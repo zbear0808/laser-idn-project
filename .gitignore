@@ -1,0 +1,38 @@
+# Clojure
+pom.xml
+pom.xml.asc
+*.jar
+*.class
+/lib/
+/classes/
+/target/
+/checkouts/
+.lein-deps-sum
+.lein-repl-history
+.lein-plugins/
+.lein-failures
+.nrepl-port
+.cpcache/
+.rebel_readline_history
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.calva/
+.clj-kondo/
+.lsp/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Temporary files
+*~
+*.swp
+*.swo
+.#*
