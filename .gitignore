@@ -36,3 +36,6 @@ desktop.ini
 *.swp
 *.swo
 .#*
+
+# Local configuration (not committed)
+/config/

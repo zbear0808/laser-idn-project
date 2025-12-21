@@ -34,8 +34,8 @@
   ([x y r g b intensity]
    (let [scale-coord (fn [v] (short (* v 32767)))
          scale-color (fn [v] (if (float? v)
-                               (byte (* v 255))
-                               (byte v)))]
+                               (unchecked-byte (* v 255))
+                               (unchecked-byte v)))]
      (->LaserPoint
       (scale-coord x)
       (scale-coord y)
@@ -47,7 +47,7 @@
 (defn make-point-raw
   "Create a LaserPoint with raw 16-bit coordinates and 8-bit colors."
   [x y r g b intensity]
-  (->LaserPoint (short x) (short y) (byte r) (byte g) (byte b) (byte intensity)))
+  (->LaserPoint (short x) (short y) (unchecked-byte r) (unchecked-byte g) (unchecked-byte b) (unchecked-byte intensity)))
 
 (defn blanked-point
   "Create a blanked (invisible) point for beam repositioning."
@@ -135,12 +135,13 @@
     time-ms))
 
 ;; ============================================================================
-;; Color Utilities
+;; Color Utilities (deprecated - use laser-show.animation.colors)
 ;; ============================================================================
 
 (defn hsv-to-rgb
   "Convert HSV to RGB. h in [0, 360], s and v in [0, 1].
-   Returns [r g b] with values in [0, 255]."
+   Returns [r g b] with values in [0, 255].
+   DEPRECATED: Use laser-show.animation.colors/hsv->rgb instead."
   [h s v]
   (let [h (mod h 360)
         c (* v s)
@@ -158,6 +159,7 @@
      (int (* 255 (+ b' m)))]))
 
 (defn rainbow-color
-  "Get a rainbow color based on position (0.0 to 1.0)."
+  "Get a rainbow color based on position (0.0 to 1.0).
+   DEPRECATED: Use laser-show.animation.colors/rainbow instead."
   [position]
   (hsv-to-rgb (* position 360) 1.0 1.0))

@@ -6,7 +6,9 @@
             [seesaw.mig :as mig]
             [laser-show.animation.types :as t]
             [laser-show.animation.presets :as presets]
-            [laser-show.ui.preview :as preview])
+            [laser-show.ui.preview :as preview]
+            [laser-show.ui.colors :as colors]
+            [laser-show.ui.layout :as layout])
   (:import [java.awt Color Dimension Font]
            [java.awt.event MouseAdapter MouseEvent]
            [javax.swing BorderFactory JPanel]))
@@ -15,30 +17,11 @@
 ;; Grid State
 ;; ============================================================================
 
-(defonce grid-state 
-  (atom {:grid-size [8 4]           ; columns x rows
-         :cells {}                   ; {[col row] -> cell-state}
-         :active-cell nil            ; Currently active/playing cell
-         :selected-cell nil}))       ; Selected for editing
-
-;; ============================================================================
-;; Cell Colors
-;; ============================================================================
-
-(def cell-colors
-  {:empty (Color. 40 40 40)
-   :assigned (Color. 60 60 80)
-   :selected (Color. 80 80 120)
-   :active (Color. 0 200 100)
-   :queued (Color. 200 200 0)})
-
-(defn get-category-color
-  "Get the color for a preset category."
-  [category]
-  (if-let [cat-info (get presets/categories category)]
-    (let [[r g b] (:color cat-info)]
-      (Color. r g b))
-    (:assigned cell-colors)))
+(defonce !grid-state
+  (atom {:grid-size [layout/default-grid-cols layout/default-grid-rows]
+         :cells {}
+         :active-cell nil
+         :selected-cell nil}))
 
 ;; ============================================================================
 ;; Cell Component
@@ -57,27 +40,27 @@
   "Create a single grid cell panel."
   [col row on-click on-right-click]
   (let [cell-key [col row]
-        state-atom (atom {:preset-id nil
-                         :animation nil
-                         :active false
-                         :selected false})
+        !cell-state (atom {:preset-id nil
+                          :animation nil
+                          :active false
+                          :selected false})
         
         name-label (create-cell-label "")
         
         panel (ss/border-panel
                :center name-label
-               :background (:empty cell-colors)
-               :border (BorderFactory/createLineBorder (Color. 20 20 20) 1))
+               :background colors/cell-empty
+               :border (BorderFactory/createLineBorder colors/border-dark layout/cell-border-width))
         
         update-appearance! (fn []
-                             (let [{:keys [preset-id active selected]} @state-atom
+                             (let [{:keys [preset-id active selected]} @!cell-state
                                    bg-color (cond
-                                              active (:active cell-colors)
-                                              selected (:selected cell-colors)
+                                              active colors/cell-active
+                                              selected colors/cell-selected
                                               preset-id (if-let [preset (presets/get-preset preset-id)]
-                                                          (get-category-color (:category preset))
-                                                          (:assigned cell-colors))
-                                              :else (:empty cell-colors))]
+                                                          (colors/get-category-color (:category preset))
+                                                          colors/cell-assigned)
+                                              :else colors/cell-empty)]
                                (ss/config! panel :background bg-color)
                                (ss/config! name-label :text (if preset-id
                                                              (:name (presets/get-preset preset-id))
@@ -87,35 +70,33 @@
     (.setPreferredSize panel (Dimension. 80 60))
     (.setMinimumSize panel (Dimension. 60 50))
     
-    ;; Add mouse listeners
     (.addMouseListener panel
                        (proxy [MouseAdapter] []
                          (mouseClicked [^MouseEvent e]
                            (if (= (.getButton e) MouseEvent/BUTTON3)
-                             (on-right-click cell-key @state-atom)
-                             (on-click cell-key @state-atom)))
+                             (on-right-click cell-key @!cell-state)
+                             (on-click cell-key @!cell-state)))
                          (mouseEntered [^MouseEvent e]
-                           (.setBorder panel (BorderFactory/createLineBorder Color/WHITE 2)))
+                           (.setBorder panel (BorderFactory/createLineBorder colors/border-highlight layout/cell-border-hover-width)))
                          (mouseExited [^MouseEvent e]
-                           (.setBorder panel (BorderFactory/createLineBorder (Color. 20 20 20) 1)))))
+                           (.setBorder panel (BorderFactory/createLineBorder colors/border-dark layout/cell-border-width)))))
     
-    ;; Return cell info
     {:panel panel
      :key cell-key
-     :state state-atom
+     :state !cell-state
      :set-preset! (fn [preset-id]
-                    (swap! state-atom assoc :preset-id preset-id)
+                    (swap! !cell-state assoc :preset-id preset-id)
                     (when preset-id
-                      (swap! state-atom assoc :animation 
+                      (swap! !cell-state assoc :animation
                              (presets/create-animation-from-preset preset-id)))
                     (update-appearance!))
      :set-active! (fn [active]
-                    (swap! state-atom assoc :active active)
+                    (swap! !cell-state assoc :active active)
                     (update-appearance!))
      :set-selected! (fn [selected]
-                      (swap! state-atom assoc :selected selected)
+                      (swap! !cell-state assoc :selected selected)
                       (update-appearance!))
-     :get-animation (fn [] (:animation @state-atom))
+     :get-animation (fn [] (:animation @!cell-state))
      :update! update-appearance!}))
 
 ;; ============================================================================
@@ -126,70 +107,67 @@
   "Create the main grid panel with cells.
    Returns a map with :panel and control functions."
   [& {:keys [cols rows on-cell-click on-cell-right-click]
-      :or {cols 8 rows 4
+      :or {cols layout/default-grid-cols
+           rows layout/default-grid-rows
            on-cell-click (fn [k s] (println "Cell clicked:" k))
            on-cell-right-click (fn [k s] (println "Cell right-clicked:" k))}}]
-  (let [cells-atom (atom {})
-        selected-atom (atom nil)
-        active-atom (atom nil)
+  (let [!cells (atom {})
+        !selected (atom nil)
+        !active (atom nil)
         
-        ;; Create constraint string for MIG layout
-        col-constraints (apply str (repeat cols "[80!, grow, fill]"))
-        row-constraints (apply str (repeat rows "[60!, grow, fill]"))
+        {:keys [layout]
+         col-constraints :cols
+         row-constraints :rows} (layout/make-grid-constraints
+                                 {:cols cols :rows rows
+                                  :cell-width layout/cell-width
+                                  :cell-height layout/cell-height})
         
         grid-panel (mig/mig-panel
-                    :constraints ["gap 2, insets 5"
-                                  col-constraints
-                                  row-constraints]
-                    :background (Color. 30 30 30))
+                    :constraints [layout col-constraints row-constraints]
+                    :background colors/background-dark)
         
-        ;; Cell click handler
         handle-click (fn [cell-key cell-state]
-                       (when-let [prev-selected @selected-atom]
-                         (when-let [prev-cell (get @cells-atom prev-selected)]
+                       (when-let [prev-selected @!selected]
+                         (when-let [prev-cell (get @!cells prev-selected)]
                            ((:set-selected! prev-cell) false)))
-                       (when-let [cell (get @cells-atom cell-key)]
+                       (when-let [cell (get @!cells cell-key)]
                          ((:set-selected! cell) true)
-                         (reset! selected-atom cell-key))
+                         (reset! !selected cell-key))
                        (on-cell-click cell-key cell-state))
         
-        ;; Right-click handler
         handle-right-click (fn [cell-key cell-state]
                              (on-cell-right-click cell-key cell-state))]
     
-    ;; Create all cells
     (doseq [row (range rows)
             col (range cols)]
       (let [cell (create-cell-panel col row handle-click handle-right-click)]
-        (swap! cells-atom assoc [col row] cell)
+        (swap! !cells assoc [col row] cell)
         (ss/add! grid-panel (:panel cell) (str "cell " col " " row))))
     
     {:panel grid-panel
-     :cells cells-atom
+     :cells !cells
      
      :set-cell-preset! (fn [col row preset-id]
-                         (when-let [cell (get @cells-atom [col row])]
+                         (when-let [cell (get @!cells [col row])]
                            ((:set-preset! cell) preset-id)))
      
      :set-active-cell! (fn [col row]
-                         ;; Deactivate previous
-                         (when-let [prev @active-atom]
-                           (when-let [prev-cell (get @cells-atom prev)]
+                         (when-let [prev @!active]
+                           (when-let [prev-cell (get @!cells prev)]
                              ((:set-active! prev-cell) false)))
-                         ;; Activate new
                          (when (and col row)
-                           (when-let [cell (get @cells-atom [col row])]
+                           (when-let [cell (get @!cells [col row])]
                              ((:set-active! cell) true)))
-                         (reset! active-atom (when col [col row])))
+                         (reset! !active (when col [col row])))
      
      :get-cell-animation (fn [col row]
-                           (when-let [cell (get @cells-atom [col row])]
+                           (when-let [cell (get @!cells [col row])]
                              ((:get-animation cell))))
      
-     :get-selected-cell (fn [] @selected-atom)
+     :get-selected-cell (fn [] @!selected)
      
      :clear-all! (fn []
-                   (doseq [[_ cell] @cells-atom]
+                   (doseq [[_ cell] @!cells]
                      ((:set-preset! cell) nil)))}))
 
 ;; ============================================================================

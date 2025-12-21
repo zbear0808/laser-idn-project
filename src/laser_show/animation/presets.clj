@@ -2,18 +2,21 @@
   "Pre-built animation presets for the laser show application.
    Each preset is a map containing name, category, parameters spec, and generator."
   (:require [laser-show.animation.types :as t]
-            [laser-show.animation.generators :as gen]))
+            [laser-show.animation.generators :as gen]
+            [laser-show.ui.colors :as ui-colors]))
 
 ;; ============================================================================
 ;; Preset Categories
 ;; ============================================================================
 
 (def categories
-  {:geometric {:name "Geometric" :color [0 200 255]}
-   :beam      {:name "Beams" :color [255 100 0]}
-   :wave      {:name "Waves" :color [0 255 100]}
-   :abstract  {:name "Abstract" :color [255 0 255]}
-   :text      {:name "Text" :color [255 255 0]}})
+  "Category definitions with names and colors.
+   Colors are stored as [r g b] vectors for compatibility."
+  {:geometric {:name "Geometric" :color (ui-colors/color->rgb-vec ui-colors/category-geometric)}
+   :beam      {:name "Beams" :color (ui-colors/color->rgb-vec ui-colors/category-beam)}
+   :wave      {:name "Waves" :color (ui-colors/color->rgb-vec ui-colors/category-wave)}
+   :abstract  {:name "Abstract" :color (ui-colors/color->rgb-vec ui-colors/category-abstract)}
+   :text      {:name "Text" :color (ui-colors/color->rgb-vec ui-colors/category-text)}})
 
 ;; ============================================================================
 ;; Parameter Types

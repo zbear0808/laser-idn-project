@@ -1,7 +1,8 @@
 (ns laser-show.animation.generators
   "Shape generators for laser animations.
    Each generator produces a sequence of LaserPoints that form a shape."
-  (:require [laser-show.animation.types :as t]))
+  (:require [laser-show.animation.types :as t]
+            [laser-show.animation.colors :as colors]))
 
 ;; ============================================================================
 ;; Geometry Helpers
@@ -405,6 +406,6 @@
                          angle (+ rotation (* TWO-PI t))
                          x (* radius (Math/cos angle))
                          y (* radius (Math/sin angle))
-                         [r g b] (t/rainbow-color (mod (+ t color-offset) 1.0))]
+                         [r g b] (colors/rainbow (mod (+ t color-offset) 1.0))]
                      (t/make-point x y r g b)))]
       (t/make-frame points))))
