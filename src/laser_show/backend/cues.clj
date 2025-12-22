@@ -1,7 +1,13 @@
 (ns laser-show.backend.cues
   "Cue storage and management for the laser show application.
-   Handles cue triggering, sequencing, and persistence."
+   Handles cue triggering, sequencing, and persistence.
+   
+   Cues now support zone targeting:
+   - :target {:type :zone :zone-id :zone-1} - Single zone
+   - :target {:type :zone-group :group-id :left-side} - Zone group
+   - :target {:type :zones :zone-ids #{:zone-1 :zone-2}} - Multiple zones"
   (:require [laser-show.backend.config :as config]
+            [laser-show.backend.zone-router :as router]
             [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
@@ -38,18 +44,43 @@
    - name: display name
    - preset-id: the animation preset to play
    - params: optional parameter overrides
-   - duration: optional duration in ms (nil for infinite)"
+   - target: zone target specification (default: zone-1)
+   - duration: optional duration in ms (nil for infinite)
+   
+   Target can be:
+   - {:type :zone :zone-id :zone-1} - Single zone
+   - {:type :zone-group :group-id :left-side} - Zone group
+   - {:type :zones :zone-ids #{:zone-1 :zone-2}} - Multiple zones
+   - nil - Uses default zone"
   ([id name preset-id]
-   (make-cue id name preset-id {} nil))
+   (make-cue id name preset-id {} nil nil))
   ([id name preset-id params]
-   (make-cue id name preset-id params nil))
-  ([id name preset-id params duration]
+   (make-cue id name preset-id params nil nil))
+  ([id name preset-id params target]
+   (make-cue id name preset-id params target nil))
+  ([id name preset-id params target duration]
    {:id id
     :name name
     :preset-id preset-id
-    :params params
+    :params (or params {})
+    :target (or target router/default-target)
     :duration duration
     :created-at (System/currentTimeMillis)}))
+
+(defn make-cue-with-zone
+  "Create a cue targeting a specific zone."
+  [id name preset-id zone-id & {:keys [params duration]}]
+  (make-cue id name preset-id params (router/make-zone-target zone-id) duration))
+
+(defn make-cue-with-group
+  "Create a cue targeting a zone group."
+  [id name preset-id group-id & {:keys [params duration]}]
+  (make-cue id name preset-id params (router/make-group-target group-id) duration))
+
+(defn make-cue-with-zones
+  "Create a cue targeting multiple specific zones."
+  [id name preset-id zone-ids & {:keys [params duration]}]
+  (make-cue id name preset-id params (router/make-zones-target zone-ids) duration))
 
 ;; ============================================================================
 ;; Cue CRUD Operations

@@ -26,7 +26,7 @@
 ;; Grid Configuration
 ;; ============================================================================
 
-(def default-grid-cols 8)
+(def default-grid-cols 5)
 (def default-grid-rows 4)
 
 (def grid-config
@@ -146,7 +146,7 @@
          cell-height 60
          gap cell-gap
          insets panel-insets}}]
-  {:layout (str "gap " gap ", insets " insets)
+  {:layout (str "gap " gap ", insets " insets ", wrap " cols)
    :cols (make-grid-col-constraints cols cell-width)
    :rows (make-grid-row-constraints rows cell-height)})
 

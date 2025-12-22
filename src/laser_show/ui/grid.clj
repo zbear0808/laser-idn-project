@@ -8,10 +8,12 @@
             [laser-show.animation.presets :as presets]
             [laser-show.ui.preview :as preview]
             [laser-show.ui.colors :as colors]
-            [laser-show.ui.layout :as layout])
-  (:import [java.awt Color Dimension Font]
-           [java.awt.event MouseAdapter MouseEvent]
-           [javax.swing BorderFactory JPanel]))
+            [laser-show.ui.layout :as layout]
+            [laser-show.state.clipboard :as clipboard])
+  (:import [java.awt Color Dimension Font BasicStroke Graphics2D RenderingHints]
+           [java.awt.event MouseAdapter MouseEvent KeyEvent InputEvent ActionEvent]
+           [javax.swing BorderFactory JPanel JPopupMenu JMenuItem KeyStroke AbstractAction]
+           [javax.swing.border Border]))
 
 ;; ============================================================================
 ;; Grid State
@@ -22,6 +24,72 @@
          :cells {}
          :active-cell nil
          :selected-cell nil}))
+
+;; ============================================================================
+;; Custom Empty Cell Border
+;; ============================================================================
+
+(defn create-dashed-border
+  "Create a dashed border for empty cells."
+  [color thickness]
+  (proxy [Border] []
+    (getBorderInsets [_c]
+      (java.awt.Insets. thickness thickness thickness thickness))
+    (isBorderOpaque []
+      false)
+    (paintBorder [_c g x y width height]
+      (let [g2d ^Graphics2D (.create g)]
+        (.setRenderingHint g2d RenderingHints/KEY_ANTIALIASING RenderingHints/VALUE_ANTIALIAS_ON)
+        (.setColor g2d color)
+        (.setStroke g2d (BasicStroke. (float thickness) 
+                                       BasicStroke/CAP_BUTT 
+                                       BasicStroke/JOIN_MITER 
+                                       10.0 
+                                       (float-array [4.0 4.0]) 
+                                       0.0))
+        (.drawRect g2d x y (dec width) (dec height))
+        (.dispose g2d)))))
+
+;; ============================================================================
+;; Context Menu
+;; ============================================================================
+
+(defn create-cell-context-menu
+  "Create a context menu for a grid cell."
+  [cell-key cell-state on-copy on-paste on-clear]
+  (let [popup (JPopupMenu.)
+        has-preset? (boolean (:preset-id cell-state))
+        can-paste? (clipboard/can-paste-cell-assignment?)
+        
+        copy-item (JMenuItem. "Copy")
+        paste-item (JMenuItem. "Paste")
+        clear-item (JMenuItem. "Clear")]
+    
+    (.setEnabled copy-item has-preset?)
+    (.setEnabled paste-item can-paste?)
+    (.setEnabled clear-item has-preset?)
+    
+    (.addActionListener copy-item
+                        (reify java.awt.event.ActionListener
+                          (actionPerformed [_ _e]
+                            (on-copy cell-key cell-state))))
+    
+    (.addActionListener paste-item
+                        (reify java.awt.event.ActionListener
+                          (actionPerformed [_ _e]
+                            (on-paste cell-key))))
+    
+    (.addActionListener clear-item
+                        (reify java.awt.event.ActionListener
+                          (actionPerformed [_ _e]
+                            (on-clear cell-key))))
+    
+    (.add popup copy-item)
+    (.add popup paste-item)
+    (.addSeparator popup)
+    (.add popup clear-item)
+    
+    popup))
 
 ;; ============================================================================
 ;; Cell Component
@@ -38,7 +106,7 @@
 
 (defn- create-cell-panel
   "Create a single grid cell panel."
-  [col row on-click on-right-click]
+  [col row on-click on-right-click on-copy on-paste on-clear]
   (let [cell-key [col row]
         !cell-state (atom {:preset-id nil
                           :animation nil
@@ -47,10 +115,14 @@
         
         name-label (create-cell-label "")
         
+        empty-border (create-dashed-border colors/border-light layout/cell-border-width)
+        assigned-border (BorderFactory/createLineBorder colors/border-dark layout/cell-border-width)
+        hover-border (BorderFactory/createLineBorder colors/border-highlight layout/cell-border-hover-width)
+        
         panel (ss/border-panel
                :center name-label
                :background colors/cell-empty
-               :border (BorderFactory/createLineBorder colors/border-dark layout/cell-border-width))
+               :border empty-border)
         
         update-appearance! (fn []
                              (let [{:keys [preset-id active selected]} @!cell-state
@@ -60,26 +132,40 @@
                                               preset-id (if-let [preset (presets/get-preset preset-id)]
                                                           (colors/get-category-color (:category preset))
                                                           colors/cell-assigned)
-                                              :else colors/cell-empty)]
+                                              :else colors/cell-empty)
+                                   border (if preset-id assigned-border empty-border)]
                                (ss/config! panel :background bg-color)
+                               (ss/config! panel :border border)
                                (ss/config! name-label :text (if preset-id
                                                              (:name (presets/get-preset preset-id))
                                                              ""))))]
     
-    ;; Set preferred size
     (.setPreferredSize panel (Dimension. 80 60))
     (.setMinimumSize panel (Dimension. 60 50))
     
     (.addMouseListener panel
                        (proxy [MouseAdapter] []
                          (mouseClicked [^MouseEvent e]
-                           (if (= (.getButton e) MouseEvent/BUTTON3)
-                             (on-right-click cell-key @!cell-state)
+                           (cond
+                             (= (.getButton e) MouseEvent/BUTTON3)
+                             (let [popup (create-cell-context-menu 
+                                          cell-key 
+                                          @!cell-state
+                                          on-copy
+                                          on-paste
+                                          on-clear)]
+                               (.show popup panel (.getX e) (.getY e)))
+                             
+                             :else
                              (on-click cell-key @!cell-state)))
-                         (mouseEntered [^MouseEvent e]
-                           (.setBorder panel (BorderFactory/createLineBorder colors/border-highlight layout/cell-border-hover-width)))
-                         (mouseExited [^MouseEvent e]
-                           (.setBorder panel (BorderFactory/createLineBorder colors/border-dark layout/cell-border-width)))))
+                         
+                         (mouseEntered [^MouseEvent _e]
+                           (.setBorder panel hover-border))
+                         
+                         (mouseExited [^MouseEvent _e]
+                           (let [{:keys [preset-id]} @!cell-state
+                                 border (if preset-id assigned-border empty-border)]
+                             (.setBorder panel border)))))
     
     {:panel panel
      :key cell-key
@@ -97,6 +183,7 @@
                       (swap! !cell-state assoc :selected selected)
                       (update-appearance!))
      :get-animation (fn [] (:animation @!cell-state))
+     :get-state (fn [] @!cell-state)
      :update! update-appearance!}))
 
 ;; ============================================================================
@@ -106,11 +193,14 @@
 (defn create-grid-panel
   "Create the main grid panel with cells.
    Returns a map with :panel and control functions."
-  [& {:keys [cols rows on-cell-click on-cell-right-click]
+  [& {:keys [cols rows on-cell-click on-cell-right-click on-copy on-paste on-clear]
       :or {cols layout/default-grid-cols
            rows layout/default-grid-rows
            on-cell-click (fn [k s] (println "Cell clicked:" k))
-           on-cell-right-click (fn [k s] (println "Cell right-clicked:" k))}}]
+           on-cell-right-click (fn [k s] (println "Cell right-clicked:" k))
+           on-copy (fn [k s] (println "Copy:" k))
+           on-paste (fn [k] (println "Paste:" k))
+           on-clear (fn [k] (println "Clear:" k))}}]
   (let [!cells (atom {})
         !selected (atom nil)
         !active (atom nil)
@@ -136,13 +226,59 @@
                        (on-cell-click cell-key cell-state))
         
         handle-right-click (fn [cell-key cell-state]
-                             (on-cell-right-click cell-key cell-state))]
+                             (on-cell-right-click cell-key cell-state))
+        
+        handle-copy (fn [cell-key cell-state]
+                      (on-copy cell-key cell-state))
+        
+        handle-paste (fn [cell-key]
+                       (on-paste cell-key))
+        
+        handle-clear (fn [cell-key]
+                       (on-clear cell-key))
+        
+        copy-selected! (fn []
+                         (when-let [selected-key @!selected]
+                           (when-let [cell (get @!cells selected-key)]
+                             (let [state ((:get-state cell))]
+                               (handle-copy selected-key state)))))
+        
+        paste-to-selected! (fn []
+                             (when-let [selected-key @!selected]
+                               (handle-paste selected-key)))]
     
+    ;; Add cells in row-major order (row 0 first, then row 1, etc.)
     (doseq [row (range rows)
             col (range cols)]
-      (let [cell (create-cell-panel col row handle-click handle-right-click)]
+      (let [cell (create-cell-panel col row handle-click handle-right-click
+                                    handle-copy handle-paste handle-clear)]
         (swap! !cells assoc [col row] cell)
         (ss/add! grid-panel (:panel cell) (str "cell " col " " row))))
+    
+    ;; Set preferred size to ensure all cells are visible
+    (let [total-width (+ (* cols (+ layout/cell-width layout/cell-gap)) (* 2 layout/panel-insets))
+          total-height (+ (* rows (+ layout/cell-height layout/cell-gap)) (* 2 layout/panel-insets))]
+      (.setPreferredSize grid-panel (Dimension. total-width total-height))
+      (.setMinimumSize grid-panel (Dimension. total-width total-height)))
+    
+    ;; Add keyboard shortcuts for copy/paste
+    (let [input-map (.getInputMap grid-panel JPanel/WHEN_IN_FOCUSED_WINDOW)
+          action-map (.getActionMap grid-panel)
+          
+          ctrl-c (KeyStroke/getKeyStroke KeyEvent/VK_C InputEvent/CTRL_DOWN_MASK)
+          ctrl-v (KeyStroke/getKeyStroke KeyEvent/VK_V InputEvent/CTRL_DOWN_MASK)]
+      
+      (.put input-map ctrl-c "copy-cell")
+      (.put action-map "copy-cell"
+            (proxy [AbstractAction] []
+              (actionPerformed [^ActionEvent _e]
+                (copy-selected!))))
+      
+      (.put input-map ctrl-v "paste-cell")
+      (.put action-map "paste-cell"
+            (proxy [AbstractAction] []
+              (actionPerformed [^ActionEvent _e]
+                (paste-to-selected!)))))
     
     {:panel grid-panel
      :cells !cells
@@ -164,11 +300,18 @@
                            (when-let [cell (get @!cells [col row])]
                              ((:get-animation cell))))
      
+     :get-cell-state (fn [col row]
+                       (when-let [cell (get @!cells [col row])]
+                         ((:get-state cell))))
+     
      :get-selected-cell (fn [] @!selected)
      
      :clear-all! (fn []
                    (doseq [[_ cell] @!cells]
-                     ((:set-preset! cell) nil)))}))
+                     ((:set-preset! cell) nil)))
+     
+     :copy-selected! copy-selected!
+     :paste-to-selected! paste-to-selected!}))
 
 ;; ============================================================================
 ;; Preset Palette (for selecting presets)

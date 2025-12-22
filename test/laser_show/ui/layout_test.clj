@@ -12,7 +12,7 @@
     (is (= 32 (layout/grid-cell-count {:cols 8 :rows 4})))
     (is (= 16 (layout/grid-cell-count {:cols 4 :rows 4})))
     (is (= 1 (layout/grid-cell-count {:cols 1 :rows 1})))
-    (is (= 32 (layout/grid-cell-count {})))))
+    (is (= 20 (layout/grid-cell-count {})))))
 
 (deftest make-grid-constraints-test
   (testing "Generates MIG layout constraints"

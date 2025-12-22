@@ -189,30 +189,5 @@
     (let [available (set (idn/get-available-dacs {:exclude-occupied true}))]
       (is (not (contains? available :occupied))))))
 
-;; ============================================================================
-;; Send to DAC Tests
-;; ============================================================================
-
-(deftest send-to-dac-test
-  (testing "Send to registered and non-existent DACs"
-    (idn/clear-dac-registry!)
-    (idn/register-dac! :test-dac {:address "127.0.0.1" :port 7255})
-    (let [socket (idn/create-udp-socket)]
-      (try
-        (is (false? (idn/send-to-dac! :nonexistent socket (byte-array [0x00]))))
-        (is (true? (idn/send-to-dac! :test-dac socket (byte-array [0x00]))))
-        (finally (.close socket))))))
-
-(deftest send-to-all-dacs-test
-  (testing "Sends to all registered DACs"
-    (idn/clear-dac-registry!)
-    (let [socket (idn/create-udp-socket)]
-      (try
-        (is (empty? (idn/send-to-all-dacs! socket (byte-array [0x00]))))
-        
-        (idn/register-dac! :dac1 {:address "127.0.0.1" :port 7255})
-        (idn/register-dac! :dac2 {:address "127.0.0.1" :port 7256})
-        (let [results (idn/send-to-all-dacs! socket (byte-array [0x00]))]
-          (is (= 2 (count results)))
-          (is (every? true? (vals results))))
-        (finally (.close socket))))))
+;; Network send tests (send-to-dac!, send-to-all-dacs!) have been moved to
+;; test/integration/idn_hello_test.clj since they send actual UDP packets.

@@ -32,5 +32,21 @@
   {:extra-paths ["test"]
    :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" 
                                                        :git/sha "dfb30dd"}}
+   :main-opts ["-m" "cognitect.test-runner" 
+               "-d" "test/idn_hello" 
+               "-d" "test/laser_show"]
+   :exec-fn cognitect.test-runner.api/test}
+  
+  :test-integration
+  {:extra-paths ["test"]
+   :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" 
+                                                       :git/sha "dfb30dd"}}
+   :main-opts ["-m" "cognitect.test-runner" "-d" "test/integration"]
+   :exec-fn cognitect.test-runner.api/test}
+  
+  :test-all
+  {:extra-paths ["test"]
+   :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" 
+                                                       :git/sha "dfb30dd"}}
    :main-opts ["-m" "cognitect.test-runner"]
    :exec-fn cognitect.test-runner.api/test}}}

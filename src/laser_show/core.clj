@@ -9,8 +9,16 @@
             [laser-show.animation.presets :as presets]
             [laser-show.ui.grid :as grid]
             [laser-show.ui.preview :as preview]
+            [laser-show.ui.projector-config :as projector-config]
+            [laser-show.ui.zone-config :as zone-config]
+            [laser-show.ui.zone-group-config :as zone-group-config]
             [laser-show.backend.packet-logger :as plog]
             [laser-show.backend.streaming-engine :as streaming]
+            [laser-show.backend.projectors :as projectors]
+            [laser-show.backend.zones :as zones]
+            [laser-show.backend.zone-groups :as zone-groups]
+            [laser-show.backend.multi-projector-stream :as multi-stream]
+            [laser-show.state.clipboard :as clipboard]
             [laser-show.input.events :as events]
             [laser-show.input.router :as router]
             [laser-show.input.keyboard :as keyboard]
@@ -160,7 +168,7 @@
 
 (defn- create-menu-bar
   "Create the application menu bar."
-  [on-new on-open on-save on-about]
+  [frame on-new on-open on-save on-about]
   (ss/menubar
    :items [(ss/menu :text "File"
                     :items [(ss/action :name "New Grid" :handler (fn [_] (on-new)))
@@ -168,6 +176,13 @@
                             (ss/action :name "Save..." :handler (fn [_] (on-save)))
                             :separator
                             (ss/action :name "Exit" :handler (fn [_] (System/exit 0)))])
+           (ss/menu :text "Configure"
+                    :items [(ss/action :name "Projectors..." 
+                                       :handler (fn [_] (projector-config/show-projector-config-dialog frame)))
+                            (ss/action :name "Zones..." 
+                                       :handler (fn [_] (zone-config/show-zone-config-dialog frame)))
+                            (ss/action :name "Zone Groups..." 
+                                       :handler (fn [_] (zone-group-config/show-zone-group-config-dialog frame)))])
            (ss/menu :text "View"
                     :items [(ss/action :name "Reset Layout" :handler (fn [_] nil))])
            (ss/menu :text "Help"
@@ -210,10 +225,20 @@
                                                   :current-animation anim
                                                   :animation-start-time (System/currentTimeMillis))))
                         :on-cell-right-click (fn [[col row] cell-state]
-                                               (println "Cell right-clicked:" [col row])
-                                               ;; Clear the cell
-                                               (when-let [gc @grid-ref]
-                                                 ((:set-cell-preset! gc) col row nil))))
+                                               (println "Cell right-clicked:" [col row]))
+                        :on-copy (fn [[col row] cell-state]
+                                   (when-let [preset-id (:preset-id cell-state)]
+                                     (clipboard/copy-cell-assignment! preset-id)
+                                     (println "Copied preset:" preset-id)))
+                        :on-paste (fn [[col row]]
+                                    (when-let [preset-id (clipboard/paste-cell-assignment)]
+                                      (when-let [gc @grid-ref]
+                                        ((:set-cell-preset! gc) col row preset-id)
+                                        (println "Pasted preset:" preset-id "to" [col row]))))
+                        :on-clear (fn [[col row]]
+                                    (when-let [gc @grid-ref]
+                                      ((:set-cell-preset! gc) col row nil)
+                                      (println "Cleared cell:" [col row]))))
         
         ;; Store grid component in ref for use in callbacks
         _ (reset! grid-ref grid-component)
@@ -319,9 +344,14 @@
                      :vgap 10
                      :background (Color. 35 35 35))
         
+        ;; Wrap grid in scrollable for when window is small
+        grid-scrollable (ss/scrollable (:panel grid-component)
+                                       :border nil
+                                       :background (Color. 30 30 30))
+        
         ;; Main content panel
         content-panel (ss/border-panel
-                       :center (:panel grid-component)
+                       :center grid-scrollable
                        :east right-panel
                        :south (:panel status-bar)
                        :north (:panel toolbar)
@@ -338,6 +368,7 @@
     ;; Set up menu bar
     (ss/config! frame :menubar 
                 (create-menu-bar
+                 frame
                  ;; New
                  (fn [] ((:clear-all! grid-component)))
                  ;; Open
@@ -454,6 +485,13 @@
 (defn start!
   "Start the Laser Show application."
   []
+  ;; Initialize projector/zone systems (before UI)
+  (println "Initializing projector and zone systems...")
+  (projectors/init!)
+  (zones/init!)
+  (zone-groups/init!)
+  (println "Projector/zone systems initialized")
+  
   (ss/invoke-later
    (try
      ;; Set up FlatLaf dark theme
