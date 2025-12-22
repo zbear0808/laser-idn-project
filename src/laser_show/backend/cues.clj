@@ -5,9 +5,16 @@
    Cues now support zone targeting:
    - :target {:type :zone :zone-id :zone-1} - Single zone
    - :target {:type :zone-group :group-id :left-side} - Zone group
-   - :target {:type :zones :zone-ids #{:zone-1 :zone-2}} - Multiple zones"
+   - :target {:type :zones :zone-ids #{:zone-1 :zone-2}} - Multiple zones
+   
+   Cues also support effect chains:
+   - :effect-chain {:effects [{:effect-id :hue-rotate :enabled true :params {...}} ...]}
+   
+   And can store animation objects directly:
+   - :animation - The actual animation object (not persisted, created from preset-id)"
   (:require [laser-show.backend.config :as config]
             [laser-show.backend.zone-router :as router]
+            [laser-show.animation.effects :as fx]
             [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
@@ -266,6 +273,85 @@
   (save-cue-lists!))
 
 ;; ============================================================================
+;; Effect Chain Management
+;; ============================================================================
+
+(defn set-cue-effect-chain!
+  "Set the effect chain for a cue."
+  [cue-id effect-chain]
+  (update-cue! cue-id {:effect-chain effect-chain}))
+
+(defn get-cue-effect-chain
+  "Get the effect chain for a cue."
+  [cue-id]
+  (:effect-chain (get-cue cue-id)))
+
+(defn add-effect-to-cue!
+  "Add an effect to a cue's effect chain."
+  [cue-id effect-instance]
+  (let [cue (get-cue cue-id)
+        current-chain (or (:effect-chain cue) (fx/empty-effect-chain))
+        new-chain (fx/add-effect-to-chain current-chain effect-instance)]
+    (update-cue! cue-id {:effect-chain new-chain})))
+
+(defn remove-effect-from-cue!
+  "Remove an effect from a cue's effect chain by index."
+  [cue-id effect-index]
+  (when-let [cue (get-cue cue-id)]
+    (when-let [chain (:effect-chain cue)]
+      (let [new-chain (fx/remove-effect-at chain effect-index)]
+        (update-cue! cue-id {:effect-chain new-chain})))))
+
+(defn update-cue-effect!
+  "Update an effect in a cue's effect chain."
+  [cue-id effect-index updates]
+  (when-let [cue (get-cue cue-id)]
+    (when-let [chain (:effect-chain cue)]
+      (let [new-chain (fx/update-effect-at chain effect-index updates)]
+        (update-cue! cue-id {:effect-chain new-chain})))))
+
+(defn enable-cue-effect!
+  "Enable an effect in a cue's effect chain."
+  [cue-id effect-index]
+  (when-let [cue (get-cue cue-id)]
+    (when-let [chain (:effect-chain cue)]
+      (let [new-chain (fx/enable-effect-at chain effect-index)]
+        (update-cue! cue-id {:effect-chain new-chain})))))
+
+(defn disable-cue-effect!
+  "Disable an effect in a cue's effect chain."
+  [cue-id effect-index]
+  (when-let [cue (get-cue cue-id)]
+    (when-let [chain (:effect-chain cue)]
+      (let [new-chain (fx/disable-effect-at chain effect-index)]
+        (update-cue! cue-id {:effect-chain new-chain})))))
+
+;; ============================================================================
+;; Animation Management
+;; ============================================================================
+
+(defn set-cue-animation!
+  "Set the animation object for a cue.
+   Note: Animation objects are not persisted, only kept in memory."
+  [cue-id animation]
+  (update-cue! cue-id {:animation animation}))
+
+(defn get-cue-animation
+  "Get the animation object for a cue."
+  [cue-id]
+  (:animation (get-cue cue-id)))
+
+(defn get-active-cue-animation
+  "Get the animation from the currently active cue."
+  []
+  (:animation @!active-cue))
+
+(defn get-active-cue-effect-chain
+  "Get the effect chain from the currently active cue."
+  []
+  (:effect-chain @!active-cue))
+
+;; ============================================================================
 ;; Quick Cue Creation from Grid
 ;; ============================================================================
 
@@ -278,3 +364,73 @@
         cue (make-cue cue-id cue-name preset-id (or params {}) duration)]
     (add-cue! cue)
     cue))
+
+;; ============================================================================
+;; Cue with Effects Creation Helpers
+;; ============================================================================
+
+(defn make-cue-with-effects
+  "Create a cue with an effect chain.
+   effects should be a vector of effect instances."
+  [id name preset-id effects & {:keys [params target duration]}]
+  (let [base-cue (make-cue id name preset-id (or params {}) target duration)]
+    (assoc base-cue :effect-chain {:effects (vec effects)})))
+
+(defn create-effect-instance
+  "Create an effect instance for use in cues.
+   Convenience wrapper for fx/make-effect-instance."
+  [effect-id & {:keys [enabled params] :or {enabled true params {}}}]
+  (fx/make-effect-instance effect-id :enabled enabled :params params))
+
+;; ============================================================================
+;; Frame Generation with Effects
+;; ============================================================================
+
+(defn get-cue-frame
+  "Get a frame from a cue's animation at the given time.
+   Returns nil if cue has no animation."
+  [cue-id time-ms]
+  (when-let [cue (get-cue cue-id)]
+    (when-let [anim (:animation cue)]
+      ;; Assuming animation has a get-frame protocol or function
+      ;; This depends on how animations are implemented in types.clj
+      (if (fn? anim)
+        (anim time-ms)
+        ;; If it's a map with a :get-frame function or similar
+        (when-let [get-frame-fn (:get-frame anim)]
+          (get-frame-fn time-ms))))))
+
+(defn get-cue-frame-with-effects
+  "Get a frame from a cue's animation with effects applied.
+   
+   Parameters:
+   - cue-id: The cue ID
+   - time-ms: Current time in milliseconds
+   - bpm: Current BPM for beat-synced effects
+   
+   Returns the frame with cue effects applied, or nil if no animation."
+  [cue-id time-ms bpm]
+  (when-let [cue (get-cue cue-id)]
+    (when-let [anim (:animation cue)]
+      ;; Get the base frame - animation can be a function or have a :get-frame key
+      (let [frame (cond
+                    (fn? anim) (anim time-ms)
+                    (map? anim) (when-let [get-frame-fn (:get-frame anim)]
+                                  (get-frame-fn time-ms))
+                    :else nil)]
+        ;; Apply cue effects if present
+        (if-let [chain (:effect-chain cue)]
+          (fx/apply-effect-chain frame chain time-ms bpm)
+          frame)))))
+
+(defn get-active-cue-frame-with-effects
+  "Get the current frame from the active cue with effects applied.
+   
+   Parameters:
+   - time-ms: Current time in milliseconds  
+   - bpm: Current BPM for beat-synced effects
+   
+   Returns the frame with effects applied, or nil if no active cue."
+  [time-ms bpm]
+  (when-let [active-cue @!active-cue]
+    (get-cue-frame-with-effects (:id active-cue) time-ms bpm)))

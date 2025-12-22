@@ -1,8 +1,12 @@
 (ns laser-show.backend.zone-groups
   "Zone group configuration and management.
-   Zone groups are collections of zones that can be targeted as a unit."
+   Zone groups are collections of zones that can be targeted as a unit.
+   
+   Zone groups now support effect chains for group-wide effects:
+   - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
   (:require [laser-show.backend.config :as config]
-            [laser-show.backend.zones :as zones]))
+            [laser-show.backend.zones :as zones]
+            [laser-show.animation.effects :as fx]))
 
 ;; ============================================================================
 ;; Zone Group Registry
@@ -212,6 +216,51 @@
   []
   (when (empty? @!zone-groups)
     (create-all-zones-group!)))
+
+;; ============================================================================
+;; Effect Chain Management
+;; ============================================================================
+
+(defn set-group-effect-chain!
+  "Set the effect chain for a zone group."
+  [group-id effect-chain]
+  (update-group! group-id {:effect-chain effect-chain}))
+
+(defn get-group-effect-chain
+  "Get the effect chain for a zone group."
+  [group-id]
+  (:effect-chain (get-group group-id)))
+
+(defn add-effect-to-zone-group!
+  "Add an effect to a zone group's effect chain."
+  [group-id effect-instance]
+  (let [group (get-group group-id)
+        current-chain (or (:effect-chain group) (fx/empty-effect-chain))
+        new-chain (fx/add-effect-to-chain current-chain effect-instance)]
+    (update-group! group-id {:effect-chain new-chain})))
+
+(defn remove-effect-from-zone-group!
+  "Remove an effect from a zone group's effect chain by index."
+  [group-id effect-index]
+  (when-let [group (get-group group-id)]
+    (when-let [chain (:effect-chain group)]
+      (let [new-chain (fx/remove-effect-at chain effect-index)]
+        (update-group! group-id {:effect-chain new-chain})))))
+
+(defn update-zone-group-effect!
+  "Update an effect in a zone group's effect chain."
+  [group-id effect-index updates]
+  (when-let [group (get-group group-id)]
+    (when-let [chain (:effect-chain group)]
+      (let [new-chain (fx/update-effect-at chain effect-index updates)]
+        (update-group! group-id {:effect-chain new-chain})))))
+
+(defn get-zone-group-for-zone
+  "Find the first zone group that contains a given zone.
+   Returns the group-id or nil if zone is not in any group."
+  [zone-id]
+  (when-let [groups (seq (get-groups-containing-zone zone-id))]
+    (:id (first groups))))
 
 ;; ============================================================================
 ;; Initialization

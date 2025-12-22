@@ -295,8 +295,14 @@
       (if (pos? rotation)
         (t/make-frame
          (map (fn [pt]
-                (let [[rx ry] (rotate-point [(:x pt) (:y pt)] rotation)]
-                  (t/make-point-raw (short rx) (short ry) (:r pt) (:g pt) (:b pt))))
+                (let [x (/ (:x pt) 32767.0)
+                      y (/ (:y pt) 32767.0)
+                      [rx ry] (rotate-point [x y] rotation)]
+                  ;; Use bit-and to convert signed bytes to unsigned int values
+                  (t/make-point rx ry 
+                                (bit-and (:r pt) 0xFF)
+                                (bit-and (:g pt) 0xFF)
+                                (bit-and (:b pt) 0xFF))))
               points))
         (t/make-frame points)))))
 
@@ -312,7 +318,11 @@
                                 (let [x (/ (:x pt) 32767.0)
                                       y (/ (:y pt) 32767.0)
                                       [rx ry] (rotate-point [x y] rotation)]
-                                  (t/make-point rx ry (:r pt) (:g pt) (:b pt))))
+                                  ;; Use bit-and to convert signed bytes to unsigned int values
+                                  (t/make-point rx ry 
+                                                (bit-and (:r pt) 0xFF)
+                                                (bit-and (:g pt) 0xFF)
+                                                (bit-and (:b pt) 0xFF))))
                               base-points)]
       (t/make-frame rotated-points))))
 
@@ -328,7 +338,11 @@
                                 (let [x (/ (:x pt) 32767.0)
                                       y (/ (:y pt) 32767.0)
                                       [rx ry] (rotate-point [x y] rotation)]
-                                  (t/make-point rx ry (:r pt) (:g pt) (:b pt))))
+                                  ;; Use bit-and to convert signed bytes to unsigned int values
+                                  (t/make-point rx ry 
+                                                (bit-and (:r pt) 0xFF)
+                                                (bit-and (:g pt) 0xFF)
+                                                (bit-and (:b pt) 0xFF))))
                               base-points)]
       (t/make-frame rotated-points))))
 
@@ -344,7 +358,11 @@
                                 (let [x (/ (:x pt) 32767.0)
                                       y (/ (:y pt) 32767.0)
                                       [rx ry] (rotate-point [x y] rotation)]
-                                  (t/make-point rx ry (:r pt) (:g pt) (:b pt))))
+                                  ;; Use bit-and to convert signed bytes to unsigned int values
+                                  (t/make-point rx ry 
+                                                (bit-and (:r pt) 0xFF)
+                                                (bit-and (:g pt) 0xFF)
+                                                (bit-and (:b pt) 0xFF))))
                               base-points)]
       (t/make-frame rotated-points))))
 
@@ -360,7 +378,11 @@
                                 (let [x (/ (:x pt) 32767.0)
                                       y (/ (:y pt) 32767.0)
                                       [rx ry] (rotate-point [x y] rotation)]
-                                  (t/make-point rx ry (:r pt) (:g pt) (:b pt))))
+                                  ;; Use bit-and to convert signed bytes to unsigned int values
+                                  (t/make-point rx ry 
+                                                (bit-and (:r pt) 0xFF)
+                                                (bit-and (:g pt) 0xFF)
+                                                (bit-and (:b pt) 0xFF))))
                               base-points)]
       (t/make-frame rotated-points))))
 

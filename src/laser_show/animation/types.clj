@@ -84,15 +84,17 @@
 (defn make-point
   "Create a LaserPoint with normalized coordinates.
    x, y should be in range [-1.0, 1.0] and will be scaled to 16-bit range.
+   Values outside this range are clamped to prevent overflow.
    r, g, b should be in range [0, 255] or [0.0, 1.0].
    Per IDN-Stream spec, blanking is indicated by r=g=b=0."
   ([x y]
    (make-point x y 255 255 255))
   ([x y r g b]
-   (let [scale-coord (fn [v] (short (* v 32767)))
+   (let [;; Clamp coordinates to [-1.0, 1.0] to prevent short overflow
+         scale-coord (fn [v] (short (* (max -1.0 (min 1.0 (double v))) 32767)))
          scale-color (fn [v] (if (float? v)
-                               (unchecked-byte (* v 255))
-                               (unchecked-byte v)))]
+                               (unchecked-byte (* (max 0.0 (min 1.0 v)) 255))
+                               (unchecked-byte (max 0 (min 255 v)))))]
      (->LaserPoint
       (scale-coord x)
       (scale-coord y)

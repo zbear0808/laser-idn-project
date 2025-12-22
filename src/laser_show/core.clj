@@ -23,9 +23,11 @@
             [laser-show.input.router :as router]
             [laser-show.input.keyboard :as keyboard]
             [laser-show.input.midi :as midi]
-            [laser-show.input.osc :as osc])
+            [laser-show.input.osc :as osc]
+            [laser-show.ui.layout :as layout])
   (:import [java.awt Color Dimension Font]
-           [javax.swing UIManager JFrame]
+           [javax.swing UIManager JFrame JSpinner SpinnerNumberModel]
+           [javax.swing.event ChangeListener]
            [com.formdev.flatlaf FlatDarkLaf])
   (:gen-class))
 
@@ -90,11 +92,27 @@
 ;; ============================================================================
 
 (defn- create-status-bar
-  "Create the status bar showing connection status and FPS."
+  "Create the status bar showing connection status, BPM, and FPS."
   []
   (let [connection-label (ss/label :text "IDN: Disconnected"
                                    :foreground (Color. 255 100 100)
                                    :font (Font. "SansSerif" Font/PLAIN 11))
+        ;; BPM display and control
+        bpm-label (ss/label :text "BPM:"
+                            :foreground Color/WHITE
+                            :font (Font. "SansSerif" Font/PLAIN 11))
+        bpm-model (SpinnerNumberModel. 120.0 20.0 300.0 0.5)
+        bpm-spinner (JSpinner. bpm-model)
+        _ (do
+            ;; Style the spinner
+            (.setFont bpm-spinner (Font. "SansSerif" Font/BOLD 11))
+            (.setPreferredSize bpm-spinner (Dimension. 65 22))
+            ;; Listen for changes and update multi-stream BPM
+            (.addChangeListener bpm-spinner
+                                (reify ChangeListener
+                                  (stateChanged [_ _evt]
+                                    (let [new-bpm (.getValue bpm-model)]
+                                      (multi-stream/set-bpm! new-bpm))))))
         fps-label (ss/label :text "FPS: --"
                             :foreground Color/WHITE
                             :font (Font. "SansSerif" Font/PLAIN 11))
@@ -102,8 +120,11 @@
                                :foreground Color/WHITE
                                :font (Font. "SansSerif" Font/PLAIN 11))]
     {:panel (mig/mig-panel
-             :constraints ["insets 5 10 5 10", "[grow][][]", ""]
+             :constraints ["insets 5 10 5 10", "[grow][][][][][]", ""]
              :items [[connection-label "growx"]
+                     [bpm-label ""]
+                     [bpm-spinner ""]
+                     [(ss/label :text "  ") ""]
                      [fps-label ""]
                      [points-label ""]]
              :background (Color. 35 35 35))
@@ -115,6 +136,10 @@
                           (do
                             (ss/config! connection-label :text "IDN: Disconnected")
                             (ss/config! connection-label :foreground (Color. 255 100 100)))))
+     :set-bpm! (fn [bpm]
+                 (.setValue bpm-model (double bpm)))
+     :get-bpm (fn []
+                (.getValue bpm-model))
      :set-fps! (fn [fps]
                  (ss/config! fps-label :text (format "FPS: %.1f" (float fps))))
      :set-points! (fn [points]
@@ -204,10 +229,8 @@
         ;; Mutable reference for grid component (needed for forward reference)
         grid-ref (atom nil)
         
-        ;; Create grid panel with handlers
+        ;; Create grid panel with handlers (use defaults from layout)
         grid-component (grid/create-grid-panel
-                        :cols 8
-                        :rows 4
                         :on-cell-click (fn [[col row] cell-state]
                                          (println "Cell clicked:" [col row])
                                          ;; If a preset is selected from palette, assign it
@@ -370,7 +393,7 @@
                 (create-menu-bar
                  frame
                  ;; New
-                 (fn [] ((:clear-all! grid-component)))
+                 (:clear-all! grid-component)
                  ;; Open
                  (fn [] (println "Open not implemented yet"))
                  ;; Save
@@ -384,17 +407,19 @@
     (swap! app-state assoc
            :main-frame frame
            :grid grid-component
-           :preview preview-component)
+           :preview preview-component
+           :status-bar status-bar)
     
-    ;; Set up some demo presets
+    ;; Set up some demo presets (only fill first row based on grid size)
     ((:set-cell-preset! grid-component) 0 0 :circle)
     ((:set-cell-preset! grid-component) 1 0 :spinning-square)
     ((:set-cell-preset! grid-component) 2 0 :triangle)
     ((:set-cell-preset! grid-component) 3 0 :star)
     ((:set-cell-preset! grid-component) 4 0 :spiral)
-    ((:set-cell-preset! grid-component) 5 0 :wave)
-    ((:set-cell-preset! grid-component) 6 0 :beam-fan)
-    ((:set-cell-preset! grid-component) 7 0 :rainbow-circle)
+    ;; Second row
+    ((:set-cell-preset! grid-component) 0 1 :wave)
+    ((:set-cell-preset! grid-component) 1 1 :beam-fan)
+    ((:set-cell-preset! grid-component) 2 1 :rainbow-circle)
     
     frame))
 
@@ -406,7 +431,8 @@
   "Sets up input event handlers to control the grid and application."
   []
   (let [{:keys [grid preview]} @app-state
-        cols 8]
+        cols layout/default-grid-cols
+        rows layout/default-grid-rows]
     
     ;; Handle note-on events (trigger grid cells)
     (router/on-note! ::grid-trigger nil nil
@@ -415,7 +441,7 @@
           (let [note (:note event)
                 col (mod note cols)
                 row (quot note cols)]
-            (when (and (< row 4) (< col 8))
+            (when (and (< row rows) (< col cols))
               ;; Trigger the cell via the grid's click handler
               (ss/invoke-later
                 (when-let [cell-state ((:get-cell-state grid) col row)]

@@ -1,9 +1,13 @@
 (ns laser-show.backend.zones
   "Zone configuration and management.
    Zones are logical projection spaces that can receive animations.
-   Each zone maps to a projector and can have transformations applied."
+   Each zone maps to a projector and can have transformations applied.
+   
+   Zones now support effect chains for per-zone effects:
+   - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
   (:require [laser-show.backend.config :as config]
-            [laser-show.backend.projectors :as projectors]))
+            [laser-show.backend.projectors :as projectors]
+            [laser-show.animation.effects :as fx]))
 
 ;; ============================================================================
 ;; Constants
@@ -332,6 +336,44 @@
   []
   (or (first (get-zone-ids))
       :zone-1))
+
+;; ============================================================================
+;; Effect Chain Management
+;; ============================================================================
+
+(defn set-zone-effect-chain!
+  "Set the effect chain for a zone."
+  [zone-id effect-chain]
+  (update-zone! zone-id {:effect-chain effect-chain}))
+
+(defn get-zone-effect-chain
+  "Get the effect chain for a zone."
+  [zone-id]
+  (:effect-chain (get-zone zone-id)))
+
+(defn add-effect-to-zone!
+  "Add an effect to a zone's effect chain."
+  [zone-id effect-instance]
+  (let [zone (get-zone zone-id)
+        current-chain (or (:effect-chain zone) (fx/empty-effect-chain))
+        new-chain (fx/add-effect-to-chain current-chain effect-instance)]
+    (update-zone! zone-id {:effect-chain new-chain})))
+
+(defn remove-effect-from-zone!
+  "Remove an effect from a zone's effect chain by index."
+  [zone-id effect-index]
+  (when-let [zone (get-zone zone-id)]
+    (when-let [chain (:effect-chain zone)]
+      (let [new-chain (fx/remove-effect-at chain effect-index)]
+        (update-zone! zone-id {:effect-chain new-chain})))))
+
+(defn update-zone-effect!
+  "Update an effect in a zone's effect chain."
+  [zone-id effect-index updates]
+  (when-let [zone (get-zone zone-id)]
+    (when-let [chain (:effect-chain zone)]
+      (let [new-chain (fx/update-effect-at chain effect-index updates)]
+        (update-zone! zone-id {:effect-chain new-chain})))))
 
 ;; ============================================================================
 ;; Initialization

@@ -1,7 +1,11 @@
 (ns laser-show.backend.projectors
   "Projector configuration and management.
-   Handles registration, status tracking, and network configuration for laser projectors."
-  (:require [laser-show.backend.config :as config]))
+   Handles registration, status tracking, and network configuration for laser projectors.
+   
+   Projectors support effect chains for projector-level calibration and effects:
+   - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
+  (:require [laser-show.backend.config :as config]
+            [laser-show.animation.effects :as fx]))
 
 ;; ============================================================================
 ;; Constants
@@ -204,3 +208,59 @@
   "Save projectors before shutdown."
   []
   (save-projectors!))
+
+;; ============================================================================
+;; Effect Chain Management
+;; ============================================================================
+
+(defn set-projector-effect-chain!
+  "Set the effect chain for a projector."
+  [projector-id effect-chain]
+  (update-projector! projector-id {:effect-chain effect-chain}))
+
+(defn get-projector-effect-chain
+  "Get the effect chain for a projector."
+  [projector-id]
+  (:effect-chain (get-projector projector-id)))
+
+(defn add-effect-to-projector!
+  "Add an effect to a projector's effect chain."
+  [projector-id effect-instance]
+  (let [projector (get-projector projector-id)
+        current-chain (or (:effect-chain projector) (fx/empty-effect-chain))
+        new-chain (fx/add-effect-to-chain current-chain effect-instance)]
+    (update-projector! projector-id {:effect-chain new-chain})))
+
+(defn remove-effect-from-projector!
+  "Remove an effect from a projector's effect chain by index."
+  [projector-id effect-index]
+  (when-let [projector (get-projector projector-id)]
+    (when-let [chain (:effect-chain projector)]
+      (let [new-chain (fx/remove-effect-at chain effect-index)]
+        (update-projector! projector-id {:effect-chain new-chain})))))
+
+(defn update-projector-effect!
+  "Update an effect in a projector's effect chain."
+  [projector-id effect-index updates]
+  (when-let [projector (get-projector projector-id)]
+    (when-let [chain (:effect-chain projector)]
+      (let [new-chain (fx/update-effect-at chain effect-index updates)]
+        (update-projector! projector-id {:effect-chain new-chain})))))
+
+(defn enable-projector-effect!
+  "Enable an effect in a projector's effect chain."
+  [projector-id effect-index]
+  (update-projector-effect! projector-id effect-index {:enabled true}))
+
+(defn disable-projector-effect!
+  "Disable an effect in a projector's effect chain."
+  [projector-id effect-index]
+  (update-projector-effect! projector-id effect-index {:enabled false}))
+
+(defn apply-projector-effects
+  "Apply a projector's effect chain to a frame.
+   This is typically used for projector-level calibration effects."
+  [projector-id frame time-ms bpm]
+  (if-let [chain (get-projector-effect-chain projector-id)]
+    (fx/apply-effect-chain frame chain time-ms bpm)
+    frame))

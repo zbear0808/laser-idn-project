@@ -1,13 +1,20 @@
 (ns laser-show.backend.multi-projector-stream
   "Multi-projector streaming coordinator.
    Manages multiple streaming engines (one per projector) and coordinates
-   frame distribution based on zone routing."
+   frame distribution based on zone routing.
+   
+   Effect Application Order:
+   1. Cue effects (applied by cue system before routing)
+   2. Zone group effects (applied during routing)
+   3. Zone effects (applied during routing)
+   4. Projector effects (applied here after routing)"
   (:require [laser-show.backend.streaming-engine :as engine]
             [laser-show.backend.projectors :as projectors]
             [laser-show.backend.zones :as zones]
             [laser-show.backend.zone-router :as router]
             [laser-show.backend.cues :as cues]
-            [laser-show.animation.types :as t]))
+            [laser-show.animation.types :as t]
+            [laser-show.animation.effects :as fx]))
 
 ;; ============================================================================
 ;; Multi-Engine State
@@ -18,7 +25,31 @@
          :running? false
          :frame-provider nil   ; Function that returns base frame
          :target-provider nil  ; Function that returns current target
-         :log-callback nil}))
+         :log-callback nil
+         :bpm 120.0            ; Global BPM for beat-synced effects
+         :start-time-ms nil})) ; Start time for consistent timing
+
+;; ============================================================================
+;; Timing
+;; ============================================================================
+
+(defn get-current-time-ms
+  "Get current time relative to engine start."
+  []
+  (let [start-time (:start-time-ms @!multi-engine-state)]
+    (if start-time
+      (- (System/currentTimeMillis) start-time)
+      0)))
+
+(defn get-bpm
+  "Get the current global BPM."
+  []
+  (:bpm @!multi-engine-state 120.0))
+
+(defn set-bpm!
+  "Set the global BPM for beat-synced effects."
+  [bpm]
+  (swap! !multi-engine-state assoc :bpm bpm))
 
 ;; ============================================================================
 ;; Frame Provider Integration
@@ -34,6 +65,29 @@
             projector-frames (router/prepare-projector-frames base-frame target)]
         (get projector-frames projector-id)))))
 
+(defn- create-projector-frame-provider-with-effects
+  "Create a frame provider for a specific projector with full effect chain support.
+   
+   This wraps the base frame provider and applies:
+   1. Zone group effects (via router)
+   2. Zone effects (via router)
+   3. Projector effects (applied here)
+   
+   Note: Cue effects should already be applied by the base-frame-provider."
+  [base-frame-provider target-provider projector-id]
+  (fn []
+    (when-let [base-frame (base-frame-provider)]
+      (let [target (or (target-provider) router/default-target)
+            time-ms (get-current-time-ms)
+            bpm (get-bpm)
+            ;; Apply zone group and zone effects during routing
+            projector-frames (router/prepare-projector-frames-with-effects 
+                              base-frame target time-ms bpm)
+            routed-frame (get projector-frames projector-id)]
+        ;; Apply projector-level effects (calibration)
+        (when routed-frame
+          (projectors/apply-projector-effects projector-id routed-frame time-ms bpm))))))
+
 ;; ============================================================================
 ;; Engine Management
 ;; ============================================================================
@@ -42,10 +96,16 @@
   "Create a streaming engine for a specific projector."
   [projector base-frame-provider target-provider opts]
   (let [projector-id (:id projector)
-        frame-provider (create-projector-frame-provider 
-                        base-frame-provider 
-                        target-provider 
-                        projector-id)]
+        use-effects? (get opts :use-effects? true)
+        frame-provider (if use-effects?
+                         (create-projector-frame-provider-with-effects
+                          base-frame-provider
+                          target-provider
+                          projector-id)
+                         (create-projector-frame-provider 
+                          base-frame-provider 
+                          target-provider 
+                          projector-id))]
     (engine/create-engine
      (:address projector)
      frame-provider
@@ -79,10 +139,12 @@
    - opts: Optional map with:
      - :fps - Target frames per second (default 30)
      - :log-callback - Optional function called with each packet for logging
+     - :bpm - Initial BPM for beat-synced effects (default 120)
+     - :use-effects? - Whether to apply effect chains (default true)
    
    Returns the multi-engine state."
-  [base-frame-provider target-provider & {:keys [fps log-callback]
-                                           :or {fps 30}}]
+  [base-frame-provider target-provider & {:keys [fps log-callback bpm use-effects?]
+                                           :or {fps 30 bpm 120.0 use-effects? true}}]
   (let [active-projectors (projectors/get-active-projectors)
         engines (into {}
                       (map (fn [proj]
@@ -91,20 +153,26 @@
                                proj 
                                base-frame-provider 
                                target-provider
-                               {:fps fps :log-callback log-callback})])
+                               {:fps fps 
+                                :log-callback log-callback
+                                :use-effects? use-effects?})])
                            active-projectors))]
     (reset! !multi-engine-state
             {:engines engines
              :running? false
              :frame-provider base-frame-provider
              :target-provider target-provider
-             :log-callback (atom log-callback)})
+             :log-callback (atom log-callback)
+             :bpm bpm
+             :start-time-ms nil})
     @!multi-engine-state))
 
 (defn start-multi-engine!
   "Start all streaming engines."
   []
   (when-not (:running? @!multi-engine-state)
+    ;; Set start time for consistent timing across all projectors
+    (swap! !multi-engine-state assoc :start-time-ms (System/currentTimeMillis))
     (doseq [[proj-id _] (:engines @!multi-engine-state)]
       (start-engine-for-projector! proj-id))
     (swap! !multi-engine-state assoc :running? true)
@@ -117,7 +185,7 @@
   (when (:running? @!multi-engine-state)
     (doseq [[proj-id _] (:engines @!multi-engine-state)]
       (stop-engine-for-projector! proj-id))
-    (swap! !multi-engine-state assoc :running? false)
+    (swap! !multi-engine-state assoc :running? false :start-time-ms nil)
     (println "Multi-projector streaming stopped")))
 
 (defn running?
@@ -236,3 +304,29 @@
     (if-let [active-cue (cues/get-active-cue)]
       (:target active-cue)
       router/default-target)))
+
+;; ============================================================================
+;; Effect-Enabled Frame Provider Helpers
+;; ============================================================================
+
+(defn create-cue-frame-provider-with-effects
+  "Create a frame provider that reads from the active cue and applies cue effects.
+   
+   This is useful when you want to use the cue system with full effect support.
+   The returned function provides frames with cue effects applied.
+   Zone group, zone, and projector effects are applied by the multi-engine."
+  []
+  (fn []
+    (when-let [active-cue (cues/get-active-cue)]
+      (let [time-ms (get-current-time-ms)
+            bpm (get-bpm)]
+        (cues/get-cue-frame-with-effects (:id active-cue) time-ms bpm)))))
+
+(defn sync-bpm-to-cue!
+  "Sync the multi-engine BPM to the active cue's BPM setting.
+   Returns the new BPM or nil if no active cue."
+  []
+  (when-let [active-cue (cues/get-active-cue)]
+    (when-let [cue-bpm (:bpm active-cue)]
+      (set-bpm! cue-bpm)
+      cue-bpm)))

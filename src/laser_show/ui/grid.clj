@@ -9,6 +9,7 @@
             [laser-show.ui.preview :as preview]
             [laser-show.ui.colors :as colors]
             [laser-show.ui.layout :as layout]
+            [laser-show.ui.drag-drop :as dnd]
             [laser-show.state.clipboard :as clipboard])
   (:import [java.awt Color Dimension Font BasicStroke Graphics2D RenderingHints]
            [java.awt.event MouseAdapter MouseEvent KeyEvent InputEvent ActionEvent]
@@ -105,8 +106,15 @@
             :valign :center))
 
 (defn- create-cell-panel
-  "Create a single grid cell panel."
-  [col row on-click on-right-click on-copy on-paste on-clear]
+  "Create a single grid cell panel.
+   
+   Parameters:
+   - col, row: Grid coordinates
+   - on-click: Called when cell is left-clicked
+   - on-right-click: Called when cell is right-clicked
+   - on-copy, on-paste, on-clear: Context menu actions
+   - on-drag-drop: Called when a preset is dropped from another cell: (on-drag-drop source-key preset-id)"
+  [col row on-click on-right-click on-copy on-paste on-clear on-drag-drop]
   (let [cell-key [col row]
         !cell-state (atom {:preset-id nil
                           :animation nil
@@ -123,6 +131,10 @@
                :center name-label
                :background colors/cell-empty
                :border empty-border)
+        
+        get-current-border (fn []
+                             (let [{:keys [preset-id]} @!cell-state]
+                               (if preset-id assigned-border empty-border)))
         
         update-appearance! (fn []
                              (let [{:keys [preset-id active selected]} @!cell-state
@@ -143,6 +155,7 @@
     (.setPreferredSize panel (Dimension. 80 60))
     (.setMinimumSize panel (Dimension. 60 50))
     
+    ;; Mouse listeners for click and hover
     (.addMouseListener panel
                        (proxy [MouseAdapter] []
                          (mouseClicked [^MouseEvent e]
@@ -163,18 +176,60 @@
                            (.setBorder panel hover-border))
                          
                          (mouseExited [^MouseEvent _e]
-                           (let [{:keys [preset-id]} @!cell-state
-                                 border (if preset-id assigned-border empty-border)]
-                             (.setBorder panel border)))))
+                           (.setBorder panel (get-current-border)))))
+    
+    ;; Set up drag support - cell can be dragged if it has a preset
+    (dnd/make-draggable! panel
+      {:data-fn (fn []
+                  (when-let [preset-id (:preset-id @!cell-state)]
+                    {:type :cue-cell
+                     :source-id :cue-grid
+                     :cell-key cell-key
+                     :data {:preset-id preset-id}}))
+       :ghost-fn (fn [comp _data]
+                   (let [{:keys [preset-id]} @!cell-state
+                         color (if-let [preset (presets/get-preset preset-id)]
+                                 (colors/get-category-color (:category preset))
+                                 colors/cell-assigned)]
+                     (dnd/create-simple-ghost-image 
+                      (.getWidth comp) (.getHeight comp)
+                      color
+                      :opacity 0.7
+                      :text (:name (presets/get-preset preset-id)))))
+       :on-drag-start (fn [_data]
+                        (println "Drag started from cell" cell-key))
+       :on-drag-end (fn [_data success?]
+                      (println "Drag ended from cell" cell-key "success:" success?))
+       :enabled-fn (fn [] (some? (:preset-id @!cell-state)))})
+    
+    ;; Set up drop target - cell accepts drops from other cue cells
+    (dnd/make-drop-target! panel
+      {:accept-fn (fn [transfer-data]
+                    (and transfer-data
+                         (= (:type transfer-data) :cue-cell)
+                         ;; Don't allow dropping on self
+                         (not= (:cell-key transfer-data) cell-key)))
+       :on-drop (fn [transfer-data]
+                  (let [source-key (:cell-key transfer-data)
+                        preset-id (get-in transfer-data [:data :preset-id])]
+                    (when (and source-key preset-id on-drag-drop)
+                      (on-drag-drop source-key preset-id)
+                      true)))
+       :on-drag-enter (fn [_data]
+                        (.setBorder panel (dnd/create-highlight-border)))
+       :on-drag-exit (fn []
+                       (.setBorder panel (get-current-border)))})
     
     {:panel panel
      :key cell-key
      :state !cell-state
      :set-preset! (fn [preset-id]
-                    (swap! !cell-state assoc :preset-id preset-id)
-                    (when preset-id
-                      (swap! !cell-state assoc :animation
-                             (presets/create-animation-from-preset preset-id)))
+                    ;; Clear both preset-id and animation together
+                    ;; When preset-id is nil, animation should also be nil
+                    (swap! !cell-state assoc 
+                           :preset-id preset-id
+                           :animation (when preset-id
+                                        (presets/create-animation-from-preset preset-id)))
                     (update-appearance!))
      :set-active! (fn [active]
                     (swap! !cell-state assoc :active active)
@@ -205,15 +260,11 @@
         !selected (atom nil)
         !active (atom nil)
         
-        {:keys [layout]
-         col-constraints :cols
-         row-constraints :rows} (layout/make-grid-constraints
-                                 {:cols cols :rows rows
-                                  :cell-width layout/cell-width
-                                  :cell-height layout/cell-height})
+        ;; Use simple wrap-based layout instead of explicit cell positioning
+        layout-str (str "wrap " cols ", gap " layout/cell-gap ", insets " layout/panel-insets)
         
         grid-panel (mig/mig-panel
-                    :constraints [layout col-constraints row-constraints]
+                    :constraints [layout-str]
                     :background colors/background-dark)
         
         handle-click (fn [cell-key cell-state]
@@ -245,15 +296,31 @@
         
         paste-to-selected! (fn []
                              (when-let [selected-key @!selected]
-                               (handle-paste selected-key)))]
+                               (handle-paste selected-key)))
+        
+        ;; Handler for drag-drop operations (move preset from source to target)
+        handle-drag-drop (fn [target-cell-key source-key preset-id]
+                           ;; Set the preset on the target cell
+                           (when-let [target-cell (get @!cells target-cell-key)]
+                             ((:set-preset! target-cell) preset-id))
+                           ;; Clear the source cell
+                           (when-let [source-cell (get @!cells source-key)]
+                             ((:set-preset! source-cell) nil))
+                           (println "Moved preset" preset-id "from" source-key "to" target-cell-key))]
     
     ;; Add cells in row-major order (row 0 first, then row 1, etc.)
+    ;; With wrap constraint, cells are added left-to-right, top-to-bottom
     (doseq [row (range rows)
             col (range cols)]
-      (let [cell (create-cell-panel col row handle-click handle-right-click
-                                    handle-copy handle-paste handle-clear)]
+      (let [cell-key [col row]
+            ;; Create drag-drop handler that knows this cell's key
+            cell-drag-drop (fn [source-key preset-id]
+                             (handle-drag-drop cell-key source-key preset-id))
+            cell (create-cell-panel col row handle-click handle-right-click
+                                    handle-copy handle-paste handle-clear cell-drag-drop)]
         (swap! !cells assoc [col row] cell)
-        (ss/add! grid-panel (:panel cell) (str "cell " col " " row))))
+        ;; Use empty constraint - cells have preferred size set already
+        (ss/add! grid-panel (:panel cell))))
     
     ;; Set preferred size to ensure all cells are visible
     (let [total-width (+ (* cols (+ layout/cell-width layout/cell-gap)) (* 2 layout/panel-insets))

@@ -1,10 +1,17 @@
 (ns laser-show.backend.zone-router
   "Zone routing and target resolution.
-   Handles resolving cue targets to zones and routing frames to projectors."
+   Handles resolving cue targets to zones and routing frames to projectors.
+   
+   Effect Application Order:
+   1. Cue effects (applied by cue system before routing)
+   2. Zone group effects (applied during routing)
+   3. Zone effects (applied during routing)
+   4. Projector effects (applied by multi_projector_stream after routing)"
   (:require [laser-show.backend.zones :as zones]
             [laser-show.backend.zone-groups :as zone-groups]
             [laser-show.backend.projectors :as projectors]
-            [laser-show.backend.zone-transform :as transform]))
+            [laser-show.backend.zone-transform :as transform]
+            [laser-show.animation.effects :as fx]))
 
 ;; ============================================================================
 ;; Target Resolution
@@ -90,11 +97,48 @@
 ;; Frame Preparation
 ;; ============================================================================
 
+(defn apply-zone-group-effects
+  "Apply zone group effects to a frame.
+   Looks up the zone group that contains the zone and applies its effects."
+  [frame zone-id time-ms bpm]
+  (if-let [group-id (zone-groups/get-zone-group-for-zone zone-id)]
+    (if-let [chain (zone-groups/get-group-effect-chain group-id)]
+      (fx/apply-effect-chain frame chain time-ms bpm)
+      frame)
+    frame))
+
+(defn apply-zone-effects
+  "Apply zone-level effects to a frame."
+  [frame zone-id time-ms bpm]
+  (if-let [chain (zones/get-zone-effect-chain zone-id)]
+    (fx/apply-effect-chain frame chain time-ms bpm)
+    frame))
+
 (defn prepare-frame-for-zone
   "Prepare a frame for a specific zone by applying transformations.
    Returns the transformed frame."
   [frame zone]
   (transform/transform-frame-for-zone frame zone))
+
+(defn prepare-frame-for-zone-with-effects
+  "Prepare a frame for a specific zone by applying effects and transformations.
+   
+   Effect application order:
+   1. Zone group effects
+   2. Zone effects
+   3. Zone transformations (viewport mapping)
+   
+   Parameters:
+   - frame: The base frame data
+   - zone: The zone configuration map
+   - time-ms: Current time in milliseconds
+   - bpm: Current BPM for beat-synced effects"
+  [frame zone time-ms bpm]
+  (let [zone-id (:id zone)]
+    (-> frame
+        (apply-zone-group-effects zone-id time-ms bpm)
+        (apply-zone-effects zone-id time-ms bpm)
+        (transform/transform-frame-for-zone zone))))
 
 (defn prepare-projector-frames
   "Given a base frame and target spec, prepare frames for each projector.
@@ -114,6 +158,32 @@
                  [proj-id (prepare-frame-for-zone frame zone)])
                winning-zones))))
 
+(defn prepare-projector-frames-with-effects
+  "Given a base frame and target spec, prepare frames for each projector with effects.
+   
+   Returns a map of projector-id -> transformed-frame.
+   
+   Process:
+   1. Resolve target to zones
+   2. Group zones by projector
+   3. Resolve priority conflicts (one zone per projector)
+   4. Apply zone group effects
+   5. Apply zone effects
+   6. Transform frame for each winning zone
+   7. Return map of projector-id -> frame
+   
+   Parameters:
+   - frame: The base frame (already has cue effects applied)
+   - target: Target specification
+   - time-ms: Current time in milliseconds
+   - bpm: Current BPM for beat-synced effects"
+  [frame target time-ms bpm]
+  (let [winning-zones (get-winning-zones-for-target target)]
+    (into {}
+          (map (fn [[proj-id zone]]
+                 [proj-id (prepare-frame-for-zone-with-effects frame zone time-ms bpm)])
+               winning-zones))))
+
 (defn prepare-frames-for-all-zones
   "Prepare frames for all zones in a target (without priority resolution).
    Useful when you want to send the same animation to multiple zones on the same projector.
@@ -124,6 +194,24 @@
     (into {}
           (map (fn [zone]
                  [(:id zone) (prepare-frame-for-zone frame zone)])
+               zone-list))))
+
+(defn prepare-frames-for-all-zones-with-effects
+  "Prepare frames for all zones in a target with effects (without priority resolution).
+   Useful when you want to send the same animation to multiple zones on the same projector.
+   
+   Returns a map of zone-id -> transformed-frame.
+   
+   Parameters:
+   - frame: The base frame (already has cue effects applied)
+   - target: Target specification
+   - time-ms: Current time in milliseconds
+   - bpm: Current BPM for beat-synced effects"
+  [frame target time-ms bpm]
+  (let [zone-list (resolve-target-to-zones target)]
+    (into {}
+          (map (fn [zone]
+                 [(:id zone) (prepare-frame-for-zone-with-effects frame zone time-ms bpm)])
                zone-list))))
 
 ;; ============================================================================
