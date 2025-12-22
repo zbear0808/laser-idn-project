@@ -98,9 +98,9 @@
   (fx/transform-colors
    frame
    (fn [[r g b]]
-     [(clamp-byte (* r amount))
-      (clamp-byte (* g amount))
-      (clamp-byte (* b amount))])))
+     [(common/clamp-byte (* r amount))
+      (common/clamp-byte (* g amount))
+      (common/clamp-byte (* b amount))])))
 
 (fx/register-effect!
  {:id :brightness
@@ -123,9 +123,9 @@
   (fx/transform-colors
    frame
    (fn [[r g b]]
-     [(clamp-byte (* r r-mult))
-      (clamp-byte (* g g-mult))
-      (clamp-byte (* b b-mult))])))
+     [(common/clamp-byte (* r r-mult))
+      (common/clamp-byte (* g g-mult))
+      (common/clamp-byte (* b b-mult))])))
 
 (fx/register-effect!
  {:id :color-filter
@@ -157,9 +157,9 @@
    frame
    (fn [[r g b]]
      (let [inv-str (- 1.0 strength)]
-       [(clamp-byte (+ (* r inv-str) (* tint-r strength)))
-        (clamp-byte (+ (* g inv-str) (* tint-g strength)))
-        (clamp-byte (+ (* b inv-str) (* tint-b strength)))]))))
+       [(common/clamp-byte (+ (* r inv-str) (* tint-r strength)))
+        (common/clamp-byte (+ (* g inv-str) (* tint-g strength)))
+        (common/clamp-byte (+ (* b inv-str) (* tint-b strength)))]))))
 
 (fx/register-effect!
  {:id :tint
@@ -222,9 +222,9 @@
    (fn [[r g b]]
      (let [gray (int (+ (* r 0.299) (* g 0.587) (* b 0.114)))
            inv-amt (- 1.0 amount)]
-       [(clamp-byte (+ (* r inv-amt) (* gray amount)))
-        (clamp-byte (+ (* g inv-amt) (* gray amount)))
-        (clamp-byte (+ (* b inv-amt) (* gray amount)))]))))
+       [(common/clamp-byte (+ (* r inv-amt) (* gray amount)))
+        (common/clamp-byte (+ (* g inv-amt) (* gray amount)))
+        (common/clamp-byte (+ (* b inv-amt) (* gray amount)))]))))
 
 (fx/register-effect!
  {:id :grayscale
@@ -257,9 +257,9 @@
      (fn [[r g b]]
        (let [gray (/ (+ r g b) 3.0)
              factor (/ gray 255.0)]
-         [(clamp-byte (* tr factor))
-          (clamp-byte (* tg factor))
-          (clamp-byte (* tb factor))])))))
+         [(common/clamp-byte (* tr factor))
+          (common/clamp-byte (* tg factor))
+          (common/clamp-byte (* tb factor))])))))
 
 (fx/register-effect!
  {:id :color-chase
@@ -294,9 +294,9 @@
      frame
      (fn [[r g b]]
        (let [brightness (/ (max r g b) 255.0)]
-         [(clamp-byte (* tr brightness))
-          (clamp-byte (* tg brightness))
-          (clamp-byte (* tb brightness))])))))
+         [(common/clamp-byte (* tr brightness))
+          (common/clamp-byte (* tg brightness))
+          (common/clamp-byte (* tb brightness))])))))
 
 (fx/register-effect!
  {:id :strobe-color
@@ -403,9 +403,9 @@
     (fx/transform-colors
      frame
      (fn [[r g b]]
-       [(clamp-byte (+ 128 (* factor (- r 128))))
-        (clamp-byte (+ 128 (* factor (- g 128))))
-        (clamp-byte (+ 128 (* factor (- b 128))))]))))
+       [(common/clamp-byte (+ 128 (* factor (- r 128))))
+        (common/clamp-byte (+ 128 (* factor (- g 128))))
+        (common/clamp-byte (+ 128 (* factor (- b 128))))]))))
 
 (fx/register-effect!
  {:id :contrast

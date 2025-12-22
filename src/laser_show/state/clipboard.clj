@@ -21,7 +21,7 @@
 ;; ============================================================================
 
 (def clipboard-types
-  #{:cue :zone :projector :effect :cell-assignment})
+  #{:cue :zone :projector :effect :cell-assignment :effect-assignment})
 
 (defn valid-clipboard-type?
   [type]
@@ -235,18 +235,54 @@
   (clipboard-has-type? :projector))
 
 ;; ============================================================================
+;; Effect Assignment Copy/Paste (for effects grid)
+;; ============================================================================
+
+(defn copy-effect-assignment!
+  "Copy an effect instance to clipboard.
+   Stores the full effect configuration so it persists.
+   Also copies to system clipboard as EDN."
+  [effect-instance]
+  (when effect-instance
+    (let [clip-data {:type :effect-assignment
+                     :effect-id (:effect-id effect-instance)
+                     :enabled (:enabled effect-instance)
+                     :params (:params effect-instance)
+                     :copied-at (System/currentTimeMillis)}]
+      (reset! !clipboard clip-data)
+      (copy-to-system-clipboard! clip-data)
+      true)))
+
+(defn paste-effect-assignment
+  "Get the effect instance from clipboard for pasting into a cell.
+   Returns an effect instance map, or nil if clipboard doesn't contain one.
+   Reads from system clipboard first, falls back to internal atom."
+  []
+  (when (clipboard-has-type? :effect-assignment)
+    (let [clip (get-clipboard)]
+      {:effect-id (:effect-id clip)
+       :enabled (:enabled clip true)
+       :params (:params clip {})})))
+
+(defn can-paste-effect-assignment?
+  "Check if clipboard contains an effect assignment that can be pasted."
+  []
+  (clipboard-has-type? :effect-assignment))
+
+;; ============================================================================
 ;; Clipboard Info
 ;; ============================================================================
 
 (defn get-clipboard-description
   "Get a human-readable description of clipboard contents."
   []
-  (if-let [{:keys [type data preset-id]} @!clipboard]
+  (if-let [{:keys [type data preset-id effect-id]} @!clipboard]
     (case type
       :cue (str "Cue: " (:name data))
       :cell-assignment (str "Preset: " (name preset-id))
       :zone (str "Zone: " (:name data))
       :projector (str "Projector: " (:name data))
       :effect (str "Effect: " (:name data))
+      :effect-assignment (str "Effect: " (name effect-id))
       "Unknown")
     "Empty"))

@@ -74,6 +74,13 @@
 
 (def ^:const DEFAULT_CHANNEL_ID 0)
 (def ^:const DEFAULT_SERVICE_ID 0)
+
+;; Maximum points per packet is determined by:
+;; - UDP max safe size: ~1400 bytes (to avoid fragmentation)
+;; - Packet headers: ~16 bytes
+;; - Per-point data: 7 bytes (X:2, Y:2, R:1, G:1, B:1)
+;; - Safe limit: (1400 - 16) / 7 ≈ 197 points
+;; - Conservative value: 150 points = ~1066 bytes total (well under MTU)
 (def ^:const MAX_POINTS_PER_PACKET 150)
 
 (def default-graphic-tags

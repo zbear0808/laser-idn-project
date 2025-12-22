@@ -2,14 +2,9 @@
   "Calibration effects for projector-specific corrections.
    These are static effects applied at the projector level to compensate
    for hardware differences between laser projectors."
-  (:require [laser-show.animation.effects :as fx]))
+  (:require [laser-show.animation.effects :as fx]
+            [laser-show.animation.effects.common :as common]))
 
-;; ============================================================================
-;; Helpers
-;; ============================================================================
-
-(defn clamp-byte [v]
-  (max 0 (min 255 (int v))))
 
 ;; ============================================================================
 ;; RGB Balance Calibration
@@ -19,9 +14,9 @@
   (fx/transform-colors
    frame
    (fn [[r g b]]
-     [(clamp-byte (* r r-gain))
-      (clamp-byte (* g g-gain))
-      (clamp-byte (* b b-gain))])))
+     [(common/clamp-byte (* r r-gain))
+      (common/clamp-byte (* g g-gain))
+      (common/clamp-byte (* b b-gain))])))
 
 (fx/register-effect!
  {:id :rgb-calibration
@@ -59,9 +54,9 @@
     (fx/transform-colors
      frame
      (fn [[r g b]]
-       [(clamp-byte (* 255.0 (Math/pow (/ r 255.0) r-inv)))
-        (clamp-byte (* 255.0 (Math/pow (/ g 255.0) g-inv)))
-        (clamp-byte (* 255.0 (Math/pow (/ b 255.0) b-inv)))]))))
+       [(common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) r-inv)))
+        (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) g-inv)))
+        (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) b-inv)))]))))
 
 (fx/register-effect!
  {:id :gamma-correction
@@ -99,9 +94,9 @@
      (let [max-val (max r g b)]
        (if (< max-val min-threshold)
          [0 0 0]
-         [(clamp-byte (* r global-brightness))
-          (clamp-byte (* g global-brightness))
-          (clamp-byte (* b global-brightness))])))))
+         [(common/clamp-byte (* r global-brightness))
+          (common/clamp-byte (* g global-brightness))
+          (common/clamp-byte (* b global-brightness))])))))
 
 (fx/register-effect!
  {:id :brightness-calibration
@@ -134,13 +129,13 @@
     (if (<= temp 66)
       ;; Warm temperatures
       [(* 255 1.0)
-       (clamp-byte (- (* 99.4708 (Math/log temp)) 161.1195))
+       (common/clamp-byte (- (* 99.4708 (Math/log temp)) 161.1195))
        (if (<= temp 19)
          0
-         (clamp-byte (- (* 138.5177 (Math/log (- temp 10))) 305.0447)))]
+         (common/clamp-byte (- (* 138.5177 (Math/log (- temp 10))) 305.0447)))]
       ;; Cool temperatures
-      [(clamp-byte (* 329.698 (Math/pow (- temp 60) -0.1332)))
-       (clamp-byte (* 288.122 (Math/pow (- temp 60) -0.0755)))
+      [(common/clamp-byte (* 329.698 (Math/pow (- temp 60) -0.1332)))
+       (common/clamp-byte (* 288.122 (Math/pow (- temp 60) -0.0755)))
        (* 255 1.0)])))
 
 (defn- apply-color-temperature [frame _time-ms _bpm {:keys [kelvin]}]
@@ -151,9 +146,9 @@
     (fx/transform-colors
      frame
      (fn [[r g b]]
-       [(clamp-byte (* r r-mult))
-        (clamp-byte (* g g-mult))
-        (clamp-byte (* b b-mult))]))))
+       [(common/clamp-byte (* r r-mult))
+        (common/clamp-byte (* g g-mult))
+        (common/clamp-byte (* b b-mult))]))))
 
 (fx/register-effect!
  {:id :color-temperature
@@ -177,9 +172,9 @@
   (fx/transform-colors
    frame
    (fn [[r g b]]
-     [(clamp-byte (+ (* r m00) (* g m01) (* b m02) offset-r))
-      (clamp-byte (+ (* r m10) (* g m11) (* b m12) offset-g))
-      (clamp-byte (+ (* r m20) (* g m21) (* b m22) offset-b))])))
+     [(common/clamp-byte (+ (* r m00) (* g m01) (* b m02) offset-r))
+      (common/clamp-byte (+ (* r m10) (* g m11) (* b m12) offset-g))
+      (common/clamp-byte (+ (* r m20) (* g m21) (* b m22) offset-b))])))
 
 (fx/register-effect!
  {:id :color-matrix
@@ -212,9 +207,9 @@
     (fx/transform-colors
      frame
      (fn [[r g b]]
-       [(clamp-byte (* r r-mult))
-        (clamp-byte (* g g-mult))
-        (clamp-byte (* b b-mult))]))))
+       [(common/clamp-byte (* r r-mult))
+        (common/clamp-byte (* g g-mult))
+        (common/clamp-byte (* b b-mult))]))))
 
 (fx/register-effect!
  {:id :white-balance
@@ -315,9 +310,9 @@
        (let [r-input (/ r 255.0)
              g-input (/ g 255.0)
              b-input (/ b 255.0)]
-         [(clamp-byte (interpolate-curve (or r-curve default-curve) r-input))
-          (clamp-byte (interpolate-curve (or g-curve default-curve) g-input))
-          (clamp-byte (interpolate-curve (or b-curve default-curve) b-input))])))))
+         [(common/clamp-byte (interpolate-curve (or r-curve default-curve) r-input))
+          (common/clamp-byte (interpolate-curve (or g-curve default-curve) g-input))
+          (common/clamp-byte (interpolate-curve (or b-curve default-curve) b-input))])))))
 
 (fx/register-effect!
  {:id :color-curves

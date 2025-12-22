@@ -1,23 +1,27 @@
 (ns laser-show.animation.time
   "Time utilities for BPM-synchronized effects.
-   Handles BPM conversions, phase calculations, and time-based computations.")
+   Handles BPM conversions, phase calculations, and time-based computations."
+  (:require [laser-show.database.dynamic :as dyn])
+  (:refer-clojure :exclude [mod]))
+
+;; Use unchecked-remainder-double for faster modulo on primitives
+(defn ^:private mod ^double [^double x ^double y]
+  (clojure.core/mod x y))
 
 ;; ============================================================================
-;; Global BPM State
+;; Global BPM State (delegated to database)
 ;; ============================================================================
-
-(defonce !global-bpm (atom 120))
 
 (defn set-global-bpm!
   "Set the global BPM value."
   [bpm]
   {:pre [(number? bpm) (pos? bpm)]}
-  (reset! !global-bpm (double bpm)))
+  (dyn/set-bpm! (double bpm)))
 
 (defn get-global-bpm
   "Get the current global BPM value."
   []
-  @!global-bpm)
+  (dyn/get-bpm))
 
 ;; ============================================================================
 ;; BPM Conversions
@@ -25,39 +29,39 @@
 
 (defn bpm->ms-per-beat
   "Convert BPM to milliseconds per beat."
-  [bpm]
+  ^double [^double bpm]
   (/ 60000.0 bpm))
 
 (defn bpm->ms-per-bar
   "Convert BPM to milliseconds per bar.
    beats-per-bar defaults to 4 (standard 4/4 time)."
-  ([bpm]
-   (bpm->ms-per-bar bpm 4))
-  ([bpm beats-per-bar]
+  (^double [^double bpm]
+   (bpm->ms-per-bar bpm 4.0))
+  (^double [^double bpm ^double beats-per-bar]
    (* (bpm->ms-per-beat bpm) beats-per-bar)))
 
 (defn beats->ms
   "Convert a number of beats to milliseconds at the given BPM."
-  [beats bpm]
+  ^double [^double beats ^double bpm]
   (* beats (bpm->ms-per-beat bpm)))
 
 (defn ms->beats
   "Convert milliseconds to beats at the given BPM."
-  [ms bpm]
+  ^double [^double ms ^double bpm]
   (/ ms (bpm->ms-per-beat bpm)))
 
 (defn bars->ms
   "Convert a number of bars to milliseconds at the given BPM."
-  ([bars bpm]
-   (bars->ms bars bpm 4))
-  ([bars bpm beats-per-bar]
+  (^double [^double bars ^double bpm]
+   (bars->ms bars bpm 4.0))
+  (^double [^double bars ^double bpm ^double beats-per-bar]
    (* bars (bpm->ms-per-bar bpm beats-per-bar))))
 
 (defn ms->bars
   "Convert milliseconds to bars at the given BPM."
-  ([ms bpm]
-   (ms->bars ms bpm 4))
-  ([ms bpm beats-per-bar]
+  (^double [^double ms ^double bpm]
+   (ms->bars ms bpm 4.0))
+  (^double [^double ms ^double bpm ^double beats-per-bar]
    (/ ms (bpm->ms-per-bar bpm beats-per-bar))))
 
 ;; ============================================================================
@@ -67,34 +71,33 @@
 (defn time->phase
   "Calculate oscillation phase (0.0 to 1.0) from time.
    frequency-hz is cycles per second."
-  [time-ms frequency-hz]
-  (let [period-ms (/ 1000.0 frequency-hz)
-        phase (mod (/ time-ms period-ms) 1.0)]
-    phase))
+  ^double [^double time-ms ^double frequency-hz]
+  (let [period-ms (/ 1000.0 frequency-hz)]
+    (mod (/ time-ms period-ms) 1.0)))
 
 (defn beat->phase
   "Calculate phase (0.0 to 1.0) within a beat cycle.
    beat-count is the fractional beat position."
-  [beat-count]
+  ^double [^double beat-count]
   (mod beat-count 1.0))
 
 (defn bar->phase
   "Calculate phase (0.0 to 1.0) within a bar cycle."
-  ([beat-count]
-   (bar->phase beat-count 4))
-  ([beat-count beats-per-bar]
+  (^double [^double beat-count]
+   (bar->phase beat-count 4.0))
+  (^double [^double beat-count ^double beats-per-bar]
    (mod (/ beat-count beats-per-bar) 1.0)))
 
 (defn time->beat-phase
   "Calculate phase within a beat at the given BPM."
-  [time-ms bpm]
+  ^double [^double time-ms ^double bpm]
   (beat->phase (ms->beats time-ms bpm)))
 
 (defn time->bar-phase
   "Calculate phase within a bar at the given BPM."
-  ([time-ms bpm]
-   (time->bar-phase time-ms bpm 4))
-  ([time-ms bpm beats-per-bar]
+  (^double [^double time-ms ^double bpm]
+   (time->bar-phase time-ms bpm 4.0))
+  (^double [^double time-ms ^double bpm ^double beats-per-bar]
    (bar->phase (ms->beats time-ms bpm) beats-per-bar)))
 
 ;; ============================================================================
@@ -103,17 +106,17 @@
 
 (defn sine-wave
   "Generate a sine wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0)."
-  [phase]
+  ^double [^double phase]
   (Math/sin (* phase 2.0 Math/PI)))
 
 (defn sine-wave-normalized
   "Generate a normalized sine wave value (0.0 to 1.0) at the given phase."
-  [phase]
-  (/ (+ 1.0 (sine-wave phase)) 2.0))
+  ^double [^double phase]
+  (* 0.5 (+ 1.0 (sine-wave phase))))
 
 (defn triangle-wave
   "Generate a triangle wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0)."
-  [phase]
+  ^double [^double phase]
   (let [p (mod phase 1.0)]
     (if (< p 0.5)
       (- (* 4.0 p) 1.0)
@@ -121,32 +124,32 @@
 
 (defn triangle-wave-normalized
   "Generate a normalized triangle wave value (0.0 to 1.0) at the given phase."
-  [phase]
-  (/ (+ 1.0 (triangle-wave phase)) 2.0))
+  ^double [^double phase]
+  (* 0.5 (+ 1.0 (triangle-wave phase))))
 
 (defn sawtooth-wave
   "Generate a sawtooth wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0)."
-  [phase]
+  ^double [^double phase]
   (- (* 2.0 (mod phase 1.0)) 1.0))
 
 (defn sawtooth-wave-normalized
   "Generate a normalized sawtooth wave value (0.0 to 1.0) at the given phase."
-  [phase]
+  ^double [^double phase]
   (mod phase 1.0))
 
 (defn square-wave
   "Generate a square wave value (-1.0 or 1.0) at the given phase (0.0 to 1.0).
    duty-cycle controls the on/off ratio (default 0.5)."
-  ([phase]
+  (^double [^double phase]
    (square-wave phase 0.5))
-  ([phase duty-cycle]
+  (^double [^double phase ^double duty-cycle]
    (if (< (mod phase 1.0) duty-cycle) 1.0 -1.0)))
 
 (defn square-wave-normalized
   "Generate a normalized square wave value (0.0 or 1.0) at the given phase."
-  ([phase]
+  (^double [^double phase]
    (square-wave-normalized phase 0.5))
-  ([phase duty-cycle]
+  (^double [^double phase ^double duty-cycle]
    (if (< (mod phase 1.0) duty-cycle) 1.0 0.0)))
 
 ;; ============================================================================
@@ -156,33 +159,32 @@
 (defn oscillate
   "Oscillate a value between min-val and max-val based on phase.
    waveform can be :sine, :triangle, :sawtooth, or :square."
-  ([min-val max-val phase]
+  (^double [^double min-val ^double max-val ^double phase]
    (oscillate min-val max-val phase :sine))
-  ([min-val max-val phase waveform]
+  ([^double min-val ^double max-val ^double phase waveform]
    (let [normalized-phase (mod phase 1.0)
-         wave-fn (case waveform
-                   :sine sine-wave-normalized
-                   :triangle triangle-wave-normalized
-                   :sawtooth sawtooth-wave-normalized
-                   :square square-wave-normalized
-                   sine-wave-normalized)
-         t (wave-fn normalized-phase)]
+         t (case waveform
+             :sine (sine-wave-normalized normalized-phase)
+             :triangle (triangle-wave-normalized normalized-phase)
+             :sawtooth (sawtooth-wave-normalized normalized-phase)
+             :square (square-wave-normalized normalized-phase)
+             (sine-wave-normalized normalized-phase))]
      (+ min-val (* t (- max-val min-val))))))
 
 (defn oscillate-bpm
   "Oscillate a value at a BPM-synchronized rate.
    frequency is cycles per beat."
   [min-val max-val time-ms bpm frequency & {:keys [waveform] :or {waveform :sine}}]
-  (let [beat-count (ms->beats time-ms bpm)
-        phase (* beat-count frequency)]
-    (oscillate min-val max-val phase waveform)))
+  (let [beat-count (ms->beats (double time-ms) (double bpm))
+        phase (* beat-count (double frequency))]
+    (oscillate (double min-val) (double max-val) phase waveform)))
 
 (defn oscillate-hz
   "Oscillate a value at a fixed frequency (Hz).
    frequency is cycles per second."
   [min-val max-val time-ms frequency & {:keys [waveform] :or {waveform :sine}}]
-  (let [phase (time->phase time-ms frequency)]
-    (oscillate min-val max-val phase waveform)))
+  (let [phase (time->phase (double time-ms) (double frequency))]
+    (oscillate (double min-val) (double max-val) phase waveform)))
 
 ;; ============================================================================
 ;; Quantization
@@ -190,26 +192,26 @@
 
 (defn quantize-to-beat
   "Quantize a time value to the nearest beat."
-  [time-ms bpm]
+  ^double [^double time-ms ^double bpm]
   (let [ms-per-beat (bpm->ms-per-beat bpm)
-        beat-num (Math/round (double (/ time-ms ms-per-beat)))]
-    (* beat-num ms-per-beat)))
+        beat-num (Math/round (/ time-ms ms-per-beat))]
+    (* (double beat-num) ms-per-beat)))
 
 (defn quantize-to-bar
   "Quantize a time value to the nearest bar."
-  ([time-ms bpm]
-   (quantize-to-bar time-ms bpm 4))
-  ([time-ms bpm beats-per-bar]
+  (^double [^double time-ms ^double bpm]
+   (quantize-to-bar time-ms bpm 4.0))
+  (^double [^double time-ms ^double bpm ^double beats-per-bar]
    (let [ms-per-bar (bpm->ms-per-bar bpm beats-per-bar)
-         bar-num (Math/round (double (/ time-ms ms-per-bar)))]
-     (* bar-num ms-per-bar))))
+         bar-num (Math/round (/ time-ms ms-per-bar))]
+     (* (double bar-num) ms-per-bar))))
 
 (defn quantize-to-subdivision
   "Quantize a time value to a beat subdivision (e.g., 2 for half beats, 4 for quarter beats)."
-  [time-ms bpm subdivision]
+  ^double [^double time-ms ^double bpm ^double subdivision]
   (let [ms-per-subdivision (/ (bpm->ms-per-beat bpm) subdivision)
-        sub-num (Math/round (double (/ time-ms ms-per-subdivision)))]
-    (* sub-num ms-per-subdivision)))
+        sub-num (Math/round (/ time-ms ms-per-subdivision))]
+    (* (double sub-num) ms-per-subdivision)))
 
 ;; ============================================================================
 ;; Easing Functions
@@ -217,44 +219,45 @@
 
 (defn ease-in-quad
   "Quadratic ease-in: slow start, accelerating."
-  [t]
+  ^double [^double t]
   (* t t))
 
 (defn ease-out-quad
   "Quadratic ease-out: fast start, decelerating."
-  [t]
-  (- 1.0 (* (- 1.0 t) (- 1.0 t))))
+  ^double [^double t]
+  (let [t1 (- 1.0 t)]
+    (- 1.0 (* t1 t1))))
 
 (defn ease-in-out-quad
   "Quadratic ease-in-out: slow start and end."
-  [t]
+  ^double [^double t]
   (if (< t 0.5)
     (* 2.0 t t)
-    (- 1.0 (/ (* (+ -2.0 (* 2.0 t)) (+ -2.0 (* 2.0 t))) 2.0))))
+    (let [t2 (- (* 2.0 t) 2.0)]
+      (- 1.0 (* 0.5 t2 t2)))))
 
 (defn ease-in-cubic
   "Cubic ease-in."
-  [t]
+  ^double [^double t]
   (* t t t))
 
 (defn ease-out-cubic
   "Cubic ease-out."
-  [t]
+  ^double [^double t]
   (let [t1 (- t 1.0)]
     (+ 1.0 (* t1 t1 t1))))
 
 (defn ease-in-out-cubic
   "Cubic ease-in-out."
-  [t]
+  ^double [^double t]
   (if (< t 0.5)
     (* 4.0 t t t)
-    (+ 1.0 (* 4.0 (- t 1.0) (- t 1.0) (- t 1.0)))))
+    (let [t1 (- t 1.0)]
+      (+ 1.0 (* 4.0 t1 t1 t1)))))
 
 ;; ============================================================================
-;; Tap Tempo (Future Enhancement)
+;; Tap Tempo (delegated to database)
 ;; ============================================================================
-
-(defonce !tap-times (atom []))
 
 (defn tap-tempo!
   "Record a tap for tap-tempo BPM detection.
@@ -263,14 +266,16 @@
   (let [now (System/currentTimeMillis)
         max-taps 8
         max-interval 2000]
-    (swap! !tap-times
-           (fn [taps]
-             (let [filtered (filterv #(< (- now %) max-interval) taps)
-                   updated (conj filtered now)]
-               (if (> (count updated) max-taps)
-                 (subvec updated (- (count updated) max-taps))
-                 updated))))
-    (let [taps @!tap-times]
+    (swap! dyn/!timing
+           (fn [timing]
+             (let [taps (:tap-times timing)
+                   filtered (filterv #(< (- now %) max-interval) taps)
+                   updated (conj filtered now)
+                   final-taps (if (> (count updated) max-taps)
+                                (subvec updated (- (count updated) max-taps))
+                                updated)]
+               (assoc timing :tap-times final-taps))))
+    (let [taps (dyn/get-tap-times)]
       (when (>= (count taps) 2)
         (let [intervals (mapv - (rest taps) (butlast taps))
               avg-interval (/ (reduce + intervals) (count intervals))
@@ -282,4 +287,4 @@
 (defn reset-tap-tempo!
   "Reset the tap tempo buffer."
   []
-  (reset! !tap-times []))
+  (dyn/clear-tap-times!))

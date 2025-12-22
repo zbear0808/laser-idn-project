@@ -113,6 +113,55 @@
   (get category-colors-vec category [100 100 100]))
 
 ;; ============================================================================
+;; Effect Category Colors
+;; ============================================================================
+
+(def effect-category-shape (rgb 70 130 200))
+(def effect-category-shape-dim (rgb 40 75 115))
+(def effect-category-color (rgb 180 80 180))
+(def effect-category-color-dim (rgb 100 45 100))
+(def effect-category-intensity (rgb 220 160 50))
+(def effect-category-intensity-dim (rgb 125 90 30))
+(def effect-category-calibration (rgb 100 100 100))
+(def effect-category-calibration-dim (rgb 60 60 60))
+
+(def effect-category-colors
+  "Map of effect category keywords to colors."
+  {:shape effect-category-shape
+   :color effect-category-color
+   :intensity effect-category-intensity
+   :calibration effect-category-calibration})
+
+(def effect-category-colors-dim
+  "Map of effect category keywords to dimmed colors (for disabled effects)."
+  {:shape effect-category-shape-dim
+   :color effect-category-color-dim
+   :intensity effect-category-intensity-dim
+   :calibration effect-category-calibration-dim})
+
+(def effect-category-colors-vec
+  "Map of effect category keywords to [r g b] vectors."
+  {:shape [70 130 200]
+   :color [180 80 180]
+   :intensity [220 160 50]
+   :calibration [100 100 100]})
+
+(defn get-effect-category-color
+  "Get the Color for an effect category keyword.
+   If dimmed? is true, returns the dimmed version for disabled effects."
+  ([category]
+   (get-effect-category-color category false))
+  ([category dimmed?]
+   (if dimmed?
+     (get effect-category-colors-dim category cell-assigned)
+     (get effect-category-colors category cell-assigned))))
+
+(defn get-effect-category-color-vec
+  "Get the [r g b] vector for an effect category keyword."
+  [category]
+  (get effect-category-colors-vec category [100 100 100]))
+
+;; ============================================================================
 ;; Preview Panel Colors
 ;; ============================================================================
 

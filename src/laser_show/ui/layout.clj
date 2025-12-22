@@ -34,6 +34,18 @@
   {:cols default-grid-cols
    :rows default-grid-rows})
 
+;; ============================================================================
+;; Effects Grid Configuration
+;; ============================================================================
+
+(def default-effects-grid-cols 5)
+(def default-effects-grid-rows 2)
+
+(def effects-grid-config
+  "Default effects grid configuration."
+  {:cols default-effects-grid-cols
+   :rows default-effects-grid-rows})
+
 (defn grid-cell-count
   "Calculate total number of cells in a grid."
   [{:keys [cols rows] :or {cols default-grid-cols rows default-grid-rows}}]

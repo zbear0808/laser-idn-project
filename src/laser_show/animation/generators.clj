@@ -45,7 +45,7 @@
    - :center - [cx cy] center position (default [0 0])
    - :color - [r g b] color (default [255 255 255])"
   [& {:keys [num-points radius center color]
-      :or {num-points 64
+      :or {num-points 64  ; 64 points provides smooth circle at typical scan rates (20-30kpps)
            radius 0.5
            center [0 0]
            color [255 255 255]}}]
@@ -114,7 +114,7 @@
    - :center - [cx cy] center position (default [0 0])
    - :color - [r g b] color (default [255 255 255])"
   [& {:keys [num-points size center color]
-      :or {num-points 21
+      :or {num-points 21  ; 21 per side = 63 total points for 3 sides (good balance for sharp corners)
            size 0.5
            center [0 0]
            color [255 255 255]}}]
@@ -143,7 +143,7 @@
    - :center - [cx cy] center position (default [0 0])
    - :color - [r g b] color (default [255 255 255])"
   [& {:keys [num-points turns start-radius end-radius center color]
-      :or {num-points 128
+      :or {num-points 128  ; Higher point count for smooth spiral curves with multiple turns
            turns 3
            start-radius 0.1
            end-radius 0.5

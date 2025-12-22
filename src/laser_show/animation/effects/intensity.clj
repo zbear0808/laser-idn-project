@@ -13,14 +13,13 @@
    NOTE: The old :pulse and :breathe effects are deprecated.
    Use :dim or :brighten with modulators instead for the same functionality."
   (:require [laser-show.animation.effects :as fx]
-            [laser-show.animation.time :as time]))
+            [laser-show.animation.time :as time]
+            [laser-show.animation.effects.common :as common]))
 
 ;; ============================================================================
 ;; Helpers
 ;; ============================================================================
 
-(defn clamp-byte [v]
-  (max 0 (min 255 (int v))))
 
 (defn- is-blanked? [r g b]
   (and (zero? r) (zero? g) (zero? b)))
@@ -33,9 +32,9 @@
   (fx/transform-colors
    frame
    (fn [[r g b]]
-     [(clamp-byte (* r amount))
-      (clamp-byte (* g amount))
-      (clamp-byte (* b amount))])))
+     [(common/clamp-byte (* r amount))
+      (common/clamp-byte (* g amount))
+      (common/clamp-byte (* b amount))])))
 
 (fx/register-effect!
  {:id :dim
@@ -58,9 +57,9 @@
   (fx/transform-colors
    frame
    (fn [[r g b]]
-     [(clamp-byte (* r amount))
-      (clamp-byte (* g amount))
-      (clamp-byte (* b amount))])))
+     [(common/clamp-byte (* r amount))
+      (common/clamp-byte (* g amount))
+      (common/clamp-byte (* b amount))])))
 
 (fx/register-effect!
  {:id :brighten
@@ -85,9 +84,9 @@
     (fx/transform-colors
      frame
      (fn [[r g b]]
-       [(clamp-byte (* r multiplier))
-        (clamp-byte (* g multiplier))
-        (clamp-byte (* b multiplier))]))))
+       [(common/clamp-byte (* r multiplier))
+        (common/clamp-byte (* g multiplier))
+        (common/clamp-byte (* b multiplier))]))))
 
 (fx/register-effect!
  {:id :fade-in
@@ -112,9 +111,9 @@
     (fx/transform-colors
      frame
      (fn [[r g b]]
-       [(clamp-byte (* r multiplier))
-        (clamp-byte (* g multiplier))
-        (clamp-byte (* b multiplier))]))))
+       [(common/clamp-byte (* r multiplier))
+        (common/clamp-byte (* g multiplier))
+        (common/clamp-byte (* b multiplier))]))))
 
 (fx/register-effect!
  {:id :fade-out
@@ -141,9 +140,9 @@
     (fx/transform-colors
      frame
      (fn [[r g b]]
-       [(clamp-byte (* r multiplier))
-        (clamp-byte (* g multiplier))
-        (clamp-byte (* b multiplier))]))))
+       [(common/clamp-byte (* r multiplier))
+        (common/clamp-byte (* g multiplier))
+        (common/clamp-byte (* b multiplier))]))))
 
 (fx/register-effect!
  {:id :strobe
@@ -175,9 +174,9 @@
     (fx/transform-colors
      frame
      (fn [[r g b]]
-       [(clamp-byte (* r multiplier))
-        (clamp-byte (* g multiplier))
-        (clamp-byte (* b multiplier))]))))
+       [(common/clamp-byte (* r multiplier))
+        (common/clamp-byte (* g multiplier))
+        (common/clamp-byte (* b multiplier))]))))
 
 (fx/register-effect!
  {:id :strobe-hz
@@ -256,9 +255,9 @@
     (fx/transform-colors
      frame
      (fn [[r g b]]
-       [(clamp-byte (* 255.0 (Math/pow (/ r 255.0) inv-gamma)))
-        (clamp-byte (* 255.0 (Math/pow (/ g 255.0) inv-gamma)))
-        (clamp-byte (* 255.0 (Math/pow (/ b 255.0) inv-gamma)))]))))
+       [(common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) inv-gamma)))
+        (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) inv-gamma)))
+        (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) inv-gamma)))]))))
 
 (fx/register-effect!
  {:id :gamma
@@ -284,9 +283,9 @@
     (fx/transform-colors
      frame
      (fn [[r g b]]
-       [(clamp-byte (* r flicker-amount))
-        (clamp-byte (* g flicker-amount))
-        (clamp-byte (* b flicker-amount))]))))
+       [(common/clamp-byte (* r flicker-amount))
+        (common/clamp-byte (* g flicker-amount))
+        (common/clamp-byte (* b flicker-amount))]))))
 
 (fx/register-effect!
  {:id :flicker
@@ -334,9 +333,9 @@
                              (zero? fade-range) 1.0
                              :else (/ (- adjusted-pos fade-start) fade-range))]
              (assoc point
-                    :r (unchecked-byte (clamp-byte (* r intensity)))
-                    :g (unchecked-byte (clamp-byte (* g intensity)))
-                    :b (unchecked-byte (clamp-byte (* b intensity)))))))))))
+                    :r (unchecked-byte (common/clamp-byte (* r intensity)))
+                    :g (unchecked-byte (common/clamp-byte (* g intensity)))
+                    :b (unchecked-byte (common/clamp-byte (* b intensity)))))))))))
 
 (fx/register-effect!
  {:id :point-fade
@@ -376,9 +375,9 @@
     (fx/transform-colors
      frame
      (fn [[r g b]]
-       [(clamp-byte (* r intensity))
-        (clamp-byte (* g intensity))
-        (clamp-byte (* b intensity))]))))
+       [(common/clamp-byte (* r intensity))
+        (common/clamp-byte (* g intensity))
+        (common/clamp-byte (* b intensity))]))))
 
 (fx/register-effect!
  {:id :beat-flash

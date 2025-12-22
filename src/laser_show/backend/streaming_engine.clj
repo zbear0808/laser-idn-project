@@ -11,9 +11,19 @@
 ;; Constants
 ;; ============================================================================
 
+;; Default streaming FPS - 30 FPS provides smooth animation while being
+;; achievable on most networks and hardware
 (def ^:const DEFAULT_FPS 30)
+
+;; IDN-Hello standard port per ILDA specification
 (def ^:const DEFAULT_PORT 7255)
+
+;; Default IDN channel - most systems use channel 0 for primary output
 (def ^:const DEFAULT_CHANNEL_ID 0)
+
+;; Per IDN-Stream spec Section 2.2: Channel configuration must be present
+;; at least every 200ms to allow consumers to recover from packet loss.
+;; This ensures robust streaming even with occasional network issues.
 (def ^:const CONFIG_RESEND_INTERVAL_MS 200)
 
 ;; ============================================================================
