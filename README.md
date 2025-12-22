@@ -1,112 +1,59 @@
 # Laser Show & IDN-Hello Project
 
-A Clojure project containing two independent modules:
-1. **Laser Show** - A launchpad-style interface for controlling laser animations
-2. **IDN-Hello** - Implementation of the ILDA Digital Network Hello Protocol
+A Clojure project for controlling laser shows with multiple projectors using the ILDA Digital Network protocols. Features a launchpad-style interface, multi-input support (keyboard, MIDI, OSC), and a sophisticated zone-based routing system.
 
-## Prerequisites
+Contains two modules:
+1. **Laser Show** - Live laser show control application
+2. **IDN-Hello** - ILDA Digital Network Hello Protocol implementation
+
+For detailed architecture information, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Quick Start
+
+### Prerequisites
 
 - Java 11 or higher
 - Clojure CLI tools (https://clojure.org/guides/install_clojure)
 
-## Project Structure
+### Running Laser Show
 
-```
-laser-idn-project/
-├── deps.edn              # Project dependencies and aliases
-├── src/
-│   ├── laser_show/       # Laser show application
-│   │   ├── core.clj      # Main entry point
-│   │   ├── animation/    # Animation system
-│   │   │   ├── types.clj
-│   │   │   ├── generators.clj
-│   │   │   ├── presets.clj
-│   │   │   └── colors.clj
-│   │   ├── backend/      # Backend systems
-│   │   │   ├── config.clj
-│   │   │   ├── cues.clj
-│   │   │   ├── packet_logger.clj
-│   │   │   └── idn_stream.clj
-│   │   ├── input/        # Input system (MIDI, OSC, Keyboard)
-│   │   │   ├── events.clj
-│   │   │   ├── router.clj
-│   │   │   ├── keyboard.clj
-│   │   │   ├── midi.clj
-│   │   │   └── osc.clj
-│   │   └── ui/           # User interface
-│   │       ├── grid.clj
-│   │       ├── preview.clj
-│   │       ├── layout.clj
-│   │       └── colors.clj
-│   └── idn_hello/        # IDN-Hello protocol
-│       └── core.clj      # Protocol implementation
-├── test/                 # Test suite
-│   ├── laser_show/
-│   │   ├── input/
-│   │   │   ├── events_test.clj
-│   │   │   └── router_test.clj
-│   │   └── backend/
-│   │       └── packet_logger_test.clj
-│   └── idn_hello/
-│       └── core_test.clj
-└── README.md
-```
-
-## Dependencies
-
-- **Clojure 1.12.1** - Core language
-- **Seesaw 1.5.0** - Swing UI wrapper (for Laser Show)
-- **FlatLaf 3.6.1** - Modern look and feel (for Laser Show)
-- **overtone/midi-clj 0.5.0** - MIDI input support
-- **overtone/osc-clj 0.9.0** - OSC input support
-- **cognitect-labs/test-runner** - Test framework
-
-## Running the Applications
-
-### Laser Show
-
-Launch the laser show application with a launchpad-style grid interface:
+Launch the laser show application with GUI:
 
 ```bash
 clj -M:laser-show
 ```
 
 Features:
-- 8x4 grid of animation cells (launchpad-style)
+- 8x4 launchpad-style grid interface
 - Real-time animation preview
-- Preset palette with various geometric shapes and effects
-- IDN protocol integration for laser hardware control
-- Click cells to trigger animations
-- Right-click to clear cells
+- Multiple zones and projectors support
+- MIDI, OSC, and keyboard input
+- Effect chains and modulation
+- IDN protocol integration for laser hardware
 
-### IDN-Hello
+### Running IDN-Hello
 
-Run the IDN-Hello protocol examples:
+Run IDN-Hello protocol examples:
 
 ```bash
 clj -M:idn-hello
 ```
 
-The IDN-Hello module provides:
-- Network device discovery
-- Ping/pong communication
-- Service map requests
-- Realtime streaming commands
-- Full ILDA Digital Network Hello Protocol implementation
+The IDN-Hello module provides network device discovery, ping/pong communication, service enumeration, and streaming commands following the ILDA Digital Network Hello Protocol specification.
 
 ## Development
 
 ### Start a REPL
 
-For interactive development with nREPL and CIDER support:
+For interactive development:
 
 ```bash
 clj -M:repl
 ```
 
-Then connect your editor (VS Code with Calva, Emacs with CIDER, etc.) to the nREPL server.
+Connect your editor (VS Code with Calva, Emacs with CIDER, etc.) to the nREPL server shown in the console output.
 
-### REPL Usage Examples
+### REPL Examples
 
 #### Laser Show
 
@@ -133,23 +80,13 @@ Then connect your editor (VS Code with Calva, Emacs with CIDER, etc.) to the nRE
 
 ;; Ping a specific device
 (idn/ping-device "192.168.1.100")
-
-;; Send realtime streaming messages
-(let [socket (idn/create-udp-socket)]
-  (try
-    (dotimes [i 10]
-      (idn/send-rt-channel-message socket "192.168.1.100" i 0 nil)
-      (Thread/sleep 100))
-    (idn/send-rt-close socket "192.168.1.100" 10 0)
-    (finally
-      (.close socket))))
 ```
 
-## Laser Show Animation System
+## Animation System
 
-The laser show uses a frame-based animation system:
+The laser show uses a frame-based animation system with the following core types:
 
-- **LaserPoint**: Individual point with X/Y coordinates (-32768 to 32767) and RGB color
+- **LaserPoint**: Individual point with X/Y coordinates (-32768 to 32767) and RGB color (0-255 each)
 - **LaserFrame**: Collection of points representing a single frame
 - **Animation**: Protocol for generating frames over time
 
@@ -160,27 +97,13 @@ The laser show uses a frame-based animation system:
 - **Waves**: Sine wave patterns
 - **Abstract**: Rainbow Circle (color-cycling effects)
 
-### Creating Custom Animations
+See [`src/laser_show/animation/presets.clj`](src/laser_show/animation/presets.clj) for preset definitions and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for animation system details.
 
-```clojure
-(require '[laser-show.animation.types :as t])
-(require '[laser-show.animation.generators :as gen])
+## IDN Protocol Support
 
-;; Define a custom animation generator
-(defn my-animation []
-  (fn [time-ms params]
-    (let [points (gen/generate-circle :radius 0.5 :color [255 0 0])]
-      (t/make-frame points))))
+### IDN-Hello Protocol
 
-;; Create animation instance
-(def my-anim (t/make-animation "My Animation" (my-animation) {} nil))
-```
-
-## IDN-Hello Protocol
-
-The IDN-Hello implementation follows the ILDA Digital Network Hello Protocol specification (Draft 2022-03-27).
-
-### Protocol Commands
+Implements ILDA Digital Network Hello Protocol (Draft 2022-03-27):
 
 **Management Commands:**
 - `CMD_PING_REQUEST` / `CMD_PING_RESPONSE` - Network connectivity testing
@@ -196,145 +119,19 @@ The IDN-Hello implementation follows the ILDA Digital Network Hello Protocol spe
 - `CMD_RT_CLOSE` - Graceful connection close
 - `CMD_RT_ABORT` - Immediate connection abort
 
-### Network Configuration
+**Default Port**: UDP 7255
 
-Default IDN-Hello port: **7255 UDP**
+### IDN-Stream Protocol
 
-## License
-
-This project is independent from the Beat Link Trigger project and uses:
-- Eclipse Public License 2.0 (for Clojure code compatibility)
-
-## Contributing
-
-This is an independent project. Feel free to fork and modify for your needs.
-
-## Troubleshooting
-
-### Laser Show won't start
-- Ensure Java 11+ is installed
-- Check that all dependencies are downloaded: `clj -P -M:laser-show`
-
-### IDN-Hello can't discover devices
-- Verify network connectivity
-- Check firewall settings (UDP port 7255)
-- Ensure broadcast address is correct for your network
-
-### REPL connection issues
-- Verify nREPL is running: `clj -M:repl`
-- Check the port number in the console output
-- Ensure your editor is configured for nREPL connection
-
----
-
-## Testing
-
-Run all tests:
-
-```bash
-clj -M:test
-```
-
-**Test Suite Summary: 49 tests, 182 assertions**
-
-| Module | Description |
-|--------|-------------|
-| `idn-hello.core-test` | Protocol constants, packet headers, parsing, sockets |
-| `laser-show.input.events-test` | Event creation, predicates, matching, value scaling |
-| `laser-show.input.router-test` | Handler registration, dispatch, pattern matching |
-| `laser-show.backend.packet-logger-test` | Command names, packet formatting, file operations |
-
----
+Frame streaming with X/Y coordinates (16-bit) and RGB color (8-bit each). See [`src/laser_show/backend/idn_stream.clj`](src/laser_show/backend/idn_stream.clj) and [`src/laser_show/backend/streaming_engine.clj`](src/laser_show/backend/streaming_engine.clj).
 
 ## Input System
 
-The laser show supports multiple input sources that all produce unified events:
+All input sources produce unified events that route to handlers:
 
-### Keyboard (Default Mappings)
+### Keyboard
 
-| Row | Keys | Notes |
-|-----|------|-------|
-| 0 | 1 2 3 4 5 6 7 8 | Grid cells 0-7 |
-| 1 | Q W E R T Y U I | Grid cells 8-15 |
-| 2 | A S D F G H J K | Grid cells 16-23 |
-| 3 | Z X C V B N M , | Grid cells 24-31 |
-
-**Transport:** Space (play/pause), Escape (stop), F1-F8 (presets)
-
-### MIDI
-
-```clojure
-(require '[laser-show.input.midi :as midi])
-(midi/list-device-names)      ;; List available devices
-(midi/connect-device! "name") ;; Connect to a device
-(midi/auto-connect!)          ;; Auto-connect first device
-```
-
-### OSC
-
-```clojure
-(require '[laser-show.input.osc :as osc])
-(osc/start-server! 9000)  ;; Start OSC server
-(osc/stop-server!)        ;; Stop server
-```
-
----
-
-## Work In Progress (WIP)
-
-| Feature | Location | Status |
-|---------|----------|--------|
-| IDN-Stream Protocol | `backend/idn_stream.clj` | Core packet construction done |
-| Packet Logging | `backend/packet_logger.clj` | Functional, UI integrated |
-| Cue System | `backend/cues.clj` | Basic structure defined |
-
----
-
-## Planned Features
-
-### High Priority
-- IDN-Stream output to laser hardware
-- Save/Load projects
-- MIDI output (LED feedback)
-
-### Medium Priority
-- Effects system (blur, color shift, scaling)
-- BPM/tempo sync
-- Audio reactivity
-- Multi-output support
-
-### Future
-- DMX integration
-- Show recording/playback
-- Web UI
-- Plugin system
-
-## Testing
-
-Run all tests with:
-
-```bash
-clj -M:test
-```
-
-### Test Coverage
-
-| Module | Tests | Assertions | Description |
-|--------|-------|------------|-------------|
-| `idn-hello.core-test` | 9 | 30+ | IDN-Hello protocol constants, packet headers, parsing, sockets |
-| `laser-show.input.events-test` | 12 | 50+ | Event creation, predicates, matching, value scaling |
-| `laser-show.input.router-test` | 15 | 40+ | Handler registration, dispatch, pattern matching, logging |
-| `laser-show.backend.packet-logger-test` | 13 | 30+ | Command names, packet formatting, file operations |
-
-**Total: 49 tests, 182 assertions**
-
-## Input System
-
-The laser show supports multiple input sources that all produce unified events:
-
-### Keyboard Input
-
-Default key mappings (launchpad-style layout):
+Default launchpad-style key mappings:
 
 | Row | Keys |
 |-----|------|
@@ -348,7 +145,7 @@ Default key mappings (launchpad-style layout):
 - `Escape` - Stop
 - `F1-F8` - Quick preset access
 
-### MIDI Input
+### MIDI
 
 ```clojure
 ;; List available MIDI devices
@@ -360,13 +157,9 @@ Default key mappings (launchpad-style layout):
 
 ;; Or auto-connect to first available device
 (midi/auto-connect!)
-
-;; MIDI Learn - returns the next MIDI event info
-(def learn-result (midi/start-learn!))
-@learn-result  ;; Wait for user to move a control
 ```
 
-### OSC Input
+### OSC
 
 ```clojure
 ;; Start OSC server on port 9000
@@ -382,55 +175,105 @@ Default key mappings (launchpad-style layout):
 (osc/stop-server!)
 ```
 
----
+See [`src/laser_show/input/`](src/laser_show/input/) for implementation details.
 
-## Work In Progress (WIP)
+## Testing
 
-These features are partially implemented:
+Run all tests:
 
-### IDN-Stream Protocol
-- **Status**: Core packet construction implemented
-- **Location**: `src/laser_show/backend/idn_stream.clj`
-- **TODO**: 
-  - Complete frame data encoding
-  - Implement streaming state machine
-  - Add connection management
+```bash
+clj -M:test
+```
 
-### Packet Logging
-- **Status**: Functional, integrated with UI
-- **Location**: `src/laser_show/backend/packet_logger.clj`
-- **TODO**: 
-  - Add packet parsing/display mode
-  - Add timestamp filtering
-  - Add export to PCAP format
+**Test Suite: 49 tests, 182 assertions**
 
-### Cue System
-- **Status**: Basic structure defined
-- **Location**: `src/laser_show/backend/cues.clj`
-- **TODO**:
-  - Implement cue triggering
-  - Add cue sequencing
-  - Add BPM sync
+Covers input system (events, routing), IDN protocol implementation, packet logging, and backend systems. See [`test/`](test/) directory for test files.
 
----
+## Current Work
 
-## To Be Started
+Features currently in development:
 
-These features are planned but not yet implemented:
+| Feature | Status | Location |
+|---------|--------|----------|
+| IDN-Stream Protocol | Core packet construction complete | [`backend/idn_stream.clj`](src/laser_show/backend/idn_stream.clj) |
+| Packet Logging | Functional, UI integrated | [`backend/packet_logger.clj`](src/laser_show/backend/packet_logger.clj) |
+| Cue System | Basic structure defined | [`backend/cues.clj`](src/laser_show/backend/cues.clj) |
+| Multi-Zone Routing | Implemented | [`backend/zone_router.clj`](src/laser_show/backend/zone_router.clj) |
+| Effects System | Functional | [`animation/effects/`](src/laser_show/animation/effects/) |
 
-### High Priority
-- [ ] **IDN-Stream Output** - Actually send animation frames to laser hardware
-- [ ] **Save/Load Projects** - Persist grid configurations to files
-- [ ] **MIDI Output** - Feedback to MIDI controllers (LED states)
+## Non-Goals
 
-### Medium Priority
-- [ ] **Effects System** - Add real-time effects (blur, color shift, scaling)
-- [ ] **Tempo Sync** - BPM-based animation timing
-- [ ] **Audio Reactivity** - FFT analysis for audio-reactive animations
-- [ ] **Multi-Output** - Support multiple laser outputs/zones
+This project intentionally does not include the following features:
 
-### Low Priority / Future
-- [ ] **DMX Integration** - Control traditional lighting fixtures
-- [ ] **Show Recording** - Record and playback complete shows
-- [ ] **Web UI** - Browser-based control interface
-- [ ] **Plugin System** - Load custom animation generators
+### High-Quality / Realistic Visualization
+
+Real-time, photorealistic laser visualization is computationally expensive and would be better suited as a standalone application. The current preview is optimized for performance and layout verification, not rendering quality. Building high-quality real-time visualization would add significant complexity without benefiting the core use case of controlling live shows.
+
+### FFT / Live Audio Analysis
+
+Live audio analysis (FFT) is typically noisy and unreliable for direct show control. The signal requires heavy smoothing and filtering to be usable, which is better handled by specialized tools. 
+
+**Instead**: Use external applications (Python scripts, TouchDesigner, Max/MSP, etc.) to analyze audio and send pre-processed OSC or MIDI curves to this application. This separation of concerns allows you to use the best tool for audio analysis while keeping this application focused on laser control.
+
+### Live Audio Playback
+
+This application does not include built-in audio playback, timecode syncing, tempo adjustment, or multi-format audio decoding. These features add substantial complexity that existing tools already handle well:
+
+- Playing audio with sample-accurate timing
+- Syncing with frame-accurate timecode
+- Dynamic BPM changes and time-stretching
+- Decoding various audio formats
+- Audio routing and mixing
+
+**Instead**: Use your preferred audio application (TouchDesigner, Ableton Live, QLab, DAWs, etc.) to handle audio playback and send timecode (MIDI timecode or LTC) to this application. This app will sync to the incoming timecode and/or MIDI messages.
+
+## Future Possibilities
+
+The following feature is planned for future development but is not currently being worked on due to its significant complexity:
+
+### Timeline System
+
+A comprehensive timeline system for fully pre-recorded shows:
+
+- **Timecode Integration**: Full support for MIDI timecode (MTC) and LTC timecode
+- **Seeking/Scrubbing**: Navigate within the timeline, jump to specific cues
+- **Pre-compilation**: Option to pre-render all IDN frames for maximum stability during playback
+- **Live Recording**: Record MIDI/OSC inputs to create and edit cues in real-time
+- **Beat Quantization**: Snap cue triggers to beat boundaries when recording to timeline
+- **Timeline Editing**: Full editing capabilities for cue timing, transitions, and effects
+
+This is a major architectural addition that requires:
+- Comprehensive timeline data structures
+- Timeline playback engine separate from live performance mode
+- Timeline UI with scrubbing and editing
+- Persistent timeline storage format
+- Pre-compilation pipeline with caching
+- Frame interpolation and transition system
+
+**Status**: Not planned for the near term. The current focus is on perfecting live performance capabilities.
+
+## Troubleshooting
+
+### Laser Show won't start
+- Ensure Java 11+ is installed: `java -version`
+- Download dependencies: `clj -P -M:laser-show`
+
+### IDN-Hello can't discover devices
+- Verify network connectivity to laser hardware
+- Check firewall settings for UDP port 7255
+- Ensure broadcast address is correct for your network
+
+### REPL connection issues
+- Verify nREPL is running: `clj -M:repl`
+- Check the port number in the console output
+- Ensure your editor is configured for nREPL connection
+
+For more help, see [`QUICKSTART.md`](QUICKSTART.md) or [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## License
+
+Eclipse Public License 2.0 (for Clojure code compatibility)
+
+## Contributing
+
+This is an independent project. Feel free to fork and modify for your needs.
