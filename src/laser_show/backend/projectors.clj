@@ -4,7 +4,7 @@
    
    Projectors support effect chains for projector-level calibration and effects:
    - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
-  (:require [laser-show.backend.config :as config]
+  (:require [laser-show.database.persistent :as persist]
             [laser-show.animation.effects :as fx]))
 
 ;; ============================================================================
@@ -15,11 +15,8 @@
 (def ^:const DEFAULT_CHANNEL_ID 0)
 
 ;; ============================================================================
-;; Projector Registry
+;; Projector Registry (now delegated to database/persistent)
 ;; ============================================================================
-
-(defonce !projectors
-  (atom {}))
 
 ;; ============================================================================
 ;; Projector Data Structure
@@ -70,7 +67,7 @@
    Can accept either a projector map or individual parameters."
   ([projector]
    (when (valid-projector? projector)
-     (swap! !projectors assoc (:id projector) projector)
+     (persist/add-projector! (:id projector) projector)
      projector))
   ([id name address & opts]
    (let [projector (apply make-projector id name address opts)]
@@ -79,34 +76,36 @@
 (defn get-projector
   "Get a projector by ID."
   [projector-id]
-  (get @!projectors projector-id))
+  (persist/get-projector projector-id))
 
 (defn update-projector!
   "Update a projector's properties."
   [projector-id updates]
   (when (get-projector projector-id)
-    (swap! !projectors update projector-id merge updates)
-    (get-projector projector-id)))
+    (let [updated (merge (get-projector projector-id) updates)]
+      (persist/add-projector! projector-id updated)
+      updated)))
 
 (defn remove-projector!
   "Remove a projector from the registry."
   [projector-id]
-  (swap! !projectors dissoc projector-id))
+  (persist/remove-projector! projector-id))
 
 (defn list-projectors
   "Get all projectors as a sequence."
   []
-  (vals @!projectors))
+  (vals (persist/get-projectors)))
 
 (defn get-projector-ids
   "Get all projector IDs."
   []
-  (keys @!projectors))
+  (keys (persist/get-projectors)))
 
 (defn clear-projectors!
   "Clear all projectors from the registry."
   []
-  (reset! !projectors {}))
+  (reset! persist/!projectors {})
+  (persist/save-projectors!))
 
 ;; ============================================================================
 ;; Status Management
@@ -159,22 +158,18 @@
     [(:address proj) (:port proj)]))
 
 ;; ============================================================================
-;; Persistence
+;; Persistence (delegated to database/persistent)
 ;; ============================================================================
-
-(def projectors-file "config/projectors.edn")
 
 (defn save-projectors!
   "Save all projectors to disk."
   []
-  (config/ensure-config-dir!)
-  (config/save-edn! projectors-file @!projectors))
+  (persist/save-projectors!))
 
 (defn load-projectors!
   "Load projectors from disk."
   []
-  (when-let [loaded (config/load-edn projectors-file)]
-    (reset! !projectors loaded)))
+  (persist/load-projectors!))
 
 ;; ============================================================================
 ;; Default Projector
@@ -184,7 +179,7 @@
   "Ensure at least one default projector exists.
    Creates :projector-1 if no projectors are registered."
   []
-  (when (empty? @!projectors)
+  (when (empty? (persist/get-projectors))
     (register-projector!
      (make-projector :projector-1 "Default Projector" "192.168.1.100"))))
 

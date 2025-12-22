@@ -8,6 +8,7 @@
             [laser-show.animation.types :as t]
             [laser-show.animation.presets :as presets]
             [laser-show.ui.grid :as grid]
+            [laser-show.ui.effects-grid :as effects-grid]
             [laser-show.ui.preview :as preview]
             [laser-show.ui.projector-config :as projector-config]
             [laser-show.ui.zone-config :as zone-config]
@@ -277,6 +278,23 @@
                               ((:set-cell-preset! gc) col row preset-id)
                               (reset! selected-preset-atom nil)))))
         
+        ;; Create effects grid (5x2 default)
+        ;; Using a ref so callbacks can reference it after creation
+        effects-grid-ref (atom nil)
+        effects-grid-component (effects-grid/create-effects-grid-panel
+                                :on-effects-change (fn [active-effects]
+                                                     (println "Active effects:" (count active-effects)))
+                                :on-new-effect (fn [cell-key]
+                                                 ;; For now, add a scale effect for testing
+                                                 (println "New effect for:" cell-key)
+                                                 (when-let [eg @effects-grid-ref]
+                                                   ((:set-cell-effect! eg) 
+                                                    (first cell-key) (second cell-key)
+                                                    (effects-grid/make-effect-data :scale :enabled true))))
+                                :on-edit-effect (fn [cell-key _cell-state]
+                                                  (println "Edit effect for:" cell-key)))
+        _ (reset! effects-grid-ref effects-grid-component)
+        
         ;; Create status bar
         status-bar (create-status-bar)
         
@@ -367,14 +385,35 @@
                      :vgap 10
                      :background (Color. 35 35 35))
         
-        ;; Wrap grid in scrollable for when window is small
-        grid-scrollable (ss/scrollable (:panel grid-component)
+        ;; Create a label for the effects grid section
+        effects-label (ss/label :text "Effects"
+                                :font (Font. "SansSerif" Font/BOLD 12)
+                                :foreground (Color. 180 180 180))
+        
+        ;; Effects grid section with label
+        effects-section (ss/border-panel
+                         :north (ss/horizontal-panel
+                                 :items [effects-label]
+                                 :background (Color. 40 40 40)
+                                 :border (border/empty-border :left 5 :top 3 :bottom 3))
+                         :center (:panel effects-grid-component)
+                         :background (Color. 30 30 30))
+        
+        ;; Left panel with cues grid and effects grid stacked vertically
+        left-panel (ss/border-panel
+                    :center (:panel grid-component)
+                    :south effects-section
+                    :vgap 5
+                    :background (Color. 30 30 30))
+        
+        ;; Wrap left panel in scrollable for when window is small
+        left-scrollable (ss/scrollable left-panel
                                        :border nil
                                        :background (Color. 30 30 30))
         
         ;; Main content panel
         content-panel (ss/border-panel
-                       :center grid-scrollable
+                       :center left-scrollable
                        :east right-panel
                        :south (:panel status-bar)
                        :north (:panel toolbar)
