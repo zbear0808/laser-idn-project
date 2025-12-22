@@ -1,0 +1,677 @@
+(ns laser-show.ui.effect-dialogs
+  "Dialogs for creating and editing effects in the effects grid.
+   Includes:
+   - Effect selection dialog (choose effect type and configure parameters)
+   - Modulator configuration dialog (add modulation to parameters)"
+  (:require [seesaw.core :as ss]
+            [seesaw.mig :as mig]
+            [seesaw.border :as border]
+            [laser-show.animation.effects :as fx]
+            [laser-show.animation.modulation :as mod]
+            [laser-show.ui.colors :as colors])
+  (:import [java.awt Color Font Dimension]
+           [javax.swing JDialog JSlider JSpinner SpinnerNumberModel DefaultListModel
+                        DefaultComboBoxModel ListSelectionModel BorderFactory]
+           [javax.swing.event ChangeListener ListSelectionListener]))
+
+;; ============================================================================
+;; Constants
+;; ============================================================================
+
+(def effect-categories
+  "Available effect categories for the UI."
+  [{:id :shape :name "Shape"}
+   {:id :color :name "Color"}
+   {:id :intensity :name "Intensity"}])
+
+(def modulator-types
+  "Available modulator types for parameter modulation."
+  [{:id :sine :name "Sine Wave" :description "Smooth oscillation"}
+   {:id :triangle :name "Triangle Wave" :description "Linear up/down"}
+   {:id :sawtooth :name "Sawtooth Wave" :description "Ramp up, reset"}
+   {:id :square :name "Square Wave" :description "On/off toggle"}
+   {:id :random :name "Random" :description "Random values per beat"}
+   {:id :beat-decay :name "Beat Decay" :description "Decay each beat"}])
+
+(def modulator-presets
+  "Preset modulator configurations."
+  [{:id :gentle-pulse :name "Gentle Pulse" :type :sine :min 0.7 :max 1.0 :freq 1.0}
+   {:id :strong-pulse :name "Strong Pulse" :type :sine :min 0.3 :max 1.0 :freq 2.0}
+   {:id :breathe :name "Breathe" :type :sine :min 0.5 :max 1.0 :freq 0.25}
+   {:id :strobe-4x :name "Strobe 4x" :type :square :min 0.0 :max 1.0 :freq 4.0}
+   {:id :ramp-up :name "Ramp Up" :type :sawtooth :min 0.0 :max 1.0 :freq 1.0}
+   {:id :wobble :name "Wobble" :type :sine :min 0.9 :max 1.1 :freq 4.0}])
+
+;; ============================================================================
+;; UI Helpers
+;; ============================================================================
+
+(defn- create-slider
+  "Create a slider for float/int parameter editing."
+  [{:keys [min max default on-change steps label-fn]}]
+  ;; Ensure min/max are numbers, provide defaults if not
+  (let [min-val (if (number? min) min 0.0)
+        max-val (if (number? max) max 1.0)
+        default-val (if (number? default) default min-val)
+        slider-min (int (* min-val 100))
+        slider-max (int (* max-val 100))
+        slider-val (int (* default-val 100))
+        steps (or steps 1)
+        slider (JSlider. slider-min slider-max slider-val)
+        value-label (ss/label :text (if label-fn 
+                                      (label-fn (/ slider-val 100.0))
+                                      (format "%.2f" (/ slider-val 100.0)))
+                              :font (Font. "Monospaced" Font/PLAIN 11)
+                              :foreground Color/WHITE)]
+    (.setMinorTickSpacing slider steps)
+    (.setPaintTicks slider false)
+    (.setBackground slider (Color. 50 50 50))
+    (.setForeground slider Color/WHITE)
+    (.addChangeListener slider
+      (reify ChangeListener
+        (stateChanged [_ _]
+          (let [v (/ (.getValue slider) 100.0)]
+            (ss/config! value-label :text (if label-fn
+                                            (label-fn v)
+                                            (format "%.2f" v)))
+            (when on-change (on-change v))))))
+    {:slider slider
+     :label value-label
+     :get-value (fn [] (/ (.getValue slider) 100.0))
+     :set-value! (fn [v] (.setValue slider (int (* v 100))))}))
+
+(defn- create-spinner
+  "Create a spinner for numeric parameter editing."
+  [{:keys [min max default step on-change]}]
+  (let [step (or step 0.1)
+        model (SpinnerNumberModel. (double (or default min)) 
+                                   (double min) 
+                                   (double max) 
+                                   (double step))
+        spinner (JSpinner. model)]
+    (.setPreferredSize spinner (Dimension. 70 25))
+    (.addChangeListener spinner
+      (reify ChangeListener
+        (stateChanged [_ _]
+          (when on-change (on-change (.getValue model))))))
+    {:spinner spinner
+     :get-value (fn [] (.getValue model))
+     :set-value! (fn [v] (.setValue model (double v)))}))
+
+(defn- style-dialog-panel
+  "Apply consistent styling to a panel."
+  [panel]
+  (ss/config! panel :background (Color. 45 45 45))
+  panel)
+
+;; ============================================================================
+;; Parameter Panel Builder
+;; ============================================================================
+
+(defn- create-param-control
+  "Create a control for a single parameter definition.
+   Returns {:panel JPanel :get-value fn :set-value! fn :set-modulator! fn}
+   
+   Parameters:
+   - param-def: The parameter definition map
+   - on-modulate: Callback for modulator button
+   - on-param-change: (optional) Callback called when parameter value changes"
+  [param-def on-modulate on-param-change]
+  (let [{:keys [key label type default min max choices]} param-def
+        control-atom (atom nil)
+        modulator-atom (atom nil)
+        mod-indicator (ss/label :text "" :foreground (Color. 100 200 255))
+        
+        panel (case type
+                :float
+                (let [ctrl (create-slider {:min (or min 0.0)
+                                          :max (or max 1.0)
+                                          :default default
+                                          :on-change (fn [_v] 
+                                                       ;; Clear modulator when manually changed
+                                                       (reset! modulator-atom nil)
+                                                       (ss/config! mod-indicator :text "")
+                                                       ;; Notify about parameter change for live preview
+                                                       (when on-param-change (on-param-change)))})]
+                  (reset! control-atom ctrl)
+                  (mig/mig-panel
+                   :constraints ["insets 2", "[100!][grow, fill][50!][80!][20!]", ""]
+                   :items [[(ss/label :text (str label ":") 
+                                     :foreground Color/WHITE) ""]
+                           [(:slider ctrl) "growx"]
+                           [(:label ctrl) ""]
+                           [(ss/button :text "Modulate" 
+                                       :font (Font. "SansSerif" Font/PLAIN 10)
+                                       :listen [:action (fn [_]
+                                                          (when on-modulate
+                                                            (on-modulate key param-def
+                                                              (fn [modulator]
+                                                                (reset! modulator-atom modulator)
+                                                                (ss/config! mod-indicator :text "~")))))]) ""]
+                           [mod-indicator ""]]))
+                
+                :int
+                (let [ctrl (create-spinner {:min (or min 0)
+                                           :max (or max 100)
+                                           :default default
+                                           :step 1
+                                           :on-change (fn [_v]
+                                                        (reset! modulator-atom nil)
+                                                        (ss/config! mod-indicator :text "")
+                                                        (when on-param-change (on-param-change)))})]
+                  (reset! control-atom ctrl)
+                  (mig/mig-panel
+                   :constraints ["insets 2", "[100!][grow][80!][20!]", ""]
+                   :items [[(ss/label :text (str label ":") 
+                                     :foreground Color/WHITE) ""]
+                           [(:spinner ctrl) ""]
+                           [(ss/button :text "Modulate"
+                                       :font (Font. "SansSerif" Font/PLAIN 10)
+                                       :listen [:action (fn [_]
+                                                          (when on-modulate
+                                                            (on-modulate key param-def
+                                                              (fn [modulator]
+                                                                (reset! modulator-atom modulator)
+                                                                (ss/config! mod-indicator :text "~")))))]) ""]
+                           [mod-indicator ""]]))
+                
+                :bool
+                (let [checkbox (ss/checkbox :text label
+                                           :selected? (boolean default)
+                                           :foreground Color/WHITE
+                                           :background (Color. 45 45 45)
+                                           :listen [:action (fn [_] 
+                                                              (when on-param-change (on-param-change)))])]
+                  (reset! control-atom {:checkbox checkbox
+                                        :get-value (fn [] (ss/value checkbox))
+                                        :set-value! (fn [v] (ss/value! checkbox v))})
+                  (mig/mig-panel
+                   :constraints ["insets 2", "[grow]", ""]
+                   :items [[checkbox ""]]))
+                
+                :choice
+                (let [combo (ss/combobox :model (vec choices)
+                                        :renderer (fn [_ {:keys [value]}]
+                                                    {:text (str value)})
+                                        :listen [:action (fn [_]
+                                                           (when on-param-change (on-param-change)))])]
+                  (when default
+                    (ss/selection! combo default))
+                  (reset! control-atom {:combo combo
+                                        :get-value (fn [] (ss/selection combo))
+                                        :set-value! (fn [v] (ss/selection! combo v))})
+                  (mig/mig-panel
+                   :constraints ["insets 2", "[100!][grow]", ""]
+                   :items [[(ss/label :text (str label ":") 
+                                     :foreground Color/WHITE) ""]
+                           [combo ""]]))
+                
+                ;; Default: treat as float
+                (let [ctrl (create-slider {:min 0.0 :max 1.0 :default (or default 0.5)
+                                          :on-change (fn [_v]
+                                                       (when on-param-change (on-param-change)))})]
+                  (reset! control-atom ctrl)
+                  (mig/mig-panel
+                   :constraints ["insets 2", "[100!][grow, fill][50!]", ""]
+                   :items [[(ss/label :text (str label ":") 
+                                     :foreground Color/WHITE) ""]
+                           [(:slider ctrl) "growx"]
+                           [(:label ctrl) ""]])))]
+    
+    (style-dialog-panel panel)
+    {:panel panel
+     :param-key key
+     :get-value (fn [] 
+                  (if-let [m @modulator-atom]
+                    m
+                    (when-let [ctrl @control-atom]
+                      ((:get-value ctrl)))))
+     :set-value! (fn [v]
+                   (when-let [ctrl @control-atom]
+                     (when (and (not (fn? v)) (:set-value! ctrl))
+                       ((:set-value! ctrl) v))))
+     :set-modulator! (fn [m]
+                       (reset! modulator-atom m)
+                       (ss/config! mod-indicator :text (if m "~" "")))}))
+
+(defn- create-params-panel
+  "Create a panel with controls for all effect parameters.
+   Returns {:panel JPanel :get-params fn :set-params! fn}
+   
+   Parameters:
+   - effect-def: The effect definition
+   - on-modulate: Callback for modulator buttons
+   - on-param-change: (optional) Callback called when any parameter changes"
+  [effect-def on-modulate & [on-param-change]]
+  (let [param-defs (:parameters effect-def)
+        controls (mapv #(create-param-control % on-modulate on-param-change) param-defs)
+        panel (mig/mig-panel
+               :constraints ["insets 5, wrap 1", "[grow, fill]", ""]
+               :items (mapv (fn [ctrl] [(:panel ctrl) "growx"]) controls))]
+    (style-dialog-panel panel)
+    {:panel panel
+     :get-params (fn []
+                   (into {}
+                     (map (fn [ctrl]
+                            [(:param-key ctrl) ((:get-value ctrl))])
+                          controls)))
+     :set-params! (fn [params]
+                    (doseq [ctrl controls]
+                      (when-let [v (get params (:param-key ctrl))]
+                        (if (fn? v)
+                          ((:set-modulator! ctrl) v)
+                          ((:set-value! ctrl) v)))))}))
+
+;; ============================================================================
+;; Modulator Dialog
+;; ============================================================================
+
+(defn show-modulator-dialog!
+  "Show dialog to configure a modulator for a parameter.
+   
+   Parameters:
+   - parent: Parent component for dialog
+   - param-key: The parameter key being modulated
+   - param-def: The parameter definition
+   - on-confirm: (fn [modulator]) called when user confirms
+   
+   Returns: The modulator function or nil if cancelled"
+  [parent param-key param-def on-confirm]
+  (let [result-atom (atom nil)
+        dialog (JDialog. (ss/to-root parent) "Configure Modulator" true)
+        
+        ;; Modulator type combo
+        type-model (DefaultComboBoxModel. (into-array (map :name modulator-types)))
+        type-combo (ss/combobox :model type-model)
+        
+        ;; Parameter defaults based on param-def
+        param-min (or (:min param-def) 0.0)
+        param-max (or (:max param-def) 1.0)
+        param-default (or (:default param-def) (/ (+ param-min param-max) 2))
+        
+        ;; Value controls
+        min-ctrl (create-slider {:min param-min :max param-max :default param-min
+                                :label-fn #(format "%.2f" %)})
+        max-ctrl (create-slider {:min param-min :max param-max :default param-max
+                                :label-fn #(format "%.2f" %)})
+        freq-ctrl (create-slider {:min 0.1 :max 8.0 :default 1.0
+                                 :label-fn #(format "%.1fx" %)})
+        phase-ctrl (create-slider {:min 0.0 :max 1.0 :default 0.0
+                                  :label-fn #(format "%.2f" %)})
+        
+        ;; Preset buttons
+        preset-panel (ss/horizontal-panel
+                      :items (mapv (fn [preset]
+                                    (ss/button 
+                                     :text (:name preset)
+                                     :font (Font. "SansSerif" Font/PLAIN 10)
+                                     :listen [:action 
+                                              (fn [_]
+                                                ;; Apply preset
+                                                (let [type-idx (case (:type preset)
+                                                                :sine 0
+                                                                :triangle 1
+                                                                :sawtooth 2
+                                                                :square 3
+                                                                :random 4
+                                                                :beat-decay 5
+                                                                0)]
+                                                  (.setSelectedIndex type-combo type-idx))
+                                                ((:set-value! min-ctrl) (:min preset))
+                                                ((:set-value! max-ctrl) (:max preset))
+                                                ((:set-value! freq-ctrl) (:freq preset)))]))
+                                  modulator-presets)
+                      :background (Color. 45 45 45))
+        
+        ;; Create modulator based on current settings
+        create-modulator (fn []
+                          (let [type-idx (.getSelectedIndex type-combo)
+                                mod-type (:id (nth modulator-types type-idx))
+                                min-v ((:get-value min-ctrl))
+                                max-v ((:get-value max-ctrl))
+                                freq ((:get-value freq-ctrl))
+                                phase ((:get-value phase-ctrl))]
+                            (case mod-type
+                              :sine (mod/sine-mod min-v max-v freq phase)
+                              :triangle (mod/triangle-mod min-v max-v freq phase)
+                              :sawtooth (mod/sawtooth-mod min-v max-v freq phase)
+                              :square (mod/square-mod min-v max-v freq)
+                              :random (mod/random-mod min-v max-v freq)
+                              :beat-decay (mod/beat-decay max-v min-v)
+                              (mod/sine-mod min-v max-v freq))))
+        
+        ;; Buttons
+        ok-btn (ss/button :text "Apply Modulator"
+                         :listen [:action (fn [_]
+                                           (let [m (create-modulator)]
+                                             (reset! result-atom m)
+                                             (when on-confirm (on-confirm m))
+                                             (.dispose dialog)))])
+        cancel-btn (ss/button :text "Cancel"
+                             :listen [:action (fn [_] (.dispose dialog))])
+        remove-btn (ss/button :text "Remove Modulator"
+                             :listen [:action (fn [_]
+                                               (reset! result-atom nil)
+                                               (when on-confirm (on-confirm nil))
+                                               (.dispose dialog))])
+        
+        ;; Main panel
+        content (mig/mig-panel
+                 :constraints ["insets 10, wrap 1", "[grow, fill]", ""]
+                 :items [[(ss/label :text (str "Modulate: " (or (:label param-def) (name param-key)))
+                                   :font (Font. "SansSerif" Font/BOLD 14)
+                                   :foreground Color/WHITE) ""]
+                         
+                         ;; Type selection
+                         [(mig/mig-panel
+                           :constraints ["insets 5", "[100!][grow]", ""]
+                           :items [[(ss/label :text "Type:" :foreground Color/WHITE) ""]
+                                   [type-combo "growx"]]
+                           :background (Color. 45 45 45)) "growx"]
+                         
+                         ;; Parameters
+                         [(ss/label :text "Parameters" 
+                                   :font (Font. "SansSerif" Font/BOLD 11)
+                                   :foreground (Color. 180 180 180)) ""]
+                         
+                         [(mig/mig-panel
+                           :constraints ["insets 5", "[80!][grow, fill][50!]", ""]
+                           :items [[(ss/label :text "Min Value:" :foreground Color/WHITE) ""]
+                                   [(:slider min-ctrl) "growx"]
+                                   [(:label min-ctrl) ""]]
+                           :background (Color. 45 45 45)) "growx"]
+                         
+                         [(mig/mig-panel
+                           :constraints ["insets 5", "[80!][grow, fill][50!]", ""]
+                           :items [[(ss/label :text "Max Value:" :foreground Color/WHITE) ""]
+                                   [(:slider max-ctrl) "growx"]
+                                   [(:label max-ctrl) ""]]
+                           :background (Color. 45 45 45)) "growx"]
+                         
+                         [(mig/mig-panel
+                           :constraints ["insets 5", "[80!][grow, fill][50!]", ""]
+                           :items [[(ss/label :text "Frequency:" :foreground Color/WHITE) ""]
+                                   [(:slider freq-ctrl) "growx"]
+                                   [(:label freq-ctrl) ""]]
+                           :background (Color. 45 45 45)) "growx"]
+                         
+                         [(mig/mig-panel
+                           :constraints ["insets 5", "[80!][grow, fill][50!]", ""]
+                           :items [[(ss/label :text "Phase:" :foreground Color/WHITE) ""]
+                                   [(:slider phase-ctrl) "growx"]
+                                   [(:label phase-ctrl) ""]]
+                           :background (Color. 45 45 45)) "growx"]
+                         
+                         ;; Presets
+                         [(ss/label :text "Presets" 
+                                   :font (Font. "SansSerif" Font/BOLD 11)
+                                   :foreground (Color. 180 180 180)) ""]
+                         [(ss/scrollable preset-panel :hscroll :as-needed :vscroll :never) "growx"]
+                         
+                         ;; Buttons
+                         [(mig/mig-panel
+                           :constraints ["insets 10", "[grow][][]", ""]
+                           :items [[remove-btn ""]
+                                   [cancel-btn ""]
+                                   [ok-btn ""]]
+                           :background (Color. 45 45 45)) "growx, dock south"]])]
+    
+    (style-dialog-panel content)
+    (.setContentPane dialog content)
+    (.setSize dialog 450 450)
+    (.setLocationRelativeTo dialog parent)
+    (.setVisible dialog true)
+    
+    @result-atom))
+
+;; ============================================================================
+;; Effect Selection Dialog
+;; ============================================================================
+
+(defn show-effect-dialog!
+  "Show dialog to create or edit an effect.
+   
+   Parameters:
+   - parent: Parent component for dialog
+   - existing-effect: Existing effect data to edit, or nil for new effect
+   - on-confirm: (fn [effect-data]) called when user confirms
+   - on-effect-change: (optional fn [effect-data]) called when effect selection or params change
+                       Used for live preview - the effect is immediately applied to the chain
+   - on-cancel: (optional fn []) called when dialog is cancelled
+   
+   Returns: Effect data map or nil if cancelled"
+  [parent existing-effect on-confirm & {:keys [on-effect-change on-cancel]}]
+  (let [result-atom (atom nil)
+        dialog (JDialog. (ss/to-root parent) 
+                        (if existing-effect "Edit Effect" "New Effect") 
+                        true)
+        
+        ;; State
+        selected-effect-atom (atom (when existing-effect
+                                    (fx/get-effect (:effect-id existing-effect))))
+        params-panel-ref (atom nil)
+        
+        ;; Category combo
+        category-model (DefaultComboBoxModel. 
+                        (into-array (map :name effect-categories)))
+        category-combo (ss/combobox :model category-model)
+        
+        ;; Effect list with custom renderer to show just name
+        effect-list-model (DefaultListModel.)
+        effect-list (ss/listbox :model effect-list-model
+                               :renderer (fn [renderer {:keys [value]}]
+                                          (if value
+                                            (ss/config! renderer 
+                                                       :text (:name value)
+                                                       :foreground Color/WHITE
+                                                       :background (Color. 50 50 50))
+                                            (ss/config! renderer :text ""))))
+        _ (.setSelectionMode effect-list ListSelectionModel/SINGLE_SELECTION)
+        _ (.setBackground effect-list (Color. 50 50 50))
+        _ (.setForeground effect-list Color/WHITE)
+        
+        ;; Parameters container
+        params-container (ss/border-panel :background (Color. 45 45 45))
+        
+        ;; Function to update effect list based on category
+        update-effect-list! (fn [category-id]
+                              (.clear effect-list-model)
+                              (doseq [effect (fx/list-effects-by-category category-id)]
+                                (.addElement effect-list-model effect)))
+        
+        ;; Function to create modulator via dialog
+        on-modulate (fn [param-key param-def on-apply]
+                      (show-modulator-dialog! dialog param-key param-def on-apply))
+        
+        ;; Empty placeholder for when no effect is selected
+        empty-placeholder (ss/label :text "Select an effect to configure parameters"
+                                    :foreground (Color. 120 120 120)
+                                    :halign :center)
+        
+        ;; Function to build and notify current effect data
+        notify-effect-change! (fn []
+                               (when on-effect-change
+                                 (when-let [effect-def @selected-effect-atom]
+                                   (let [params (if-let [pp @params-panel-ref]
+                                                  ((:get-params pp))
+                                                  {})
+                                         effect-data {:effect-id (:id effect-def)
+                                                     :enabled true
+                                                     :params params}]
+                                     (on-effect-change effect-data)))))
+        
+        ;; Function to update params panel
+        update-params-panel! (fn [effect-def]
+                              ;; Remove all existing content
+                              (.removeAll params-container)
+                              (if effect-def
+                                ;; Pass notify-effect-change! so param changes trigger live preview
+                                (let [pp (create-params-panel effect-def on-modulate notify-effect-change!)]
+                                  (reset! params-panel-ref pp)
+                                  (.add params-container (:panel pp) java.awt.BorderLayout/CENTER)
+                                  ;; If editing, set existing params
+                                  (when existing-effect
+                                    ((:set-params! pp) (:params existing-effect))))
+                                ;; No effect selected - show placeholder
+                                (do
+                                  (reset! params-panel-ref nil)
+                                  (.add params-container empty-placeholder java.awt.BorderLayout/CENTER)))
+                              (.revalidate params-container)
+                              (.repaint params-container)
+                              ;; Notify about the effect change (new effect selected with default params)
+                              (notify-effect-change!))
+        
+        ;; Category change listener
+        _ (ss/listen category-combo :action
+            (fn [_]
+              (let [idx (.getSelectedIndex category-combo)
+                    cat-id (:id (nth effect-categories idx))]
+                (update-effect-list! cat-id)
+                (reset! selected-effect-atom nil)
+                (update-params-panel! nil))))
+        
+        ;; Effect selection listener
+        _ (.addListSelectionListener effect-list
+            (reify ListSelectionListener
+              (valueChanged [_ e]
+                (when-not (.getValueIsAdjusting e)
+                  (when-let [effect-def (.getSelectedValue effect-list)]
+                    (reset! selected-effect-atom effect-def)
+                    (update-params-panel! effect-def))))))
+        
+        ;; Buttons
+        ok-btn (ss/button :text (if existing-effect "Update Effect" "Create Effect")
+                         :listen [:action (fn [_]
+                                           (when-let [effect-def @selected-effect-atom]
+                                             (let [params (if-let [pp @params-panel-ref]
+                                                           ((:get-params pp))
+                                                           {})
+                                                   effect-data {:effect-id (:id effect-def)
+                                                               :enabled (if existing-effect
+                                                                         (:enabled existing-effect true)
+                                                                         true)
+                                                               :params params}]
+                                               (reset! result-atom effect-data)
+                                               (when on-confirm (on-confirm effect-data))
+                                               (.dispose dialog))))])
+        cancel-btn (ss/button :text "Cancel"
+                             :listen [:action (fn [_] 
+                                               (when on-cancel (on-cancel))
+                                               (.dispose dialog))])
+        
+        ;; Main content
+        content (mig/mig-panel
+                 :constraints ["insets 10, wrap 1", "[grow, fill]", "[][][grow, fill][grow, fill][]"]
+                 :items [;; Title
+                         [(ss/label :text (if existing-effect "Edit Effect" "New Effect")
+                                   :font (Font. "SansSerif" Font/BOLD 16)
+                                   :foreground Color/WHITE) ""]
+                         
+                         ;; Category selection
+                         [(mig/mig-panel
+                           :constraints ["insets 5", "[80!][grow]", ""]
+                           :items [[(ss/label :text "Category:" :foreground Color/WHITE) ""]
+                                   [category-combo "growx"]]
+                           :background (Color. 45 45 45)) "growx"]
+                         
+                         ;; Effect list
+                         [(ss/border-panel
+                           :north (ss/label :text "Effects"
+                                           :font (Font. "SansSerif" Font/BOLD 11)
+                                           :foreground (Color. 180 180 180))
+                           :center (ss/scrollable effect-list 
+                                                 :border (border/line-border :color (Color. 60 60 60)))
+                           :background (Color. 45 45 45)) "grow, h 150!"]
+                         
+                         ;; Parameters panel
+                         [(ss/border-panel
+                           :north (ss/label :text "Parameters"
+                                           :font (Font. "SansSerif" Font/BOLD 11)
+                                           :foreground (Color. 180 180 180))
+                           :center (ss/scrollable params-container
+                                                 :border (border/line-border :color (Color. 60 60 60)))
+                           :background (Color. 45 45 45)) "grow"]
+                         
+                         ;; Buttons
+                         [(mig/mig-panel
+                           :constraints ["insets 10", "[grow][][]", ""]
+                           :items [[(ss/label) "growx"]
+                                   [cancel-btn ""]
+                                   [ok-btn ""]]
+                           :background (Color. 45 45 45)) "growx, dock south"]])]
+    
+    (style-dialog-panel content)
+    
+    ;; Initialize with first category
+    (let [first-cat (:id (first effect-categories))]
+      (update-effect-list! first-cat))
+    
+    ;; If editing, select the existing effect's category and effect
+    (when existing-effect
+      (let [effect-def (fx/get-effect (:effect-id existing-effect))
+            cat (:category effect-def)
+            cat-idx (or (first (keep-indexed 
+                                (fn [i c] (when (= (:id c) cat) i)) 
+                                effect-categories))
+                       0)]
+        (.setSelectedIndex category-combo cat-idx)
+        (update-effect-list! cat)
+        ;; Find and select the effect in the list
+        (let [list-size (.getSize effect-list-model)]
+          (doseq [i (range list-size)]
+            (let [item (.getElementAt effect-list-model i)]
+              (when (= (:id item) (:effect-id existing-effect))
+                (.setSelectedIndex effect-list i)))))))
+    
+    (.setContentPane dialog content)
+    (.setSize dialog 500 550)
+    (.setLocationRelativeTo dialog parent)
+    (.setVisible dialog true)
+    
+    @result-atom))
+
+;; ============================================================================
+;; Quick Effect Creation (for testing/demo)
+;; ============================================================================
+
+(defn create-quick-effect
+  "Create an effect data map with defaults.
+   Useful for quick testing without going through the dialog."
+  [effect-id & {:keys [enabled params] :or {enabled true params {}}}]
+  {:effect-id effect-id
+   :enabled enabled
+   :params (merge (fx/get-default-params effect-id) params)})
+
+;; ============================================================================
+;; Demo/Test
+;; ============================================================================
+
+(comment
+  ;; Test effect dialog
+  (require '[seesaw.core :as ss])
+  
+  ;; Make sure effects are registered
+  (require '[laser-show.animation.effects.shape])
+  (require '[laser-show.animation.effects.color])
+  (require '[laser-show.animation.effects.intensity])
+  
+  ;; Show new effect dialog
+  (ss/invoke-later
+   (show-effect-dialog! nil nil
+     (fn [effect-data]
+       (println "Created effect:" effect-data))))
+  
+  ;; Show edit effect dialog
+  (ss/invoke-later
+   (show-effect-dialog! nil 
+     {:effect-id :scale :enabled true :params {:x-scale 1.5 :y-scale 1.5}}
+     (fn [effect-data]
+       (println "Updated effect:" effect-data))))
+  
+  ;; Test modulator dialog
+  (ss/invoke-later
+   (show-modulator-dialog! nil :x-scale 
+     {:key :x-scale :label "X Scale" :type :float :min 0.0 :max 5.0 :default 1.0}
+     (fn [modulator]
+       (println "Modulator:" modulator))))
+  )

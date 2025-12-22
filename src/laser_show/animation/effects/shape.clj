@@ -12,10 +12,9 @@
    {:effect-id :scale :params {:x-scale (mod/sine-mod 0.8 1.2 2.0)
                                :y-scale (mod/sine-mod 0.8 1.2 2.0)}}
    
-   NOTE: The old :scale-oscillate and :offset-oscillate effects are deprecated.
-   Use :scale or :offset with modulators instead for the same functionality."
-  (:require [laser-show.animation.effects :as fx]
-            [laser-show.animation.time :as time]))
+   For animated rotation, use modulators:
+   {:effect-id :rotation :params {:angle (mod/sawtooth-mod 0 360 1.0)}}"
+  (:require [laser-show.animation.effects :as fx]))
 
 ;; ============================================================================
 ;; Transformation Helpers
@@ -31,10 +30,10 @@
   (short (Math/round (* (clamp coord -1.0 1.0) 32767.0))))
 
 ;; ============================================================================
-;; Scale Effects
+;; Scale Effect
 ;; ============================================================================
 
-(defn- apply-scale-static [frame _time-ms _bpm {:keys [x-scale y-scale]}]
+(defn- apply-scale [frame _time-ms _bpm {:keys [x-scale y-scale]}]
   (fx/transform-positions
    frame
    (fn [[x y]]
@@ -58,33 +57,13 @@
                 :default 1.0
                 :min 0.0
                 :max 5.0}]
-  :apply-fn apply-scale-static})
-
-(defn- apply-scale-uniform [frame _time-ms _bpm {:keys [scale]}]
-  (fx/transform-positions
-   frame
-   (fn [[x y]]
-     [(* x scale)
-      (* y scale)])))
-
-(fx/register-effect!
- {:id :scale-uniform
-  :name "Scale Uniform"
-  :category :shape
-  :timing :static
-  :parameters [{:key :scale
-                :label "Scale"
-                :type :float
-                :default 1.0
-                :min 0.0
-                :max 5.0}]
-  :apply-fn apply-scale-uniform})
+  :apply-fn apply-scale})
 
 ;; ============================================================================
-;; Offset (Translation) Effects
+;; Offset (Translation) Effect
 ;; ============================================================================
 
-(defn- apply-offset-static [frame _time-ms _bpm {:keys [x-offset y-offset]}]
+(defn- apply-offset [frame _time-ms _bpm {:keys [x-offset y-offset]}]
   (fx/transform-positions
    frame
    (fn [[x y]]
@@ -108,10 +87,10 @@
                 :default 0.0
                 :min -2.0
                 :max 2.0}]
-  :apply-fn apply-offset-static})
+  :apply-fn apply-offset})
 
 ;; ============================================================================
-;; Rotation Effects
+;; Rotation Effect
 ;; ============================================================================
 
 (defn- rotate-point [[x y] angle]
@@ -120,7 +99,7 @@
     [(- (* x cos-a) (* y sin-a))
      (+ (* x sin-a) (* y cos-a))]))
 
-(defn- apply-rotation-static [frame _time-ms _bpm {:keys [angle]}]
+(defn- apply-rotation [frame _time-ms _bpm {:keys [angle]}]
   (let [radians (Math/toRadians angle)]
     (fx/transform-positions
      frame
@@ -138,48 +117,7 @@
                 :default 0.0
                 :min -360.0
                 :max 360.0}]
-  :apply-fn apply-rotation-static})
-
-(defn- apply-rotation-continuous [frame time-ms _bpm {:keys [speed]}]
-  (let [angle (Math/toRadians (* (/ time-ms 1000.0) speed))]
-    (fx/transform-positions
-     frame
-     (fn [[x y]]
-       (rotate-point [x y] angle)))))
-
-(fx/register-effect!
- {:id :rotation-continuous
-  :name "Rotation Continuous"
-  :category :shape
-  :timing :seconds
-  :parameters [{:key :speed
-                :label "Speed (deg/sec)"
-                :type :float
-                :default 45.0
-                :min -720.0
-                :max 720.0}]
-  :apply-fn apply-rotation-continuous})
-
-(defn- apply-rotation-beat-sync [frame time-ms bpm {:keys [degrees-per-beat]}]
-  (let [beats (time/ms->beats time-ms bpm)
-        angle (Math/toRadians (* beats degrees-per-beat))]
-    (fx/transform-positions
-     frame
-     (fn [[x y]]
-       (rotate-point [x y] angle)))))
-
-(fx/register-effect!
- {:id :rotation-beat-sync
-  :name "Rotation Beat Sync"
-  :category :shape
-  :timing :bpm
-  :parameters [{:key :degrees-per-beat
-                :label "Degrees/Beat"
-                :type :float
-                :default 90.0
-                :min -360.0
-                :max 360.0}]
-  :apply-fn apply-rotation-beat-sync})
+  :apply-fn apply-rotation})
 
 ;; ============================================================================
 ;; Mirror Effects
@@ -228,7 +166,7 @@
   :apply-fn apply-mirror-diagonal})
 
 ;; ============================================================================
-;; Viewport Effects
+;; Viewport Effect
 ;; ============================================================================
 
 (defn- apply-viewport [frame _time-ms _bpm {:keys [x-min x-max y-min y-max]}]
@@ -280,7 +218,7 @@
   :apply-fn apply-viewport})
 
 ;; ============================================================================
-;; Shear Effects
+;; Shear Effect
 ;; ============================================================================
 
 (defn- apply-shear [frame _time-ms _bpm {:keys [x-factor y-factor]}]
@@ -308,86 +246,6 @@
                 :min -2.0
                 :max 2.0}]
   :apply-fn apply-shear})
-
-;; ============================================================================
-;; Wave Distortion Effects
-;; ============================================================================
-
-(defn- apply-wave-distort [frame time-ms _bpm {:keys [amplitude frequency axis speed]}]
-  (let [time-offset (* (/ time-ms 1000.0) speed)]
-    (fx/transform-positions
-     frame
-     (fn [[x y]]
-       (case axis
-         :x [x (+ y (* amplitude (Math/sin (* 2.0 Math/PI (+ (* x frequency) time-offset)))))]
-         :y [(+ x (* amplitude (Math/sin (* 2.0 Math/PI (+ (* y frequency) time-offset))))) y]
-         [x y])))))
-
-(fx/register-effect!
- {:id :wave-distort
-  :name "Wave Distort"
-  :category :shape
-  :timing :seconds
-  :parameters [{:key :amplitude
-                :label "Amplitude"
-                :type :float
-                :default 0.1
-                :min 0.0
-                :max 1.0}
-               {:key :frequency
-                :label "Frequency"
-                :type :float
-                :default 2.0
-                :min 0.1
-                :max 10.0}
-               {:key :axis
-                :label "Axis"
-                :type :choice
-                :default :x
-                :choices [:x :y]}
-               {:key :speed
-                :label "Speed"
-                :type :float
-                :default 2.0
-                :min 0.0
-                :max 10.0}]
-  :apply-fn apply-wave-distort})
-
-;; ============================================================================
-;; Spiral Distortion Effect
-;; ============================================================================
-
-(defn- apply-spiral [frame time-ms bpm {:keys [amount frequency]}]
-  (let [phase (time/time->beat-phase time-ms bpm)
-        spiral-phase (* phase frequency)]
-    (fx/transform-positions
-     frame
-     (fn [[x y]]
-       (let [distance (Math/sqrt (+ (* x x) (* y y)))
-             angle (Math/atan2 y x)
-             twist (* amount distance spiral-phase Math/PI)
-             new-angle (+ angle twist)]
-         [(* distance (Math/cos new-angle))
-          (* distance (Math/sin new-angle))])))))
-
-(fx/register-effect!
- {:id :spiral
-  :name "Spiral"
-  :category :shape
-  :timing :bpm
-  :parameters [{:key :amount
-                :label "Amount"
-                :type :float
-                :default 0.5
-                :min -2.0
-                :max 2.0}
-               {:key :frequency
-                :label "Frequency (cycles/beat)"
-                :type :float
-                :default 0.5
-                :min 0.1
-                :max 4.0}]
-  :apply-fn apply-spiral})
 
 ;; ============================================================================
 ;; Pinch/Bulge Effect
@@ -442,25 +300,25 @@
                 :label "Top Width"
                 :type :float
                 :default 1.0
-                :min 0.5
+                :min 0.0
                 :max 1.5}
                {:key :bottom-width
                 :label "Bottom Width"
                 :type :float
                 :default 1.0
-                :min 0.5
+                :min 0.0
                 :max 1.5}
                {:key :left-height
                 :label "Left Height"
                 :type :float
                 :default 1.0
-                :min 0.5
+                :min 0.0
                 :max 1.5}
                {:key :right-height
                 :label "Right Height"
                 :type :float
                 :default 1.0
-                :min 0.5
+                :min 0.0
                 :max 1.5}]
   :apply-fn apply-keystone})
 
@@ -495,3 +353,53 @@
                 :min -1.0
                 :max 1.0}]
   :apply-fn apply-lens-distortion})
+
+;; ============================================================================
+;; SPECIAL EFFECTS
+;; These are more complex effects kept for specific use cases.
+;; Consider using modulators with basic effects for more flexibility.
+;; ============================================================================
+
+;; ============================================================================
+;; Wave Distortion Effect (Special)
+;; ============================================================================
+
+(defn- apply-wave-distort [frame time-ms _bpm {:keys [amplitude frequency axis speed]}]
+  (let [time-offset (* (/ time-ms 1000.0) speed)]
+    (fx/transform-positions
+     frame
+     (fn [[x y]]
+       (case axis
+         :x [x (+ y (* amplitude (Math/sin (* 2.0 Math/PI (+ (* x frequency) time-offset)))))]
+         :y [(+ x (* amplitude (Math/sin (* 2.0 Math/PI (+ (* y frequency) time-offset))))) y]
+         [x y])))))
+
+(fx/register-effect!
+ {:id :wave-distort
+  :name "Wave Distort (Special)"
+  :category :shape
+  :timing :seconds
+  :parameters [{:key :amplitude
+                :label "Amplitude"
+                :type :float
+                :default 0.1
+                :min 0.0
+                :max 1.0}
+               {:key :frequency
+                :label "Frequency"
+                :type :float
+                :default 2.0
+                :min 0.1
+                :max 10.0}
+               {:key :axis
+                :label "Axis"
+                :type :choice
+                :default :x
+                :choices [:x :y]}
+               {:key :speed
+                :label "Speed"
+                :type :float
+                :default 2.0
+                :min 0.0
+                :max 10.0}]
+  :apply-fn apply-wave-distort})

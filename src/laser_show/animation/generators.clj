@@ -247,34 +247,34 @@
                    :color color)))
 
 (defn generate-beam-fan
-  "Generate multiple beams in a fan pattern.
+  "Generate multiple beams as disconnected endpoint dots in a fan pattern.
+   Each beam is a single point at the endpoint with blanking in between.
    Options:
    - :num-beams - number of beams (default 8)
-   - :num-points - points per beam (default 16)
-   - :length - beam length (default 0.8)
+   - :length - beam length / distance from origin (default 0.8)
    - :spread - angular spread in radians (default PI)
    - :start-angle - starting angle (default -PI/2)
    - :origin - [x y] beam origin (default [0 -0.5])
    - :color - [r g b] color (default [255 255 255])"
-  [& {:keys [num-beams num-points length spread start-angle origin color]
+  [& {:keys [num-beams length spread start-angle origin color]
       :or {num-beams 8
-           num-points 16
            length 0.8
            spread Math/PI
            start-angle (- (/ Math/PI 2))
            origin [0 -0.5]
            color [255 255 255]}}]
-  (let [angle-step (/ spread (dec num-beams))]
+  (let [[ox oy] origin
+        [r g b] color
+        angle-step (if (> num-beams 1)
+                     (/ spread (dec num-beams))
+                     0)]
     (mapcat (fn [i]
-              (let [angle (+ start-angle (* i angle-step))]
-                (concat
-                 ;; Blanked point to jump to origin
-                 [(t/blanked-point (first origin) (second origin))]
-                 (generate-beam :num-points num-points
-                                :length length
-                                :angle angle
-                                :origin origin
-                                :color color))))
+              (let [angle (+ start-angle (* i angle-step))
+                    ex (+ ox (* length (Math/cos angle)))
+                    ey (+ oy (* length (Math/sin angle)))]
+                ;; Blanked point to move to endpoint position, then lit point at endpoint
+                [(t/blanked-point ex ey)
+                 (t/make-point ex ey r g b)]))
             (range num-beams))))
 
 ;; ============================================================================
@@ -286,148 +286,88 @@
    Returns (fn [time-ms params] -> LaserFrame)"
   []
   (fn [time-ms params]
-    (let [{:keys [radius color rotation-speed]
-           :or {radius 0.5 color [255 255 255] rotation-speed 0}} params
-          rotation (if (pos? rotation-speed)
-                     (* (/ time-ms 1000.0) rotation-speed TWO-PI)
-                     0)
+    (let [{:keys [radius color]
+           :or {radius 0.5 color [255 255 255]}} params
           points (generate-circle :radius radius :color color)]
-      (if (pos? rotation)
-        (t/make-frame
-         (map (fn [pt]
-                (let [x (/ (:x pt) 32767.0)
-                      y (/ (:y pt) 32767.0)
-                      [rx ry] (rotate-point [x y] rotation)]
-                  ;; Use bit-and to convert signed bytes to unsigned int values
-                  (t/make-point rx ry 
-                                (bit-and (:r pt) 0xFF)
-                                (bit-and (:g pt) 0xFF)
-                                (bit-and (:b pt) 0xFF))))
-              points))
-        (t/make-frame points)))))
+      (t/make-frame points))))
 
 (defn square-animation
   "Create a square animation generator function."
   []
   (fn [time-ms params]
-    (let [{:keys [size color rotation-speed]
-           :or {size 0.5 color [255 255 255] rotation-speed 1}} params
-          rotation (* (/ time-ms 1000.0) rotation-speed TWO-PI)
-          base-points (generate-square :size size :color color)
-          rotated-points (map (fn [pt]
-                                (let [x (/ (:x pt) 32767.0)
-                                      y (/ (:y pt) 32767.0)
-                                      [rx ry] (rotate-point [x y] rotation)]
-                                  ;; Use bit-and to convert signed bytes to unsigned int values
-                                  (t/make-point rx ry 
-                                                (bit-and (:r pt) 0xFF)
-                                                (bit-and (:g pt) 0xFF)
-                                                (bit-and (:b pt) 0xFF))))
-                              base-points)]
-      (t/make-frame rotated-points))))
+    (let [{:keys [size color]
+           :or {size 0.5 color [255 255 255]}} params
+          points (generate-square :size size :color color)]
+      (t/make-frame points))))
 
 (defn triangle-animation
   "Create a triangle animation generator function."
   []
   (fn [time-ms params]
-    (let [{:keys [size color rotation-speed]
-           :or {size 0.5 color [255 255 255] rotation-speed 1}} params
-          rotation (* (/ time-ms 1000.0) rotation-speed TWO-PI)
-          base-points (generate-triangle :size size :color color)
-          rotated-points (map (fn [pt]
-                                (let [x (/ (:x pt) 32767.0)
-                                      y (/ (:y pt) 32767.0)
-                                      [rx ry] (rotate-point [x y] rotation)]
-                                  ;; Use bit-and to convert signed bytes to unsigned int values
-                                  (t/make-point rx ry 
-                                                (bit-and (:r pt) 0xFF)
-                                                (bit-and (:g pt) 0xFF)
-                                                (bit-and (:b pt) 0xFF))))
-                              base-points)]
-      (t/make-frame rotated-points))))
+    (let [{:keys [size color]
+           :or {size 0.5 color [255 255 255]}} params
+          points (generate-triangle :size size :color color)]
+      (t/make-frame points))))
 
 (defn spiral-animation
   "Create a spiral animation generator function."
   []
   (fn [time-ms params]
-    (let [{:keys [turns start-radius end-radius color rotation-speed]
-           :or {turns 3 start-radius 0.1 end-radius 0.5 color [255 255 255] rotation-speed 0.5}} params
-          rotation (* (/ time-ms 1000.0) rotation-speed TWO-PI)
-          base-points (generate-spiral :turns turns :start-radius start-radius :end-radius end-radius :color color)
-          rotated-points (map (fn [pt]
-                                (let [x (/ (:x pt) 32767.0)
-                                      y (/ (:y pt) 32767.0)
-                                      [rx ry] (rotate-point [x y] rotation)]
-                                  ;; Use bit-and to convert signed bytes to unsigned int values
-                                  (t/make-point rx ry 
-                                                (bit-and (:r pt) 0xFF)
-                                                (bit-and (:g pt) 0xFF)
-                                                (bit-and (:b pt) 0xFF))))
-                              base-points)]
-      (t/make-frame rotated-points))))
+    (let [{:keys [turns start-radius end-radius color]
+           :or {turns 3 start-radius 0.1 end-radius 0.5 color [255 255 255]}} params
+          points (generate-spiral :turns turns :start-radius start-radius :end-radius end-radius :color color)]
+      (t/make-frame points))))
 
 (defn star-animation
   "Create a star animation generator function."
   []
   (fn [time-ms params]
-    (let [{:keys [spikes outer-radius inner-radius color rotation-speed]
-           :or {spikes 5 outer-radius 0.5 inner-radius 0.25 color [255 255 255] rotation-speed 0.3}} params
-          rotation (* (/ time-ms 1000.0) rotation-speed TWO-PI)
-          base-points (generate-star :spikes spikes :outer-radius outer-radius :inner-radius inner-radius :color color)
-          rotated-points (map (fn [pt]
-                                (let [x (/ (:x pt) 32767.0)
-                                      y (/ (:y pt) 32767.0)
-                                      [rx ry] (rotate-point [x y] rotation)]
-                                  ;; Use bit-and to convert signed bytes to unsigned int values
-                                  (t/make-point rx ry 
-                                                (bit-and (:r pt) 0xFF)
-                                                (bit-and (:g pt) 0xFF)
-                                                (bit-and (:b pt) 0xFF))))
-                              base-points)]
-      (t/make-frame rotated-points))))
+    (let [{:keys [spikes outer-radius inner-radius color]
+           :or {spikes 5 outer-radius 0.5 inner-radius 0.25 color [255 255 255]}} params
+          points (generate-star :spikes spikes :outer-radius outer-radius :inner-radius inner-radius :color color)]
+      (t/make-frame points))))
 
 (defn wave-animation
   "Create a wave animation generator function."
   []
   (fn [time-ms params]
-    (let [{:keys [amplitude frequency color phase-speed]
-           :or {amplitude 0.3 frequency 2 color [255 255 255] phase-speed 2}} params
-          phase (* (/ time-ms 1000.0) phase-speed TWO-PI)
-          points (for [i (range 64)]
-                   (let [t (/ i 63.0)
-                         x (- t 0.5)
-                         y (* amplitude (Math/sin (+ phase (* TWO-PI frequency t))))]
-                     (t/make-point x y (first color) (second color) (nth color 2))))]
+    (let [{:keys [amplitude frequency color]
+           :or {amplitude 0.3 frequency 2 color [255 255 255]}} params
+          [r g b] color
+          points (mapv (fn [i]
+                         (let [t (/ (double i) 63.0)
+                               x (- t 0.5)
+                               y (* amplitude (Math/sin (* TWO-PI frequency t)))]
+                           (t/make-point x y r g b)))
+                       (range 64))]
       (t/make-frame points))))
 
 (defn beam-fan-animation
   "Create a beam fan animation generator function."
   []
   (fn [time-ms params]
-    (let [{:keys [num-beams length spread sweep-speed color]
-           :or {num-beams 8 length 0.8 spread Math/PI sweep-speed 0.5 color [255 255 255]}} params
-          sweep-offset (* (Math/sin (* (/ time-ms 1000.0) sweep-speed TWO-PI)) 0.3)
-          points (generate-beam-fan :num-beams num-beams
-                                    :length length
-                                    :spread spread
-                                    :start-angle (+ (- (/ Math/PI 2)) sweep-offset)
-                                    :color color)]
+    (let [{:keys [length color]
+           :or {length 0.8 color [255 255 255]}} params
+          half-length (/ length 2)
+          points (generate-line :num-points 32
+                               :start [(- half-length) 0]
+                               :end [half-length 0]
+                               :color color)]
       (t/make-frame points))))
 
 (defn rainbow-circle-animation
   "Create a rainbow-colored circle animation."
   []
   (fn [time-ms params]
-    (let [{:keys [radius rotation-speed color-speed]
-           :or {radius 0.5 rotation-speed 0.5 color-speed 1}} params
-          rotation (* (/ time-ms 1000.0) rotation-speed TWO-PI)
-          color-offset (* (/ time-ms 1000.0) color-speed)
+    (let [{:keys [radius]
+           :or {radius 0.5}} params
           num-points 64
-          points (for [i (range num-points)]
-                   (let [t (/ i num-points)
-                         angle (+ rotation (* TWO-PI t))
-                         x (* radius (Math/cos angle))
-                         y (* radius (Math/sin angle))
-                         [r g b] (colors/rainbow (mod (+ t color-offset) 1.0))]
-                     (t/make-point x y r g b)))]
+          points (mapv (fn [i]
+                         (let [t (/ (double i) num-points)
+                               angle (* TWO-PI t)
+                               x (* radius (Math/cos angle))
+                               y (* radius (Math/sin angle))
+                               [r g b] (colors/rainbow t)]
+                           (t/make-point x y r g b)))
+                       (range num-points))]
       (t/make-frame points))))

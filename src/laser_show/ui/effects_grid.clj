@@ -14,7 +14,8 @@
             [laser-show.ui.layout :as layout]
             [laser-show.ui.drag-drop :as dnd]
             [laser-show.animation.effects :as fx]
-            [laser-show.state.clipboard :as clipboard])
+            [laser-show.state.clipboard :as clipboard]
+            [laser-show.ui.effect-dialogs :as dialogs])
   (:import [java.awt Color]
            [java.awt.event MouseEvent]
            [javax.swing JPopupMenu]))

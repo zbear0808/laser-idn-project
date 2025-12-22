@@ -97,14 +97,21 @@
 
 (defn create-preview-panel
   "Create a preview panel for rendering laser animations.
-   Returns a map with :panel (the Swing component) and control functions."
-  [& {:keys [width height]
+   Returns a map with :panel (the Swing component) and control functions.
+   
+   Options:
+   - :width, :height - Panel dimensions
+   - :frame-processor - Optional (fn [frame elapsed-ms bpm]) that post-processes frames
+                        Used to apply effects chain before rendering"
+  [& {:keys [width height frame-processor]
       :or {width layout/preview-default-width
-           height layout/preview-default-height}}]
+           height layout/preview-default-height
+           frame-processor nil}}]
   (let [!state (atom {:animation nil
                       :start-time 0
                       :running false
-                      :current-frame nil})
+                      :current-frame nil
+                      :frame-processor frame-processor})
         
         canvas (ss/canvas
                 :paint (fn [c g2d]
@@ -121,7 +128,12 @@
                           (when (:running @!state)
                             (when-let [anim (:animation @!state)]
                               (let [elapsed (- (System/currentTimeMillis) (:start-time @!state))
-                                    frame (t/get-frame anim elapsed)]
+                                    base-frame (t/get-frame anim elapsed)
+                                    ;; Apply frame processor if present (for effects chain)
+                                    processor (:frame-processor @!state)
+                                    frame (if processor
+                                            (processor base-frame elapsed)
+                                            base-frame)]
                                 (swap! !state assoc :current-frame frame)
                                 (ss/repaint! canvas)))))))
         
@@ -141,11 +153,15 @@
                      (swap! !state assoc :current-frame frame :running false)
                      (when (.isRunning timer)
                        (.stop timer))
-                     (ss/repaint! canvas))]
+                     (ss/repaint! canvas))
+        
+        set-frame-processor! (fn [processor]
+                               (swap! !state assoc :frame-processor processor))]
     
     {:panel canvas
      :set-animation! set-animation!
      :set-frame! set-frame!
+     :set-frame-processor! set-frame-processor!
      :stop! stop!
      :get-state (fn [] @!state)}))
 

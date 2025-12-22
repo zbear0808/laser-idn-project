@@ -1,6 +1,6 @@
 (ns laser-show.animation.effects.color
   "Color effects for laser frames.
-   Includes hue shift, saturation, brightness, color filters, and color chase effects.
+   Includes hue shift, saturation, brightness, color filters, and more.
    
    All effects support both static values and modulators:
    ;; Static
@@ -10,18 +10,19 @@
    (require '[laser-show.animation.modulation :as mod])
    {:effect-id :hue-shift :params {:degrees (mod/sine-mod -30 30 2.0)}}
    
-   NOTE: The old :hue-pulse and :saturation-pulse effects are deprecated.
-   Use :hue-shift or :saturation with modulators instead for the same functionality."
+   For animated hue rotation, use:
+   {:effect-id :hue-shift :params {:degrees (mod/sawtooth-mod 0 360 1.0)}}
+   
+   For rainbow effects, use the rainbow-hue modulator on tint or hue-shift."
   (:require [laser-show.animation.effects :as fx]
             [laser-show.animation.effects.common :as common]
-            [laser-show.animation.time :as time]
             [laser-show.animation.colors :as colors]))
 
 ;; ============================================================================
-;; Hue Effects
+;; Hue Shift Effect
 ;; ============================================================================
 
-(defn- apply-hue-shift-static [frame _time-ms _bpm {:keys [degrees]}]
+(defn- apply-hue-shift [frame _time-ms _bpm {:keys [degrees]}]
   (fx/transform-colors
    frame
    (fn [[r g b]]
@@ -40,36 +41,13 @@
                 :default 0.0
                 :min -180.0
                 :max 180.0}]
-  :apply-fn apply-hue-shift-static})
-
-(defn- apply-hue-rotate [frame time-ms _bpm {:keys [speed]}]
-  (let [elapsed-sec (/ time-ms 1000.0)
-        degrees (mod (* elapsed-sec speed) 360)]
-    (fx/transform-colors
-     frame
-     (fn [[r g b]]
-       (let [[h s v] (colors/rgb->hsv r g b)
-             new-h (mod (+ h degrees) 360)]
-         (colors/hsv->rgb new-h s v))))))
-
-(fx/register-effect!
- {:id :hue-rotate
-  :name "Hue Rotate"
-  :category :color
-  :timing :seconds
-  :parameters [{:key :speed
-                :label "Speed (deg/sec)"
-                :type :float
-                :default 60.0
-                :min 0.0
-                :max 720.0}]
-  :apply-fn apply-hue-rotate})
+  :apply-fn apply-hue-shift})
 
 ;; ============================================================================
-;; Saturation Effects
+;; Saturation Effect
 ;; ============================================================================
 
-(defn- apply-saturation-static [frame _time-ms _bpm {:keys [amount]}]
+(defn- apply-saturation [frame _time-ms _bpm {:keys [amount]}]
   (fx/transform-colors
    frame
    (fn [[r g b]]
@@ -88,13 +66,13 @@
                 :default 1.0
                 :min 0.0
                 :max 2.0}]
-  :apply-fn apply-saturation-static})
+  :apply-fn apply-saturation})
 
 ;; ============================================================================
-;; Brightness Effects
+;; Brightness Effect
 ;; ============================================================================
 
-(defn- apply-brightness-static [frame _time-ms _bpm {:keys [amount]}]
+(defn- apply-brightness [frame _time-ms _bpm {:keys [amount]}]
   (fx/transform-colors
    frame
    (fn [[r g b]]
@@ -113,10 +91,10 @@
                 :default 1.0
                 :min 0.0
                 :max 2.0}]
-  :apply-fn apply-brightness-static})
+  :apply-fn apply-brightness})
 
 ;; ============================================================================
-;; Color Filter Effects
+;; Color Filter Effect
 ;; ============================================================================
 
 (defn- apply-color-filter [frame _time-ms _bpm {:keys [r-mult g-mult b-mult]}]
@@ -151,6 +129,10 @@
                 :min 0.0
                 :max 2.0}]
   :apply-fn apply-color-filter})
+
+;; ============================================================================
+;; Tint Effect
+;; ============================================================================
 
 (defn- apply-tint [frame _time-ms _bpm {:keys [tint-r tint-g tint-b strength]}]
   (fx/transform-colors
@@ -238,161 +220,6 @@
                 :min 0.0
                 :max 1.0}]
   :apply-fn apply-grayscale})
-
-;; ============================================================================
-;; Color Chase Effects
-;; ============================================================================
-
-(def default-chase-colors
-  [[255 0 0] [0 255 0] [0 0 255]])
-
-(defn- apply-color-chase [frame time-ms bpm {:keys [color-list speed]}]
-  (let [colors-to-use (or color-list default-chase-colors)
-        num-colors (count colors-to-use)
-        beats (time/ms->beats time-ms bpm)
-        color-index (mod (int (* beats speed)) num-colors)
-        [tr tg tb] (nth colors-to-use color-index)]
-    (fx/transform-colors
-     frame
-     (fn [[r g b]]
-       (let [gray (/ (+ r g b) 3.0)
-             factor (/ gray 255.0)]
-         [(common/clamp-byte (* tr factor))
-          (common/clamp-byte (* tg factor))
-          (common/clamp-byte (* tb factor))])))))
-
-(fx/register-effect!
- {:id :color-chase
-  :name "Color Chase"
-  :category :color
-  :timing :bpm
-  :parameters [{:key :color-list
-                :label "Colors"
-                :type :color-list
-                :default [[255 0 0] [0 255 0] [0 0 255]]}
-               {:key :speed
-                :label "Speed (colors/beat)"
-                :type :float
-                :default 1.0
-                :min 0.1
-                :max 16.0}]
-  :apply-fn apply-color-chase})
-
-;; ============================================================================
-;; Strobe Color Effect
-;; ============================================================================
-
-(defn- apply-strobe-color [frame time-ms bpm {:keys [color1-r color1-g color1-b
-                                                     color2-r color2-g color2-b
-                                                     frequency]}]
-  (let [phase (time/time->beat-phase time-ms bpm)
-        use-color1? (< (mod (* phase frequency) 1.0) 0.5)
-        [tr tg tb] (if use-color1?
-                     [color1-r color1-g color1-b]
-                     [color2-r color2-g color2-b])]
-    (fx/transform-colors
-     frame
-     (fn [[r g b]]
-       (let [brightness (/ (max r g b) 255.0)]
-         [(common/clamp-byte (* tr brightness))
-          (common/clamp-byte (* tg brightness))
-          (common/clamp-byte (* tb brightness))])))))
-
-(fx/register-effect!
- {:id :strobe-color
-  :name "Strobe Color"
-  :category :color
-  :timing :bpm
-  :parameters [{:key :color1-r
-                :label "Color 1 Red"
-                :type :int
-                :default 255
-                :min 0
-                :max 255}
-               {:key :color1-g
-                :label "Color 1 Green"
-                :type :int
-                :default 0
-                :min 0
-                :max 255}
-               {:key :color1-b
-                :label "Color 1 Blue"
-                :type :int
-                :default 0
-                :min 0
-                :max 255}
-               {:key :color2-r
-                :label "Color 2 Red"
-                :type :int
-                :default 0
-                :min 0
-                :max 255}
-               {:key :color2-g
-                :label "Color 2 Green"
-                :type :int
-                :default 0
-                :min 0
-                :max 255}
-               {:key :color2-b
-                :label "Color 2 Blue"
-                :type :int
-                :default 255
-                :min 0
-                :max 255}
-               {:key :frequency
-                :label "Frequency (changes/beat)"
-                :type :float
-                :default 4.0
-                :min 0.5
-                :max 32.0}]
-  :apply-fn apply-strobe-color})
-
-;; ============================================================================
-;; Rainbow Effect (position-based)
-;; ============================================================================
-
-(defn- apply-rainbow-position [frame time-ms _bpm {:keys [speed axis]}]
-  (let [time-offset (mod (* (/ time-ms 1000.0) speed) 360)]
-    (fx/transform-points
-     frame
-     (fn [point]
-       (let [x (/ (:x point) 32767.0)
-             y (/ (:y point) 32767.0)
-             r (bit-and (:r point) 0xFF)
-             g (bit-and (:g point) 0xFF)
-             b (bit-and (:b point) 0xFF)]
-         (if (and (zero? r) (zero? g) (zero? b))
-           point
-           (let [position (case axis
-                            :x (/ (+ x 1.0) 2.0)
-                            :y (/ (+ y 1.0) 2.0)
-                            :radial (Math/sqrt (+ (* x x) (* y y)))
-                            :angle (/ (+ (Math/atan2 y x) Math/PI) (* 2.0 Math/PI)))
-                 brightness (/ (max r g b) 255.0)
-                 hue (mod (+ (* position 360.0) time-offset) 360.0)
-                 [nr ng nb] (colors/hsv->rgb hue 1.0 brightness)]
-             (assoc point
-                    :r (unchecked-byte nr)
-                    :g (unchecked-byte ng)
-                    :b (unchecked-byte nb)))))))))
-
-(fx/register-effect!
- {:id :rainbow-position
-  :name "Rainbow Position"
-  :category :color
-  :timing :seconds
-  :parameters [{:key :speed
-                :label "Speed (deg/sec)"
-                :type :float
-                :default 60.0
-                :min 0.0
-                :max 360.0}
-               {:key :axis
-                :label "Axis"
-                :type :choice
-                :default :x
-                :choices [:x :y :radial :angle]}]
-  :apply-fn apply-rainbow-position})
 
 ;; ============================================================================
 ;; Contrast Effect
@@ -487,3 +314,95 @@
                 :min 0.0
                 :max 255.0}]
   :apply-fn apply-color-replace})
+
+;; ============================================================================
+;; Set Color Effect (replaces color of ALL points)
+;; ============================================================================
+
+(defn- apply-set-color [frame _time-ms _bpm {:keys [red green blue]}]
+  (fx/transform-colors
+   frame
+   (fn [[r g b]]
+     (if (or (pos? r) (pos? g) (pos? b))
+       [red green blue]
+       [0 0 0]))))
+
+(fx/register-effect!
+ {:id :set-color
+  :name "Set Color"
+  :category :color
+  :timing :static
+  :parameters [{:key :red
+                :label "Red"
+                :type :int
+                :default 255
+                :min 0
+                :max 255}
+               {:key :green
+                :label "Green"
+                :type :int
+                :default 255
+                :min 0
+                :max 255}
+               {:key :blue
+                :label "Blue"
+                :type :int
+                :default 255
+                :min 0
+                :max 255}]
+  :apply-fn apply-set-color})
+
+;; ============================================================================
+;; SPECIAL EFFECTS
+;; These are more complex effects kept for specific use cases.
+;; Consider using modulators with basic effects for more flexibility.
+;; ============================================================================
+
+;; ============================================================================
+;; Rainbow Position Effect (Special)
+;; Creates a rainbow effect based on point position.
+;; For more control, use hue-shift with rainbow-hue modulator.
+;; ============================================================================
+
+(defn- apply-rainbow-position [frame time-ms _bpm {:keys [speed axis]}]
+  (let [time-offset (mod (* (/ time-ms 1000.0) speed) 360)]
+    (fx/transform-points
+     frame
+     (fn [point]
+       (let [x (/ (:x point) 32767.0)
+             y (/ (:y point) 32767.0)
+             r (bit-and (:r point) 0xFF)
+             g (bit-and (:g point) 0xFF)
+             b (bit-and (:b point) 0xFF)]
+         (if (and (zero? r) (zero? g) (zero? b))
+           point
+           (let [position (case axis
+                            :x (/ (+ x 1.0) 2.0)
+                            :y (/ (+ y 1.0) 2.0)
+                            :radial (Math/sqrt (+ (* x x) (* y y)))
+                            :angle (/ (+ (Math/atan2 y x) Math/PI) (* 2.0 Math/PI)))
+                 brightness (/ (max r g b) 255.0)
+                 hue (mod (+ (* position 360.0) time-offset) 360.0)
+                 [nr ng nb] (colors/hsv->rgb hue 1.0 brightness)]
+             (assoc point
+                    :r (unchecked-byte nr)
+                    :g (unchecked-byte ng)
+                    :b (unchecked-byte nb)))))))))
+
+(fx/register-effect!
+ {:id :rainbow-position
+  :name "Rainbow Position (Special)"
+  :category :color
+  :timing :seconds
+  :parameters [{:key :speed
+                :label "Speed (deg/sec)"
+                :type :float
+                :default 60.0
+                :min 0.0
+                :max 360.0}
+               {:key :axis
+                :label "Axis"
+                :type :choice
+                :default :x
+                :choices [:x :y :radial :angle]}]
+  :apply-fn apply-rainbow-position})

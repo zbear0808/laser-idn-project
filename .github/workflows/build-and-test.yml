@@ -1,0 +1,62 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout repository
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    # Setup Java
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+    
+    # Setup Clojure
+    - name: Setup Clojure
+      uses: DeLaGuardo/setup-clojure@13.4
+      with:
+        cli: '1.12.0.1530'
+    
+    # Cache Clojure dependencies
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.m2/repository
+          ~/.gitlibs
+        key: ${{ runner.os }}-clojure-${{ hashFiles('**/deps.edn') }}
+        restore-keys: |
+          ${{ runner.os }}-clojure-
+    
+    # Run tests
+    - name: Run unit tests
+      run: clojure -M:test
+    
+    - name: Run integration tests
+      run: clojure -M:test-integration
+    
+    - name: Run all tests
+      run: clojure -M:test-all
+    
+    # Build application
+    - name: Build JAR
+      run: clojure -T:build uber
+    
+    # Upload JAR artifact
+    - name: Upload JAR artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: laser-show-jar
+        path: target/laser-show-*-standalone.jar
+        retention-days: 30

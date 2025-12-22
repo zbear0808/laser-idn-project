@@ -7,8 +7,14 @@
             [seesaw.color :as sc]
             [laser-show.animation.types :as t]
             [laser-show.animation.presets :as presets]
+            [laser-show.animation.time :as anim-time]
+            ;; Effect definitions - require these to register effects
+            [laser-show.animation.effects.shape]
+            [laser-show.animation.effects.color]
+            [laser-show.animation.effects.intensity]
             [laser-show.ui.grid :as grid]
             [laser-show.ui.effects-grid :as effects-grid]
+            [laser-show.ui.effect-dialogs :as effect-dialogs]
             [laser-show.ui.preview :as preview]
             [laser-show.ui.projector-config :as projector-config]
             [laser-show.ui.zone-config :as zone-config]
@@ -39,6 +45,7 @@
 (defonce app-state
   (atom {:main-frame nil
          :grid nil
+         :effects-grid nil
          :preview nil
          :idn-connected false
          :idn-target nil
@@ -57,13 +64,21 @@
 (defn create-frame-provider
   "Create a function that provides the current animation frame for streaming.
    The frame provider reads from app-state and generates frames based on
-   the current animation and elapsed time."
+   the current animation and elapsed time.
+   
+   Also applies any active effects from the effects grid."
   []
   (fn []
     (when-let [anim (:current-animation @app-state)]
       (let [start-time (:animation-start-time @app-state)
-            elapsed (- (System/currentTimeMillis) start-time)]
-        (t/get-frame anim elapsed)))))
+            elapsed (- (System/currentTimeMillis) start-time)
+            bpm (anim-time/get-global-bpm)
+            ;; Get the base frame from the animation
+            base-frame (t/get-frame anim elapsed)]
+        ;; Apply effects from effects grid if available
+        (if-let [eg (:effects-grid @app-state)]
+          ((:apply-to-frame eg) base-frame elapsed bpm)
+          base-frame)))))
 
 ;; ============================================================================
 ;; IDN Packet Logging Helper
@@ -221,8 +236,22 @@
 (defn create-main-window
   "Create and configure the main application window."
   []
-  (let [;; Create preview panel
-        preview-component (preview/create-preview-panel :width 350 :height 350)
+  (let [;; Effects grid ref declared early so we can use it for frame processing
+        effects-grid-ref (atom nil)
+        
+        ;; Create a frame processor function that applies effects
+        ;; This will be passed to the preview panel so effects are visible
+        frame-processor (fn [frame elapsed-ms]
+                          (let [bpm (anim-time/get-global-bpm)]
+                            (if-let [eg @effects-grid-ref]
+                              ((:apply-to-frame eg) frame elapsed-ms bpm)
+                              frame)))
+        
+        ;; Create preview panel with frame processor for effects
+        preview-component (preview/create-preview-panel 
+                           :width 350 
+                           :height 350
+                           :frame-processor frame-processor)
         
         ;; Track selected preset for assignment
         selected-preset-atom (atom nil)
@@ -278,21 +307,60 @@
                               ((:set-cell-preset! gc) col row preset-id)
                               (reset! selected-preset-atom nil)))))
         
-        ;; Create effects grid (5x2 default)
-        ;; Using a ref so callbacks can reference it after creation
-        effects-grid-ref (atom nil)
+        ;; Forward reference to main frame for dialogs
+        main-frame-ref (atom nil)
+        ;; Note: effects-grid-ref was declared earlier for use in frame-processor
         effects-grid-component (effects-grid/create-effects-grid-panel
                                 :on-effects-change (fn [active-effects]
                                                      (println "Active effects:" (count active-effects)))
                                 :on-new-effect (fn [cell-key]
-                                                 ;; For now, add a scale effect for testing
+                                                 ;; Show effect creation dialog with live preview
                                                  (println "New effect for:" cell-key)
-                                                 (when-let [eg @effects-grid-ref]
-                                                   ((:set-cell-effect! eg) 
-                                                    (first cell-key) (second cell-key)
-                                                    (effects-grid/make-effect-data :scale :enabled true))))
-                                :on-edit-effect (fn [cell-key _cell-state]
-                                                  (println "Edit effect for:" cell-key)))
+                                                 (let [col (first cell-key)
+                                                       row (second cell-key)
+                                                       ;; Track if we've set an effect so we can clear on cancel
+                                                       has-effect-atom (atom false)]
+                                                   (effect-dialogs/show-effect-dialog! 
+                                                    @main-frame-ref nil
+                                                    ;; on-confirm: effect is final, keep it
+                                                    (fn [effect-data]
+                                                      (when (and effect-data @effects-grid-ref)
+                                                        ((:set-cell-effect! @effects-grid-ref) col row effect-data)
+                                                        (println "Created effect:" (:effect-id effect-data))))
+                                                    ;; Live preview: immediately apply effect as user configures
+                                                    :on-effect-change (fn [effect-data]
+                                                                        (when @effects-grid-ref
+                                                                          (reset! has-effect-atom true)
+                                                                          ((:set-cell-effect! @effects-grid-ref) col row effect-data)))
+                                                    ;; on-cancel: clear the temporary effect
+                                                    :on-cancel (fn []
+                                                                 (when (and @has-effect-atom @effects-grid-ref)
+                                                                   ((:set-cell-effect! @effects-grid-ref) col row nil)
+                                                                   (println "Cancelled, cleared effect"))))))
+                                :on-edit-effect (fn [cell-key cell-state]
+                                                  ;; Show effect editing dialog with live preview
+                                                  (println "Edit effect for:" cell-key)
+                                                  (let [col (first cell-key)
+                                                        row (second cell-key)
+                                                        existing-effect (:data cell-state)
+                                                        ;; Store original effect to restore on cancel
+                                                        original-effect existing-effect]
+                                                    (effect-dialogs/show-effect-dialog!
+                                                     @main-frame-ref existing-effect
+                                                     ;; on-confirm: effect is final, keep it
+                                                     (fn [effect-data]
+                                                       (when (and effect-data @effects-grid-ref)
+                                                         ((:set-cell-effect! @effects-grid-ref) col row effect-data)
+                                                         (println "Updated effect:" (:effect-id effect-data))))
+                                                     ;; Live preview: immediately apply effect as user configures
+                                                     :on-effect-change (fn [effect-data]
+                                                                         (when @effects-grid-ref
+                                                                           ((:set-cell-effect! @effects-grid-ref) col row effect-data)))
+                                                     ;; on-cancel: restore the original effect
+                                                     :on-cancel (fn []
+                                                                  (when @effects-grid-ref
+                                                                    ((:set-cell-effect! @effects-grid-ref) col row original-effect)
+                                                                    (println "Cancelled, restored original effect")))))))
         _ (reset! effects-grid-ref effects-grid-component)
         
         ;; Create status bar
@@ -442,10 +510,14 @@
                    (ss/alert frame 
                              "Laser Show - IDN Controller\n\nA launchpad-style interface for laser animations.\n\nVersion 0.1.0"))))
     
+    ;; Store the main-frame-ref for dialog callbacks
+    (reset! main-frame-ref frame)
+    
     ;; Store references
     (swap! app-state assoc
            :main-frame frame
            :grid grid-component
+           :effects-grid effects-grid-component
            :preview preview-component
            :status-bar status-bar)
     

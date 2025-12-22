@@ -8,7 +8,7 @@
    - :target {:type :zones :zone-ids #{:zone-1 :zone-2}} - Multiple zones
    
    Cues also support effect chains:
-   - :effect-chain {:effects [{:effect-id :hue-rotate :enabled true :params {...}} ...]}
+   - :effect-chain {:effects [{:effect-id :hue-shift :enabled true :params {...}} ...]}
    
    And can store animation objects directly:
    - :animation - The actual animation object (not persisted, created from preset-id)"

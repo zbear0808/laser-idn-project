@@ -184,17 +184,19 @@
   "Convert HSV to 8-bit RGB. h in [0, 360], s and v in [0, 1].
    Returns [r g b] with values in [0, 255]."
   [h s v]
-  (let [h (mod h 360)
+  (let [h (double (mod h 360))
+        s (double s)
+        v (double v)
         c (* v s)
-        x (* c (- 1 (Math/abs (- (mod (/ h 60) 2) 1))))
+        x (* c (- 1.0 (Math/abs (- (mod (/ h 60.0) 2.0) 1.0))))
         m (- v c)
         [r' g' b'] (cond
-                     (< h 60)  [c x 0]
-                     (< h 120) [x c 0]
-                     (< h 180) [0 c x]
-                     (< h 240) [0 x c]
-                     (< h 300) [x 0 c]
-                     :else     [c 0 x])]
+                     (< h 60.0)  [c x 0.0]
+                     (< h 120.0) [x c 0.0]
+                     (< h 180.0) [0.0 c x]
+                     (< h 240.0) [0.0 x c]
+                     (< h 300.0) [x 0.0 c]
+                     :else       [c 0.0 x])]
     [(int (* max-8bit (+ r' m)))
      (int (* max-8bit (+ g' m)))
      (int (* max-8bit (+ b' m)))]))
@@ -226,17 +228,19 @@
   "Convert HSV to 16-bit ILDA RGB. h in [0, 360], s and v in [0, 1].
    Returns [r g b] with values in [0, 65535]."
   [h s v]
-  (let [h (mod h 360)
+  (let [h (double (mod h 360))
+        s (double s)
+        v (double v)
         c (* v s)
-        x (* c (- 1 (Math/abs (- (mod (/ h 60) 2) 1))))
+        x (* c (- 1.0 (Math/abs (- (mod (/ h 60.0) 2.0) 1.0))))
         m (- v c)
         [r' g' b'] (cond
-                     (< h 60)  [c x 0]
-                     (< h 120) [x c 0]
-                     (< h 180) [0 c x]
-                     (< h 240) [0 x c]
-                     (< h 300) [x 0 c]
-                     :else     [c 0 x])]
+                     (< h 60.0)  [c x 0.0]
+                     (< h 120.0) [x c 0.0]
+                     (< h 180.0) [0.0 c x]
+                     (< h 240.0) [0.0 x c]
+                     (< h 300.0) [x 0.0 c]
+                     :else       [c 0.0 x])]
     [(int (* max-16bit (+ r' m)))
      (int (* max-16bit (+ g' m)))
      (int (* max-16bit (+ b' m)))]))

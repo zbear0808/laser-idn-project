@@ -51,16 +51,14 @@
    :name "Circle"
    :category :geometric
    :parameters [(float-param :radius "Radius" 0.5 0.1 1.0)
-                (float-param :rotation-speed "Rotation Speed" 0.0 0.0 5.0)
                 (color-param :color "Color" [255 255 255])]
    :generator (gen/circle-animation)})
 
-(def preset-spinning-square
-  {:id :spinning-square
-   :name "Spinning Square"
+(def preset-square
+  {:id :square
+   :name "Square"
    :category :geometric
    :parameters [(float-param :size "Size" 0.5 0.1 1.0)
-                (float-param :rotation-speed "Rotation Speed" 1.0 0.1 5.0)
                 (color-param :color "Color" [255 255 255])]
    :generator (gen/square-animation)})
 
@@ -69,7 +67,6 @@
    :name "Triangle"
    :category :geometric
    :parameters [(float-param :size "Size" 0.5 0.1 1.0)
-                (float-param :rotation-speed "Rotation Speed" 1.0 0.1 5.0)
                 (color-param :color "Color" [255 255 255])]
    :generator (gen/triangle-animation)})
 
@@ -80,7 +77,6 @@
    :parameters [(int-param :turns "Turns" 3 1 10)
                 (float-param :start-radius "Inner Radius" 0.1 0.0 0.5)
                 (float-param :end-radius "Outer Radius" 0.5 0.2 1.0)
-                (float-param :rotation-speed "Rotation Speed" 0.5 0.0 3.0)
                 (color-param :color "Color" [255 255 255])]
    :generator (gen/spiral-animation)})
 
@@ -91,7 +87,6 @@
    :parameters [(int-param :spikes "Spikes" 5 3 12)
                 (float-param :outer-radius "Outer Radius" 0.5 0.2 1.0)
                 (float-param :inner-radius "Inner Radius" 0.25 0.1 0.5)
-                (float-param :rotation-speed "Rotation Speed" 0.3 0.0 3.0)
                 (color-param :color "Color" [255 255 255])]
    :generator (gen/star-animation)})
 
@@ -101,7 +96,6 @@
    :category :wave
    :parameters [(float-param :amplitude "Amplitude" 0.3 0.1 0.8)
                 (int-param :frequency "Frequency" 2 1 8)
-                (float-param :phase-speed "Phase Speed" 2.0 0.5 5.0)
                 (color-param :color "Color" [0 255 255])]
    :generator (gen/wave-animation)})
 
@@ -109,10 +103,7 @@
   {:id :beam-fan
    :name "Beam Fan"
    :category :beam
-   :parameters [(int-param :num-beams "Num Beams" 8 3 16)
-                (float-param :length "Length" 0.8 0.3 1.0)
-                (float-param :spread "Spread" 3.14 1.0 6.28)
-                (float-param :sweep-speed "Sweep Speed" 0.5 0.0 3.0)
+   :parameters [(float-param :length "Length" 0.8 0.3 1.0)
                 (color-param :color "Color" [255 100 0])]
    :generator (gen/beam-fan-animation)})
 
@@ -120,9 +111,7 @@
   {:id :rainbow-circle
    :name "Rainbow Circle"
    :category :abstract
-   :parameters [(float-param :radius "Radius" 0.5 0.1 1.0)
-                (float-param :rotation-speed "Rotation Speed" 0.5 0.0 3.0)
-                (float-param :color-speed "Color Speed" 1.0 0.1 5.0)]
+   :parameters [(float-param :radius "Radius" 0.5 0.1 1.0)]
    :generator (gen/rainbow-circle-animation)})
 
 ;; ============================================================================
@@ -132,7 +121,7 @@
 (def all-presets
   "Vector of all available presets."
   [preset-circle
-   preset-spinning-square
+   preset-square
    preset-triangle
    preset-spiral
    preset-star

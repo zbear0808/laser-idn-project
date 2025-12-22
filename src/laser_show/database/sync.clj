@@ -1,7 +1,8 @@
 (ns laser-show.database.sync
   "State synchronization utilities.
    Provides watchers and helpers to keep different parts of the system in sync."
-  (:require [laser-show.database.dynamic :as dyn]
+  (:require [clojure.data :as data]
+            [laser-show.database.dynamic :as dyn]
             [laser-show.database.persistent :as persist]))
 
 ;; ============================================================================
@@ -256,27 +257,27 @@
   (add-watcher! dyn/!timing ::debug-timing
     (fn [_key _ref old new]
       (when (not= old new)
-        (println "TIMING CHANGE:" (keys (clojure.data/diff old new))))))
+        (println "TIMING CHANGE:" (keys (data/diff old new))))))
   
   (add-watcher! dyn/!playback ::debug-playback
     (fn [_key _ref old new]
       (when (not= old new)
-        (println "PLAYBACK CHANGE:" (keys (clojure.data/diff old new))))))
+        (println "PLAYBACK CHANGE:" (keys (data/diff old new))))))
   
   (add-watcher! dyn/!streaming ::debug-streaming
     (fn [_key _ref old new]
       (when (not= old new)
-        (println "STREAMING CHANGE:" (keys (clojure.data/diff old new))))))
+        (println "STREAMING CHANGE:" (keys (data/diff old new))))))
   
   (add-watcher! dyn/!input ::debug-input
     (fn [_key _ref old new]
       (when (not= old new)
-        (println "INPUT CHANGE:" (keys (clojure.data/diff old new))))))
+        (println "INPUT CHANGE:" (keys (data/diff old new))))))
   
   (add-watcher! dyn/!ui ::debug-ui
     (fn [_key _ref old new]
       (when (not= old new)
-        (println "UI CHANGE:" (keys (clojure.data/diff old new)))))))
+        (println "UI CHANGE:" (keys (data/diff old new)))))))
 
 (defn stop-logging-state-changes
   "Remove debug watchers"

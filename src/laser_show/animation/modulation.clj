@@ -332,6 +332,235 @@
      (str "osc(" path " " min-val "-" max-val ")"))))
 
 ;; ============================================================================
+;; Point/Position-Based Modulators
+;; ============================================================================
+
+;; These modulators depend on point index or position rather than time.
+;; They require additional context: :point-index, :point-count, :x, :y
+
+(defn point-index-mod
+  "Create a modulator based on point index in the frame.
+   Maps point index (0 to n-1) to the specified range.
+   
+   Parameters:
+   - min-val: Value at first point
+   - max-val: Value at last point
+   - wrap?: If true, wraps around; if false, clamps (default false)"
+  ([min-val max-val]
+   (point-index-mod min-val max-val false))
+  ([min-val max-val wrap?]
+   (let [min-v (double min-val)
+         max-v (double max-val)
+         range-v (- max-v min-v)]
+     (make-modulator
+      (fn [{:keys [point-index point-count]}]
+        (if (and point-index point-count (pos? point-count))
+          (let [t (/ (double point-index) (max 1.0 (dec (double point-count))))]
+            (+ min-v (* (if wrap? (mod t 1.0) t) range-v)))
+          min-v))
+      (str "point-index(" min-val "-" max-val (when wrap? " wrap") ")")))))
+
+(defn point-index-wave
+  "Create a wave modulator based on point index.
+   Creates wave patterns along the point sequence.
+   
+   Parameters:
+   - min-val: Minimum value
+   - max-val: Maximum value
+   - cycles: Number of wave cycles across all points (default 1.0)
+   - wave-type: :sine, :triangle, :sawtooth, :square (default :sine)"
+  ([min-val max-val]
+   (point-index-wave min-val max-val 1.0))
+  ([min-val max-val cycles]
+   (point-index-wave min-val max-val cycles :sine))
+  ([min-val max-val cycles wave-type]
+   (let [min-v (double min-val)
+         max-v (double max-val)
+         cyc (double cycles)]
+     (make-modulator
+      (fn [{:keys [point-index point-count]}]
+        (if (and point-index point-count (pos? point-count))
+          (let [t (/ (double point-index) (max 1.0 (double point-count)))
+                phase (* t cyc)]
+            (time/oscillate min-v max-v phase wave-type))
+          min-v))
+      (str "point-wave(" min-val "-" max-val " " cycles "x " wave-type ")")))))
+
+(defn position-x-mod
+  "Create a modulator based on X position.
+   Maps X coordinate (-1.0 to 1.0) to the specified range.
+   
+   Parameters:
+   - min-val: Value at X=-1
+   - max-val: Value at X=1"
+  [min-val max-val]
+  (let [min-v (double min-val)
+        max-v (double max-val)
+        range-v (- max-v min-v)]
+    (make-modulator
+     (fn [{:keys [x]}]
+       (if x
+         (let [t (/ (+ (double x) 1.0) 2.0)]  ; normalize -1..1 to 0..1
+           (+ min-v (* t range-v)))
+         min-v))
+     (str "pos-x(" min-val "-" max-val ")"))))
+
+(defn position-y-mod
+  "Create a modulator based on Y position.
+   Maps Y coordinate (-1.0 to 1.0) to the specified range.
+   
+   Parameters:
+   - min-val: Value at Y=-1
+   - max-val: Value at Y=1"
+  [min-val max-val]
+  (let [min-v (double min-val)
+        max-v (double max-val)
+        range-v (- max-v min-v)]
+    (make-modulator
+     (fn [{:keys [y]}]
+       (if y
+         (let [t (/ (+ (double y) 1.0) 2.0)]  ; normalize -1..1 to 0..1
+           (+ min-v (* t range-v)))
+         min-v))
+     (str "pos-y(" min-val "-" max-val ")"))))
+
+(defn position-radial-mod
+  "Create a modulator based on distance from center.
+   Maps distance from origin (0.0 to ~1.41) to the specified range.
+   
+   Parameters:
+   - min-val: Value at center
+   - max-val: Value at edge
+   - normalize?: If true, normalizes to 0-1 range (default true)"
+  ([min-val max-val]
+   (position-radial-mod min-val max-val true))
+  ([min-val max-val normalize?]
+   (let [min-v (double min-val)
+         max-v (double max-val)
+         range-v (- max-v min-v)
+         max-dist (if normalize? (Math/sqrt 2.0) 1.0)]
+     (make-modulator
+      (fn [{:keys [x y]}]
+        (if (and x y)
+          (let [dist (Math/sqrt (+ (* (double x) (double x)) 
+                                   (* (double y) (double y))))
+                t (min 1.0 (/ dist max-dist))]
+            (+ min-v (* t range-v)))
+          min-v))
+      (str "pos-radial(" min-val "-" max-val ")")))))
+
+(defn position-angle-mod
+  "Create a modulator based on angle from center.
+   Maps angle (0 to 2π) to the specified range.
+   
+   Parameters:
+   - min-val: Value at angle 0 (positive X axis)
+   - max-val: Value at angle 2π"
+  [min-val max-val]
+  (let [min-v (double min-val)
+        max-v (double max-val)
+        range-v (- max-v min-v)]
+    (make-modulator
+     (fn [{:keys [x y]}]
+       (if (and x y)
+         (let [angle (Math/atan2 (double y) (double x))
+               t (/ (+ angle Math/PI) (* 2.0 Math/PI))]  ; normalize -π..π to 0..1
+           (+ min-v (* t range-v)))
+         min-v))
+     (str "pos-angle(" min-val "-" max-val ")"))))
+
+(defn position-wave
+  "Create a wave pattern based on position.
+   Creates spatial wave patterns.
+   
+   Parameters:
+   - min-val: Minimum value
+   - max-val: Maximum value
+   - axis: :x, :y, :radial, or :angle
+   - frequency: Wave frequency (cycles per unit, default 1.0)
+   - wave-type: :sine, :triangle, :sawtooth, :square (default :sine)"
+  ([min-val max-val axis]
+   (position-wave min-val max-val axis 1.0))
+  ([min-val max-val axis frequency]
+   (position-wave min-val max-val axis frequency :sine))
+  ([min-val max-val axis frequency wave-type]
+   (let [min-v (double min-val)
+         max-v (double max-val)
+         freq (double frequency)]
+     (make-modulator
+      (fn [{:keys [x y]}]
+        (if (and x y)
+          (let [pos-val (case axis
+                          :x (double x)
+                          :y (double y)
+                          :radial (Math/sqrt (+ (* (double x) (double x))
+                                                (* (double y) (double y))))
+                          :angle (/ (+ (Math/atan2 (double y) (double x)) Math/PI)
+                                    (* 2.0 Math/PI)))
+                phase (* pos-val freq)]
+            (time/oscillate min-v max-v phase wave-type))
+          min-v))
+      (str "pos-wave(" axis " " min-val "-" max-val " " frequency "x " wave-type ")")))))
+
+;; ============================================================================
+;; Animated Position Modulators (combine position + time)
+;; ============================================================================
+
+(defn position-scroll
+  "Create a scrolling pattern based on position + time.
+   The pattern moves across the shape.
+   
+   Parameters:
+   - min-val: Minimum value
+   - max-val: Maximum value
+   - axis: :x or :y
+   - speed: Scroll speed (units per beat, default 1.0)
+   - wave-type: :sine, :triangle, :sawtooth, :square (default :sine)"
+  ([min-val max-val axis]
+   (position-scroll min-val max-val axis 1.0))
+  ([min-val max-val axis speed]
+   (position-scroll min-val max-val axis speed :sine))
+  ([min-val max-val axis speed wave-type]
+   (let [min-v (double min-val)
+         max-v (double max-val)
+         spd (double speed)]
+     (make-modulator
+      (fn [{:keys [x y time-ms bpm]}]
+        (if (and x y time-ms bpm)
+          (let [pos-val (case axis :x (double x) :y (double y))
+                time-offset (* (time/time->beat-phase (double time-ms) (double bpm)) spd)
+                phase (+ pos-val time-offset)]
+            (time/oscillate min-v max-v phase wave-type))
+          min-v))
+      (str "pos-scroll(" axis " " min-val "-" max-val " @" speed "x " wave-type ")")))))
+
+(defn rainbow-hue
+  "Create a rainbow hue pattern based on position + time.
+   Specifically for hue values (0-360 range).
+   
+   Parameters:
+   - axis: :x, :y, :radial, or :angle
+   - speed: Rotation speed in degrees per second (default 60.0)"
+  ([axis]
+   (rainbow-hue axis 60.0))
+  ([axis speed]
+   (let [spd (double speed)]
+     (make-modulator
+      (fn [{:keys [x y time-ms]}]
+        (if (and x y time-ms)
+          (let [position (case axis
+                           :x (/ (+ (double x) 1.0) 2.0)
+                           :y (/ (+ (double y) 1.0) 2.0)
+                           :radial (Math/sqrt (+ (* (double x) (double x))
+                                                 (* (double y) (double y))))
+                           :angle (/ (+ (Math/atan2 (double y) (double x)) Math/PI)
+                                     (* 2.0 Math/PI)))
+                time-offset (mod (* (/ (double time-ms) 1000.0) spd) 360.0)]
+            (mod (+ (* position 360.0) time-offset) 360.0))
+          0.0))
+      (str "rainbow-hue(" axis " @" speed "°/s)")))))
+
+;; ============================================================================
 ;; Utility Modulators
 ;; ============================================================================
 
@@ -433,7 +662,9 @@
 
 (def presets
   "Common modulator presets."
-  {;; Gentle pulsing (1 cycle per beat, 70-100% range)
+  {;; === Time-based modulators ===
+   
+   ;; Gentle pulsing (1 cycle per beat, 70-100% range)
    :gentle-pulse (sine-mod 0.7 1.0 1.0)
 
    ;; Strong pulsing (2 cycles per beat, 30-100% range)
@@ -458,7 +689,38 @@
    :ramp-down (sawtooth-mod 1.0 0.0 1.0)
 
    ;; Wobble (fast small oscillation)
-   :wobble (sine-mod 0.9 1.1 4.0)})
+   :wobble (sine-mod 0.9 1.1 4.0)
+   
+   ;; === Position-based modulators ===
+   
+   ;; Fade across X axis (left to right)
+   :fade-x (position-x-mod 0.0 1.0)
+   
+   ;; Fade across Y axis (bottom to top)
+   :fade-y (position-y-mod 0.0 1.0)
+   
+   ;; Radial fade from center
+   :fade-radial (position-radial-mod 1.0 0.0)
+   
+   ;; Radial glow (bright center, dim edges)
+   :glow-center (position-radial-mod 1.0 0.3)
+   
+   ;; Rainbow across X (hue values 0-360)
+   :rainbow-x (rainbow-hue :x 60.0)
+   
+   ;; Rainbow across Y (hue values 0-360)
+   :rainbow-y (rainbow-hue :y 60.0)
+   
+   ;; Rainbow by angle (hue values 0-360)
+   :rainbow-angle (rainbow-hue :angle 60.0)
+   
+   ;; === Point-index modulators ===
+   
+   ;; Fade along drawing path
+   :fade-path (point-index-mod 0.0 1.0)
+   
+   ;; Wave along drawing path
+   :wave-path (point-index-wave 0.3 1.0 2.0)})
 
 (defn preset
   "Get a preset modulator by keyword.
