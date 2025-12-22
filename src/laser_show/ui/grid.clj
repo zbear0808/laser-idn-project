@@ -13,8 +13,10 @@
             [laser-show.state.clipboard :as clipboard])
   (:import [java.awt Color Dimension Font BasicStroke Graphics2D RenderingHints]
            [java.awt.event MouseAdapter MouseEvent KeyEvent InputEvent ActionEvent]
-           [javax.swing BorderFactory JPanel JPopupMenu JMenuItem KeyStroke AbstractAction]
-           [javax.swing.border Border]))
+           [javax.swing BorderFactory JPanel JPopupMenu JMenuItem KeyStroke AbstractAction JDialog]
+           [javax.swing.border Border]
+           [javax.swing DefaultComboBoxModel DefaultListModel ListSelectionModel]
+           [javax.swing.event ListSelectionListener]))
 
 ;; ============================================================================
 ;; Grid State
@@ -52,43 +54,148 @@
         (.dispose g2d)))))
 
 ;; ============================================================================
+;; Preset Selection Dialog
+;; ============================================================================
+
+(defn show-preset-selection-dialog!
+  "Show dialog to select an animation preset.
+   
+   Parameters:
+   - parent: Parent component for dialog
+   - on-select: (fn [preset-id]) called when user selects a preset
+   
+   Returns: Selected preset-id or nil if cancelled"
+  [parent on-select]
+  (let [result-atom (atom nil)
+        dialog (JDialog. (ss/to-root parent) "Select Animation Preset" true)
+        
+        ;; Category combo
+        category-ids (sort (keys presets/categories))
+        category-names (mapv #(:name (get presets/categories %)) category-ids)
+        category-model (DefaultComboBoxModel. (into-array category-names))
+        category-combo (ss/combobox :model category-model)
+        
+        ;; Preset list
+        preset-list-model (DefaultListModel.)
+        preset-list (ss/listbox :model preset-list-model
+                               :renderer (fn [renderer {:keys [value]}]
+                                          (if value
+                                            (ss/config! renderer
+                                                       :text (:name value)
+                                                       :foreground Color/WHITE
+                                                       :background (Color. 50 50 50))
+                                            (ss/config! renderer :text ""))))
+        _ (.setSelectionMode preset-list ListSelectionModel/SINGLE_SELECTION)
+        _ (.setBackground preset-list (Color. 50 50 50))
+        _ (.setForeground preset-list Color/WHITE)
+        
+        ;; Update list based on category selection
+        update-preset-list! (fn [category-id]
+                             (.clear preset-list-model)
+                             (doseq [preset (presets/get-presets-by-category category-id)]
+                               (.addElement preset-list-model preset)))
+        
+        ;; Buttons
+        ok-btn (ss/button :text "Select"
+                         :listen [:action (fn [_]
+                                           (when-let [preset (.getSelectedValue preset-list)]
+                                             (reset! result-atom (:id preset))
+                                             (when on-select (on-select (:id preset)))
+                                             (.dispose dialog)))])
+        cancel-btn (ss/button :text "Cancel"
+                             :listen [:action (fn [_] (.dispose dialog))])
+        
+        ;; Layout
+        content (mig/mig-panel
+                 :constraints ["insets 10, wrap 1", "[grow, fill]", "[][grow, fill][]"]
+                 :items [[(ss/label :text "Select Preset"
+                                   :font (Font. "SansSerif" Font/BOLD 14)
+                                   :foreground Color/WHITE) ""]
+                         [(mig/mig-panel
+                           :constraints ["insets 5", "[80!][grow]", ""]
+                           :items [[(ss/label :text "Category:" :foreground Color/WHITE) ""]
+                                   [category-combo "growx"]]
+                           :background (Color. 45 45 45)) "growx"]
+                         [(ss/scrollable preset-list
+                                        :border (border/line-border :color (Color. 60 60 60))) "grow, h 300!"]
+                         [(mig/mig-panel
+                           :constraints ["insets 10", "[grow][][]", ""]
+                           :items [[(ss/label) "growx"]
+                                   [cancel-btn ""]
+                                   [ok-btn ""]]
+                           :background (Color. 45 45 45)) "growx"]])]
+    
+    ;; Style and setup
+    (ss/config! content :background (Color. 45 45 45))
+    (.setContentPane dialog content)
+    (.setSize dialog 400 450)
+    (.setLocationRelativeTo dialog parent)
+    
+    ;; Initialize with first category
+    (let [first-cat (first category-ids)]
+      (update-preset-list! first-cat))
+    
+    ;; Category change listener
+    (ss/listen category-combo :action
+      (fn [_]
+        (let [idx (.getSelectedIndex category-combo)
+              cat-id (nth category-ids idx)]
+          (update-preset-list! cat-id))))
+    
+    (.setVisible dialog true)
+    @result-atom))
+
+;; ============================================================================
 ;; Context Menu
 ;; ============================================================================
 
 (defn create-cell-context-menu
   "Create a context menu for a grid cell."
-  [cell-key cell-state on-copy on-paste on-clear]
+  [cell-key cell-state on-copy on-paste on-clear on-assign-preset]
   (let [popup (JPopupMenu.)
         has-preset? (boolean (:preset-id cell-state))
         can-paste? (clipboard/can-paste-cell-assignment?)
         
         copy-item (JMenuItem. "Copy")
         paste-item (JMenuItem. "Paste")
-        clear-item (JMenuItem. "Clear")]
-    
-    (.setEnabled copy-item has-preset?)
-    (.setEnabled paste-item can-paste?)
-    (.setEnabled clear-item has-preset?)
-    
-    (.addActionListener copy-item
-                        (reify java.awt.event.ActionListener
-                          (actionPerformed [_ _e]
-                            (on-copy cell-key cell-state))))
-    
-    (.addActionListener paste-item
-                        (reify java.awt.event.ActionListener
-                          (actionPerformed [_ _e]
-                            (on-paste cell-key))))
-    
-    (.addActionListener clear-item
-                        (reify java.awt.event.ActionListener
-                          (actionPerformed [_ _e]
-                            (on-clear cell-key))))
-    
-    (.add popup copy-item)
-    (.add popup paste-item)
-    (.addSeparator popup)
-    (.add popup clear-item)
+        clear-item (JMenuItem. "Clear")
+        assign-preset-item (JMenuItem. "New from Preset...")]
+   
+   (.setEnabled copy-item has-preset?)
+   (.setEnabled paste-item can-paste?)
+   (.setEnabled clear-item has-preset?)
+   
+   (.addActionListener copy-item
+                       (reify java.awt.event.ActionListener
+                         (actionPerformed [_ _e]
+                           (on-copy cell-key cell-state))))
+   
+   (.addActionListener paste-item
+                       (reify java.awt.event.ActionListener
+                         (actionPerformed [_ _e]
+                           (on-paste cell-key))))
+   
+   (.addActionListener clear-item
+                       (reify java.awt.event.ActionListener
+                         (actionPerformed [_ _e]
+                           (on-clear cell-key))))
+   
+   (.addActionListener assign-preset-item
+                       (reify java.awt.event.ActionListener
+                         (actionPerformed [_ e]
+                           (let [source (.getSource e)
+                                 popup-parent (.getInvoker (.getParent source))]
+                             (show-preset-selection-dialog!
+                              popup-parent
+                              (fn [preset-id]
+                                (when preset-id
+                                  (on-assign-preset cell-key preset-id))))))))
+   
+   (.add popup copy-item)
+   (.add popup paste-item)
+   (.addSeparator popup)
+   (.add popup assign-preset-item)
+   (.add popup clear-item)
     
     popup))
 
@@ -161,12 +268,19 @@
                          (mouseClicked [^MouseEvent e]
                            (cond
                              (= (.getButton e) MouseEvent/BUTTON3)
-                             (let [popup (create-cell-context-menu 
-                                          cell-key 
+                             (let [popup (create-cell-context-menu
+                                          cell-key
                                           @!cell-state
                                           on-copy
                                           on-paste
-                                          on-clear)]
+                                          on-clear
+                          (fn [_key preset-id]
+                            ;; Assign preset to this cell using local state
+                            (swap! !cell-state assoc 
+                                   :preset-id preset-id
+                                   :animation (when preset-id
+                                                (presets/create-animation-from-preset preset-id)))
+                            (update-appearance!)))]
                                (.show popup panel (.getX e) (.getY e)))
                              
                              :else

@@ -1,538 +1,29 @@
 (ns laser-show.core
   "Main entry point for the Laser Show application.
-   Creates the main window with grid, preview, and controls."
+   
+   This namespace provides the application entry point and input system setup.
+   The main window and UI components are managed by laser-show.ui.window."
   (:require [seesaw.core :as ss]
-            [seesaw.mig :as mig]
-            [seesaw.border :as border]
-            [seesaw.color :as sc]
-            [laser-show.animation.types :as t]
-            [laser-show.animation.presets :as presets]
-            [laser-show.animation.time :as anim-time]
-            ;; Effect definitions - require these to register effects
-            [laser-show.animation.effects.shape]
-            [laser-show.animation.effects.color]
-            [laser-show.animation.effects.intensity]
-            [laser-show.ui.grid :as grid]
-            [laser-show.ui.effects-grid :as effects-grid]
-            [laser-show.ui.effect-dialogs :as effect-dialogs]
-            [laser-show.ui.preview :as preview]
-            [laser-show.ui.projector-config :as projector-config]
-            [laser-show.ui.zone-config :as zone-config]
-            [laser-show.ui.zone-group-config :as zone-group-config]
-            [laser-show.backend.packet-logger :as plog]
-            [laser-show.backend.streaming-engine :as streaming]
+            [laser-show.ui.window :as window]
+            [laser-show.ui.layout :as layout]
             [laser-show.backend.projectors :as projectors]
             [laser-show.backend.zones :as zones]
             [laser-show.backend.zone-groups :as zone-groups]
-            [laser-show.backend.multi-projector-stream :as multi-stream]
-            [laser-show.state.clipboard :as clipboard]
             [laser-show.input.events :as events]
             [laser-show.input.router :as router]
             [laser-show.input.keyboard :as keyboard]
             [laser-show.input.midi :as midi]
-            [laser-show.input.osc :as osc]
-            [laser-show.ui.layout :as layout])
-  (:import [java.awt Color Dimension Font]
-           [javax.swing UIManager JFrame JSpinner SpinnerNumberModel]
-           [javax.swing.event ChangeListener]
-           [com.formdev.flatlaf FlatDarkLaf])
+            [laser-show.input.osc :as osc])
   (:gen-class))
 
 ;; ============================================================================
-;; Application State
+;; Application State (delegated to window namespace)
 ;; ============================================================================
 
-(defonce app-state
-  (atom {:main-frame nil
-         :grid nil
-         :effects-grid nil
-         :preview nil
-         :idn-connected false
-         :idn-target nil
-         :playing false
-         :current-animation nil
-         :animation-start-time 0
-         :streaming-engine nil
-         :packet-logging-enabled false
-         :packet-log-file nil
-         :packet-log-path "idn-packets.log"}))
-
-;; ============================================================================
-;; Frame Provider for Streaming
-;; ============================================================================
-
-(defn create-frame-provider
-  "Create a function that provides the current animation frame for streaming.
-   The frame provider reads from app-state and generates frames based on
-   the current animation and elapsed time.
-   
-   Also applies any active effects from the effects grid."
-  []
-  (fn []
-    (when-let [anim (:current-animation @app-state)]
-      (let [start-time (:animation-start-time @app-state)
-            elapsed (- (System/currentTimeMillis) start-time)
-            bpm (anim-time/get-global-bpm)
-            ;; Get the base frame from the animation
-            base-frame (t/get-frame anim elapsed)]
-        ;; Apply effects from effects grid if available
-        (if-let [eg (:effects-grid @app-state)]
-          ((:apply-to-frame eg) base-frame elapsed bpm)
-          base-frame)))))
-
-;; ============================================================================
-;; IDN Packet Logging Helper
-;; ============================================================================
-
-(defn get-packet-log-callback
-  "Returns a logging callback function if packet logging is enabled, nil otherwise.
-   This function should be called when sending IDN packets and passed to send-packet."
-  []
-  (when (:packet-logging-enabled @app-state)
-    (when-let [writer (:packet-log-file @app-state)]
-      (plog/create-log-callback writer))))
-
-(defn send-idn-packet
-  "Convenience wrapper for sending IDN packets with automatic logging.
-   Requires idn-hello.core to be required where this is used.
-   Usage: (send-idn-packet socket data host port)"
-  [socket data host port]
-  (let [log-fn (get-packet-log-callback)]
-    ;; Note: This requires (require '[idn-hello.core :as idn]) in the calling namespace
-    ;; and calling (idn/send-packet socket data host port log-fn)
-    ;; This is just a helper to get the log callback
-    log-fn))
-
-;; ============================================================================
-;; Status Bar
-;; ============================================================================
-
-(defn- create-status-bar
-  "Create the status bar showing connection status, BPM, and FPS."
-  []
-  (let [connection-label (ss/label :text "IDN: Disconnected"
-                                   :foreground (Color. 255 100 100)
-                                   :font (Font. "SansSerif" Font/PLAIN 11))
-        ;; BPM display and control
-        bpm-label (ss/label :text "BPM:"
-                            :foreground Color/WHITE
-                            :font (Font. "SansSerif" Font/PLAIN 11))
-        bpm-model (SpinnerNumberModel. 120.0 20.0 300.0 0.5)
-        bpm-spinner (JSpinner. bpm-model)
-        _ (do
-            ;; Style the spinner
-            (.setFont bpm-spinner (Font. "SansSerif" Font/BOLD 11))
-            (.setPreferredSize bpm-spinner (Dimension. 65 22))
-            ;; Listen for changes and update multi-stream BPM
-            (.addChangeListener bpm-spinner
-                                (reify ChangeListener
-                                  (stateChanged [_ _evt]
-                                    (let [new-bpm (.getValue bpm-model)]
-                                      (multi-stream/set-bpm! new-bpm))))))
-        fps-label (ss/label :text "FPS: --"
-                            :foreground Color/WHITE
-                            :font (Font. "SansSerif" Font/PLAIN 11))
-        points-label (ss/label :text "Points: --"
-                               :foreground Color/WHITE
-                               :font (Font. "SansSerif" Font/PLAIN 11))]
-    {:panel (mig/mig-panel
-             :constraints ["insets 5 10 5 10", "[grow][][][][][]", ""]
-             :items [[connection-label "growx"]
-                     [bpm-label ""]
-                     [bpm-spinner ""]
-                     [(ss/label :text "  ") ""]
-                     [fps-label ""]
-                     [points-label ""]]
-             :background (Color. 35 35 35))
-     :set-connection! (fn [connected target]
-                        (if connected
-                          (do
-                            (ss/config! connection-label :text (str "IDN: " target))
-                            (ss/config! connection-label :foreground (Color. 100 255 100)))
-                          (do
-                            (ss/config! connection-label :text "IDN: Disconnected")
-                            (ss/config! connection-label :foreground (Color. 255 100 100)))))
-     :set-bpm! (fn [bpm]
-                 (.setValue bpm-model (double bpm)))
-     :get-bpm (fn []
-                (.getValue bpm-model))
-     :set-fps! (fn [fps]
-                 (ss/config! fps-label :text (format "FPS: %.1f" (float fps))))
-     :set-points! (fn [points]
-                    (ss/config! points-label :text (str "Points: " points)))}))
-
-;; ============================================================================
-;; Toolbar
-;; ============================================================================
-
-(defn- create-toolbar
-  "Create the main toolbar with playback and connection controls."
-  [on-play on-stop on-connect on-log-toggle]
-  (let [play-btn (ss/button :text "▶ Play"
-                            :font (Font. "SansSerif" Font/BOLD 12))
-        stop-btn (ss/button :text "■ Stop"
-                            :font (Font. "SansSerif" Font/BOLD 12))
-        connect-btn (ss/button :text "🔌 Connect IDN"
-                               :font (Font. "SansSerif" Font/PLAIN 11))
-        target-field (ss/text :text "192.168.1.100"
-                              :columns 12
-                              :font (Font. "Monospaced" Font/PLAIN 11))
-        log-checkbox (ss/checkbox :text "Log Packets"
-                                 :selected? false
-                                 :font (Font. "SansSerif" Font/PLAIN 11))]
-    
-    (ss/listen play-btn :action (fn [_] (on-play)))
-    (ss/listen stop-btn :action (fn [_] (on-stop)))
-    (ss/listen connect-btn :action (fn [_] (on-connect (ss/text target-field))))
-    (ss/listen log-checkbox :action (fn [_] (on-log-toggle (ss/value log-checkbox))))
-    
-    {:panel (mig/mig-panel
-             :constraints ["insets 5 10 5 10", "[][][][grow][][]", ""]
-             :items [[play-btn ""]
-                     [stop-btn ""]
-                     [(ss/label :text "   ") ""]
-                     [(ss/label :text "") "growx"]
-                     [(ss/label :text "Target:") ""]
-                     [target-field ""]
-                     [log-checkbox ""]
-                     [connect-btn ""]]
-             :background (Color. 45 45 45))
-     :set-playing! (fn [playing]
-                     (ss/config! play-btn :enabled? (not playing))
-                     (ss/config! stop-btn :enabled? playing))
-     :get-target (fn [] (ss/text target-field))
-     :log-checkbox log-checkbox}))
-
-;; ============================================================================
-;; Menu Bar
-;; ============================================================================
-
-(defn- create-menu-bar
-  "Create the application menu bar."
-  [frame on-new on-open on-save on-about]
-  (ss/menubar
-   :items [(ss/menu :text "File"
-                    :items [(ss/action :name "New Grid" :handler (fn [_] (on-new)))
-                            (ss/action :name "Open..." :handler (fn [_] (on-open)))
-                            (ss/action :name "Save..." :handler (fn [_] (on-save)))
-                            :separator
-                            (ss/action :name "Exit" :handler (fn [_] (System/exit 0)))])
-           (ss/menu :text "Configure"
-                    :items [(ss/action :name "Projectors..." 
-                                       :handler (fn [_] (projector-config/show-projector-config-dialog frame)))
-                            (ss/action :name "Zones..." 
-                                       :handler (fn [_] (zone-config/show-zone-config-dialog frame)))
-                            (ss/action :name "Zone Groups..." 
-                                       :handler (fn [_] (zone-group-config/show-zone-group-config-dialog frame)))])
-           (ss/menu :text "View"
-                    :items [(ss/action :name "Reset Layout" :handler (fn [_] nil))])
-           (ss/menu :text "Help"
-                    :items [(ss/action :name "About Laser Show" :handler (fn [_] (on-about)))])]))
-
-;; ============================================================================
-;; Main Window
-;; ============================================================================
-
-(defn create-main-window
-  "Create and configure the main application window."
-  []
-  (let [;; Effects grid ref declared early so we can use it for frame processing
-        effects-grid-ref (atom nil)
-        
-        ;; Create a frame processor function that applies effects
-        ;; This will be passed to the preview panel so effects are visible
-        frame-processor (fn [frame elapsed-ms]
-                          (let [bpm (anim-time/get-global-bpm)]
-                            (if-let [eg @effects-grid-ref]
-                              ((:apply-to-frame eg) frame elapsed-ms bpm)
-                              frame)))
-        
-        ;; Create preview panel with frame processor for effects
-        preview-component (preview/create-preview-panel 
-                           :width 350 
-                           :height 350
-                           :frame-processor frame-processor)
-        
-        ;; Track selected preset for assignment
-        selected-preset-atom (atom nil)
-        
-        ;; Mutable reference for grid component (needed for forward reference)
-        grid-ref (atom nil)
-        
-        ;; Create grid panel with handlers (use defaults from layout)
-        grid-component (grid/create-grid-panel
-                        :on-cell-click (fn [[col row] cell-state]
-                                         (println "Cell clicked:" [col row])
-                                         ;; If a preset is selected from palette, assign it
-                                         (when-let [preset-id @selected-preset-atom]
-                                           (when-let [gc @grid-ref]
-                                             ((:set-cell-preset! gc) col row preset-id))
-                                           (reset! selected-preset-atom nil))
-                                         ;; If cell has animation, play it
-                                         (when-let [anim (:animation cell-state)]
-                                           ((:set-animation! preview-component) anim)
-                                           (when-let [gc @grid-ref]
-                                             ((:set-active-cell! gc) col row))
-                                           (swap! app-state assoc 
-                                                  :playing true 
-                                                  :current-animation anim
-                                                  :animation-start-time (System/currentTimeMillis))))
-                        :on-cell-right-click (fn [[col row] cell-state]
-                                               (println "Cell right-clicked:" [col row]))
-                        :on-copy (fn [[col row] cell-state]
-                                   (when-let [preset-id (:preset-id cell-state)]
-                                     (clipboard/copy-cell-assignment! preset-id)
-                                     (println "Copied preset:" preset-id)))
-                        :on-paste (fn [[col row]]
-                                    (when-let [preset-id (clipboard/paste-cell-assignment)]
-                                      (when-let [gc @grid-ref]
-                                        ((:set-cell-preset! gc) col row preset-id)
-                                        (println "Pasted preset:" preset-id "to" [col row]))))
-                        :on-clear (fn [[col row]]
-                                    (when-let [gc @grid-ref]
-                                      ((:set-cell-preset! gc) col row nil)
-                                      (println "Cleared cell:" [col row]))))
-        
-        ;; Store grid component in ref for use in callbacks
-        _ (reset! grid-ref grid-component)
-        
-        ;; Create preset palette
-        preset-palette (grid/create-preset-palette
-                        (fn [preset-id]
-                          (println "Preset selected:" preset-id)
-                          (reset! selected-preset-atom preset-id)
-                          ;; If a cell is selected, assign directly
-                          (when-let [gc @grid-ref]
-                            (when-let [[col row] ((:get-selected-cell gc))]
-                              ((:set-cell-preset! gc) col row preset-id)
-                              (reset! selected-preset-atom nil)))))
-        
-        ;; Forward reference to main frame for dialogs
-        main-frame-ref (atom nil)
-        ;; Note: effects-grid-ref was declared earlier for use in frame-processor
-        effects-grid-component (effects-grid/create-effects-grid-panel
-                                :on-effects-change (fn [active-effects]
-                                                     (println "Active effects:" (count active-effects)))
-                                :on-new-effect (fn [cell-key]
-                                                 ;; Show effect creation dialog with live preview
-                                                 (println "New effect for:" cell-key)
-                                                 (let [col (first cell-key)
-                                                       row (second cell-key)
-                                                       ;; Track if we've set an effect so we can clear on cancel
-                                                       has-effect-atom (atom false)]
-                                                   (effect-dialogs/show-effect-dialog! 
-                                                    @main-frame-ref nil
-                                                    ;; on-confirm: effect is final, keep it
-                                                    (fn [effect-data]
-                                                      (when (and effect-data @effects-grid-ref)
-                                                        ((:set-cell-effect! @effects-grid-ref) col row effect-data)
-                                                        (println "Created effect:" (:effect-id effect-data))))
-                                                    ;; Live preview: immediately apply effect as user configures
-                                                    :on-effect-change (fn [effect-data]
-                                                                        (when @effects-grid-ref
-                                                                          (reset! has-effect-atom true)
-                                                                          ((:set-cell-effect! @effects-grid-ref) col row effect-data)))
-                                                    ;; on-cancel: clear the temporary effect
-                                                    :on-cancel (fn []
-                                                                 (when (and @has-effect-atom @effects-grid-ref)
-                                                                   ((:set-cell-effect! @effects-grid-ref) col row nil)
-                                                                   (println "Cancelled, cleared effect"))))))
-                                :on-edit-effect (fn [cell-key cell-state]
-                                                  ;; Show effect editing dialog with live preview
-                                                  (println "Edit effect for:" cell-key)
-                                                  (let [col (first cell-key)
-                                                        row (second cell-key)
-                                                        existing-effect (:data cell-state)
-                                                        ;; Store original effect to restore on cancel
-                                                        original-effect existing-effect]
-                                                    (effect-dialogs/show-effect-dialog!
-                                                     @main-frame-ref existing-effect
-                                                     ;; on-confirm: effect is final, keep it
-                                                     (fn [effect-data]
-                                                       (when (and effect-data @effects-grid-ref)
-                                                         ((:set-cell-effect! @effects-grid-ref) col row effect-data)
-                                                         (println "Updated effect:" (:effect-id effect-data))))
-                                                     ;; Live preview: immediately apply effect as user configures
-                                                     :on-effect-change (fn [effect-data]
-                                                                         (when @effects-grid-ref
-                                                                           ((:set-cell-effect! @effects-grid-ref) col row effect-data)))
-                                                     ;; on-cancel: restore the original effect
-                                                     :on-cancel (fn []
-                                                                  (when @effects-grid-ref
-                                                                    ((:set-cell-effect! @effects-grid-ref) col row original-effect)
-                                                                    (println "Cancelled, restored original effect")))))))
-        _ (reset! effects-grid-ref effects-grid-component)
-        
-        ;; Create status bar
-        status-bar (create-status-bar)
-        
-        ;; Toolbar reference for callbacks
-        toolbar-ref (atom nil)
-        
-        ;; Create toolbar
-        toolbar (create-toolbar
-                 ;; On Play
-                 (fn []
-                   (when-let [anim (:current-animation @app-state)]
-                     ((:set-animation! preview-component) anim)
-                     (swap! app-state assoc 
-                            :playing true
-                            :animation-start-time (System/currentTimeMillis))))
-                 ;; On Stop
-                 (fn []
-                   ((:stop! preview-component))
-                   ((:set-active-cell! grid-component) nil nil)
-                   (swap! app-state assoc :playing false :current-animation nil))
-                 ;; On Connect
-                 (fn [target]
-                   (if (:idn-connected @app-state)
-                     ;; Disconnect
-                     (do
-                       (println "Disconnecting from IDN target")
-                       (when-let [engine (:streaming-engine @app-state)]
-                         (streaming/stop! engine))
-                       (swap! app-state assoc 
-                              :idn-connected false 
-                              :idn-target nil
-                              :streaming-engine nil)
-                       ((:set-connection! status-bar) false nil))
-                     ;; Connect
-                     (do
-                       (println "Connecting to IDN target:" target)
-                       (try
-                         (let [frame-provider (create-frame-provider)
-                               log-callback (get-packet-log-callback)
-                               engine (streaming/create-engine target frame-provider
-                                                               :log-callback log-callback)]
-                           (streaming/start! engine)
-                           (swap! app-state assoc 
-                                  :idn-target target 
-                                  :idn-connected true
-                                  :streaming-engine engine)
-                           ((:set-connection! status-bar) true target))
-                         (catch Exception e
-                           (println "Connection failed:" (.getMessage e))
-                           (ss/alert "Connection failed: " (.getMessage e)))))))
-                 ;; On Log Toggle
-                 (fn [enabled]
-                   (if enabled
-                     ;; Start logging
-                     (let [log-path (:packet-log-path @app-state)
-                           writer (plog/start-logging! log-path)]
-                       (if writer
-                         (do
-                           (swap! app-state assoc
-                                  :packet-logging-enabled true
-                                  :packet-log-file writer)
-                           ;; Update streaming engine callback if connected
-                           (when-let [engine (:streaming-engine @app-state)]
-                             (streaming/set-log-callback! engine (plog/create-log-callback writer))))
-                         ;; Failed to start logging, uncheck the box
-                         (when-let [tb @toolbar-ref]
-                           (ss/value! (:log-checkbox tb) false))))
-                     ;; Stop logging
-                     (do
-                       (when-let [writer (:packet-log-file @app-state)]
-                         (plog/stop-logging! writer))
-                       ;; Clear streaming engine callback if connected
-                       (when-let [engine (:streaming-engine @app-state)]
-                         (streaming/set-log-callback! engine nil))
-                       (swap! app-state assoc
-                              :packet-logging-enabled false
-                              :packet-log-file nil)))))
-        
-        ;; Store toolbar reference
-        _ (reset! toolbar-ref toolbar)
-        
-        ;; Right panel with preview and palette
-        right-panel (ss/border-panel
-                     :north (ss/border-panel
-                             :center (:panel preview-component)
-                             :border (border/line-border :color (Color. 60 60 60) :thickness 1))
-                     :center preset-palette
-                     :vgap 10
-                     :background (Color. 35 35 35))
-        
-        ;; Create a label for the effects grid section
-        effects-label (ss/label :text "Effects"
-                                :font (Font. "SansSerif" Font/BOLD 12)
-                                :foreground (Color. 180 180 180))
-        
-        ;; Effects grid section with label
-        effects-section (ss/border-panel
-                         :north (ss/horizontal-panel
-                                 :items [effects-label]
-                                 :background (Color. 40 40 40)
-                                 :border (border/empty-border :left 5 :top 3 :bottom 3))
-                         :center (:panel effects-grid-component)
-                         :background (Color. 30 30 30))
-        
-        ;; Left panel with cues grid and effects grid stacked vertically
-        left-panel (ss/border-panel
-                    :center (:panel grid-component)
-                    :south effects-section
-                    :vgap 5
-                    :background (Color. 30 30 30))
-        
-        ;; Wrap left panel in scrollable for when window is small
-        left-scrollable (ss/scrollable left-panel
-                                       :border nil
-                                       :background (Color. 30 30 30))
-        
-        ;; Main content panel
-        content-panel (ss/border-panel
-                       :center left-scrollable
-                       :east right-panel
-                       :south (:panel status-bar)
-                       :north (:panel toolbar)
-                       :background (Color. 30 30 30))
-        
-        ;; Create main frame
-        frame (ss/frame
-               :title "Laser Show - IDN Controller"
-               :content content-panel
-               :minimum-size [900 :by 600]
-               :size [1100 :by 700]
-               :on-close :exit)]
-    
-    ;; Set up menu bar
-    (ss/config! frame :menubar 
-                (create-menu-bar
-                 frame
-                 ;; New
-                 (:clear-all! grid-component)
-                 ;; Open
-                 (fn [] (println "Open not implemented yet"))
-                 ;; Save
-                 (fn [] (println "Save not implemented yet"))
-                 ;; About
-                 (fn [] 
-                   (ss/alert frame 
-                             "Laser Show - IDN Controller\n\nA launchpad-style interface for laser animations.\n\nVersion 0.1.0"))))
-    
-    ;; Store the main-frame-ref for dialog callbacks
-    (reset! main-frame-ref frame)
-    
-    ;; Store references
-    (swap! app-state assoc
-           :main-frame frame
-           :grid grid-component
-           :effects-grid effects-grid-component
-           :preview preview-component
-           :status-bar status-bar)
-    
-    ;; Set up some demo presets (only fill first row based on grid size)
-    ((:set-cell-preset! grid-component) 0 0 :circle)
-    ((:set-cell-preset! grid-component) 1 0 :spinning-square)
-    ((:set-cell-preset! grid-component) 2 0 :triangle)
-    ((:set-cell-preset! grid-component) 3 0 :star)
-    ((:set-cell-preset! grid-component) 4 0 :spiral)
-    ;; Second row
-    ((:set-cell-preset! grid-component) 0 1 :wave)
-    ((:set-cell-preset! grid-component) 1 1 :beam-fan)
-    ((:set-cell-preset! grid-component) 2 1 :rainbow-circle)
-    
-    frame))
+(def app-state 
+  "Application state atom. This is the same atom as window/app-state,
+   provided here for backward compatibility."
+  window/app-state)
 
 ;; ============================================================================
 ;; Input System Integration
@@ -541,7 +32,7 @@
 (defn- setup-input-handlers!
   "Sets up input event handlers to control the grid and application."
   []
-  (let [{:keys [grid preview]} @app-state
+  (let [{:keys [grid preview]} @window/app-state
         cols layout/default-grid-cols
         rows layout/default-grid-rows]
     
@@ -553,33 +44,32 @@
                 col (mod note cols)
                 row (quot note cols)]
             (when (and (< row rows) (< col cols))
-              ;; Trigger the cell via the grid's click handler
               (ss/invoke-later
                 (when-let [cell-state ((:get-cell-state grid) col row)]
                   (when-let [anim (:animation cell-state)]
                     ((:set-animation! preview) anim)
                     ((:set-active-cell! grid) col row)
-                    (swap! app-state assoc :playing true :current-animation anim)))))))))
+                    (swap! window/app-state assoc :playing true :current-animation anim)))))))))
     
     ;; Handle transport triggers
     (router/on-trigger! ::play-pause :play-pause
       (fn [_event]
         (ss/invoke-later
-          (if (:playing @app-state)
+          (if (:playing @window/app-state)
             (do
               ((:stop! preview))
               (when grid ((:set-active-cell! grid) nil nil))
-              (swap! app-state assoc :playing false :current-animation nil))
-            (when-let [anim (:current-animation @app-state)]
+              (swap! window/app-state assoc :playing false :current-animation nil))
+            (when-let [anim (:current-animation @window/app-state)]
               ((:set-animation! preview) anim)
-              (swap! app-state assoc :playing true))))))
+              (swap! window/app-state assoc :playing true))))))
     
     (router/on-trigger! ::stop :stop
       (fn [_event]
         (ss/invoke-later
           ((:stop! preview))
           (when grid ((:set-active-cell! grid) nil nil))
-          (swap! app-state assoc :playing false :current-animation nil))))
+          (swap! window/app-state assoc :playing false :current-animation nil))))
     
     (println "Input handlers registered")))
 
@@ -600,11 +90,7 @@
   (println "OSC input initialized (server not started)")
   
   ;; Set up the handlers
-  (setup-input-handlers!)
-  
-  ;; Enable router logging for debugging (optional)
-  ;; (router/enable-logging!)
-  )
+  (setup-input-handlers!))
 
 (defn- shutdown-input-system!
   "Shuts down the input system cleanly."
@@ -620,7 +106,10 @@
 ;; ============================================================================
 
 (defn start!
-  "Start the Laser Show application."
+  "Start the Laser Show application.
+   
+   If a window is already open, brings it to front.
+   Otherwise creates a new window."
   []
   ;; Initialize projector/zone systems (before UI)
   (println "Initializing projector and zone systems...")
@@ -629,33 +118,48 @@
   (zone-groups/init!)
   (println "Projector/zone systems initialized")
   
-  (ss/invoke-later
-   (try
-     ;; Set up FlatLaf dark theme
-     (FlatDarkLaf/setup)
-     (catch Exception e
-       (println "Could not set FlatLaf theme:" (.getMessage e))))
-   
-   (let [frame (create-main-window)]
-     ;; Initialize input system
-     (init-input-system! frame)
-     
-     ;; Show the frame
-     (ss/show! frame))))
+  ;; Register input system shutdown as a window close callback
+  (window/add-on-close-callback! shutdown-input-system!)
+  
+  ;; Show or create the window
+  (window/show-window!)
+  
+  ;; Initialize input system after window is shown
+  ;; We need to wait briefly for the window to be created
+  (future
+    (Thread/sleep 200)
+    (when-let [frame (window/get-frame)]
+      (init-input-system! frame))))
+
+(defn stop!
+  "Stop the Laser Show application.
+   Closes the window and cleans up resources."
+  []
+  (shutdown-input-system!)
+  (window/close-window!))
 
 (defn -main
   "Main entry point."
-  [& args]
+  [& _args]
   (start!))
 
-;; For REPL development
+;; ============================================================================
+;; REPL Development Helpers
+;; ============================================================================
+
 (comment
+  ;; Start the application
   (start!)
   
-  ;; Test animation
-  (let [anim (presets/create-animation-from-preset :spinning-square)]
-    ((:set-animation! (:preview @app-state)) anim))
+  ;; Stop the application (close window)
+  (stop!)
   
-  ;; Stop animation
-  ((:stop! (:preview @app-state)))
+  ;; Check if window is open
+  (window/window-open?)
+  
+  ;; Bring window to front
+  (window/bring-to-front!)
+  
+  ;; Get current state
+  @window/app-state
   )

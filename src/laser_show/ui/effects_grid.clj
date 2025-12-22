@@ -235,13 +235,24 @@
          ;; Right-click shows context menu
          :on-right-click (fn [cell-key cell-state panel event]
                            (when-let [grid @!grid-ref]
-                             (let [menu (create-effect-context-menu 
-                                         cell-key cell-state grid 
+                             (let [menu (create-effect-context-menu
+                                         cell-key cell-state grid
                                          on-new-effect on-edit-effect)]
                                (base-grid/show-context-menu! menu panel event))))
-         
-         ;; Drag & drop
-         :get-drag-data (fn [cell-state]
+                        
+                        ;; Double-click opens dialog
+                        :on-double-click (fn [cell-key cell-state]
+                                          (when-let [grid @!grid-ref]
+                                            (if (has-effect? cell-state)
+                                              ;; Has effect - open edit dialog
+                                              (when on-edit-effect
+                                                (on-edit-effect cell-key cell-state))
+                                              ;; Empty cell - open new effect dialog
+                                              (when on-new-effect
+                                                (on-new-effect cell-key)))))
+                        
+                        ;; Drag & drop
+                        :get-drag-data (fn [cell-state]
                           (when (has-effect? cell-state)
                             (assoc (get-effect-drag-data cell-state)
                                    :cell-key nil))) ;; cell-key set per-cell

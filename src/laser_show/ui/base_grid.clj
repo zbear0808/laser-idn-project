@@ -85,6 +85,7 @@
    - cell-key: [col row] identifier for this cell
    - callbacks: Map of callback functions:
      - :on-click (fn [cell-key cell-state]) - left click handler
+     - :on-double-click (fn [cell-key cell-state]) - double-click handler
      - :on-right-click (fn [cell-key cell-state panel event]) - right click handler (shows context menu)
      - :render-content (fn [cell-state] -> text) - returns display text for cell
      - :get-background (fn [cell-state] -> Color) - returns background color
@@ -141,10 +142,18 @@
                        (proxy [MouseAdapter] []
                          (mouseClicked [^MouseEvent e]
                            (cond
+                             ;; Right-click (button 3) - show context menu
                              (= (.getButton e) MouseEvent/BUTTON3)
                              (when-let [f (:on-right-click callbacks)]
                                (f cell-key @!cell-state panel e))
                              
+                             ;; Double-click (left button, 2 clicks) - trigger double-click callback
+                             (and (= (.getButton e) MouseEvent/BUTTON1)
+                                  (= (.getClickCount e) 2))
+                             (when-let [f (:on-double-click callbacks)]
+                               (f cell-key @!cell-state))
+                             
+                             ;; Single left-click - normal click behavior
                              :else
                              (when-let [f (:on-click callbacks)]
                                (f cell-key @!cell-state))))

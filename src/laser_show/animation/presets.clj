@@ -107,6 +107,14 @@
                 (color-param :color "Color" [255 100 0])]
    :generator (gen/beam-fan-animation)})
 
+(def preset-horizontal-line
+  {:id :horizontal-line
+   :name "Horizontal Line"
+   :category :beam
+   :parameters [(float-param :length "Length" 1.0 0.1 2.0)
+                (color-param :color "Color" [255 255 255])]
+   :generator (gen/horizontal-line-animation)})
+
 (def preset-rainbow-circle
   {:id :rainbow-circle
    :name "Rainbow Circle"
@@ -127,6 +135,7 @@
    preset-star
    preset-wave
    preset-beam-fan
+   preset-horizontal-line
    preset-rainbow-circle])
 
 (def presets-by-id

@@ -3,9 +3,10 @@
    Includes:
    - Effect selection dialog (choose effect type and configure parameters)
    - Modulator configuration dialog (add modulation to parameters)"
-  (:require [seesaw.core :as ss]
+(:require [seesaw.core :as ss]
             [seesaw.mig :as mig]
             [seesaw.border :as border]
+            [clojure.string :as str]
             [laser-show.animation.effects :as fx]
             [laser-show.animation.modulation :as mod]
             [laser-show.ui.colors :as colors])
@@ -46,39 +47,95 @@
 ;; UI Helpers
 ;; ============================================================================
 
-(defn- create-slider
-  "Create a slider for float/int parameter editing."
-  [{:keys [min max default on-change steps label-fn]}]
-  ;; Ensure min/max are numbers, provide defaults if not
+(defn- create-slider-with-textfield
+  "Create a slider with an editable text field for float parameter editing.
+   The slider and text field are synchronized bidirectionally.
+   Returns {:slider JSlider :textfield JTextField :get-value fn :set-value! fn}"
+  [{:keys [min max default on-change steps label-fn decimal-places]}]
   (let [min-val (if (number? min) min 0.0)
         max-val (if (number? max) max 1.0)
         default-val (if (number? default) default min-val)
-        slider-min (int (* min-val 100))
-        slider-max (int (* max-val 100))
-        slider-val (int (* default-val 100))
+        decimal-places (or decimal-places 2)
+        format-str (str "%." decimal-places "f")
+        slider-scale 100
+        slider-min (int (* min-val slider-scale))
+        slider-max (int (* max-val slider-scale))
+        slider-val (int (* default-val slider-scale))
         steps (or steps 1)
         slider (JSlider. slider-min slider-max slider-val)
-        value-label (ss/label :text (if label-fn 
-                                      (label-fn (/ slider-val 100.0))
-                                      (format "%.2f" (/ slider-val 100.0)))
-                              :font (Font. "Monospaced" Font/PLAIN 11)
-                              :foreground Color/WHITE)]
+        updating-atom (atom false)
+        textfield (ss/text :text (if label-fn 
+                                   (label-fn default-val)
+                                   (format format-str default-val))
+                          :columns 5
+                          :font (Font. "Monospaced" Font/PLAIN 11)
+                          :background (Color. 60 60 60)
+                          :foreground Color/WHITE
+                          :halign :center)
+        
+        update-from-slider! (fn []
+                              (when-not @updating-atom
+                                (reset! updating-atom true)
+                                (let [v (/ (.getValue slider) (double slider-scale))]
+                                  (ss/text! textfield (if label-fn
+                                                        (label-fn v)
+                                                        (format format-str v)))
+                                  (when on-change (on-change v)))
+                                (reset! updating-atom false)))
+        
+        update-from-textfield! (fn []
+                                 (when-not @updating-atom
+                                   (reset! updating-atom true)
+                                   (try
+                                     (let [text-val (ss/text textfield)
+                                           parsed (Double/parseDouble 
+                                                   (str/replace text-val #"[^\d.\-]" ""))
+                                           clamped (max min-val (min max-val parsed))]
+                                       (.setValue slider (int (* clamped slider-scale)))
+                                       (ss/text! textfield (if label-fn
+                                                            (label-fn clamped)
+                                                            (format format-str clamped)))
+                                       (when on-change (on-change clamped)))
+                                     (catch Exception _
+                                       (let [current-v (/ (.getValue slider) (double slider-scale))]
+                                         (ss/text! textfield (if label-fn
+                                                              (label-fn current-v)
+                                                              (format format-str current-v))))))
+                                   (reset! updating-atom false)))]
+    
     (.setMinorTickSpacing slider steps)
     (.setPaintTicks slider false)
     (.setBackground slider (Color. 50 50 50))
     (.setForeground slider Color/WHITE)
+    
     (.addChangeListener slider
       (reify ChangeListener
         (stateChanged [_ _]
-          (let [v (/ (.getValue slider) 100.0)]
-            (ss/config! value-label :text (if label-fn
-                                            (label-fn v)
-                                            (format "%.2f" v)))
-            (when on-change (on-change v))))))
+          (update-from-slider!))))
+    
+    (ss/listen textfield :focus-lost (fn [_] (update-from-textfield!)))
+    (ss/listen textfield :action (fn [_] (update-from-textfield!)))
+    
     {:slider slider
-     :label value-label
-     :get-value (fn [] (/ (.getValue slider) 100.0))
-     :set-value! (fn [v] (.setValue slider (int (* v 100))))}))
+     :textfield textfield
+     :get-value (fn [] (/ (.getValue slider) (double slider-scale)))
+     :set-value! (fn [v]
+                   (reset! updating-atom true)
+                   (.setValue slider (int (* v slider-scale)))
+                   (ss/text! textfield (if label-fn
+                                         (label-fn v)
+                                         (format format-str v)))
+                   (reset! updating-atom false))}))
+
+(defn- create-slider
+  "Create a slider with an editable text field for float/int parameter editing.
+   Wraps create-slider-with-textfield for backward compatibility."
+  [{:keys [min max default on-change steps label-fn] :as opts}]
+  (let [ctrl (create-slider-with-textfield opts)]
+    {:slider (:slider ctrl)
+     :label (:textfield ctrl)
+     :get-value (:get-value ctrl)
+     :set-value! (:set-value! ctrl)}))
 
 (defn- create-spinner
   "Create a spinner for numeric parameter editing."

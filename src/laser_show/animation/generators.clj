@@ -355,6 +355,20 @@
                                :color color)]
       (t/make-frame points))))
 
+(defn horizontal-line-animation
+  "Create a horizontal line animation generator function.
+   Line spans horizontally across the projection area."
+  []
+  (fn [time-ms params]
+    (let [{:keys [length color]
+           :or {length 1.0 color [255 255 255]}} params
+          half-length (/ length 2)
+          points (generate-line :num-points 64
+                               :start [(- half-length) 0]
+                               :end [half-length 0]
+                               :color color)]
+      (t/make-frame points))))
+
 (defn rainbow-circle-animation
   "Create a rainbow-colored circle animation."
   []
