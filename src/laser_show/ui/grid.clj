@@ -1,35 +1,20 @@
 (ns laser-show.ui.grid
-  "Launchpad-style grid UI for triggering laser animations."
+  "Launchpad-style grid UI for triggering laser animations.
+   Refactored to use Uni-directional Data Flow."
   (:require [seesaw.core :as ss]
             [seesaw.border :as border]
-            [seesaw.color :as sc]
             [seesaw.mig :as mig]
-            [laser-show.animation.types :as t]
             [laser-show.animation.presets :as presets]
-            [laser-show.ui.preview :as preview]
             [laser-show.ui.colors :as colors]
             [laser-show.ui.layout :as layout]
-            [laser-show.ui.drag-drop :as dnd]
-            [laser-show.state.clipboard :as clipboard])
+            [laser-show.ui.drag-drop :as dnd])
   (:import [java.awt Color Dimension Font BasicStroke Graphics2D RenderingHints]
            [java.awt.event MouseAdapter MouseEvent KeyEvent InputEvent ActionEvent]
-           [javax.swing BorderFactory JPanel JPopupMenu JMenuItem KeyStroke AbstractAction JDialog]
-           [javax.swing.border Border]
-           [javax.swing DefaultComboBoxModel DefaultListModel ListSelectionModel]
-           [javax.swing.event ListSelectionListener]))
+           [javax.swing BorderFactory JPanel JPopupMenu JMenuItem KeyStroke AbstractAction]
+           [javax.swing.border Border]))
 
 ;; ============================================================================
-;; Grid State
-;; ============================================================================
-
-(defonce !grid-state
-  (atom {:grid-size [layout/default-grid-cols layout/default-grid-rows]
-         :cells {}
-         :active-cell nil
-         :selected-cell nil}))
-
-;; ============================================================================
-;; Custom Empty Cell Border
+;; Custom Empty Cell Border (No changes, helper)
 ;; ============================================================================
 
 (defn create-dashed-border
@@ -54,148 +39,44 @@
         (.dispose g2d)))))
 
 ;; ============================================================================
-;; Preset Selection Dialog
-;; ============================================================================
-
-(defn show-preset-selection-dialog!
-  "Show dialog to select an animation preset.
-   
-   Parameters:
-   - parent: Parent component for dialog
-   - on-select: (fn [preset-id]) called when user selects a preset
-   
-   Returns: Selected preset-id or nil if cancelled"
-  [parent on-select]
-  (let [result-atom (atom nil)
-        dialog (JDialog. (ss/to-root parent) "Select Animation Preset" true)
-        
-        ;; Category combo
-        category-ids (sort (keys presets/categories))
-        category-names (mapv #(:name (get presets/categories %)) category-ids)
-        category-model (DefaultComboBoxModel. (into-array category-names))
-        category-combo (ss/combobox :model category-model)
-        
-        ;; Preset list
-        preset-list-model (DefaultListModel.)
-        preset-list (ss/listbox :model preset-list-model
-                               :renderer (fn [renderer {:keys [value]}]
-                                          (if value
-                                            (ss/config! renderer
-                                                       :text (:name value)
-                                                       :foreground Color/WHITE
-                                                       :background (Color. 50 50 50))
-                                            (ss/config! renderer :text ""))))
-        _ (.setSelectionMode preset-list ListSelectionModel/SINGLE_SELECTION)
-        _ (.setBackground preset-list (Color. 50 50 50))
-        _ (.setForeground preset-list Color/WHITE)
-        
-        ;; Update list based on category selection
-        update-preset-list! (fn [category-id]
-                             (.clear preset-list-model)
-                             (doseq [preset (presets/get-presets-by-category category-id)]
-                               (.addElement preset-list-model preset)))
-        
-        ;; Buttons
-        ok-btn (ss/button :text "Select"
-                         :listen [:action (fn [_]
-                                           (when-let [preset (.getSelectedValue preset-list)]
-                                             (reset! result-atom (:id preset))
-                                             (when on-select (on-select (:id preset)))
-                                             (.dispose dialog)))])
-        cancel-btn (ss/button :text "Cancel"
-                             :listen [:action (fn [_] (.dispose dialog))])
-        
-        ;; Layout
-        content (mig/mig-panel
-                 :constraints ["insets 10, wrap 1", "[grow, fill]", "[][grow, fill][]"]
-                 :items [[(ss/label :text "Select Preset"
-                                   :font (Font. "SansSerif" Font/BOLD 14)
-                                   :foreground Color/WHITE) ""]
-                         [(mig/mig-panel
-                           :constraints ["insets 5", "[80!][grow]", ""]
-                           :items [[(ss/label :text "Category:" :foreground Color/WHITE) ""]
-                                   [category-combo "growx"]]
-                           :background (Color. 45 45 45)) "growx"]
-                         [(ss/scrollable preset-list
-                                        :border (border/line-border :color (Color. 60 60 60))) "grow, h 300!"]
-                         [(mig/mig-panel
-                           :constraints ["insets 10", "[grow][][]", ""]
-                           :items [[(ss/label) "growx"]
-                                   [cancel-btn ""]
-                                   [ok-btn ""]]
-                           :background (Color. 45 45 45)) "growx"]])]
-    
-    ;; Style and setup
-    (ss/config! content :background (Color. 45 45 45))
-    (.setContentPane dialog content)
-    (.setSize dialog 400 450)
-    (.setLocationRelativeTo dialog parent)
-    
-    ;; Initialize with first category
-    (let [first-cat (first category-ids)]
-      (update-preset-list! first-cat))
-    
-    ;; Category change listener
-    (ss/listen category-combo :action
-      (fn [_]
-        (let [idx (.getSelectedIndex category-combo)
-              cat-id (nth category-ids idx)]
-          (update-preset-list! cat-id))))
-    
-    (.setVisible dialog true)
-    @result-atom))
-
-;; ============================================================================
 ;; Context Menu
 ;; ============================================================================
 
 (defn create-cell-context-menu
   "Create a context menu for a grid cell."
-  [cell-key cell-state on-copy on-paste on-clear on-assign-preset]
+  [cell-key cell-data dispatch!]
   (let [popup (JPopupMenu.)
-        has-preset? (boolean (:preset-id cell-state))
-        can-paste? (clipboard/can-paste-cell-assignment?)
+        has-preset? (boolean (:preset-id cell-data))
+        ;; Simple placeholders for copy/paste dispatch
         
         copy-item (JMenuItem. "Copy")
         paste-item (JMenuItem. "Paste")
-        clear-item (JMenuItem. "Clear")
-        assign-preset-item (JMenuItem. "New from Preset...")]
-   
-   (.setEnabled copy-item has-preset?)
-   (.setEnabled paste-item can-paste?)
-   (.setEnabled clear-item has-preset?)
-   
-   (.addActionListener copy-item
-                       (reify java.awt.event.ActionListener
-                         (actionPerformed [_ _e]
-                           (on-copy cell-key cell-state))))
-   
-   (.addActionListener paste-item
-                       (reify java.awt.event.ActionListener
-                         (actionPerformed [_ _e]
-                           (on-paste cell-key))))
-   
-   (.addActionListener clear-item
-                       (reify java.awt.event.ActionListener
-                         (actionPerformed [_ _e]
-                           (on-clear cell-key))))
-   
-   (.addActionListener assign-preset-item
-                       (reify java.awt.event.ActionListener
-                         (actionPerformed [_ e]
-                           (let [source (.getSource e)
-                                 popup-parent (.getInvoker (.getParent source))]
-                             (show-preset-selection-dialog!
-                              popup-parent
-                              (fn [preset-id]
-                                (when preset-id
-                                  (on-assign-preset cell-key preset-id))))))))
-   
-   (.add popup copy-item)
-   (.add popup paste-item)
-   (.addSeparator popup)
-   (.add popup assign-preset-item)
-   (.add popup clear-item)
+        clear-item (JMenuItem. "Clear")]
+    
+    (.setEnabled copy-item has-preset?)
+    (.setEnabled paste-item true) ;; Assume always can paste for now
+    (.setEnabled clear-item has-preset?)
+    
+    (.addActionListener copy-item
+      (reify java.awt.event.ActionListener
+        (actionPerformed [_ _e]
+          ;; Dispatch copy event
+          (dispatch! [:clipboard/copy-cell cell-key]))))
+    
+    (.addActionListener paste-item
+      (reify java.awt.event.ActionListener
+        (actionPerformed [_ _e]
+          (dispatch! [:clipboard/paste-cell cell-key]))))
+    
+    (.addActionListener clear-item
+      (reify java.awt.event.ActionListener
+        (actionPerformed [_ _e]
+          (dispatch! [:grid/clear-cell (first cell-key) (second cell-key)]))))
+    
+    (.add popup copy-item)
+    (.add popup paste-item)
+    (.addSeparator popup)
+    (.add popup clear-item)
     
     popup))
 
@@ -204,7 +85,6 @@
 ;; ============================================================================
 
 (defn- create-cell-label
-  "Create the label showing the animation name."
   [text]
   (ss/label :text (or text "")
             :font (Font. "SansSerif" Font/BOLD 11)
@@ -214,20 +94,9 @@
 
 (defn- create-cell-panel
   "Create a single grid cell panel.
-   
-   Parameters:
-   - col, row: Grid coordinates
-   - on-click: Called when cell is left-clicked
-   - on-right-click: Called when cell is right-clicked
-   - on-copy, on-paste, on-clear: Context menu actions
-   - on-drag-drop: Called when a preset is dropped from another cell: (on-drag-drop source-key preset-id)"
-  [col row on-click on-right-click on-copy on-paste on-clear on-drag-drop]
+   Interactions now dispatch events."
+  [col row dispatch!]
   (let [cell-key [col row]
-        !cell-state (atom {:preset-id nil
-                          :animation nil
-                          :active false
-                          :selected false})
-        
         name-label (create-cell-label "")
         
         empty-border (create-dashed-border colors/border-light layout/cell-border-width)
@@ -239,268 +108,172 @@
                :background colors/cell-empty
                :border empty-border)
         
-        get-current-border (fn []
-                             (let [{:keys [preset-id]} @!cell-state]
-                               (if preset-id assigned-border empty-border)))
-        
-        update-appearance! (fn []
-                             (let [{:keys [preset-id active selected]} @!cell-state
-                                   bg-color (cond
-                                              active colors/cell-active
-                                              selected colors/cell-selected
-                                              preset-id (if-let [preset (presets/get-preset preset-id)]
-                                                          (colors/get-category-color (:category preset))
-                                                          colors/cell-assigned)
-                                              :else colors/cell-empty)
-                                   border (if preset-id assigned-border empty-border)]
-                               (ss/config! panel :background bg-color)
-                               (ss/config! panel :border border)
-                               (ss/config! name-label :text (if preset-id
-                                                             (:name (presets/get-preset preset-id))
-                                                             ""))))]
+        ;; Mutable state for UI interactions (hover) - not app state
+        !ui-state (atom {:hover false})
+        !last-render-state (atom nil)] ; Cache to avoid unnecessary Swing updates
     
     (.setPreferredSize panel (Dimension. 80 60))
     (.setMinimumSize panel (Dimension. 60 50))
     
-    ;; Mouse listeners for click and hover
+    ;; Mouse listeners
     (.addMouseListener panel
-                       (proxy [MouseAdapter] []
-                         (mouseClicked [^MouseEvent e]
-                           (cond
-                             (= (.getButton e) MouseEvent/BUTTON3)
-                             (let [popup (create-cell-context-menu
-                                          cell-key
-                                          @!cell-state
-                                          on-copy
-                                          on-paste
-                                          on-clear
-                          (fn [_key preset-id]
-                            ;; Assign preset to this cell using local state
-                            (swap! !cell-state assoc 
-                                   :preset-id preset-id
-                                   :animation (when preset-id
-                                                (presets/create-animation-from-preset preset-id)))
-                            (update-appearance!)))]
-                               (.show popup panel (.getX e) (.getY e)))
-                             
-                             :else
-                             (on-click cell-key @!cell-state)))
-                         
-                         (mouseEntered [^MouseEvent _e]
-                           (.setBorder panel hover-border))
-                         
-                         (mouseExited [^MouseEvent _e]
-                           (.setBorder panel (get-current-border)))))
+      (proxy [MouseAdapter] []
+        (mouseClicked [^MouseEvent e]
+          (cond
+            (= (.getButton e) MouseEvent/BUTTON3)
+            (let [popup (create-cell-context-menu 
+                         cell-key 
+                         (:data @!last-render-state) ;; Use last rendered data
+                         dispatch!)]
+              (.show popup panel (.getX e) (.getY e)))
+            
+            :else
+            (do
+              ;; Dispatch selection AND trigger
+              (dispatch! [:grid/select-cell col row])
+              (dispatch! [:grid/trigger-cell col row]))))
+        
+        (mouseEntered [^MouseEvent _e]
+          (swap! !ui-state assoc :hover true)
+          (.setBorder panel hover-border))
+        
+        (mouseExited [^MouseEvent _e]
+          (swap! !ui-state assoc :hover false)
+          ;; We need to restore the border based on whether it's assigned or not.
+          ;; The 'update-view!' function needs to run frequently or we rely on the border
+          ;; being reset correctly here. Ideally, we re-run the appearance logic.
+          ;; For now, let's just trigger a re-render if we can, or simplified check:
+          (let [{:keys [preset-id]} (:data @!last-render-state)]
+             (.setBorder panel (if preset-id assigned-border empty-border))))))
     
-    ;; Set up drag support - cell can be dragged if it has a preset
-    (dnd/make-draggable! panel
-      {:data-fn (fn []
-                  (when-let [preset-id (:preset-id @!cell-state)]
-                    {:type :cue-cell
-                     :source-id :cue-grid
-                     :cell-key cell-key
-                     :data {:preset-id preset-id}}))
-       :ghost-fn (fn [comp _data]
-                   (let [{:keys [preset-id]} @!cell-state
-                         color (if-let [preset (presets/get-preset preset-id)]
-                                 (colors/get-category-color (:category preset))
-                                 colors/cell-assigned)]
-                     (dnd/create-simple-ghost-image 
-                      (.getWidth comp) (.getHeight comp)
-                      color
-                      :opacity 0.7
-                      :text (:name (presets/get-preset preset-id)))))
-       :on-drag-start (fn [_data]
-                        (println "Drag started from cell" cell-key))
-       :on-drag-end (fn [_data success?]
-                      (println "Drag ended from cell" cell-key "success:" success?))
-       :enabled-fn (fn [] (some? (:preset-id @!cell-state)))})
+    ;; Drag and Drop - Enable dragging cells with simple ghost image
+    (dnd/make-cell-draggable! panel
+      {:cell-key cell-key
+       :get-data-fn (fn [] (:data @!last-render-state))
+       :data-type :cue-cell
+       :source-id :main-grid
+       :ghost-color colors/cell-assigned})
     
-    ;; Set up drop target - cell accepts drops from other cue cells
-    (dnd/make-drop-target! panel
-      {:accept-fn (fn [transfer-data]
-                    (and transfer-data
-                         (= (:type transfer-data) :cue-cell)
-                         ;; Don't allow dropping on self
-                         (not= (:cell-key transfer-data) cell-key)))
-       :on-drop (fn [transfer-data]
-                  (let [source-key (:cell-key transfer-data)
-                        preset-id (get-in transfer-data [:data :preset-id])]
-                    (when (and source-key preset-id on-drag-drop)
-                      (on-drag-drop source-key preset-id)
-                      true)))
-       :on-drag-enter (fn [_data]
-                        (.setBorder panel (dnd/create-highlight-border)))
-       :on-drag-exit (fn []
-                       (.setBorder panel (get-current-border)))})
+    ;; Make cell a drop target
+    (dnd/make-cell-drop-target! panel
+      {:cell-key cell-key
+       :accept-types #{:cue-cell}
+       :source-id :main-grid
+       :on-drop-fn (fn [source-key _data]
+                     (when source-key
+                       (dispatch! [:grid/move-cell 
+                                   (first source-key) (second source-key)
+                                   col row]))
+                     true)
+       :default-border empty-border})
     
     {:panel panel
      :key cell-key
-     :state !cell-state
-     :set-preset! (fn [preset-id]
-                    ;; Clear both preset-id and animation together
-                    ;; When preset-id is nil, animation should also be nil
-                    (swap! !cell-state assoc 
-                           :preset-id preset-id
-                           :animation (when preset-id
-                                        (presets/create-animation-from-preset preset-id)))
-                    (update-appearance!))
-     :set-active! (fn [active]
-                    (swap! !cell-state assoc :active active)
-                    (update-appearance!))
-     :set-selected! (fn [selected]
-                      (swap! !cell-state assoc :selected selected)
-                      (update-appearance!))
-     :get-animation (fn [] (:animation @!cell-state))
-     :get-state (fn [] @!cell-state)
-     :update! update-appearance!}))
+     
+     ;; Update Function: Called when global state changes
+     :update-view! 
+     (fn [grid-state active-cell selected-cell]
+       (let [cell-data (get-in grid-state [:cells cell-key])
+             preset-id (:preset-id cell-data)
+             active?   (= active-cell cell-key)
+             selected? (= selected-cell cell-key)
+             
+             new-render-state {:data cell-data 
+                               :active active? 
+                               :selected selected?}]
+         
+         (when (not= new-render-state @!last-render-state)
+           (reset! !last-render-state new-render-state)
+           
+           (let [bg-color (cond
+                            active? colors/cell-active
+                            selected? colors/cell-selected
+                            preset-id (if-let [preset (presets/get-preset preset-id)]
+                                        (colors/get-category-color (:category preset))
+                                        colors/cell-assigned)
+                            :else colors/cell-empty)
+                 border (if preset-id assigned-border empty-border)]
+             
+             (ss/config! panel :background bg-color)
+             (when-not (:hover @!ui-state)
+               (ss/config! panel :border border))
+             (ss/config! name-label :text (if preset-id
+                                            (:name (presets/get-preset preset-id))
+                                            ""))))))}))
 
 ;; ============================================================================
 ;; Grid Panel
 ;; ============================================================================
 
 (defn create-grid-panel
-  "Create the main grid panel with cells.
-   Returns a map with :panel and control functions."
-  [& {:keys [cols rows on-cell-click on-cell-right-click on-copy on-paste on-clear]
-      :or {cols layout/default-grid-cols
-           rows layout/default-grid-rows
-           on-cell-click (fn [k s] (println "Cell clicked:" k))
-           on-cell-right-click (fn [k s] (println "Cell right-clicked:" k))
-           on-copy (fn [k s] (println "Copy:" k))
-           on-paste (fn [k] (println "Paste:" k))
-           on-clear (fn [k] (println "Clear:" k))}}]
-  (let [!cells (atom {})
-        !selected (atom nil)
-        !active (atom nil)
+  "Create the main grid panel.
+   
+   arguments:
+   - dispatch!: function (fn [event-vector])
+   - cols, rows (optional)
+   
+   returns map:
+   {:panel seesaw-panel
+    :update-view! (fn [app-state] ...)}"
+  [dispatch! & {:keys [cols rows]
+                :or {cols layout/default-grid-cols
+                     rows layout/default-grid-rows}}]
+  (let [;; We still store refernece to cells to update them
+        !cell-components (atom {}) 
         
-        ;; Use simple wrap-based layout instead of explicit cell positioning
         layout-str (str "wrap " cols ", gap " layout/cell-gap ", insets " layout/panel-insets)
-        
         grid-panel (mig/mig-panel
                     :constraints [layout-str]
-                    :background colors/background-dark)
-        
-        handle-click (fn [cell-key cell-state]
-                       (when-let [prev-selected @!selected]
-                         (when-let [prev-cell (get @!cells prev-selected)]
-                           ((:set-selected! prev-cell) false)))
-                       (when-let [cell (get @!cells cell-key)]
-                         ((:set-selected! cell) true)
-                         (reset! !selected cell-key))
-                       (on-cell-click cell-key cell-state))
-        
-        handle-right-click (fn [cell-key cell-state]
-                             (on-cell-right-click cell-key cell-state))
-        
-        handle-copy (fn [cell-key cell-state]
-                      (on-copy cell-key cell-state))
-        
-        handle-paste (fn [cell-key]
-                       (on-paste cell-key))
-        
-        handle-clear (fn [cell-key]
-                       (on-clear cell-key))
-        
-        copy-selected! (fn []
-                         (when-let [selected-key @!selected]
-                           (when-let [cell (get @!cells selected-key)]
-                             (let [state ((:get-state cell))]
-                               (handle-copy selected-key state)))))
-        
-        paste-to-selected! (fn []
-                             (when-let [selected-key @!selected]
-                               (handle-paste selected-key)))
-        
-        ;; Handler for drag-drop operations (move preset from source to target)
-        handle-drag-drop (fn [target-cell-key source-key preset-id]
-                           ;; Set the preset on the target cell
-                           (when-let [target-cell (get @!cells target-cell-key)]
-                             ((:set-preset! target-cell) preset-id))
-                           ;; Clear the source cell
-                           (when-let [source-cell (get @!cells source-key)]
-                             ((:set-preset! source-cell) nil))
-                           (println "Moved preset" preset-id "from" source-key "to" target-cell-key))]
+                    :background colors/background-dark)]
     
-    ;; Add cells in row-major order (row 0 first, then row 1, etc.)
-    ;; With wrap constraint, cells are added left-to-right, top-to-bottom
+    ;; Create cells
     (doseq [row (range rows)
             col (range cols)]
-      (let [cell-key [col row]
-            ;; Create drag-drop handler that knows this cell's key
-            cell-drag-drop (fn [source-key preset-id]
-                             (handle-drag-drop cell-key source-key preset-id))
-            cell (create-cell-panel col row handle-click handle-right-click
-                                    handle-copy handle-paste handle-clear cell-drag-drop)]
-        (swap! !cells assoc [col row] cell)
-        ;; Use empty constraint - cells have preferred size set already
-        (ss/add! grid-panel (:panel cell))))
+      (let [cell-comp (create-cell-panel col row dispatch!)]
+        (swap! !cell-components assoc [col row] cell-comp)
+        (ss/add! grid-panel (:panel cell-comp))))
     
-    ;; Set preferred size to ensure all cells are visible
-    (let [total-width (+ (* cols (+ layout/cell-width layout/cell-gap)) (* 2 layout/panel-insets))
-          total-height (+ (* rows (+ layout/cell-height layout/cell-gap)) (* 2 layout/panel-insets))]
-      (.setPreferredSize grid-panel (Dimension. total-width total-height))
-      (.setMinimumSize grid-panel (Dimension. total-width total-height)))
+    ;; Set size
+     (let [total-width (+ (* cols (+ layout/cell-width layout/cell-gap)) (* 2 layout/panel-insets))
+           total-height (+ (* rows (+ layout/cell-height layout/cell-gap)) (* 2 layout/panel-insets))]
+       (.setPreferredSize grid-panel (Dimension. total-width total-height))
+       (.setMinimumSize grid-panel (Dimension. total-width total-height)))
     
-    ;; Add keyboard shortcuts for copy/paste
+    ;; Keyboard Shortcuts (Copy/Paste)
     (let [input-map (.getInputMap grid-panel JPanel/WHEN_IN_FOCUSED_WINDOW)
           action-map (.getActionMap grid-panel)
-          
           ctrl-c (KeyStroke/getKeyStroke KeyEvent/VK_C InputEvent/CTRL_DOWN_MASK)
           ctrl-v (KeyStroke/getKeyStroke KeyEvent/VK_V InputEvent/CTRL_DOWN_MASK)]
       
       (.put input-map ctrl-c "copy-cell")
       (.put action-map "copy-cell"
             (proxy [AbstractAction] []
-              (actionPerformed [^ActionEvent _e]
-                (copy-selected!))))
+              (actionPerformed [_ _]
+                (dispatch! [:clipboard/copy-selected]))))
       
       (.put input-map ctrl-v "paste-cell")
       (.put action-map "paste-cell"
             (proxy [AbstractAction] []
-              (actionPerformed [^ActionEvent _e]
-                (paste-to-selected!)))))
+              (actionPerformed [_ _]
+                (dispatch! [:clipboard/paste-to-selected])))))
     
     {:panel grid-panel
-     :cells !cells
-     
-     :set-cell-preset! (fn [col row preset-id]
-                         (when-let [cell (get @!cells [col row])]
-                           ((:set-preset! cell) preset-id)))
-     
-     :set-active-cell! (fn [col row]
-                         (when-let [prev @!active]
-                           (when-let [prev-cell (get @!cells prev)]
-                             ((:set-active! prev-cell) false)))
-                         (when (and col row)
-                           (when-let [cell (get @!cells [col row])]
-                             ((:set-active! cell) true)))
-                         (reset! !active (when col [col row])))
-     
-     :get-cell-animation (fn [col row]
-                           (when-let [cell (get @!cells [col row])]
-                             ((:get-animation cell))))
-     
-     :get-cell-state (fn [col row]
-                       (when-let [cell (get @!cells [col row])]
-                         ((:get-state cell))))
-     
-     :get-selected-cell (fn [] @!selected)
-     
-     :clear-all! (fn []
-                   (doseq [[_ cell] @!cells]
-                     ((:set-preset! cell) nil)))
-     
-     :copy-selected! copy-selected!
-     :paste-to-selected! paste-to-selected!}))
+     ;; This function is called by the parent (window) whenever app-state atom changes
+     :update-view! (fn [app-state]
+                     (let [grid-state (:grid app-state)
+                           active-cell (:active-cell grid-state)
+                           selected-cell (:selected-cell grid-state)]
+                       ;; Update all cells
+                       (doseq [[_ cell-comp] @!cell-components]
+                         ((:update-view! cell-comp) grid-state active-cell selected-cell))))}))
 
 ;; ============================================================================
-;; Preset Palette (for selecting presets)
+;; Preset Palette (unchanged, just use dispatch helper)
 ;; ============================================================================
 
 (defn create-preset-palette
-  "Create a panel showing available presets for assignment."
-  [on-preset-select]
+  "Create a panel showing available presets."
+  [dispatch!]
   (let [preset-buttons (for [preset presets/all-presets]
                          (let [[r g b] (or (get-in presets/categories [(:category preset) :color])
                                            [100 100 100])
@@ -509,7 +282,7 @@
                                     :font (Font. "SansSerif" Font/PLAIN 10)
                                     :background (Color. r g b)
                                     :foreground Color/WHITE)]
-                           (ss/listen btn :action (fn [_] (on-preset-select (:id preset))))
+                           (ss/listen btn :action (fn [_] (dispatch! [:grid/set-selected-preset (:id preset)])))
                            btn))]
     (ss/scrollable
      (mig/mig-panel

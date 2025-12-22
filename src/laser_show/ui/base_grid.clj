@@ -169,7 +169,9 @@
       (dnd/make-draggable! panel
         {:data-fn (fn []
                     (when-let [f (:get-drag-data callbacks)]
-                      (f @!cell-state)))
+                      (when-let [data (f @!cell-state)]
+                        ;; Inject cell-key into drag data
+                        (assoc data :cell-key cell-key))))
          :ghost-fn (fn [comp data]
                      (if-let [f (:create-ghost callbacks)]
                        (f comp @!cell-state)

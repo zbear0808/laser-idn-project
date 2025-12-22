@@ -62,10 +62,21 @@
 ;; ============================================================================
 
 (defn- make-modulator
-  "Wrap a function as a modulator with metadata."
-  [f description]
-  (with-meta f {::modulator true
-                ::description description}))
+  "Wrap a function as a modulator with metadata.
+   The config map stores the original parameters for UI reconstruction."
+  ([f description]
+   (make-modulator f description nil))
+  ([f description config]
+   (with-meta f {::modulator true
+                 ::description description
+                 ::config config})))
+
+(defn get-modulator-config
+  "Extract the configuration from a modulator function.
+   Returns nil if not a modulator or no config available."
+  [modulator]
+  (when (modulator? modulator)
+    (::config (meta modulator))))
 
 ;; ============================================================================
 ;; Waveform Modulators (BPM-synced)
@@ -92,7 +103,8 @@
       (fn [{:keys [time-ms bpm]}]
         (let [phase (+ (time/time->beat-phase (double time-ms) (double bpm)) offset)]
           (time/oscillate min-v max-v (* phase freq) :sine)))
-      (str "sine(" min-val "-" max-val " @" frequency "x)")))))
+      (str "sine(" min-val "-" max-val " @" frequency "x)")
+      {:type :sine :min min-val :max max-val :freq frequency :phase phase-offset}))))
 
 (defn triangle-mod
   "Create a triangle wave modulator (BPM-synced).
@@ -115,7 +127,8 @@
       (fn [{:keys [time-ms bpm]}]
         (let [phase (+ (time/time->beat-phase (double time-ms) (double bpm)) offset)]
           (time/oscillate min-v max-v (* phase freq) :triangle)))
-      (str "triangle(" min-val "-" max-val " @" frequency "x)")))))
+      (str "triangle(" min-val "-" max-val " @" frequency "x)")
+      {:type :triangle :min min-val :max max-val :freq frequency :phase phase-offset}))))
 
 (defn sawtooth-mod
   "Create a sawtooth wave modulator (BPM-synced).
@@ -139,7 +152,8 @@
       (fn [{:keys [time-ms bpm]}]
         (let [phase (+ (time/time->beat-phase (double time-ms) (double bpm)) offset)]
           (time/oscillate min-v max-v (* phase freq) :sawtooth)))
-      (str "sawtooth(" min-val "-" max-val " @" frequency "x)")))))
+      (str "sawtooth(" min-val "-" max-val " @" frequency "x)")
+      {:type :sawtooth :min min-val :max max-val :freq frequency :phase phase-offset}))))
 
 (defn square-mod
   "Create a square wave modulator (BPM-synced).
@@ -168,7 +182,8 @@
         (let [phase (+ (time/time->beat-phase (double time-ms) (double bpm)) offset)
               cycle-phase (mod (* phase freq) 1.0)]
           (if (< cycle-phase duty) max-v min-v)))
-      (str "square(" min-val "-" max-val " @" frequency "x)")))))
+      (str "square(" min-val "-" max-val " @" frequency "x)")
+      {:type :square :min min-val :max max-val :freq frequency :phase phase-offset}))))
 
 ;; ============================================================================
 ;; Time-based Modulators (Hz, not BPM-synced)
@@ -189,7 +204,8 @@
      (fn [{:keys [time-ms]}]
        (let [phase (time/time->phase (double time-ms) freq)]
          (time/oscillate min-v max-v phase :sine)))
-     (str "sine-hz(" min-val "-" max-val " @" frequency-hz "Hz)"))))
+     (str "sine-hz(" min-val "-" max-val " @" frequency-hz "Hz)")
+     nil)))
 
 (defn square-hz
   "Create a square wave modulator at fixed Hz frequency.
@@ -210,7 +226,8 @@
       (fn [{:keys [time-ms]}]
         (let [phase (time/time->phase (double time-ms) freq)]
           (if (< phase duty) max-v min-v)))
-      (str "square-hz(" min-val "-" max-val " @" frequency-hz "Hz)")))))
+      (str "square-hz(" min-val "-" max-val " @" frequency-hz "Hz)")
+      nil))))
 
 ;; ============================================================================
 ;; One-shot Modulators (Decay/Envelope)
@@ -238,7 +255,8 @@
         (let [elapsed (- (double time-ms) trigger)
               progress (min 1.0 (/ elapsed duration))]
           (+ start-v (* progress range-v))))
-      (str "linear-decay(" start-val "->" end-val " over " duration-ms "ms)")))))
+      (str "linear-decay(" start-val "->" end-val " over " duration-ms "ms)")
+      nil))))
 
 (defn exp-decay
   "Create an exponential decay modulator.
@@ -263,7 +281,8 @@
         (let [elapsed (- (double time-ms) trigger)
               decay-factor (Math/exp (- (/ (* elapsed ln2) half-life)))]
           (+ end-v (* decay-factor range-v))))
-      (str "exp-decay(" start-val "->" end-val " t½=" half-life-ms "ms)")))))
+      (str "exp-decay(" start-val "->" end-val " t½=" half-life-ms "ms)")
+      nil))))
 
 (defn beat-decay
   "Create a decay that resets on each beat.
@@ -288,7 +307,8 @@
                    (+ end-v (* decay-factor range-exp)))
             ;; :linear is default
             (+ start-v (* phase range-v)))))
-      (str "beat-decay(" start-val "->" end-val " " decay-type ")")))))
+      (str "beat-decay(" start-val "->" end-val " " decay-type ")")
+      {:type :beat-decay :min end-val :max start-val :freq 1.0 :phase 0.0}))))
 
 ;; ============================================================================
 ;; External Control Modulators
@@ -311,7 +331,8 @@
      (fn [{:keys [midi-state]}]
        (let [cc-val (double (get-in midi-state [[channel cc]] 0))]
          (+ min-v (* (/ cc-val 127.0) range-v))))
-     (str "midi(" channel ":" cc " " min-val "-" max-val ")"))))
+     (str "midi(" channel ":" cc " " min-val "-" max-val ")")
+     nil)))
 
 (defn osc-mod
   "Create an OSC parameter modulator.
@@ -329,7 +350,8 @@
      (fn [{:keys [osc-state]}]
        (let [osc-val (double (get osc-state path 0.0))]
          (+ min-v (* osc-val range-v))))
-     (str "osc(" path " " min-val "-" max-val ")"))))
+     (str "osc(" path " " min-val "-" max-val ")")
+     nil)))
 
 ;; ============================================================================
 ;; Point/Position-Based Modulators
@@ -358,7 +380,8 @@
           (let [t (/ (double point-index) (max 1.0 (dec (double point-count))))]
             (+ min-v (* (if wrap? (mod t 1.0) t) range-v)))
           min-v))
-      (str "point-index(" min-val "-" max-val (when wrap? " wrap") ")")))))
+      (str "point-index(" min-val "-" max-val (when wrap? " wrap") ")")
+      nil))))
 
 (defn point-index-wave
   "Create a wave modulator based on point index.
@@ -384,7 +407,8 @@
                 phase (* t cyc)]
             (time/oscillate min-v max-v phase wave-type))
           min-v))
-      (str "point-wave(" min-val "-" max-val " " cycles "x " wave-type ")")))))
+      (str "point-wave(" min-val "-" max-val " " cycles "x " wave-type ")")
+      nil))))
 
 (defn position-x-mod
   "Create a modulator based on X position.
@@ -403,7 +427,8 @@
          (let [t (/ (+ (double x) 1.0) 2.0)]  ; normalize -1..1 to 0..1
            (+ min-v (* t range-v)))
          min-v))
-     (str "pos-x(" min-val "-" max-val ")"))))
+     (str "pos-x(" min-val "-" max-val ")")
+     nil)))
 
 (defn position-y-mod
   "Create a modulator based on Y position.
@@ -422,7 +447,8 @@
          (let [t (/ (+ (double y) 1.0) 2.0)]  ; normalize -1..1 to 0..1
            (+ min-v (* t range-v)))
          min-v))
-     (str "pos-y(" min-val "-" max-val ")"))))
+     (str "pos-y(" min-val "-" max-val ")")
+     nil)))
 
 (defn position-radial-mod
   "Create a modulator based on distance from center.
@@ -447,7 +473,8 @@
                 t (min 1.0 (/ dist max-dist))]
             (+ min-v (* t range-v)))
           min-v))
-      (str "pos-radial(" min-val "-" max-val ")")))))
+      (str "pos-radial(" min-val "-" max-val ")")
+      nil))))
 
 (defn position-angle-mod
   "Create a modulator based on angle from center.
@@ -467,7 +494,8 @@
                t (/ (+ angle Math/PI) (* 2.0 Math/PI))]  ; normalize -π..π to 0..1
            (+ min-v (* t range-v)))
          min-v))
-     (str "pos-angle(" min-val "-" max-val ")"))))
+     (str "pos-angle(" min-val "-" max-val ")")
+     nil)))
 
 (defn position-wave
   "Create a wave pattern based on position.
@@ -500,7 +528,8 @@
                 phase (* pos-val freq)]
             (time/oscillate min-v max-v phase wave-type))
           min-v))
-      (str "pos-wave(" axis " " min-val "-" max-val " " frequency "x " wave-type ")")))))
+      (str "pos-wave(" axis " " min-val "-" max-val " " frequency "x " wave-type ")")
+      nil))))
 
 ;; ============================================================================
 ;; Animated Position Modulators (combine position + time)

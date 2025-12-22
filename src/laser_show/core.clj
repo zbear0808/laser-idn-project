@@ -1,15 +1,14 @@
 (ns laser-show.core
   "Main entry point for the Laser Show application.
-   
-   This namespace provides the application entry point and input system setup.
-   The main window and UI components are managed by laser-show.ui.window."
+   Refactored to use Uni-directional Data Flow."
   (:require [seesaw.core :as ss]
+            [laser-show.state :as state]
+            [laser-show.events :as events]
             [laser-show.ui.window :as window]
             [laser-show.ui.layout :as layout]
             [laser-show.backend.projectors :as projectors]
             [laser-show.backend.zones :as zones]
             [laser-show.backend.zone-groups :as zone-groups]
-            [laser-show.input.events :as events]
             [laser-show.input.router :as router]
             [laser-show.input.keyboard :as keyboard]
             [laser-show.input.midi :as midi]
@@ -17,61 +16,45 @@
   (:gen-class))
 
 ;; ============================================================================
-;; Application State (delegated to window namespace)
+;; Application State Access
 ;; ============================================================================
 
 (def app-state 
-  "Application state atom. This is the same atom as window/app-state,
-   provided here for backward compatibility."
-  window/app-state)
+  "Reference to the central app state."
+  state/app-state)
 
 ;; ============================================================================
 ;; Input System Integration
 ;; ============================================================================
 
 (defn- setup-input-handlers!
-  "Sets up input event handlers to control the grid and application."
+  "Sets up input event handlers to dispatch application events."
   []
-  (let [{:keys [grid preview]} @window/app-state
-        cols layout/default-grid-cols
+  (let [cols layout/default-grid-cols
         rows layout/default-grid-rows]
     
     ;; Handle note-on events (trigger grid cells)
     (router/on-note! ::grid-trigger nil nil
       (fn [event]
-        (when grid
-          (let [note (:note event)
-                col (mod note cols)
-                row (quot note cols)]
-            (when (and (< row rows) (< col cols))
-              (ss/invoke-later
-                (when-let [cell-state ((:get-cell-state grid) col row)]
-                  (when-let [anim (:animation cell-state)]
-                    ((:set-animation! preview) anim)
-                    ((:set-active-cell! grid) col row)
-                    (swap! window/app-state assoc :playing true :current-animation anim)))))))))
+        (let [note (:note event)
+              col (mod note cols)
+              row (quot note cols)]
+          (when (and (< row rows) (< col cols))
+            (ss/invoke-later
+              (events/dispatch! [:grid/trigger-cell col row]))))))
     
     ;; Handle transport triggers
     (router/on-trigger! ::play-pause :play-pause
       (fn [_event]
         (ss/invoke-later
-          (if (:playing @window/app-state)
-            (do
-              ((:stop! preview))
-              (when grid ((:set-active-cell! grid) nil nil))
-              (swap! window/app-state assoc :playing false :current-animation nil))
-            (when-let [anim (:current-animation @window/app-state)]
-              ((:set-animation! preview) anim)
-              (swap! window/app-state assoc :playing true))))))
+          (events/dispatch! [:transport/play-pause]))))
     
     (router/on-trigger! ::stop :stop
       (fn [_event]
         (ss/invoke-later
-          ((:stop! preview))
-          (when grid ((:set-active-cell! grid) nil nil))
-          (swap! window/app-state assoc :playing false :current-animation nil))))
+          (events/dispatch! [:transport/stop]))))
     
-    (println "Input handlers registered")))
+    (println "Input handlers registered (using event dispatch)")))
 
 (defn- init-input-system!
   "Initializes the input system (keyboard, MIDI, OSC)."
@@ -106,10 +89,7 @@
 ;; ============================================================================
 
 (defn start!
-  "Start the Laser Show application.
-   
-   If a window is already open, brings it to front.
-   Otherwise creates a new window."
+  "Start the Laser Show application."
   []
   ;; Initialize projector/zone systems (before UI)
   (println "Initializing projector and zone systems...")
@@ -125,15 +105,13 @@
   (window/show-window!)
   
   ;; Initialize input system after window is shown
-  ;; We need to wait briefly for the window to be created
   (future
     (Thread/sleep 200)
     (when-let [frame (window/get-frame)]
       (init-input-system! frame))))
 
 (defn stop!
-  "Stop the Laser Show application.
-   Closes the window and cleans up resources."
+  "Stop the Laser Show application."
   []
   (shutdown-input-system!)
   (window/close-window!))
@@ -142,24 +120,3 @@
   "Main entry point."
   [& _args]
   (start!))
-
-;; ============================================================================
-;; REPL Development Helpers
-;; ============================================================================
-
-(comment
-  ;; Start the application
-  (start!)
-  
-  ;; Stop the application (close window)
-  (stop!)
-  
-  ;; Check if window is open
-  (window/window-open?)
-  
-  ;; Bring window to front
-  (window/bring-to-front!)
-  
-  ;; Get current state
-  @window/app-state
-  )

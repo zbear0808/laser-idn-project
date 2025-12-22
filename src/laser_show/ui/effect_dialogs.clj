@@ -204,7 +204,8 @@
                                                             (on-modulate key param-def
                                                               (fn [modulator]
                                                                 (reset! modulator-atom modulator)
-                                                                (ss/config! mod-indicator :text "~")))))]) ""]
+                                                                (ss/config! mod-indicator :text (if modulator "~" "")))
+                                                              :existing-modulator @modulator-atom)))]) ""]
                            [mod-indicator ""]]))
                 
                 :int
@@ -229,7 +230,8 @@
                                                             (on-modulate key param-def
                                                               (fn [modulator]
                                                                 (reset! modulator-atom modulator)
-                                                                (ss/config! mod-indicator :text "~")))))]) ""]
+                                                                (ss/config! mod-indicator :text (if modulator "~" "")))
+                                                              :existing-modulator @modulator-atom)))]) ""]
                            [mod-indicator ""]]))
                 
                 :bool
@@ -331,11 +333,18 @@
    - param-key: The parameter key being modulated
    - param-def: The parameter definition
    - on-confirm: (fn [modulator]) called when user confirms
+   - existing-modulator: (optional) Existing modulator to edit - will initialize UI with its config
+   - on-modulator-change: (optional fn [modulator]) called when modulator settings change
+                          Used for live preview - the modulator is immediately applied
    
    Returns: The modulator function or nil if cancelled"
-  [parent param-key param-def on-confirm]
+  [parent param-key param-def on-confirm & {:keys [existing-modulator on-modulator-change]}]
   (let [result-atom (atom nil)
         dialog (JDialog. (ss/to-root parent) "Configure Modulator" true)
+        
+        ;; Extract existing modulator config if available
+        existing-config (when existing-modulator
+                          (mod/get-modulator-config existing-modulator))
         
         ;; Modulator type combo
         type-model (DefaultComboBoxModel. (into-array (map :name modulator-types)))
@@ -346,14 +355,30 @@
         param-max (or (:max param-def) 1.0)
         param-default (or (:default param-def) (/ (+ param-min param-max) 2))
         
+        ;; Initial values from existing config or defaults
+        init-min (or (:min existing-config) param-min)
+        init-max (or (:max existing-config) param-max)
+        init-freq (or (:freq existing-config) 1.0)
+        init-phase (or (:phase existing-config) 0.0)
+        init-type-idx (if-let [t (:type existing-config)]
+                        (case t
+                          :sine 0
+                          :triangle 1
+                          :sawtooth 2
+                          :square 3
+                          :random 4
+                          :beat-decay 5
+                          0)
+                        0)
+        
         ;; Value controls
-        min-ctrl (create-slider {:min param-min :max param-max :default param-min
+        min-ctrl (create-slider {:min param-min :max param-max :default init-min
                                 :label-fn #(format "%.2f" %)})
-        max-ctrl (create-slider {:min param-min :max param-max :default param-max
+        max-ctrl (create-slider {:min param-min :max param-max :default init-max
                                 :label-fn #(format "%.2f" %)})
-        freq-ctrl (create-slider {:min 0.1 :max 8.0 :default 1.0
+        freq-ctrl (create-slider {:min 0.1 :max 8.0 :default init-freq
                                  :label-fn #(format "%.1fx" %)})
-        phase-ctrl (create-slider {:min 0.0 :max 1.0 :default 0.0
+        phase-ctrl (create-slider {:min 0.0 :max 1.0 :default init-phase
                                   :label-fn #(format "%.2f" %)})
         
         ;; Preset buttons
@@ -396,6 +421,29 @@
                               :random (mod/random-mod min-v max-v freq)
                               :beat-decay (mod/beat-decay max-v min-v)
                               (mod/sine-mod min-v max-v freq))))
+        
+        ;; Notify about modulator change for live preview
+        notify-modulator-change! (fn []
+                                   (when on-modulator-change
+                                     (let [m (create-modulator)]
+                                       (on-modulator-change m))))
+        
+        ;; Add change listeners to sliders for live preview
+        _ (when on-modulator-change
+            (.addChangeListener (:slider min-ctrl)
+              (reify ChangeListener
+                (stateChanged [_ _] (notify-modulator-change!))))
+            (.addChangeListener (:slider max-ctrl)
+              (reify ChangeListener
+                (stateChanged [_ _] (notify-modulator-change!))))
+            (.addChangeListener (:slider freq-ctrl)
+              (reify ChangeListener
+                (stateChanged [_ _] (notify-modulator-change!))))
+            (.addChangeListener (:slider phase-ctrl)
+              (reify ChangeListener
+                (stateChanged [_ _] (notify-modulator-change!))))
+            ;; Also listen to type combo changes
+            (ss/listen type-combo :action (fn [_] (notify-modulator-change!))))
         
         ;; Buttons
         ok-btn (ss/button :text "Apply Modulator"
@@ -474,6 +522,11 @@
                            :background (Color. 45 45 45)) "growx, dock south"]])]
     
     (style-dialog-panel content)
+    
+    ;; Initialize type combo from existing config
+    (when existing-config
+      (.setSelectedIndex type-combo init-type-idx))
+    
     (.setContentPane dialog content)
     (.setSize dialog 450 450)
     (.setLocationRelativeTo dialog parent)
@@ -536,16 +589,12 @@
                               (doseq [effect (fx/list-effects-by-category category-id)]
                                 (.addElement effect-list-model effect)))
         
-        ;; Function to create modulator via dialog
-        on-modulate (fn [param-key param-def on-apply]
-                      (show-modulator-dialog! dialog param-key param-def on-apply))
-        
         ;; Empty placeholder for when no effect is selected
         empty-placeholder (ss/label :text "Select an effect to configure parameters"
                                     :foreground (Color. 120 120 120)
                                     :halign :center)
         
-        ;; Function to build and notify current effect data
+        ;; Function to build and notify current effect data (defined first so on-modulate can use it)
         notify-effect-change! (fn []
                                (when on-effect-change
                                  (when-let [effect-def @selected-effect-atom]
@@ -556,6 +605,16 @@
                                                      :enabled true
                                                      :params params}]
                                      (on-effect-change effect-data)))))
+        
+        ;; Function to create modulator via dialog
+        ;; This callback is passed to create-params-panel and receives the existing modulator
+        on-modulate (fn [param-key param-def on-apply & {:keys [existing-modulator]}]
+                      (show-modulator-dialog! dialog param-key param-def on-apply
+                        :existing-modulator existing-modulator
+                        :on-modulator-change (fn [m]
+                                               ;; Apply the modulator and notify for live preview
+                                               (on-apply m)
+                                               (notify-effect-change!))))
         
         ;; Function to update params panel
         update-params-panel! (fn [effect-def]

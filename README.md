@@ -8,6 +8,24 @@ Contains two modules:
 
 For detailed architecture information, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+## Table of Contents
+
+- [Quick Start](#quick-start)
+  - [Prerequisites](#prerequisites)
+  - [Running Laser Show](#running-laser-show)
+  - [Running IDN-Hello](#running-idn-hello)
+- [Development](#development)
+- [Animation System](#animation-system)
+- [IDN Protocol Support](#idn-protocol-support)
+- [Input System](#input-system)
+- [Testing](#testing)
+- [Current Work](#current-work)
+- [Non-Goals](#non-goals)
+- [Future Possibilities](#future-possibilities)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+- [Contributing](#contributing)
+
 ## Quick Start
 
 ### Prerequisites
@@ -208,6 +226,8 @@ This project intentionally does not include the following features:
 ### High-Quality / Realistic Visualization
 
 Real-time, photorealistic laser visualization is computationally expensive and would be better suited as a standalone application. The current preview is optimized for performance and layout verification, not rendering quality. Building high-quality real-time visualization would add significant complexity without benefiting the core use case of controlling live shows.
+
+**If you need visualization**: Check out the [IDN Tools project](https://gitlab.com/laser_light_lab_uni_bonn/idn-npp/idn-tools) which includes visualization tools for the IDN protocol.
 
 ### FFT / Live Audio Analysis
 

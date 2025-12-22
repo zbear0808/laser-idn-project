@@ -14,6 +14,7 @@
             [laser-show.ui.layout :as layout]
             [laser-show.ui.drag-drop :as dnd]
             [laser-show.animation.effects :as fx]
+            [laser-show.animation.modulation :as mod]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.ui.effect-dialogs :as dialogs])
   (:import [java.awt Color]
@@ -105,13 +106,54 @@
 ;; Drag & Drop
 ;; ============================================================================
 
+(defn- serialize-params-for-drag
+  "Convert effect params to a serializable format.
+   Modulator functions are converted to their config maps.
+   This allows drag data to be EDN-serialized."
+  [params]
+  (when params
+    (into {}
+      (map (fn [[k v]]
+             (if (and (fn? v) (mod/modulator? v))
+               ;; Convert modulator to its config
+               (if-let [config (mod/get-modulator-config v)]
+                 [k {:modulator-config config}]
+                 ;; If no config available, use static default
+                 [k 1.0])
+               [k v]))
+           params))))
+
+(defn- deserialize-params-from-drag
+  "Convert serialized params back to effect params.
+   Modulator configs are converted back to modulator functions."
+  [params]
+  (when params
+    (into {}
+      (map (fn [[k v]]
+             (if (and (map? v) (:modulator-config v))
+               ;; Reconstruct modulator from config
+               (let [{:keys [type min max freq phase]} (:modulator-config v)]
+                 [k (case type
+                      :sine (mod/sine-mod min max freq (or phase 0.0))
+                      :triangle (mod/triangle-mod min max freq (or phase 0.0))
+                      :sawtooth (mod/sawtooth-mod min max freq (or phase 0.0))
+                      :square (mod/square-mod min max freq)
+                      :random (mod/random-mod min max freq)
+                      :beat-decay (mod/beat-decay max min)
+                      ;; Default to sine
+                      (mod/sine-mod min max freq (or phase 0.0)))])
+               [k v]))
+           params))))
+
 (defn get-effect-drag-data
-  "Get drag data for an effect cell."
+  "Get drag data for an effect cell.
+   Params are serialized to allow EDN transfer."
   [cell-state]
   (when-let [effect-data (:data cell-state)]
-    {:type :effect-cell
-     :source-id :effect-grid
-     :data effect-data}))
+    (let [serializable-data (update effect-data :params serialize-params-for-drag)]
+      {:type :effect-cell
+       :source-id :effect-grid
+       :data serializable-data})))
 
 (defn accept-effect-drop?
   "Check if a drop should be accepted for an effect cell."
@@ -262,10 +304,11 @@
          :on-drop (fn [cell-key transfer-data]
                     (when-let [grid @!grid-ref]
                       (let [source-key (:cell-key transfer-data)
-                            effect-data (:data transfer-data)]
+                            ;; Deserialize params (reconstruct modulators from config)
+                            effect-data (update (:data transfer-data) :params deserialize-params-from-drag)]
                         ;; Set the effect on target
                         ((:set-cell-effect! grid) (first cell-key) (second cell-key) effect-data)
-                        ;; Clear source if it exists
+                        ;; Clear source if it exists (MOVE not COPY)
                         (when source-key
                           ((:clear-cell! grid) (first source-key) (second source-key)))
                         true)))
