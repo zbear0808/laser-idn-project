@@ -1,7 +1,19 @@
 (ns laser-show.animation.effects.shape
   "Shape effects - geometric transformations for laser frames.
    Includes scale, rotate, offset, mirror, viewport, and distortion effects.
-   These effects can be used at any level (cue, zone group, zone, projector)."
+   These effects can be used at any level (cue, zone group, zone, projector).
+   
+   All effects support both static values and modulators:
+   ;; Static
+   {:effect-id :scale :params {:x-scale 1.5 :y-scale 1.5}}
+   
+   ;; Modulated (using modulation.clj)
+   (require '[laser-show.animation.modulation :as mod])
+   {:effect-id :scale :params {:x-scale (mod/sine-mod 0.8 1.2 2.0)
+                               :y-scale (mod/sine-mod 0.8 1.2 2.0)}}
+   
+   NOTE: The old :scale-oscillate and :offset-oscillate effects are deprecated.
+   Use :scale or :offset with modulators instead for the same functionality."
   (:require [laser-show.animation.effects :as fx]
             [laser-show.animation.time :as time]))
 
@@ -68,45 +80,6 @@
                 :max 5.0}]
   :apply-fn apply-scale-uniform})
 
-(defn- apply-scale-oscillate [frame time-ms bpm {:keys [min-scale max-scale frequency waveform]}]
-  (let [phase (time/time->beat-phase time-ms bpm)
-        scale (time/oscillate min-scale max-scale (* phase frequency) (or waveform :sine))]
-    (fx/transform-positions
-     frame
-     (fn [[x y]]
-       [(* x scale)
-        (* y scale)]))))
-
-(fx/register-effect!
- {:id :scale-oscillate
-  :name "Scale Oscillate"
-  :category :shape
-  :timing :bpm
-  :parameters [{:key :min-scale
-                :label "Min Scale"
-                :type :float
-                :default 0.8
-                :min 0.0
-                :max 5.0}
-               {:key :max-scale
-                :label "Max Scale"
-                :type :float
-                :default 1.2
-                :min 0.0
-                :max 5.0}
-               {:key :frequency
-                :label "Frequency (cycles/beat)"
-                :type :float
-                :default 1.0
-                :min 0.1
-                :max 16.0}
-               {:key :waveform
-                :label "Waveform"
-                :type :choice
-                :default :sine
-                :choices [:sine :triangle :sawtooth :square]}]
-  :apply-fn apply-scale-oscillate})
-
 ;; ============================================================================
 ;; Offset (Translation) Effects
 ;; ============================================================================
@@ -136,46 +109,6 @@
                 :min -2.0
                 :max 2.0}]
   :apply-fn apply-offset-static})
-
-(defn- apply-offset-oscillate [frame time-ms bpm {:keys [x-amount y-amount frequency waveform]}]
-  (let [phase (time/time->beat-phase time-ms bpm)
-        x-off (time/oscillate (- x-amount) x-amount (* phase frequency) (or waveform :sine))
-        y-off (time/oscillate (- y-amount) y-amount (* phase frequency 0.5) (or waveform :sine))]
-    (fx/transform-positions
-     frame
-     (fn [[x y]]
-       [(+ x x-off)
-        (+ y y-off)]))))
-
-(fx/register-effect!
- {:id :offset-oscillate
-  :name "Offset Oscillate"
-  :category :shape
-  :timing :bpm
-  :parameters [{:key :x-amount
-                :label "X Amount"
-                :type :float
-                :default 0.2
-                :min 0.0
-                :max 1.0}
-               {:key :y-amount
-                :label "Y Amount"
-                :type :float
-                :default 0.2
-                :min 0.0
-                :max 1.0}
-               {:key :frequency
-                :label "Frequency (cycles/beat)"
-                :type :float
-                :default 1.0
-                :min 0.1
-                :max 16.0}
-               {:key :waveform
-                :label "Waveform"
-                :type :choice
-                :default :sine
-                :choices [:sine :triangle :sawtooth :square]}]
-  :apply-fn apply-offset-oscillate})
 
 ;; ============================================================================
 ;; Rotation Effects

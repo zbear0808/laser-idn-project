@@ -1,16 +1,21 @@
 (ns laser-show.animation.effects.color
   "Color effects for laser frames.
-   Includes hue shift, saturation, brightness, color filters, and color chase effects."
+   Includes hue shift, saturation, brightness, color filters, and color chase effects.
+   
+   All effects support both static values and modulators:
+   ;; Static
+   {:effect-id :hue-shift :params {:degrees 30}}
+   
+   ;; Modulated (using modulation.clj)
+   (require '[laser-show.animation.modulation :as mod])
+   {:effect-id :hue-shift :params {:degrees (mod/sine-mod -30 30 2.0)}}
+   
+   NOTE: The old :hue-pulse and :saturation-pulse effects are deprecated.
+   Use :hue-shift or :saturation with modulators instead for the same functionality."
   (:require [laser-show.animation.effects :as fx]
+            [laser-show.animation.effects.common :as common]
             [laser-show.animation.time :as time]
             [laser-show.animation.colors :as colors]))
-
-;; ============================================================================
-;; Color Space Helpers
-;; ============================================================================
-
-(defn clamp-byte [v]
-  (max 0 (min 255 (int v))))
 
 ;; ============================================================================
 ;; Hue Effects
@@ -60,35 +65,6 @@
                 :max 720.0}]
   :apply-fn apply-hue-rotate})
 
-(defn- apply-hue-pulse [frame time-ms bpm {:keys [amount frequency]}]
-  (let [phase (time/time->beat-phase time-ms bpm)
-        shift (time/oscillate (- amount) amount (* phase frequency) :sine)]
-    (fx/transform-colors
-     frame
-     (fn [[r g b]]
-       (let [[h s v] (colors/rgb->hsv r g b)
-             new-h (mod (+ h shift) 360)]
-         (colors/hsv->rgb new-h s v))))))
-
-(fx/register-effect!
- {:id :hue-pulse
-  :name "Hue Pulse"
-  :category :color
-  :timing :bpm
-  :parameters [{:key :amount
-                :label "Amount (degrees)"
-                :type :float
-                :default 30.0
-                :min 0.0
-                :max 180.0}
-               {:key :frequency
-                :label "Frequency (cycles/beat)"
-                :type :float
-                :default 1.0
-                :min 0.1
-                :max 16.0}]
-  :apply-fn apply-hue-pulse})
-
 ;; ============================================================================
 ;; Saturation Effects
 ;; ============================================================================
@@ -113,41 +89,6 @@
                 :min 0.0
                 :max 2.0}]
   :apply-fn apply-saturation-static})
-
-(defn- apply-saturation-pulse [frame time-ms bpm {:keys [min-sat max-sat frequency]}]
-  (let [phase (time/time->beat-phase time-ms bpm)
-        sat-mult (time/oscillate min-sat max-sat (* phase frequency) :sine)]
-    (fx/transform-colors
-     frame
-     (fn [[r g b]]
-       (let [[h s v] (colors/rgb->hsv r g b)
-             new-s (max 0.0 (min 1.0 (* s sat-mult)))]
-         (colors/hsv->rgb h new-s v))))))
-
-(fx/register-effect!
- {:id :saturation-pulse
-  :name "Saturation Pulse"
-  :category :color
-  :timing :bpm
-  :parameters [{:key :min-sat
-                :label "Min Saturation"
-                :type :float
-                :default 0.3
-                :min 0.0
-                :max 2.0}
-               {:key :max-sat
-                :label "Max Saturation"
-                :type :float
-                :default 1.0
-                :min 0.0
-                :max 2.0}
-               {:key :frequency
-                :label "Frequency (cycles/beat)"
-                :type :float
-                :default 1.0
-                :min 0.1
-                :max 16.0}]
-  :apply-fn apply-saturation-pulse})
 
 ;; ============================================================================
 ;; Brightness Effects

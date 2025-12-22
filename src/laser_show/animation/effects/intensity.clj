@@ -1,6 +1,17 @@
 (ns laser-show.animation.effects.intensity
   "Intensity effects for laser frames.
-   Includes dim, brighten, fade, pulse, strobe, and blackout effects."
+   Includes dim, brighten, fade, pulse, strobe, and blackout effects.
+   
+   All effects support both static values and modulators:
+   ;; Static
+   {:effect-id :dim :params {:amount 0.5}}
+   
+   ;; Modulated (using modulation.clj)
+   (require '[laser-show.animation.modulation :as mod])
+   {:effect-id :dim :params {:amount (mod/sine-mod 0.3 1.0 2.0)}}
+   
+   NOTE: The old :pulse and :breathe effects are deprecated.
+   Use :dim or :brighten with modulators instead for the same functionality."
   (:require [laser-show.animation.effects :as fx]
             [laser-show.animation.time :as time]))
 
@@ -117,89 +128,6 @@
                 :min 100.0
                 :max 30000.0}]
   :apply-fn apply-fade-out})
-
-;; ============================================================================
-;; Pulse Effect (BPM-synced)
-;; ============================================================================
-
-(defn- apply-pulse [frame time-ms bpm {:keys [min-intensity max-intensity frequency waveform]}]
-  (let [phase (time/time->beat-phase time-ms bpm)
-        intensity (time/oscillate min-intensity max-intensity (* phase frequency) (or waveform :sine))]
-    (fx/transform-colors
-     frame
-     (fn [[r g b]]
-       [(clamp-byte (* r intensity))
-        (clamp-byte (* g intensity))
-        (clamp-byte (* b intensity))]))))
-
-(fx/register-effect!
- {:id :pulse
-  :name "Pulse"
-  :category :intensity
-  :timing :bpm
-  :parameters [{:key :min-intensity
-                :label "Min Intensity"
-                :type :float
-                :default 0.3
-                :min 0.0
-                :max 1.0}
-               {:key :max-intensity
-                :label "Max Intensity"
-                :type :float
-                :default 1.0
-                :min 0.0
-                :max 2.0}
-               {:key :frequency
-                :label "Frequency (cycles/beat)"
-                :type :float
-                :default 1.0
-                :min 0.1
-                :max 16.0}
-               {:key :waveform
-                :label "Waveform"
-                :type :choice
-                :default :sine
-                :choices [:sine :triangle :sawtooth :square]}]
-  :apply-fn apply-pulse})
-
-;; ============================================================================
-;; Breathe Effect (slower pulse)
-;; ============================================================================
-
-(defn- apply-breathe [frame time-ms bpm {:keys [min-intensity max-intensity frequency]}]
-  (let [phase (time/time->beat-phase time-ms bpm)
-        intensity (time/oscillate min-intensity max-intensity (* phase frequency) :sine)]
-    (fx/transform-colors
-     frame
-     (fn [[r g b]]
-       [(clamp-byte (* r intensity))
-        (clamp-byte (* g intensity))
-        (clamp-byte (* b intensity))]))))
-
-(fx/register-effect!
- {:id :breathe
-  :name "Breathe"
-  :category :intensity
-  :timing :bpm
-  :parameters [{:key :min-intensity
-                :label "Min Intensity"
-                :type :float
-                :default 0.2
-                :min 0.0
-                :max 1.0}
-               {:key :max-intensity
-                :label "Max Intensity"
-                :type :float
-                :default 1.0
-                :min 0.0
-                :max 2.0}
-               {:key :frequency
-                :label "Frequency (cycles/beat)"
-                :type :float
-                :default 0.25
-                :min 0.05
-                :max 2.0}]
-  :apply-fn apply-breathe})
 
 ;; ============================================================================
 ;; Strobe Effect

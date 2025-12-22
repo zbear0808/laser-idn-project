@@ -1,7 +1,15 @@
 (ns laser-show.animation.effects
   "Core effect system for laser animations.
-   Defines the effect protocol, timing modes, and effect registry."
-  (:require [laser-show.animation.time :as time]))
+   Defines the effect protocol, timing modes, and effect registry.
+   
+   Supports both static parameters and modulated parameters:
+   ;; Static (backward compatible)
+   {:effect-id :scale :params {:x-scale 1.5}}
+   
+   ;; Modulated (using modulation.clj)
+   {:effect-id :scale :params {:x-scale (mod/sine-mod 0.8 1.2 2.0)}}"
+  (:require [laser-show.animation.time :as time]
+            [laser-show.animation.modulation :as mod]))
 
 ;; ============================================================================
 ;; Timing Modes
@@ -122,6 +130,37 @@
   (merge (get-default-params effect-id) params))
 
 ;; ============================================================================
+;; Modulation Helpers for Effects
+;; ============================================================================
+
+(defn resolve-param
+  "Resolve a parameter that may be a static value or a modulator.
+   Effects can call this to support both static and modulated parameters.
+   
+   Parameters:
+   - param: Static value or modulator function
+   - time-ms: Current time in milliseconds
+   - bpm: Current BPM
+   
+   Returns: Resolved numeric value"
+  [param time-ms bpm]
+  (let [context {:time-ms time-ms :bpm bpm}]
+    (mod/resolve-param param context)))
+
+(defn resolve-params-map
+  "Resolve all parameters in a map that may contain modulators.
+   
+   Parameters:
+   - params: Map of parameter values (static or modulators)
+   - time-ms: Current time in milliseconds
+   - bpm: Current BPM
+   
+   Returns: Map with all modulators resolved to values"
+  [params time-ms bpm]
+  (let [context {:time-ms time-ms :bpm bpm}]
+    (mod/resolve-params params context)))
+
+;; ============================================================================
 ;; Effect Instance
 ;; ============================================================================
 
@@ -165,6 +204,9 @@
    - time-ms: Current time in milliseconds
    - bpm: Current BPM (from global state if not provided)
    
+   Parameters can be static values or modulators (from modulation.clj).
+   Modulators are automatically resolved before the effect is applied.
+   
    Returns: Transformed frame"
   ([frame effect-instance time-ms]
    (apply-effect frame effect-instance time-ms (time/get-global-bpm)))
@@ -173,8 +215,10 @@
      frame
      (if-let [effect-def (get-effect (:effect-id effect-instance))]
        (let [apply-fn (:apply-fn effect-def)
-             params (:params effect-instance)]
-         (apply-fn frame time-ms bpm params))
+             raw-params (:params effect-instance)
+             context (mod/make-context {:time-ms time-ms :bpm bpm})
+             resolved-params (mod/resolve-params raw-params context)]
+         (apply-fn frame time-ms bpm resolved-params))
        (do
          (println "Warning: Unknown effect:" (:effect-id effect-instance))
          frame)))))
