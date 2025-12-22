@@ -1,0 +1,385 @@
+(ns laser-show.backend.idn-stream
+  "IDN-Stream packet format converter.
+   Implements ILDA Digital Network Stream Specification (Revision 002, July 2025).
+   Converts LaserFrame objects to binary IDN packet format for transmission."
+  (:require [laser-show.animation.types :as t])
+  (:import [java.nio ByteBuffer ByteOrder]))
+
+;; ============================================================================
+;; IDN-Stream Constants (from spec Section 2)
+;; ============================================================================
+
+(def ^:const CONTENT_ID_CHANNEL_MSG_BASE
+  "Content identifier base for channel messages (0x8000-0xFFFF)"
+  0x8000)
+
+;; Chunk Types (Section 2.1)
+(def ^:const CHUNK_TYPE_VOID 0x00)
+(def ^:const CHUNK_TYPE_WAVE_SAMPLES 0x01)
+(def ^:const CHUNK_TYPE_FRAME_SAMPLES 0x02)
+(def ^:const CHUNK_TYPE_FRAME_SAMPLES_FIRST 0x03)
+(def ^:const CHUNK_TYPE_OCTET_SEGMENT 0x10)
+(def ^:const CHUNK_TYPE_OCTET_STRING 0x11)
+(def ^:const CHUNK_TYPE_DIMMER_LEVELS 0x18)
+(def ^:const CHUNK_TYPE_AUDIO_WAVE 0x20)
+(def ^:const CHUNK_TYPE_FRAME_SAMPLES_SEQUEL 0xC0)
+
+;; Service Modes (Section 2.2)
+(def ^:const SERVICE_MODE_VOID 0x00)
+(def ^:const SERVICE_MODE_GRAPHIC_CONTINUOUS 0x01)
+(def ^:const SERVICE_MODE_GRAPHIC_DISCRETE 0x02)
+(def ^:const SERVICE_MODE_EFFECTS_CONTINUOUS 0x03)
+(def ^:const SERVICE_MODE_EFFECTS_DISCRETE 0x04)
+(def ^:const SERVICE_MODE_DMX512_CONTINUOUS 0x05)
+(def ^:const SERVICE_MODE_DMX512_DISCRETE 0x06)
+(def ^:const SERVICE_MODE_AUDIO_CONTINUOUS 0x0C)
+
+;; Configuration Tags (Section 3.4)
+(def ^:const TAG_VOID 0x0000)
+(def ^:const TAG_BREAK 0x1000)
+(def ^:const TAG_NOP 0x4000)
+(def ^:const TAG_PRECISION 0x4010)
+(def ^:const TAG_HINT_NO_SHUTTER 0x4100)
+(def ^:const TAG_HINT_WITH_SHUTTER 0x4101)
+(def ^:const TAG_X 0x4200)
+(def ^:const TAG_Y 0x4210)
+(def ^:const TAG_Z 0x4220)
+(def ^:const TAG_INTENSITY 0x5C10)
+(def ^:const TAG_BEAM_BRUSH 0x5C20)
+(def ^:const TAG_WAVELEN_PREFIX 0x5C00)
+
+;; Color wavelength tags (Section 3.4.8)
+;; Tag format: 0x5www where www is 10-bit wavelength
+(defn color-tag
+  "Create a color tag for a specific wavelength in nm.
+   Wavelength is encoded in 10 bits (0-1023nm range)."
+  [wavelength-nm]
+  (bit-or 0x5000 (bit-and wavelength-nm 0x3FF)))
+
+;; Standard ISP-DB25 color wavelengths (Section 3.4.10)
+(def ^:const TAG_COLOR_RED (color-tag 638))      ; 0x527E
+(def ^:const TAG_COLOR_GREEN (color-tag 532))    ; 0x5214
+(def ^:const TAG_COLOR_BLUE (color-tag 460))     ; 0x51CC
+(def ^:const TAG_COLOR_DEEP_BLUE (color-tag 445)); 0x51BD
+(def ^:const TAG_COLOR_YELLOW (color-tag 577))   ; 0x5241
+(def ^:const TAG_COLOR_CYAN (color-tag 488))     ; 0x51E8
+
+;; Channel Configuration Flags (Section 2.2)
+(def ^:const CFL_ROUTING 0x01)
+(def ^:const CFL_CLOSE 0x02)
+
+;; ============================================================================
+;; Default Configuration
+;; ============================================================================
+
+(def ^:const DEFAULT_CHANNEL_ID 0)
+(def ^:const DEFAULT_SERVICE_ID 0)
+(def ^:const MAX_POINTS_PER_PACKET 150)
+
+(def default-graphic-tags
+  "Default tag configuration for ISP-DB25 compatible X/Y/R/G/B format.
+   Per Section 3.4.10 and 3.4.11 of the spec."
+  [TAG_X TAG_PRECISION        ; X coordinate, 16-bit
+   TAG_Y TAG_PRECISION        ; Y coordinate, 16-bit
+   TAG_COLOR_RED              ; Red, 8-bit
+   TAG_COLOR_GREEN            ; Green, 8-bit
+   TAG_COLOR_BLUE])           ; Blue, 8-bit
+
+(def bytes-per-sample
+  "Bytes per sample for default configuration: X(2) + Y(2) + R(1) + G(1) + B(1) = 7"
+  7)
+
+;; ============================================================================
+;; Packet Size Calculations
+;; ============================================================================
+
+(defn channel-message-header-size
+  "Size of channel message header (without configuration)"
+  []
+  8)
+
+(defn channel-config-header-size
+  "Size of channel configuration header"
+  []
+  4)
+
+(defn service-config-size
+  "Size of service configuration (tag array) in bytes"
+  [tags]
+  (* 2 (count tags)))
+
+(defn frame-chunk-header-size
+  "Size of frame samples data chunk header"
+  []
+  4)
+
+(defn packet-size-with-config
+  "Calculate total IDN message size with channel configuration"
+  [point-count tags]
+  (+ (channel-message-header-size)
+     (channel-config-header-size)
+     (service-config-size tags)
+     (frame-chunk-header-size)
+     (* bytes-per-sample point-count)))
+
+(defn packet-size-without-config
+  "Calculate total IDN message size without channel configuration"
+  [point-count]
+  (+ (channel-message-header-size)
+     (frame-chunk-header-size)
+     (* bytes-per-sample point-count)))
+
+(defn max-points-for-size
+  "Calculate maximum points that fit in given packet size (without config)"
+  [max-size]
+  (quot (- max-size (channel-message-header-size) (frame-chunk-header-size))
+        bytes-per-sample))
+
+;; ============================================================================
+;; Binary Writing Helpers
+;; ============================================================================
+
+(defn write-channel-message-header!
+  "Write IDN-Stream channel message header to ByteBuffer.
+   
+   Per Section 2.1:
+   - Total Size (2 bytes): Total message size
+   - CNL (1 byte): CCLF bit + Channel ID (0-63)
+   - Chunk Type (1 byte): Type of data chunk
+   - Timestamp (4 bytes): Timestamp in microseconds"
+  [^ByteBuffer buf total-size channel-id chunk-type timestamp has-config?]
+  (let [cclf-bit (if has-config? 0x80 0x00)
+        cnl-byte (bit-or cclf-bit (bit-and channel-id 0x3F))]
+    (.putShort buf (short total-size))
+    (.put buf (unchecked-byte cnl-byte))
+    (.put buf (unchecked-byte chunk-type))
+    (.putInt buf (int timestamp))))
+
+(defn write-channel-config-header!
+  "Write IDN-Stream channel configuration header to ByteBuffer.
+   
+   Per Section 2.2:
+   - SCWC (1 byte): Service Configuration Word Count
+   - CFL (1 byte): Channel flags (Routing, Close, SDM)
+   - Service ID (1 byte): Target service identifier
+   - Service Mode (1 byte): Service operating mode"
+  [^ByteBuffer buf scwc flags service-id service-mode]
+  (.put buf (unchecked-byte scwc))
+  (.put buf (unchecked-byte flags))
+  (.put buf (unchecked-byte service-id))
+  (.put buf (unchecked-byte service-mode)))
+
+(defn write-service-config-tags!
+  "Write service configuration tags (16-bit words) to ByteBuffer."
+  [^ByteBuffer buf tags]
+  (doseq [tag tags]
+    (.putShort buf (short tag))))
+
+(defn write-frame-chunk-header!
+  "Write frame samples data chunk header to ByteBuffer.
+   
+   Per Section 6.2:
+   - Flags (1 byte): SCM bits and Once flag
+   - Duration (3 bytes): Frame duration in microseconds"
+  [^ByteBuffer buf flags duration-us]
+  (.put buf (unchecked-byte flags))
+  (.put buf (unchecked-byte (bit-and (bit-shift-right duration-us 16) 0xFF)))
+  (.put buf (unchecked-byte (bit-and (bit-shift-right duration-us 8) 0xFF)))
+  (.put buf (unchecked-byte (bit-and duration-us 0xFF))))
+
+(defn write-point!
+  "Write a single LaserPoint to ByteBuffer in default format.
+   Format: X (16-bit signed), Y (16-bit signed), R, G, B (8-bit unsigned each)"
+  [^ByteBuffer buf point]
+  (.putShort buf (:x point))
+  (.putShort buf (:y point))
+  (.put buf (unchecked-byte (:r point)))
+  (.put buf (unchecked-byte (:g point)))
+  (.put buf (unchecked-byte (:b point))))
+
+;; ============================================================================
+;; Frame to Packet Conversion
+;; ============================================================================
+
+(defn frame->packet-with-config
+  "Convert a LaserFrame to an IDN packet with channel configuration.
+   Use this when opening a channel or when configuration needs to be sent.
+   
+   Parameters:
+   - frame: LaserFrame record with :points vector
+   - channel-id: IDN channel ID (0-63)
+   - timestamp-us: Timestamp in microseconds
+   - duration-us: Frame duration in microseconds
+   - opts: Optional map with:
+     - :service-id - Target service ID (default 0)
+     - :service-mode - Service mode (default GRAPHIC_DISCRETE)
+     - :tags - Configuration tags (default ISP-DB25 compatible)
+     - :close? - Set close flag (default false)
+     - :single-scan? - Draw frame only once (default false)
+   
+   Returns: byte array ready to send"
+  [frame channel-id timestamp-us duration-us & {:keys [service-id service-mode tags close? single-scan?]
+                                                  :or {service-id DEFAULT_SERVICE_ID
+                                                       service-mode SERVICE_MODE_GRAPHIC_DISCRETE
+                                                       tags default-graphic-tags
+                                                       close? false
+                                                       single-scan? false}}]
+  (let [points (take MAX_POINTS_PER_PACKET (:points frame))
+        point-count (count points)
+        scwc (quot (count tags) 2)
+        total-size (packet-size-with-config point-count tags)
+        cfl-flags (bit-or CFL_ROUTING (if close? CFL_CLOSE 0))
+        chunk-flags (if single-scan? 0x01 0x00)
+        buf (ByteBuffer/allocate total-size)]
+    
+    (.order buf ByteOrder/BIG_ENDIAN)
+    
+    (write-channel-message-header! buf total-size channel-id 
+                                   CHUNK_TYPE_FRAME_SAMPLES timestamp-us true)
+    (write-channel-config-header! buf scwc cfl-flags service-id service-mode)
+    (write-service-config-tags! buf tags)
+    (write-frame-chunk-header! buf chunk-flags duration-us)
+    
+    (doseq [point points]
+      (write-point! buf point))
+    
+    (.array buf)))
+
+(defn frame->packet
+  "Convert a LaserFrame to an IDN packet without channel configuration.
+   Use this for subsequent frames after channel is already configured.
+   
+   Parameters:
+   - frame: LaserFrame record with :points vector
+   - channel-id: IDN channel ID (0-63)
+   - timestamp-us: Timestamp in microseconds
+   - duration-us: Frame duration in microseconds
+   - opts: Optional map with:
+     - :single-scan? - Draw frame only once (default false)
+   
+   Returns: byte array ready to send"
+  [frame channel-id timestamp-us duration-us & {:keys [single-scan?]
+                                                  :or {single-scan? false}}]
+  (let [points (take MAX_POINTS_PER_PACKET (:points frame))
+        point-count (count points)
+        total-size (packet-size-without-config point-count)
+        chunk-flags (if single-scan? 0x01 0x00)
+        buf (ByteBuffer/allocate total-size)]
+    
+    (.order buf ByteOrder/BIG_ENDIAN)
+    
+    (write-channel-message-header! buf total-size channel-id
+                                   CHUNK_TYPE_FRAME_SAMPLES timestamp-us false)
+    (write-frame-chunk-header! buf chunk-flags duration-us)
+    
+    (doseq [point points]
+      (write-point! buf point))
+    
+    (.array buf)))
+
+(defn empty-frame-packet
+  "Create a packet for an empty frame (no points).
+   Per spec Section 6.2: empty sample array voids the frame buffer."
+  [channel-id timestamp-us]
+  (frame->packet (t/empty-frame) channel-id timestamp-us 0))
+
+(defn close-channel-packet
+  "Create a packet to close a channel.
+   Uses Void chunk type with Close flag set."
+  [channel-id timestamp-us]
+  (let [total-size (+ (channel-message-header-size) (channel-config-header-size))
+        buf (ByteBuffer/allocate total-size)]
+    
+    (.order buf ByteOrder/BIG_ENDIAN)
+    
+    (write-channel-message-header! buf total-size channel-id
+                                   CHUNK_TYPE_VOID timestamp-us true)
+    (write-channel-config-header! buf 0 CFL_CLOSE 0 SERVICE_MODE_VOID)
+    
+    (.array buf)))
+
+;; ============================================================================
+;; Packet Parsing (for validation and debugging)
+;; ============================================================================
+
+(defn parse-channel-message-header
+  "Parse channel message header from byte array.
+   Returns map with header fields."
+  [^bytes packet]
+  (when (>= (alength packet) 8)
+    (let [buf (ByteBuffer/wrap packet)]
+      (.order buf ByteOrder/BIG_ENDIAN)
+      (let [total-size (.getShort buf)
+            cnl-byte (bit-and (.get buf) 0xFF)
+            chunk-type (bit-and (.get buf) 0xFF)
+            timestamp (.getInt buf)]
+        {:total-size total-size
+         :has-config? (bit-test cnl-byte 7)
+         :channel-id (bit-and cnl-byte 0x3F)
+         :chunk-type chunk-type
+         :timestamp timestamp}))))
+
+(defn parse-channel-config-header
+  "Parse channel configuration header from byte array at given offset.
+   Returns map with config fields."
+  [^bytes packet offset]
+  (when (>= (alength packet) (+ offset 4))
+    (let [buf (ByteBuffer/wrap packet)]
+      (.order buf ByteOrder/BIG_ENDIAN)
+      (.position buf offset)
+      {:scwc (bit-and (.get buf) 0xFF)
+       :flags (bit-and (.get buf) 0xFF)
+       :service-id (bit-and (.get buf) 0xFF)
+       :service-mode (bit-and (.get buf) 0xFF)})))
+
+(defn packet-info
+  "Get comprehensive information about a packet for debugging.
+   Returns map with all parsed header fields."
+  [^bytes packet]
+  (when (>= (alength packet) 8)
+    (let [msg-header (parse-channel-message-header packet)
+          config-offset 8
+          config-header (when (:has-config? msg-header)
+                          (parse-channel-config-header packet config-offset))]
+      (merge msg-header
+             {:packet-size (alength packet)}
+             (when config-header
+               {:config config-header})))))
+
+(defn validate-packet
+  "Validate that a packet has correct structure.
+   Returns map with :valid? boolean and optional :error string"
+  [^bytes packet]
+  (try
+    (when (< (alength packet) 8)
+      (throw (ex-info "Packet too small for channel message header" 
+                      {:size (alength packet) :min-required 8})))
+    
+    (let [info (packet-info packet)
+          expected-size (:total-size info)
+          actual-size (alength packet)]
+      
+      (when (not= expected-size actual-size)
+        (throw (ex-info "Packet size mismatch"
+                        {:expected expected-size :actual actual-size})))
+      
+      {:valid? true :info info})
+    
+    (catch Exception e
+      {:valid? false
+       :error (.getMessage e)
+       :exception e})))
+
+;; ============================================================================
+;; Utilities
+;; ============================================================================
+
+(defn microseconds-now
+  "Get current time in microseconds (for timestamps)"
+  []
+  (* (System/currentTimeMillis) 1000))
+
+(defn frame-duration-us
+  "Calculate frame duration in microseconds for given FPS"
+  [fps]
+  (long (/ 1000000 fps)))

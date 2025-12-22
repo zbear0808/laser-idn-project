@@ -8,7 +8,14 @@
             [laser-show.animation.types :as t]
             [laser-show.animation.presets :as presets]
             [laser-show.ui.grid :as grid]
-            [laser-show.ui.preview :as preview])
+            [laser-show.ui.preview :as preview]
+            [laser-show.backend.packet-logger :as plog]
+            [laser-show.backend.streaming-engine :as streaming]
+            [laser-show.input.events :as events]
+            [laser-show.input.router :as router]
+            [laser-show.input.keyboard :as keyboard]
+            [laser-show.input.midi :as midi]
+            [laser-show.input.osc :as osc])
   (:import [java.awt Color Dimension Font]
            [javax.swing UIManager JFrame]
            [com.formdev.flatlaf FlatDarkLaf])
@@ -25,7 +32,50 @@
          :idn-connected false
          :idn-target nil
          :playing false
-         :current-animation nil}))
+         :current-animation nil
+         :animation-start-time 0
+         :streaming-engine nil
+         :packet-logging-enabled false
+         :packet-log-file nil
+         :packet-log-path "idn-packets.log"}))
+
+;; ============================================================================
+;; Frame Provider for Streaming
+;; ============================================================================
+
+(defn create-frame-provider
+  "Create a function that provides the current animation frame for streaming.
+   The frame provider reads from app-state and generates frames based on
+   the current animation and elapsed time."
+  []
+  (fn []
+    (when-let [anim (:current-animation @app-state)]
+      (let [start-time (:animation-start-time @app-state)
+            elapsed (- (System/currentTimeMillis) start-time)]
+        (t/get-frame anim elapsed)))))
+
+;; ============================================================================
+;; IDN Packet Logging Helper
+;; ============================================================================
+
+(defn get-packet-log-callback
+  "Returns a logging callback function if packet logging is enabled, nil otherwise.
+   This function should be called when sending IDN packets and passed to send-packet."
+  []
+  (when (:packet-logging-enabled @app-state)
+    (when-let [writer (:packet-log-file @app-state)]
+      (plog/create-log-callback writer))))
+
+(defn send-idn-packet
+  "Convenience wrapper for sending IDN packets with automatic logging.
+   Requires idn-hello.core to be required where this is used.
+   Usage: (send-idn-packet socket data host port)"
+  [socket data host port]
+  (let [log-fn (get-packet-log-callback)]
+    ;; Note: This requires (require '[idn-hello.core :as idn]) in the calling namespace
+    ;; and calling (idn/send-packet socket data host port log-fn)
+    ;; This is just a helper to get the log callback
+    log-fn))
 
 ;; ============================================================================
 ;; Status Bar
@@ -68,7 +118,7 @@
 
 (defn- create-toolbar
   "Create the main toolbar with playback and connection controls."
-  [on-play on-stop on-connect]
+  [on-play on-stop on-connect on-log-toggle]
   (let [play-btn (ss/button :text "▶ Play"
                             :font (Font. "SansSerif" Font/BOLD 12))
         stop-btn (ss/button :text "■ Stop"
@@ -77,26 +127,32 @@
                                :font (Font. "SansSerif" Font/PLAIN 11))
         target-field (ss/text :text "192.168.1.100"
                               :columns 12
-                              :font (Font. "Monospaced" Font/PLAIN 11))]
+                              :font (Font. "Monospaced" Font/PLAIN 11))
+        log-checkbox (ss/checkbox :text "Log Packets"
+                                 :selected? false
+                                 :font (Font. "SansSerif" Font/PLAIN 11))]
     
     (ss/listen play-btn :action (fn [_] (on-play)))
     (ss/listen stop-btn :action (fn [_] (on-stop)))
     (ss/listen connect-btn :action (fn [_] (on-connect (ss/text target-field))))
+    (ss/listen log-checkbox :action (fn [_] (on-log-toggle (ss/value log-checkbox))))
     
     {:panel (mig/mig-panel
-             :constraints ["insets 5 10 5 10", "[][][][grow][]", ""]
+             :constraints ["insets 5 10 5 10", "[][][][grow][][]", ""]
              :items [[play-btn ""]
                      [stop-btn ""]
                      [(ss/label :text "   ") ""]
                      [(ss/label :text "") "growx"]
                      [(ss/label :text "Target:") ""]
                      [target-field ""]
+                     [log-checkbox ""]
                      [connect-btn ""]]
              :background (Color. 45 45 45))
      :set-playing! (fn [playing]
                      (ss/config! play-btn :enabled? (not playing))
                      (ss/config! stop-btn :enabled? playing))
-     :get-target (fn [] (ss/text target-field))}))
+     :get-target (fn [] (ss/text target-field))
+     :log-checkbox log-checkbox}))
 
 ;; ============================================================================
 ;; Menu Bar
@@ -151,7 +207,8 @@
                                              ((:set-active-cell! gc) col row))
                                            (swap! app-state assoc 
                                                   :playing true 
-                                                  :current-animation anim)))
+                                                  :current-animation anim
+                                                  :animation-start-time (System/currentTimeMillis))))
                         :on-cell-right-click (fn [[col row] cell-state]
                                                (println "Cell right-clicked:" [col row])
                                                ;; Clear the cell
@@ -175,13 +232,18 @@
         ;; Create status bar
         status-bar (create-status-bar)
         
+        ;; Toolbar reference for callbacks
+        toolbar-ref (atom nil)
+        
         ;; Create toolbar
         toolbar (create-toolbar
                  ;; On Play
                  (fn []
                    (when-let [anim (:current-animation @app-state)]
                      ((:set-animation! preview-component) anim)
-                     (swap! app-state assoc :playing true)))
+                     (swap! app-state assoc 
+                            :playing true
+                            :animation-start-time (System/currentTimeMillis))))
                  ;; On Stop
                  (fn []
                    ((:stop! preview-component))
@@ -189,9 +251,64 @@
                    (swap! app-state assoc :playing false :current-animation nil))
                  ;; On Connect
                  (fn [target]
-                   (println "Connecting to IDN target:" target)
-                   (swap! app-state assoc :idn-target target :idn-connected true)
-                   ((:set-connection! status-bar) true target)))
+                   (if (:idn-connected @app-state)
+                     ;; Disconnect
+                     (do
+                       (println "Disconnecting from IDN target")
+                       (when-let [engine (:streaming-engine @app-state)]
+                         (streaming/stop! engine))
+                       (swap! app-state assoc 
+                              :idn-connected false 
+                              :idn-target nil
+                              :streaming-engine nil)
+                       ((:set-connection! status-bar) false nil))
+                     ;; Connect
+                     (do
+                       (println "Connecting to IDN target:" target)
+                       (try
+                         (let [frame-provider (create-frame-provider)
+                               log-callback (get-packet-log-callback)
+                               engine (streaming/create-engine target frame-provider
+                                                               :log-callback log-callback)]
+                           (streaming/start! engine)
+                           (swap! app-state assoc 
+                                  :idn-target target 
+                                  :idn-connected true
+                                  :streaming-engine engine)
+                           ((:set-connection! status-bar) true target))
+                         (catch Exception e
+                           (println "Connection failed:" (.getMessage e))
+                           (ss/alert "Connection failed: " (.getMessage e)))))))
+                 ;; On Log Toggle
+                 (fn [enabled]
+                   (if enabled
+                     ;; Start logging
+                     (let [log-path (:packet-log-path @app-state)
+                           writer (plog/start-logging! log-path)]
+                       (if writer
+                         (do
+                           (swap! app-state assoc
+                                  :packet-logging-enabled true
+                                  :packet-log-file writer)
+                           ;; Update streaming engine callback if connected
+                           (when-let [engine (:streaming-engine @app-state)]
+                             (streaming/set-log-callback! engine (plog/create-log-callback writer))))
+                         ;; Failed to start logging, uncheck the box
+                         (when-let [tb @toolbar-ref]
+                           (ss/value! (:log-checkbox tb) false))))
+                     ;; Stop logging
+                     (do
+                       (when-let [writer (:packet-log-file @app-state)]
+                         (plog/stop-logging! writer))
+                       ;; Clear streaming engine callback if connected
+                       (when-let [engine (:streaming-engine @app-state)]
+                         (streaming/set-log-callback! engine nil))
+                       (swap! app-state assoc
+                              :packet-logging-enabled false
+                              :packet-log-file nil)))))
+        
+        ;; Store toolbar reference
+        _ (reset! toolbar-ref toolbar)
         
         ;; Right panel with preview and palette
         right-panel (ss/border-panel
@@ -251,6 +368,86 @@
     frame))
 
 ;; ============================================================================
+;; Input System Integration
+;; ============================================================================
+
+(defn- setup-input-handlers!
+  "Sets up input event handlers to control the grid and application."
+  []
+  (let [{:keys [grid preview]} @app-state
+        cols 8]
+    
+    ;; Handle note-on events (trigger grid cells)
+    (router/on-note! ::grid-trigger nil nil
+      (fn [event]
+        (when grid
+          (let [note (:note event)
+                col (mod note cols)
+                row (quot note cols)]
+            (when (and (< row 4) (< col 8))
+              ;; Trigger the cell via the grid's click handler
+              (ss/invoke-later
+                (when-let [cell-state ((:get-cell-state grid) col row)]
+                  (when-let [anim (:animation cell-state)]
+                    ((:set-animation! preview) anim)
+                    ((:set-active-cell! grid) col row)
+                    (swap! app-state assoc :playing true :current-animation anim)))))))))
+    
+    ;; Handle transport triggers
+    (router/on-trigger! ::play-pause :play-pause
+      (fn [_event]
+        (ss/invoke-later
+          (if (:playing @app-state)
+            (do
+              ((:stop! preview))
+              (when grid ((:set-active-cell! grid) nil nil))
+              (swap! app-state assoc :playing false :current-animation nil))
+            (when-let [anim (:current-animation @app-state)]
+              ((:set-animation! preview) anim)
+              (swap! app-state assoc :playing true))))))
+    
+    (router/on-trigger! ::stop :stop
+      (fn [_event]
+        (ss/invoke-later
+          ((:stop! preview))
+          (when grid ((:set-active-cell! grid) nil nil))
+          (swap! app-state assoc :playing false :current-animation nil))))
+    
+    (println "Input handlers registered")))
+
+(defn- init-input-system!
+  "Initializes the input system (keyboard, MIDI, OSC)."
+  [frame]
+  ;; Initialize keyboard input
+  (keyboard/init!)
+  (keyboard/attach-to-component! frame)
+  (println "Keyboard input initialized")
+  
+  ;; Initialize MIDI (don't auto-connect, let user do it)
+  (midi/init! false)
+  (println "MIDI input initialized (no auto-connect)")
+  
+  ;; Initialize OSC (don't start server by default)
+  (osc/init! false)
+  (println "OSC input initialized (server not started)")
+  
+  ;; Set up the handlers
+  (setup-input-handlers!)
+  
+  ;; Enable router logging for debugging (optional)
+  ;; (router/enable-logging!)
+  )
+
+(defn- shutdown-input-system!
+  "Shuts down the input system cleanly."
+  []
+  (router/clear-handlers!)
+  (keyboard/detach-all!)
+  (midi/shutdown!)
+  (osc/shutdown!)
+  (println "Input system shutdown complete"))
+
+;; ============================================================================
 ;; Application Entry Point
 ;; ============================================================================
 
@@ -265,6 +462,10 @@
        (println "Could not set FlatLaf theme:" (.getMessage e))))
    
    (let [frame (create-main-window)]
+     ;; Initialize input system
+     (init-input-system! frame)
+     
+     ;; Show the frame
      (ss/show! frame))))
 
 (defn -main

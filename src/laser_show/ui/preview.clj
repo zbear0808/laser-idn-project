@@ -1,5 +1,11 @@
 (ns laser-show.ui.preview
-  "Animation preview panel - renders laser frames in a Swing canvas."
+  "Animation preview panel - renders laser frames in a Swing canvas.
+   
+   IDN-Stream Compliance Notes:
+   - LaserPoint uses X, Y coordinates (16-bit signed) and R, G, B colors (8-bit unsigned)
+   - Blanking is indicated by r=g=b=0 per IDN-Stream spec Section 3.4.11
+   - The preview renders points and lines between consecutive visible (non-blanked) points
+   - Coordinate system: X positive = right, Y positive = up (matches IDN-Stream spec)"
   (:require [seesaw.core :as ss]
             [seesaw.graphics :as g]
             [seesaw.color :as color]
@@ -23,8 +29,19 @@
 ;; Frame Rendering
 ;; ============================================================================
 
+(defn- point-visible?
+  "Check if a point is visible (not blanked).
+   Per IDN-Stream spec Section 3.4.11, blanking is indicated by r=g=b=0."
+  [pt]
+  (not (t/blanked? pt)))
+
 (defn- render-frame
-  "Render a laser frame to the graphics context."
+  "Render a laser frame to the graphics context.
+   
+   IDN-Stream Compliance:
+   - Points with r=g=b=0 are blanked (invisible) per Section 3.4.11
+   - Lines are drawn between consecutive visible points
+   - Coordinate mapping: laser coords (-32768 to 32767) -> screen coords"
   [^Graphics2D g2d frame width height]
   (.setRenderingHint g2d RenderingHints/KEY_ANTIALIASING RenderingHints/VALUE_ANTIALIAS_ON)
   (.setRenderingHint g2d RenderingHints/KEY_STROKE_CONTROL RenderingHints/VALUE_STROKE_PURE)
@@ -46,29 +63,26 @@
         (.setStroke g2d (BasicStroke. 2.0 BasicStroke/CAP_ROUND BasicStroke/JOIN_ROUND))
         
         (doseq [[p1 p2] (partition 2 1 points)]
-          (let [x1 (layout/laser-to-screen (:x p1) width)
-                y1 (- height (layout/laser-to-screen (:y p1) height))
-                x2 (layout/laser-to-screen (:x p2) width)
-                y2 (- height (layout/laser-to-screen (:y p2) height))
-                i1 (bit-and (:intensity p1) 0xFF)
-                i2 (bit-and (:intensity p2) 0xFF)]
-            (when (and (pos? i1) (pos? i2))
-              (let [r (bit-and (:r p2) 0xFF)
-                    g (bit-and (:g p2) 0xFF)
-                    b (bit-and (:b p2) 0xFF)]
-                (.setColor g2d (Color. r g b))
-                (.draw g2d (Line2D$Double. x1 y1 x2 y2))))))
+          (when (and (point-visible? p1) (point-visible? p2))
+            (let [x1 (layout/laser-to-screen (:x p1) width)
+                  y1 (- height (layout/laser-to-screen (:y p1) height))
+                  x2 (layout/laser-to-screen (:x p2) width)
+                  y2 (- height (layout/laser-to-screen (:y p2) height))
+                  r (bit-and (:r p2) 0xFF)
+                  g (bit-and (:g p2) 0xFF)
+                  b (bit-and (:b p2) 0xFF)]
+              (.setColor g2d (Color. r g b))
+              (.draw g2d (Line2D$Double. x1 y1 x2 y2)))))
         
         (doseq [pt points]
-          (let [x (layout/laser-to-screen (:x pt) width)
-                y (- height (layout/laser-to-screen (:y pt) height))
-                intensity (bit-and (:intensity pt) 0xFF)]
-            (when (pos? intensity)
-              (let [r (bit-and (:r pt) 0xFF)
-                    g (bit-and (:g pt) 0xFF)
-                    b (bit-and (:b pt) 0xFF)]
-                (.setColor g2d (Color. r g b))
-                (.fill g2d (Ellipse2D$Double. (- x 2) (- y 2) 4 4))))))))))
+          (when (point-visible? pt)
+            (let [x (layout/laser-to-screen (:x pt) width)
+                  y (- height (layout/laser-to-screen (:y pt) height))
+                  r (bit-and (:r pt) 0xFF)
+                  g (bit-and (:g pt) 0xFF)
+                  b (bit-and (:b pt) 0xFF)]
+              (.setColor g2d (Color. r g b))
+              (.fill g2d (Ellipse2D$Double. (- x 2) (- y 2) 4 4)))))))))
 
 ;; ============================================================================
 ;; Preview Panel Component

@@ -1,6 +1,26 @@
 (ns laser-show.ui.layout
   "UI layout configuration for the laser show application.
-   Defines dimensions, grid sizes, and layout constraints.")
+   Defines dimensions, grid sizes, and layout constraints.
+   
+   IDN-Stream Coordinate System (Section 3.4.7)
+   ============================================
+   
+   The coordinate mapping functions in this namespace convert between:
+   - IDN-Stream laser coordinates: 16-bit signed (-32768 to 32767)
+   - Screen coordinates: 0 to screen-size pixels
+   - Normalized coordinates: -1.0 to 1.0 (application convenience)
+   
+   IDN-Stream Coordinate Orientation:
+   - X: Positive = right, Negative = left (front projection view)
+   - Y: Positive = up, Negative = down
+   - Origin (0,0) = center of projection area
+   
+   Screen Coordinate Orientation:
+   - X: 0 = left, max = right (standard screen coords)
+   - Y: 0 = top, max = bottom (standard screen coords, inverted from laser)
+   
+   Note: When rendering, Y coordinates must be inverted:
+   screen_y = screen_height - laser_to_screen(laser_y)")
 
 ;; ============================================================================
 ;; Grid Configuration
@@ -131,31 +151,70 @@
    :rows (make-grid-row-constraints rows cell-height)})
 
 ;; ============================================================================
-;; Coordinate Mapping
+;; Coordinate Mapping (IDN-Stream Section 3.4.7)
 ;; ============================================================================
 
-(def laser-coord-min -32768)
-(def laser-coord-max 32767)
-(def laser-coord-range 65535)
+(def laser-coord-min
+  "Minimum laser coordinate value per IDN-Stream spec (16-bit signed)."
+  -32768)
+
+(def laser-coord-max
+  "Maximum laser coordinate value per IDN-Stream spec (16-bit signed)."
+  32767)
+
+(def laser-coord-range
+  "Total range of laser coordinates."
+  65535)
 
 (defn laser-to-screen
-  "Convert laser coordinates (-32768 to 32767) to screen coordinates."
+  "Convert IDN-Stream laser coordinates to screen coordinates.
+   
+   IDN-Stream coordinates (Section 3.4.7):
+   - Range: -32768 to 32767 (16-bit signed)
+   - -32768 maps to screen position 0
+   - 32767 maps to screen position screen-size
+   - 0 maps to screen center
+   
+   Note: For Y axis, caller should invert: (- screen-height result)"
   [laser-coord screen-size]
-  (let [normalized (/ laser-coord 32767.0)]  ; -1 to 1
+  (let [normalized (/ laser-coord 32767.0)]
     (int (* (+ normalized 1) (/ screen-size 2)))))
 
 (defn screen-to-laser
-  "Convert screen coordinates to laser coordinates (-32768 to 32767)."
+  "Convert screen coordinates to IDN-Stream laser coordinates.
+   
+   Returns 16-bit signed value in range -32768 to 32767.
+   Note: For Y axis, caller should invert screen-coord first."
   [screen-coord screen-size]
-  (let [normalized (- (* 2 (/ screen-coord screen-size)) 1)]  ; -1 to 1
+  (let [normalized (- (* 2 (/ screen-coord screen-size)) 1)]
     (int (* normalized 32767))))
 
 (defn normalized-to-screen
-  "Convert normalized coordinates (-1 to 1) to screen coordinates."
+  "Convert normalized coordinates (-1 to 1) to screen coordinates.
+   
+   Normalized coordinates are an application convenience:
+   - Range: -1.0 to 1.0
+   - Maps directly to IDN-Stream range when scaled by 32767"
   [normalized screen-size]
   (int (* (+ normalized 1) (/ screen-size 2))))
 
 (defn screen-to-normalized
-  "Convert screen coordinates to normalized coordinates (-1 to 1)."
+  "Convert screen coordinates to normalized coordinates (-1 to 1).
+   
+   Normalized coordinates are an application convenience:
+   - Range: -1.0 to 1.0
+   - Maps directly to IDN-Stream range when scaled by 32767"
   [screen-coord screen-size]
   (- (* 2 (/ screen-coord screen-size)) 1))
+
+(defn normalized-to-laser
+  "Convert normalized coordinates (-1 to 1) to IDN-Stream laser coordinates.
+   
+   This is the scaling used by make-point in animation.types."
+  [normalized]
+  (short (* normalized 32767)))
+
+(defn laser-to-normalized
+  "Convert IDN-Stream laser coordinates to normalized coordinates (-1 to 1)."
+  [laser-coord]
+  (/ laser-coord 32767.0))

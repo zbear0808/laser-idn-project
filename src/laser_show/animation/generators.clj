@@ -296,7 +296,7 @@
         (t/make-frame
          (map (fn [pt]
                 (let [[rx ry] (rotate-point [(:x pt) (:y pt)] rotation)]
-                  (t/make-point-raw (short rx) (short ry) (:r pt) (:g pt) (:b pt) (:intensity pt))))
+                  (t/make-point-raw (short rx) (short ry) (:r pt) (:g pt) (:b pt))))
               points))
         (t/make-frame points)))))
 
@@ -312,7 +312,7 @@
                                 (let [x (/ (:x pt) 32767.0)
                                       y (/ (:y pt) 32767.0)
                                       [rx ry] (rotate-point [x y] rotation)]
-                                  (t/make-point rx ry (:r pt) (:g pt) (:b pt) (:intensity pt))))
+                                  (t/make-point rx ry (:r pt) (:g pt) (:b pt))))
                               base-points)]
       (t/make-frame rotated-points))))
 
@@ -328,7 +328,7 @@
                                 (let [x (/ (:x pt) 32767.0)
                                       y (/ (:y pt) 32767.0)
                                       [rx ry] (rotate-point [x y] rotation)]
-                                  (t/make-point rx ry (:r pt) (:g pt) (:b pt) (:intensity pt))))
+                                  (t/make-point rx ry (:r pt) (:g pt) (:b pt))))
                               base-points)]
       (t/make-frame rotated-points))))
 
@@ -344,7 +344,7 @@
                                 (let [x (/ (:x pt) 32767.0)
                                       y (/ (:y pt) 32767.0)
                                       [rx ry] (rotate-point [x y] rotation)]
-                                  (t/make-point rx ry (:r pt) (:g pt) (:b pt) (:intensity pt))))
+                                  (t/make-point rx ry (:r pt) (:g pt) (:b pt))))
                               base-points)]
       (t/make-frame rotated-points))))
 
@@ -360,7 +360,7 @@
                                 (let [x (/ (:x pt) 32767.0)
                                       y (/ (:y pt) 32767.0)
                                       [rx ry] (rotate-point [x y] rotation)]
-                                  (t/make-point rx ry (:r pt) (:g pt) (:b pt) (:intensity pt))))
+                                  (t/make-point rx ry (:r pt) (:g pt) (:b pt))))
                               base-points)]
       (t/make-frame rotated-points))))
 

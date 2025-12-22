@@ -7,10 +7,7 @@ pom.xml.asc
 /classes/
 /target/
 /checkouts/
-.lein-deps-sum
-.lein-repl-history
-.lein-plugins/
-.lein-failures
+
 .nrepl-port
 .cpcache/
 .rebel_readline_history
@@ -30,6 +27,11 @@ desktop.ini
 
 # Logs
 *.log
+idn-packets.log
+
+# Test artifacts
+*.tmp
+test-*.log
 
 # Temporary files
 *~
@@ -39,3 +41,4 @@ desktop.ini
 
 # Local configuration (not committed)
 /config/
+/plans

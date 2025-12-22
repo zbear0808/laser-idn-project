@@ -1,0 +1,223 @@
+(ns laser-show.backend.streaming-engine
+  "IDN streaming engine - manages continuous frame streaming to laser hardware.
+   Implements IDN-Stream spec compliant packet generation and transmission.
+   Runs in a separate thread and sends frames at a configurable rate."
+  (:require [laser-show.backend.idn-stream :as idn-stream]
+            [laser-show.animation.types :as t]
+            [idn-hello.core :as idn])
+  (:import [java.net DatagramSocket]))
+
+;; ============================================================================
+;; Constants
+;; ============================================================================
+
+(def ^:const DEFAULT_FPS 30)
+(def ^:const DEFAULT_PORT 7255)
+(def ^:const DEFAULT_CHANNEL_ID 0)
+(def ^:const CONFIG_RESEND_INTERVAL_MS 200)
+
+;; ============================================================================
+;; Engine State
+;; ============================================================================
+
+(defn create-engine
+  "Create a new streaming engine configuration.
+   
+   Parameters:
+   - target-host: IP address of the laser DAC
+   - frame-provider: Function that returns the current LaserFrame to send
+   - opts: Optional map with:
+     - :fps - Target frames per second (default 30)
+     - :port - Target UDP port (default 7255)
+     - :channel-id - IDN channel ID (default 0)
+     - :log-callback - Optional function called with each packet for logging
+   
+   Returns an engine map that can be started with start!"
+  [target-host frame-provider & {:keys [fps port channel-id log-callback]
+                                  :or {fps DEFAULT_FPS
+                                       port DEFAULT_PORT
+                                       channel-id DEFAULT_CHANNEL_ID}}]
+  {:target-host target-host
+   :target-port port
+   :frame-provider frame-provider
+   :fps fps
+   :channel-id channel-id
+   :log-callback (atom log-callback)
+   :running? (atom false)
+   :socket (atom nil)
+   :thread (atom nil)
+   :start-time-us (atom 0)
+   :last-config-time-ms (atom 0)
+   :stats (atom {:frames-sent 0
+                 :last-frame-time 0
+                 :actual-fps 0.0})})
+
+;; ============================================================================
+;; Timestamp Management
+;; ============================================================================
+
+(defn- current-timestamp-us
+  "Get current timestamp in microseconds relative to engine start."
+  [engine]
+  (let [now-us (* (System/currentTimeMillis) 1000)
+        start-us @(:start-time-us engine)]
+    (- now-us start-us)))
+
+(defn- should-resend-config?
+  "Check if channel configuration should be resent.
+   Per spec Section 2.2: config should be present every 200ms for recovery."
+  [engine]
+  (let [now-ms (System/currentTimeMillis)
+        last-config-ms @(:last-config-time-ms engine)]
+    (>= (- now-ms last-config-ms) CONFIG_RESEND_INTERVAL_MS)))
+
+;; ============================================================================
+;; Streaming Loop
+;; ============================================================================
+
+(defn- calculate-actual-fps
+  "Calculate actual FPS based on frame timing."
+  [last-time current-time]
+  (let [elapsed-ms (- current-time last-time)]
+    (if (pos? elapsed-ms)
+      (/ 1000.0 elapsed-ms)
+      0.0)))
+
+(defn- create-idn-stream-packet
+  "Create an IDN-Stream packet for the given frame.
+   Includes configuration periodically per spec requirements."
+  [engine frame]
+  (let [channel-id (:channel-id engine)
+        timestamp-us (current-timestamp-us engine)
+        duration-us (idn-stream/frame-duration-us (:fps engine))
+        include-config? (should-resend-config? engine)]
+    
+    (when include-config?
+      (reset! (:last-config-time-ms engine) (System/currentTimeMillis)))
+    
+    (if include-config?
+      (idn-stream/frame->packet-with-config frame channel-id timestamp-us duration-us)
+      (idn-stream/frame->packet frame channel-id timestamp-us duration-us))))
+
+(defn- streaming-loop
+  "Main streaming loop - runs in a separate thread.
+   Continuously gets frames from the provider and sends them as IDN packets."
+  [engine]
+  (let [{:keys [target-host target-port frame-provider fps
+                log-callback running? socket stats]} engine
+        frame-interval-ms (/ 1000.0 fps)]
+    
+    (println (format "Streaming loop started: %s:%d @ %d FPS" target-host target-port fps))
+    
+    (reset! (:last-config-time-ms engine) 0)
+    
+    (while @running?
+      (let [loop-start (System/currentTimeMillis)]
+        (try
+          (let [frame (frame-provider)
+                frame (or frame (t/empty-frame))
+                idn-packet (create-idn-stream-packet engine frame)
+                hello-packet (idn/wrap-channel-message idn-packet)
+                log-fn @log-callback]
+            
+            (idn/send-packet @socket hello-packet target-host target-port log-fn)
+            
+            (let [now (System/currentTimeMillis)
+                  last-time (:last-frame-time @stats)
+                  actual-fps (calculate-actual-fps last-time now)]
+              (swap! stats assoc
+                     :frames-sent (inc (:frames-sent @stats))
+                     :last-frame-time now
+                     :actual-fps actual-fps)))
+          
+          (catch Exception e
+            (println "Streaming error:" (.getMessage e))))
+        
+        (let [elapsed (- (System/currentTimeMillis) loop-start)
+              sleep-time (- frame-interval-ms elapsed)]
+          (when (pos? sleep-time)
+            (Thread/sleep (long sleep-time))))))))
+
+;; ============================================================================
+;; Engine Control
+;; ============================================================================
+
+(defn start!
+  "Start the streaming engine.
+   Creates a UDP socket and starts the streaming thread.
+   Returns the engine map, or throws on error."
+  [engine]
+  (when @(:running? engine)
+    (throw (ex-info "Engine already running" {})))
+  
+  (let [socket (idn/create-udp-socket)]
+    (reset! (:socket engine) socket)
+    (reset! (:running? engine) true)
+    (reset! (:start-time-us engine) (* (System/currentTimeMillis) 1000))
+    (reset! (:last-config-time-ms engine) 0)
+    (reset! (:stats engine) {:frames-sent 0
+                             :last-frame-time (System/currentTimeMillis)
+                             :actual-fps 0.0})
+    
+    (let [thread (Thread. #(streaming-loop engine) "idn-streaming")]
+      (.setDaemon thread true)
+      (reset! (:thread engine) thread)
+      (.start thread))
+    
+    (println (format "Streaming engine started: %s:%d"
+                     (:target-host engine)
+                     (:target-port engine)))
+    engine))
+
+(defn stop!
+  "Stop the streaming engine gracefully.
+   Sends channel close packet, stops the thread, and closes the socket."
+  [engine]
+  (when @(:running? engine)
+    (reset! (:running? engine) false)
+    
+    (when-let [thread @(:thread engine)]
+      (.join thread 1000))
+    
+    (when-let [socket @(:socket engine)]
+      (try
+        (let [timestamp-us (current-timestamp-us engine)
+              close-packet (idn-stream/close-channel-packet (:channel-id engine) timestamp-us)
+              hello-packet (idn/wrap-channel-message close-packet)]
+          (idn/send-packet socket hello-packet (:target-host engine) (:target-port engine) nil))
+        (catch Exception e
+          (println "Error sending close packet:" (.getMessage e))))
+      
+      (.close socket))
+    
+    (reset! (:socket engine) nil)
+    (reset! (:thread engine) nil)
+    
+    (println "Streaming engine stopped")
+    engine))
+
+(defn running?
+  "Check if the engine is currently running."
+  [engine]
+  @(:running? engine))
+
+(defn get-stats
+  "Get current streaming statistics."
+  [engine]
+  @(:stats engine))
+
+(defn set-log-callback!
+  "Update the logging callback function."
+  [engine callback]
+  (reset! (:log-callback engine) callback))
+
+;; ============================================================================
+;; Convenience Functions
+;; ============================================================================
+
+(defn create-and-start!
+  "Create and immediately start a streaming engine.
+   Convenience function combining create-engine and start!"
+  [target-host frame-provider & opts]
+  (-> (apply create-engine target-host frame-provider opts)
+      (start!)))

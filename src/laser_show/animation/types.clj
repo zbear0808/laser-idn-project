@@ -1,6 +1,64 @@
 (ns laser-show.animation.types
   "Core types for laser animation system.
-   Defines LaserPoint, LaserFrame, and Animation abstractions.")
+   Defines LaserPoint, LaserFrame, and Animation abstractions.
+   
+   IDN-Stream Specification Compliance (Revision 002, July 2025)
+   =============================================================
+   
+   This namespace defines the internal data structures used by the application.
+   These structures are designed to map directly to IDN-Stream packet format.
+   
+   LaserPoint -> IDN-Stream Sample (Section 6.2)
+   ---------------------------------------------
+   Our LaserPoint record maps to IDN-Stream frame samples as follows:
+   
+   | LaserPoint Field | IDN-Stream Field | Size    | Range              |
+   |------------------|------------------|---------|---------------------|
+   | :x               | X coordinate     | 16-bit  | -32768 to 32767    |
+   | :y               | Y coordinate     | 16-bit  | -32768 to 32767    |
+   | :r               | Red (638nm)      | 8-bit   | 0 to 255           |
+   | :g               | Green (532nm)    | 8-bit   | 0 to 255           |
+   | :b               | Blue (460nm)     | 8-bit   | 0 to 255           |
+   
+   Coordinate System (Section 3.4.7):
+   - X: Positive = right, Negative = left (front projection)
+   - Y: Positive = up, Negative = down
+   - Origin (0,0) is at center of projection area
+   
+   Blanking (Section 3.4.11):
+   - Blanking is indicated by r=g=b=0 (all color intensities zero)
+   - There is no separate 'intensity' or 'blanking' field
+   - Use `blanked-point` to create invisible points for beam repositioning
+   
+   Color Wavelengths (Section 3.4.10):
+   - Red: 638nm (TAG_COLOR_RED = 0x527E)
+   - Green: 532nm (TAG_COLOR_GREEN = 0x5214)  
+   - Blue: 460nm (TAG_COLOR_BLUE = 0x51CC)
+   
+   LaserFrame -> IDN-Stream Frame Samples Chunk (Section 6.2)
+   ----------------------------------------------------------
+   Our LaserFrame record maps to IDN-Stream frame samples data chunk:
+   
+   | LaserFrame Field | IDN-Stream Usage                              |
+   |------------------|-----------------------------------------------|
+   | :points          | Sample array in Frame Samples chunk           |
+   | :timestamp       | Used for timing (not directly in packet)      |
+   | :metadata        | Application-specific, not sent to hardware    |
+   
+   Frame Structure Notes:
+   - First point is the start position (should be blanked for repositioning)
+   - Last point is the end position
+   - Consumer handles movement between frames
+   - Empty frame (no points) voids the frame buffer
+   
+   Animation -> IDN-Stream Channel (Section 2.1)
+   ---------------------------------------------
+   Our Animation abstraction generates frames over time. Each frame is
+   converted to an IDN-Stream channel message for transmission:
+   
+   - Animation runs on a single IDN channel
+   - Frames are sent in Discrete Graphic Mode (Service Mode 0x02)
+   - Channel configuration is sent every 200ms per spec requirement")
 
 ;; ============================================================================
 ;; Core Types
@@ -11,8 +69,8 @@
    ^short y          ; Y coordinate (-32768 to 32767)
    ^byte r           ; Red (0-255)
    ^byte g           ; Green (0-255)
-   ^byte b           ; Blue (0-255)
-   ^byte intensity]) ; Intensity/blanking (0-255, 0 = blanked)
+   ^byte b])         ; Blue (0-255)
+                     ; Note: Blanking is indicated by r=g=b=0 per IDN-Stream spec
 
 (defrecord LaserFrame
   [points            ; Vector of LaserPoint
@@ -26,12 +84,11 @@
 (defn make-point
   "Create a LaserPoint with normalized coordinates.
    x, y should be in range [-1.0, 1.0] and will be scaled to 16-bit range.
-   r, g, b, intensity should be in range [0, 255] or [0.0, 1.0]."
+   r, g, b should be in range [0, 255] or [0.0, 1.0].
+   Per IDN-Stream spec, blanking is indicated by r=g=b=0."
   ([x y]
-   (make-point x y 255 255 255 255))
+   (make-point x y 255 255 255))
   ([x y r g b]
-   (make-point x y r g b 255))
-  ([x y r g b intensity]
    (let [scale-coord (fn [v] (short (* v 32767)))
          scale-color (fn [v] (if (float? v)
                                (unchecked-byte (* v 255))
@@ -41,18 +98,33 @@
       (scale-coord y)
       (scale-color r)
       (scale-color g)
-      (scale-color b)
-      (scale-color intensity)))))
+      (scale-color b))))
+  ([x y r g b _intensity]
+   ;; Backward compatibility: intensity parameter is ignored
+   ;; Blanking should be done by setting r=g=b=0
+   (make-point x y r g b)))
 
 (defn make-point-raw
-  "Create a LaserPoint with raw 16-bit coordinates and 8-bit colors."
-  [x y r g b intensity]
-  (->LaserPoint (short x) (short y) (unchecked-byte r) (unchecked-byte g) (unchecked-byte b) (unchecked-byte intensity)))
+  "Create a LaserPoint with raw 16-bit coordinates and 8-bit colors.
+   Per IDN-Stream spec, blanking is indicated by r=g=b=0."
+  ([x y r g b]
+   (->LaserPoint (short x) (short y) (unchecked-byte r) (unchecked-byte g) (unchecked-byte b)))
+  ([x y r g b _intensity]
+   ;; Backward compatibility: intensity parameter is ignored
+   (make-point-raw x y r g b)))
 
 (defn blanked-point
-  "Create a blanked (invisible) point for beam repositioning."
+  "Create a blanked (invisible) point for beam repositioning.
+   Per IDN-Stream spec Section 3.4.11, blanking is done by setting all color intensities to 0."
   [x y]
-  (make-point x y 0 0 0 0))
+  (make-point x y 0 0 0))
+
+(defn blanked?
+  "Check if a point is blanked (invisible)."
+  [point]
+  (and (zero? (:r point))
+       (zero? (:g point))
+       (zero? (:b point))))
 
 ;; ============================================================================
 ;; Frame Construction
@@ -133,33 +205,3 @@
   (if duration-ms
     (mod time-ms duration-ms)
     time-ms))
-
-;; ============================================================================
-;; Color Utilities (deprecated - use laser-show.animation.colors)
-;; ============================================================================
-
-(defn hsv-to-rgb
-  "Convert HSV to RGB. h in [0, 360], s and v in [0, 1].
-   Returns [r g b] with values in [0, 255].
-   DEPRECATED: Use laser-show.animation.colors/hsv->rgb instead."
-  [h s v]
-  (let [h (mod h 360)
-        c (* v s)
-        x (* c (- 1 (Math/abs (- (mod (/ h 60) 2) 1))))
-        m (- v c)
-        [r' g' b'] (cond
-                     (< h 60)  [c x 0]
-                     (< h 120) [x c 0]
-                     (< h 180) [0 c x]
-                     (< h 240) [0 x c]
-                     (< h 300) [x 0 c]
-                     :else     [c 0 x])]
-    [(int (* 255 (+ r' m)))
-     (int (* 255 (+ g' m)))
-     (int (* 255 (+ b' m)))]))
-
-(defn rainbow-color
-  "Get a rainbow color based on position (0.0 to 1.0).
-   DEPRECATED: Use laser-show.animation.colors/rainbow instead."
-  [position]
-  (hsv-to-rgb (* position 360) 1.0 1.0))
