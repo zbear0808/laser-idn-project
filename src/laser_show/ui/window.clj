@@ -1,27 +1,27 @@
 (ns laser-show.ui.window
   "Window lifecycle management for the Laser Show application.
    Refactored to use Uni-directional Data Flow."
-  (:require [seesaw.core :as ss]
-            [seesaw.border :as border]
-            [laser-show.state :as state]
-            [laser-show.events :as events]
-            [laser-show.animation.types :as t]
-            [laser-show.animation.time :as anim-time]
-            [laser-show.animation.effects.shape]
-            [laser-show.animation.effects.color]
-            [laser-show.animation.effects.intensity]
-            [laser-show.ui.grid :as grid]
-            [laser-show.ui.effects-grid :as effects-grid]
-            [laser-show.ui.effect-dialogs :as effect-dialogs]
-            [laser-show.ui.preview :as preview]
-            [laser-show.ui.toolbar :as toolbar]
-            [laser-show.backend.packet-logger :as plog]
-            [laser-show.backend.streaming-engine :as streaming])
-  (:import [java.awt Color Font]
-           [java.awt.event WindowAdapter]
-           [javax.imageio ImageIO]
-           [java.io File]
-           [com.formdev.flatlaf FlatDarkLaf]))
+  (:require
+   [clojure.java.io :as io]
+   [laser-show.animation.effects.color]
+   [laser-show.animation.effects.intensity]
+   [laser-show.animation.effects.shape]
+   [laser-show.animation.time :as anim-time]
+   [laser-show.animation.types :as t]
+   [laser-show.events :as events]
+   [laser-show.state :as state]
+   [laser-show.ui.effect-dialogs :as effect-dialogs]
+   [laser-show.ui.effects-grid :as effects-grid]
+   [laser-show.ui.grid :as grid]
+   [laser-show.ui.preview :as preview]
+   [laser-show.ui.toolbar :as toolbar]
+   [seesaw.border :as border]
+   [seesaw.core :as ss])
+  (:import
+   [com.formdev.flatlaf FlatDarkLaf]
+   [java.awt Color]
+   [java.awt.event WindowAdapter]
+   [javax.imageio ImageIO]))
 
 ;; ============================================================================
 ;; State References
@@ -195,11 +195,20 @@
                :minimum-size [900 :by 600]
                :size [1100 :by 700]
                :icon (try
-                       (ImageIO/read (clojure.java.io/resource "laser-warning.png"))
+                       (ImageIO/read (io/resource "laser-warning.png"))
                        (catch Exception e
                          (println "Could not load icon:" (.getMessage e))
                          nil))
-               :on-close :dispose)]
+               :on-close :dispose)
+        
+        ;; Create and add menu bar after frame exists (needed for dialog parent)
+        menu-bar (toolbar/create-menu-bar
+                   frame
+                   (fn [] (println "File > New - not yet implemented"))
+                   (fn [] (println "File > Open - not yet implemented"))
+                   (fn [] (println "File > Save - not yet implemented"))
+                   (fn [] (ss/alert frame "Laser Show - IDN Controller\n\nA laser show control application using IDN protocol.")))
+        _ (.setJMenuBar frame menu-bar)]
     
     (.addWindowListener frame
       (proxy [WindowAdapter] []

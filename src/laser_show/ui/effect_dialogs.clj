@@ -9,8 +9,10 @@
             [clojure.string :as str]
             [laser-show.animation.effects :as fx]
             [laser-show.animation.modulation :as mod]
-            [laser-show.ui.colors :as colors])
-  (:import [java.awt Color Font Dimension]
+            [laser-show.ui.colors :as colors :refer [background-dark background-medium 
+                                                      background-light text-primary text-secondary
+                                                      get-effect-category-color]])
+  (:import [java.awt Color Font Dimension Cursor]
            [javax.swing JDialog JSlider JSpinner SpinnerNumberModel DefaultListModel
                         DefaultComboBoxModel ListSelectionModel BorderFactory]
            [javax.swing.event ChangeListener ListSelectionListener]))
@@ -160,6 +162,58 @@
   [panel]
   (ss/config! panel :background (Color. 45 45 45))
   panel)
+
+;; ============================================================================
+;; Tab Panel for Category Selection
+;; ============================================================================
+
+(defn- create-tab-panel
+  "Create a horizontal tab panel for category selection.
+   Returns {:panel JPanel :set-active-tab! fn :get-active-tab fn}
+   
+   Parameters:
+   - categories: Sequence of {:id :keyword :name \"string\"} maps
+   - initial-category: The :id of the initially active category
+   - on-category-change: (fn [category-id]) called when tab is clicked"
+  [categories initial-category on-category-change]
+  (let [active-tab-atom (atom initial-category)
+        buttons-atom (atom [])
+        
+        update-buttons! (fn [new-active]
+                          (doseq [[btn cat] @buttons-atom]
+                            (let [active? (= (:id cat) new-active)
+                                  cat-color (get-effect-category-color (:id cat))]
+                              (ss/config! btn
+                                          :background (if active? cat-color background-medium)
+                                          :foreground (if active? text-primary text-secondary)
+                                          :font (Font. "SansSerif" (if active? Font/BOLD Font/PLAIN) 12))
+                              (.setBorder btn (BorderFactory/createEmptyBorder 8 16 8 16))
+                              (.setCursor btn (Cursor/getPredefinedCursor Cursor/HAND_CURSOR)))))
+        
+        buttons (mapv (fn [cat]
+                        (let [btn (ss/button 
+                                   :text (:name cat)
+                                   :focusable? false
+                                   :listen [:action (fn [_]
+                                                      (reset! active-tab-atom (:id cat))
+                                                      (update-buttons! (:id cat))
+                                                      (when on-category-change
+                                                        (on-category-change (:id cat))))])]
+                          [btn cat]))
+                      categories)
+        
+        panel (ss/horizontal-panel
+               :items (mapv first buttons)
+               :background background-dark)]
+    
+    (reset! buttons-atom buttons)
+    (update-buttons! initial-category)
+    
+    {:panel panel
+     :set-active-tab! (fn [cat-id]
+                        (reset! active-tab-atom cat-id)
+                        (update-buttons! cat-id))
+     :get-active-tab (fn [] @active-tab-atom)}))
 
 ;; ============================================================================
 ;; Parameter Panel Builder
@@ -560,25 +614,26 @@
         selected-effect-atom (atom (when existing-effect
                                     (fx/get-effect (:effect-id existing-effect))))
         params-panel-ref (atom nil)
+        tab-panel-ref (atom nil)
         
-        ;; Category combo
-        category-model (DefaultComboBoxModel. 
-                        (into-array (map :name effect-categories)))
-        category-combo (ss/combobox :model category-model)
-        
-        ;; Effect list with custom renderer to show just name
+        ;; Effect list with custom renderer that shows selection highlighting
         effect-list-model (DefaultListModel.)
         effect-list (ss/listbox :model effect-list-model
-                               :renderer (fn [renderer {:keys [value]}]
+                               :renderer (fn [renderer {:keys [value selected?]}]
                                           (if value
-                                            (ss/config! renderer 
-                                                       :text (:name value)
-                                                       :foreground Color/WHITE
-                                                       :background (Color. 50 50 50))
+                                            (let [bg-color (if selected?
+                                                            background-light
+                                                            (Color. 50 50 50))]
+                                              (ss/config! renderer 
+                                                         :text (:name value)
+                                                         :foreground Color/WHITE
+                                                         :background bg-color))
                                             (ss/config! renderer :text ""))))
         _ (.setSelectionMode effect-list ListSelectionModel/SINGLE_SELECTION)
         _ (.setBackground effect-list (Color. 50 50 50))
         _ (.setForeground effect-list Color/WHITE)
+        _ (.setSelectionBackground effect-list background-light)
+        _ (.setSelectionForeground effect-list Color/WHITE)
         
         ;; Parameters container
         params-container (ss/border-panel :background (Color. 45 45 45))
@@ -637,14 +692,14 @@
                               ;; Notify about the effect change (new effect selected with default params)
                               (notify-effect-change!))
         
-        ;; Category change listener
-        _ (ss/listen category-combo :action
-            (fn [_]
-              (let [idx (.getSelectedIndex category-combo)
-                    cat-id (:id (nth effect-categories idx))]
-                (update-effect-list! cat-id)
-                (reset! selected-effect-atom nil)
-                (update-params-panel! nil))))
+        ;; Category tab panel (replaces dropdown)
+        on-category-change (fn [category-id]
+                             (update-effect-list! category-id)
+                             (reset! selected-effect-atom nil)
+                             (update-params-panel! nil))
+        
+        tab-panel (create-tab-panel effect-categories :shape on-category-change)
+        _ (reset! tab-panel-ref tab-panel)
         
         ;; Effect selection listener
         _ (.addListSelectionListener effect-list
@@ -683,12 +738,8 @@
                                    :font (Font. "SansSerif" Font/BOLD 16)
                                    :foreground Color/WHITE) ""]
                          
-                         ;; Category selection
-                         [(mig/mig-panel
-                           :constraints ["insets 5", "[80!][grow]", ""]
-                           :items [[(ss/label :text "Category:" :foreground Color/WHITE) ""]
-                                   [category-combo "growx"]]
-                           :background (Color. 45 45 45)) "growx"]
+                         ;; Category selection (tab panel)
+                         [(:panel tab-panel) "growx"]
                          
                          ;; Effect list
                          [(ss/border-panel
@@ -725,12 +776,9 @@
     ;; If editing, select the existing effect's category and effect
     (when existing-effect
       (let [effect-def (fx/get-effect (:effect-id existing-effect))
-            cat (:category effect-def)
-            cat-idx (or (first (keep-indexed 
-                                (fn [i c] (when (= (:id c) cat) i)) 
-                                effect-categories))
-                       0)]
-        (.setSelectedIndex category-combo cat-idx)
+            cat (:category effect-def)]
+        ;; Set the active tab to the effect's category
+        ((:set-active-tab! tab-panel) cat)
         (update-effect-list! cat)
         ;; Find and select the effect in the list
         (let [list-size (.getSize effect-list-model)]

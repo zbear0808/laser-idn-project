@@ -68,13 +68,6 @@
 (def cell-active (rgb 0 200 100))
 (def cell-queued (rgb 200 200 0))
 
-(def cell-colors
-  "Map of cell state keywords to colors."
-  {:empty cell-empty
-   :assigned cell-assigned
-   :selected cell-selected
-   :active cell-active
-   :queued cell-queued})
 
 ;; ============================================================================
 ;; Preset Category Colors
@@ -139,12 +132,6 @@
    :intensity effect-category-intensity-dim
    :calibration effect-category-calibration-dim})
 
-(def effect-category-colors-vec
-  "Map of effect category keywords to [r g b] vectors."
-  {:shape [70 130 200]
-   :color [180 80 180]
-   :intensity [220 160 50]
-   :calibration [100 100 100]})
 
 (defn get-effect-category-color
   "Get the Color for an effect category keyword.
@@ -156,10 +143,6 @@
      (get effect-category-colors-dim category cell-assigned)
      (get effect-category-colors category cell-assigned))))
 
-(defn get-effect-category-color-vec
-  "Get the [r g b] vector for an effect category keyword."
-  [category]
-  (get effect-category-colors-vec category [100 100 100]))
 
 ;; ============================================================================
 ;; Preview Panel Colors
