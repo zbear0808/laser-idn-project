@@ -1,0 +1,15 @@
+{
+  "calva.replConnectSequences": [
+    {
+      "name": "Laser Show Dev",
+      "projectType": "deps.edn",
+      "cljsType": "none",
+      "autoSelectForJackIn": true,
+      "autoSelectForConnect": true,
+      "menuSelections": {
+        "cljAliases": ["dev"]
+      },
+      "afterCLJReplJackInCode": "(start)"
+    }
+  ]
+}

@@ -15,10 +15,12 @@ pom.xml.asc
 # IDE
 .idea/
 *.iml
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .calva/
 .clj-kondo/
 .lsp/
+.clinerules/
 
 # OS
 .DS_Store
@@ -32,12 +34,6 @@ idn-packets.log
 # Test artifacts
 *.tmp
 test-*.log
-
-# Temporary files
-*~
-*.swp
-*.swo
-.#*
 
 # Local configuration (not committed)
 /config/
