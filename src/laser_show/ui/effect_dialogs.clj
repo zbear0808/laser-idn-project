@@ -12,7 +12,8 @@
                                           background-light text-primary text-secondary
                                           get-effect-category-color get-modulator-category-color]]
             [laser-show.ui.components.slider :as slider]
-            [laser-show.ui.components.corner-pin-editor :as corner-pin])
+            [laser-show.ui.components.corner-pin-editor :as corner-pin]
+            [laser-show.ui.components.translate-editor :as translate-editor])
   (:import [java.awt Color Font Dimension Cursor Graphics2D RenderingHints]
            [java.awt.geom RoundRectangle2D$Float]
            [javax.swing JDialog JSpinner SpinnerNumberModel DefaultListModel JPanel
@@ -406,6 +407,185 @@
                        (reset! modulator-atom m)
                        (ss/config! mod-indicator :text (if m "~" "")))}))
 
+(defn- create-translate-hybrid-panel
+  "Create hybrid panel with visual editor + sliders for translate effect.
+   Uses consolidated state atom with single source of truth.
+   
+   Parameters:
+   - effect-def: The translate effect definition
+   - on-modulate: Callback for modulator buttons (fn [param-key param-def on-apply & opts])
+   - on-param-change: Callback when any parameter changes (for live preview)"
+  [effect-def on-modulate on-param-change]
+  (let [;; Single consolidated state atom - single source of truth
+        !state (atom {:x 0.0
+                      :y 0.0
+                      :x-modulator nil
+                      :y-modulator nil
+                      :updating? false})
+        
+        ;; Create visual editor - it calls on-change when user drags
+        visual-editor (translate-editor/create-translate-editor
+                       :on-change (fn [x y]
+                                    (when-not (:updating? @!state)
+                                      (swap! !state assoc :updating? true)
+                                      ;; Update state values
+                                      (swap! !state assoc :x x :y y)
+                                      ;; Update sliders silently (they'll read from state)
+                                      (when-let [x-set (:x-slider-set! @!state)]
+                                        (x-set x))
+                                      (when-let [y-set (:y-slider-set! @!state)]
+                                        (y-set y))
+                                      (swap! !state assoc :updating? false)
+                                      ;; Single notification point for live preview
+                                      (when on-param-change (on-param-change)))))
+        
+        ;; Modulation indicator labels
+        x-mod-indicator (ss/label :text "" :foreground (Color. 100 200 255))
+        y-mod-indicator (ss/label :text "" :foreground (Color. 100 200 255))
+        
+        ;; Create X slider manually (not via create-param-control to avoid complexity)
+        x-slider-ctrl (slider/create-slider 
+                       {:min -2.0
+                        :max 2.0
+                        :default 0.0
+                        :on-change (fn [v]
+                                     (when-not (:updating? @!state)
+                                       (swap! !state assoc :updating? true)
+                                       ;; Update state and visual
+                                       (swap! !state assoc :x v :x-modulator nil)
+                                       (ss/config! x-mod-indicator :text "")
+                                       ((:set-x! visual-editor) v)
+                                       ((:set-x-modulated! visual-editor) false)
+                                       (swap! !state assoc :updating? false)
+                                       ;; Single notification point
+                                       (when on-param-change (on-param-change))))})
+        
+        ;; Create Y slider manually
+        y-slider-ctrl (slider/create-slider 
+                       {:min -2.0
+                        :max 2.0
+                        :default 0.0
+                        :on-change (fn [v]
+                                     (when-not (:updating? @!state)
+                                       (swap! !state assoc :updating? true)
+                                       ;; Update state and visual
+                                       (swap! !state assoc :y v :y-modulator nil)
+                                       (ss/config! y-mod-indicator :text "")
+                                       ((:set-y! visual-editor) v)
+                                       ((:set-y-modulated! visual-editor) false)
+                                       (swap! !state assoc :updating? false)
+                                       ;; Single notification point
+                                       (when on-param-change (on-param-change))))})
+        
+        ;; Store slider setters in state for visual->slider sync
+        _ (swap! !state assoc 
+                 :x-slider-set! (:set-value! x-slider-ctrl)
+                 :y-slider-set! (:set-value! y-slider-ctrl))
+        
+        ;; X modulate button handler
+        on-x-modulate (fn []
+                        (when on-modulate
+                          (on-modulate :x 
+                            {:key :x :label "X" :type :float :min -2.0 :max 2.0 :default 0.0}
+                            (fn [modulator]
+                              ;; Apply modulator to state
+                              (swap! !state assoc :x-modulator modulator)
+                              (let [is-mod? (mod/modulator-config? modulator)]
+                                (ss/config! x-mod-indicator :text (if is-mod? "~" ""))
+                                ((:set-x-modulated! visual-editor) is-mod?)
+                                ;; Notify for live preview
+                                (when on-param-change (on-param-change))))
+                            :existing-modulator (:x-modulator @!state))))
+        
+        ;; Y modulate button handler
+        on-y-modulate (fn []
+                        (when on-modulate
+                          (on-modulate :y
+                            {:key :y :label "Y" :type :float :min -2.0 :max 2.0 :default 0.0}
+                            (fn [modulator]
+                              ;; Apply modulator to state
+                              (swap! !state assoc :y-modulator modulator)
+                              (let [is-mod? (mod/modulator-config? modulator)]
+                                (ss/config! y-mod-indicator :text (if is-mod? "~" ""))
+                                ((:set-y-modulated! visual-editor) is-mod?)
+                                ;; Notify for live preview
+                                (when on-param-change (on-param-change))))
+                            :existing-modulator (:y-modulator @!state))))
+        
+        ;; Build X parameter row
+        x-panel (mig/mig-panel
+                 :constraints ["insets 2", "[50!][grow, fill][90!][80!][20!]", ""]
+                 :items [[(ss/label :text "X:" :foreground Color/WHITE) ""]
+                         [(:slider x-slider-ctrl) "growx"]
+                         [(:textfield x-slider-ctrl) ""]
+                         [(ss/button :text "Modulate"
+                                     :font (Font. "SansSerif" Font/PLAIN 10)
+                                     :listen [:action (fn [_] (on-x-modulate))]) ""]
+                         [x-mod-indicator ""]])
+        
+        ;; Build Y parameter row
+        y-panel (mig/mig-panel
+                 :constraints ["insets 2", "[50!][grow, fill][90!][80!][20!]", ""]
+                 :items [[(ss/label :text "Y:" :foreground Color/WHITE) ""]
+                         [(:slider y-slider-ctrl) "growx"]
+                         [(:textfield y-slider-ctrl) ""]
+                         [(ss/button :text "Modulate"
+                                     :font (Font. "SansSerif" Font/PLAIN 10)
+                                     :listen [:action (fn [_] (on-y-modulate))]) ""]
+                         [y-mod-indicator ""]])
+        
+        ;; Combine sliders panel
+        sliders-panel (mig/mig-panel
+                       :constraints ["insets 5, wrap 1", "[grow, fill]", ""]
+                       :items [[x-panel "growx"]
+                               [y-panel "growx"]])
+        
+        ;; Main panel: visual editor on top, sliders below
+        main-panel (mig/mig-panel
+                    :constraints ["insets 5, wrap 1", "[grow, fill]", ""]
+                    :items [[(:panel visual-editor) "growx"]
+                            [sliders-panel "growx"]])]
+    
+    (style-dialog-panel x-panel)
+    (style-dialog-panel y-panel)
+    (style-dialog-panel sliders-panel)
+    (style-dialog-panel main-panel)
+    
+    {:panel main-panel
+     :get-params (fn []
+                   (let [state @!state]
+                     {:x (or (:x-modulator state) (:x state))
+                      :y (or (:y-modulator state) (:y state))}))
+     :set-params! (fn [params]
+                    (swap! !state assoc :updating? true)
+                    ;; Handle X
+                    (when-let [x (:x params)]
+                      (if (mod/modulator-config? x)
+                        (do
+                          (swap! !state assoc :x-modulator x)
+                          (ss/config! x-mod-indicator :text "~")
+                          ((:set-x-modulated! visual-editor) true))
+                        (do
+                          (swap! !state assoc :x x :x-modulator nil)
+                          (ss/config! x-mod-indicator :text "")
+                          ((:set-value! x-slider-ctrl) x)
+                          ((:set-x! visual-editor) x)
+                          ((:set-x-modulated! visual-editor) false))))
+                    ;; Handle Y
+                    (when-let [y (:y params)]
+                      (if (mod/modulator-config? y)
+                        (do
+                          (swap! !state assoc :y-modulator y)
+                          (ss/config! y-mod-indicator :text "~")
+                          ((:set-y-modulated! visual-editor) true))
+                        (do
+                          (swap! !state assoc :y y :y-modulator nil)
+                          (ss/config! y-mod-indicator :text "")
+                          ((:set-value! y-slider-ctrl) y)
+                          ((:set-y! visual-editor) y)
+                          ((:set-y-modulated! visual-editor) false))))
+                    (swap! !state assoc :updating? false))}))
+
 (defn- create-params-panel
   "Create a panel with controls for all effect parameters.
    Returns {:panel JPanel :get-params fn :set-params! fn}
@@ -415,8 +595,9 @@
    - on-modulate: Callback for modulator buttons
    - on-param-change: (optional) Callback called when any parameter changes"
   [effect-def on-modulate & [on-param-change]]
-  ;; Special case: Corner pin effect uses visual editor instead of sliders
-  (if (= (:id effect-def) :corner-pin)
+  (cond
+    ;; Special case: Corner pin effect uses visual editor (no sliders)
+    (= (:id effect-def) :corner-pin)
     (let [editor (corner-pin/create-corner-pin-editor
                   :on-change (fn [_corners]
                                (when on-param-change (on-param-change))))]
@@ -445,7 +626,12 @@
                           :bl {:x (:bl-x params) :y (:bl-y params)}
                           :br {:x (:br-x params) :y (:br-y params)}})))})
     
+    ;; Special case: Translate effect uses hybrid visual + sliders
+    (= (:id effect-def) :translate)
+    (create-translate-hybrid-panel effect-def on-modulate on-param-change)
+    
     ;; Default case: Use slider-based controls for all other effects
+    :else
     (let [param-defs (:parameters effect-def)
           controls (mapv #(create-param-control % on-modulate on-param-change) param-defs)
           panel (mig/mig-panel
@@ -1077,17 +1263,23 @@
                               (if effect-def
                                 ;; Pass notify-effect-change! so param changes trigger live preview
                                 (let [pp (create-params-panel effect-def on-modulate notify-effect-change!)
-                                      is-corner-pin? (= (:id effect-def) :corner-pin)]
+                                      is-corner-pin? (= (:id effect-def) :corner-pin)
+                                      is-translate? (= (:id effect-def) :translate)
+                                      use-horizontal-layout? (or is-corner-pin? is-translate?)]
                                   (reset! params-panel-ref pp)
                                   (.add params-container (:panel pp) java.awt.BorderLayout/CENTER)
                                   
-                                  ;; For corner-pin, use horizontal layout
-                                  (if is-corner-pin?
+                                  ;; For corner-pin and translate, use horizontal layout
+                                  (if use-horizontal-layout?
                                     (let [left-panel (ss/border-panel
                                                       :center effect-list-panel
                                                       :background (Color. 45 45 45))
+                                          editor-label (cond
+                                                         is-corner-pin? "Corner Pin Editor"
+                                                         is-translate? "Translate Editor"
+                                                         :else "Visual Editor")
                                           right-panel (ss/border-panel
-                                                       :north (ss/label :text "Corner Pin Editor"
+                                                       :north (ss/label :text editor-label
                                                                        :font (Font. "SansSerif" Font/BOLD 11)
                                                                        :foreground (Color. 180 180 180))
                                                        :center params-container
