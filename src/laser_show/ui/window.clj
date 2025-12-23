@@ -1,15 +1,15 @@
 (ns laser-show.ui.window
   "Window lifecycle management for the Laser Show application.
    Refactored to use Uni-directional Data Flow with dynamic state atoms."
-  (:require
+(:require
    [clojure.java.io :as io]
    [laser-show.animation.effects.color]
    [laser-show.animation.effects.intensity]
    [laser-show.animation.effects.shape]
    [laser-show.animation.presets :as presets]
    [laser-show.animation.time :as anim-time]
-   [laser-show.animation.types :as t]
-   [laser-show.app-events :as events]
+   [laser-show.backend.frame-provider :as frame-provider]
+   [laser-show.events.dispatch :as events]
    [laser-show.state.dynamic :as dyn]
    [laser-show.ui.effect-dialogs :as effect-dialogs]
    [laser-show.ui.effects-grid :as effects-grid]
@@ -24,27 +24,6 @@
    [java.awt Color]
    [java.awt.event WindowAdapter]
    [javax.imageio ImageIO]))
-
-;; ============================================================================
-;; Frame Provider for Streaming
-;; ============================================================================
-
-(defn create-frame-provider
-  "Create a function that provides the current animation frame for streaming.
-   Reads from dynamic state atoms."
-  []
-  (fn []
-    (let [active-cell (dyn/get-active-cell)
-          trigger-time (dyn/get-trigger-time)]
-      (when active-cell
-        (let [cell (dyn/get-cell (first active-cell) (second active-cell))
-              preset-id (:preset-id cell)]
-          (when preset-id
-            (let [anim (presets/create-animation-from-preset preset-id)
-                  elapsed (- (System/currentTimeMillis) trigger-time)
-                  bpm (anim-time/get-global-bpm)
-                  base-frame (t/get-frame anim elapsed)]
-              base-frame)))))))
 
 ;; ============================================================================
 ;; Window Cleanup
@@ -149,7 +128,7 @@
                      (fn [target]
                        (println "Connect logic needs migration to events fully.")
                        ;; For now, just fire an event
-                       (events/dispatch! [:idn/connect target (create-frame-provider)]))
+                       (events/dispatch! [:idn/connect target (frame-provider/create-frame-provider)]))
                      ;; Log
                      (fn [enabled]
                        (println "Logging toggle pending migration.")))

@@ -1,141 +1,37 @@
 (ns laser-show.state.dynamic
-  "Dynamic runtime state for the laser show application.
-   This state is volatile and not persisted between sessions.
+  "Dynamic runtime state accessor functions for the laser show application.
    
-   This is the single source of truth for all runtime state.")
+   This namespace provides accessor functions for all runtime state.
+   The actual atom definitions are in laser-show.state.atoms.
+   
+   This is the public API for runtime state access."
+  (:require [laser-show.state.atoms :as atoms]))
 
 ;; ============================================================================
-;; Default Constants
+;; Re-export Constants for Backward Compatibility
 ;; ============================================================================
 
-(def default-bpm 120.0)
-(def default-osc-port 8000)
-(def default-window-width 1200)
-(def default-window-height 800)
-(def default-grid-cols 8)
-(def default-grid-rows 4)
-(def default-log-path "idn-packets.log")
+(def default-bpm atoms/default-bpm)
+(def default-osc-port atoms/default-osc-port)
+(def default-window-width atoms/default-window-width)
+(def default-window-height atoms/default-window-height)
+(def default-grid-cols atoms/default-grid-cols)
+(def default-grid-rows atoms/default-grid-rows)
+(def default-log-path atoms/default-log-path)
 
 ;; ============================================================================
-;; Timing State
+;; Re-export Atoms for Direct Access (when needed by watchers, etc.)
 ;; ============================================================================
 
-(defonce !timing
-  (atom {:bpm default-bpm
-         :tap-times []
-         :beat-position 0.0           ; Current position within beat cycle (0.0-1.0)
-         :bar-position 0.0            ; Current position within bar cycle (0.0-1.0)
-         :last-beat-time 0            ; Timestamp of last beat
-         :beats-elapsed 0             ; Total beats since playback started
-         :quantization :beat}))       ; Current quantization setting (:beat, :bar, :off)
-
-;; ============================================================================
-;; Playback State
-;; ============================================================================
-
-(defonce !playback
-  (atom {:playing? false
-         :trigger-time 0              ; KEY for retriggering - timestamp when cue was triggered
-         :active-cell nil             ; [col row] of active cell, or nil
-         :active-cue nil              ; Currently playing cue
-         :cue-queue []}))             ; Queue of upcoming cues
-
-;; ============================================================================
-;; Grid State (Cue assignments and cells)
-;; ============================================================================
-
-(defonce !grid
-  (atom {:cells {[0 0] {:preset-id :circle}
-                 [1 0] {:preset-id :spinning-square}
-                 [2 0] {:preset-id :triangle}
-                 [3 0] {:preset-id :star}
-                 [4 0] {:preset-id :spiral}
-                 [5 0] {:preset-id :wave}
-                 [6 0] {:preset-id :beam-fan}
-                 [7 0] {:preset-id :rainbow-circle}}
-         :selected-cell nil
-         :size [8 4]}))
-
-;; ============================================================================
-;; Streaming State
-;; ============================================================================
-
-(defonce !streaming
-  (atom {:engines {}                  ; projector-id -> engine instance
-         :running? false
-         :connected-targets #{}       ; Set of connected "host:port" strings
-         :frame-stats {}              ; Per-projector frame statistics
-         :multi-engine-state nil}))   ; Multi-projector streaming state
-
-;; ============================================================================
-;; IDN / Network State
-;; ============================================================================
-
-(defonce !idn
-  (atom {:connected? false
-         :target nil
-         :streaming-engine nil}))
-
-;; ============================================================================
-;; Input State
-;; ============================================================================
-
-(defonce !input
-  (atom {:midi {:enabled true
-                :connected-devices #{}
-                :learn-mode nil        ; nil or {:target action-key}
-                :device nil
-                :receiver nil}
-         :osc {:enabled false
-               :server-running false
-               :learn-mode nil         ; nil or {:target action-key}
-               :server nil
-               :port default-osc-port}
-         :keyboard {:enabled true
-                    :attached-components #{}}
-         :router {:handlers {}         ; action-key -> handler-fn
-                  :event-log []
-                  :enabled true}}))
-
-;; ============================================================================
-;; UI State
-;; ============================================================================
-
-(defonce !ui
-  (atom {:selected-preset nil
-         :clipboard nil
-         :preview {:frame nil
-                   :last-render-time 0}
-         :active-tab :grid
-         :window {:width default-window-width
-                  :height default-window-height}
-         :drag {:active? false      ; Is a drag currently in progress?
-                :source-type nil    ; :grid-cell, :effect-cell, :preset, etc.
-                :source-id nil      ; Grid identifier
-                :source-key nil     ; [col row] of source cell
-                :data nil}          ; The data being dragged
-         :components {:main-frame nil
-                      :preview-panel nil
-                      :grid-panel nil
-                      :effects-panel nil
-                      :status-bar nil
-                      :toolbar nil}}))
-
-;; ============================================================================
-;; Logging State
-;; ============================================================================
-
-(defonce !logging
-  (atom {:enabled? false
-         :file nil
-         :path default-log-path}))
-
-;; ============================================================================
-;; Effects Grid State
-;; ============================================================================
-
-(defonce !effects
-  (atom {:active-effects {}}))        ; {[col row] effect-data}
+(def !timing atoms/!timing)
+(def !playback atoms/!playback)
+(def !grid atoms/!grid)
+(def !streaming atoms/!streaming)
+(def !idn atoms/!idn)
+(def !input atoms/!input)
+(def !ui atoms/!ui)
+(def !logging atoms/!logging)
+(def !effects atoms/!effects)
 
 ;; ============================================================================
 ;; Accessor Functions - Timing

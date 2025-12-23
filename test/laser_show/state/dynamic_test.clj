@@ -15,7 +15,7 @@
 
 (deftest test-bpm-operations
   (testing "Get default BPM"
-    (is (= 120.0 (dyn/get-bpm))))
+    (is (= dyn/default-bpm (dyn/get-bpm))))
   
   (testing "Set BPM"
     (dyn/set-bpm! 140.0)
@@ -265,7 +265,7 @@
     (is (true? (dyn/logging-enabled?))))
   
   (testing "Get log path"
-    (is (= "idn-packets.log" (dyn/get-log-path)))))
+    (is (= dyn/default-log-path (dyn/get-log-path)))))
 
 ;; ============================================================================
 ;; State Reset Tests
@@ -285,7 +285,7 @@
     (dyn/reset-all-dynamic-state!)
     
     ;; Verify all reset
-    (is (= 120.0 (dyn/get-bpm)))
+    (is (= dyn/default-bpm (dyn/get-bpm)))
     (is (false? (dyn/playing?)))
     (is (nil? (dyn/get-active-cell)))
     (is (= [8 4] (dyn/get-grid-size)))
