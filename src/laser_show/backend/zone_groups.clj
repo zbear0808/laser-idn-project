@@ -4,7 +4,7 @@
    
    Zone groups now support effect chains for group-wide effects:
    - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
-  (:require [laser-show.database.persistent :as persist]
+  (:require [laser-show.state.persistent :as persist]
             [laser-show.backend.zones :as zones]
             [laser-show.animation.effects :as fx]))
 

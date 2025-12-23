@@ -5,7 +5,7 @@
    
    Zones now support effect chains for per-zone effects:
    - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
-  (:require [laser-show.database.persistent :as persist]
+  (:require [laser-show.state.persistent :as persist]
             [laser-show.backend.projectors :as projectors]
             [laser-show.animation.effects :as fx]))
 

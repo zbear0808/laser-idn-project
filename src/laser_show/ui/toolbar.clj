@@ -15,19 +15,88 @@
 ;; ============================================================================
 
 (defn create-status-bar
-  "Create the status bar showing connection status, BPM, and FPS.
+  "Create the status bar showing connection controls and status.
+   
+   Parameters:
+   - on-connect - fn [target-string] called when connect button clicked
+   - on-log-toggle - fn [enabled?] called when log checkbox toggled
    
    Returns a map with:
    - :panel - the status bar panel component
    - :set-connection! - fn [connected target] to update connection status
-   - :set-bpm! - fn [bpm] to update BPM display
-   - :get-bpm - fn [] to get current BPM value
    - :set-fps! - fn [fps] to update FPS display
-   - :set-points! - fn [points] to update points display"
-  []
-  (let [connection-label (ss/label :text "IDN: Disconnected"
+   - :set-points! - fn [points] to update points display
+   - :get-target - fn [] to get target IP address
+   - :log-checkbox - the log checkbox component"
+  [on-connect on-log-toggle]
+  (let [target-field (ss/text :text "192.168.1.100"
+                              :columns 12
+                              :font (Font. "Monospaced" Font/PLAIN 11))
+        log-checkbox (ss/checkbox :text "Log Packets"
+                                 :selected? false
+                                 :font (Font. "SansSerif" Font/PLAIN 11))
+        connect-btn (ss/button :text "🔌 Connect IDN"
+                               :font (Font. "SansSerif" Font/PLAIN 11))
+        connection-label (ss/label :text "IDN: Disconnected"
                                    :foreground (Color. 255 100 100)
                                    :font (Font. "SansSerif" Font/PLAIN 11))
+        fps-label (ss/label :text "FPS: --"
+                            :foreground Color/WHITE
+                            :font (Font. "SansSerif" Font/PLAIN 11))
+        points-label (ss/label :text "Points: --"
+                               :foreground Color/WHITE
+                               :font (Font. "SansSerif" Font/PLAIN 11))]
+    
+    (ss/listen connect-btn :action (fn [_] (on-connect (ss/text target-field))))
+    (ss/listen log-checkbox :action (fn [_] (on-log-toggle (ss/value log-checkbox))))
+    
+    {:panel (mig/mig-panel
+             :constraints ["insets 5 10 5 10", "[][][][grow][][][]", ""]
+             :items [[(ss/label :text "Target:") ""]
+                     [target-field ""]
+                     [log-checkbox ""]
+                     [connect-btn ""]
+                     [(ss/label :text "") "growx"]
+                     [connection-label ""]
+                     [fps-label ""]
+                     [points-label ""]]
+             :background (Color. 35 35 35))
+     :set-connection! (fn [connected target]
+                        (if connected
+                          (do
+                            (ss/config! connection-label :text (str "IDN: " target))
+                            (ss/config! connection-label :foreground (Color. 100 255 100)))
+                          (do
+                            (ss/config! connection-label :text "IDN: Disconnected")
+                            (ss/config! connection-label :foreground (Color. 255 100 100)))))
+     :set-fps! (fn [fps]
+                 (ss/config! fps-label :text (format "FPS: %.1f" (float fps))))
+     :set-points! (fn [points]
+                    (ss/config! points-label :text (str "Points: " points)))
+     :get-target (fn [] (ss/text target-field))
+     :log-checkbox log-checkbox}))
+
+;; ============================================================================
+;; Toolbar
+;; ============================================================================
+
+(defn create-toolbar
+  "Create the main toolbar with playback and BPM controls.
+   
+   Parameters:
+   - on-play - fn [] called when play button clicked
+   - on-stop - fn [] called when stop button clicked
+   
+   Returns a map with:
+   - :panel - the toolbar panel component
+   - :set-playing! - fn [playing?] to update button states
+   - :set-bpm! - fn [bpm] to update BPM display
+   - :get-bpm - fn [] to get current BPM value"
+  [on-play on-stop]
+  (let [play-btn (ss/button :text "▶ Play"
+                            :font (Font. "SansSerif" Font/BOLD 12))
+        stop-btn (ss/button :text "■ Stop"
+                            :font (Font. "SansSerif" Font/BOLD 12))
         bpm-label (ss/label :text "BPM:"
                             :foreground Color/WHITE
                             :font (Font. "SansSerif" Font/PLAIN 11))
@@ -40,75 +109,10 @@
                                 (reify ChangeListener
                                   (stateChanged [_ _evt]
                                     (let [new-bpm (.getValue bpm-model)]
-                                      (multi-stream/set-bpm! new-bpm))))))
-        fps-label (ss/label :text "FPS: --"
-                            :foreground Color/WHITE
-                            :font (Font. "SansSerif" Font/PLAIN 11))
-        points-label (ss/label :text "Points: --"
-                               :foreground Color/WHITE
-                               :font (Font. "SansSerif" Font/PLAIN 11))]
-    {:panel (mig/mig-panel
-             :constraints ["insets 5 10 5 10", "[grow][][][][][]", ""]
-             :items [[connection-label "growx"]
-                     [bpm-label ""]
-                     [bpm-spinner ""]
-                     [(ss/label :text "  ") ""]
-                     [fps-label ""]
-                     [points-label ""]]
-             :background (Color. 35 35 35))
-     :set-connection! (fn [connected target]
-                        (if connected
-                          (do
-                            (ss/config! connection-label :text (str "IDN: " target))
-                            (ss/config! connection-label :foreground (Color. 100 255 100)))
-                          (do
-                            (ss/config! connection-label :text "IDN: Disconnected")
-                            (ss/config! connection-label :foreground (Color. 255 100 100)))))
-     :set-bpm! (fn [bpm]
-                 (.setValue bpm-model (double bpm)))
-     :get-bpm (fn []
-                (.getValue bpm-model))
-     :set-fps! (fn [fps]
-                 (ss/config! fps-label :text (format "FPS: %.1f" (float fps))))
-     :set-points! (fn [points]
-                    (ss/config! points-label :text (str "Points: " points)))}))
-
-;; ============================================================================
-;; Toolbar
-;; ============================================================================
-
-(defn create-toolbar
-  "Create the main toolbar with playback and connection controls.
-   
-   Parameters:
-   - on-play - fn [] called when play button clicked
-   - on-stop - fn [] called when stop button clicked
-   - on-connect - fn [target-string] called when connect button clicked
-   - on-log-toggle - fn [enabled?] called when log checkbox toggled
-   
-   Returns a map with:
-   - :panel - the toolbar panel component
-   - :set-playing! - fn [playing?] to update button states
-   - :get-target - fn [] to get target IP address
-   - :log-checkbox - the log checkbox component"
-  [on-play on-stop on-connect on-log-toggle]
-  (let [play-btn (ss/button :text "▶ Play"
-                            :font (Font. "SansSerif" Font/BOLD 12))
-        stop-btn (ss/button :text "■ Stop"
-                            :font (Font. "SansSerif" Font/BOLD 12))
-        connect-btn (ss/button :text "🔌 Connect IDN"
-                               :font (Font. "SansSerif" Font/PLAIN 11))
-        target-field (ss/text :text "192.168.1.100"
-                              :columns 12
-                              :font (Font. "Monospaced" Font/PLAIN 11))
-        log-checkbox (ss/checkbox :text "Log Packets"
-                                 :selected? false
-                                 :font (Font. "SansSerif" Font/PLAIN 11))]
+                                      (multi-stream/set-bpm! new-bpm))))))]
     
     (ss/listen play-btn :action (fn [_] (on-play)))
     (ss/listen stop-btn :action (fn [_] (on-stop)))
-    (ss/listen connect-btn :action (fn [_] (on-connect (ss/text target-field))))
-    (ss/listen log-checkbox :action (fn [_] (on-log-toggle (ss/value log-checkbox))))
     
     {:panel (mig/mig-panel
              :constraints ["insets 5 10 5 10", "[][][][grow][][]", ""]
@@ -116,16 +120,16 @@
                      [stop-btn ""]
                      [(ss/label :text "   ") ""]
                      [(ss/label :text "") "growx"]
-                     [(ss/label :text "Target:") ""]
-                     [target-field ""]
-                     [log-checkbox ""]
-                     [connect-btn ""]]
+                     [bpm-label ""]
+                     [bpm-spinner ""]]
              :background (Color. 45 45 45))
      :set-playing! (fn [playing]
                      (ss/config! play-btn :enabled? (not playing))
                      (ss/config! stop-btn :enabled? playing))
-     :get-target (fn [] (ss/text target-field))
-     :log-checkbox log-checkbox}))
+     :set-bpm! (fn [bpm]
+                 (.setValue bpm-model (double bpm)))
+     :get-bpm (fn []
+                (.getValue bpm-model))}))
 
 ;; ============================================================================
 ;; Menu Bar

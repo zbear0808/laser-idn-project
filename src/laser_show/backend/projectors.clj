@@ -4,7 +4,7 @@
    
    Projectors support effect chains for projector-level calibration and effects:
    - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
-  (:require [laser-show.database.persistent :as persist]
+  (:require [laser-show.state.persistent :as persist]
             [laser-show.animation.effects :as fx]))
 
 ;; ============================================================================

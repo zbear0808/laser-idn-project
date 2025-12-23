@@ -1,6 +1,6 @@
-(ns laser-show.database.persistent-test
+(ns laser-show.state.persistent-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [laser-show.database.persistent :as persist]
+            [laser-show.state.persistent :as persist]
             [clojure.java.io :as io]))
 
 ;; Clean up test files and reset state before each test

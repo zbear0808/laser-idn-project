@@ -1,6 +1,6 @@
-(ns laser-show.database.dynamic-test
+(ns laser-show.state.dynamic-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [laser-show.database.dynamic :as dyn]))
+            [laser-show.state.dynamic :as dyn]))
 
 ;; Reset state before each test
 (defn reset-fixture [f]

@@ -10,7 +10,7 @@
    [laser-show.animation.time :as anim-time]
    [laser-show.animation.types :as t]
    [laser-show.app-events :as events]
-   [laser-show.database.dynamic :as dyn]
+   [laser-show.state.dynamic :as dyn]
    [laser-show.ui.effect-dialogs :as effect-dialogs]
    [laser-show.ui.effects-grid :as effects-grid]
    [laser-show.ui.grid :as grid]
@@ -144,21 +144,21 @@
         ;; Store reference for callbacks
         _ (reset! !effects-grid-ref effects-grid-comp)
         
-        status-bar (toolbar/create-status-bar)
+        status-bar (toolbar/create-status-bar
+                     ;; Connect
+                     (fn [target]
+                       (println "Connect logic needs migration to events fully.")
+                       ;; For now, just fire an event
+                       (events/dispatch! [:idn/connect target (create-frame-provider)]))
+                     ;; Log
+                     (fn [enabled]
+                       (println "Logging toggle pending migration.")))
         
         toolbar-comp (toolbar/create-toolbar
                        ;; Play
                        (fn [] (events/dispatch! [:transport/play-pause]))
                        ;; Stop
-                       (fn [] (events/dispatch! [:transport/stop]))
-                       ;; Connect (Complex logic kept here for now for simplicity, could move to events)
-                       (fn [target]
-                         (println "Connect logic needs migration to events fully.")
-                         ;; For now, just fire an event
-                         (events/dispatch! [:idn/connect target (create-frame-provider)]))
-                       ;; Log
-                       (fn [enabled]
-                         (println "Logging toggle pending migration.")))
+                       (fn [] (events/dispatch! [:transport/stop])))
         
         ;; --- Layout ---
         

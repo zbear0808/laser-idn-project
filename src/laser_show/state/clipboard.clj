@@ -8,7 +8,7 @@
   (:require [laser-show.backend.cues :as cues]
             [laser-show.backend.zones :as zones]
             [laser-show.backend.projectors :as projectors]
-            [laser-show.database.dynamic :as dyn]
+            [laser-show.state.dynamic :as dyn]
             [clojure.edn :as edn])
   (:import [java.awt Toolkit]
            [java.awt.datatransfer StringSelection DataFlavor Clipboard]))

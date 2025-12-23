@@ -12,8 +12,8 @@
    
    And can store animation objects directly:
    - :animation - The actual animation object (not persisted, created from preset-id)"
-  (:require [laser-show.database.persistent :as persist]
-            [laser-show.database.dynamic :as dyn]
+  (:require [laser-show.state.persistent :as persist]
+            [laser-show.state.dynamic :as dyn]
             [laser-show.backend.zone-router :as router]
             [laser-show.animation.effects :as fx]))
 

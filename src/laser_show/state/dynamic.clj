@@ -1,15 +1,27 @@
-(ns laser-show.database.dynamic
+(ns laser-show.state.dynamic
   "Dynamic runtime state for the laser show application.
    This state is volatile and not persisted between sessions.
    
    This is the single source of truth for all runtime state.")
 
 ;; ============================================================================
+;; Default Constants
+;; ============================================================================
+
+(def default-bpm 120.0)
+(def default-osc-port 8000)
+(def default-window-width 1200)
+(def default-window-height 800)
+(def default-grid-cols 8)
+(def default-grid-rows 4)
+(def default-log-path "idn-packets.log")
+
+;; ============================================================================
 ;; Timing State
 ;; ============================================================================
 
 (defonce !timing
-  (atom {:bpm 120.0
+  (atom {:bpm default-bpm
          :tap-times []
          :beat-position 0.0           ; Current position within beat cycle (0.0-1.0)
          :bar-position 0.0            ; Current position within bar cycle (0.0-1.0)
@@ -78,7 +90,7 @@
                :server-running false
                :learn-mode nil         ; nil or {:target action-key}
                :server nil
-               :port 8000}
+               :port default-osc-port}
          :keyboard {:enabled true
                     :attached-components #{}}
          :router {:handlers {}         ; action-key -> handler-fn
@@ -95,8 +107,8 @@
          :preview {:frame nil
                    :last-render-time 0}
          :active-tab :grid
-         :window {:width 1200
-                  :height 800}
+         :window {:width default-window-width
+                  :height default-window-height}
          :drag {:active? false      ; Is a drag currently in progress?
                 :source-type nil    ; :grid-cell, :effect-cell, :preset, etc.
                 :source-id nil      ; Grid identifier
@@ -116,7 +128,7 @@
 (defonce !logging
   (atom {:enabled? false
          :file nil
-         :path "idn-packets.log"}))
+         :path default-log-path}))
 
 ;; ============================================================================
 ;; Effects Grid State
@@ -387,7 +399,7 @@
 (defn reset-all-dynamic-state!
   "Reset all dynamic state to initial values. USE WITH CAUTION - mainly for testing."
   []
-  (reset! !timing {:bpm 120.0
+  (reset! !timing {:bpm default-bpm
                    :tap-times []
                    :beat-position 0.0
                    :bar-position 0.0
@@ -426,7 +438,7 @@
                         :server-running false
                         :learn-mode nil
                         :server nil
-                        :port 8000}
+                        :port default-osc-port}
                   :keyboard {:enabled true
                              :attached-components #{}}
                   :router {:handlers {}
@@ -437,8 +449,8 @@
                :preview {:frame nil
                          :last-render-time 0}
                :active-tab :grid
-               :window {:width 1200
-                        :height 800}
+               :window {:width default-window-width
+                        :height default-window-height}
                :drag {:active? false
                       :source-type nil
                       :source-id nil
@@ -452,5 +464,5 @@
                             :toolbar nil}})
   (reset! !logging {:enabled? false
                     :file nil
-                    :path "idn-packets.log"})
+                    :path default-log-path})
   (reset! !effects {:active-effects {}}))

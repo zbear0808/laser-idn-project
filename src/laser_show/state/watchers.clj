@@ -1,34 +1,34 @@
-(ns laser-show.database.sync
+(ns laser-show.state.watchers
   "State synchronization utilities.
    Provides watchers and helpers to keep different parts of the system in sync."
   (:require [clojure.data :as data]
-            [laser-show.database.dynamic :as dyn]
-            [laser-show.database.persistent :as persist]))
+            [laser-show.state.dynamic :as dyn]
+            [laser-show.state.persistent :as persist]))
 
 ;; ============================================================================
 ;; Watcher Management
 ;; ============================================================================
 
-(defonce active-watchers (atom {}))
+(defonce !active-watchers (atom {}))
 
 (defn add-watcher!
   "Add a named watcher to an atom. Stores the watcher so it can be removed later."
   [atom-ref watcher-key watcher-fn]
   (add-watch atom-ref watcher-key watcher-fn)
-  (swap! active-watchers assoc [atom-ref watcher-key] watcher-fn))
+  (swap! !active-watchers assoc [atom-ref watcher-key] watcher-fn))
 
 (defn remove-watcher!
   "Remove a named watcher from an atom."
   [atom-ref watcher-key]
   (remove-watch atom-ref watcher-key)
-  (swap! active-watchers dissoc [atom-ref watcher-key]))
+  (swap! !active-watchers dissoc [atom-ref watcher-key]))
 
 (defn remove-all-watchers!
   "Remove all registered watchers."
   []
-  (doseq [[[atom-ref watcher-key] _] @active-watchers]
+  (doseq [[[atom-ref watcher-key] _] @!active-watchers]
     (remove-watch atom-ref watcher-key))
-  (reset! active-watchers {}))
+  (reset! !active-watchers {}))
 
 ;; ============================================================================
 ;; Timing Synchronization

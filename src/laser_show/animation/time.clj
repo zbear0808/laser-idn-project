@@ -1,7 +1,7 @@
 (ns laser-show.animation.time
   "Time utilities for BPM-synchronized effects.
    Handles BPM conversions, phase calculations, and time-based computations."
-  (:require [laser-show.database.dynamic :as dyn])
+  (:require [laser-show.state.dynamic :as dyn])
   (:refer-clojure :exclude [mod]))
 
 ;; Use unchecked-remainder-double for faster modulo on primitives

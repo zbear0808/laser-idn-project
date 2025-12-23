@@ -1,7 +1,7 @@
 (ns laser-show.backend.config
   "Configuration API that delegates to the centralized database layer.
    This namespace provides backward-compatible APIs that now use database/persistent."
-  (:require [laser-show.database.persistent :as persist]))
+  (:require [laser-show.state.persistent :as persist]))
 
 ;; ============================================================================
 ;; Configuration Access (delegates to database/persistent)

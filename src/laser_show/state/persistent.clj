@@ -1,4 +1,4 @@
-(ns laser-show.database.persistent
+(ns laser-show.state.persistent
   "Persistent configuration state for the laser show application.
    This state is saved to disk and restored on startup."
   (:require [clojure.edn :as edn]

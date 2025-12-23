@@ -1,10 +1,10 @@
-(ns laser-show.app-events
+(ns laser-show.events.dispatch
   "Event system for the Laser Show application.
    Handles state transitions based on dispatched events.
    
-   Events update the dynamic atoms in database.dynamic."
+   Events update the dynamic atoms in state.dynamic."
   (:require [laser-show.state.dynamic :as dyn]
-            [laser-show.database.clipboard]))
+            [laser-show.state.clipboard]))
 
 ;; ============================================================================
 ;; Dispatch Infrastructure
