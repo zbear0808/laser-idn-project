@@ -3,20 +3,19 @@
    Includes:
    - Effect selection dialog (choose effect type and configure parameters)
    - Modulator configuration dialog (add modulation to parameters)"
-(:require [seesaw.core :as ss]
+  (:require [seesaw.core :as ss]
             [seesaw.mig :as mig]
             [seesaw.border :as border]
-            [clojure.string :as str]
             [laser-show.animation.effects :as fx]
             [laser-show.animation.modulation :as mod]
-            [laser-show.ui.colors :as colors :refer [background-dark background-medium 
-                                                      background-light text-primary text-secondary
-                                                      get-effect-category-color]])
+            [laser-show.ui.colors :refer [background-dark background-medium 
+                                          background-light text-primary text-secondary
+                                          get-effect-category-color]]
+            [laser-show.ui.components.slider :as slider])
   (:import [java.awt Color Font Dimension Cursor]
-           [java.awt.event KeyAdapter KeyEvent]
-           [javax.swing JDialog JSlider JSpinner SpinnerNumberModel DefaultListModel
-                        DefaultComboBoxModel ListSelectionModel BorderFactory JTextField]
-           [javax.swing.event ChangeListener ListSelectionListener DocumentListener]))
+           [javax.swing JDialog JSpinner SpinnerNumberModel DefaultListModel
+                        DefaultComboBoxModel ListSelectionModel BorderFactory]
+           [javax.swing.event ChangeListener ListSelectionListener]))
 
 ;; ============================================================================
 ;; Constants
@@ -49,118 +48,6 @@
 ;; ============================================================================
 ;; UI Helpers
 ;; ============================================================================
-
-(defn- create-slider-with-textfield
-  "Create a slider with an editable text field for float parameter editing.
-   The slider and text field are synchronized bidirectionally.
-   Uses a normalized slider range [0, slider-steps] internally, then maps to [min, max].
-   Returns {:slider JSlider :textfield JTextField :get-value fn :set-value! fn}"
-  [{:keys [min max default on-change steps label-fn decimal-places]}]
-  (let [min-val (double (if (number? min) min 0.0))
-        max-val (double (if (number? max) max 1.0))
-        default-val (double (if (number? default) default min-val))
-        decimal-places (or decimal-places 2)
-        format-str (str "%." decimal-places "f")
-        ;; Use 1000 steps for finer granularity
-        slider-steps 1000
-        ;; Helper to convert value to slider position
-        value->slider (fn [v]
-                        (let [range (- max-val min-val)]
-                          (if (zero? range)
-                            0
-                            (int (* (/ (- v min-val) range) slider-steps)))))
-        ;; Helper to convert slider position to value
-        slider->value (fn [s]
-                        (let [range (- max-val min-val)]
-                          (+ min-val (* (/ s (double slider-steps)) range))))
-        slider (JSlider. 0 slider-steps (value->slider default-val))
-        updating-atom (atom false)
-        ;; Create JTextField directly for better control over events
-        textfield (doto (JTextField. (if label-fn 
-                                       (label-fn default-val)
-                                       (format format-str default-val))
-                                     5)
-                    (.setFont (Font. "Monospaced" Font/PLAIN 11))
-                    (.setBackground (Color. 60 60 60))
-                    (.setForeground Color/WHITE)
-                    (.setHorizontalAlignment JTextField/CENTER))
-        
-        update-from-slider! (fn []
-                              (when-not @updating-atom
-                                (reset! updating-atom true)
-                                (let [v (slider->value (.getValue slider))]
-                                  (.setText textfield (if label-fn
-                                                        (label-fn v)
-                                                        (format format-str v)))
-                                  (when on-change (on-change v)))
-                                (reset! updating-atom false)))
-        
-        update-from-textfield! (fn []
-                                 (when-not @updating-atom
-                                   (reset! updating-atom true)
-                                   (try
-                                     (let [text-val (.getText textfield)
-                                           ;; Parse numeric value, allowing negative and decimal
-                                           cleaned (str/replace text-val #"[^\d.\-]" "")
-                                           parsed (if (empty? cleaned) 
-                                                    (slider->value (.getValue slider))
-                                                    (Double/parseDouble cleaned))
-                                           clamped (max min-val (min max-val parsed))]
-                                       (.setValue slider (value->slider clamped))
-                                       (.setText textfield (if label-fn
-                                                            (label-fn clamped)
-                                                            (format format-str clamped)))
-                                       (when on-change (on-change clamped)))
-                                     (catch Exception _
-                                       (let [current-v (slider->value (.getValue slider))]
-                                         (.setText textfield (if label-fn
-                                                              (label-fn current-v)
-                                                              (format format-str current-v))))))
-                                   (reset! updating-atom false)))]
-    
-    (.setMinorTickSpacing slider (or steps 1))
-    (.setPaintTicks slider false)
-    (.setBackground slider (Color. 50 50 50))
-    (.setForeground slider Color/WHITE)
-    
-    (.addChangeListener slider
-      (reify ChangeListener
-        (stateChanged [_ _]
-          (update-from-slider!))))
-    
-    ;; Focus lost listener
-    (.addFocusListener textfield
-      (reify java.awt.event.FocusListener
-        (focusGained [_ _])
-        (focusLost [_ _] (update-from-textfield!))))
-    
-    ;; Key listener for Enter key
-    (.addKeyListener textfield
-      (proxy [KeyAdapter] []
-        (keyPressed [e]
-          (when (= (.getKeyCode e) KeyEvent/VK_ENTER)
-            (update-from-textfield!)))))
-    
-    {:slider slider
-     :textfield textfield
-     :get-value (fn [] (slider->value (.getValue slider)))
-     :set-value! (fn [v]
-                   (reset! updating-atom true)
-                   (.setValue slider (value->slider v))
-                   (ss/text! textfield (if label-fn
-                                         (label-fn v)
-                                         (format format-str v)))
-                   (reset! updating-atom false))}))
-
-(defn- create-slider
-  "Create a slider with an editable text field for float/int parameter editing.
-   Wraps create-slider-with-textfield for backward compatibility."
-  [{:keys [min max default on-change steps label-fn] :as opts}]
-  (let [ctrl (create-slider-with-textfield opts)]
-    {:slider (:slider ctrl)
-     :label (:textfield ctrl)
-     :get-value (:get-value ctrl)
-     :set-value! (:set-value! ctrl)}))
 
 (defn- create-spinner
   "Create a spinner for numeric parameter editing."
@@ -242,81 +129,6 @@
 ;; Parameter Panel Builder
 ;; ============================================================================
 
-(defn- create-int-slider-with-textfield
-  "Create a slider with an editable text field for integer parameter editing.
-   The slider and text field are synchronized bidirectionally.
-   Returns {:slider JSlider :textfield JTextField :get-value fn :set-value! fn}"
-  [{:keys [min max default on-change]}]
-  (let [min-val (if (number? min) (int min) 0)
-        max-val (if (number? max) (int max) 100)
-        default-val (if (number? default) (int default) min-val)
-        slider (JSlider. min-val max-val default-val)
-        updating-atom (atom false)
-        ;; Create JTextField directly for better control over events
-        textfield (doto (JTextField. (str default-val) 5)
-                    (.setFont (Font. "Monospaced" Font/PLAIN 11))
-                    (.setBackground (Color. 60 60 60))
-                    (.setForeground Color/WHITE)
-                    (.setHorizontalAlignment JTextField/CENTER))
-        
-        update-from-slider! (fn []
-                              (when-not @updating-atom
-                                (reset! updating-atom true)
-                                (let [v (.getValue slider)]
-                                  (.setText textfield (str v))
-                                  (when on-change (on-change v)))
-                                (reset! updating-atom false)))
-        
-        update-from-textfield! (fn []
-                                 (when-not @updating-atom
-                                   (reset! updating-atom true)
-                                   (try
-                                     (let [text-val (.getText textfield)
-                                           cleaned (str/trim text-val)
-                                           parsed (if (empty? cleaned)
-                                                    (.getValue slider)
-                                                    (Integer/parseInt cleaned))
-                                           clamped (max min-val (min max-val parsed))]
-                                       (.setValue slider clamped)
-                                       (.setText textfield (str clamped))
-                                       (when on-change (on-change clamped)))
-                                     (catch Exception _
-                                       (let [current-v (.getValue slider)]
-                                         (.setText textfield (str current-v)))))
-                                   (reset! updating-atom false)))]
-    
-    (.setMinorTickSpacing slider 1)
-    (.setPaintTicks slider false)
-    (.setBackground slider (Color. 50 50 50))
-    (.setForeground slider Color/WHITE)
-    
-    (.addChangeListener slider
-      (reify ChangeListener
-        (stateChanged [_ _]
-          (update-from-slider!))))
-    
-    ;; Focus lost listener
-    (.addFocusListener textfield
-      (reify java.awt.event.FocusListener
-        (focusGained [_ _])
-        (focusLost [_ _] (update-from-textfield!))))
-    
-    ;; Key listener for Enter key
-    (.addKeyListener textfield
-      (proxy [KeyAdapter] []
-        (keyPressed [e]
-          (when (= (.getKeyCode e) KeyEvent/VK_ENTER)
-            (update-from-textfield!)))))
-    
-    {:slider slider
-     :textfield textfield
-     :get-value (fn [] (.getValue slider))
-     :set-value! (fn [v]
-                   (reset! updating-atom true)
-                   (.setValue slider (int v))
-                   (.setText textfield (str (int v)))
-                   (reset! updating-atom false))}))
-
 (defn- create-param-control
   "Create a control for a single parameter definition.
    Returns {:panel JPanel :get-value fn :set-value! fn :set-modulator! fn}
@@ -333,22 +145,22 @@
         
         panel (case type
                 :float
-                (let [ctrl (create-slider {:min (or min 0.0)
-                                          :max (or max 1.0)
-                                          :default default
-                                          :on-change (fn [_v] 
-                                                       ;; Clear modulator when manually changed
-                                                       (reset! modulator-atom nil)
-                                                       (ss/config! mod-indicator :text "")
-                                                       ;; Notify about parameter change for live preview
-                                                       (when on-param-change (on-param-change)))})]
+                (let [ctrl (slider/create-slider {:min (or min 0.0)
+                                                  :max (or max 1.0)
+                                                  :default default
+                                                  :on-change (fn [_v] 
+                                                               ;; Clear modulator when manually changed
+                                                               (reset! modulator-atom nil)
+                                                               (ss/config! mod-indicator :text "")
+                                                               ;; Notify about parameter change for live preview
+                                                               (when on-param-change (on-param-change)))})]
                   (reset! control-atom ctrl)
                   (mig/mig-panel
-                   :constraints ["insets 2", "[100!][grow, fill][50!][80!][20!]", ""]
+                   :constraints ["insets 2", "[100!][grow, fill][90!][80!][20!]", ""]
                    :items [[(ss/label :text (str label ":") 
                                      :foreground Color/WHITE) ""]
                            [(:slider ctrl) "growx"]
-                           [(:label ctrl) ""]
+                           [(:textfield ctrl) ""]
                            [(ss/button :text "Modulate" 
                                        :font (Font. "SansSerif" Font/PLAIN 10)
                                        :listen [:action (fn [_]
@@ -361,17 +173,18 @@
                            [mod-indicator ""]]))
                 
                 :int
-                (let [ctrl (create-int-slider-with-textfield 
+                (let [ctrl (slider/create-slider 
                             {:min (or min 0)
                              :max (or max 255)
                              :default default
+                             :integer? true
                              :on-change (fn [_v]
                                           (reset! modulator-atom nil)
                                           (ss/config! mod-indicator :text "")
                                           (when on-param-change (on-param-change)))})]
                   (reset! control-atom ctrl)
                   (mig/mig-panel
-                   :constraints ["insets 2", "[100!][grow, fill][50!][80!][20!]", ""]
+                   :constraints ["insets 2", "[100!][grow, fill][90!][80!][20!]", ""]
                    :items [[(ss/label :text (str label ":") 
                                      :foreground Color/WHITE) ""]
                            [(:slider ctrl) "growx"]
@@ -419,16 +232,16 @@
                            [combo ""]]))
                 
                 ;; Default: treat as float
-                (let [ctrl (create-slider {:min 0.0 :max 1.0 :default (or default 0.5)
-                                          :on-change (fn [_v]
-                                                       (when on-param-change (on-param-change)))})]
+                (let [ctrl (slider/create-slider {:min 0.0 :max 1.0 :default (or default 0.5)
+                                                  :on-change (fn [_v]
+                                                               (when on-param-change (on-param-change)))})]
                   (reset! control-atom ctrl)
                   (mig/mig-panel
                    :constraints ["insets 2", "[100!][grow, fill][50!]", ""]
                    :items [[(ss/label :text (str label ":") 
                                      :foreground Color/WHITE) ""]
                            [(:slider ctrl) "growx"]
-                           [(:label ctrl) ""]])))]
+                           [(:textfield ctrl) ""]])))]
     
     (style-dialog-panel panel)
     {:panel panel
@@ -524,15 +337,22 @@
                           0)
                         0)
         
-        ;; Value controls
-        min-ctrl (create-slider {:min param-min :max param-max :default init-min
-                                :label-fn #(format "%.2f" %)})
-        max-ctrl (create-slider {:min param-min :max param-max :default init-max
-                                :label-fn #(format "%.2f" %)})
-        freq-ctrl (create-slider {:min 0.1 :max 8.0 :default init-freq
-                                 :label-fn #(format "%.1fx" %)})
-        phase-ctrl (create-slider {:min 0.0 :max 1.0 :default init-phase
-                                  :label-fn #(format "%.2f" %)})
+        ;; Atom to hold notification function (needed for circular reference)
+        notify-fn-atom (atom nil)
+        
+        ;; Value controls - on-change calls the notification function for live preview
+        min-ctrl (slider/create-slider {:min param-min :max param-max :default init-min
+                                        :label-fn #(format "%.2f" %)
+                                        :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
+        max-ctrl (slider/create-slider {:min param-min :max param-max :default init-max
+                                        :label-fn #(format "%.2f" %)
+                                        :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
+        freq-ctrl (slider/create-slider {:min 0.1 :max 8.0 :default init-freq
+                                         :label-fn #(format "%.1fx" %)
+                                         :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
+        phase-ctrl (slider/create-slider {:min 0.0 :max 1.0 :default init-phase
+                                          :label-fn #(format "%.2f" %)
+                                          :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
         
         ;; Preset buttons
         preset-panel (ss/horizontal-panel
@@ -581,21 +401,11 @@
                                      (let [m (create-modulator)]
                                        (on-modulator-change m))))
         
-        ;; Add change listeners to sliders for live preview
+        ;; Set the notify function atom so slider on-change callbacks can use it
+        _ (reset! notify-fn-atom notify-modulator-change!)
+        
+        ;; Listen to type combo changes for live preview
         _ (when on-modulator-change
-            (.addChangeListener (:slider min-ctrl)
-              (reify ChangeListener
-                (stateChanged [_ _] (notify-modulator-change!))))
-            (.addChangeListener (:slider max-ctrl)
-              (reify ChangeListener
-                (stateChanged [_ _] (notify-modulator-change!))))
-            (.addChangeListener (:slider freq-ctrl)
-              (reify ChangeListener
-                (stateChanged [_ _] (notify-modulator-change!))))
-            (.addChangeListener (:slider phase-ctrl)
-              (reify ChangeListener
-                (stateChanged [_ _] (notify-modulator-change!))))
-            ;; Also listen to type combo changes
             (ss/listen type-combo :action (fn [_] (notify-modulator-change!))))
         
         ;; Buttons
@@ -633,31 +443,31 @@
                                    :foreground (Color. 180 180 180)) ""]
                          
                          [(mig/mig-panel
-                           :constraints ["insets 5", "[80!][grow, fill][50!]", ""]
+                           :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
                            :items [[(ss/label :text "Min Value:" :foreground Color/WHITE) ""]
                                    [(:slider min-ctrl) "growx"]
-                                   [(:label min-ctrl) ""]]
+                                   [(:textfield min-ctrl) ""]]
                            :background (Color. 45 45 45)) "growx"]
                          
                          [(mig/mig-panel
-                           :constraints ["insets 5", "[80!][grow, fill][50!]", ""]
+                           :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
                            :items [[(ss/label :text "Max Value:" :foreground Color/WHITE) ""]
                                    [(:slider max-ctrl) "growx"]
-                                   [(:label max-ctrl) ""]]
+                                   [(:textfield max-ctrl) ""]]
                            :background (Color. 45 45 45)) "growx"]
                          
                          [(mig/mig-panel
-                           :constraints ["insets 5", "[80!][grow, fill][50!]", ""]
+                           :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
                            :items [[(ss/label :text "Frequency:" :foreground Color/WHITE) ""]
                                    [(:slider freq-ctrl) "growx"]
-                                   [(:label freq-ctrl) ""]]
+                                   [(:textfield freq-ctrl) ""]]
                            :background (Color. 45 45 45)) "growx"]
                          
                          [(mig/mig-panel
-                           :constraints ["insets 5", "[80!][grow, fill][50!]", ""]
+                           :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
                            :items [[(ss/label :text "Phase:" :foreground Color/WHITE) ""]
                                    [(:slider phase-ctrl) "growx"]
-                                   [(:label phase-ctrl) ""]]
+                                   [(:textfield phase-ctrl) ""]]
                            :background (Color. 45 45 45)) "growx"]
                          
                          ;; Presets
@@ -681,7 +491,7 @@
       (.setSelectedIndex type-combo init-type-idx))
     
     (.setContentPane dialog content)
-    (.setSize dialog 450 450)
+    (.setSize dialog 500 480)
     (.setLocationRelativeTo dialog parent)
     (.setVisible dialog true)
     
@@ -887,7 +697,7 @@
                 (.setSelectedIndex effect-list i)))))))
     
     (.setContentPane dialog content)
-    (.setSize dialog 500 550)
+    (.setSize dialog 560 580)
     (.setLocationRelativeTo dialog parent)
     (.setVisible dialog true)
     
