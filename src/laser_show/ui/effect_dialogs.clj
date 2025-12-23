@@ -438,20 +438,20 @@
 ;; ============================================================================
 
 (defn- create-modulator-from-config
-  "Create a modulator function based on type and parameters."
+  "Create a modulator function based on type and parameters.
+   Note: Trigger time is NOT stored in the modulator config.
+   It comes from the modulation context at runtime (see effects.clj apply-effect)."
   [mod-type params]
   (let [{:keys [min-val max-val freq phase axis speed wave-type cycles
-                channel cc path value wrap? loop-mode duration time-unit trigger-time]} params
+                channel cc path value wrap? loop-mode duration time-unit]} params
         loop-mode (or loop-mode :loop)
         duration (or duration 2.0)
-        time-unit (or time-unit :beats)
-        ;; Pass trigger-time for BOTH modes to enable consistent retriggering
-        ;; Loop mode now uses relative time (elapsed since trigger) just like once mode
-        trigger-override trigger-time]
+        time-unit (or time-unit :beats)]
     (case mod-type
-      ;; Time-based modulators with loop-mode support (trigger-time used for both modes)
-      :sine (mod/sine-mod min-val max-val (or freq 1.0) (or phase 0.0) loop-mode duration time-unit trigger-override)
-      :triangle (mod/triangle-mod min-val max-val (or freq 1.0) (or phase 0.0) loop-mode duration time-unit trigger-override)
+      ;; Time-based modulators with loop-mode support
+      ;; Trigger time comes from context, not from config
+      :sine (mod/sine-mod min-val max-val (or freq 1.0) (or phase 0.0) loop-mode duration time-unit)
+      :triangle (mod/triangle-mod min-val max-val (or freq 1.0) (or phase 0.0) loop-mode duration time-unit)
       :sawtooth (mod/sawtooth-mod min-val max-val (or freq 1.0) (or phase 0.0))
       :square (mod/square-mod min-val max-val (or freq 1.0))
       :beat-decay (mod/beat-decay max-val min-val)
@@ -814,16 +814,11 @@
         tab-panel (create-modulator-tab-panel init-category on-category-change)
         
         ;; Create modulator based on current settings
-        ;; Note: We pass the trigger-time-atom itself (not the value) for BOTH modes
-        ;; so the modulator can read the current trigger time when it evaluates.
-        ;; This allows the Retrigger button to reset the animation to phase 0 without recreating the modulator.
-        ;; Loop mode now also uses relative time (elapsed since trigger) for consistent retriggering.
+        ;; Note: Trigger time is NOT stored in the modulator - it comes from global playback state
+        ;; at runtime via the modulation context (see effects.clj apply-effect).
         create-modulator (fn []
                            (let [mod-type @selected-type-atom
                                  loop-mode @loop-mode-atom
-                                 ;; Pass the atom itself so it's live-updatable for BOTH modes
-                                 ;; Loop mode now uses relative time for consistent retrigger behavior
-                                 trigger-source trigger-time-atom
                                  params {:min-val ((:get-value min-ctrl))
                                          :max-val ((:get-value max-ctrl))
                                          :freq ((:get-value freq-ctrl))
@@ -835,13 +830,7 @@
                                          :wrap? (ss/value wrap-checkbox)
                                          :loop-mode loop-mode
                                          :duration ((:get-value duration-ctrl))
-                                         :time-unit (ss/selection time-unit-combo)
-                                         :trigger-time trigger-source}]
-                             (println "[DEBUG] Creating modulator with trigger-source:" 
-                                      (if (instance? clojure.lang.IDeref trigger-source) 
-                                        (str "atom@" @trigger-source) 
-                                        trigger-source)
-                                      "loop-mode:" loop-mode)
+                                         :time-unit (ss/selection time-unit-combo)}]
                              (create-modulator-from-config mod-type params)))
         
         ;; Notify about modulator change for live preview

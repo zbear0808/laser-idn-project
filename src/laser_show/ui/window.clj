@@ -1,15 +1,16 @@
 (ns laser-show.ui.window
   "Window lifecycle management for the Laser Show application.
-   Refactored to use Uni-directional Data Flow."
+   Refactored to use Uni-directional Data Flow with dynamic state atoms."
   (:require
    [clojure.java.io :as io]
    [laser-show.animation.effects.color]
    [laser-show.animation.effects.intensity]
    [laser-show.animation.effects.shape]
+   [laser-show.animation.presets :as presets]
    [laser-show.animation.time :as anim-time]
    [laser-show.animation.types :as t]
    [laser-show.app-events :as events]
-   [laser-show.app-db :as state]
+   [laser-show.database.dynamic :as dyn]
    [laser-show.ui.effect-dialogs :as effect-dialogs]
    [laser-show.ui.effects-grid :as effects-grid]
    [laser-show.ui.grid :as grid]
@@ -25,33 +26,25 @@
    [javax.imageio ImageIO]))
 
 ;; ============================================================================
-;; State References
-;; ============================================================================
-
-;; Backward compatibility for core/app-state if needed, though core should change
-(def app-state state/app-state)
-
-;; ============================================================================
 ;; Frame Provider for Streaming
 ;; ============================================================================
 
 (defn create-frame-provider
   "Create a function that provides the current animation frame for streaming.
-   Reads from global app-state."
+   Reads from dynamic state atoms."
   []
   (fn []
-    (let [current-state @state/app-state
-          anim (:current-animation current-state)]
-      (when anim
-        (let [start-time (:animation-start-time current-state)
-              elapsed (- (System/currentTimeMillis) start-time)
-              bpm (anim-time/get-global-bpm)
-              base-frame (t/get-frame anim elapsed)]
-          ;; Effect grid still needs legacy integration or refactor
-          ;; For now, use the active effects from state if migrated, 
-          ;; or we might have broken effect grid momentarily.
-          ;; Assuming effects are applied elsewhere or we skip effects for this phase.
-          base-frame)))))
+    (let [active-cell (dyn/get-active-cell)
+          trigger-time (dyn/get-trigger-time)]
+      (when active-cell
+        (let [cell (dyn/get-cell (first active-cell) (second active-cell))
+              preset-id (:preset-id cell)]
+          (when preset-id
+            (let [anim (presets/create-animation-from-preset preset-id)
+                  elapsed (- (System/currentTimeMillis) trigger-time)
+                  bpm (anim-time/get-global-bpm)
+                  base-frame (t/get-frame anim elapsed)]
+              base-frame)))))))
 
 ;; ============================================================================
 ;; Window Cleanup
@@ -97,7 +90,7 @@
                            :on-new-effect (fn [cell-key]
                                             (let [original-data nil]
                                               (effect-dialogs/show-effect-dialog!
-                                                (get-in @state/app-state [:ui :main-frame])
+                                                (dyn/get-main-frame)
                                                 nil
                                                 (fn [effect-data]
                                                   (when (and effect-data @!effects-grid-ref)
@@ -121,7 +114,7 @@
                            :on-edit-effect (fn [cell-key cell-state]
                                              (let [original-data (:data cell-state)]
                                                (effect-dialogs/show-effect-dialog!
-                                                 (get-in @state/app-state [:ui :main-frame])
+                                                 (dyn/get-main-frame)
                                                  original-data
                                                  (fn [effect-data]
                                                    (when (and effect-data @!effects-grid-ref)
@@ -209,33 +202,71 @@
                    (fn [] (println "File > Open - not yet implemented"))
                    (fn [] (println "File > Save - not yet implemented"))
                    (fn [] (ss/alert frame "Laser Show - IDN Controller\n\nA laser show control application using IDN protocol.")))
-        _ (.setJMenuBar frame menu-bar)]
+        _ (.setJMenuBar frame menu-bar)
+        
+        ;; Helper to convert dynamic state to legacy grid format
+        make-legacy-state (fn []
+                            {:playing? (dyn/playing?)
+                             :grid {:cells (dyn/get-grid-cells)
+                                    :active-cell (dyn/get-active-cell)
+                                    :selected-cell (dyn/get-selected-cell)
+                                    :size (dyn/get-grid-size)}})]
     
     (.addWindowListener frame
       (proxy [WindowAdapter] []
         (windowClosed [_e]
           (clean-up!)
-          (swap! state/app-state assoc-in [:ui :main-frame] nil))))
+          (dyn/set-main-frame! nil))))
     
-    ;; --- Wire Up State Watcher ---
+    ;; --- Wire Up State Watchers ---
+    ;; Watch !playback for trigger-time and active-cell changes (KEY for retriggering)
     
-    (add-watch state/app-state :ui-update
-      (fn [_key _ref _old-state new-state]
+    (add-watch dyn/!playback :preview-update
+      (fn [_key _ref old-playback new-playback]
         (ss/invoke-later
-          ;; Update Grid
-          ((:update-view! grid-comp) new-state)
-          
-          ;; Update Preview
-          (if-let [anim (:current-animation new-state)]
-             ((:set-animation! preview-comp) anim)
-             ((:stop! preview-comp)))
-          
-          ;; Update Status Bar
-          (let [{:keys [connected? target]} (:idn new-state)]
-            ((:set-connection! status-bar) connected? target)))))
+          (let [old-trigger (:trigger-time old-playback)
+                new-trigger (:trigger-time new-playback)
+                old-cell (:active-cell old-playback)
+                new-cell (:active-cell new-playback)
+                playing? (:playing? new-playback)]
+            (cond
+              ;; Stop preview if not playing
+              (not playing?)
+              ((:stop! preview-comp))
+              
+              ;; Retrigger if trigger-time changed OR active-cell changed
+              (or (not= old-trigger new-trigger)
+                  (not= old-cell new-cell))
+              (when new-cell
+                (let [cell (dyn/get-cell (first new-cell) (second new-cell))
+                      preset-id (:preset-id cell)]
+                  (when preset-id
+                    (let [anim (presets/create-animation-from-preset preset-id)]
+                      ((:set-animation! preview-comp) anim)))))
+              
+              ;; Default: do nothing if no change
+              :else nil)))))
+    
+    ;; Watch !grid for grid UI updates
+    (add-watch dyn/!grid :grid-update
+      (fn [_key _ref _old-grid _new-grid]
+        (ss/invoke-later
+          ((:update-view! grid-comp) (make-legacy-state)))))
+    
+    ;; Watch !playback for grid active-cell highlight
+    (add-watch dyn/!playback :grid-active-update
+      (fn [_key _ref _old-playback _new-playback]
+        (ss/invoke-later
+          ((:update-view! grid-comp) (make-legacy-state)))))
+    
+    ;; Watch !idn for status bar updates
+    (add-watch dyn/!idn :status-bar-update
+      (fn [_key _ref _old-idn new-idn]
+        (ss/invoke-later
+          ((:set-connection! status-bar) (:connected? new-idn) (:target new-idn)))))
     
     ;; Initial Render
-    ((:update-view! grid-comp) @state/app-state)
+    ((:update-view! grid-comp) (make-legacy-state))
     
     frame))
 
@@ -260,24 +291,23 @@
         (System/setProperty "apple.awt.textantialiasing" "on"))
       
       ;; Setup FlatLaf - use macOS-specific theme on macOS for native look
-      (FlatMacDarkLaf/setup)
-      #_(if is-macos?
+      (if is-macos?
         (FlatMacDarkLaf/setup)
         (FlatDarkLaf/setup))
       
-      (if-let [frame (get-in @app-state [:ui :main-frame])]
+      (if-let [frame (dyn/get-main-frame)]
         (do (.toFront frame) frame)
         (let [frame (create-main-window-internal)]
           (ss/show! frame)
-          (swap! state/app-state assoc-in [:ui :main-frame] frame)
+          (dyn/set-main-frame! frame)
           frame)))))
 
 (defn close-window! []
-  (when-let [frame (get-in @app-state [:ui :main-frame])]
+  (when-let [frame (dyn/get-main-frame)]
     (.dispose frame)))
 
 (defn window-open? []
-  (some? (get-in @app-state [:ui :main-frame])))
+  (some? (dyn/get-main-frame)))
 
 (defn get-frame []
-  (get-in @app-state [:ui :main-frame]))
+  (dyn/get-main-frame))

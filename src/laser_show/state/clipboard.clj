@@ -1,20 +1,33 @@
 (ns laser-show.state.clipboard
   "Clipboard state management for copy/paste operations.
    Supports copying cues, zones, projectors, and effects (future).
-   Uses both an internal atom and the system clipboard for EDN data."
+   Uses both the centralized dynamic state and the system clipboard for EDN data.
+   
+   NOTE: Clipboard state is stored in database/dynamic.clj at [:ui :clipboard]
+   to maintain a single source of truth for all application state."
   (:require [laser-show.backend.cues :as cues]
             [laser-show.backend.zones :as zones]
             [laser-show.backend.projectors :as projectors]
+            [laser-show.database.dynamic :as dyn]
             [clojure.edn :as edn])
   (:import [java.awt Toolkit]
            [java.awt.datatransfer StringSelection DataFlavor Clipboard]))
 
 ;; ============================================================================
-;; Clipboard State
+;; Clipboard State - uses database/dynamic.clj !ui atom
 ;; ============================================================================
 
-(defonce !clipboard
-  (atom nil))
+;; No local atom - state is in dyn/!ui at [:clipboard]
+
+(defn- get-internal-clipboard
+  "Get the internal clipboard state from central store."
+  []
+  (dyn/get-clipboard))
+
+(defn- set-internal-clipboard!
+  "Set the internal clipboard state in central store."
+  [data]
+  (dyn/set-clipboard! data))
 
 ;; ============================================================================
 ;; Clipboard Types
@@ -76,15 +89,15 @@
 
 (defn get-clipboard
   "Get the current clipboard contents.
-   First tries to read from system clipboard, falls back to internal atom."
+   First tries to read from system clipboard, falls back to internal state."
   []
   (or (read-from-system-clipboard)
-      @!clipboard))
+      (get-internal-clipboard)))
 
 (defn clear-clipboard!
-  "Clear the clipboard (both internal atom and system clipboard)."
+  "Clear the clipboard (both internal state and system clipboard)."
   []
-  (reset! !clipboard nil)
+  (set-internal-clipboard! nil)
   (try
     (let [clipboard (get-system-clipboard)
           selection (StringSelection. "")]
@@ -116,7 +129,7 @@
     (let [clip-data {:type :cue
                      :data cue
                      :copied-at (System/currentTimeMillis)}]
-      (reset! !clipboard clip-data)
+      (set-internal-clipboard! clip-data)
       (copy-to-system-clipboard! clip-data)
       true)))
 
@@ -125,7 +138,7 @@
    Returns the new cue, or nil if clipboard doesn't contain a cue."
   []
   (when (clipboard-has-type? :cue)
-    (let [{:keys [data]} @!clipboard
+    (let [{:keys [data]} (get-internal-clipboard)
           new-id (keyword (str "cue-" (System/currentTimeMillis)))
           new-cue (assoc data 
                          :id new-id 
@@ -152,7 +165,7 @@
     (let [clip-data {:type :cell-assignment
                      :preset-id preset-id
                      :copied-at (System/currentTimeMillis)}]
-      (reset! !clipboard clip-data)
+      (set-internal-clipboard! clip-data)
       (copy-to-system-clipboard! clip-data)
       true)))
 
@@ -178,17 +191,19 @@
   "Copy a zone to the clipboard by ID."
   [zone-id]
   (when-let [zone (zones/get-zone zone-id)]
-    (reset! !clipboard {:type :zone
-                        :data zone
-                        :copied-at (System/currentTimeMillis)})
-    true))
+    (let [clip-data {:type :zone
+                     :data zone
+                     :copied-at (System/currentTimeMillis)}]
+      (set-internal-clipboard! clip-data)
+      (copy-to-system-clipboard! clip-data)
+      true)))
 
 (defn paste-zone!
   "Paste a zone from clipboard, creating a new zone with a unique ID.
    Returns the new zone, or nil if clipboard doesn't contain a zone."
   []
   (when (clipboard-has-type? :zone)
-    (let [{:keys [data]} @!clipboard
+    (let [{:keys [data]} (get-internal-clipboard)
           new-id (keyword (str "zone-" (System/currentTimeMillis)))
           new-zone (assoc data 
                           :id new-id 
@@ -210,17 +225,19 @@
   "Copy a projector to the clipboard by ID."
   [projector-id]
   (when-let [projector (projectors/get-projector projector-id)]
-    (reset! !clipboard {:type :projector
-                        :data projector
-                        :copied-at (System/currentTimeMillis)})
-    true))
+    (let [clip-data {:type :projector
+                     :data projector
+                     :copied-at (System/currentTimeMillis)}]
+      (set-internal-clipboard! clip-data)
+      (copy-to-system-clipboard! clip-data)
+      true)))
 
 (defn paste-projector!
   "Paste a projector from clipboard, creating a new projector with a unique ID.
    Returns the new projector, or nil if clipboard doesn't contain a projector."
   []
   (when (clipboard-has-type? :projector)
-    (let [{:keys [data]} @!clipboard
+    (let [{:keys [data]} (get-internal-clipboard)
           new-id (keyword (str "projector-" (System/currentTimeMillis)))
           new-projector (assoc data 
                                :id new-id 
@@ -249,7 +266,7 @@
                      :enabled (:enabled effect-instance)
                      :params (:params effect-instance)
                      :copied-at (System/currentTimeMillis)}]
-      (reset! !clipboard clip-data)
+      (set-internal-clipboard! clip-data)
       (copy-to-system-clipboard! clip-data)
       true)))
 
@@ -276,7 +293,7 @@
 (defn get-clipboard-description
   "Get a human-readable description of clipboard contents."
   []
-  (if-let [{:keys [type data preset-id effect-id]} @!clipboard]
+  (if-let [{:keys [type data preset-id effect-id]} (get-internal-clipboard)]
     (case type
       :cue (str "Cue: " (:name data))
       :cell-assignment (str "Preset: " (name preset-id))

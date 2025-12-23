@@ -107,5 +107,4 @@
   (restart)
   (reset)
   (current-state)
-  (window/window-open?)
-  (window/bring-to-front!))
+  (window/window-open?))

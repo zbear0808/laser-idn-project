@@ -109,17 +109,34 @@
 (defn- serialize-params-for-drag
   "Convert effect params to a serializable format.
    Modulator functions are converted to their config maps.
-   This allows drag data to be EDN-serialized."
+   This allows drag data to be EDN-serialized.
+   
+   Handles:
+   - Modulator functions -> their config maps
+   - Non-modulator functions -> static default (1.0)
+   - Atoms/refs -> dereferenced value
+   - All other values -> as-is"
   [params]
   (when params
     (into {}
       (map (fn [[k v]]
-             (if (and (fn? v) (mod/modulator? v))
-               ;; Convert modulator to its config
+             (cond
+               ;; Modulator function with config
+               (and (fn? v) (mod/modulator? v))
                (if-let [config (mod/get-modulator-config v)]
                  [k {:modulator-config config}]
-                 ;; If no config available, use static default
                  [k 1.0])
+               
+               ;; Any other function (non-modulator) - use default
+               (fn? v)
+               [k 1.0]
+               
+               ;; Atom or other derefable - deref it
+               (instance? clojure.lang.IDeref v)
+               [k @v]
+               
+               ;; Regular serializable value
+               :else
                [k v]))
            params))))
 
@@ -132,16 +149,19 @@
       (map (fn [[k v]]
              (if (and (map? v) (:modulator-config v))
                ;; Reconstruct modulator from config
-               (let [{:keys [type min max freq phase]} (:modulator-config v)]
+               (let [{:keys [type min max freq phase loop-mode duration time-unit]} (:modulator-config v)
+                     lm (or loop-mode :loop)
+                     dur (or duration 1.0)
+                     tu (or time-unit :beats)]
                  [k (case type
-                      :sine (mod/sine-mod min max freq (or phase 0.0))
-                      :triangle (mod/triangle-mod min max freq (or phase 0.0))
-                      :sawtooth (mod/sawtooth-mod min max freq (or phase 0.0))
-                      :square (mod/square-mod min max freq)
-                      :random (mod/random-mod min max freq)
+                      :sine (mod/sine-mod min max (or freq 1.0) (or phase 0.0) lm dur tu)
+                      :triangle (mod/triangle-mod min max (or freq 1.0) (or phase 0.0) lm dur tu)
+                      :sawtooth (mod/sawtooth-mod min max (or freq 1.0) (or phase 0.0))
+                      :square (mod/square-mod min max (or freq 1.0))
+                      :random (mod/random-mod min max (or freq 1.0))
                       :beat-decay (mod/beat-decay max min)
                       ;; Default to sine
-                      (mod/sine-mod min max freq (or phase 0.0)))])
+                      (mod/sine-mod min max (or freq 1.0) (or phase 0.0) lm dur tu))])
                [k v]))
            params))))
 

@@ -61,24 +61,38 @@
 
 (deftest test-playback-operations
   (testing "Initially not playing"
-    (is (false? (dyn/is-playing?))))
+    (is (false? (dyn/playing?))))
   
   (testing "Start playback"
-    (let [animation {:type :circle}]
-      (dyn/start-playback! animation)
-      (is (true? (dyn/is-playing?)))
-      (is (= animation (dyn/get-current-animation)))
-      (is (pos? (:animation-start-time @dyn/!playback)))))
+    (dyn/start-playback!)
+    (is (true? (dyn/playing?)))
+    (is (pos? (dyn/get-trigger-time))))
   
   (testing "Stop playback"
-    (dyn/start-playback! {:type :square})
+    (dyn/start-playback!)
     (dyn/stop-playback!)
-    (is (false? (dyn/is-playing?)))
-    (is (nil? (dyn/get-current-animation)))))
+    (is (false? (dyn/playing?)))))
+
+(deftest test-trigger-time-operations
+  (testing "Initial trigger time is 0"
+    (dyn/reset-all-dynamic-state!)
+    (is (= 0 (dyn/get-trigger-time))))
+  
+  (testing "Trigger updates trigger-time"
+    (let [before (System/currentTimeMillis)]
+      (dyn/trigger!)
+      (let [after (System/currentTimeMillis)
+            trigger-time (dyn/get-trigger-time)]
+        (is (>= trigger-time before))
+        (is (<= trigger-time after)))))
+  
+  (testing "Set trigger time manually"
+    (dyn/set-trigger-time! 12345)
+    (is (= 12345 (dyn/get-trigger-time)))))
 
 (deftest test-active-cell-operations
-  (testing "Initial active cell is [nil nil]"
-    (is (= [nil nil] (dyn/get-active-cell))))
+  (testing "Initial active cell is nil"
+    (is (nil? (dyn/get-active-cell))))
   
   (testing "Set active cell"
     (dyn/set-active-cell! 2 3)
@@ -87,7 +101,61 @@
   (testing "Clear active cell"
     (dyn/set-active-cell! 2 3)
     (dyn/set-active-cell! nil nil)
-    (is (= [nil nil] (dyn/get-active-cell)))))
+    (is (nil? (dyn/get-active-cell)))))
+
+(deftest test-trigger-cell
+  (testing "Trigger cell sets active cell, playing, and trigger time"
+    (dyn/reset-all-dynamic-state!)
+    (let [before (System/currentTimeMillis)]
+      (dyn/trigger-cell! 3 2)
+      (let [after (System/currentTimeMillis)]
+        (is (= [3 2] (dyn/get-active-cell)))
+        (is (true? (dyn/playing?)))
+        (is (>= (dyn/get-trigger-time) before))
+        (is (<= (dyn/get-trigger-time) after))))))
+
+;; ============================================================================
+;; Grid State Tests
+;; ============================================================================
+
+(deftest test-grid-cell-operations
+  (testing "Get initial grid cells"
+    (let [cells (dyn/get-grid-cells)]
+      (is (= :circle (:preset-id (get cells [0 0]))))
+      (is (= :spinning-square (:preset-id (get cells [1 0]))))))
+  
+  (testing "Get specific cell"
+    (is (= {:preset-id :circle} (dyn/get-cell 0 0)))
+    (is (nil? (dyn/get-cell 0 1))))
+  
+  (testing "Set cell preset"
+    (dyn/set-cell-preset! 0 1 :wave)
+    (is (= {:preset-id :wave} (dyn/get-cell 0 1))))
+  
+  (testing "Clear cell"
+    (dyn/set-cell-preset! 0 2 :star)
+    (dyn/clear-cell! 0 2)
+    (is (nil? (dyn/get-cell 0 2)))))
+
+(deftest test-grid-selection
+  (testing "Initial selected cell is nil"
+    (is (nil? (dyn/get-selected-cell))))
+  
+  (testing "Set selected cell"
+    (dyn/set-selected-cell! 1 2)
+    (is (= [1 2] (dyn/get-selected-cell))))
+  
+  (testing "Clear selected cell"
+    (dyn/set-selected-cell! 1 2)
+    (dyn/clear-selected-cell!)
+    (is (nil? (dyn/get-selected-cell)))))
+
+(deftest test-grid-move-cell
+  (testing "Move cell from one position to another"
+    (dyn/set-cell-preset! 5 5 :test-preset)
+    (dyn/move-cell! 5 5 6 6)
+    (is (nil? (dyn/get-cell 5 5)))
+    (is (= {:preset-id :test-preset} (dyn/get-cell 6 6)))))
 
 ;; ============================================================================
 ;; Streaming State Tests
@@ -95,7 +163,7 @@
 
 (deftest test-streaming-operations
   (testing "Initially not streaming"
-    (is (false? (dyn/is-streaming?))))
+    (is (false? (dyn/streaming?))))
   
   (testing "Get empty engines initially"
     (is (empty? (dyn/get-streaming-engines))))
@@ -110,6 +178,19 @@
     (dyn/add-streaming-engine! :proj-2 {:id :engine-2})
     (dyn/remove-streaming-engine! :proj-1)
     (is (= {:proj-2 {:id :engine-2}} (dyn/get-streaming-engines)))))
+
+;; ============================================================================
+;; IDN State Tests
+;; ============================================================================
+
+(deftest test-idn-operations
+  (testing "Initially not connected"
+    (is (false? (dyn/idn-connected?))))
+  
+  (testing "Set IDN connection"
+    (dyn/set-idn-connection! true "192.168.1.100:7255" {:engine :test})
+    (is (true? (dyn/idn-connected?)))
+    (is (= "192.168.1.100:7255" (dyn/get-idn-target)))))
 
 ;; ============================================================================
 ;; Input State Tests
@@ -147,7 +228,44 @@
   
   (testing "Set selected preset"
     (dyn/set-selected-preset! :circle)
-    (is (= :circle (dyn/get-selected-preset)))))
+    (is (= :circle (dyn/get-selected-preset))))
+  
+  (testing "Clipboard operations"
+    (is (nil? (dyn/get-clipboard)))
+    (dyn/set-clipboard! {:preset-id :test})
+    (is (= {:preset-id :test} (dyn/get-clipboard)))))
+
+;; ============================================================================
+;; Effects State Tests
+;; ============================================================================
+
+(deftest test-effects-operations
+  (testing "Initially no active effects"
+    (is (empty? (dyn/get-active-effects))))
+  
+  (testing "Set effect at position"
+    (dyn/set-effect-at! 0 0 {:type :hue-shift :params {:amount 0.5}})
+    (is (= {:type :hue-shift :params {:amount 0.5}} (dyn/get-effect-at 0 0))))
+  
+  (testing "Clear effect at position"
+    (dyn/set-effect-at! 1 1 {:type :test})
+    (dyn/clear-effect-at! 1 1)
+    (is (nil? (dyn/get-effect-at 1 1)))))
+
+;; ============================================================================
+;; Logging State Tests
+;; ============================================================================
+
+(deftest test-logging-operations
+  (testing "Logging initially disabled"
+    (is (false? (dyn/logging-enabled?))))
+  
+  (testing "Enable logging"
+    (dyn/set-logging-enabled! true)
+    (is (true? (dyn/logging-enabled?))))
+  
+  (testing "Get log path"
+    (is (= "idn-packets.log" (dyn/get-log-path)))))
 
 ;; ============================================================================
 ;; State Reset Tests
@@ -157,15 +275,19 @@
   (testing "Reset clears all dynamic state"
     ;; Modify various state
     (dyn/set-bpm! 150.0)
-    (dyn/start-playback! {:type :triangle})
+    (dyn/start-playback!)
     (dyn/set-active-cell! 3 4)
     (dyn/set-grid-size! 12 6)
+    (dyn/set-idn-connection! true "test:123" nil)
+    (dyn/set-logging-enabled! true)
     
     ;; Reset
     (dyn/reset-all-dynamic-state!)
     
     ;; Verify all reset
     (is (= 120.0 (dyn/get-bpm)))
-    (is (false? (dyn/is-playing?)))
-    (is (= [nil nil] (dyn/get-active-cell)))
-    (is (= [8 4] (dyn/get-grid-size)))))
+    (is (false? (dyn/playing?)))
+    (is (nil? (dyn/get-active-cell)))
+    (is (= [8 4] (dyn/get-grid-size)))
+    (is (false? (dyn/idn-connected?)))
+    (is (false? (dyn/logging-enabled?)))))

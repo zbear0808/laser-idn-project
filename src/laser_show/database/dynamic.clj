@@ -1,6 +1,8 @@
 (ns laser-show.database.dynamic
   "Dynamic runtime state for the laser show application.
-   This state is volatile and not persisted between sessions.")
+   This state is volatile and not persisted between sessions.
+   
+   This is the single source of truth for all runtime state.")
 
 ;; ============================================================================
 ;; Timing State
@@ -20,13 +22,27 @@
 ;; ============================================================================
 
 (defonce !playback
-  (atom {:playing false
-         :current-animation nil
-         :current-cue-id nil
-         :animation-start-time 0
-         :active-cell [nil nil]       ; [col row] of active cell
-         :cue-queue []                ; Queue of upcoming cues
-         :active-cue nil}))           ; Currently playing cue
+  (atom {:playing? false
+         :trigger-time 0              ; KEY for retriggering - timestamp when cue was triggered
+         :active-cell nil             ; [col row] of active cell, or nil
+         :active-cue nil              ; Currently playing cue
+         :cue-queue []}))             ; Queue of upcoming cues
+
+;; ============================================================================
+;; Grid State (Cue assignments and cells)
+;; ============================================================================
+
+(defonce !grid
+  (atom {:cells {[0 0] {:preset-id :circle}
+                 [1 0] {:preset-id :spinning-square}
+                 [2 0] {:preset-id :triangle}
+                 [3 0] {:preset-id :star}
+                 [4 0] {:preset-id :spiral}
+                 [5 0] {:preset-id :wave}
+                 [6 0] {:preset-id :beam-fan}
+                 [7 0] {:preset-id :rainbow-circle}}
+         :selected-cell nil
+         :size [8 4]}))
 
 ;; ============================================================================
 ;; Streaming State
@@ -38,6 +54,15 @@
          :connected-targets #{}       ; Set of connected "host:port" strings
          :frame-stats {}              ; Per-projector frame statistics
          :multi-engine-state nil}))   ; Multi-projector streaming state
+
+;; ============================================================================
+;; IDN / Network State
+;; ============================================================================
+
+(defonce !idn
+  (atom {:connected? false
+         :target nil
+         :streaming-engine nil}))
 
 ;; ============================================================================
 ;; Input State
@@ -66,141 +91,294 @@
 
 (defonce !ui
   (atom {:selected-preset nil
-         :selected-cell nil
          :clipboard nil
-         :grid {:size [8 4]            ; [cols rows]
-                :cell-states {}}       ; {[col row] {:animation animation, :preset-id id}}
-         :preview {:current-animation nil
-                   :frame nil
+         :preview {:frame nil
                    :last-render-time 0}
          :active-tab :grid
          :window {:width 1200
-                  :height 800}}))
+                  :height 800}
+         :drag {:active? false      ; Is a drag currently in progress?
+                :source-type nil    ; :grid-cell, :effect-cell, :preset, etc.
+                :source-id nil      ; Grid identifier
+                :source-key nil     ; [col row] of source cell
+                :data nil}          ; The data being dragged
+         :components {:main-frame nil
+                      :preview-panel nil
+                      :grid-panel nil
+                      :effects-panel nil
+                      :status-bar nil
+                      :toolbar nil}}))
+
+;; ============================================================================
+;; Logging State
+;; ============================================================================
+
+(defonce !logging
+  (atom {:enabled? false
+         :file nil
+         :path "idn-packets.log"}))
+
+;; ============================================================================
+;; Effects Grid State
+;; ============================================================================
+
+(defonce !effects
+  (atom {:active-effects {}}))        ; {[col row] effect-data}
 
 ;; ============================================================================
 ;; Accessor Functions - Timing
 ;; ============================================================================
 
 (defn get-bpm []
-  "Get current BPM"
   (:bpm @!timing))
 
 (defn set-bpm! [bpm]
-  "Set BPM to a new value"
   (swap! !timing assoc :bpm (double bpm)))
 
 (defn get-tap-times []
-  "Get tap tempo buffer"
   (:tap-times @!timing))
 
 (defn add-tap-time! [timestamp]
-  "Add a tap timestamp to the buffer"
   (swap! !timing update :tap-times conj timestamp))
 
 (defn clear-tap-times! []
-  "Clear tap tempo buffer"
   (swap! !timing assoc :tap-times []))
 
 (defn get-beat-position []
-  "Get current position within beat (0.0-1.0)"
   (:beat-position @!timing))
 
 (defn update-beat-position! [position]
-  "Update current beat position"
   (swap! !timing assoc :beat-position position))
 
 ;; ============================================================================
 ;; Accessor Functions - Playback
 ;; ============================================================================
 
-(defn is-playing? []
-  "Check if playback is active"
-  (:playing @!playback))
+(defn playing? []
+  (:playing? @!playback))
 
-(defn start-playback! [animation]
-  "Start playback with given animation"
-  (swap! !playback assoc
-         :playing true
-         :current-animation animation
-         :animation-start-time (System/currentTimeMillis)))
+(defn get-trigger-time []
+  (:trigger-time @!playback))
+
+(defn trigger!
+  "Set trigger-time to current timestamp. KEY function for retriggering animations."
+  []
+  (swap! !playback assoc :trigger-time (System/currentTimeMillis)))
+
+(defn set-trigger-time! [time-ms]
+  (swap! !playback assoc :trigger-time time-ms))
+
+(defn start-playback!
+  "Start playback and reset trigger time."
+  []
+  (swap! !playback #(-> %
+                        (assoc :playing? true)
+                        (assoc :trigger-time (System/currentTimeMillis)))))
 
 (defn stop-playback! []
-  "Stop playback"
-  (swap! !playback assoc
-         :playing false
-         :current-animation nil))
-
-(defn get-current-animation []
-  "Get currently playing animation"
-  (:current-animation @!playback))
-
-(defn set-active-cell! [col row]
-  "Set the active grid cell"
-  (swap! !playback assoc :active-cell [col row]))
+  (swap! !playback #(-> %
+                        (assoc :playing? false)
+                        (assoc :active-cell nil))))
 
 (defn get-active-cell []
-  "Get the active grid cell"
   (:active-cell @!playback))
+
+(defn set-active-cell! [col row]
+  (swap! !playback assoc :active-cell (when (and col row) [col row])))
+
+(defn get-active-cue []
+  (:active-cue @!playback))
+
+(defn set-active-cue! [cue]
+  (swap! !playback assoc :active-cue cue))
+
+(defn trigger-cell!
+  "Trigger a grid cell - sets it as active and updates trigger time."
+  [col row]
+  (swap! !playback #(-> %
+                        (assoc :active-cell [col row])
+                        (assoc :playing? true)
+                        (assoc :trigger-time (System/currentTimeMillis)))))
+
+;; ============================================================================
+;; Accessor Functions - Grid
+;; ============================================================================
+
+(defn get-grid-cells []
+  (:cells @!grid))
+
+(defn get-cell [col row]
+  (get-in @!grid [:cells [col row]]))
+
+(defn set-cell! [col row cell-data]
+  (swap! !grid assoc-in [:cells [col row]] cell-data))
+
+(defn set-cell-preset! [col row preset-id]
+  (swap! !grid assoc-in [:cells [col row]] {:preset-id preset-id}))
+
+(defn clear-cell! [col row]
+  (swap! !grid update :cells dissoc [col row]))
+
+(defn get-selected-cell []
+  (:selected-cell @!grid))
+
+(defn set-selected-cell! [col row]
+  (swap! !grid assoc :selected-cell (when (and col row) [col row])))
+
+(defn clear-selected-cell! []
+  (swap! !grid assoc :selected-cell nil))
+
+(defn get-grid-size []
+  (:size @!grid))
+
+(defn set-grid-size! [cols rows]
+  (swap! !grid assoc :size [cols rows]))
+
+(defn move-cell! [from-col from-row to-col to-row]
+  (swap! !grid (fn [grid]
+                 (let [cell-data (get-in grid [:cells [from-col from-row]])]
+                   (if cell-data
+                     (-> grid
+                         (update :cells dissoc [from-col from-row])
+                         (assoc-in [:cells [to-col to-row]] cell-data))
+                     grid)))))
 
 ;; ============================================================================
 ;; Accessor Functions - Streaming
 ;; ============================================================================
 
-(defn is-streaming? []
-  "Check if streaming is active"
+(defn streaming? []
   (:running? @!streaming))
 
 (defn get-streaming-engines []
-  "Get all streaming engines"
   (:engines @!streaming))
 
 (defn add-streaming-engine! [projector-id engine]
-  "Add a streaming engine"
   (swap! !streaming assoc-in [:engines projector-id] engine))
 
 (defn remove-streaming-engine! [projector-id]
-  "Remove a streaming engine"
   (swap! !streaming update :engines dissoc projector-id))
+
+;; ============================================================================
+;; Accessor Functions - IDN
+;; ============================================================================
+
+(defn idn-connected? []
+  (:connected? @!idn))
+
+(defn get-idn-target []
+  (:target @!idn))
+
+(defn set-idn-connection! [connected? target engine]
+  (reset! !idn {:connected? connected?
+                :target target
+                :streaming-engine engine}))
 
 ;; ============================================================================
 ;; Accessor Functions - Input
 ;; ============================================================================
 
 (defn midi-enabled? []
-  "Check if MIDI input is enabled"
   (get-in @!input [:midi :enabled]))
 
 (defn enable-midi! [enabled]
-  "Enable or disable MIDI input"
   (swap! !input assoc-in [:midi :enabled] enabled))
 
 (defn osc-enabled? []
-  "Check if OSC input is enabled"
   (get-in @!input [:osc :enabled]))
 
 (defn enable-osc! [enabled]
-  "Enable or disable OSC input"
   (swap! !input assoc-in [:osc :enabled] enabled))
 
 ;; ============================================================================
 ;; Accessor Functions - UI
 ;; ============================================================================
 
-(defn get-grid-size []
-  "Get current grid size [cols rows]"
-  (get-in @!ui [:grid :size]))
-
-(defn set-grid-size! [cols rows]
-  "Set grid size"
-  (swap! !ui assoc-in [:grid :size] [cols rows]))
-
 (defn get-selected-preset []
-  "Get currently selected preset"
   (:selected-preset @!ui))
 
 (defn set-selected-preset! [preset-id]
-  "Set selected preset"
   (swap! !ui assoc :selected-preset preset-id))
+
+(defn get-clipboard []
+  (:clipboard @!ui))
+
+(defn set-clipboard! [data]
+  (swap! !ui assoc :clipboard data))
+
+(defn get-ui-component [component-key]
+  (get-in @!ui [:components component-key]))
+
+(defn set-ui-component! [component-key component]
+  (swap! !ui assoc-in [:components component-key] component))
+
+(defn get-main-frame []
+  (get-ui-component :main-frame))
+
+(defn set-main-frame! [frame]
+  (set-ui-component! :main-frame frame))
+
+;; ============================================================================
+;; Accessor Functions - Drag State
+;; ============================================================================
+
+(defn dragging? []
+  (get-in @!ui [:drag :active?]))
+
+(defn get-drag-data []
+  (get-in @!ui [:drag]))
+
+(defn start-drag!
+  "Start a drag operation.
+   Parameters:
+   - source-type: :grid-cell, :effect-cell, :preset, etc.
+   - source-id: identifier for the source grid
+   - source-key: [col row] of source cell
+   - data: the data being dragged"
+  [source-type source-id source-key data]
+  (swap! !ui assoc :drag {:active? true
+                          :source-type source-type
+                          :source-id source-id
+                          :source-key source-key
+                          :data data}))
+
+(defn end-drag!
+  "End the current drag operation."
+  []
+  (swap! !ui assoc :drag {:active? false
+                          :source-type nil
+                          :source-id nil
+                          :source-key nil
+                          :data nil}))
+
+;; ============================================================================
+;; Accessor Functions - Logging
+;; ============================================================================
+
+(defn logging-enabled? []
+  (:enabled? @!logging))
+
+(defn set-logging-enabled! [enabled]
+  (swap! !logging assoc :enabled? enabled))
+
+(defn get-log-path []
+  (:path @!logging))
+
+;; ============================================================================
+;; Accessor Functions - Effects
+;; ============================================================================
+
+(defn get-active-effects []
+  (:active-effects @!effects))
+
+(defn get-effect-at [col row]
+  (get-in @!effects [:active-effects [col row]]))
+
+(defn set-effect-at! [col row effect-data]
+  (swap! !effects assoc-in [:active-effects [col row]] effect-data))
+
+(defn clear-effect-at! [col row]
+  (swap! !effects update :active-effects dissoc [col row]))
 
 ;; ============================================================================
 ;; State Reset (for testing)
@@ -216,18 +394,29 @@
                    :last-beat-time 0
                    :beats-elapsed 0
                    :quantization :beat})
-  (reset! !playback {:playing false
-                     :current-animation nil
-                     :current-cue-id nil
-                     :animation-start-time 0
-                     :active-cell [nil nil]
-                     :cue-queue []
-                     :active-cue nil})
+  (reset! !playback {:playing? false
+                     :trigger-time 0
+                     :active-cell nil
+                     :active-cue nil
+                     :cue-queue []})
+  (reset! !grid {:cells {[0 0] {:preset-id :circle}
+                         [1 0] {:preset-id :spinning-square}
+                         [2 0] {:preset-id :triangle}
+                         [3 0] {:preset-id :star}
+                         [4 0] {:preset-id :spiral}
+                         [5 0] {:preset-id :wave}
+                         [6 0] {:preset-id :beam-fan}
+                         [7 0] {:preset-id :rainbow-circle}}
+                 :selected-cell nil
+                 :size [8 4]})
   (reset! !streaming {:engines {}
                       :running? false
                       :connected-targets #{}
                       :frame-stats {}
                       :multi-engine-state nil})
+  (reset! !idn {:connected? false
+                :target nil
+                :streaming-engine nil})
   (reset! !input {:midi {:enabled true
                          :connected-devices #{}
                          :learn-mode nil
@@ -244,13 +433,24 @@
                            :event-log []
                            :enabled true}})
   (reset! !ui {:selected-preset nil
-               :selected-cell nil
                :clipboard nil
-               :grid {:size [8 4]
-                      :cell-states {}}
-               :preview {:current-animation nil
-                         :frame nil
+               :preview {:frame nil
                          :last-render-time 0}
                :active-tab :grid
                :window {:width 1200
-                        :height 800}}))
+                        :height 800}
+               :drag {:active? false
+                      :source-type nil
+                      :source-id nil
+                      :source-key nil
+                      :data nil}
+               :components {:main-frame nil
+                            :preview-panel nil
+                            :grid-panel nil
+                            :effects-panel nil
+                            :status-bar nil
+                            :toolbar nil}})
+  (reset! !logging {:enabled? false
+                    :file nil
+                    :path "idn-packets.log"})
+  (reset! !effects {:active-effects {}}))

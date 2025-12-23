@@ -168,16 +168,16 @@
    - loop-mode: :loop (continuous, default) or :once (single run then hold)
    - duration: Duration for once mode (in beats or seconds)
    - time-unit: :beats (default) or :seconds
-   - trigger-time-override: (optional) Fixed trigger time, overrides context trigger-time"
+   
+   The trigger time for once-mode modulators comes from the modulation context,
+   which is provided when effects are applied (see effects.clj apply-effect)."
   ([min-val max-val]
    (sine-mod min-val max-val 1.0))
   ([min-val max-val frequency]
    (sine-mod min-val max-val frequency 0.0))
   ([min-val max-val frequency phase-offset]
-   (sine-mod min-val max-val frequency phase-offset :loop 1.0 :beats nil))
+   (sine-mod min-val max-val frequency phase-offset :loop 1.0 :beats))
   ([min-val max-val frequency phase-offset loop-mode duration time-unit]
-   (sine-mod min-val max-val frequency phase-offset loop-mode duration time-unit nil))
-  ([min-val max-val frequency phase-offset loop-mode duration time-unit trigger-time-override]
    (let [min-v (double min-val)
          max-v (double max-val)
          freq (double frequency)
@@ -186,13 +186,12 @@
          tunit (or time-unit :beats)]
      (make-modulator
       (fn [context]
-        (let [phase (calculate-modulator-phase context freq offset loop-mode dur tunit trigger-time-override)]
+        (let [phase (calculate-modulator-phase context freq offset loop-mode dur tunit)]
           (time/oscillate min-v max-v phase :sine)))
       (str "sine(" min-val "-" max-val " @" frequency "x"
            (when (= loop-mode :once) (str " once:" duration (name tunit))) ")")
       {:type :sine :min min-val :max max-val :freq frequency :phase phase-offset
-       :loop-mode (or loop-mode :loop) :duration duration :time-unit tunit
-       :trigger-time-override trigger-time-override}))))
+       :loop-mode (or loop-mode :loop) :duration dur :time-unit tunit}))))
 
 (defn triangle-mod
   "Create a triangle wave modulator (BPM-synced by default, or time-based with once mode).
@@ -205,16 +204,16 @@
    - loop-mode: :loop (continuous, default) or :once (single run then hold)
    - duration: Duration for once mode (in beats or seconds)
    - time-unit: :beats (default) or :seconds
-   - trigger-time-override: (optional) Fixed trigger time, overrides context trigger-time"
+   
+   The trigger time for once-mode modulators comes from the modulation context,
+   which is provided when effects are applied (see effects.clj apply-effect)."
   ([min-val max-val]
    (triangle-mod min-val max-val 1.0))
   ([min-val max-val frequency]
    (triangle-mod min-val max-val frequency 0.0))
   ([min-val max-val frequency phase-offset]
-   (triangle-mod min-val max-val frequency phase-offset :loop 1.0 :beats nil))
+   (triangle-mod min-val max-val frequency phase-offset :loop 1.0 :beats))
   ([min-val max-val frequency phase-offset loop-mode duration time-unit]
-   (triangle-mod min-val max-val frequency phase-offset loop-mode duration time-unit nil))
-  ([min-val max-val frequency phase-offset loop-mode duration time-unit trigger-time-override]
    (let [min-v (double min-val)
          max-v (double max-val)
          freq (double frequency)
@@ -223,13 +222,12 @@
          tunit (or time-unit :beats)]
      (make-modulator
       (fn [context]
-        (let [phase (calculate-modulator-phase context freq offset loop-mode dur tunit trigger-time-override)]
+        (let [phase (calculate-modulator-phase context freq offset loop-mode dur tunit)]
           (time/oscillate min-v max-v phase :triangle)))
       (str "triangle(" min-val "-" max-val " @" frequency "x"
            (when (= loop-mode :once) (str " once:" duration (name tunit))) ")")
       {:type :triangle :min min-val :max max-val :freq frequency :phase phase-offset
-       :loop-mode (or loop-mode :loop) :duration duration :time-unit tunit
-       :trigger-time-override trigger-time-override}))))
+       :loop-mode (or loop-mode :loop) :duration dur :time-unit tunit}))))
 
 (defn sawtooth-mod
   "Create a sawtooth wave modulator (BPM-synced).

@@ -2,8 +2,8 @@
   "Main entry point for the Laser Show application.
    Refactored to use Uni-directional Data Flow."
   (:require [seesaw.core :as ss]
-            [laser-show.state :as state]
-            [laser-show.events :as events]
+            [laser-show.database.dynamic :as dyn]
+            [laser-show.app-events :as events]
             [laser-show.ui.window :as window]
             [laser-show.ui.layout :as layout]
             [laser-show.backend.projectors :as projectors]
@@ -14,14 +14,6 @@
             [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc])
   (:gen-class))
-
-;; ============================================================================
-;; Application State Access
-;; ============================================================================
-
-(def app-state 
-  "Reference to the central app state."
-  state/app-state)
 
 ;; ============================================================================
 ;; Input System Integration
