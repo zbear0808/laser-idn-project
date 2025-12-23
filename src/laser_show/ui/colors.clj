@@ -150,3 +150,43 @@
 
 (def preview-background Color/BLACK)
 (def preview-grid-lines (rgb 30 30 30))
+
+;; ============================================================================
+;; Modulator Category Colors
+;; ============================================================================
+
+(def modulator-category-time (rgb 100 180 255))        ;; Blue - temporal
+(def modulator-category-time-dim (rgb 60 110 155))
+
+(def modulator-category-space (rgb 255 140 100))       ;; Orange - spatial
+(def modulator-category-space-dim (rgb 155 85 60))
+
+(def modulator-category-animated (rgb 150 255 150))    ;; Green - dynamic
+(def modulator-category-animated-dim (rgb 90 155 90))
+
+(def modulator-category-control (rgb 200 200 100))     ;; Yellow - external control
+(def modulator-category-control-dim (rgb 120 120 60))
+
+(def modulator-category-colors
+  "Map of modulator category keywords to colors."
+  {:time modulator-category-time
+   :space modulator-category-space
+   :animated modulator-category-animated
+   :control modulator-category-control})
+
+(def modulator-category-colors-dim
+  "Map of modulator category keywords to dimmed colors."
+  {:time modulator-category-time-dim
+   :space modulator-category-space-dim
+   :animated modulator-category-animated-dim
+   :control modulator-category-control-dim})
+
+(defn get-modulator-category-color
+  "Get the Color for a modulator category keyword.
+   If dimmed? is true, returns the dimmed version."
+  ([category]
+   (get-modulator-category-color category false))
+  ([category dimmed?]
+   (if dimmed?
+     (get modulator-category-colors-dim category cell-assigned)
+     (get modulator-category-colors category cell-assigned))))

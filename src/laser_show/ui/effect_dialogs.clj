@@ -10,10 +10,11 @@
             [laser-show.animation.modulation :as mod]
             [laser-show.ui.colors :refer [background-dark background-medium 
                                           background-light text-primary text-secondary
-                                          get-effect-category-color]]
+                                          get-effect-category-color get-modulator-category-color]]
             [laser-show.ui.components.slider :as slider])
-  (:import [java.awt Color Font Dimension Cursor]
-           [javax.swing JDialog JSpinner SpinnerNumberModel DefaultListModel
+  (:import [java.awt Color Font Dimension Cursor Graphics2D RenderingHints]
+           [java.awt.geom RoundRectangle2D$Float]
+           [javax.swing JDialog JSpinner SpinnerNumberModel DefaultListModel JPanel
                         DefaultComboBoxModel ListSelectionModel BorderFactory]
            [javax.swing.event ChangeListener ListSelectionListener]))
 
@@ -27,23 +28,99 @@
    {:id :color :name "Color"}
    {:id :intensity :name "Intensity"}])
 
+(def modulator-categories
+  "Hierarchical modulator categories with their types and parameters."
+  [{:id :time
+    :name "Time"
+    :icon "🕐"
+    :description "Modulators that vary over time, synced to BPM"
+    :types [{:id :sine :name "Sine Wave" :description "Smooth oscillation"
+             :params [:min :max :freq :phase]}
+            {:id :triangle :name "Triangle Wave" :description "Linear up/down"
+             :params [:min :max :freq :phase]}
+            {:id :sawtooth :name "Sawtooth Wave" :description "Ramp up, reset"
+             :params [:min :max :freq :phase]}
+            {:id :square :name "Square Wave" :description "On/off toggle"
+             :params [:min :max :freq :phase]}
+            :separator
+            {:id :beat-decay :name "Beat Decay" :description "Decay each beat"
+             :params [:min :max]}
+            {:id :random :name "Random" :description "Random values per beat"
+             :params [:min :max :freq]}
+            {:id :step :name "Step Sequencer" :description "Cycle through values"
+             :params [:values :freq]}]}
+   {:id :space
+    :name "Space"
+    :icon "📍"
+    :description "Modulators based on point position in 2D space"
+    :types [{:id :pos-x :name "X Position" :description "Left ↔ Right gradient"
+             :params [:min :max]}
+            {:id :pos-y :name "Y Position" :description "Bottom ↔ Top gradient"
+             :params [:min :max]}
+            :separator
+            {:id :radial :name "Radial Distance" :description "Center → Edge gradient"
+             :params [:min :max]}
+            {:id :angle :name "Angle" :description "Rotation around center"
+             :params [:min :max]}
+            :separator
+            {:id :point-index :name "Point Index" :description "First → Last point"
+             :params [:min :max :wrap?]}
+            {:id :point-wave :name "Point Wave" :description "Wave along path"
+             :params [:min :max :cycles :wave-type]}
+            :separator
+            {:id :pos-wave :name "Position Wave" :description "Spatial wave pattern"
+             :params [:min :max :axis :freq :wave-type]}]}
+   {:id :animated
+    :name "Animated"
+    :icon "🌊"
+    :description "Combined space + time modulators"
+    :types [{:id :pos-scroll :name "Position Scroll" :description "Scrolling wave pattern"
+             :params [:min :max :axis :speed :wave-type]}
+            {:id :rainbow-hue :name "Rainbow Hue" :description "Rotating color wheel"
+             :params [:axis :speed]}]}
+   {:id :control
+    :name "Control"
+    :icon "🎛️"
+    :description "External control and utility modulators"
+    :types [{:id :midi :name "MIDI CC" :description "MIDI controller input"
+             :params [:channel :cc :min :max]}
+            {:id :osc :name "OSC" :description "OSC message input"
+             :params [:path :min :max]}
+            {:id :constant :name "Constant" :description "Fixed value"
+             :params [:value]}]}])
+
+(def modulator-presets-by-category
+  "Preset modulator configurations organized by category."
+  {:time [{:id :gentle-pulse :name "Gentle Pulse" :type :sine :min 0.7 :max 1.0 :freq 1.0 :phase 0.0}
+          {:id :strong-pulse :name "Strong Pulse" :type :sine :min 0.3 :max 1.0 :freq 2.0 :phase 0.0}
+          {:id :breathe :name "Breathe" :type :sine :min 0.5 :max 1.0 :freq 0.25 :phase 0.0}
+          {:id :strobe-4x :name "Strobe 4x" :type :square :min 0.0 :max 1.0 :freq 4.0 :phase 0.0}
+          {:id :strobe-8x :name "Strobe 8x" :type :square :min 0.0 :max 1.0 :freq 8.0 :phase 0.0}
+          {:id :ramp-up :name "Ramp Up" :type :sawtooth :min 0.0 :max 1.0 :freq 1.0 :phase 0.0}
+          {:id :wobble :name "Wobble" :type :sine :min 0.9 :max 1.1 :freq 4.0 :phase 0.0}
+          {:id :beat-flash :name "Beat Flash" :type :beat-decay :min 0.3 :max 1.0}]
+   :space [{:id :fade-x :name "Fade X" :type :pos-x :min 0.0 :max 1.0}
+           {:id :fade-y :name "Fade Y" :type :pos-y :min 0.0 :max 1.0}
+           {:id :glow-center :name "Glow Center" :type :radial :min 1.0 :max 0.3}
+           {:id :fade-edges :name "Fade Edges" :type :radial :min 0.3 :max 1.0}
+           {:id :fade-path :name "Fade Path" :type :point-index :min 0.0 :max 1.0}
+           {:id :wave-path :name "Wave Path" :type :point-wave :min 0.3 :max 1.0 :cycles 2.0 :wave-type :sine}]
+   :animated [{:id :scroll-x :name "Scroll X" :type :pos-scroll :min 0.0 :max 1.0 :axis :x :speed 1.0 :wave-type :sine}
+              {:id :scroll-y :name "Scroll Y" :type :pos-scroll :min 0.0 :max 1.0 :axis :y :speed 1.0 :wave-type :sine}
+              {:id :rainbow-x :name "Rainbow X" :type :rainbow-hue :axis :x :speed 60.0}
+              {:id :rainbow-angle :name "Rainbow Angle" :type :rainbow-hue :axis :angle :speed 60.0}]
+   :control []})
+
+;; Legacy flat list for backwards compatibility with existing code
 (def modulator-types
-  "Available modulator types for parameter modulation."
-  [{:id :sine :name "Sine Wave" :description "Smooth oscillation"}
-   {:id :triangle :name "Triangle Wave" :description "Linear up/down"}
-   {:id :sawtooth :name "Sawtooth Wave" :description "Ramp up, reset"}
-   {:id :square :name "Square Wave" :description "On/off toggle"}
-   {:id :random :name "Random" :description "Random values per beat"}
-   {:id :beat-decay :name "Beat Decay" :description "Decay each beat"}])
+  "Available modulator types for parameter modulation (legacy flat list)."
+  (vec (mapcat (fn [cat]
+                 (filter map? (:types cat)))
+               modulator-categories)))
 
 (def modulator-presets
-  "Preset modulator configurations."
-  [{:id :gentle-pulse :name "Gentle Pulse" :type :sine :min 0.7 :max 1.0 :freq 1.0}
-   {:id :strong-pulse :name "Strong Pulse" :type :sine :min 0.3 :max 1.0 :freq 2.0}
-   {:id :breathe :name "Breathe" :type :sine :min 0.5 :max 1.0 :freq 0.25}
-   {:id :strobe-4x :name "Strobe 4x" :type :square :min 0.0 :max 1.0 :freq 4.0}
-   {:id :ramp-up :name "Ramp Up" :type :sawtooth :min 0.0 :max 1.0 :freq 1.0}
-   {:id :wobble :name "Wobble" :type :sine :min 0.9 :max 1.1 :freq 4.0}])
+  "Preset modulator configurations (legacy flat list)."
+  (vec (mapcat val modulator-presets-by-category)))
 
 ;; ============================================================================
 ;; UI Helpers
@@ -74,8 +151,42 @@
   panel)
 
 ;; ============================================================================
-;; Tab Panel for Category Selection
+;; Tab Panel for Category Selection  
 ;; ============================================================================
+
+(defn- create-rounded-tab-button
+  "Create a custom panel that acts as a rounded tab button."
+  [text active? color on-click]
+  (let [radius 10
+        panel (proxy [JPanel] []
+                (paintComponent [^Graphics2D g]
+                  (let [w (.getWidth this)
+                        h (.getHeight this)
+                        bg-color (if active? color background-medium)]
+                    (.setRenderingHint g RenderingHints/KEY_ANTIALIASING 
+                                       RenderingHints/VALUE_ANTIALIAS_ON)
+                    (.setColor g bg-color)
+                    ;; Draw rounded rectangle (only top corners rounded)
+                    (.fill g (RoundRectangle2D$Float. 0 0 w (+ h radius) radius radius))
+                    ;; Fill bottom to make it square at bottom
+                    (.fillRect g 0 (- h 2) w (+ radius 2)))))]
+    (.setOpaque panel false)
+    (.setPreferredSize panel (Dimension. 80 32))
+    (.setCursor panel (Cursor/getPredefinedCursor Cursor/HAND_CURSOR))
+    (.setLayout panel (java.awt.BorderLayout.))
+    (let [label (ss/label :text text
+                          :foreground (if active? text-primary text-secondary)
+                          :font (Font. "SansSerif" (if active? Font/BOLD Font/PLAIN) 11)
+                          :halign :center)]
+      (.add panel label java.awt.BorderLayout/CENTER))
+    (.addMouseListener panel
+      (reify java.awt.event.MouseListener
+        (mouseClicked [_ _] (when on-click (on-click)))
+        (mousePressed [_ _])
+        (mouseReleased [_ _])
+        (mouseEntered [_ _])
+        (mouseExited [_ _])))
+    panel))
 
 (defn- create-tab-panel
   "Create a horizontal tab panel for category selection.
@@ -84,46 +195,89 @@
    Parameters:
    - categories: Sequence of {:id :keyword :name \"string\"} maps
    - initial-category: The :id of the initially active category
-   - on-category-change: (fn [category-id]) called when tab is clicked"
-  [categories initial-category on-category-change]
-  (let [active-tab-atom (atom initial-category)
-        buttons-atom (atom [])
-        
-        update-buttons! (fn [new-active]
-                          (doseq [[btn cat] @buttons-atom]
-                            (let [active? (= (:id cat) new-active)
-                                  cat-color (get-effect-category-color (:id cat))]
-                              (ss/config! btn
-                                          :background (if active? cat-color background-medium)
-                                          :foreground (if active? text-primary text-secondary)
-                                          :font (Font. "SansSerif" (if active? Font/BOLD Font/PLAIN) 12))
-                              (.setBorder btn (BorderFactory/createEmptyBorder 8 16 8 16))
-                              (.setCursor btn (Cursor/getPredefinedCursor Cursor/HAND_CURSOR)))))
-        
-        buttons (mapv (fn [cat]
-                        (let [btn (ss/button 
-                                   :text (:name cat)
-                                   :focusable? false
-                                   :listen [:action (fn [_]
-                                                      (reset! active-tab-atom (:id cat))
-                                                      (update-buttons! (:id cat))
-                                                      (when on-category-change
-                                                        (on-category-change (:id cat))))])]
-                          [btn cat]))
-                      categories)
-        
-        panel (ss/horizontal-panel
-               :items (mapv first buttons)
-               :background background-dark)]
-    
-    (reset! buttons-atom buttons)
-    (update-buttons! initial-category)
-    
-    {:panel panel
-     :set-active-tab! (fn [cat-id]
-                        (reset! active-tab-atom cat-id)
-                        (update-buttons! cat-id))
-     :get-active-tab (fn [] @active-tab-atom)}))
+   - on-category-change: (fn [category-id]) called when tab is clicked
+   - get-color-fn: (optional) Function to get color for category, defaults to get-effect-category-color"
+  ([categories initial-category on-category-change]
+   (create-tab-panel categories initial-category on-category-change get-effect-category-color))
+  ([categories initial-category on-category-change get-color-fn]
+   (let [active-tab-atom (atom initial-category)
+         buttons-atom (atom [])
+         
+         update-buttons! (fn [new-active]
+                           (doseq [[btn cat] @buttons-atom]
+                             (let [active? (= (:id cat) new-active)
+                                   cat-color (get-color-fn (:id cat))]
+                               (ss/config! btn
+                                           :background (if active? cat-color background-medium)
+                                           :foreground (if active? text-primary text-secondary)
+                                           :font (Font. "SansSerif" (if active? Font/BOLD Font/PLAIN) 12))
+                               (.setBorder btn (BorderFactory/createEmptyBorder 8 16 8 16))
+                               (.setCursor btn (Cursor/getPredefinedCursor Cursor/HAND_CURSOR)))))
+         
+         buttons (mapv (fn [cat]
+                         (let [btn (ss/button 
+                                    :text (str (or (:icon cat) "") " " (:name cat))
+                                    :focusable? false
+                                    :listen [:action (fn [_]
+                                                       (reset! active-tab-atom (:id cat))
+                                                       (update-buttons! (:id cat))
+                                                       (when on-category-change
+                                                         (on-category-change (:id cat))))])]
+                           [btn cat]))
+                       categories)
+         
+         panel (ss/horizontal-panel
+                :items (mapv first buttons)
+                :background background-dark)]
+     
+     (reset! buttons-atom buttons)
+     (update-buttons! initial-category)
+     
+     {:panel panel
+      :set-active-tab! (fn [cat-id]
+                         (reset! active-tab-atom cat-id)
+                         (update-buttons! cat-id))
+      :get-active-tab (fn [] @active-tab-atom)})))
+
+;; ============================================================================
+;; Modulator Tab Panel
+;; ============================================================================
+
+(defn- create-modulator-tab-panel
+  "Create a tab panel specifically for modulator categories.
+   Uses modulator category colors."
+  [initial-category on-category-change]
+  (create-tab-panel modulator-categories initial-category on-category-change get-modulator-category-color))
+
+;; ============================================================================
+;; Helper Functions for Modulator Dialog
+;; ============================================================================
+
+(defn- get-category-types
+  "Get modulator types for a category (excluding separators)."
+  [category-id]
+  (let [cat (first (filter #(= (:id %) category-id) modulator-categories))]
+    (vec (filter map? (:types cat)))))
+
+(defn- get-modulator-type-by-id
+  "Find a modulator type definition by its id."
+  [type-id]
+  (first (filter #(= (:id %) type-id) modulator-types)))
+
+(defn- detect-modulator-category
+  "Detect which category a modulator type belongs to."
+  [mod-type-id]
+  (or (first (for [cat modulator-categories
+                   type-def (:types cat)
+                   :when (and (map? type-def) (= (:id type-def) mod-type-id))]
+               (:id cat)))
+      :time))
+
+(defn- modulator-needs-param?
+  "Check if a modulator type needs a specific parameter."
+  [mod-type-id param-key]
+  (let [type-def (get-modulator-type-by-id mod-type-id)]
+    (boolean (some #{param-key} (:params type-def)))))
 
 ;; ============================================================================
 ;; Parameter Panel Builder
@@ -291,6 +445,41 @@
 ;; Modulator Dialog
 ;; ============================================================================
 
+(defn- create-modulator-from-config
+  "Create a modulator function based on type and parameters."
+  [mod-type params]
+  (let [{:keys [min-val max-val freq phase axis speed wave-type cycles
+                channel cc path value wrap?]} params]
+    (case mod-type
+      ;; Time-based modulators
+      :sine (mod/sine-mod min-val max-val (or freq 1.0) (or phase 0.0))
+      :triangle (mod/triangle-mod min-val max-val (or freq 1.0) (or phase 0.0))
+      :sawtooth (mod/sawtooth-mod min-val max-val (or freq 1.0) (or phase 0.0))
+      :square (mod/square-mod min-val max-val (or freq 1.0))
+      :beat-decay (mod/beat-decay max-val min-val)
+      :random (mod/random-mod min-val max-val (or freq 1.0))
+      
+      ;; Space-based modulators
+      :pos-x (mod/position-x-mod min-val max-val)
+      :pos-y (mod/position-y-mod min-val max-val)
+      :radial (mod/position-radial-mod min-val max-val)
+      :angle (mod/position-angle-mod min-val max-val)
+      :point-index (mod/point-index-mod min-val max-val (boolean wrap?))
+      :point-wave (mod/point-index-wave min-val max-val (or cycles 1.0) (or wave-type :sine))
+      :pos-wave (mod/position-wave min-val max-val (or axis :x) (or freq 1.0) (or wave-type :sine))
+      
+      ;; Animated modulators
+      :pos-scroll (mod/position-scroll min-val max-val (or axis :x) (or speed 1.0) (or wave-type :sine))
+      :rainbow-hue (mod/rainbow-hue (or axis :x) (or speed 60.0))
+      
+      ;; Control modulators
+      :midi (mod/midi-mod (or channel 1) (or cc 1) min-val max-val)
+      :osc (mod/osc-mod (or path "/control") min-val max-val)
+      :constant (mod/constant (or value min-val))
+      
+      ;; Default to sine
+      (mod/sine-mod (or min-val 0.0) (or max-val 1.0) 1.0 0.0))))
+
 (defn show-modulator-dialog!
   "Show dialog to configure a modulator for a parameter.
    
@@ -312,35 +501,32 @@
         existing-config (when existing-modulator
                           (mod/get-modulator-config existing-modulator))
         
-        ;; Modulator type combo
-        type-model (DefaultComboBoxModel. (into-array (map :name modulator-types)))
-        type-combo (ss/combobox :model type-model)
+        ;; Determine initial category from existing config
+        init-category (if-let [t (:type existing-config)]
+                        (detect-modulator-category t)
+                        :time)
         
         ;; Parameter defaults based on param-def
         param-min (or (:min param-def) 0.0)
         param-max (or (:max param-def) 1.0)
-        param-default (or (:default param-def) (/ (+ param-min param-max) 2))
+        
+        ;; State atoms
+        active-category-atom (atom init-category)
+        selected-type-atom (atom (or (:type existing-config) :sine))
         
         ;; Initial values from existing config or defaults
         init-min (or (:min existing-config) param-min)
         init-max (or (:max existing-config) param-max)
         init-freq (or (:freq existing-config) 1.0)
         init-phase (or (:phase existing-config) 0.0)
-        init-type-idx (if-let [t (:type existing-config)]
-                        (case t
-                          :sine 0
-                          :triangle 1
-                          :sawtooth 2
-                          :square 3
-                          :random 4
-                          :beat-decay 5
-                          0)
-                        0)
+        init-axis (or (:axis existing-config) :x)
+        init-speed (or (:speed existing-config) 1.0)
+        init-cycles (or (:cycles existing-config) 1.0)
         
-        ;; Atom to hold notification function (needed for circular reference)
+        ;; Atom to hold notification function
         notify-fn-atom (atom nil)
         
-        ;; Value controls - on-change calls the notification function for live preview
+        ;; Parameter controls - create all of them, show/hide based on type
         min-ctrl (slider/create-slider {:min param-min :max param-max :default init-min
                                         :label-fn #(format "%.2f" %)
                                         :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
@@ -353,68 +539,235 @@
         phase-ctrl (slider/create-slider {:min 0.0 :max 1.0 :default init-phase
                                           :label-fn #(format "%.2f" %)
                                           :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
+        speed-ctrl (slider/create-slider {:min 0.1 :max 8.0 :default init-speed
+                                          :label-fn #(format "%.1fx" %)
+                                          :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
+        cycles-ctrl (slider/create-slider {:min 0.5 :max 8.0 :default init-cycles
+                                           :label-fn #(format "%.1f" %)
+                                           :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
         
-        ;; Preset buttons
-        preset-panel (ss/horizontal-panel
-                      :items (mapv (fn [preset]
-                                    (ss/button 
-                                     :text (:name preset)
-                                     :font (Font. "SansSerif" Font/PLAIN 10)
-                                     :listen [:action 
-                                              (fn [_]
-                                                ;; Apply preset
-                                                (let [type-idx (case (:type preset)
-                                                                :sine 0
-                                                                :triangle 1
-                                                                :sawtooth 2
-                                                                :square 3
-                                                                :random 4
-                                                                :beat-decay 5
-                                                                0)]
-                                                  (.setSelectedIndex type-combo type-idx))
-                                                ((:set-value! min-ctrl) (:min preset))
-                                                ((:set-value! max-ctrl) (:max preset))
-                                                ((:set-value! freq-ctrl) (:freq preset)))]))
-                                  modulator-presets)
+        axis-combo (ss/combobox :model [:x :y :radial :angle]
+                               :listen [:action (fn [_] (when-let [f @notify-fn-atom] (f)))])
+        _ (ss/selection! axis-combo init-axis)
+        
+        wave-type-combo (ss/combobox :model [:sine :triangle :sawtooth :square]
+                                    :listen [:action (fn [_] (when-let [f @notify-fn-atom] (f)))])
+        _ (ss/selection! wave-type-combo (or (:wave-type existing-config) :sine))
+        
+        wrap-checkbox (ss/checkbox :text "Wrap around" 
+                                   :selected? (boolean (:wrap? existing-config))
+                                   :foreground Color/WHITE
+                                   :background (Color. 45 45 45)
+                                   :listen [:action (fn [_] (when-let [f @notify-fn-atom] (f)))])
+        
+        ;; Parameter panels (will show/hide based on selected type)
+        min-panel (mig/mig-panel
+                   :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
+                   :items [[(ss/label :text "Min Value:" :foreground Color/WHITE) ""]
+                           [(:slider min-ctrl) "growx"]
+                           [(:textfield min-ctrl) ""]]
+                   :background (Color. 45 45 45))
+        
+        max-panel (mig/mig-panel
+                   :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
+                   :items [[(ss/label :text "Max Value:" :foreground Color/WHITE) ""]
+                           [(:slider max-ctrl) "growx"]
+                           [(:textfield max-ctrl) ""]]
+                   :background (Color. 45 45 45))
+        
+        freq-panel (mig/mig-panel
+                    :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
+                    :items [[(ss/label :text "Frequency:" :foreground Color/WHITE) ""]
+                            [(:slider freq-ctrl) "growx"]
+                            [(:textfield freq-ctrl) ""]]
+                    :background (Color. 45 45 45))
+        
+        phase-panel (mig/mig-panel
+                     :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
+                     :items [[(ss/label :text "Phase:" :foreground Color/WHITE) ""]
+                             [(:slider phase-ctrl) "growx"]
+                             [(:textfield phase-ctrl) ""]]
+                     :background (Color. 45 45 45))
+        
+        speed-panel (mig/mig-panel
+                     :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
+                     :items [[(ss/label :text "Speed:" :foreground Color/WHITE) ""]
+                             [(:slider speed-ctrl) "growx"]
+                             [(:textfield speed-ctrl) ""]]
+                     :background (Color. 45 45 45))
+        
+        cycles-panel (mig/mig-panel
+                      :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
+                      :items [[(ss/label :text "Cycles:" :foreground Color/WHITE) ""]
+                              [(:slider cycles-ctrl) "growx"]
+                              [(:textfield cycles-ctrl) ""]]
                       :background (Color. 45 45 45))
+        
+        axis-panel (mig/mig-panel
+                    :constraints ["insets 5", "[80!][grow]", ""]
+                    :items [[(ss/label :text "Axis:" :foreground Color/WHITE) ""]
+                            [axis-combo "growx"]]
+                    :background (Color. 45 45 45))
+        
+        wave-type-panel (mig/mig-panel
+                         :constraints ["insets 5", "[80!][grow]", ""]
+                         :items [[(ss/label :text "Wave Type:" :foreground Color/WHITE) ""]
+                                 [wave-type-combo "growx"]]
+                         :background (Color. 45 45 45))
+        
+        wrap-panel (mig/mig-panel
+                    :constraints ["insets 5", "[grow]", ""]
+                    :items [[wrap-checkbox ""]]
+                    :background (Color. 45 45 45))
+        
+        ;; Container for dynamic parameters
+        params-container (ss/border-panel :background (Color. 45 45 45))
+        
+        ;; Function to update parameter visibility based on selected type
+        update-params-visibility! (fn [mod-type-id]
+                                    (.removeAll params-container)
+                                    (let [type-def (get-modulator-type-by-id mod-type-id)
+                                          params-needed (set (or (:params type-def) [:min :max :freq :phase]))
+                                          panel-items (cond-> []
+                                                        (params-needed :min) (conj [min-panel "growx, wrap"])
+                                                        (params-needed :max) (conj [max-panel "growx, wrap"])
+                                                        (params-needed :freq) (conj [freq-panel "growx, wrap"])
+                                                        (params-needed :phase) (conj [phase-panel "growx, wrap"])
+                                                        (params-needed :speed) (conj [speed-panel "growx, wrap"])
+                                                        (params-needed :cycles) (conj [cycles-panel "growx, wrap"])
+                                                        (params-needed :axis) (conj [axis-panel "growx, wrap"])
+                                                        (params-needed :wave-type) (conj [wave-type-panel "growx, wrap"])
+                                                        (params-needed :wrap?) (conj [wrap-panel "growx, wrap"]))
+                                          inner-panel (mig/mig-panel
+                                                       :constraints ["insets 0, wrap 1", "[grow, fill]", ""]
+                                                       :items panel-items
+                                                       :background (Color. 45 45 45))]
+                                      (.add params-container inner-panel java.awt.BorderLayout/CENTER))
+                                    (.revalidate params-container)
+                                    (.repaint params-container))
+        
+        ;; Modulator type list
+        type-list-model (DefaultListModel.)
+        type-list (ss/listbox :model type-list-model
+                             :renderer (fn [renderer {:keys [value selected?]}]
+                                         (if value
+                                           (let [bg-color (if selected?
+                                                           (get-modulator-category-color @active-category-atom)
+                                                           (Color. 50 50 50))]
+                                             (ss/config! renderer 
+                                                        :text (str (:name value) " - " (:description value))
+                                                        :foreground Color/WHITE
+                                                        :background bg-color))
+                                           (ss/config! renderer :text ""))))
+        _ (.setSelectionMode type-list ListSelectionModel/SINGLE_SELECTION)
+        _ (.setBackground type-list (Color. 50 50 50))
+        _ (.setForeground type-list Color/WHITE)
+        
+        ;; Function to update type list based on category
+        update-type-list! (fn [category-id]
+                            (.clear type-list-model)
+                            (doseq [type-def (get-category-types category-id)]
+                              (.addElement type-list-model type-def))
+                            ;; Select first item
+                            (when (pos? (.getSize type-list-model))
+                              (.setSelectedIndex type-list 0)))
+        
+        ;; Type selection listener
+        _ (.addListSelectionListener type-list
+            (reify ListSelectionListener
+              (valueChanged [_ e]
+                (when-not (.getValueIsAdjusting e)
+                  (when-let [type-def (.getSelectedValue type-list)]
+                    (reset! selected-type-atom (:id type-def))
+                    (update-params-visibility! (:id type-def))
+                    (when-let [f @notify-fn-atom] (f)))))))
+        
+        ;; Presets panel (filtered by category)
+        presets-container (ss/border-panel :background (Color. 45 45 45))
+        
+        update-presets-panel! (fn [category-id]
+                                (.removeAll presets-container)
+                                (let [category-presets (get modulator-presets-by-category category-id [])
+                                      preset-buttons (mapv (fn [preset]
+                                                            (ss/button 
+                                                             :text (:name preset)
+                                                             :font (Font. "SansSerif" Font/PLAIN 10)
+                                                             :listen [:action 
+                                                                      (fn [_]
+                                                                        ;; Find and select the type in the list
+                                                                        (let [list-size (.getSize type-list-model)]
+                                                                          (doseq [i (range list-size)]
+                                                                            (let [item (.getElementAt type-list-model i)]
+                                                                              (when (= (:id item) (:type preset))
+                                                                                (.setSelectedIndex type-list i)))))
+                                                                        ;; Apply preset values
+                                                                        (when (:min preset) ((:set-value! min-ctrl) (:min preset)))
+                                                                        (when (:max preset) ((:set-value! max-ctrl) (:max preset)))
+                                                                        (when (:freq preset) ((:set-value! freq-ctrl) (:freq preset)))
+                                                                        (when (:phase preset) ((:set-value! phase-ctrl) (:phase preset)))
+                                                                        (when (:speed preset) ((:set-value! speed-ctrl) (:speed preset)))
+                                                                        (when (:cycles preset) ((:set-value! cycles-ctrl) (:cycles preset)))
+                                                                        (when (:axis preset) (ss/selection! axis-combo (:axis preset)))
+                                                                        (when (:wave-type preset) (ss/selection! wave-type-combo (:wave-type preset))))]))
+                                                          category-presets)]
+                                  (if (seq preset-buttons)
+                                    (let [inner-panel (ss/horizontal-panel
+                                                       :items preset-buttons
+                                                       :background (Color. 45 45 45))]
+                                      (.add presets-container (ss/scrollable inner-panel :hscroll :as-needed :vscroll :never)
+                                            java.awt.BorderLayout/CENTER))
+                                    (.add presets-container 
+                                          (ss/label :text "No presets for this category" 
+                                                    :foreground (Color. 120 120 120)
+                                                    :halign :center)
+                                          java.awt.BorderLayout/CENTER)))
+                                (.revalidate presets-container)
+                                (.repaint presets-container))
+        
+        ;; Category change handler
+        on-category-change (fn [category-id]
+                             (reset! active-category-atom category-id)
+                             (update-type-list! category-id)
+                             (update-presets-panel! category-id))
+        
+        ;; Create category tabs
+        tab-panel (create-modulator-tab-panel init-category on-category-change)
         
         ;; Create modulator based on current settings
         create-modulator (fn []
-                          (let [type-idx (.getSelectedIndex type-combo)
-                                mod-type (:id (nth modulator-types type-idx))
-                                min-v ((:get-value min-ctrl))
-                                max-v ((:get-value max-ctrl))
-                                freq ((:get-value freq-ctrl))
-                                phase ((:get-value phase-ctrl))]
-                            (case mod-type
-                              :sine (mod/sine-mod min-v max-v freq phase)
-                              :triangle (mod/triangle-mod min-v max-v freq phase)
-                              :sawtooth (mod/sawtooth-mod min-v max-v freq phase)
-                              :square (mod/square-mod min-v max-v freq)
-                              :random (mod/random-mod min-v max-v freq)
-                              :beat-decay (mod/beat-decay max-v min-v)
-                              (mod/sine-mod min-v max-v freq))))
+                           (let [mod-type @selected-type-atom
+                                 params {:min-val ((:get-value min-ctrl))
+                                         :max-val ((:get-value max-ctrl))
+                                         :freq ((:get-value freq-ctrl))
+                                         :phase ((:get-value phase-ctrl))
+                                         :speed ((:get-value speed-ctrl))
+                                         :cycles ((:get-value cycles-ctrl))
+                                         :axis (ss/selection axis-combo)
+                                         :wave-type (ss/selection wave-type-combo)
+                                         :wrap? (ss/value wrap-checkbox)}]
+                             (create-modulator-from-config mod-type params)))
         
         ;; Notify about modulator change for live preview
         notify-modulator-change! (fn []
                                    (when on-modulator-change
-                                     (let [m (create-modulator)]
-                                       (on-modulator-change m))))
+                                     (try
+                                       (let [m (create-modulator)]
+                                         (on-modulator-change m))
+                                       (catch Exception _ nil))))
         
-        ;; Set the notify function atom so slider on-change callbacks can use it
+        ;; Set the notify function atom
         _ (reset! notify-fn-atom notify-modulator-change!)
-        
-        ;; Listen to type combo changes for live preview
-        _ (when on-modulator-change
-            (ss/listen type-combo :action (fn [_] (notify-modulator-change!))))
         
         ;; Buttons
         ok-btn (ss/button :text "Apply Modulator"
                          :listen [:action (fn [_]
-                                           (let [m (create-modulator)]
-                                             (reset! result-atom m)
-                                             (when on-confirm (on-confirm m))
-                                             (.dispose dialog)))])
+                                           (try
+                                             (let [m (create-modulator)]
+                                               (reset! result-atom m)
+                                               (when on-confirm (on-confirm m))
+                                               (.dispose dialog))
+                                             (catch Exception e
+                                               (ss/alert dialog (str "Error creating modulator: " (.getMessage e))))))])
         cancel-btn (ss/button :text "Cancel"
                              :listen [:action (fn [_] (.dispose dialog))])
         remove-btn (ss/button :text "Remove Modulator"
@@ -430,51 +783,37 @@
                                    :font (Font. "SansSerif" Font/BOLD 14)
                                    :foreground Color/WHITE) ""]
                          
-                         ;; Type selection
-                         [(mig/mig-panel
-                           :constraints ["insets 5", "[100!][grow]", ""]
-                           :items [[(ss/label :text "Type:" :foreground Color/WHITE) ""]
-                                   [type-combo "growx"]]
-                           :background (Color. 45 45 45)) "growx"]
+                         ;; Category tabs
+                         [(:panel tab-panel) "growx"]
+                         
+                         ;; Category description
+                         [(let [cat (first (filter #(= (:id %) @active-category-atom) modulator-categories))]
+                            (ss/label :text (or (:description cat) "")
+                                     :foreground (Color. 150 150 150)
+                                     :font (Font. "SansSerif" Font/ITALIC 10))) "growx"]
+                         
+                         ;; Type selection list
+                         [(ss/border-panel
+                           :north (ss/label :text "Modulator Type"
+                                           :font (Font. "SansSerif" Font/BOLD 11)
+                                           :foreground (Color. 180 180 180))
+                           :center (ss/scrollable type-list 
+                                                 :border (border/line-border :color (Color. 60 60 60)))
+                           :background (Color. 45 45 45)) "grow, h 120!"]
                          
                          ;; Parameters
                          [(ss/label :text "Parameters" 
                                    :font (Font. "SansSerif" Font/BOLD 11)
                                    :foreground (Color. 180 180 180)) ""]
                          
-                         [(mig/mig-panel
-                           :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
-                           :items [[(ss/label :text "Min Value:" :foreground Color/WHITE) ""]
-                                   [(:slider min-ctrl) "growx"]
-                                   [(:textfield min-ctrl) ""]]
-                           :background (Color. 45 45 45)) "growx"]
-                         
-                         [(mig/mig-panel
-                           :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
-                           :items [[(ss/label :text "Max Value:" :foreground Color/WHITE) ""]
-                                   [(:slider max-ctrl) "growx"]
-                                   [(:textfield max-ctrl) ""]]
-                           :background (Color. 45 45 45)) "growx"]
-                         
-                         [(mig/mig-panel
-                           :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
-                           :items [[(ss/label :text "Frequency:" :foreground Color/WHITE) ""]
-                                   [(:slider freq-ctrl) "growx"]
-                                   [(:textfield freq-ctrl) ""]]
-                           :background (Color. 45 45 45)) "growx"]
-                         
-                         [(mig/mig-panel
-                           :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
-                           :items [[(ss/label :text "Phase:" :foreground Color/WHITE) ""]
-                                   [(:slider phase-ctrl) "growx"]
-                                   [(:textfield phase-ctrl) ""]]
-                           :background (Color. 45 45 45)) "growx"]
+                         [(ss/scrollable params-container
+                                        :border (border/line-border :color (Color. 60 60 60))) "grow, h 150!"]
                          
                          ;; Presets
-                         [(ss/label :text "Presets" 
+                         [(ss/label :text "Quick Presets" 
                                    :font (Font. "SansSerif" Font/BOLD 11)
                                    :foreground (Color. 180 180 180)) ""]
-                         [(ss/scrollable preset-panel :hscroll :as-needed :vscroll :never) "growx"]
+                         [presets-container "growx, h 40!"]
                          
                          ;; Buttons
                          [(mig/mig-panel
@@ -486,12 +825,20 @@
     
     (style-dialog-panel content)
     
-    ;; Initialize type combo from existing config
-    (when existing-config
-      (.setSelectedIndex type-combo init-type-idx))
+    ;; Initialize the UI
+    (update-type-list! init-category)
+    (update-presets-panel! init-category)
+    
+    ;; If editing existing modulator, select the right type
+    (when-let [t (:type existing-config)]
+      (let [list-size (.getSize type-list-model)]
+        (doseq [i (range list-size)]
+          (let [item (.getElementAt type-list-model i)]
+            (when (= (:id item) t)
+              (.setSelectedIndex type-list i))))))
     
     (.setContentPane dialog content)
-    (.setSize dialog 500 480)
+    (.setSize dialog 550 600)
     (.setLocationRelativeTo dialog parent)
     (.setVisible dialog true)
     
