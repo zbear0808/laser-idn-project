@@ -419,24 +419,9 @@
   (if (= (:id effect-def) :corner-pin)
     (let [editor (corner-pin/create-corner-pin-editor
                   :on-change (fn [_corners]
-                               (when on-param-change (on-param-change))))
-          
-          ;; Create a panel with the editor and optional snap checkbox
-          snap-checkbox (ss/checkbox :text "Snap to grid"
-                                    :selected? false
-                                    :foreground Color/WHITE
-                                    :background (Color. 45 45 45)
-                                    :listen [:action (fn [e]
-                                                       ((:set-snap! editor)
-                                                        (.isSelected (.getSource e))))])
-          
-          container-panel (mig/mig-panel
-                           :constraints ["insets 5, wrap 1", "[grow, fill]", ""]
-                           :items [[(:panel editor) "growx, h 430!"]
-                                   [snap-checkbox "left"]])]
+                               (when on-param-change (on-param-change))))]
       
-      (style-dialog-panel container-panel)
-      {:panel container-panel
+      {:panel (style-dialog-panel (:panel editor))
        :get-params (fn []
                      ;; Convert corners map to flat parameter structure
                      (let [corners ((:get-corners editor))]
@@ -1062,24 +1047,80 @@
                                                (on-apply m)
                                                (notify-effect-change!))))
         
-        ;; Function to update params panel
+        ;; Container that holds both effect list panel and params panel
+        ;; This allows us to reorganize the layout for corner-pin
+        main-content-container (ss/border-panel :background (Color. 45 45 45))
+        
+        ;; Effect list panel (extracted so we can reuse it)
+        effect-list-panel (ss/border-panel
+                           :north (ss/label :text "Effects"
+                                           :font (Font. "SansSerif" Font/BOLD 11)
+                                           :foreground (Color. 180 180 180))
+                           :center (ss/scrollable effect-list
+                                                 :border (border/line-border :color (Color. 60 60 60)))
+                           :background (Color. 45 45 45))
+        
+        ;; Function to update params panel and potentially reorganize layout
         update-params-panel! (fn [effect-def]
                               ;; Remove all existing content
                               (.removeAll params-container)
+                              (.removeAll main-content-container)
+                              
                               (if effect-def
                                 ;; Pass notify-effect-change! so param changes trigger live preview
-                                (let [pp (create-params-panel effect-def on-modulate notify-effect-change!)]
+                                (let [pp (create-params-panel effect-def on-modulate notify-effect-change!)
+                                      is-corner-pin? (= (:id effect-def) :corner-pin)]
                                   (reset! params-panel-ref pp)
                                   (.add params-container (:panel pp) java.awt.BorderLayout/CENTER)
+                                  
+                                  ;; For corner-pin, use horizontal layout
+                                  (if is-corner-pin?
+                                    (let [left-panel (ss/border-panel
+                                                      :center effect-list-panel
+                                                      :background (Color. 45 45 45))
+                                          right-panel (ss/border-panel
+                                                       :north (ss/label :text "Corner Pin Editor"
+                                                                       :font (Font. "SansSerif" Font/BOLD 11)
+                                                                       :foreground (Color. 180 180 180))
+                                                       :center params-container
+                                                       :background (Color. 45 45 45))]
+                                      (.add main-content-container left-panel java.awt.BorderLayout/WEST)
+                                      (.add main-content-container right-panel java.awt.BorderLayout/CENTER))
+                                    ;; Default vertical layout
+                                    (let [vertical-panel (mig/mig-panel
+                                                          :constraints ["insets 0, wrap 1", "[grow, fill]", "[grow][grow]"]
+                                                          :items [[effect-list-panel "grow, h 150!"]
+                                                                  [(ss/border-panel
+                                                                    :north (ss/label :text "Parameters"
+                                                                                    :font (Font. "SansSerif" Font/BOLD 11)
+                                                                                    :foreground (Color. 180 180 180))
+                                                                    :center (ss/scrollable params-container
+                                                                                          :border (border/line-border :color (Color. 60 60 60)))
+                                                                    :background (Color. 45 45 45)) "grow"]]
+                                                          :background (Color. 45 45 45))]
+                                      (.add main-content-container vertical-panel java.awt.BorderLayout/CENTER)))
+                                  
                                   ;; If editing, set existing params
                                   (when existing-effect
                                     ((:set-params! pp) (:params existing-effect))))
                                 ;; No effect selected - show placeholder
                                 (do
                                   (reset! params-panel-ref nil)
-                                  (.add params-container empty-placeholder java.awt.BorderLayout/CENTER)))
-                              (.revalidate params-container)
-                              (.repaint params-container)
+                                  (.add params-container empty-placeholder java.awt.BorderLayout/CENTER)
+                                  (let [vertical-panel (mig/mig-panel
+                                                        :constraints ["insets 0, wrap 1", "[grow, fill]", "[grow][grow]"]
+                                                        :items [[effect-list-panel "grow, h 150!"]
+                                                                [(ss/border-panel
+                                                                  :north (ss/label :text "Parameters"
+                                                                                  :font (Font. "SansSerif" Font/BOLD 11)
+                                                                                  :foreground (Color. 180 180 180))
+                                                                  :center params-container
+                                                                  :background (Color. 45 45 45)) "grow"]]
+                                                        :background (Color. 45 45 45))]
+                                    (.add main-content-container vertical-panel java.awt.BorderLayout/CENTER))))
+                              
+                              (.revalidate main-content-container)
+                              (.repaint main-content-container)
                               ;; Notify about the effect change (new effect selected with default params)
                               (notify-effect-change!))
         
@@ -1121,95 +1162,35 @@
                                                (when on-cancel (on-cancel))
                                                (.dispose dialog))])
         
-        ;; Detect if this is corner-pin effect for special layout
-        is-corner-pin? (or (and existing-effect (= (:effect-id existing-effect) :corner-pin))
-                          (and @selected-effect-atom (= (:id @selected-effect-atom) :corner-pin)))
-        
-        ;; Main content - use horizontal layout for corner-pin, vertical for others
-        content (if is-corner-pin?
-                  ;; Horizontal layout for corner-pin: controls on left, editor on right
-                  (let [left-panel (mig/mig-panel
-                                    :constraints ["insets 10, wrap 1", "[300!]", "[][][][grow][]"]
-                                    :items [;; Title
-                                            [(ss/label :text (if existing-effect "Edit Effect" "New Effect")
-                                                      :font (Font. "SansSerif" Font/BOLD 16)
-                                                      :foreground Color/WHITE) ""]
-                                            
-                                            ;; Category selection (tab panel)
-                                            [(:panel tab-panel) "growx"]
-                                            
-                                            ;; Effect list
-                                            [(ss/border-panel
-                                              :north (ss/label :text "Effects"
-                                                              :font (Font. "SansSerif" Font/BOLD 11)
-                                                              :foreground (Color. 180 180 180))
-                                              :center (ss/scrollable effect-list
-                                                                    :border (border/line-border :color (Color. 60 60 60)))
-                                              :background (Color. 45 45 45)) "grow"]
-                                            
-                                            ;; Buttons
-                                            [(mig/mig-panel
-                                              :constraints ["insets 10", "[grow][][]", ""]
-                                              :items [[(ss/label) "growx"]
-                                                      [cancel-btn ""]
-                                                      [ok-btn ""]]
-                                              :background (Color. 45 45 45)) "growx"]])
-                        
-                        right-panel (ss/border-panel
-                                     :north (ss/label :text "Corner Pin Editor"
-                                                     :font (Font. "SansSerif" Font/BOLD 11)
-                                                     :foreground (Color. 180 180 180))
-                                     :center params-container
-                                     :background (Color. 45 45 45)
-                                     :border (border/line-border :color (Color. 60 60 60)))]
-                    
-                    (ss/border-panel
-                     :west left-panel
-                     :center right-panel
-                     :background (Color. 45 45 45)))
-                  
-                  ;; Default vertical layout for other effects
-                  (mig/mig-panel
-                   :constraints ["insets 10, wrap 1", "[grow, fill]", "[][][grow, fill][grow, fill][]"]
-                   :items [;; Title
-                           [(ss/label :text (if existing-effect "Edit Effect" "New Effect")
-                                     :font (Font. "SansSerif" Font/BOLD 16)
-                                     :foreground Color/WHITE) ""]
-                           
-                           ;; Category selection (tab panel)
-                           [(:panel tab-panel) "growx"]
-                           
-                           ;; Effect list
-                           [(ss/border-panel
-                             :north (ss/label :text "Effects"
-                                             :font (Font. "SansSerif" Font/BOLD 11)
-                                             :foreground (Color. 180 180 180))
-                             :center (ss/scrollable effect-list
-                                                   :border (border/line-border :color (Color. 60 60 60)))
-                             :background (Color. 45 45 45)) "grow, h 150!"]
-                           
-                           ;; Parameters panel
-                           [(ss/border-panel
-                             :north (ss/label :text "Parameters"
-                                             :font (Font. "SansSerif" Font/BOLD 11)
-                                             :foreground (Color. 180 180 180))
-                             :center (ss/scrollable params-container
-                                                   :border (border/line-border :color (Color. 60 60 60)))
-                             :background (Color. 45 45 45)) "grow"]
-                           
-                           ;; Buttons
-                           [(mig/mig-panel
-                             :constraints ["insets 10", "[grow][][]", ""]
-                             :items [[(ss/label) "growx"]
-                                     [cancel-btn ""]
-                                     [ok-btn ""]]
-                             :background (Color. 45 45 45)) "growx, dock south"]]))]
+        ;; Main content - uses dynamic main-content-container
+        content (mig/mig-panel
+                 :constraints ["insets 10, wrap 1", "[grow, fill]", "[][][][grow][]"]
+                 :items [;; Title
+                         [(ss/label :text (if existing-effect "Edit Effect" "New Effect")
+                                   :font (Font. "SansSerif" Font/BOLD 16)
+                                   :foreground Color/WHITE) ""]
+                         
+                         ;; Category selection (tab panel)
+                         [(:panel tab-panel) "growx"]
+                         
+                         ;; Main content area (dynamically reorganizes for corner-pin vs other effects)
+                         [main-content-container "grow"]
+                         
+                         ;; Buttons
+                         [(mig/mig-panel
+                           :constraints ["insets 10", "[grow][][]", ""]
+                           :items [[(ss/label) "growx"]
+                                   [cancel-btn ""]
+                                   [ok-btn ""]]
+                           :background (Color. 45 45 45)) "growx"]])]
     
     (style-dialog-panel content)
     
-    ;; Initialize with first category
+    ;; Initialize with first category and set up initial layout
     (let [first-cat (:id (first effect-categories))]
-      (update-effect-list! first-cat))
+      (update-effect-list! first-cat)
+      ;; Initialize main-content-container with default vertical layout showing effect list
+      (update-params-panel! nil))
     
     ;; If editing, select the existing effect's category and effect
     (when existing-effect
@@ -1226,14 +1207,8 @@
                 (.setSelectedIndex effect-list i)))))))
     
     (.setContentPane dialog content)
-    ;; Use larger dialog size for corner-pin effect to accommodate visual editor
-    (let [effect-id (when existing-effect (:effect-id existing-effect))
-          selected-id (when @selected-effect-atom (:id @selected-effect-atom))
-          is-corner-pin? (or (= effect-id :corner-pin) (= selected-id :corner-pin))
-          [width height] (if is-corner-pin?
-                           [700 660]  ; Wider and taller for visual editor
-                           [560 580])] ; Default size
-      (.setSize dialog width height))
+    ;; Use wider dialog to accommodate visual editor when corner-pin is selected
+    (.setSize dialog 650 700)
     (.setLocationRelativeTo dialog parent)
     (.setVisible dialog true)
     
