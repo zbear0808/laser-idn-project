@@ -183,7 +183,12 @@
    Returns: Phase value for oscillation
    
    Both loop and once modes now use relative time (elapsed since trigger).
-   This ensures retriggering always starts from phase 0."
+   This ensures retriggering always starts from phase 0.
+   
+   IMPORTANT: We use raw beat count (ms->beats) NOT beat-phase (mod 1.0).
+   The mod operation must happen AFTER frequency multiplication, not before.
+   Otherwise frequencies < 1.0 (slow oscillations over multiple beats) will jump
+   at every beat boundary."
   ([context frequency phase-offset loop-mode duration time-unit]
    (calculate-modulator-phase context frequency phase-offset loop-mode duration time-unit nil))
   ([{:keys [time-ms bpm trigger-time]} frequency phase-offset loop-mode duration time-unit trigger-override]
@@ -199,9 +204,10 @@
        (let [progress (calculate-once-progress time-ms effective-trigger-time duration time-unit bpm)]
          (+ (* progress frequency) phase-offset))
        ;; Loop mode: continuous cycling based on ELAPSED time (relative, not global)
-       ;; This ensures retriggering resets the animation to phase 0
-       (let [beat-phase (time/time->beat-phase elapsed bpm)]
-         (* (+ beat-phase phase-offset) frequency))))))
+       ;; Use raw beat count - the oscillate function handles normalization via mod
+       ;; Phase offset is added AFTER frequency multiplication for correct behavior
+       (let [beats (time/ms->beats elapsed bpm)]
+         (+ (* beats frequency) phase-offset))))))
 
 ;; ============================================================================
 ;; Waveform Modulators (BPM-synced, with optional once-mode)
@@ -299,8 +305,11 @@
          offset (double phase-offset)]
      (make-modulator
       (fn [{:keys [time-ms bpm]}]
-        (let [phase (+ (time/time->beat-phase (double time-ms) (double bpm)) offset)]
-          (time/oscillate min-v max-v (* phase freq) :sawtooth)))
+        ;; Use raw beat count, not beat-phase (which applies mod 1.0 prematurely)
+        ;; Phase offset is added AFTER frequency multiplication
+        (let [beats (time/ms->beats (double time-ms) (double bpm))
+              phase (+ (* beats freq) offset)]
+          (time/oscillate min-v max-v phase :sawtooth)))
       (str "sawtooth(" min-val "-" max-val " @" frequency "x)")
       {:type :sawtooth :min min-val :max max-val :freq frequency :phase phase-offset}))))
 
@@ -328,8 +337,10 @@
          offset (double phase-offset)]
      (make-modulator
       (fn [{:keys [time-ms bpm]}]
-        (let [phase (+ (time/time->beat-phase (double time-ms) (double bpm)) offset)
-              cycle-phase (mod (* phase freq) 1.0)]
+        ;; Use raw beat count, not beat-phase (which applies mod 1.0 prematurely)
+        ;; Phase offset is added AFTER frequency multiplication
+        (let [beats (time/ms->beats (double time-ms) (double bpm))
+              cycle-phase (mod (+ (* beats freq) offset) 1.0)]
           (if (< cycle-phase duty) max-v min-v)))
       (str "square(" min-val "-" max-val " @" frequency "x)")
       {:type :square :min min-val :max max-val :freq frequency :phase phase-offset}))))
