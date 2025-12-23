@@ -1,7 +1,7 @@
 (ns laser-show.state.persistent
   "Persistent configuration state for the laser show application.
    This state is saved to disk and restored on startup."
-  (:require [clojure.edn :as edn]
+  (:require [laser-show.state.serialization :as ser]
             [clojure.java.io :as io]))
 
 ;; ============================================================================
@@ -54,79 +54,51 @@
    :effects       "config/effects.edn"})
 
 ;; ============================================================================
-;; Low-level Persistence Functions
-;; ============================================================================
-
-(defn ensure-config-dir!
-  "Ensure the config directory exists"
-  []
-  (let [dir (io/file config-dir)]
-    (when-not (.exists dir)
-      (.mkdirs dir))))
-
-(defn save-edn!
-  "Save data to an EDN file"
-  [filepath data]
-  (ensure-config-dir!)
-  (spit filepath (pr-str data)))
-
-(defn load-edn
-  "Load data from an EDN file, returns nil if file doesn't exist"
-  [filepath]
-  (let [file (io/file filepath)]
-    (when (.exists file)
-      (try
-        (edn/read-string (slurp file))
-        (catch Exception e
-          (println "Error loading" filepath ":" (.getMessage e))
-          nil)))))
-
-;; ============================================================================
-;; Save Functions - Individual State Atoms
+;; Save State Atoms to Disk
 ;; ============================================================================
 
 (defn save-config!
-  "Save application settings to disk"
+
   []
-  (save-edn! (:settings config-files) @!config))
+  (ser/save-to-file! (:settings config-files) @!config))
 
 (defn save-grid-assignments!
-  "Save grid assignments to disk"
+
   []
-  (save-edn! (:grid config-files) @!grid-assignments))
+  (ser/save-to-file! (:grid config-files) @!grid-assignments))
 
 (defn save-projectors!
-  "Save projector configurations to disk"
+
   []
-  (save-edn! (:projectors config-files) @!projectors))
+  (ser/save-to-file! (:projectors config-files) @!projectors))
 
 (defn save-zones!
-  "Save zone definitions to disk"
+
   []
-  (save-edn! (:zones config-files) @!zones))
+  (ser/save-to-file! (:zones config-files) @!zones))
 
 (defn save-zone-groups!
-  "Save zone group definitions to disk"
+
   []
-  (save-edn! (:zone-groups config-files) @!zone-groups))
+  (ser/save-to-file! (:zone-groups config-files) @!zone-groups))
 
 (defn save-cues!
-  "Save cue library to disk"
+
   []
-  (save-edn! (:cues config-files) @!cues))
+  (ser/save-to-file! (:cues config-files) @!cues))
 
 (defn save-cue-lists!
-  "Save cue lists to disk"
+
   []
-  (save-edn! (:cue-lists config-files) @!cue-lists))
+  (ser/save-to-file! (:cue-lists config-files) @!cue-lists))
 
 (defn save-effects!
-  "Save effect registry to disk"
+
   []
-  (save-edn! (:effects config-files) @!effect-registry))
+  (ser/save-to-file! (:effects config-files) @!effect-registry))
 
 (defn save-all!
-  "Save all persistent state to disk"
+
   []
   (save-config!)
   (save-grid-assignments!)
@@ -142,55 +114,55 @@
 ;; ============================================================================
 
 (defn load-config!
-  "Load application settings from disk"
+  
   []
-  (when-let [loaded (load-edn (:settings config-files))]
+  (when-let [loaded (ser/load-from-file (:settings config-files))]
     (reset! !config (merge @!config loaded))))
 
 (defn load-grid-assignments!
-  "Load grid assignments from disk"
+  
   []
-  (when-let [loaded (load-edn (:grid config-files))]
+  (when-let [loaded (ser/load-from-file (:grid config-files))]
     (reset! !grid-assignments loaded)))
 
 (defn load-projectors!
-  "Load projector configurations from disk"
+  
   []
-  (when-let [loaded (load-edn (:projectors config-files))]
+  (when-let [loaded (ser/load-from-file (:projectors config-files))]
     (reset! !projectors loaded)))
 
 (defn load-zones!
-  "Load zone definitions from disk"
+  
   []
-  (when-let [loaded (load-edn (:zones config-files))]
+  (when-let [loaded (ser/load-from-file (:zones config-files))]
     (reset! !zones loaded)))
 
 (defn load-zone-groups!
-  "Load zone group definitions from disk"
+  
   []
-  (when-let [loaded (load-edn (:zone-groups config-files))]
+  (when-let [loaded (ser/load-from-file (:zone-groups config-files))]
     (reset! !zone-groups loaded)))
 
 (defn load-cues!
-  "Load cue library from disk"
+  
   []
-  (when-let [loaded (load-edn (:cues config-files))]
+  (when-let [loaded (ser/load-from-file (:cues config-files))]
     (reset! !cues loaded)))
 
 (defn load-cue-lists!
-  "Load cue lists from disk"
+  
   []
-  (when-let [loaded (load-edn (:cue-lists config-files))]
+  (when-let [loaded (ser/load-from-file (:cue-lists config-files))]
     (reset! !cue-lists loaded)))
 
 (defn load-effects!
-  "Load effect registry from disk"
+  
   []
-  (when-let [loaded (load-edn (:effects config-files))]
+  (when-let [loaded (ser/load-from-file (:effects config-files))]
     (reset! !effect-registry loaded)))
 
 (defn load-all!
-  "Load all persistent state from disk"
+  
   []
   (load-config!)
   (load-grid-assignments!)
@@ -206,23 +178,22 @@
 ;; ============================================================================
 
 (defn get-config []
-  "Get entire config map"
+
   @!config)
 
 (defn get-grid-config []
-  "Get grid configuration"
+
   (:grid @!config))
 
 (defn get-window-config []
-  "Get window configuration"
+
   (:window @!config))
 
 (defn get-idn-config []
-  "Get IDN configuration"
+
   (:idn @!config))
 
 (defn update-config! [path value]
-  "Update a config value at the given path"
   (swap! !config assoc-in path value)
   (save-config!))
 
@@ -231,11 +202,11 @@
 ;; ============================================================================
 
 (defn get-grid-assignments []
-  "Get all grid assignments"
+
   @!grid-assignments)
 
 (defn get-assignment [col row]
-  "Get preset assignment for a specific cell"
+
   (get @!grid-assignments [col row]))
 
 (defn set-assignment! [col row preset-id]
@@ -253,20 +224,20 @@
 ;; ============================================================================
 
 (defn get-projectors []
-  "Get all projectors"
+
   @!projectors)
 
 (defn get-projector [projector-id]
-  "Get a specific projector"
+
   (get @!projectors projector-id))
 
 (defn add-projector! [projector-id config]
-  "Add or update a projector"
+
   (swap! !projectors assoc projector-id config)
   (save-projectors!))
 
 (defn remove-projector! [projector-id]
-  "Remove a projector"
+
   (swap! !projectors dissoc projector-id)
   (save-projectors!))
 
@@ -275,20 +246,20 @@
 ;; ============================================================================
 
 (defn get-zones []
-  "Get all zones"
+
   @!zones)
 
 (defn get-zone [zone-id]
-  "Get a specific zone"
+
   (get @!zones zone-id))
 
 (defn add-zone! [zone-id config]
-  "Add or update a zone"
+
   (swap! !zones assoc zone-id config)
   (save-zones!))
 
 (defn remove-zone! [zone-id]
-  "Remove a zone"
+
   (swap! !zones dissoc zone-id)
   (save-zones!))
 
@@ -297,20 +268,20 @@
 ;; ============================================================================
 
 (defn get-zone-groups []
-  "Get all zone groups"
+
   @!zone-groups)
 
 (defn get-zone-group [group-id]
-  "Get a specific zone group"
+
   (get @!zone-groups group-id))
 
 (defn add-zone-group! [group-id config]
-  "Add or update a zone group"
+
   (swap! !zone-groups assoc group-id config)
   (save-zone-groups!))
 
 (defn remove-zone-group! [group-id]
-  "Remove a zone group"
+
   (swap! !zone-groups dissoc group-id)
   (save-zone-groups!))
 
@@ -319,20 +290,20 @@
 ;; ============================================================================
 
 (defn get-cues []
-  "Get all cues"
+
   @!cues)
 
 (defn get-cue [cue-id]
-  "Get a specific cue"
+
   (get @!cues cue-id))
 
 (defn add-cue! [cue-id definition]
-  "Add or update a cue"
+
   (swap! !cues assoc cue-id definition)
   (save-cues!))
 
 (defn remove-cue! [cue-id]
-  "Remove a cue"
+
   (swap! !cues dissoc cue-id)
   (save-cues!))
 
@@ -341,20 +312,20 @@
 ;; ============================================================================
 
 (defn get-cue-lists []
-  "Get all cue lists"
+
   @!cue-lists)
 
 (defn get-cue-list [list-id]
-  "Get a specific cue list"
+
   (get @!cue-lists list-id))
 
 (defn add-cue-list! [list-id cue-list]
-  "Add or update a cue list"
+
   (swap! !cue-lists assoc list-id cue-list)
   (save-cue-lists!))
 
 (defn remove-cue-list! [list-id]
-  "Remove a cue list"
+
   (swap! !cue-lists dissoc list-id)
   (save-cue-lists!))
 
@@ -383,7 +354,7 @@
              (fn [_ _ _ _] (save-effects!))))
 
 (defn disable-auto-save!
-  "Remove auto-save watchers"
+
   []
   (remove-watch !config ::auto-save)
   (remove-watch !grid-assignments ::auto-save)

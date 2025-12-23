@@ -12,11 +12,11 @@
    1. Call (make-draggable! component opts) to enable dragging FROM a component
    2. Call (make-drop-target! component opts) to enable dropping ON a component
    3. Use callbacks to handle drag events and visual feedback"
-  (:require [clojure.edn :as edn])
+  (:require [laser-show.state.serialization :as ser])
   (:import [java.awt Color Component Graphics2D Image Point RenderingHints]
            [java.awt.datatransfer DataFlavor StringSelection Transferable UnsupportedFlavorException]
-           [java.awt.dnd DnDConstants DragGestureListener DragSource DragSourceAdapter 
-            DragSourceDragEvent DragSourceDropEvent DragSourceListener DropTarget 
+           [java.awt.dnd DnDConstants DragGestureListener DragSource DragSourceAdapter
+            DragSourceDragEvent DragSourceDropEvent DragSourceListener DropTarget
             DropTargetAdapter DropTargetDragEvent DropTargetDropEvent DropTargetListener]
            [java.awt.image BufferedImage]
            [javax.swing JComponent TransferHandler]))
@@ -34,16 +34,15 @@
 (defn- serialize-data
   "Serialize Clojure data to EDN string."
   [data]
-  (pr-str data))
+  (ser/serialize data))
 
 (defn- deserialize-data
   "Deserialize EDN string to Clojure data."
   [s]
-  (try
-    (edn/read-string s)
-    (catch Exception e
-      (println "Failed to deserialize drag data:" (.getMessage e))
-      nil)))
+  (ser/deserialize s
+    :on-error (fn [e]
+                (println "Failed to deserialize drag data:" (.getMessage e))
+                nil)))
 
 ;; ============================================================================
 ;; Transferable Implementation

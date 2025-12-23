@@ -9,7 +9,7 @@
             [laser-show.backend.zones :as zones]
             [laser-show.backend.projectors :as projectors]
             [laser-show.state.dynamic :as dyn]
-            [clojure.edn :as edn])
+            [laser-show.state.serialization :as ser])
   (:import [java.awt Toolkit]
            [java.awt.datatransfer StringSelection DataFlavor Clipboard]))
 
@@ -54,7 +54,7 @@
   [data]
   (try
     (let [clipboard (get-system-clipboard)
-          edn-str (pr-str data)
+          edn-str (ser/serialize-for-clipboard data)
           selection (StringSelection. edn-str)]
       (.setContents clipboard selection nil)
       true)
@@ -71,14 +71,11 @@
       (when (.isDataFlavorAvailable clipboard DataFlavor/stringFlavor)
         (let [content (.getData clipboard DataFlavor/stringFlavor)]
           (when (string? content)
-            (try
-              (let [parsed (edn/read-string content)]
-                (when (and (map? parsed)
-                           (contains? parsed :type)
-                           (valid-clipboard-type? (:type parsed)))
-                  parsed))
-              (catch Exception _
-                nil))))))
+            (ser/deserialize-from-clipboard content
+              :schema-fn (fn [data]
+                          (and (map? data)
+                               (contains? data :type)
+                               (valid-clipboard-type? (:type data)))))))))
     (catch Exception e
       (println "Failed to read from system clipboard:" (.getMessage e))
       nil)))

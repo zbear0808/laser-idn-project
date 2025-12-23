@@ -8,10 +8,11 @@
             [seesaw.border :as border]
             [laser-show.animation.effects :as fx]
             [laser-show.animation.modulation :as mod]
-            [laser-show.ui.colors :refer [background-dark background-medium 
+            [laser-show.ui.colors :refer [background-dark background-medium
                                           background-light text-primary text-secondary
                                           get-effect-category-color get-modulator-category-color]]
-            [laser-show.ui.components.slider :as slider])
+            [laser-show.ui.components.slider :as slider]
+            [laser-show.ui.components.corner-pin-editor :as corner-pin])
   (:import [java.awt Color Font Dimension Cursor Graphics2D RenderingHints]
            [java.awt.geom RoundRectangle2D$Float]
            [javax.swing JDialog JSpinner SpinnerNumberModel DefaultListModel JPanel
@@ -414,24 +415,70 @@
    - on-modulate: Callback for modulator buttons
    - on-param-change: (optional) Callback called when any parameter changes"
   [effect-def on-modulate & [on-param-change]]
-  (let [param-defs (:parameters effect-def)
-        controls (mapv #(create-param-control % on-modulate on-param-change) param-defs)
-        panel (mig/mig-panel
-               :constraints ["insets 5, wrap 1", "[grow, fill]", ""]
-               :items (mapv (fn [ctrl] [(:panel ctrl) "growx"]) controls))]
-    (style-dialog-panel panel)
-    {:panel panel
-     :get-params (fn []
-                   (into {}
-                     (map (fn [ctrl]
-                            [(:param-key ctrl) ((:get-value ctrl))])
-                          controls)))
-     :set-params! (fn [params]
-                    (doseq [ctrl controls]
-                      (when-let [v (get params (:param-key ctrl))]
-                        (if (fn? v)
-                          ((:set-modulator! ctrl) v)
-                          ((:set-value! ctrl) v)))))}))
+  ;; Special case: Corner pin effect uses visual editor instead of sliders
+  (if (= (:id effect-def) :corner-pin)
+    (let [editor (corner-pin/create-corner-pin-editor
+                  :on-change (fn [_corners]
+                               (when on-param-change (on-param-change))))
+          
+          ;; Create a panel with the editor and optional snap checkbox
+          snap-checkbox (ss/checkbox :text "Snap to grid"
+                                    :selected? false
+                                    :foreground Color/WHITE
+                                    :background (Color. 45 45 45)
+                                    :listen [:action (fn [e]
+                                                       ((:set-snap! editor)
+                                                        (.isSelected (.getSource e))))])
+          
+          container-panel (mig/mig-panel
+                           :constraints ["insets 5, wrap 1", "[grow, fill]", ""]
+                           :items [[(:panel editor) "growx, h 430!"]
+                                   [snap-checkbox "left"]])]
+      
+      (style-dialog-panel container-panel)
+      {:panel container-panel
+       :get-params (fn []
+                     ;; Convert corners map to flat parameter structure
+                     (let [corners ((:get-corners editor))]
+                       {:tl-x (get-in corners [:tl :x])
+                        :tl-y (get-in corners [:tl :y])
+                        :tr-x (get-in corners [:tr :x])
+                        :tr-y (get-in corners [:tr :y])
+                        :bl-x (get-in corners [:bl :x])
+                        :bl-y (get-in corners [:bl :y])
+                        :br-x (get-in corners [:br :x])
+                        :br-y (get-in corners [:br :y])}))
+       :set-params! (fn [params]
+                      ;; Convert flat params to corners map
+                      (when (and (:tl-x params) (:tl-y params)
+                                 (:tr-x params) (:tr-y params)
+                                 (:bl-x params) (:bl-y params)
+                                 (:br-x params) (:br-y params))
+                        ((:set-corners! editor)
+                         {:tl {:x (:tl-x params) :y (:tl-y params)}
+                          :tr {:x (:tr-x params) :y (:tr-y params)}
+                          :bl {:x (:bl-x params) :y (:bl-y params)}
+                          :br {:x (:br-x params) :y (:br-y params)}})))})
+    
+    ;; Default case: Use slider-based controls for all other effects
+    (let [param-defs (:parameters effect-def)
+          controls (mapv #(create-param-control % on-modulate on-param-change) param-defs)
+          panel (mig/mig-panel
+                 :constraints ["insets 5, wrap 1", "[grow, fill]", ""]
+                 :items (mapv (fn [ctrl] [(:panel ctrl) "growx"]) controls))]
+      (style-dialog-panel panel)
+      {:panel panel
+       :get-params (fn []
+                     (into {}
+                       (map (fn [ctrl]
+                              [(:param-key ctrl) ((:get-value ctrl))])
+                            controls)))
+       :set-params! (fn [params]
+                      (doseq [ctrl controls]
+                        (when-let [v (get params (:param-key ctrl))]
+                          (if (fn? v)
+                            ((:set-modulator! ctrl) v)
+                            ((:set-value! ctrl) v)))))})))
 
 ;; ============================================================================
 ;; Modulator Dialog
@@ -1132,7 +1179,14 @@
                 (.setSelectedIndex effect-list i)))))))
     
     (.setContentPane dialog content)
-    (.setSize dialog 560 580)
+    ;; Use larger dialog size for corner-pin effect to accommodate visual editor
+    (let [effect-id (when existing-effect (:effect-id existing-effect))
+          selected-id (when @selected-effect-atom (:id @selected-effect-atom))
+          is-corner-pin? (or (= effect-id :corner-pin) (= selected-id :corner-pin))
+          [width height] (if is-corner-pin?
+                           [700 660]  ; Wider and taller for visual editor
+                           [560 580])] ; Default size
+      (.setSize dialog width height))
     (.setLocationRelativeTo dialog parent)
     (.setVisible dialog true)
     
