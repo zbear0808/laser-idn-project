@@ -157,6 +157,11 @@ jobs:
             --no-fallback \
             --verbose \
             -H:+ReportExceptionStackTraces \
+            --initialize-at-build-time=java.awt,javax.swing,java.awt.color,java.awt.font,java.awt.geom,java.awt.image \
+            --initialize-at-run-time=java.awt.Toolkit,sun.java2d,sun.awt,com.sun.imageio \
+            -H:ReflectionConfigurationFiles= \
+            -H:+AddAllCharsets \
+            -H:IncludeResourceBundles=sun.awt.resources.awtoptions \
             ${{ matrix.march-flag }} \
             -O3 \
             -jar "$JAR_FILE" \
@@ -222,8 +227,8 @@ jobs:
           JAR_FILE=$(ls target/*-standalone.jar | head -1)
           echo "Analyzing dependencies for: $JAR_FILE"
           
-          # Use jdeps to determine required modules
-          jdeps --print-module-deps --ignore-missing-deps "$JAR_FILE" > modules.txt || true
+          # Use jdeps to determine required modules (with multi-release flag for Java 21)
+          jdeps --multi-release 21 --print-module-deps --ignore-missing-deps "$JAR_FILE" > modules.txt || true
           
           # If jdeps fails or returns empty, use a safe default module set
           if [ ! -s modules.txt ] || [ $(cat modules.txt | wc -c) -lt 5 ]; then
