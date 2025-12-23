@@ -1,4 +1,4 @@
-(ns laser-show.state
+(ns laser-show.app-db
   "Central managed state for the Laser Show application.
    This namespace contains the single source of truth atom."
   (:require [laser-show.ui.layout :as layout]))

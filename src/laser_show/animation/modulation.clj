@@ -23,12 +23,14 @@
    Parameters:
    - time-ms: Current time in milliseconds
    - bpm: Current BPM
+   - trigger-time: Time when the cue/effect was triggered (optional, for once-mode modulators)
    - midi-state: Map of {[channel cc] -> value} (optional)
    - osc-state: Map of {path -> value} (optional)"
-  [{:keys [time-ms bpm midi-state osc-state]
+  [{:keys [time-ms bpm trigger-time midi-state osc-state]
     :or {midi-state {} osc-state {}}}]
   {:time-ms time-ms
    :bpm bpm
+   :trigger-time trigger-time
    :midi-state midi-state
    :osc-state osc-state})
 
@@ -79,56 +81,155 @@
     (::config (meta modulator))))
 
 ;; ============================================================================
-;; Waveform Modulators (BPM-synced)
+;; Once-Mode Helper Functions
+;; ============================================================================
+
+(defn- calculate-once-progress
+  "Calculate progress (0.0 to 1.0) for once-mode modulators.
+   
+   Parameters:
+   - time-ms: Current time in milliseconds
+   - trigger-time: Time when modulator was triggered (falls back to 0 if nil)
+   - duration: Duration value
+   - time-unit: :beats or :seconds
+   - bpm: Current BPM (required for :beats time-unit)
+   
+   Returns: Progress value clamped to 0.0-1.0"
+  [time-ms trigger-time duration time-unit bpm]
+  (let [start-time (double (or trigger-time 0.0))
+        elapsed (- time-ms start-time)
+        duration-ms (if (= time-unit :seconds)
+                      (* duration 1000.0)
+                      (time/beats->ms duration bpm))]
+    (if (pos? duration-ms)
+      (min 1.0 (max 0.0 (/ elapsed duration-ms)))
+      1.0)))
+
+(defn- resolve-trigger-time
+  "Resolve trigger time from either a fixed value or an atom reference.
+   Returns the trigger time as a number, or nil if not available."
+  [trigger-source]
+  (cond
+    ;; It's an atom - deref it to get current value
+    (instance? clojure.lang.IDeref trigger-source) @trigger-source
+    ;; It's a number - use directly
+    (number? trigger-source) trigger-source
+    ;; Nil or other - return nil
+    :else nil))
+
+(defn- calculate-modulator-phase
+  "Calculate the phase for a modulator based on loop-mode and timing settings.
+   
+   Parameters:
+   - context: Modulation context with :time-ms, :bpm, and optionally :trigger-time
+   - frequency: Number of cycles
+   - phase-offset: Phase offset (0.0-1.0)
+   - loop-mode: :loop or :once
+   - duration: Duration for once-mode
+   - time-unit: :beats or :seconds
+   - trigger-override: Optional trigger time (can be a number OR an atom containing a number)
+                       to use instead of context's trigger-time
+   
+   Returns: Phase value for oscillation
+   
+   Both loop and once modes now use relative time (elapsed since trigger).
+   This ensures retriggering always starts from phase 0."
+  ([context frequency phase-offset loop-mode duration time-unit]
+   (calculate-modulator-phase context frequency phase-offset loop-mode duration time-unit nil))
+  ([{:keys [time-ms bpm trigger-time]} frequency phase-offset loop-mode duration time-unit trigger-override]
+   (let [time-ms (double time-ms)
+         bpm (double bpm)
+         ;; Resolve trigger-override (may be atom or value), fall back to context's trigger-time
+         effective-trigger-time (or (resolve-trigger-time trigger-override) trigger-time)
+         ;; Calculate elapsed time from trigger (or from 0 if no trigger-time)
+         start-time (double (or effective-trigger-time 0.0))
+         elapsed (- time-ms start-time)]
+     (if (= loop-mode :once)
+       ;; Once mode: single cycle (or frequency cycles) over duration
+       (let [progress (calculate-once-progress time-ms effective-trigger-time duration time-unit bpm)]
+         (+ (* progress frequency) phase-offset))
+       ;; Loop mode: continuous cycling based on ELAPSED time (relative, not global)
+       ;; This ensures retriggering resets the animation to phase 0
+       (let [beat-phase (time/time->beat-phase elapsed bpm)]
+         (* (+ beat-phase phase-offset) frequency))))))
+
+;; ============================================================================
+;; Waveform Modulators (BPM-synced, with optional once-mode)
 ;; ============================================================================
 
 (defn sine-mod
-  "Create a sine wave modulator (BPM-synced).
+  "Create a sine wave modulator (BPM-synced by default, or time-based with once mode).
    
    Parameters:
    - min-val: Minimum value
    - max-val: Maximum value
-   - frequency: Cycles per beat (default 1.0)
-   - phase-offset: Phase offset 0.0-1.0 (default 0.0)"
+   - frequency: Cycles per beat in loop mode, or cycles over duration in once mode (default 1.0)
+   - phase-offset: Phase offset 0.0-1.0 (default 0.0)
+   - loop-mode: :loop (continuous, default) or :once (single run then hold)
+   - duration: Duration for once mode (in beats or seconds)
+   - time-unit: :beats (default) or :seconds
+   - trigger-time-override: (optional) Fixed trigger time, overrides context trigger-time"
   ([min-val max-val]
    (sine-mod min-val max-val 1.0))
   ([min-val max-val frequency]
    (sine-mod min-val max-val frequency 0.0))
   ([min-val max-val frequency phase-offset]
+   (sine-mod min-val max-val frequency phase-offset :loop 1.0 :beats nil))
+  ([min-val max-val frequency phase-offset loop-mode duration time-unit]
+   (sine-mod min-val max-val frequency phase-offset loop-mode duration time-unit nil))
+  ([min-val max-val frequency phase-offset loop-mode duration time-unit trigger-time-override]
    (let [min-v (double min-val)
          max-v (double max-val)
          freq (double frequency)
-         offset (double phase-offset)]
+         offset (double phase-offset)
+         dur (double (or duration 1.0))
+         tunit (or time-unit :beats)]
      (make-modulator
-      (fn [{:keys [time-ms bpm]}]
-        (let [phase (+ (time/time->beat-phase (double time-ms) (double bpm)) offset)]
-          (time/oscillate min-v max-v (* phase freq) :sine)))
-      (str "sine(" min-val "-" max-val " @" frequency "x)")
-      {:type :sine :min min-val :max max-val :freq frequency :phase phase-offset}))))
+      (fn [context]
+        (let [phase (calculate-modulator-phase context freq offset loop-mode dur tunit trigger-time-override)]
+          (time/oscillate min-v max-v phase :sine)))
+      (str "sine(" min-val "-" max-val " @" frequency "x"
+           (when (= loop-mode :once) (str " once:" duration (name tunit))) ")")
+      {:type :sine :min min-val :max max-val :freq frequency :phase phase-offset
+       :loop-mode (or loop-mode :loop) :duration duration :time-unit tunit
+       :trigger-time-override trigger-time-override}))))
 
 (defn triangle-mod
-  "Create a triangle wave modulator (BPM-synced).
+  "Create a triangle wave modulator (BPM-synced by default, or time-based with once mode).
    
    Parameters:
    - min-val: Minimum value
    - max-val: Maximum value
-   - frequency: Cycles per beat (default 1.0)
-   - phase-offset: Phase offset 0.0-1.0 (default 0.0)"
+   - frequency: Cycles per beat in loop mode, or cycles over duration in once mode (default 1.0)
+   - phase-offset: Phase offset 0.0-1.0 (default 0.0)
+   - loop-mode: :loop (continuous, default) or :once (single run then hold)
+   - duration: Duration for once mode (in beats or seconds)
+   - time-unit: :beats (default) or :seconds
+   - trigger-time-override: (optional) Fixed trigger time, overrides context trigger-time"
   ([min-val max-val]
    (triangle-mod min-val max-val 1.0))
   ([min-val max-val frequency]
    (triangle-mod min-val max-val frequency 0.0))
   ([min-val max-val frequency phase-offset]
+   (triangle-mod min-val max-val frequency phase-offset :loop 1.0 :beats nil))
+  ([min-val max-val frequency phase-offset loop-mode duration time-unit]
+   (triangle-mod min-val max-val frequency phase-offset loop-mode duration time-unit nil))
+  ([min-val max-val frequency phase-offset loop-mode duration time-unit trigger-time-override]
    (let [min-v (double min-val)
          max-v (double max-val)
          freq (double frequency)
-         offset (double phase-offset)]
+         offset (double phase-offset)
+         dur (double (or duration 1.0))
+         tunit (or time-unit :beats)]
      (make-modulator
-      (fn [{:keys [time-ms bpm]}]
-        (let [phase (+ (time/time->beat-phase (double time-ms) (double bpm)) offset)]
-          (time/oscillate min-v max-v (* phase freq) :triangle)))
-      (str "triangle(" min-val "-" max-val " @" frequency "x)")
-      {:type :triangle :min min-val :max max-val :freq frequency :phase phase-offset}))))
+      (fn [context]
+        (let [phase (calculate-modulator-phase context freq offset loop-mode dur tunit trigger-time-override)]
+          (time/oscillate min-v max-v phase :triangle)))
+      (str "triangle(" min-val "-" max-val " @" frequency "x"
+           (when (= loop-mode :once) (str " once:" duration (name tunit))) ")")
+      {:type :triangle :min min-val :max max-val :freq frequency :phase phase-offset
+       :loop-mode (or loop-mode :loop) :duration duration :time-unit tunit
+       :trigger-time-override trigger-time-override}))))
 
 (defn sawtooth-mod
   "Create a sawtooth wave modulator (BPM-synced).

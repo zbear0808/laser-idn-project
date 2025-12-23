@@ -109,11 +109,14 @@
 
 (defn trigger-cue!
   "Trigger a cue to start playing.
+   Records trigger time for time-based modulators with 'once' mode.
    Returns the cue if found, nil otherwise."
   [cue-id]
   (when-let [cue (get-cue cue-id)]
-    (swap! dyn/!playback assoc :active-cue cue)
-    cue))
+    (let [trigger-time (System/currentTimeMillis)
+          cue-with-trigger (assoc cue :trigger-time trigger-time)]
+      (swap! dyn/!playback assoc :active-cue cue-with-trigger)
+      cue-with-trigger)))
 
 (defn stop-cue!
   "Stop the currently playing cue."
@@ -392,7 +395,11 @@
    - time-ms: Current time in milliseconds
    - bpm: Current BPM for beat-synced effects
    
-   Returns the frame with cue effects applied, or nil if no animation."
+   Returns the frame with cue effects applied, or nil if no animation.
+   
+   Note: This function reads the cue from storage, which may not have trigger-time.
+   For active cues, use get-active-cue-frame-with-effects instead which has
+   the trigger-time from when the cue was triggered."
   [cue-id time-ms bpm]
   (when-let [cue (get-cue cue-id)]
     (when-let [anim (:animation cue)]
@@ -401,10 +408,12 @@
                     (fn? anim) (anim time-ms)
                     (map? anim) (when-let [get-frame-fn (:get-frame anim)]
                                   (get-frame-fn time-ms))
-                    :else nil)]
-        ;; Apply cue effects if present
+                    :else nil)
+            ;; Get trigger-time if available (may be nil for stored cues)
+            trigger-time (:trigger-time cue)]
+        ;; Apply cue effects if present, passing trigger-time for modulator phase reset
         (if-let [chain (:effect-chain cue)]
-          (fx/apply-effect-chain frame chain time-ms bpm)
+          (fx/apply-effect-chain frame chain time-ms bpm trigger-time)
           frame)))))
 
 (defn get-active-cue-frame-with-effects
@@ -414,7 +423,22 @@
    - time-ms: Current time in milliseconds
    - bpm: Current BPM for beat-synced effects
    
-   Returns the frame with effects applied, or nil if no active cue."
+   Returns the frame with effects applied, or nil if no active cue.
+   
+   Note: This function gets the active cue from playback state which includes
+   the trigger-time from when trigger-cue! was called. This is used to reset
+   modulator phases when the cue is retriggered."
   [time-ms bpm]
   (when-let [active-cue (:active-cue @dyn/!playback)]
-    (get-cue-frame-with-effects (:id active-cue) time-ms bpm)))
+    ;; Get animation and apply effects with the active cue's trigger-time
+    (when-let [anim (:animation active-cue)]
+      (let [frame (cond
+                    (fn? anim) (anim time-ms)
+                    (map? anim) (when-let [get-frame-fn (:get-frame anim)]
+                                  (get-frame-fn time-ms))
+                    :else nil)
+            ;; Use the trigger-time from the active cue (set by trigger-cue!)
+            trigger-time (:trigger-time active-cue)]
+        (if-let [chain (:effect-chain active-cue)]
+          (fx/apply-effect-chain frame chain time-ms bpm trigger-time)
+          frame)))))

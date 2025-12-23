@@ -35,13 +35,13 @@
     :icon "🕐"
     :description "Modulators that vary over time, synced to BPM"
     :types [{:id :sine :name "Sine Wave" :description "Smooth oscillation"
-             :params [:min :max :freq :phase]}
+             :params [:min :max :freq :phase :loop-mode :duration :time-unit]}
             {:id :triangle :name "Triangle Wave" :description "Linear up/down"
-             :params [:min :max :freq :phase]}
+             :params [:min :max :freq :phase :loop-mode :duration :time-unit]}
             {:id :sawtooth :name "Sawtooth Wave" :description "Ramp up, reset"
-             :params [:min :max :freq :phase]}
+             :params [:min :max :freq :phase :loop-mode :duration :time-unit]}
             {:id :square :name "Square Wave" :description "On/off toggle"
-             :params [:min :max :freq :phase]}
+             :params [:min :max :freq :phase :loop-mode :duration :time-unit]}
             :separator
             {:id :beat-decay :name "Beat Decay" :description "Decay each beat"
              :params [:min :max]}
@@ -110,17 +110,6 @@
               {:id :rainbow-x :name "Rainbow X" :type :rainbow-hue :axis :x :speed 60.0}
               {:id :rainbow-angle :name "Rainbow Angle" :type :rainbow-hue :axis :angle :speed 60.0}]
    :control []})
-
-;; Legacy flat list for backwards compatibility with existing code
-(def modulator-types
-  "Available modulator types for parameter modulation (legacy flat list)."
-  (vec (mapcat (fn [cat]
-                 (filter map? (:types cat)))
-               modulator-categories)))
-
-(def modulator-presets
-  "Preset modulator configurations (legacy flat list)."
-  (vec (mapcat val modulator-presets-by-category)))
 
 ;; ============================================================================
 ;; UI Helpers
@@ -262,7 +251,10 @@
 (defn- get-modulator-type-by-id
   "Find a modulator type definition by its id."
   [type-id]
-  (first (filter #(= (:id %) type-id) modulator-types)))
+  (first (for [cat modulator-categories
+               type-def (:types cat)
+               :when (and (map? type-def) (= (:id type-def) type-id))]
+           type-def)))
 
 (defn- detect-modulator-category
   "Detect which category a modulator type belongs to."
@@ -449,11 +441,17 @@
   "Create a modulator function based on type and parameters."
   [mod-type params]
   (let [{:keys [min-val max-val freq phase axis speed wave-type cycles
-                channel cc path value wrap?]} params]
+                channel cc path value wrap? loop-mode duration time-unit trigger-time]} params
+        loop-mode (or loop-mode :loop)
+        duration (or duration 2.0)
+        time-unit (or time-unit :beats)
+        ;; Pass trigger-time for BOTH modes to enable consistent retriggering
+        ;; Loop mode now uses relative time (elapsed since trigger) just like once mode
+        trigger-override trigger-time]
     (case mod-type
-      ;; Time-based modulators
-      :sine (mod/sine-mod min-val max-val (or freq 1.0) (or phase 0.0))
-      :triangle (mod/triangle-mod min-val max-val (or freq 1.0) (or phase 0.0))
+      ;; Time-based modulators with loop-mode support (trigger-time used for both modes)
+      :sine (mod/sine-mod min-val max-val (or freq 1.0) (or phase 0.0) loop-mode duration time-unit trigger-override)
+      :triangle (mod/triangle-mod min-val max-val (or freq 1.0) (or phase 0.0) loop-mode duration time-unit trigger-override)
       :sawtooth (mod/sawtooth-mod min-val max-val (or freq 1.0) (or phase 0.0))
       :square (mod/square-mod min-val max-val (or freq 1.0))
       :beat-decay (mod/beat-decay max-val min-val)
@@ -522,6 +520,12 @@
         init-axis (or (:axis existing-config) :x)
         init-speed (or (:speed existing-config) 1.0)
         init-cycles (or (:cycles existing-config) 1.0)
+        init-loop-mode (or (:loop-mode existing-config) :loop)
+        init-duration (or (:duration existing-config) 2.0)
+        init-time-unit (or (:time-unit existing-config) :beats)
+        
+        ;; State atom for loop-mode (affects visibility of duration/time-unit)
+        loop-mode-atom (atom init-loop-mode)
         
         ;; Atom to hold notification function
         notify-fn-atom (atom nil)
@@ -559,6 +563,59 @@
                                    :foreground Color/WHITE
                                    :background (Color. 45 45 45)
                                    :listen [:action (fn [_] (when-let [f @notify-fn-atom] (f)))])
+        
+        ;; Loop mode controls
+        duration-ctrl (slider/create-slider {:min 0.25 :max 16.0 :default init-duration
+                                             :label-fn #(format "%.2f" %)
+                                             :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
+        
+        ;; Trigger time atom for "once" preview
+        trigger-time-atom (atom (System/currentTimeMillis))
+        
+        ;; Loop mode toggle button (instead of dropdown)
+        update-params-visibility-ref (atom nil) ;; Forward reference for update function
+        loop-toggle-btn (ss/button :text (if (= init-loop-mode :once) "Once" "Loop")
+                                   :font (Font. "SansSerif" Font/BOLD 11))
+        _ (ss/listen loop-toggle-btn :action 
+                     (fn [_]
+                       (let [new-mode (if (= @loop-mode-atom :loop) :once :loop)]
+                         (reset! loop-mode-atom new-mode)
+                         (ss/config! loop-toggle-btn :text (if (= new-mode :once) "Once" "Loop"))
+                         ;; Reset trigger time when switching to once mode
+                         (when (= new-mode :once)
+                           (reset! trigger-time-atom (System/currentTimeMillis)))
+                         ;; Rebuild visibility when loop mode changes
+                         (when-let [update-fn @update-params-visibility-ref]
+                           (update-fn @selected-type-atom))
+                         (when-let [f @notify-fn-atom] (f)))))
+        
+        ;; Retrigger button - resets animation to phase 0
+        ;; Available for BOTH loop and once modes for consistent retriggering
+        ;; NOTE: This button ONLY resets the trigger-time atom.
+        ;; It does NOT recreate the modulator. The existing modulator
+        ;; already holds a reference to the atom and will read the new
+        ;; time on the next render frame.
+        trigger-btn (ss/button :text "↻ Retrigger"
+                               :font (Font. "SansSerif" Font/BOLD 11)
+                               :background (Color. 80 140 80)
+                               :foreground Color/WHITE)
+        _ (ss/listen trigger-btn :action 
+                     (fn [_]
+                       (let [new-time (System/currentTimeMillis)]
+                         (println "[DEBUG] Trigger clicked! Resetting trigger-time atom to:" new-time)
+                         (reset! trigger-time-atom new-time))))
+        
+        time-unit-combo (ss/combobox :model [:beats :seconds])
+        _ (ss/listen time-unit-combo :action (fn [_] (when-let [f @notify-fn-atom] (f))))
+        _ (ss/selection! time-unit-combo init-time-unit)
+        
+        ;; Loop mode toggle panel with trigger button
+        loop-mode-toggle-panel (mig/mig-panel
+                                :constraints ["insets 5", "[80!][100!][100!]", ""]
+                                :items [[(ss/label :text "Loop Mode:" :foreground Color/WHITE) ""]
+                                        [loop-toggle-btn "growx"]
+                                        [trigger-btn "growx"]]
+                                :background (Color. 45 45 45))
         
         ;; Parameter panels (will show/hide based on selected type)
         min-panel (mig/mig-panel
@@ -620,14 +677,31 @@
                     :items [[wrap-checkbox ""]]
                     :background (Color. 45 45 45))
         
+        
+        duration-panel (mig/mig-panel
+                        :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
+                        :items [[(ss/label :text "Duration:" :foreground Color/WHITE) ""]
+                                [(:slider duration-ctrl) "growx"]
+                                [(:textfield duration-ctrl) ""]]
+                        :background (Color. 45 45 45))
+        
+        time-unit-panel (mig/mig-panel
+                         :constraints ["insets 5", "[80!][grow]", ""]
+                         :items [[(ss/label :text "Time Unit:" :foreground Color/WHITE) ""]
+                                 [time-unit-combo "growx"]]
+                         :background (Color. 45 45 45))
+        
         ;; Container for dynamic parameters
         params-container (ss/border-panel :background (Color. 45 45 45))
         
-        ;; Function to update parameter visibility based on selected type
+        ;; Function to update parameter visibility based on selected type and loop-mode
         update-params-visibility! (fn [mod-type-id]
                                     (.removeAll params-container)
                                     (let [type-def (get-modulator-type-by-id mod-type-id)
                                           params-needed (set (or (:params type-def) [:min :max :freq :phase]))
+                                          show-once-params? (= @loop-mode-atom :once)
+                                          ;; Retrigger button is ALWAYS visible for both loop and once modes
+                                          _ (ss/config! trigger-btn :visible? true)
                                           panel-items (cond-> []
                                                         (params-needed :min) (conj [min-panel "growx, wrap"])
                                                         (params-needed :max) (conj [max-panel "growx, wrap"])
@@ -637,7 +711,10 @@
                                                         (params-needed :cycles) (conj [cycles-panel "growx, wrap"])
                                                         (params-needed :axis) (conj [axis-panel "growx, wrap"])
                                                         (params-needed :wave-type) (conj [wave-type-panel "growx, wrap"])
-                                                        (params-needed :wrap?) (conj [wrap-panel "growx, wrap"]))
+                                                        (params-needed :wrap?) (conj [wrap-panel "growx, wrap"])
+                                                        (params-needed :loop-mode) (conj [loop-mode-toggle-panel "growx, wrap"])
+                                                        (and (params-needed :duration) show-once-params?) (conj [duration-panel "growx, wrap"])
+                                                        (and (params-needed :time-unit) show-once-params?) (conj [time-unit-panel "growx, wrap"]))
                                           inner-panel (mig/mig-panel
                                                        :constraints ["insets 0, wrap 1", "[grow, fill]", ""]
                                                        :items panel-items
@@ -645,6 +722,9 @@
                                       (.add params-container inner-panel java.awt.BorderLayout/CENTER))
                                     (.revalidate params-container)
                                     (.repaint params-container))
+        
+        ;; Set the forward reference so loop-mode listener can call it
+        _ (reset! update-params-visibility-ref update-params-visibility!)
         
         ;; Modulator type list
         type-list-model (DefaultListModel.)
@@ -734,8 +814,16 @@
         tab-panel (create-modulator-tab-panel init-category on-category-change)
         
         ;; Create modulator based on current settings
+        ;; Note: We pass the trigger-time-atom itself (not the value) for BOTH modes
+        ;; so the modulator can read the current trigger time when it evaluates.
+        ;; This allows the Retrigger button to reset the animation to phase 0 without recreating the modulator.
+        ;; Loop mode now also uses relative time (elapsed since trigger) for consistent retriggering.
         create-modulator (fn []
                            (let [mod-type @selected-type-atom
+                                 loop-mode @loop-mode-atom
+                                 ;; Pass the atom itself so it's live-updatable for BOTH modes
+                                 ;; Loop mode now uses relative time for consistent retrigger behavior
+                                 trigger-source trigger-time-atom
                                  params {:min-val ((:get-value min-ctrl))
                                          :max-val ((:get-value max-ctrl))
                                          :freq ((:get-value freq-ctrl))
@@ -744,7 +832,16 @@
                                          :cycles ((:get-value cycles-ctrl))
                                          :axis (ss/selection axis-combo)
                                          :wave-type (ss/selection wave-type-combo)
-                                         :wrap? (ss/value wrap-checkbox)}]
+                                         :wrap? (ss/value wrap-checkbox)
+                                         :loop-mode loop-mode
+                                         :duration ((:get-value duration-ctrl))
+                                         :time-unit (ss/selection time-unit-combo)
+                                         :trigger-time trigger-source}]
+                             (println "[DEBUG] Creating modulator with trigger-source:" 
+                                      (if (instance? clojure.lang.IDeref trigger-source) 
+                                        (str "atom@" @trigger-source) 
+                                        trigger-source)
+                                      "loop-mode:" loop-mode)
                              (create-modulator-from-config mod-type params)))
         
         ;; Notify about modulator change for live preview
@@ -752,8 +849,10 @@
                                    (when on-modulator-change
                                      (try
                                        (let [m (create-modulator)]
+                                         (println "[DEBUG] Modulator created, calling on-modulator-change")
                                          (on-modulator-change m))
-                                       (catch Exception _ nil))))
+                                       (catch Exception e 
+                                         (println "[DEBUG] Exception creating modulator:" (.getMessage e))))))
         
         ;; Set the notify function atom
         _ (reset! notify-fn-atom notify-modulator-change!)

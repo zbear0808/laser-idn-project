@@ -8,8 +8,8 @@
    [laser-show.animation.effects.shape]
    [laser-show.animation.time :as anim-time]
    [laser-show.animation.types :as t]
-   [laser-show.events :as events]
-   [laser-show.state :as state]
+   [laser-show.app-events :as events]
+   [laser-show.app-db :as state]
    [laser-show.ui.effect-dialogs :as effect-dialogs]
    [laser-show.ui.effects-grid :as effects-grid]
    [laser-show.ui.grid :as grid]
@@ -19,6 +19,7 @@
    [seesaw.core :as ss])
   (:import
    [com.formdev.flatlaf FlatDarkLaf]
+   [com.formdev.flatlaf.themes FlatMacDarkLaf]
    [java.awt Color]
    [java.awt.event WindowAdapter]
    [javax.imageio ImageIO]))
@@ -79,9 +80,9 @@
         ;; Create preview with frame processor that applies effects
         preview-comp (preview/create-preview-panel 
                        :width 350 :height 350
-                       :frame-processor (fn [frame time-ms]
+                       :frame-processor (fn [frame _time-ms]
                                           (if-let [effects-grid @!effects-grid-ref]
-                                            ((:apply-to-frame effects-grid) frame time-ms (anim-time/get-global-bpm))
+                                            ((:apply-to-frame effects-grid) frame (System/currentTimeMillis) (anim-time/get-global-bpm))
                                             frame)))
         
         ;; Passing dispatch! to grid is key
@@ -244,13 +245,32 @@
 
 (defn show-window! []
   (ss/invoke-later
-    (FlatDarkLaf/setup)
-    (if-let [frame (get-in @app-state [:ui :main-frame])]
-      (do (.toFront frame) frame)
-      (let [frame (create-main-window-internal)]
-        (ss/show! frame)
-        (swap! state/app-state assoc-in [:ui :main-frame] frame)
-        frame))))
+    (let [is-macos? (= "Mac OS X" (System/getProperty "os.name"))]
+      ;; Configure font rendering for macOS BEFORE FlatLaf setup
+      ;; This fixes missing/broken characters on macOS, especially Apple Silicon
+      (when is-macos?
+        ;; Enable LCD text rendering on macOS
+        (System/setProperty "awt.useSystemAAFontSettings" "lcd")
+        (System/setProperty "swing.aatext" "true")
+        ;; Use Quartz rendering on macOS for better font display
+        (System/setProperty "apple.awt.graphics.UseQuartz" "true")
+        ;; Better sub-pixel rendering
+        (System/setProperty "apple.laf.useScreenMenuBar" "true")
+        ;; Ensure proper font smoothing
+        (System/setProperty "apple.awt.textantialiasing" "on"))
+      
+      ;; Setup FlatLaf - use macOS-specific theme on macOS for native look
+      (FlatMacDarkLaf/setup)
+      #_(if is-macos?
+        (FlatMacDarkLaf/setup)
+        (FlatDarkLaf/setup))
+      
+      (if-let [frame (get-in @app-state [:ui :main-frame])]
+        (do (.toFront frame) frame)
+        (let [frame (create-main-window-internal)]
+          (ss/show! frame)
+          (swap! state/app-state assoc-in [:ui :main-frame] frame)
+          frame)))))
 
 (defn close-window! []
   (when-let [frame (get-in @app-state [:ui :main-frame])]

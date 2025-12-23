@@ -203,20 +203,23 @@
    - effect-instance: {:effect-id ... :enabled ... :params ...}
    - time-ms: Current time in milliseconds
    - bpm: Current BPM (from global state if not provided)
+   - trigger-time: (optional) Time when the cue/effect was triggered, for once-mode modulators
    
    Parameters can be static values or modulators (from modulation.clj).
    Modulators are automatically resolved before the effect is applied.
    
    Returns: Transformed frame"
   ([frame effect-instance time-ms]
-   (apply-effect frame effect-instance time-ms (time/get-global-bpm)))
+   (apply-effect frame effect-instance time-ms (time/get-global-bpm) nil))
   ([frame effect-instance time-ms bpm]
+   (apply-effect frame effect-instance time-ms bpm nil))
+  ([frame effect-instance time-ms bpm trigger-time]
    (if-not (effect-instance-enabled? effect-instance)
      frame
      (if-let [effect-def (get-effect (:effect-id effect-instance))]
        (let [apply-fn (:apply-fn effect-def)
              raw-params (:params effect-instance)
-             context (mod/make-context {:time-ms time-ms :bpm bpm})
+             context (mod/make-context {:time-ms time-ms :bpm bpm :trigger-time trigger-time})
              resolved-params (mod/resolve-params raw-params context)]
          (apply-fn frame time-ms bpm resolved-params))
        (do
@@ -312,16 +315,19 @@
    - chain: Effect chain or nil
    - time-ms: Current time in milliseconds
    - bpm: Current BPM (from global state if not provided)
+   - trigger-time: (optional) Time when the cue was triggered, for once-mode modulators
    
    Returns: Transformed frame"
   ([frame chain time-ms]
-   (apply-effect-chain frame chain time-ms (time/get-global-bpm)))
+   (apply-effect-chain frame chain time-ms (time/get-global-bpm) nil))
   ([frame chain time-ms bpm]
+   (apply-effect-chain frame chain time-ms bpm nil))
+  ([frame chain time-ms bpm trigger-time]
    (if (or (nil? chain) (empty? (:effects chain)))
      frame
      (reduce
       (fn [f effect-instance]
-        (apply-effect f effect-instance time-ms bpm))
+        (apply-effect f effect-instance time-ms bpm trigger-time))
       frame
       (:effects chain)))))
 

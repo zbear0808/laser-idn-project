@@ -1,7 +1,7 @@
-(ns laser-show.events
+(ns laser-show.app-events
   "Event system for the Laser Show application.
    Handles state transitions based on dispatched events."
-  (:require [laser-show.state :refer [app-state]]
+  (:require [laser-show.app-db :refer [app-state]]
             [laser-show.state.clipboard]
             [laser-show.animation.presets :as presets]))
 
