@@ -384,3 +384,49 @@
        (assoc point
               :x (short (Math/round (* (max -1.0 (min 1.0 new-x)) 32767.0)))
               :y (short (Math/round (* (max -1.0 (min 1.0 new-y)) 32767.0))))))))
+
+(defn transform-colors-per-point
+  "Apply a per-point transformation to colors.
+   The transform-fn receives [point-index point-count x y r g b resolved-params]
+   where resolved-params is a map of resolved parameters for that specific point.
+   Returns [r g b].
+   
+   This enables effects like:
+   - Rainbow gradients based on position
+   - Radial brightness fades
+   - Wave patterns across points
+   
+   Parameters:
+   - frame: The laser frame to transform
+   - time-ms: Current time in milliseconds
+   - bpm: Current BPM
+   - raw-params: Parameter map that may contain per-point modulators
+   - transform-fn: Function that receives [idx cnt x y r g b params] -> [r g b]
+   - transform-blanked: If true, transforms blanked points (default false)"
+  [frame time-ms bpm raw-params transform-fn & {:keys [transform-blanked] :or {transform-blanked false}}]
+  (let [points (:points frame)
+        point-count (count points)
+        base-context {:time-ms time-ms :bpm bpm}]
+    (update frame :points
+      (fn [pts]
+        (mapv (fn [idx point]
+                (let [x (/ (:x point) 32767.0)
+                      y (/ (:y point) 32767.0)
+                      r (bit-and (:r point) 0xFF)
+                      g (bit-and (:g point) 0xFF)
+                      b (bit-and (:b point) 0xFF)]
+                  (if (and (not transform-blanked)
+                           (zero? r) (zero? g) (zero? b))
+                    point  ; Skip blanked points
+                    (let [point-context (assoc base-context
+                                          :x x :y y
+                                          :point-index idx
+                                          :point-count point-count)
+                          resolved-params (mod/resolve-params raw-params point-context)
+                          [nr ng nb] (transform-fn idx point-count x y r g b resolved-params)]
+                      (assoc point
+                        :r (unchecked-byte (max 0 (min 255 (int nr))))
+                        :g (unchecked-byte (max 0 (min 255 (int ng))))
+                        :b (unchecked-byte (max 0 (min 255 (int nb)))))))))
+              (range)
+              pts)))))

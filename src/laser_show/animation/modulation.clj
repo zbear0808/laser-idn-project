@@ -86,13 +86,18 @@
 
 (defn- make-modulator
   "Wrap a function as a modulator with metadata.
-   The config map stores the original parameters for UI reconstruction."
+   The config map stores the original parameters for UI reconstruction.
+   The per-point? flag indicates whether the modulator requires per-point context
+   (x, y, point-index, point-count)."
   ([f description]
-   (make-modulator f description nil))
+   (make-modulator f description nil false))
   ([f description config]
+   (make-modulator f description config false))
+  ([f description config per-point?]
    (with-meta f {::modulator true
                  ::description description
-                 ::config config})))
+                 ::config config
+                 ::per-point per-point?})))
 
 (defn get-modulator-config
   "Extract the configuration from a modulator function.
@@ -100,6 +105,30 @@
   [modulator]
   (when (modulator? modulator)
     (::config (meta modulator))))
+
+(defn requires-per-point-context?
+  "Check if a modulator requires per-point context (x, y, point-index, point-count).
+   Returns true if the modulator has the ::per-point metadata flag set."
+  [modulator]
+  (when (modulator? modulator)
+    (::per-point (meta modulator))))
+
+(defn any-param-requires-per-point?
+  "Check if any parameter in a params map requires per-point context.
+   Recursively checks all values, including nested maps and collections."
+  [params]
+  (cond
+    (modulator? params)
+    (requires-per-point-context? params)
+    
+    (map? params)
+    (some any-param-requires-per-point? (vals params))
+    
+    (coll? params)
+    (some any-param-requires-per-point? params)
+    
+    :else
+    false))
 
 ;; ============================================================================
 ;; Once-Mode Helper Functions
@@ -501,7 +530,8 @@
             (+ min-v (* (if wrap? (mod t 1.0) t) range-v)))
           min-v))
       (str "point-index(" min-val "-" max-val (when wrap? " wrap") ")")
-      nil))))
+      nil
+      true))))  ; per-point modulator
 
 (defn point-index-wave
   "Create a wave modulator based on point index.
@@ -528,7 +558,8 @@
             (time/oscillate min-v max-v phase wave-type))
           min-v))
       (str "point-wave(" min-val "-" max-val " " cycles "x " wave-type ")")
-      nil))))
+      nil
+      true))))  ; per-point modulator
 
 (defn position-x-mod
   "Create a modulator based on X position.
@@ -548,7 +579,8 @@
            (+ min-v (* t range-v)))
          min-v))
      (str "pos-x(" min-val "-" max-val ")")
-     nil)))
+     nil
+     true)))  ; per-point modulator
 
 (defn position-y-mod
   "Create a modulator based on Y position.
@@ -568,7 +600,8 @@
            (+ min-v (* t range-v)))
          min-v))
      (str "pos-y(" min-val "-" max-val ")")
-     nil)))
+     nil
+     true)))  ; per-point modulator
 
 (defn position-radial-mod
   "Create a modulator based on distance from center.
@@ -588,13 +621,14 @@
      (make-modulator
       (fn [{:keys [x y]}]
         (if (and x y)
-          (let [dist (Math/sqrt (+ (* (double x) (double x)) 
+          (let [dist (Math/sqrt (+ (* (double x) (double x))
                                    (* (double y) (double y))))
                 t (min 1.0 (/ dist max-dist))]
             (+ min-v (* t range-v)))
           min-v))
       (str "pos-radial(" min-val "-" max-val ")")
-      nil))))
+      nil
+      true))))  ; per-point modulator
 
 (defn position-angle-mod
   "Create a modulator based on angle from center.
@@ -615,7 +649,8 @@
            (+ min-v (* t range-v)))
          min-v))
      (str "pos-angle(" min-val "-" max-val ")")
-     nil)))
+     nil
+     true)))  ; per-point modulator
 
 (defn position-wave
   "Create a wave pattern based on position.
@@ -649,7 +684,8 @@
             (time/oscillate min-v max-v phase wave-type))
           min-v))
       (str "pos-wave(" axis " " min-val "-" max-val " " frequency "x " wave-type ")")
-      nil))))
+      nil
+      true))))  ; per-point modulator
 
 ;; ============================================================================
 ;; Animated Position Modulators (combine position + time)
@@ -681,7 +717,9 @@
                 phase (+ pos-val time-offset)]
             (time/oscillate min-v max-v phase wave-type))
           min-v))
-      (str "pos-scroll(" axis " " min-val "-" max-val " @" speed "x " wave-type ")")))))
+      (str "pos-scroll(" axis " " min-val "-" max-val " @" speed "x " wave-type ")")
+      nil
+      true))))  ; per-point modulator
 
 (defn rainbow-hue
   "Create a rainbow hue pattern based on position + time.
@@ -707,7 +745,9 @@
                 time-offset (mod (* (/ (double time-ms) 1000.0) spd) 360.0)]
             (mod (+ (* position 360.0) time-offset) 360.0))
           0.0))
-      (str "rainbow-hue(" axis " @" speed "°/s)")))))
+      (str "rainbow-hue(" axis " @" speed "°/s)")
+      nil
+      true))))  ; per-point modulator
 
 ;; ============================================================================
 ;; Utility Modulators
