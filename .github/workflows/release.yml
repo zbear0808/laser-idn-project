@@ -159,7 +159,6 @@ jobs:
             -H:+ReportExceptionStackTraces \
             --initialize-at-build-time=java.awt,javax.swing,java.awt.color,java.awt.font,java.awt.geom,java.awt.image \
             --initialize-at-run-time=java.awt.Toolkit,sun.java2d,sun.awt,com.sun.imageio \
-            -H:ReflectionConfigurationFiles= \
             -H:+AddAllCharsets \
             -H:IncludeResourceBundles=sun.awt.resources.awtoptions \
             ${{ matrix.march-flag }} \
@@ -221,40 +220,6 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
       
-      - name: Analyze JAR dependencies for jlink
-        shell: bash
-        run: |
-          JAR_FILE=$(ls target/*-standalone.jar | head -1)
-          echo "Analyzing dependencies for: $JAR_FILE"
-          
-          # Use jdeps to determine required modules (with multi-release flag for Java 21)
-          jdeps --multi-release 21 --print-module-deps --ignore-missing-deps "$JAR_FILE" > modules.txt || true
-          
-          # If jdeps fails or returns empty, use a safe default module set
-          if [ ! -s modules.txt ] || [ $(cat modules.txt | wc -c) -lt 5 ]; then
-            echo "jdeps analysis incomplete, using comprehensive module set"
-            echo "java.base,java.desktop,java.logging,java.management,java.naming,java.sql,java.xml" > modules.txt
-          fi
-          
-          MODULES=$(cat modules.txt)
-          echo "Required modules: $MODULES"
-          echo "JLINK_MODULES=$MODULES" >> $GITHUB_ENV
-      
-      - name: Create custom JRE with jlink
-        shell: bash
-        run: |
-          echo "Creating custom JRE with modules: $JLINK_MODULES"
-          jlink \
-            --add-modules "$JLINK_MODULES" \
-            --strip-debug \
-            --no-header-files \
-            --no-man-pages \
-            --compress=2 \
-            --output custom-jre
-          
-          echo "Custom JRE created successfully"
-          du -sh custom-jre
-      
       - name: Prepare JAR for jpackage
         shell: bash
         run: |
@@ -267,17 +232,18 @@ jobs:
         shell: bash
         run: |
           echo "Creating ${{ matrix.installer-type }} installer..."
+          echo "Let jpackage automatically create the runtime with all required modules"
           
           jpackage \
             --type ${{ matrix.installer-type }} \
             --input target \
             --name LaserShow \
             --main-jar "$JAR_NAME" \
-            --runtime-image custom-jre \
             --dest dist \
             --app-version "1.0.0" \
             --vendor "LaserShow" \
             --description "Laser Show Control Application with bundled JRE" \
+            --java-options "-Xmx2048m" \
             --verbose
           
           echo "Installer created:"
