@@ -1,6 +1,9 @@
 (ns laser-show.animation.effects.color
   "Color effects for laser frames.
-   Includes hue shift, saturation, brightness, color filters, and more.
+   Includes hue shift, saturation, set hue, color filter, color replace, set color, and more.
+   
+   Note: For grayscale effect, use :saturation with amount=0.
+   For brightness control, use :intensity effect from intensity.clj.
    
    All effects support both static values and modulators:
    ;; Static
@@ -11,9 +14,7 @@
    {:effect-id :hue-shift :params {:degrees (mod/sine-mod -30 30 2.0)}}
    
    For animated hue rotation, use:
-   {:effect-id :hue-shift :params {:degrees (mod/sawtooth-mod 0 360 1.0)}}
-   
-   For rainbow effects, use the rainbow-hue modulator on tint or hue-shift."
+   {:effect-id :hue-shift :params {:degrees (mod/sawtooth-mod 0 360 1.0)}}"
   (:require [laser-show.animation.effects :as fx]
             [laser-show.animation.effects.common :as common]
             [laser-show.animation.colors :as colors]))
@@ -69,31 +70,6 @@
   :apply-fn apply-saturation})
 
 ;; ============================================================================
-;; Brightness Effect
-;; ============================================================================
-
-(defn- apply-brightness [frame _time-ms _bpm {:keys [amount]}]
-  (fx/transform-colors
-   frame
-   (fn [[r g b]]
-     [(common/clamp-byte (* r amount))
-      (common/clamp-byte (* g amount))
-      (common/clamp-byte (* b amount))])))
-
-(fx/register-effect!
- {:id :brightness
-  :name "Brightness"
-  :category :color
-  :timing :static
-  :parameters [{:key :amount
-                :label "Amount"
-                :type :float
-                :default 1.0
-                :min 0.0
-                :max 2.0}]
-  :apply-fn apply-brightness})
-
-;; ============================================================================
 ;; Color Filter Effect
 ;; ============================================================================
 
@@ -131,50 +107,6 @@
   :apply-fn apply-color-filter})
 
 ;; ============================================================================
-;; Tint Effect
-;; ============================================================================
-
-(defn- apply-tint [frame _time-ms _bpm {:keys [tint-r tint-g tint-b strength]}]
-  (fx/transform-colors
-   frame
-   (fn [[r g b]]
-     (let [inv-str (- 1.0 strength)]
-       [(common/clamp-byte (+ (* r inv-str) (* tint-r strength)))
-        (common/clamp-byte (+ (* g inv-str) (* tint-g strength)))
-        (common/clamp-byte (+ (* b inv-str) (* tint-b strength)))]))))
-
-(fx/register-effect!
- {:id :tint
-  :name "Tint"
-  :category :color
-  :timing :static
-  :parameters [{:key :tint-r
-                :label "Tint Red"
-                :type :int
-                :default 255
-                :min 0
-                :max 255}
-               {:key :tint-g
-                :label "Tint Green"
-                :type :int
-                :default 255
-                :min 0
-                :max 255}
-               {:key :tint-b
-                :label "Tint Blue"
-                :type :int
-                :default 255
-                :min 0
-                :max 255}
-               {:key :strength
-                :label "Strength"
-                :type :float
-                :default 0.0
-                :min 0.0
-                :max 1.0}]
-  :apply-fn apply-tint})
-
-;; ============================================================================
 ;; Invert Effect
 ;; ============================================================================
 
@@ -195,57 +127,31 @@
   :apply-fn apply-invert})
 
 ;; ============================================================================
-;; Grayscale Effect
+;; Set Hue Effect (sets all points to specific hue, preserving saturation/value)
 ;; ============================================================================
 
-(defn- apply-grayscale [frame _time-ms _bpm {:keys [amount]}]
+(defn- apply-set-hue [frame _time-ms _bpm {:keys [hue]}]
   (fx/transform-colors
    frame
    (fn [[r g b]]
-     (let [gray (int (+ (* r 0.299) (* g 0.587) (* b 0.114)))
-           inv-amt (- 1.0 amount)]
-       [(common/clamp-byte (+ (* r inv-amt) (* gray amount)))
-        (common/clamp-byte (+ (* g inv-amt) (* gray amount)))
-        (common/clamp-byte (+ (* b inv-amt) (* gray amount)))]))))
+     (let [[_h s v] (colors/rgb->hsv r g b)]
+       ;; Only apply to non-black points with some saturation
+       (if (and (pos? v) (or (pos? r) (pos? g) (pos? b)))
+         (colors/hsv->rgb hue s v)
+         [r g b])))))
 
 (fx/register-effect!
- {:id :grayscale
-  :name "Grayscale"
+ {:id :set-hue
+  :name "Set Hue"
   :category :color
   :timing :static
-  :parameters [{:key :amount
-                :label "Amount"
-                :type :float
-                :default 1.0
-                :min 0.0
-                :max 1.0}]
-  :apply-fn apply-grayscale})
-
-;; ============================================================================
-;; Contrast Effect
-;; ============================================================================
-
-(defn- apply-contrast [frame _time-ms _bpm {:keys [amount]}]
-  (let [factor (/ (+ 259.0 (* 255.0 amount)) (+ 255.0 (* 259.0 amount)))]
-    (fx/transform-colors
-     frame
-     (fn [[r g b]]
-       [(common/clamp-byte (+ 128 (* factor (- r 128))))
-        (common/clamp-byte (+ 128 (* factor (- g 128))))
-        (common/clamp-byte (+ 128 (* factor (- b 128))))]))))
-
-(fx/register-effect!
- {:id :contrast
-  :name "Contrast"
-  :category :color
-  :timing :static
-  :parameters [{:key :amount
-                :label "Amount"
+  :parameters [{:key :hue
+                :label "Hue"
                 :type :float
                 :default 0.0
-                :min -1.0
-                :max 1.0}]
-  :apply-fn apply-contrast})
+                :min 0.0
+                :max 360.0}]
+  :apply-fn apply-set-hue})
 
 ;; ============================================================================
 ;; Color Replace Effect

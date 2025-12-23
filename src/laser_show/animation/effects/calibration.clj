@@ -274,13 +274,13 @@
                 :label "X Scale"
                 :type :float
                 :default 1.0
-                :min 0.1
+                :min -2.0
                 :max 2.0}
                {:key :y-scale
                 :label "Y Scale"
                 :type :float
                 :default 1.0
-                :min 0.1
+                :min -2.0
                 :max 2.0}]
   :apply-fn apply-projector-scale})
 

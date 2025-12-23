@@ -13,9 +13,10 @@
                                                       background-light text-primary text-secondary
                                                       get-effect-category-color]])
   (:import [java.awt Color Font Dimension Cursor]
+           [java.awt.event KeyAdapter KeyEvent]
            [javax.swing JDialog JSlider JSpinner SpinnerNumberModel DefaultListModel
-                        DefaultComboBoxModel ListSelectionModel BorderFactory]
-           [javax.swing.event ChangeListener ListSelectionListener]))
+                        DefaultComboBoxModel ListSelectionModel BorderFactory JTextField]
+           [javax.swing.event ChangeListener ListSelectionListener DocumentListener]))
 
 ;; ============================================================================
 ;; Constants
@@ -52,34 +53,43 @@
 (defn- create-slider-with-textfield
   "Create a slider with an editable text field for float parameter editing.
    The slider and text field are synchronized bidirectionally.
+   Uses a normalized slider range [0, slider-steps] internally, then maps to [min, max].
    Returns {:slider JSlider :textfield JTextField :get-value fn :set-value! fn}"
   [{:keys [min max default on-change steps label-fn decimal-places]}]
-  (let [min-val (if (number? min) min 0.0)
-        max-val (if (number? max) max 1.0)
-        default-val (if (number? default) default min-val)
+  (let [min-val (double (if (number? min) min 0.0))
+        max-val (double (if (number? max) max 1.0))
+        default-val (double (if (number? default) default min-val))
         decimal-places (or decimal-places 2)
         format-str (str "%." decimal-places "f")
-        slider-scale 100
-        slider-min (int (* min-val slider-scale))
-        slider-max (int (* max-val slider-scale))
-        slider-val (int (* default-val slider-scale))
-        steps (or steps 1)
-        slider (JSlider. slider-min slider-max slider-val)
+        ;; Use 1000 steps for finer granularity
+        slider-steps 1000
+        ;; Helper to convert value to slider position
+        value->slider (fn [v]
+                        (let [range (- max-val min-val)]
+                          (if (zero? range)
+                            0
+                            (int (* (/ (- v min-val) range) slider-steps)))))
+        ;; Helper to convert slider position to value
+        slider->value (fn [s]
+                        (let [range (- max-val min-val)]
+                          (+ min-val (* (/ s (double slider-steps)) range))))
+        slider (JSlider. 0 slider-steps (value->slider default-val))
         updating-atom (atom false)
-        textfield (ss/text :text (if label-fn 
-                                   (label-fn default-val)
-                                   (format format-str default-val))
-                          :columns 5
-                          :font (Font. "Monospaced" Font/PLAIN 11)
-                          :background (Color. 60 60 60)
-                          :foreground Color/WHITE
-                          :halign :center)
+        ;; Create JTextField directly for better control over events
+        textfield (doto (JTextField. (if label-fn 
+                                       (label-fn default-val)
+                                       (format format-str default-val))
+                                     5)
+                    (.setFont (Font. "Monospaced" Font/PLAIN 11))
+                    (.setBackground (Color. 60 60 60))
+                    (.setForeground Color/WHITE)
+                    (.setHorizontalAlignment JTextField/CENTER))
         
         update-from-slider! (fn []
                               (when-not @updating-atom
                                 (reset! updating-atom true)
-                                (let [v (/ (.getValue slider) (double slider-scale))]
-                                  (ss/text! textfield (if label-fn
+                                (let [v (slider->value (.getValue slider))]
+                                  (.setText textfield (if label-fn
                                                         (label-fn v)
                                                         (format format-str v)))
                                   (when on-change (on-change v)))
@@ -89,23 +99,26 @@
                                  (when-not @updating-atom
                                    (reset! updating-atom true)
                                    (try
-                                     (let [text-val (ss/text textfield)
-                                           parsed (Double/parseDouble 
-                                                   (str/replace text-val #"[^\d.\-]" ""))
+                                     (let [text-val (.getText textfield)
+                                           ;; Parse numeric value, allowing negative and decimal
+                                           cleaned (str/replace text-val #"[^\d.\-]" "")
+                                           parsed (if (empty? cleaned) 
+                                                    (slider->value (.getValue slider))
+                                                    (Double/parseDouble cleaned))
                                            clamped (max min-val (min max-val parsed))]
-                                       (.setValue slider (int (* clamped slider-scale)))
-                                       (ss/text! textfield (if label-fn
+                                       (.setValue slider (value->slider clamped))
+                                       (.setText textfield (if label-fn
                                                             (label-fn clamped)
                                                             (format format-str clamped)))
                                        (when on-change (on-change clamped)))
                                      (catch Exception _
-                                       (let [current-v (/ (.getValue slider) (double slider-scale))]
-                                         (ss/text! textfield (if label-fn
+                                       (let [current-v (slider->value (.getValue slider))]
+                                         (.setText textfield (if label-fn
                                                               (label-fn current-v)
                                                               (format format-str current-v))))))
                                    (reset! updating-atom false)))]
     
-    (.setMinorTickSpacing slider steps)
+    (.setMinorTickSpacing slider (or steps 1))
     (.setPaintTicks slider false)
     (.setBackground slider (Color. 50 50 50))
     (.setForeground slider Color/WHITE)
@@ -115,15 +128,25 @@
         (stateChanged [_ _]
           (update-from-slider!))))
     
-    (ss/listen textfield :focus-lost (fn [_] (update-from-textfield!)))
-    (ss/listen textfield :action (fn [_] (update-from-textfield!)))
+    ;; Focus lost listener
+    (.addFocusListener textfield
+      (reify java.awt.event.FocusListener
+        (focusGained [_ _])
+        (focusLost [_ _] (update-from-textfield!))))
+    
+    ;; Key listener for Enter key
+    (.addKeyListener textfield
+      (proxy [KeyAdapter] []
+        (keyPressed [e]
+          (when (= (.getKeyCode e) KeyEvent/VK_ENTER)
+            (update-from-textfield!)))))
     
     {:slider slider
      :textfield textfield
-     :get-value (fn [] (/ (.getValue slider) (double slider-scale)))
+     :get-value (fn [] (slider->value (.getValue slider)))
      :set-value! (fn [v]
                    (reset! updating-atom true)
-                   (.setValue slider (int (* v slider-scale)))
+                   (.setValue slider (value->slider v))
                    (ss/text! textfield (if label-fn
                                          (label-fn v)
                                          (format format-str v)))
@@ -219,6 +242,81 @@
 ;; Parameter Panel Builder
 ;; ============================================================================
 
+(defn- create-int-slider-with-textfield
+  "Create a slider with an editable text field for integer parameter editing.
+   The slider and text field are synchronized bidirectionally.
+   Returns {:slider JSlider :textfield JTextField :get-value fn :set-value! fn}"
+  [{:keys [min max default on-change]}]
+  (let [min-val (if (number? min) (int min) 0)
+        max-val (if (number? max) (int max) 100)
+        default-val (if (number? default) (int default) min-val)
+        slider (JSlider. min-val max-val default-val)
+        updating-atom (atom false)
+        ;; Create JTextField directly for better control over events
+        textfield (doto (JTextField. (str default-val) 5)
+                    (.setFont (Font. "Monospaced" Font/PLAIN 11))
+                    (.setBackground (Color. 60 60 60))
+                    (.setForeground Color/WHITE)
+                    (.setHorizontalAlignment JTextField/CENTER))
+        
+        update-from-slider! (fn []
+                              (when-not @updating-atom
+                                (reset! updating-atom true)
+                                (let [v (.getValue slider)]
+                                  (.setText textfield (str v))
+                                  (when on-change (on-change v)))
+                                (reset! updating-atom false)))
+        
+        update-from-textfield! (fn []
+                                 (when-not @updating-atom
+                                   (reset! updating-atom true)
+                                   (try
+                                     (let [text-val (.getText textfield)
+                                           cleaned (str/trim text-val)
+                                           parsed (if (empty? cleaned)
+                                                    (.getValue slider)
+                                                    (Integer/parseInt cleaned))
+                                           clamped (max min-val (min max-val parsed))]
+                                       (.setValue slider clamped)
+                                       (.setText textfield (str clamped))
+                                       (when on-change (on-change clamped)))
+                                     (catch Exception _
+                                       (let [current-v (.getValue slider)]
+                                         (.setText textfield (str current-v)))))
+                                   (reset! updating-atom false)))]
+    
+    (.setMinorTickSpacing slider 1)
+    (.setPaintTicks slider false)
+    (.setBackground slider (Color. 50 50 50))
+    (.setForeground slider Color/WHITE)
+    
+    (.addChangeListener slider
+      (reify ChangeListener
+        (stateChanged [_ _]
+          (update-from-slider!))))
+    
+    ;; Focus lost listener
+    (.addFocusListener textfield
+      (reify java.awt.event.FocusListener
+        (focusGained [_ _])
+        (focusLost [_ _] (update-from-textfield!))))
+    
+    ;; Key listener for Enter key
+    (.addKeyListener textfield
+      (proxy [KeyAdapter] []
+        (keyPressed [e]
+          (when (= (.getKeyCode e) KeyEvent/VK_ENTER)
+            (update-from-textfield!)))))
+    
+    {:slider slider
+     :textfield textfield
+     :get-value (fn [] (.getValue slider))
+     :set-value! (fn [v]
+                   (reset! updating-atom true)
+                   (.setValue slider (int v))
+                   (.setText textfield (str (int v)))
+                   (reset! updating-atom false))}))
+
 (defn- create-param-control
   "Create a control for a single parameter definition.
    Returns {:panel JPanel :get-value fn :set-value! fn :set-modulator! fn}
@@ -263,20 +361,21 @@
                            [mod-indicator ""]]))
                 
                 :int
-                (let [ctrl (create-spinner {:min (or min 0)
-                                           :max (or max 100)
-                                           :default default
-                                           :step 1
-                                           :on-change (fn [_v]
-                                                        (reset! modulator-atom nil)
-                                                        (ss/config! mod-indicator :text "")
-                                                        (when on-param-change (on-param-change)))})]
+                (let [ctrl (create-int-slider-with-textfield 
+                            {:min (or min 0)
+                             :max (or max 255)
+                             :default default
+                             :on-change (fn [_v]
+                                          (reset! modulator-atom nil)
+                                          (ss/config! mod-indicator :text "")
+                                          (when on-param-change (on-param-change)))})]
                   (reset! control-atom ctrl)
                   (mig/mig-panel
-                   :constraints ["insets 2", "[100!][grow][80!][20!]", ""]
+                   :constraints ["insets 2", "[100!][grow, fill][50!][80!][20!]", ""]
                    :items [[(ss/label :text (str label ":") 
                                      :foreground Color/WHITE) ""]
-                           [(:spinner ctrl) ""]
+                           [(:slider ctrl) "growx"]
+                           [(:textfield ctrl) ""]
                            [(ss/button :text "Modulate"
                                        :font (Font. "SansSerif" Font/PLAIN 10)
                                        :listen [:action (fn [_]

@@ -190,12 +190,12 @@
                        :background (Color. 30 30 30))
         
         frame (ss/frame
-               :title "Laser Show - IDN Controller (Refactored)"
+               :title "Laser Show - IDN Controller"
                :content content-panel
                :minimum-size [900 :by 600]
                :size [1100 :by 700]
                :icon (try
-                       (ImageIO/read (io/resource "laser-warning.png"))
+                       (ImageIO/read (io/resource "laser-warning-square.png"))
                        (catch Exception e
                          (println "Could not load icon:" (.getMessage e))
                          nil))

@@ -1,7 +1,9 @@
 (ns laser-show.animation.effects.shape
   "Shape effects - geometric transformations for laser frames.
-   Includes scale, rotate, offset, mirror, viewport, and distortion effects.
+   Includes scale, translate, rotate, viewport, corner-pin, and distortion effects.
    These effects can be used at any level (cue, zone group, zone, projector).
+   
+   Note: Scale supports negative values for mirroring (e.g., x-scale -1 = mirror X).
    
    All effects support both static values and modulators:
    ;; Static
@@ -49,45 +51,45 @@
                 :label "X Scale"
                 :type :float
                 :default 1.0
-                :min 0.0
+                :min -5.0
                 :max 5.0}
                {:key :y-scale
                 :label "Y Scale"
                 :type :float
                 :default 1.0
-                :min 0.0
+                :min -5.0
                 :max 5.0}]
   :apply-fn apply-scale})
 
 ;; ============================================================================
-;; Offset (Translation) Effect
+;; Translate Effect
 ;; ============================================================================
 
-(defn- apply-offset [frame _time-ms _bpm {:keys [x-offset y-offset]}]
+(defn- apply-translate [frame _time-ms _bpm {:keys [x y]}]
   (fx/transform-positions
    frame
-   (fn [[x y]]
-     [(+ x x-offset)
-      (+ y y-offset)])))
+   (fn [[px py]]
+     [(+ px x)
+      (+ py y)])))
 
 (fx/register-effect!
- {:id :offset
-  :name "Offset"
+ {:id :translate
+  :name "Translate"
   :category :shape
   :timing :static
-  :parameters [{:key :x-offset
-                :label "X Offset"
+  :parameters [{:key :x
+                :label "X"
                 :type :float
                 :default 0.0
                 :min -2.0
                 :max 2.0}
-               {:key :y-offset
-                :label "Y Offset"
+               {:key :y
+                :label "Y"
                 :type :float
                 :default 0.0
                 :min -2.0
                 :max 2.0}]
-  :apply-fn apply-offset})
+  :apply-fn apply-translate})
 
 ;; ============================================================================
 ;; Rotation Effect
@@ -119,51 +121,6 @@
                 :max 360.0}]
   :apply-fn apply-rotation})
 
-;; ============================================================================
-;; Mirror Effects
-;; ============================================================================
-
-(defn- apply-mirror-x [frame _time-ms _bpm _params]
-  (fx/transform-positions
-   frame
-   (fn [[x y]]
-     [(- x) y])))
-
-(fx/register-effect!
- {:id :mirror-x
-  :name "Mirror X"
-  :category :shape
-  :timing :static
-  :parameters []
-  :apply-fn apply-mirror-x})
-
-(defn- apply-mirror-y [frame _time-ms _bpm _params]
-  (fx/transform-positions
-   frame
-   (fn [[x y]]
-     [x (- y)])))
-
-(fx/register-effect!
- {:id :mirror-y
-  :name "Mirror Y"
-  :category :shape
-  :timing :static
-  :parameters []
-  :apply-fn apply-mirror-y})
-
-(defn- apply-mirror-diagonal [frame _time-ms _bpm _params]
-  (fx/transform-positions
-   frame
-   (fn [[x y]]
-     [y x])))
-
-(fx/register-effect!
- {:id :mirror-diagonal
-  :name "Mirror Diagonal"
-  :category :shape
-  :timing :static
-  :parameters []
-  :apply-fn apply-mirror-diagonal})
 
 ;; ============================================================================
 ;; Viewport Effect
@@ -218,36 +175,6 @@
   :apply-fn apply-viewport})
 
 ;; ============================================================================
-;; Shear Effect
-;; ============================================================================
-
-(defn- apply-shear [frame _time-ms _bpm {:keys [x-factor y-factor]}]
-  (fx/transform-positions
-   frame
-   (fn [[x y]]
-     [(+ x (* y x-factor))
-      (+ y (* x y-factor))])))
-
-(fx/register-effect!
- {:id :shear
-  :name "Shear"
-  :category :shape
-  :timing :static
-  :parameters [{:key :x-factor
-                :label "X Factor"
-                :type :float
-                :default 0.0
-                :min -2.0
-                :max 2.0}
-               {:key :y-factor
-                :label "Y Factor"
-                :type :float
-                :default 0.0
-                :min -2.0
-                :max 2.0}]
-  :apply-fn apply-shear})
-
-;; ============================================================================
 ;; Pinch/Bulge Effect
 ;; ============================================================================
 
@@ -271,56 +198,98 @@
                 :label "Amount"
                 :type :float
                 :default 1.0
-                :min 0.1
+                :min -3.0
                 :max 3.0}]
   :apply-fn apply-pinch-bulge})
 
 ;; ============================================================================
-;; Keystone Correction Effect (for projector calibration)
+;; Corner Pin Effect (4-corner perspective/bilinear transform)
 ;; ============================================================================
 
-(defn- apply-keystone [frame _time-ms _bpm {:keys [top-width bottom-width left-height right-height]}]
+(defn- apply-corner-pin
+  "Maps the unit square [-1,1]x[-1,1] to a quadrilateral defined by four corners.
+   Uses bilinear interpolation for the mapping.
+   
+   Corner positions:
+   - tl (top-left): maps from (-1, 1)
+   - tr (top-right): maps from (1, 1)
+   - bl (bottom-left): maps from (-1, -1)
+   - br (bottom-right): maps from (1, -1)"
+  [frame _time-ms _bpm {:keys [tl-x tl-y tr-x tr-y bl-x bl-y br-x br-y]}]
   (fx/transform-positions
    frame
    (fn [[x y]]
-     (let [t (/ (+ y 1.0) 2.0)
-           width-factor (+ (* (- 1.0 t) bottom-width) (* t top-width))
-           s (/ (+ x 1.0) 2.0)
-           height-factor (+ (* (- 1.0 s) left-height) (* s right-height))
-           new-x (* x width-factor)
-           new-y (* y height-factor)]
+     ;; Convert from [-1,1] to [0,1] for interpolation
+     (let [u (/ (+ x 1.0) 2.0)  ; 0 at left, 1 at right
+           v (/ (+ y 1.0) 2.0)  ; 0 at bottom, 1 at top
+           ;; Bilinear interpolation
+           ;; P = (1-u)(1-v)*BL + u*(1-v)*BR + (1-u)*v*TL + u*v*TR
+           one-minus-u (- 1.0 u)
+           one-minus-v (- 1.0 v)
+           new-x (+ (* one-minus-u one-minus-v bl-x)
+                    (* u one-minus-v br-x)
+                    (* one-minus-u v tl-x)
+                    (* u v tr-x))
+           new-y (+ (* one-minus-u one-minus-v bl-y)
+                    (* u one-minus-v br-y)
+                    (* one-minus-u v tl-y)
+                    (* u v tr-y))]
        [new-x new-y]))))
 
 (fx/register-effect!
- {:id :keystone
-  :name "Keystone"
+ {:id :corner-pin
+  :name "Corner Pin"
   :category :shape
   :timing :static
-  :parameters [{:key :top-width
-                :label "Top Width"
+  :parameters [{:key :tl-x
+                :label "Top-Left X"
+                :type :float
+                :default -1.0
+                :min -2.0
+                :max 2.0}
+               {:key :tl-y
+                :label "Top-Left Y"
                 :type :float
                 :default 1.0
-                :min 0.0
-                :max 1.5}
-               {:key :bottom-width
-                :label "Bottom Width"
+                :min -2.0
+                :max 2.0}
+               {:key :tr-x
+                :label "Top-Right X"
                 :type :float
                 :default 1.0
-                :min 0.0
-                :max 1.5}
-               {:key :left-height
-                :label "Left Height"
+                :min -2.0
+                :max 2.0}
+               {:key :tr-y
+                :label "Top-Right Y"
                 :type :float
                 :default 1.0
-                :min 0.0
-                :max 1.5}
-               {:key :right-height
-                :label "Right Height"
+                :min -2.0
+                :max 2.0}
+               {:key :bl-x
+                :label "Bottom-Left X"
+                :type :float
+                :default -1.0
+                :min -2.0
+                :max 2.0}
+               {:key :bl-y
+                :label "Bottom-Left Y"
+                :type :float
+                :default -1.0
+                :min -2.0
+                :max 2.0}
+               {:key :br-x
+                :label "Bottom-Right X"
                 :type :float
                 :default 1.0
-                :min 0.0
-                :max 1.5}]
-  :apply-fn apply-keystone})
+                :min -2.0
+                :max 2.0}
+               {:key :br-y
+                :label "Bottom-Right Y"
+                :type :float
+                :default -1.0
+                :min -2.0
+                :max 2.0}]
+  :apply-fn apply-corner-pin})
 
 ;; ============================================================================
 ;; Lens Distortion Effect (barrel/pincushion)
