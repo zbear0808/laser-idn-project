@@ -37,35 +37,64 @@
 ;; Accessor Functions - Timing
 ;; ============================================================================
 
-(defn get-bpm []
+(defn get-bpm
+  "Get the current BPM (beats per minute).
+   Returns: BPM as a double."
+  []
   (:bpm @!timing))
 
-(defn set-bpm! [bpm]
+(defn set-bpm!
+  "Set the BPM (beats per minute).
+   Parameters:
+   - bpm: New BPM value (will be converted to double)"
+  [bpm]
   (swap! !timing assoc :bpm (double bpm)))
 
-(defn get-tap-times []
+(defn get-tap-times
+  "Get the vector of tap-tempo timestamps.
+   Returns: Vector of timestamps for BPM calculation."
+  []
   (:tap-times @!timing))
 
-(defn add-tap-time! [timestamp]
+(defn add-tap-time!
+  "Add a tap-tempo timestamp for BPM calculation.
+   Parameters:
+   - timestamp: System timestamp of the tap"
+  [timestamp]
   (swap! !timing update :tap-times conj timestamp))
 
-(defn clear-tap-times! []
+(defn clear-tap-times!
+  "Clear all tap-tempo timestamps."
+  []
   (swap! !timing assoc :tap-times []))
 
-(defn get-beat-position []
+(defn get-beat-position
+  "Get the current position within the beat (0.0 to 1.0).
+   Returns: Beat position as a double."
+  []
   (:beat-position @!timing))
 
-(defn update-beat-position! [position]
+(defn update-beat-position!
+  "Update the current beat position.
+   Parameters:
+   - position: New beat position (0.0 to 1.0)"
+  [position]
   (swap! !timing assoc :beat-position position))
 
 ;; ============================================================================
 ;; Accessor Functions - Playback
 ;; ============================================================================
 
-(defn playing? []
+(defn playing?
+  "Check if playback is currently active.
+   Returns: true if playing, false otherwise."
+  []
   (:playing? @!playback))
 
-(defn get-trigger-time []
+(defn get-trigger-time
+  "Get the timestamp when the current animation was triggered.
+   Returns: Timestamp in milliseconds."
+  []
   (:trigger-time @!playback))
 
 (defn trigger!
@@ -88,16 +117,31 @@
                         (assoc :playing? false)
                         (assoc :active-cell nil))))
 
-(defn get-active-cell []
+(defn get-active-cell
+  "Get the currently active (playing) cell.
+   Returns: [col row] or nil if nothing is playing."
+  []
   (:active-cell @!playback))
 
-(defn set-active-cell! [col row]
+(defn set-active-cell!
+  "Set the active cell.
+   Parameters:
+   - col: Column index (or nil to clear)
+   - row: Row index (or nil to clear)"
+  [col row]
   (swap! !playback assoc :active-cell (when (and col row) [col row])))
 
-(defn get-active-cue []
+(defn get-active-cue
+  "Get the currently active cue.
+   Returns: Cue data or nil."
+  []
   (:active-cue @!playback))
 
-(defn set-active-cue! [cue]
+(defn set-active-cue!
+  "Set the active cue.
+   Parameters:
+   - cue: Cue data to set"
+  [cue]
   (swap! !playback assoc :active-cue cue))
 
 (defn trigger-cell!
@@ -112,37 +156,86 @@
 ;; Accessor Functions - Grid
 ;; ============================================================================
 
-(defn get-grid-cells []
+(defn get-grid-cells
+  "Get all cells in the grid.
+   Returns: Map of [col row] -> cell-data."
+  []
   (:cells @!grid))
 
-(defn get-cell [col row]
+(defn get-cell
+  "Get a cell from the grid by position.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   Returns: Cell data map or nil if empty."
+  [col row]
   (get-in @!grid [:cells [col row]]))
 
-(defn set-cell! [col row cell-data]
+(defn set-cell!
+  "Set cell data at a position.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   - cell-data: Map of cell data (e.g., {:preset-id :circle})"
+  [col row cell-data]
   (swap! !grid assoc-in [:cells [col row]] cell-data))
 
-(defn set-cell-preset! [col row preset-id]
+(defn set-cell-preset!
+  "Set a preset for a cell.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   - preset-id: Keyword identifying the preset"
+  [col row preset-id]
   (swap! !grid assoc-in [:cells [col row]] {:preset-id preset-id}))
 
-(defn clear-cell! [col row]
+(defn clear-cell!
+  "Clear a cell, removing its content.
+   Parameters:
+   - col: Column index
+   - row: Row index"
+  [col row]
   (swap! !grid update :cells dissoc [col row]))
 
-(defn get-selected-cell []
+(defn get-selected-cell
+  "Get the currently selected cell.
+   Returns: [col row] or nil if nothing selected."
+  []
   (:selected-cell @!grid))
 
-(defn set-selected-cell! [col row]
+(defn set-selected-cell!
+  "Set the selected cell.
+   Parameters:
+   - col: Column index (or nil to clear)
+   - row: Row index (or nil to clear)"
+  [col row]
   (swap! !grid assoc :selected-cell (when (and col row) [col row])))
 
-(defn clear-selected-cell! []
+(defn clear-selected-cell!
+  "Clear the cell selection."
+  []
   (swap! !grid assoc :selected-cell nil))
 
-(defn get-grid-size []
+(defn get-grid-size
+  "Get the grid dimensions.
+   Returns: [cols rows]."
+  []
   (:size @!grid))
 
-(defn set-grid-size! [cols rows]
+(defn set-grid-size!
+  "Set the grid dimensions.
+   Parameters:
+   - cols: Number of columns
+   - rows: Number of rows"
+  [cols rows]
   (swap! !grid assoc :size [cols rows]))
 
-(defn move-cell! [from-col from-row to-col to-row]
+(defn move-cell!
+  "Move a cell from one position to another.
+   Parameters:
+   - from-col, from-row: Source position
+   - to-col, to-row: Destination position"
+  [from-col from-row to-col to-row]
   (swap! !grid (fn [grid]
                  (let [cell-data (get-in grid [:cells [from-col from-row]])]
                    (if cell-data
@@ -155,29 +248,56 @@
 ;; Accessor Functions - Streaming
 ;; ============================================================================
 
-(defn streaming? []
+(defn streaming?
+  "Check if streaming is currently active.
+   Returns: true if streaming, false otherwise."
+  []
   (:running? @!streaming))
 
-(defn get-streaming-engines []
+(defn get-streaming-engines
+  "Get all active streaming engines.
+   Returns: Map of projector-id -> engine."
+  []
   (:engines @!streaming))
 
-(defn add-streaming-engine! [projector-id engine]
+(defn add-streaming-engine!
+  "Add a streaming engine for a projector.
+   Parameters:
+   - projector-id: Unique projector identifier
+   - engine: Streaming engine instance"
+  [projector-id engine]
   (swap! !streaming assoc-in [:engines projector-id] engine))
 
-(defn remove-streaming-engine! [projector-id]
+(defn remove-streaming-engine!
+  "Remove a streaming engine.
+   Parameters:
+   - projector-id: Projector identifier to remove"
+  [projector-id]
   (swap! !streaming update :engines dissoc projector-id))
 
 ;; ============================================================================
 ;; Accessor Functions - IDN
 ;; ============================================================================
 
-(defn idn-connected? []
+(defn idn-connected?
+  "Check if connected to an IDN target.
+   Returns: true if connected, false otherwise."
+  []
   (:connected? @!idn))
 
-(defn get-idn-target []
+(defn get-idn-target
+  "Get the current IDN target.
+   Returns: Target hostname/IP or nil."
+  []
   (:target @!idn))
 
-(defn set-idn-connection! [connected? target engine]
+(defn set-idn-connection!
+  "Set the IDN connection state.
+   Parameters:
+   - connected?: Whether connected
+   - target: Target hostname/IP
+   - engine: Streaming engine instance"
+  [connected? target engine]
   (reset! !idn {:connected? connected?
                 :target target
                 :streaming-engine engine}))
@@ -186,54 +306,106 @@
 ;; Accessor Functions - Input
 ;; ============================================================================
 
-(defn midi-enabled? []
+(defn midi-enabled?
+  "Check if MIDI input is enabled.
+   Returns: true if enabled, false otherwise."
+  []
   (get-in @!input [:midi :enabled]))
 
-(defn enable-midi! [enabled]
+(defn enable-midi!
+  "Enable or disable MIDI input.
+   Parameters:
+   - enabled: true to enable, false to disable"
+  [enabled]
   (swap! !input assoc-in [:midi :enabled] enabled))
 
-(defn osc-enabled? []
+(defn osc-enabled?
+  "Check if OSC input is enabled.
+   Returns: true if enabled, false otherwise."
+  []
   (get-in @!input [:osc :enabled]))
 
-(defn enable-osc! [enabled]
+(defn enable-osc!
+  "Enable or disable OSC input.
+   Parameters:
+   - enabled: true to enable, false to disable"
+  [enabled]
   (swap! !input assoc-in [:osc :enabled] enabled))
 
 ;; ============================================================================
 ;; Accessor Functions - UI
 ;; ============================================================================
 
-(defn get-selected-preset []
+(defn get-selected-preset
+  "Get the currently selected preset in the UI.
+   Returns: Preset ID keyword or nil."
+  []
   (:selected-preset @!ui))
 
-(defn set-selected-preset! [preset-id]
+(defn set-selected-preset!
+  "Set the selected preset in the UI.
+   Parameters:
+   - preset-id: Preset ID keyword"
+  [preset-id]
   (swap! !ui assoc :selected-preset preset-id))
 
-(defn get-clipboard []
+(defn get-clipboard
+  "Get the clipboard contents.
+   Returns: Clipboard data or nil."
+  []
   (:clipboard @!ui))
 
-(defn set-clipboard! [data]
+(defn set-clipboard!
+  "Set the clipboard contents.
+   Parameters:
+   - data: Data to store in clipboard"
+  [data]
   (swap! !ui assoc :clipboard data))
 
-(defn get-ui-component [component-key]
+(defn get-ui-component
+  "Get a reference to a UI component.
+   Parameters:
+   - component-key: Keyword identifying the component
+     (:main-frame, :preview-panel, :grid-panel, :effects-panel, :status-bar, :toolbar)
+   Returns: Component reference or nil."
+  [component-key]
   (get-in @!ui [:components component-key]))
 
-(defn set-ui-component! [component-key component]
+(defn set-ui-component!
+  "Store a reference to a UI component.
+   Parameters:
+   - component-key: Keyword identifying the component
+   - component: Component reference to store"
+  [component-key component]
   (swap! !ui assoc-in [:components component-key] component))
 
-(defn get-main-frame []
+(defn get-main-frame
+  "Get the main application frame.
+   Returns: JFrame instance or nil."
+  []
   (get-ui-component :main-frame))
 
-(defn set-main-frame! [frame]
+(defn set-main-frame!
+  "Set the main application frame reference.
+   Parameters:
+   - frame: JFrame instance"
+  [frame]
   (set-ui-component! :main-frame frame))
 
 ;; ============================================================================
 ;; Accessor Functions - Drag State
 ;; ============================================================================
 
-(defn dragging? []
+(defn dragging?
+  "Check if a drag operation is in progress.
+   Returns: true if dragging, false otherwise."
+  []
   (get-in @!ui [:drag :active?]))
 
-(defn get-drag-data []
+(defn get-drag-data
+  "Get the current drag operation data.
+   Returns: Map with :active?, :source-type, :source-id, :source-key, :data."
+  []
   (get-in @!ui [:drag]))
 
 (defn start-drag!
@@ -263,29 +435,59 @@
 ;; Accessor Functions - Logging
 ;; ============================================================================
 
-(defn logging-enabled? []
+(defn logging-enabled?
+  "Check if packet logging is enabled.
+   Returns: true if enabled, false otherwise."
+  []
   (:enabled? @!logging))
 
-(defn set-logging-enabled! [enabled]
+(defn set-logging-enabled!
+  "Enable or disable packet logging.
+   Parameters:
+   - enabled: true to enable, false to disable"
+  [enabled]
   (swap! !logging assoc :enabled? enabled))
 
-(defn get-log-path []
+(defn get-log-path
+  "Get the path to the log file.
+   Returns: File path string."
+  []
   (:path @!logging))
 
 ;; ============================================================================
 ;; Accessor Functions - Effects
 ;; ============================================================================
 
-(defn get-active-effects []
+(defn get-active-effects
+  "Get all active effects from the effects grid.
+   Returns: Map of [col row] -> effect-data."
+  []
   (:active-effects @!effects))
 
-(defn get-effect-at [col row]
+(defn get-effect-at
+  "Get the effect at a specific grid position.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   Returns: Effect data map or nil."
+  [col row]
   (get-in @!effects [:active-effects [col row]]))
 
-(defn set-effect-at! [col row effect-data]
+(defn set-effect-at!
+  "Set an effect at a specific grid position.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   - effect-data: Effect configuration map"
+  [col row effect-data]
   (swap! !effects assoc-in [:active-effects [col row]] effect-data))
 
-(defn clear-effect-at! [col row]
+(defn clear-effect-at!
+  "Clear the effect at a specific grid position.
+   Parameters:
+   - col: Column index
+   - row: Row index"
+  [col row]
   (swap! !effects update :active-effects dissoc [col row]))
 
 ;; ============================================================================
