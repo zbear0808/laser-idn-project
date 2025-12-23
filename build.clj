@@ -12,7 +12,7 @@
 
 (defn uber [_]
   (clean nil)
-  (b/copy-dir {:src-dirs ["src"]
+  (b/copy-dir {:src-dirs ["src" "resources"]
                :target-dir class-dir})
   (b/compile-clj {:basis @basis
                   :ns-compile '[laser-show.core]
@@ -20,4 +20,7 @@
   (b/uber {:class-dir class-dir
            :uber-file uber-file
            :basis @basis
-           :main 'laser-show.core}))
+           :main 'laser-show.core
+           :conflict-handlers {"META-INF/.*\\.SF$" :ignore
+                              "META-INF/.*\\.DSA$" :ignore
+                              "META-INF/.*\\.RSA$" :ignore}}))
