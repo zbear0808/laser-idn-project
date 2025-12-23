@@ -4,13 +4,10 @@
    
    Zone groups now support effect chains for group-wide effects:
    - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
-  (:require [laser-show.state.persistent :as persist]
+  (:require [laser-show.state.atoms :as state]
+            [laser-show.state.persistent :as persist]
             [laser-show.backend.zones :as zones]
             [laser-show.animation.effects :as fx]))
-
-;; ============================================================================
-;; Zone Group Registry (now delegated to database/persistent)
-;; ============================================================================
 
 ;; ============================================================================
 ;; Zone Group Data Structure
@@ -50,7 +47,7 @@
    Can accept either a group map or individual parameters."
   ([group]
    (when (valid-zone-group? group)
-     (persist/add-zone-group! (:id group) group)
+     (state/add-zone-group! (:id group) group)
      group))
   ([id name zone-ids & opts]
    (let [group (apply make-zone-group id name zone-ids opts)]
@@ -59,36 +56,35 @@
 (defn get-group
   "Get a zone group by ID."
   [group-id]
-  (persist/get-zone-group group-id))
+  (state/get-zone-group group-id))
 
 (defn update-group!
   "Update a zone group's properties."
   [group-id updates]
   (when (get-group group-id)
     (let [updated (merge (get-group group-id) updates)]
-      (persist/add-zone-group! group-id updated)
+      (state/add-zone-group! group-id updated)
       updated)))
 
 (defn remove-group!
   "Remove a zone group from the registry."
   [group-id]
-  (persist/remove-zone-group! group-id))
+  (state/remove-zone-group! group-id))
 
 (defn list-groups
   "Get all zone groups as a sequence."
   []
-  (vals (persist/get-zone-groups)))
+  (vals (state/get-zone-groups)))
 
 (defn get-group-ids
   "Get all zone group IDs."
   []
-  (keys (persist/get-zone-groups)))
+  (keys (state/get-zone-groups)))
 
 (defn clear-groups!
   "Clear all zone groups from the registry."
   []
-  (reset! persist/!zone-groups {})
-  (persist/save-zone-groups!))
+  (state/reset-zone-groups!))
 
 ;; ============================================================================
 ;; Zone Membership
@@ -189,18 +185,18 @@
       (create-all-zones-group!))))
 
 ;; ============================================================================
-;; Persistence (delegated to database/persistent)
+;; Persistence
 ;; ============================================================================
 
 (defn save-groups!
   "Save all zone groups to disk."
   []
-  (persist/save-zone-groups!))
+  (persist/save-single! :zone-groups))
 
 (defn load-groups!
   "Load zone groups from disk."
   []
-  (persist/load-zone-groups!))
+  (persist/load-single! :zone-groups))
 
 ;; ============================================================================
 ;; Default Groups
@@ -209,7 +205,7 @@
 (defn ensure-default-groups!
   "Ensure default zone groups exist."
   []
-  (when (empty? (persist/get-zone-groups))
+  (when (empty? (state/get-zone-groups))
     (create-all-zones-group!)))
 
 ;; ============================================================================

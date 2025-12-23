@@ -4,7 +4,7 @@
 
 ;; Reset state before each test
 (defn reset-fixture [f]
-  (state/reset-all-runtime-state!)
+  (state/reset-all!)
   (f))
 
 (use-fixtures :each reset-fixture)
@@ -75,7 +75,7 @@
 
 (deftest test-trigger-time-operations
   (testing "Initial trigger time is 0"
-    (state/reset-all-runtime-state!)
+    (state/reset-all!)
     (is (= 0 (state/get-trigger-time))))
   
   (testing "Trigger updates trigger-time"
@@ -105,7 +105,7 @@
 
 (deftest test-trigger-cell
   (testing "Trigger cell sets active cell, playing, and trigger time"
-    (state/reset-all-runtime-state!)
+    (state/reset-all!)
     (let [before (System/currentTimeMillis)]
       (state/trigger-cell! 3 2)
       (let [after (System/currentTimeMillis)]
@@ -282,7 +282,7 @@
     (state/set-logging-enabled! true)
     
     ;; Reset
-    (state/reset-all-runtime-state!)
+    (state/reset-all!)
     
     ;; Verify all reset
     (is (= state/default-bpm (state/get-bpm)))

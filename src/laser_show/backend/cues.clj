@@ -12,16 +12,10 @@
    
    And can store animation objects directly:
    - :animation - The actual animation object (not persisted, created from preset-id)"
-  (:require [laser-show.state.persistent :as persist]
-            [laser-show.state.atoms :as state]
+  (:require [laser-show.state.atoms :as state]
+            [laser-show.state.persistent :as persist]
             [laser-show.backend.zone-router :as router]
             [laser-show.animation.effects :as fx]))
-
-;; ============================================================================
-;; Cue State (now delegated to database layer)
-;; Persistent: database/persistent (!cues, !cue-lists)
-;; Dynamic: database/dynamic (!playback :active-cue, :cue-queue)
-;; ============================================================================
 
 ;; ============================================================================
 ;; Cue Definition
@@ -78,30 +72,30 @@
 (defn add-cue!
   "Add a cue to the cue library."
   [cue]
-  (persist/add-cue! (:id cue) cue))
+  (state/add-cue! (:id cue) cue))
 
 (defn get-cue
   "Get a cue by ID."
   [cue-id]
-  (persist/get-cue cue-id))
+  (state/get-cue cue-id))
 
 (defn update-cue!
   "Update a cue's properties."
   [cue-id updates]
   (when (get-cue cue-id)
     (let [updated (merge (get-cue cue-id) updates)]
-      (persist/add-cue! cue-id updated)
+      (state/add-cue! cue-id updated)
       updated)))
 
 (defn remove-cue!
   "Remove a cue from the library."
   [cue-id]
-  (persist/remove-cue! cue-id))
+  (state/remove-cue! cue-id))
 
 (defn list-cues
   "Get all cues as a sequence."
   []
-  (vals (persist/get-cues)))
+  (vals (state/get-cues)))
 
 ;; ============================================================================
 ;; Cue Triggering
@@ -186,30 +180,30 @@
 (defn add-cue-list!
   "Add a cue list."
   [cue-list]
-  (persist/add-cue-list! (:id cue-list) cue-list))
+  (state/add-cue-list! (:id cue-list) cue-list))
 
 (defn get-cue-list
   "Get a cue list by ID."
   [list-id]
-  (persist/get-cue-list list-id))
+  (state/get-cue-list list-id))
 
 (defn update-cue-list!
   "Update a cue list's properties."
   [list-id updates]
   (when (get-cue-list list-id)
     (let [updated (merge (get-cue-list list-id) updates)]
-      (persist/add-cue-list! list-id updated)
+      (state/add-cue-list! list-id updated)
       updated)))
 
 (defn remove-cue-list!
   "Remove a cue list."
   [list-id]
-  (persist/remove-cue-list! list-id))
+  (state/remove-cue-list! list-id))
 
 (defn list-cue-lists
   "Get all cue lists as a sequence."
   []
-  (vals (persist/get-cue-lists)))
+  (vals (state/get-cue-lists)))
 
 (defn load-cue-list-to-queue!
   "Load all cues from a cue list into the queue."
@@ -220,28 +214,28 @@
       (queue-cue! cue-id))))
 
 ;; ============================================================================
-;; Persistence (delegated to database/persistent)
+;; Persistence
 ;; ============================================================================
 
 (defn save-cues!
   "Save all cues to disk."
   []
-  (persist/save-cues!))
+  (persist/save-single! :cues))
 
 (defn load-cues!
   "Load cues from disk."
   []
-  (persist/load-cues!))
+  (persist/load-single! :cues))
 
 (defn save-cue-lists!
   "Save all cue lists to disk."
   []
-  (persist/save-cue-lists!))
+  (persist/save-single! :cue-lists))
 
 (defn load-cue-lists!
   "Load cue lists from disk."
   []
-  (persist/load-cue-lists!))
+  (persist/load-single! :cue-lists))
 
 ;; ============================================================================
 ;; Initialization
@@ -379,11 +373,8 @@
   [cue-id time-ms]
   (when-let [cue (get-cue cue-id)]
     (when-let [anim (:animation cue)]
-      ;; Assuming animation has a get-frame protocol or function
-      ;; This depends on how animations are implemented in types.clj
       (if (fn? anim)
         (anim time-ms)
-        ;; If it's a map with a :get-frame function or similar
         (when-let [get-frame-fn (:get-frame anim)]
           (get-frame-fn time-ms))))))
 
@@ -395,23 +386,16 @@
    - time-ms: Current time in milliseconds
    - bpm: Current BPM for beat-synced effects
    
-   Returns the frame with cue effects applied, or nil if no animation.
-   
-   Note: This function reads the cue from storage, which may not have trigger-time.
-   For active cues, use get-active-cue-frame-with-effects instead which has
-   the trigger-time from when the cue was triggered."
+   Returns the frame with cue effects applied, or nil if no animation."
   [cue-id time-ms bpm]
   (when-let [cue (get-cue cue-id)]
     (when-let [anim (:animation cue)]
-      ;; Get the base frame - animation can be a function or have a :get-frame key
       (let [frame (cond
                     (fn? anim) (anim time-ms)
                     (map? anim) (when-let [get-frame-fn (:get-frame anim)]
                                   (get-frame-fn time-ms))
                     :else nil)
-            ;; Get trigger-time if available (may be nil for stored cues)
             trigger-time (:trigger-time cue)]
-        ;; Apply cue effects if present, passing trigger-time for modulator phase reset
         (if-let [chain (:effect-chain cue)]
           (fx/apply-effect-chain frame chain time-ms bpm trigger-time)
           frame)))))
@@ -423,21 +407,15 @@
    - time-ms: Current time in milliseconds
    - bpm: Current BPM for beat-synced effects
    
-   Returns the frame with effects applied, or nil if no active cue.
-   
-   Note: This function gets the active cue from playback state which includes
-   the trigger-time from when trigger-cue! was called. This is used to reset
-   modulator phases when the cue is retriggered."
+   Returns the frame with effects applied, or nil if no active cue."
   [time-ms bpm]
   (when-let [active-cue (:active-cue @state/!playback)]
-    ;; Get animation and apply effects with the active cue's trigger-time
     (when-let [anim (:animation active-cue)]
       (let [frame (cond
                     (fn? anim) (anim time-ms)
                     (map? anim) (when-let [get-frame-fn (:get-frame anim)]
                                   (get-frame-fn time-ms))
                     :else nil)
-            ;; Use the trigger-time from the active cue (set by trigger-cue!)
             trigger-time (:trigger-time active-cue)]
         (if-let [chain (:effect-chain active-cue)]
           (fx/apply-effect-chain frame chain time-ms bpm trigger-time)

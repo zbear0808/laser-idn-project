@@ -5,7 +5,8 @@
    
    Zones now support effect chains for per-zone effects:
    - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
-  (:require [laser-show.state.persistent :as persist]
+  (:require [laser-show.state.atoms :as state]
+            [laser-show.state.persistent :as persist]
             [laser-show.backend.projectors :as projectors]
             [laser-show.animation.effects :as fx]))
 
@@ -29,10 +30,6 @@
    :scale {:x 1.0 :y 1.0}
    :offset {:x 0.0 :y 0.0}
    :rotation 0.0})
-
-;; ============================================================================
-;; Zone Registry (now delegated to database/persistent)
-;; ============================================================================
 
 ;; ============================================================================
 ;; Zone Data Structure
@@ -88,7 +85,7 @@
    Can accept either a zone map or individual parameters."
   ([zone]
    (when (valid-zone? zone)
-     (persist/add-zone! (:id zone) zone)
+     (state/add-zone! (:id zone) zone)
      zone))
   ([id name projector-id & opts]
    (let [zone (apply make-zone id name projector-id opts)]
@@ -97,36 +94,35 @@
 (defn get-zone
   "Get a zone by ID."
   [zone-id]
-  (persist/get-zone zone-id))
+  (state/get-zone zone-id))
 
 (defn update-zone!
   "Update a zone's properties."
   [zone-id updates]
   (when (get-zone zone-id)
     (let [updated (merge (get-zone zone-id) updates)]
-      (persist/add-zone! zone-id updated)
+      (state/add-zone! zone-id updated)
       updated)))
 
 (defn remove-zone!
   "Remove a zone from the registry."
   [zone-id]
-  (persist/remove-zone! zone-id))
+  (state/remove-zone! zone-id))
 
 (defn list-zones
   "Get all zones as a sequence."
   []
-  (vals (persist/get-zones)))
+  (vals (state/get-zones)))
 
 (defn get-zone-ids
   "Get all zone IDs."
   []
-  (keys (persist/get-zones)))
+  (keys (state/get-zones)))
 
 (defn clear-zones!
   "Clear all zones from the registry."
   []
-  (reset! persist/!zones {})
-  (persist/save-zones!))
+  (state/reset-zones!))
 
 ;; ============================================================================
 ;; Zone Queries
@@ -300,18 +296,18 @@
   (:enabled (get-zone zone-id)))
 
 ;; ============================================================================
-;; Persistence (delegated to database/persistent)
+;; Persistence
 ;; ============================================================================
 
 (defn save-zones!
   "Save all zones to disk."
   []
-  (persist/save-zones!))
+  (persist/save-single! :zones))
 
 (defn load-zones!
   "Load zones from disk."
   []
-  (persist/load-zones!))
+  (persist/load-single! :zones))
 
 ;; ============================================================================
 ;; Default Zone
@@ -321,7 +317,7 @@
   "Ensure at least one default zone exists.
    Creates :zone-1 mapped to the default projector if no zones are registered."
   []
-  (when (empty? (persist/get-zones))
+  (when (empty? (state/get-zones))
     (let [default-projector-id (projectors/get-default-projector-id)]
       (create-zone!
        (make-zone :zone-1 "Default Zone" default-projector-id)))))

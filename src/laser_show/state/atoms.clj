@@ -206,6 +206,53 @@
    - :active-effects - Map of [col row] -> effect-data for effects grid"
   {:active-effects {}})
 
+(def initial-config-state
+  "Initial state for application configuration.
+   
+   Keys:
+   - :grid - Grid dimensions {:cols :rows}
+   - :window - Window dimensions {:width :height}
+   - :preview - Preview panel dimensions {:width :height}
+   - :idn - IDN connection settings {:host :port}
+   - :osc - OSC settings {:enabled :port}
+   - :midi - MIDI settings {:enabled :device}"
+  {:grid {:cols default-grid-cols :rows default-grid-rows}
+   :window {:width default-window-width :height default-window-height}
+   :preview {:width 400 :height 400}
+   :idn {:host nil :port 7255}
+   :osc {:enabled false :port default-osc-port}
+   :midi {:enabled false :device nil}})
+
+(def initial-projectors-state
+  "Initial state for projector configurations.
+   Map of projector-id -> projector-config."
+  {})
+
+(def initial-zones-state
+  "Initial state for zone configurations.
+   Map of zone-id -> zone-config."
+  {})
+
+(def initial-zone-groups-state
+  "Initial state for zone group configurations.
+   Map of group-id -> group-config."
+  {})
+
+(def initial-cues-state
+  "Initial state for cue definitions.
+   Map of cue-id -> cue-definition."
+  {})
+
+(def initial-cue-lists-state
+  "Initial state for cue lists.
+   Map of list-id -> cue-list."
+  {})
+
+(def initial-effect-registry-state
+  "Initial state for the effect registry.
+   Map of effect-id -> effect-definition."
+  {})
+
 ;; ============================================================================
 ;; Atom Definitions
 ;; ============================================================================
@@ -236,6 +283,27 @@
 
 (defonce ^{:doc "Atom for active effects state. See `initial-effects-state` for structure."}
   !effects (atom initial-effects-state))
+
+(defonce ^{:doc "Atom for application configuration. See `initial-config-state` for structure."}
+  !config (atom initial-config-state))
+
+(defonce ^{:doc "Atom for projector configurations. See `initial-projectors-state` for structure."}
+  !projectors (atom initial-projectors-state))
+
+(defonce ^{:doc "Atom for zone configurations. See `initial-zones-state` for structure."}
+  !zones (atom initial-zones-state))
+
+(defonce ^{:doc "Atom for zone group configurations. See `initial-zone-groups-state` for structure."}
+  !zone-groups (atom initial-zone-groups-state))
+
+(defonce ^{:doc "Atom for cue definitions. See `initial-cues-state` for structure."}
+  !cues (atom initial-cues-state))
+
+(defonce ^{:doc "Atom for cue lists. See `initial-cue-lists-state` for structure."}
+  !cue-lists (atom initial-cue-lists-state))
+
+(defonce ^{:doc "Atom for effect registry. See `initial-effect-registry-state` for structure."}
+  !effect-registry (atom initial-effect-registry-state))
 
 ;; ============================================================================
 ;; Reset Functions
@@ -286,6 +354,41 @@
   []
   (reset! !effects initial-effects-state))
 
+(defn reset-config!
+  "Reset config state to initial values."
+  []
+  (reset! !config initial-config-state))
+
+(defn reset-projectors!
+  "Reset projectors state to initial values."
+  []
+  (reset! !projectors initial-projectors-state))
+
+(defn reset-zones!
+  "Reset zones state to initial values."
+  []
+  (reset! !zones initial-zones-state))
+
+(defn reset-zone-groups!
+  "Reset zone-groups state to initial values."
+  []
+  (reset! !zone-groups initial-zone-groups-state))
+
+(defn reset-cues!
+  "Reset cues state to initial values."
+  []
+  (reset! !cues initial-cues-state))
+
+(defn reset-cue-lists!
+  "Reset cue-lists state to initial values."
+  []
+  (reset! !cue-lists initial-cue-lists-state))
+
+(defn reset-effect-registry!
+  "Reset effect-registry state to initial values."
+  []
+  (reset! !effect-registry initial-effect-registry-state))
+
 (defn reset-all!
   "Reset all state atoms to their initial values.
    USE WITH CAUTION - mainly for testing."
@@ -298,7 +401,14 @@
   (reset-input!)
   (reset-ui!)
   (reset-logging!)
-  (reset-effects!))
+  (reset-effects!)
+  (reset-config!)
+  (reset-projectors!)
+  (reset-zones!)
+  (reset-zone-groups!)
+  (reset-cues!)
+  (reset-cue-lists!)
+  (reset-effect-registry!))
 
 ;; ============================================================================
 ;; Accessor Functions - Timing
@@ -762,3 +872,184 @@
    - row: Row index"
   [col row]
   (swap! !effects update :active-effects dissoc [col row]))
+
+;; ============================================================================
+;; Accessor Functions - Config
+;; ============================================================================
+
+(defn get-config
+  "Get the full config map."
+  []
+  @!config)
+
+(defn get-grid-config
+  "Get grid configuration {:cols :rows}."
+  []
+  (:grid @!config))
+
+(defn get-window-config
+  "Get window configuration {:width :height}."
+  []
+  (:window @!config))
+
+(defn get-preview-config
+  "Get preview panel configuration {:width :height}."
+  []
+  (:preview @!config))
+
+(defn get-idn-config
+  "Get IDN configuration {:host :port}."
+  []
+  (:idn @!config))
+
+(defn update-config!
+  "Update a config value at the given path.
+   Parameters:
+   - path: Vector path into config (e.g., [:grid :cols])
+   - value: New value to set"
+  [path value]
+  (swap! !config assoc-in path value))
+
+;; ============================================================================
+;; Accessor Functions - Projectors
+;; ============================================================================
+
+(defn get-projectors
+  "Get all projector configurations."
+  []
+  @!projectors)
+
+(defn get-projector
+  "Get a projector configuration by ID."
+  [projector-id]
+  (get @!projectors projector-id))
+
+(defn add-projector!
+  "Add or update a projector configuration."
+  [projector-id config]
+  (swap! !projectors assoc projector-id config))
+
+(defn remove-projector!
+  "Remove a projector configuration."
+  [projector-id]
+  (swap! !projectors dissoc projector-id))
+
+;; ============================================================================
+;; Accessor Functions - Zones
+;; ============================================================================
+
+(defn get-zones
+  "Get all zone configurations."
+  []
+  @!zones)
+
+(defn get-zone
+  "Get a zone configuration by ID."
+  [zone-id]
+  (get @!zones zone-id))
+
+(defn add-zone!
+  "Add or update a zone configuration."
+  [zone-id config]
+  (swap! !zones assoc zone-id config))
+
+(defn remove-zone!
+  "Remove a zone configuration."
+  [zone-id]
+  (swap! !zones dissoc zone-id))
+
+;; ============================================================================
+;; Accessor Functions - Zone Groups
+;; ============================================================================
+
+(defn get-zone-groups
+  "Get all zone group configurations."
+  []
+  @!zone-groups)
+
+(defn get-zone-group
+  "Get a zone group configuration by ID."
+  [group-id]
+  (get @!zone-groups group-id))
+
+(defn add-zone-group!
+  "Add or update a zone group configuration."
+  [group-id config]
+  (swap! !zone-groups assoc group-id config))
+
+(defn remove-zone-group!
+  "Remove a zone group configuration."
+  [group-id]
+  (swap! !zone-groups dissoc group-id))
+
+;; ============================================================================
+;; Accessor Functions - Cues
+;; ============================================================================
+
+(defn get-cues
+  "Get all cue definitions."
+  []
+  @!cues)
+
+(defn get-cue
+  "Get a cue definition by ID."
+  [cue-id]
+  (get @!cues cue-id))
+
+(defn add-cue!
+  "Add or update a cue definition."
+  [cue-id definition]
+  (swap! !cues assoc cue-id definition))
+
+(defn remove-cue!
+  "Remove a cue definition."
+  [cue-id]
+  (swap! !cues dissoc cue-id))
+
+;; ============================================================================
+;; Accessor Functions - Cue Lists
+;; ============================================================================
+
+(defn get-cue-lists
+  "Get all cue lists."
+  []
+  @!cue-lists)
+
+(defn get-cue-list
+  "Get a cue list by ID."
+  [list-id]
+  (get @!cue-lists list-id))
+
+(defn add-cue-list!
+  "Add or update a cue list."
+  [list-id cue-list]
+  (swap! !cue-lists assoc list-id cue-list))
+
+(defn remove-cue-list!
+  "Remove a cue list."
+  [list-id]
+  (swap! !cue-lists dissoc list-id))
+
+;; ============================================================================
+;; Accessor Functions - Effect Registry
+;; ============================================================================
+
+(defn get-effect-registry
+  "Get all registered effects."
+  []
+  @!effect-registry)
+
+(defn get-registered-effect
+  "Get a registered effect by ID."
+  [effect-id]
+  (get @!effect-registry effect-id))
+
+(defn register-effect!
+  "Register an effect definition."
+  [effect-id definition]
+  (swap! !effect-registry assoc effect-id definition))
+
+(defn unregister-effect!
+  "Unregister an effect."
+  [effect-id]
+  (swap! !effect-registry dissoc effect-id))

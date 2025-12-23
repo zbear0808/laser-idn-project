@@ -1,41 +1,15 @@
 (ns laser-show.state.persistent
-  "Persistent configuration state for the laser show application.
-   This state is saved to disk and restored on startup."
-  (:require [laser-show.state.serialization :as ser]
-            [clojure.java.io :as io]))
-
-;; ============================================================================
-;; Configuration State
-;; ============================================================================
-
-(defonce !config
-  (atom {:grid {:cols 8 :rows 4}
-         :window {:width 1200 :height 800}
-         :preview {:width 400 :height 400}
-         :idn {:host nil :port 7255}
-         :osc {:enabled false :port 8000}
-         :midi {:enabled false :device nil}}))
-
-(defonce !grid-assignments
-  (atom {}))  ; {[col row] preset-id}
-
-(defonce !projectors
-  (atom {}))  ; {projector-id projector-config}
-
-(defonce !zones
-  (atom {}))  ; {zone-id zone-config}
-
-(defonce !zone-groups
-  (atom {}))  ; {group-id group-config}
-
-(defonce !cues
-  (atom {}))  ; {cue-id cue-definition}
-
-(defonce !cue-lists
-  (atom {}))  ; {list-id cue-list}
-
-(defonce !effect-registry
-  (atom {}))  ; {effect-id effect-definition}
+  "Persistence layer for application state.
+   
+   This namespace is responsible for:
+   - Defining WHICH state is persistent (the mapping lives here, not in atoms.clj)
+   - Loading persistent state from disk on app startup
+   - Saving persistent state to disk on user request
+   
+   The atoms.clj namespace is agnostic about persistence - it just holds state.
+   This namespace decides what gets saved and loaded."
+  (:require [laser-show.state.atoms :as state]
+            [laser-show.state.serialization :as ser]))
 
 ;; ============================================================================
 ;; File Paths
@@ -44,323 +18,109 @@
 (def config-dir "config")
 
 (def config-files
-  {:settings      "config/settings.edn"
-   :grid          "config/grid.edn"
-   :projectors    "config/projectors.edn"
-   :zones         "config/zones.edn"
-   :zone-groups   "config/zone-groups.edn"
-   :cues          "config/cues.edn"
-   :cue-lists     "config/cue-lists.edn"
-   :effects       "config/effects.edn"})
+  "Map of config type to file path."
+  {:settings    "config/settings.edn"
+   :grid        "config/grid.edn"
+   :projectors  "config/projectors.edn"
+   :zones       "config/zones.edn"
+   :zone-groups "config/zone-groups.edn"
+   :cues        "config/cues.edn"
+   :cue-lists   "config/cue-lists.edn"
+   :effects     "config/effects.edn"})
 
 ;; ============================================================================
-;; Save State Atoms to Disk
+;; Persistence Mapping
 ;; ============================================================================
+;; Defines what state is persistent. The atoms.clj namespace doesn't care
+;; about persistence - this mapping is the single source of truth for what
+;; gets saved/loaded.
 
-(defn save-config!
-
-  []
-  (ser/save-to-file! (:settings config-files) @!config))
-
-(defn save-grid-assignments!
-
-  []
-  (ser/save-to-file! (:grid config-files) @!grid-assignments))
-
-(defn save-projectors!
-
-  []
-  (ser/save-to-file! (:projectors config-files) @!projectors))
-
-(defn save-zones!
-
-  []
-  (ser/save-to-file! (:zones config-files) @!zones))
-
-(defn save-zone-groups!
-
-  []
-  (ser/save-to-file! (:zone-groups config-files) @!zone-groups))
-
-(defn save-cues!
-
-  []
-  (ser/save-to-file! (:cues config-files) @!cues))
-
-(defn save-cue-lists!
-
-  []
-  (ser/save-to-file! (:cue-lists config-files) @!cue-lists))
-
-(defn save-effects!
-
-  []
-  (ser/save-to-file! (:effects config-files) @!effect-registry))
-
-(defn save-all!
-
-  []
-  (save-config!)
-  (save-grid-assignments!)
-  (save-projectors!)
-  (save-zones!)
-  (save-zone-groups!)
-  (save-cues!)
-  (save-cue-lists!)
-  (save-effects!))
+(def persistent-state-mapping
+  "Defines the mapping between file keys, atoms, and what keys to persist.
+   
+   Format: {:file-key {:atom atom-ref
+                       :keys nil-or-vector}}
+   
+   - :atom - Reference to the atom in state namespace
+   - :keys - nil means save whole atom, vector means select-keys for partial save
+   
+   When loading: data from file is merged into the atom
+   When saving: if :keys is nil, save @atom; if :keys is a vector, save (select-keys @atom keys)"
+  {:settings    {:atom state/!config
+                 :keys nil}
+   :grid        {:atom state/!grid
+                 :keys [:cells]}  ; Only persist cells, not selected-cell or size
+   :projectors  {:atom state/!projectors
+                 :keys nil}
+   :zones       {:atom state/!zones
+                 :keys nil}
+   :zone-groups {:atom state/!zone-groups
+                 :keys nil}
+   :cues        {:atom state/!cues
+                 :keys nil}
+   :cue-lists   {:atom state/!cue-lists
+                 :keys nil}
+   :effects     {:atom state/!effect-registry
+                 :keys nil}})
 
 ;; ============================================================================
-;; Load Functions - Individual State Atoms
+;; Load Functions
 ;; ============================================================================
 
-(defn load-config!
-  
+(defn load-single!
+  "Load a single config file and merge into its atom.
+   Returns true if loaded successfully, false otherwise."
+  [file-key]
+  (let [filepath (get config-files file-key)
+        {:keys [atom keys]} (get persistent-state-mapping file-key)]
+    (when (and filepath atom)
+      (if-let [data (ser/load-from-file filepath)]
+        (do
+          (if keys
+            (swap! atom merge (select-keys data keys))
+            (swap! atom merge data))
+          true)
+        false))))
+
+(defn load-from-disk!
+  "Load all persistent state from disk. Called once at app startup.
+   Loads each config file and merges into the corresponding atom."
   []
-  (when-let [loaded (ser/load-from-file (:settings config-files))]
-    (reset! !config (merge @!config loaded))))
+  (doseq [file-key (keys persistent-state-mapping)]
+    (load-single! file-key)))
 
-(defn load-grid-assignments!
-  
+;; ============================================================================
+;; Save Functions
+;; ============================================================================
+
+(defn save-single!
+  "Save a single config file from its atom.
+   Returns true if saved successfully, false otherwise."
+  [file-key]
+  (let [filepath (get config-files file-key)
+        {:keys [atom keys]} (get persistent-state-mapping file-key)]
+    (when (and filepath atom)
+      (let [data (if keys
+                   (select-keys @atom keys)
+                   @atom)]
+        (ser/save-to-file! filepath data)))))
+
+(defn save-to-disk!
+  "Save all persistent state to disk. Called when user saves."
   []
-  (when-let [loaded (ser/load-from-file (:grid config-files))]
-    (reset! !grid-assignments loaded)))
+  (doseq [file-key (keys persistent-state-mapping)]
+    (save-single! file-key)))
 
-(defn load-projectors!
-  
+;; ============================================================================
+;; Utility Functions
+;; ============================================================================
+
+(defn get-config-path
+  "Get the file path for a config type."
+  [file-key]
+  (get config-files file-key))
+
+(defn persistent-keys
+  "Get a list of all persistent state keys."
   []
-  (when-let [loaded (ser/load-from-file (:projectors config-files))]
-    (reset! !projectors loaded)))
-
-(defn load-zones!
-  
-  []
-  (when-let [loaded (ser/load-from-file (:zones config-files))]
-    (reset! !zones loaded)))
-
-(defn load-zone-groups!
-  
-  []
-  (when-let [loaded (ser/load-from-file (:zone-groups config-files))]
-    (reset! !zone-groups loaded)))
-
-(defn load-cues!
-  
-  []
-  (when-let [loaded (ser/load-from-file (:cues config-files))]
-    (reset! !cues loaded)))
-
-(defn load-cue-lists!
-  
-  []
-  (when-let [loaded (ser/load-from-file (:cue-lists config-files))]
-    (reset! !cue-lists loaded)))
-
-(defn load-effects!
-  
-  []
-  (when-let [loaded (ser/load-from-file (:effects config-files))]
-    (reset! !effect-registry loaded)))
-
-(defn load-all!
-  
-  []
-  (load-config!)
-  (load-grid-assignments!)
-  (load-projectors!)
-  (load-zones!)
-  (load-zone-groups!)
-  (load-cues!)
-  (load-cue-lists!)
-  (load-effects!))
-
-;; ============================================================================
-;; Accessor Functions - Config
-;; ============================================================================
-
-(defn get-config []
-
-  @!config)
-
-(defn get-grid-config []
-
-  (:grid @!config))
-
-(defn get-window-config []
-
-  (:window @!config))
-
-(defn get-idn-config []
-
-  (:idn @!config))
-
-(defn update-config! [path value]
-  (swap! !config assoc-in path value)
-  (save-config!))
-
-;; ============================================================================
-;; Accessor Functions - Grid Assignments
-;; ============================================================================
-
-(defn get-grid-assignments []
-
-  @!grid-assignments)
-
-(defn get-assignment [col row]
-
-  (get @!grid-assignments [col row]))
-
-(defn set-assignment! [col row preset-id]
-  "Set preset assignment for a specific cell"
-  (swap! !grid-assignments assoc [col row] preset-id)
-  (save-grid-assignments!))
-
-(defn clear-assignment! [col row]
-  "Clear preset assignment for a specific cell"
-  (swap! !grid-assignments dissoc [col row])
-  (save-grid-assignments!))
-
-;; ============================================================================
-;; Accessor Functions - Projectors
-;; ============================================================================
-
-(defn get-projectors []
-
-  @!projectors)
-
-(defn get-projector [projector-id]
-
-  (get @!projectors projector-id))
-
-(defn add-projector! [projector-id config]
-
-  (swap! !projectors assoc projector-id config)
-  (save-projectors!))
-
-(defn remove-projector! [projector-id]
-
-  (swap! !projectors dissoc projector-id)
-  (save-projectors!))
-
-;; ============================================================================
-;; Accessor Functions - Zones
-;; ============================================================================
-
-(defn get-zones []
-
-  @!zones)
-
-(defn get-zone [zone-id]
-
-  (get @!zones zone-id))
-
-(defn add-zone! [zone-id config]
-
-  (swap! !zones assoc zone-id config)
-  (save-zones!))
-
-(defn remove-zone! [zone-id]
-
-  (swap! !zones dissoc zone-id)
-  (save-zones!))
-
-;; ============================================================================
-;; Accessor Functions - Zone Groups
-;; ============================================================================
-
-(defn get-zone-groups []
-
-  @!zone-groups)
-
-(defn get-zone-group [group-id]
-
-  (get @!zone-groups group-id))
-
-(defn add-zone-group! [group-id config]
-
-  (swap! !zone-groups assoc group-id config)
-  (save-zone-groups!))
-
-(defn remove-zone-group! [group-id]
-
-  (swap! !zone-groups dissoc group-id)
-  (save-zone-groups!))
-
-;; ============================================================================
-;; Accessor Functions - Cues
-;; ============================================================================
-
-(defn get-cues []
-
-  @!cues)
-
-(defn get-cue [cue-id]
-
-  (get @!cues cue-id))
-
-(defn add-cue! [cue-id definition]
-
-  (swap! !cues assoc cue-id definition)
-  (save-cues!))
-
-(defn remove-cue! [cue-id]
-
-  (swap! !cues dissoc cue-id)
-  (save-cues!))
-
-;; ============================================================================
-;; Accessor Functions - Cue Lists
-;; ============================================================================
-
-(defn get-cue-lists []
-
-  @!cue-lists)
-
-(defn get-cue-list [list-id]
-
-  (get @!cue-lists list-id))
-
-(defn add-cue-list! [list-id cue-list]
-
-  (swap! !cue-lists assoc list-id cue-list)
-  (save-cue-lists!))
-
-(defn remove-cue-list! [list-id]
-
-  (swap! !cue-lists dissoc list-id)
-  (save-cue-lists!))
-
-;; ============================================================================
-;; Auto-save Support
-;; ============================================================================
-
-(defn enable-auto-save!
-  "Add watchers to automatically save state on changes"
-  []
-  (add-watch !config ::auto-save
-             (fn [_ _ _ _] (save-config!)))
-  (add-watch !grid-assignments ::auto-save
-             (fn [_ _ _ _] (save-grid-assignments!)))
-  (add-watch !projectors ::auto-save
-             (fn [_ _ _ _] (save-projectors!)))
-  (add-watch !zones ::auto-save
-             (fn [_ _ _ _] (save-zones!)))
-  (add-watch !zone-groups ::auto-save
-             (fn [_ _ _ _] (save-zone-groups!)))
-  (add-watch !cues ::auto-save
-             (fn [_ _ _ _] (save-cues!)))
-  (add-watch !cue-lists ::auto-save
-             (fn [_ _ _ _] (save-cue-lists!)))
-  (add-watch !effect-registry ::auto-save
-             (fn [_ _ _ _] (save-effects!))))
-
-(defn disable-auto-save!
-
-  []
-  (remove-watch !config ::auto-save)
-  (remove-watch !grid-assignments ::auto-save)
-  (remove-watch !projectors ::auto-save)
-  (remove-watch !zones ::auto-save)
-  (remove-watch !zone-groups ::auto-save)
-  (remove-watch !cues ::auto-save)
-  (remove-watch !cue-lists ::auto-save)
-  (remove-watch !effect-registry ::auto-save))
+  (keys persistent-state-mapping))
