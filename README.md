@@ -26,9 +26,27 @@ For detailed architecture information, see [`docs/ARCHITECTURE.md`](docs/ARCHITE
 - [License](#license)
 - [Contributing](#contributing)
 
+
+### Installation Steps
+
+1. **Download** the appropriate file for your system from the [releases page](https://github.com/zbear0808/laser-idn-project/releases)
+
+
+### Troubleshooting Downloads
+
+**"Illegal instruction" error or application crashes immediately?**
+→ Your CPU may not support the native-optimized build. Download the compatibility variant instead.
+
+**macOS "unidentified developer" warning?**
+→ Right-click the executable, select "Open", then click "Open" in the dialog.
+
+**Application won't start at all?**
+→ Try the universal JAR: `java -jar laser-show-X.X.X-standalone.jar`
+
+
 ## Quick Start
 
-### Prerequisites
+### Prerequisites (for Development)
 
 - Java 11 or higher
 - Clojure CLI tools (https://clojure.org/guides/install_clojure)

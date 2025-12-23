@@ -68,26 +68,53 @@ jobs:
       fail-fast: false  # Continue other builds if one fails
       matrix:
         include:
-          # macOS ARM64 (Apple Silicon)
-          - os: macos-15
+          # macOS ARM64 (Apple Silicon) - Native Optimized
+          - os: macos-latest
             arch: aarch64
-            artifact-name: laser-show-macos-arm64
+            variant: native
+            march-flag: "-march=native"
+            artifact-name: laser-show-macos-arm64-native
             executable-name: laser-show
-            native-image-args: ""
             
-          # macOS Intel x86_64
-          - os: macos-13
+          # macOS ARM64 (Apple Silicon) - Compatibility
+          - os: macos-latest
+            arch: aarch64
+            variant: compatibility
+            march-flag: "-march=compatibility"
+            artifact-name: laser-show-macos-arm64-compat
+            executable-name: laser-show
+            
+          # macOS Intel x86_64 - Native Optimized
+          - os: macos-15-intel
             arch: x86_64
-            artifact-name: laser-show-macos-intel
+            variant: native
+            march-flag: "-march=native"
+            artifact-name: laser-show-macos-intel-native
             executable-name: laser-show
-            native-image-args: ""
             
-          # Windows x86_64
+          # macOS Intel x86_64 - Compatibility
+          - os: macos-15-intel
+            arch: x86_64
+            variant: compatibility
+            march-flag: "-march=compatibility"
+            artifact-name: laser-show-macos-intel-compat
+            executable-name: laser-show
+            
+          # Windows x86_64 - Native Optimized
           - os: windows-latest
             arch: x86_64
-            artifact-name: laser-show-windows
+            variant: native
+            march-flag: "-march=native"
+            artifact-name: laser-show-windows-native
             executable-name: laser-show.exe
-            native-image-args: ""
+            
+          # Windows x86_64 - Compatibility
+          - os: windows-latest
+            arch: x86_64
+            variant: compatibility
+            march-flag: "-march=compatibility"
+            artifact-name: laser-show-windows-compat
+            executable-name: laser-show.exe
 
     runs-on: ${{ matrix.os }}
     
@@ -119,16 +146,19 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
       
-      - name: Build native image
+      - name: Build native image (${{ matrix.variant }})
         shell: bash
         run: |
           JAR_FILE=$(ls target/*-standalone.jar | head -1)
-          echo "Building native image from: $JAR_FILE"
+          echo "Building ${{ matrix.variant }} native image from: $JAR_FILE"
+          echo "Using optimization flag: ${{ matrix.march-flag }}"
           
           native-image \
             --no-fallback \
             --verbose \
             -H:+ReportExceptionStackTraces \
+            ${{ matrix.march-flag }} \
+            -O3 \
             -jar "$JAR_FILE" \
             -o target/${{ matrix.executable-name }}
       
@@ -140,65 +170,191 @@ jobs:
           retention-days: 30
 
   # ==========================================================================
-  # Upload Release Assets
+  # Build JPackage Bundled Executables (with JRE)
   # ==========================================================================
-  upload-release-assets:
-    needs: [build-jar, build-native]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'release'
+  build-jpackage:
+    needs: build-jar
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows installer with bundled JRE
+          - os: windows-latest
+            installer-type: msi
+            artifact-name: laser-show-windows-jre-msi
+            
+          # macOS installer with bundled JRE (ARM64)
+          - os: macos-15-latest
+            installer-type: dmg
+            artifact-name: laser-show-macos-arm64-jre-dmg
+            
+          # macOS installer with bundled JRE (Intel)
+          - os: macos-15-intel
+            installer-type: dmg
+            artifact-name: laser-show-macos-intel-jre-dmg
+            
+          # Linux installer with bundled JRE
+          - os: ubuntu-latest
+            installer-type: deb
+            artifact-name: laser-show-linux-jre-deb
+
+    runs-on: ${{ matrix.os }}
     
     steps:
-      - name: Download all artifacts
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download JAR artifact
         uses: actions/download-artifact@v4
         with:
-          path: artifacts/
+          name: uber-jar
+          path: target/
       
-      - name: Display artifacts
-        run: |
-          echo "Downloaded artifacts:"
-          find artifacts/ -type f
-      
-      - name: Create release archives
-        run: |
-          cd artifacts
-          
-          # Package macOS ARM64
-          if [ -d "laser-show-macos-arm64" ]; then
-            cd laser-show-macos-arm64
-            chmod +x laser-show 2>/dev/null || true
-            zip -r ../laser-show-macos-arm64.zip .
-            cd ..
-          fi
-          
-          # Package macOS Intel
-          if [ -d "laser-show-macos-intel" ]; then
-            cd laser-show-macos-intel
-            chmod +x laser-show 2>/dev/null || true
-            zip -r ../laser-show-macos-intel.zip .
-            cd ..
-          fi
-          
-          # Package Windows
-          if [ -d "laser-show-windows" ]; then
-            cd laser-show-windows
-            zip -r ../laser-show-windows.zip .
-            cd ..
-          fi
-          
-          # Package JAR
-          if [ -d "uber-jar" ]; then
-            cd uber-jar
-            zip -r ../laser-show-jar.zip .
-            cd ..
-          fi
-          
-          echo "Created archives:"
-          ls -la *.zip || echo "No zip files created"
-      
-      - name: Upload to release
-        uses: softprops/action-gh-release@v1
+      - name: Setup Java (with jpackage)
+        uses: actions/setup-java@v4
         with:
-          files: |
-            artifacts/*.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+      
+      - name: Analyze JAR dependencies for jlink
+        shell: bash
+        run: |
+          JAR_FILE=$(ls target/*-standalone.jar | head -1)
+          echo "Analyzing dependencies for: $JAR_FILE"
+          
+          # Use jdeps to determine required modules
+          jdeps --print-module-deps --ignore-missing-deps "$JAR_FILE" > modules.txt || true
+          
+          # If jdeps fails or returns empty, use a safe default module set
+          if [ ! -s modules.txt ] || [ $(cat modules.txt | wc -c) -lt 5 ]; then
+            echo "jdeps analysis incomplete, using comprehensive module set"
+            echo "java.base,java.desktop,java.logging,java.management,java.naming,java.sql,java.xml" > modules.txt
+          fi
+          
+          MODULES=$(cat modules.txt)
+          echo "Required modules: $MODULES"
+          echo "JLINK_MODULES=$MODULES" >> $GITHUB_ENV
+      
+      - name: Create custom JRE with jlink
+        shell: bash
+        run: |
+          echo "Creating custom JRE with modules: $JLINK_MODULES"
+          jlink \
+            --add-modules "$JLINK_MODULES" \
+            --strip-debug \
+            --no-header-files \
+            --no-man-pages \
+            --compress=2 \
+            --output custom-jre
+          
+          echo "Custom JRE created successfully"
+          du -sh custom-jre
+      
+      - name: Prepare JAR for jpackage
+        shell: bash
+        run: |
+          JAR_FILE=$(ls target/*-standalone.jar | head -1)
+          JAR_NAME=$(basename "$JAR_FILE")
+          echo "JAR_NAME=$JAR_NAME" >> $GITHUB_ENV
+          echo "Main JAR: $JAR_NAME"
+      
+      - name: Package installer with jpackage
+        shell: bash
+        run: |
+          echo "Creating ${{ matrix.installer-type }} installer..."
+          
+          jpackage \
+            --type ${{ matrix.installer-type }} \
+            --input target \
+            --name LaserShow \
+            --main-jar "$JAR_NAME" \
+            --runtime-image custom-jre \
+            --dest dist \
+            --app-version "1.0.0" \
+            --vendor "LaserShow" \
+            --description "Laser Show Control Application with bundled JRE" \
+            --verbose
+          
+          echo "Installer created:"
+          ls -lh dist/
+      
+      - name: Upload bundled installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: dist/*
+          retention-days: 30
+
+  # ==========================================================================
+  # Upload Release Assets (COMMENTED OUT - artifacts generated only)
+  # ==========================================================================
+  # upload-release-assets:
+  #   needs: [build-jar, build-native, build-jpackage]
+  #   runs-on: ubuntu-latest
+  #   if: github.event_name == 'release'
+  #
+  #   steps:
+  #     - name: Download all artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         path: artifacts/
+  #
+  #     - name: Display artifacts
+  #       run: |
+  #         echo "Downloaded artifacts:"
+  #         find artifacts/ -type f
+  #
+  #     - name: Create release archives
+  #       run: |
+  #         cd artifacts
+  #
+  #         # Package all macOS ARM64 variants (native and compat)
+  #         for dir in laser-show-macos-arm64-*; do
+  #           if [ -d "$dir" ]; then
+  #             echo "Packaging $dir..."
+  #             cd "$dir"
+  #             chmod +x laser-show 2>/dev/null || true
+  #             zip -r "../${dir}.zip" .
+  #             cd ..
+  #           fi
+  #         done
+  #
+  #         # Package all macOS Intel variants (native and compat)
+  #         for dir in laser-show-macos-intel-*; do
+  #           if [ -d "$dir" ]; then
+  #             echo "Packaging $dir..."
+  #             cd "$dir"
+  #             chmod +x laser-show 2>/dev/null || true
+  #             zip -r "../${dir}.zip" .
+  #             cd ..
+  #           fi
+  #         done
+  #
+  #         # Package all Windows variants (native and compat)
+  #         for dir in laser-show-windows-*; do
+  #           if [ -d "$dir" ]; then
+  #             echo "Packaging $dir..."
+  #             cd "$dir"
+  #             zip -r "../${dir}.zip" .
+  #             cd ..
+  #           fi
+  #         done
+  #
+  #         # Package JAR (unchanged)
+  #         if [ -d "uber-jar" ]; then
+  #           echo "Packaging uber-jar..."
+  #           cd uber-jar
+  #           zip -r ../laser-show-jar.zip .
+  #           cd ..
+  #         fi
+  #
+  #         echo "Created archives:"
+  #         ls -la *.zip || echo "No zip files created"
+  #
+  #     - name: Upload to release
+  #       uses: softprops/action-gh-release@v1
+  #       with:
+  #         files: |
+  #           artifacts/*.zip
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

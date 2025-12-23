@@ -11,5 +11,16 @@
       },
       "afterCLJReplJackInCode": "(start)"
     }
-  ]
+  ],
+
+  "files.exclude": {
+    ".clj-kondo/": true,
+    ".calva/": true,
+    ".cpcache/": true,
+    ".lsp/": true,
+    ".nrepl-port": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/.git": true
+  }
 }
