@@ -1,16 +1,18 @@
 (ns laser-show.animation.modulation
   "Parameter modulation system for effects.
-   Provides modulator functions that can be used as effect parameters.
+   
+   Modulators are represented as pure data configs that can be serialized to EDN.
+   The modulator functions are created at runtime when parameters are resolved.
    
    Usage:
-   ;; Static value (backward compatible)
+   ;; Static value
    {:effect-id :scale :params {:x-scale 1.5}}
    
-   ;; Modulated value
-   {:effect-id :scale :params {:x-scale (sine-mod 0.8 1.2 2.0)}}
+   ;; Modulated value (pure data config - serializable!)
+   {:effect-id :scale :params {:x-scale {:type :sine :min 0.8 :max 1.2 :freq 2.0}}}
    
    ;; MIDI controlled
-   {:effect-id :scale :params {:x-scale (midi-mod 1 7 0.5 2.0)}}"
+   {:effect-id :scale :params {:x-scale {:type :midi :channel 1 :cc 7 :min 0.5 :max 2.0}}}"
   (:require [laser-show.animation.time :as time]))
 
 ;; ============================================================================
@@ -43,14 +45,33 @@
   [x]
   (and (fn? x) (::modulator (meta x))))
 
+(defn modulator-config?
+  "Check if a value is a modulator config map (pure data representation).
+   Modulator configs are maps with a :type key that matches a known modulator type."
+  [x]
+  (and (map? x)
+       (contains? x :type)
+       (contains? #{:sine :triangle :sawtooth :square :beat-decay :random
+                    :pos-x :pos-y :radial :angle :point-index :point-wave :pos-wave
+                    :pos-scroll :rainbow-hue :midi :osc :constant}
+                  (:type x))))
+
+;; Forward declaration - will be defined after modulator constructors
+(declare create-modulator-from-config)
+
 (defn resolve-param
   "Resolve a parameter value.
-   If the param is a modulator function, call it with context.
-   If it's a static value, return it as-is."
+   - If the param is a modulator config map (pure data), create the function and call it.
+   - If the param is a modulator function, call it directly.
+   - If it's a static value (number, string, etc.), return it as-is.
+   
+   Note: For storage/serialization, always use config maps (pure data).
+   Modulator functions are only used internally (combinators, presets, tests)."
   [param context]
-  (if (modulator? param)
-    (param context)
-    param))
+  (cond
+    (modulator-config? param) ((create-modulator-from-config param) context)
+    (modulator? param) (param context)
+    :else param))
 
 (defn resolve-params
   "Resolve all parameters in a params map."
@@ -855,3 +876,67 @@
    Returns the modulator or nil if not found."
   [preset-key]
   (get presets preset-key))
+
+;; ============================================================================
+;; Create Modulator from Config (Pure Data -> Function)
+;; ============================================================================
+
+(defn create-modulator-from-config
+  "Create a modulator function from a pure data config map.
+   
+   This is the inverse of storing modulator configs - it takes a config map
+   and returns the corresponding modulator function.
+   
+   Config map format:
+   {:type :sine      ;; Modulator type (required)
+    :min 0.0         ;; Min value
+    :max 1.0         ;; Max value  
+    :freq 1.0        ;; Frequency
+    :phase 0.0       ;; Phase offset
+    :loop-mode :loop ;; Loop mode (:loop or :once)
+    :duration 2.0    ;; Duration for once mode
+    :time-unit :beats ;; Time unit for once mode
+    ... other type-specific params}
+   
+   Returns: Modulator function"
+  [{:keys [type min max freq phase axis speed wave-type cycles
+           channel cc path value wrap? loop-mode duration time-unit]
+    :as config}]
+  (let [min-val (or min 0.0)
+        max-val (or max 1.0)
+        frequency (or freq 1.0)
+        phase-offset (or phase 0.0)
+        lm (or loop-mode :loop)
+        dur (or duration 2.0)
+        tu (or time-unit :beats)]
+    (case type
+      ;; Time-based waveform modulators
+      :sine (sine-mod min-val max-val frequency phase-offset lm dur tu)
+      :triangle (triangle-mod min-val max-val frequency phase-offset lm dur tu)
+      :sawtooth (sawtooth-mod min-val max-val frequency phase-offset)
+      :square (square-mod min-val max-val frequency)
+      
+      ;; Decay/envelope modulators
+      :beat-decay (beat-decay max-val min-val)
+      :random (random-mod min-val max-val frequency)
+      
+      ;; Position-based modulators
+      :pos-x (position-x-mod min-val max-val)
+      :pos-y (position-y-mod min-val max-val)
+      :radial (position-radial-mod min-val max-val)
+      :angle (position-angle-mod min-val max-val)
+      :point-index (point-index-mod min-val max-val (boolean wrap?))
+      :point-wave (point-index-wave min-val max-val (or cycles 1.0) (or wave-type :sine))
+      :pos-wave (position-wave min-val max-val (or axis :x) frequency (or wave-type :sine))
+      
+      ;; Animated position modulators
+      :pos-scroll (position-scroll min-val max-val (or axis :x) (or speed 1.0) (or wave-type :sine))
+      :rainbow-hue (rainbow-hue (or axis :x) (or speed 60.0))
+      
+      ;; Control modulators
+      :midi (midi-mod (or channel 1) (or cc 1) min-val max-val)
+      :osc (osc-mod (or path "/control") min-val max-val)
+      :constant (constant (or value min-val))
+      
+      ;; Default fallback to sine
+      (sine-mod min-val max-val frequency phase-offset))))

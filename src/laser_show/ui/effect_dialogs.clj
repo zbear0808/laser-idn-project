@@ -461,17 +461,22 @@
        :set-params! (fn [params]
                       (doseq [ctrl controls]
                         (when-let [v (get params (:param-key ctrl))]
-                          (if (fn? v)
+                          (if (mod/modulator-config? v)
+                            ;; Modulator config map (pure data)
                             ((:set-modulator! ctrl) v)
+                            ;; Static value
                             ((:set-value! ctrl) v)))))})))
 
 ;; ============================================================================
 ;; Modulator Dialog
 ;; ============================================================================
 
-(defn- create-modulator-from-config
-  "Create a modulator function based on type and parameters.
-   Note: Trigger time is NOT stored in the modulator config.
+(defn- create-modulator-config
+  "Create a modulator config map (pure data) based on type and parameters.
+   This returns a data structure that can be serialized to EDN.
+   The modulator function will be created at runtime by resolve-param.
+   
+   Note: Trigger time is NOT stored in the config.
    It comes from the modulation context at runtime (see effects.clj apply-effect)."
   [mod-type params]
   (let [{:keys [min-val max-val freq phase axis speed wave-type cycles
@@ -479,36 +484,38 @@
         loop-mode (or loop-mode :loop)
         duration (or duration 2.0)
         time-unit (or time-unit :beats)]
+    ;; Return pure data config - the modulator function will be created at runtime
     (case mod-type
-      ;; Time-based modulators with loop-mode support
-      ;; Trigger time comes from context, not from config
-      :sine (mod/sine-mod min-val max-val (or freq 1.0) (or phase 0.0) loop-mode duration time-unit)
-      :triangle (mod/triangle-mod min-val max-val (or freq 1.0) (or phase 0.0) loop-mode duration time-unit)
-      :sawtooth (mod/sawtooth-mod min-val max-val (or freq 1.0) (or phase 0.0))
-      :square (mod/square-mod min-val max-val (or freq 1.0))
-      :beat-decay (mod/beat-decay max-val min-val)
-      :random (mod/random-mod min-val max-val (or freq 1.0))
+      ;; Time-based modulators
+      :sine {:type :sine :min min-val :max max-val :freq (or freq 1.0) :phase (or phase 0.0)
+             :loop-mode loop-mode :duration duration :time-unit time-unit}
+      :triangle {:type :triangle :min min-val :max max-val :freq (or freq 1.0) :phase (or phase 0.0)
+                 :loop-mode loop-mode :duration duration :time-unit time-unit}
+      :sawtooth {:type :sawtooth :min min-val :max max-val :freq (or freq 1.0) :phase (or phase 0.0)}
+      :square {:type :square :min min-val :max max-val :freq (or freq 1.0) :phase (or phase 0.0)}
+      :beat-decay {:type :beat-decay :min min-val :max max-val}
+      :random {:type :random :min min-val :max max-val :freq (or freq 1.0)}
       
       ;; Space-based modulators
-      :pos-x (mod/position-x-mod min-val max-val)
-      :pos-y (mod/position-y-mod min-val max-val)
-      :radial (mod/position-radial-mod min-val max-val)
-      :angle (mod/position-angle-mod min-val max-val)
-      :point-index (mod/point-index-mod min-val max-val (boolean wrap?))
-      :point-wave (mod/point-index-wave min-val max-val (or cycles 1.0) (or wave-type :sine))
-      :pos-wave (mod/position-wave min-val max-val (or axis :x) (or freq 1.0) (or wave-type :sine))
+      :pos-x {:type :pos-x :min min-val :max max-val}
+      :pos-y {:type :pos-y :min min-val :max max-val}
+      :radial {:type :radial :min min-val :max max-val}
+      :angle {:type :angle :min min-val :max max-val}
+      :point-index {:type :point-index :min min-val :max max-val :wrap? (boolean wrap?)}
+      :point-wave {:type :point-wave :min min-val :max max-val :cycles (or cycles 1.0) :wave-type (or wave-type :sine)}
+      :pos-wave {:type :pos-wave :min min-val :max max-val :axis (or axis :x) :freq (or freq 1.0) :wave-type (or wave-type :sine)}
       
       ;; Animated modulators
-      :pos-scroll (mod/position-scroll min-val max-val (or axis :x) (or speed 1.0) (or wave-type :sine))
-      :rainbow-hue (mod/rainbow-hue (or axis :x) (or speed 60.0))
+      :pos-scroll {:type :pos-scroll :min min-val :max max-val :axis (or axis :x) :speed (or speed 1.0) :wave-type (or wave-type :sine)}
+      :rainbow-hue {:type :rainbow-hue :axis (or axis :x) :speed (or speed 60.0)}
       
       ;; Control modulators
-      :midi (mod/midi-mod (or channel 1) (or cc 1) min-val max-val)
-      :osc (mod/osc-mod (or path "/control") min-val max-val)
-      :constant (mod/constant (or value min-val))
+      :midi {:type :midi :channel (or channel 1) :cc (or cc 1) :min min-val :max max-val}
+      :osc {:type :osc :path (or path "/control") :min min-val :max max-val}
+      :constant {:type :constant :value (or value min-val)}
       
       ;; Default to sine
-      (mod/sine-mod (or min-val 0.0) (or max-val 1.0) 1.0 0.0))))
+      {:type :sine :min (or min-val 0.0) :max (or max-val 1.0) :freq 1.0 :phase 0.0})))
 
 (defn show-modulator-dialog!
   "Show dialog to configure a modulator for a parameter.
@@ -527,9 +534,9 @@
   (let [result-atom (atom nil)
         dialog (JDialog. (ss/to-root parent) "Configure Modulator" true)
         
-        ;; Extract existing modulator config if available
-        existing-config (when existing-modulator
-                          (mod/get-modulator-config existing-modulator))
+        ;; Extract existing modulator config (pure data only)
+        existing-config (when (and existing-modulator (mod/modulator-config? existing-modulator))
+                          existing-modulator)
         
         ;; Determine initial category from existing config
         init-category (if-let [t (:type existing-config)]
@@ -845,8 +852,8 @@
         ;; Create category tabs
         tab-panel (create-modulator-tab-panel init-category on-category-change)
         
-        ;; Create modulator based on current settings
-        ;; Note: Trigger time is NOT stored in the modulator - it comes from global playback state
+        ;; Create modulator config (pure data) based on current settings
+        ;; Note: Trigger time is NOT stored in the config - it comes from global playback state
         ;; at runtime via the modulation context (see effects.clj apply-effect).
         create-modulator (fn []
                            (let [mod-type @selected-type-atom
@@ -863,7 +870,8 @@
                                          :loop-mode loop-mode
                                          :duration ((:get-value duration-ctrl))
                                          :time-unit (ss/selection time-unit-combo)}]
-                             (create-modulator-from-config mod-type params)))
+                             ;; Return pure data config - serializable to EDN
+                             (create-modulator-config mod-type params)))
         
         ;; Notify about modulator change for live preview
         notify-modulator-change! (fn []
