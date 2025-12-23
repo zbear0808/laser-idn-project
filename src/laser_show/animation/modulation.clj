@@ -9,7 +9,7 @@
    {:effect-id :scale :params {:x-scale 1.5}}
    
    ;; Modulated value (pure data config - serializable!)
-   {:effect-id :scale :params {:x-scale {:type :sine :min 0.8 :max 1.2 :freq 2.0}}}
+   {:effect-id :scale :params {:x-scale {:type :sine :min 0.8 :max 1.2 :period 0.5}}}
    
    ;; MIDI controlled
    {:effect-id :scale :params {:x-scale {:type :midi :channel 1 :cc 7 :min 0.5 :max 2.0}}}"
@@ -131,6 +131,18 @@
     false))
 
 ;; ============================================================================
+;; Period/Frequency Conversion
+;; ============================================================================
+
+(defn- period->frequency
+  "Convert period (beats per cycle) to frequency (cycles per beat).
+   Period of 0 is treated as infinite frequency (returns a large number)."
+  ^double [^double period]
+  (if (zero? period)
+    1000000.0  ; effectively instant
+    (/ 1.0 period)))
+
+;; ============================================================================
 ;; Once-Mode Helper Functions
 ;; ============================================================================
 
@@ -172,7 +184,7 @@
    
    Parameters:
    - context: Modulation context with :time-ms, :bpm, and optionally :trigger-time
-   - frequency: Number of cycles
+   - period: Beats per cycle (converted to frequency internally)
    - phase-offset: Phase offset (0.0-1.0)
    - loop-mode: :loop or :once
    - duration: Duration for once-mode
@@ -187,13 +199,14 @@
    
    IMPORTANT: We use raw beat count (ms->beats) NOT beat-phase (mod 1.0).
    The mod operation must happen AFTER frequency multiplication, not before.
-   Otherwise frequencies < 1.0 (slow oscillations over multiple beats) will jump
+   Otherwise periods > 1.0 (slow oscillations over multiple beats) will jump
    at every beat boundary."
-  ([context frequency phase-offset loop-mode duration time-unit]
-   (calculate-modulator-phase context frequency phase-offset loop-mode duration time-unit nil))
-  ([{:keys [time-ms bpm trigger-time]} frequency phase-offset loop-mode duration time-unit trigger-override]
+  ([context period phase-offset loop-mode duration time-unit]
+   (calculate-modulator-phase context period phase-offset loop-mode duration time-unit nil))
+  ([{:keys [time-ms bpm trigger-time]} period phase-offset loop-mode duration time-unit trigger-override]
    (let [time-ms (double time-ms)
          bpm (double bpm)
+         frequency (period->frequency (double period))
          ;; Resolve trigger-override (may be atom or value), fall back to context's trigger-time
          effective-trigger-time (or (resolve-trigger-time trigger-override) trigger-time)
          ;; Calculate elapsed time from trigger (or from 0 if no trigger-time)
@@ -219,7 +232,7 @@
    Parameters:
    - min-val: Minimum value
    - max-val: Maximum value
-   - frequency: Cycles per beat in loop mode, or cycles over duration in once mode (default 1.0)
+   - period: Beats per cycle in loop mode, or cycles over duration in once mode (default 1.0)
    - phase-offset: Phase offset 0.0-1.0 (default 0.0)
    - loop-mode: :loop (continuous, default) or :once (single run then hold)
    - duration: Duration for once mode (in beats or seconds)
@@ -229,24 +242,24 @@
    which is provided when effects are applied (see effects.clj apply-effect)."
   ([min-val max-val]
    (sine-mod min-val max-val 1.0))
-  ([min-val max-val frequency]
-   (sine-mod min-val max-val frequency 0.0))
-  ([min-val max-val frequency phase-offset]
-   (sine-mod min-val max-val frequency phase-offset :loop 1.0 :beats))
-  ([min-val max-val frequency phase-offset loop-mode duration time-unit]
+  ([min-val max-val period]
+   (sine-mod min-val max-val period 0.0))
+  ([min-val max-val period phase-offset]
+   (sine-mod min-val max-val period phase-offset :loop 1.0 :beats))
+  ([min-val max-val period phase-offset loop-mode duration time-unit]
    (let [min-v (double min-val)
          max-v (double max-val)
-         freq (double frequency)
+         per (double period)
          offset (double phase-offset)
          dur (double (or duration 1.0))
          tunit (or time-unit :beats)]
      (make-modulator
       (fn [context]
-        (let [phase (calculate-modulator-phase context freq offset loop-mode dur tunit)]
+        (let [phase (calculate-modulator-phase context per offset loop-mode dur tunit)]
           (time/oscillate min-v max-v phase :sine)))
-      (str "sine(" min-val "-" max-val " @" frequency "x"
+      (str "sine(" min-val "-" max-val " @" period " beats"
            (when (= loop-mode :once) (str " once:" duration (name tunit))) ")")
-      {:type :sine :min min-val :max max-val :freq frequency :phase phase-offset
+      {:type :sine :min min-val :max max-val :period period :phase phase-offset
        :loop-mode (or loop-mode :loop) :duration dur :time-unit tunit}))))
 
 (defn triangle-mod
@@ -255,7 +268,7 @@
    Parameters:
    - min-val: Minimum value
    - max-val: Maximum value
-   - frequency: Cycles per beat in loop mode, or cycles over duration in once mode (default 1.0)
+   - period: Beats per cycle in loop mode, or cycles over duration in once mode (default 1.0)
    - phase-offset: Phase offset 0.0-1.0 (default 0.0)
    - loop-mode: :loop (continuous, default) or :once (single run then hold)
    - duration: Duration for once mode (in beats or seconds)
@@ -265,24 +278,24 @@
    which is provided when effects are applied (see effects.clj apply-effect)."
   ([min-val max-val]
    (triangle-mod min-val max-val 1.0))
-  ([min-val max-val frequency]
-   (triangle-mod min-val max-val frequency 0.0))
-  ([min-val max-val frequency phase-offset]
-   (triangle-mod min-val max-val frequency phase-offset :loop 1.0 :beats))
-  ([min-val max-val frequency phase-offset loop-mode duration time-unit]
+  ([min-val max-val period]
+   (triangle-mod min-val max-val period 0.0))
+  ([min-val max-val period phase-offset]
+   (triangle-mod min-val max-val period phase-offset :loop 1.0 :beats))
+  ([min-val max-val period phase-offset loop-mode duration time-unit]
    (let [min-v (double min-val)
          max-v (double max-val)
-         freq (double frequency)
+         per (double period)
          offset (double phase-offset)
          dur (double (or duration 1.0))
          tunit (or time-unit :beats)]
      (make-modulator
       (fn [context]
-        (let [phase (calculate-modulator-phase context freq offset loop-mode dur tunit)]
+        (let [phase (calculate-modulator-phase context per offset loop-mode dur tunit)]
           (time/oscillate min-v max-v phase :triangle)))
-      (str "triangle(" min-val "-" max-val " @" frequency "x"
+      (str "triangle(" min-val "-" max-val " @" period " beats"
            (when (= loop-mode :once) (str " once:" duration (name tunit))) ")")
-      {:type :triangle :min min-val :max max-val :freq frequency :phase phase-offset
+      {:type :triangle :min min-val :max max-val :period period :phase phase-offset
        :loop-mode (or loop-mode :loop) :duration dur :time-unit tunit}))))
 
 (defn sawtooth-mod
@@ -292,16 +305,16 @@
    Parameters:
    - min-val: Minimum value
    - max-val: Maximum value
-   - frequency: Cycles per beat (default 1.0)
+   - period: Beats per cycle (default 1.0)
    - phase-offset: Phase offset 0.0-1.0 (default 0.0)"
   ([min-val max-val]
    (sawtooth-mod min-val max-val 1.0))
-  ([min-val max-val frequency]
-   (sawtooth-mod min-val max-val frequency 0.0))
-  ([min-val max-val frequency phase-offset]
+  ([min-val max-val period]
+   (sawtooth-mod min-val max-val period 0.0))
+  ([min-val max-val period phase-offset]
    (let [min-v (double min-val)
          max-v (double max-val)
-         freq (double frequency)
+         freq (period->frequency (double period))
          offset (double phase-offset)]
      (make-modulator
       (fn [{:keys [time-ms bpm]}]
@@ -310,8 +323,8 @@
         (let [beats (time/ms->beats (double time-ms) (double bpm))
               phase (+ (* beats freq) offset)]
           (time/oscillate min-v max-v phase :sawtooth)))
-      (str "sawtooth(" min-val "-" max-val " @" frequency "x)")
-      {:type :sawtooth :min min-val :max max-val :freq frequency :phase phase-offset}))))
+      (str "sawtooth(" min-val "-" max-val " @" period " beats)")
+      {:type :sawtooth :min min-val :max max-val :period period :phase phase-offset}))))
 
 (defn square-mod
   "Create a square wave modulator (BPM-synced).
@@ -320,19 +333,19 @@
    Parameters:
    - min-val: Minimum value (off state)
    - max-val: Maximum value (on state)
-   - frequency: Cycles per beat (default 1.0)
+   - period: Beats per cycle (default 1.0)
    - duty-cycle: On-time ratio 0.0-1.0 (default 0.5)
    - phase-offset: Phase offset 0.0-1.0 (default 0.0)"
   ([min-val max-val]
    (square-mod min-val max-val 1.0))
-  ([min-val max-val frequency]
-   (square-mod min-val max-val frequency 0.5))
-  ([min-val max-val frequency duty-cycle]
-   (square-mod min-val max-val frequency duty-cycle 0.0))
-  ([min-val max-val frequency duty-cycle phase-offset]
+  ([min-val max-val period]
+   (square-mod min-val max-val period 0.5))
+  ([min-val max-val period duty-cycle]
+   (square-mod min-val max-val period duty-cycle 0.0))
+  ([min-val max-val period duty-cycle phase-offset]
    (let [min-v (double min-val)
          max-v (double max-val)
-         freq (double frequency)
+         freq (period->frequency (double period))
          duty (double duty-cycle)
          offset (double phase-offset)]
      (make-modulator
@@ -342,8 +355,8 @@
         (let [beats (time/ms->beats (double time-ms) (double bpm))
               cycle-phase (mod (+ (* beats freq) offset) 1.0)]
           (if (< cycle-phase duty) max-v min-v)))
-      (str "square(" min-val "-" max-val " @" frequency "x)")
-      {:type :square :min min-val :max max-val :freq frequency :phase phase-offset}))))
+      (str "square(" min-val "-" max-val " @" period " beats)")
+      {:type :square :min min-val :max max-val :period period :phase phase-offset}))))
 
 ;; ============================================================================
 ;; Time-based Modulators (Hz, not BPM-synced)
@@ -468,7 +481,7 @@
             ;; :linear is default
             (+ start-v (* phase range-v)))))
       (str "beat-decay(" start-val "->" end-val " " decay-type ")")
-      {:type :beat-decay :min end-val :max start-val :freq 1.0 :phase 0.0}))))
+      {:type :beat-decay :min end-val :max start-val :period 1.0 :phase 0.0}))))
 
 ;; ============================================================================
 ;; External Control Modulators
@@ -864,20 +877,20 @@
   "Common modulator presets."
   {;; === Time-based modulators ===
    
-   ;; Gentle pulsing (1 cycle per beat, 70-100% range)
+   ;; Gentle pulsing (1 beat period, 70-100% range)
    :gentle-pulse (sine-mod 0.7 1.0 1.0)
 
-   ;; Strong pulsing (2 cycles per beat, 30-100% range)
-   :strong-pulse (sine-mod 0.3 1.0 2.0)
+   ;; Strong pulsing (0.5 beat period, 30-100% range)
+   :strong-pulse (sine-mod 0.3 1.0 0.5)
 
-   ;; Slow breathing (1 cycle per 4 beats)
-   :breathe (sine-mod 0.5 1.0 0.25)
+   ;; Slow breathing (4 beat period)
+   :breathe (sine-mod 0.5 1.0 4.0)
 
-   ;; 4x strobe (4 flashes per beat)
-   :strobe-4x (square-mod 0.0 1.0 4.0 0.1)
+   ;; 4x strobe (0.25 beat period)
+   :strobe-4x (square-mod 0.0 1.0 0.25 0.1)
 
-   ;; 8x strobe (8 flashes per beat)
-   :strobe-8x (square-mod 0.0 1.0 8.0 0.1)
+   ;; 8x strobe (0.125 beat period)
+   :strobe-8x (square-mod 0.0 1.0 0.125 0.1)
 
    ;; Beat flash (bright on beat, decay)
    :beat-flash (beat-decay 2.0 1.0 :exp)
@@ -888,8 +901,8 @@
    ;; Ramp down (sawtooth from 1 to 0)
    :ramp-down (sawtooth-mod 1.0 0.0 1.0)
 
-   ;; Wobble (fast small oscillation)
-   :wobble (sine-mod 0.9 1.1 4.0)
+   ;; Wobble (fast small oscillation, 0.25 beat period)
+   :wobble (sine-mod 0.9 1.1 0.25)
    
    ;; === Position-based modulators ===
    
@@ -942,7 +955,7 @@
    {:type :sine      ;; Modulator type (required)
     :min 0.0         ;; Min value
     :max 1.0         ;; Max value  
-    :freq 1.0        ;; Frequency
+    :period 1.0      ;; Period (beats per cycle)
     :phase 0.0       ;; Phase offset
     :loop-mode :loop ;; Loop mode (:loop or :once)
     :duration 2.0    ;; Duration for once mode
@@ -950,26 +963,26 @@
     ... other type-specific params}
    
    Returns: Modulator function"
-  [{:keys [type min max freq phase axis speed wave-type cycles
+  [{:keys [type min max period phase axis speed wave-type cycles
            channel cc path value wrap? loop-mode duration time-unit]
-    :as config}]
+    :as _config}]
   (let [min-val (or min 0.0)
         max-val (or max 1.0)
-        frequency (or freq 1.0)
+        per (or period 1.0)
         phase-offset (or phase 0.0)
         lm (or loop-mode :loop)
         dur (or duration 2.0)
         tu (or time-unit :beats)]
     (case type
       ;; Time-based waveform modulators
-      :sine (sine-mod min-val max-val frequency phase-offset lm dur tu)
-      :triangle (triangle-mod min-val max-val frequency phase-offset lm dur tu)
-      :sawtooth (sawtooth-mod min-val max-val frequency phase-offset)
-      :square (square-mod min-val max-val frequency)
+      :sine (sine-mod min-val max-val per phase-offset lm dur tu)
+      :triangle (triangle-mod min-val max-val per phase-offset lm dur tu)
+      :sawtooth (sawtooth-mod min-val max-val per phase-offset)
+      :square (square-mod min-val max-val per)
       
       ;; Decay/envelope modulators
       :beat-decay (beat-decay max-val min-val)
-      :random (random-mod min-val max-val frequency)
+      :random (random-mod min-val max-val per)
       
       ;; Position-based modulators
       :pos-x (position-x-mod min-val max-val)
@@ -978,7 +991,7 @@
       :angle (position-angle-mod min-val max-val)
       :point-index (point-index-mod min-val max-val (boolean wrap?))
       :point-wave (point-index-wave min-val max-val (or cycles 1.0) (or wave-type :sine))
-      :pos-wave (position-wave min-val max-val (or axis :x) frequency (or wave-type :sine))
+      :pos-wave (position-wave min-val max-val (or axis :x) (period->frequency per) (or wave-type :sine))
       
       ;; Animated position modulators
       :pos-scroll (position-scroll min-val max-val (or axis :x) (or speed 1.0) (or wave-type :sine))
@@ -990,4 +1003,4 @@
       :constant (constant (or value min-val))
       
       ;; Default fallback to sine
-      (sine-mod min-val max-val frequency phase-offset))))
+      (sine-mod min-val max-val per phase-offset))))

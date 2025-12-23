@@ -82,16 +82,16 @@
       ;; At phase 0.75 (3/4 beat), sine should be at min
       (is (approx= 0.0 (mod/resolve-param modulator (make-test-context (* 0.75 ms-per-beat) bpm)) 0.05)))))
 
-(deftest sine-mod-frequency-test
-  (testing "Frequency multiplier changes cycle speed"
+(deftest sine-mod-period-test
+  (testing "Period controls cycle speed"
     (let [bpm 120
           ms-per-beat (/ 60000 bpm)
-          modulator-1x (mod/sine-mod 0.0 1.0 1.0)
-          modulator-2x (mod/sine-mod 0.0 1.0 2.0)]
-      ;; At half beat with 2x frequency, should be same as full beat with 1x
-      (let [val-1x-full (mod/resolve-param modulator-1x (make-test-context ms-per-beat bpm))
-            val-2x-half (mod/resolve-param modulator-2x (make-test-context (* 0.5 ms-per-beat) bpm))]
-        (is (approx= val-1x-full val-2x-half 0.05))))))
+          modulator-1beat (mod/sine-mod 0.0 1.0 1.0)  ; 1 beat period
+          modulator-half-beat (mod/sine-mod 0.0 1.0 0.5)]  ; 0.5 beat period (faster)
+      ;; At quarter beat with 0.5 period, should be same as half beat with 1.0 period
+      (let [val-1-half (mod/resolve-param modulator-1beat (make-test-context (* 0.5 ms-per-beat) bpm))
+            val-half-quarter (mod/resolve-param modulator-half-beat (make-test-context (* 0.25 ms-per-beat) bpm))]
+        (is (approx= val-1-half val-half-quarter 0.05))))))
 
 (deftest sine-mod-phase-offset-test
   (testing "Phase offset shifts the waveform"

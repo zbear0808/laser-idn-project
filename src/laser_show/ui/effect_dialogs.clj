@@ -37,20 +37,20 @@
     :icon "🕐"
     :description "Modulators that vary over time, synced to BPM"
     :types [{:id :sine :name "Sine Wave" :description "Smooth oscillation"
-             :params [:min :max :freq :phase :loop-mode :duration :time-unit]}
+             :params [:min :max :period :phase :loop-mode :duration :time-unit]}
             {:id :triangle :name "Triangle Wave" :description "Linear up/down"
-             :params [:min :max :freq :phase :loop-mode :duration :time-unit]}
+             :params [:min :max :period :phase :loop-mode :duration :time-unit]}
             {:id :sawtooth :name "Sawtooth Wave" :description "Ramp up, reset"
-             :params [:min :max :freq :phase :loop-mode :duration :time-unit]}
+             :params [:min :max :period :phase :loop-mode :duration :time-unit]}
             {:id :square :name "Square Wave" :description "On/off toggle"
-             :params [:min :max :freq :phase :loop-mode :duration :time-unit]}
+             :params [:min :max :period :phase :loop-mode :duration :time-unit]}
             :separator
             {:id :beat-decay :name "Beat Decay" :description "Decay each beat"
              :params [:min :max]}
             {:id :random :name "Random" :description "Random values per beat"
-             :params [:min :max :freq]}
+             :params [:min :max :period]}
             {:id :step :name "Step Sequencer" :description "Cycle through values"
-             :params [:values :freq]}]}
+             :params [:values :period]}]}
    {:id :space
     :name "Space"
     :icon "📍"
@@ -71,7 +71,7 @@
              :params [:min :max :cycles :wave-type]}
             :separator
             {:id :pos-wave :name "Position Wave" :description "Spatial wave pattern"
-             :params [:min :max :axis :freq :wave-type]}]}
+             :params [:min :max :axis :period :wave-type]}]}
    {:id :animated
     :name "Animated"
     :icon "🌊"
@@ -93,13 +93,13 @@
 
 (def modulator-presets-by-category
   "Preset modulator configurations organized by category."
-  {:time [{:id :gentle-pulse :name "Gentle Pulse" :type :sine :min 0.7 :max 1.0 :freq 1.0 :phase 0.0}
-          {:id :strong-pulse :name "Strong Pulse" :type :sine :min 0.3 :max 1.0 :freq 2.0 :phase 0.0}
-          {:id :breathe :name "Breathe" :type :sine :min 0.5 :max 1.0 :freq 0.25 :phase 0.0}
-          {:id :strobe-4x :name "Strobe 4x" :type :square :min 0.0 :max 1.0 :freq 4.0 :phase 0.0}
-          {:id :strobe-8x :name "Strobe 8x" :type :square :min 0.0 :max 1.0 :freq 8.0 :phase 0.0}
-          {:id :ramp-up :name "Ramp Up" :type :sawtooth :min 0.0 :max 1.0 :freq 1.0 :phase 0.0}
-          {:id :wobble :name "Wobble" :type :sine :min 0.9 :max 1.1 :freq 4.0 :phase 0.0}
+  {:time [{:id :gentle-pulse :name "Gentle Pulse" :type :sine :min 0.7 :max 1.0 :period 1.0 :phase 0.0}
+          {:id :strong-pulse :name "Strong Pulse" :type :sine :min 0.3 :max 1.0 :period 0.5 :phase 0.0}
+          {:id :breathe :name "Breathe" :type :sine :min 0.5 :max 1.0 :period 4.0 :phase 0.0}
+          {:id :strobe-4x :name "Strobe 4x" :type :square :min 0.0 :max 1.0 :period 0.25 :phase 0.0}
+          {:id :strobe-8x :name "Strobe 8x" :type :square :min 0.0 :max 1.0 :period 0.125 :phase 0.0}
+          {:id :ramp-up :name "Ramp Up" :type :sawtooth :min 0.0 :max 1.0 :period 1.0 :phase 0.0}
+          {:id :wobble :name "Wobble" :type :sine :min 0.9 :max 1.1 :period 0.25 :phase 0.0}
           {:id :beat-flash :name "Beat Flash" :type :beat-decay :min 0.3 :max 1.0}]
    :space [{:id :fade-x :name "Fade X" :type :pos-x :min 0.0 :max 1.0}
            {:id :fade-y :name "Fade Y" :type :pos-y :min 0.0 :max 1.0}
@@ -665,7 +665,7 @@
    Note: Trigger time is NOT stored in the config.
    It comes from the modulation context at runtime (see effects.clj apply-effect)."
   [mod-type params]
-  (let [{:keys [min-val max-val freq phase axis speed wave-type cycles
+  (let [{:keys [min-val max-val period phase axis speed wave-type cycles
                 channel cc path value wrap? loop-mode duration time-unit]} params
         loop-mode (or loop-mode :loop)
         duration (or duration 2.0)
@@ -673,14 +673,14 @@
     ;; Return pure data config - the modulator function will be created at runtime
     (case mod-type
       ;; Time-based modulators
-      :sine {:type :sine :min min-val :max max-val :freq (or freq 1.0) :phase (or phase 0.0)
+      :sine {:type :sine :min min-val :max max-val :period (or period 1.0) :phase (or phase 0.0)
              :loop-mode loop-mode :duration duration :time-unit time-unit}
-      :triangle {:type :triangle :min min-val :max max-val :freq (or freq 1.0) :phase (or phase 0.0)
+      :triangle {:type :triangle :min min-val :max max-val :period (or period 1.0) :phase (or phase 0.0)
                  :loop-mode loop-mode :duration duration :time-unit time-unit}
-      :sawtooth {:type :sawtooth :min min-val :max max-val :freq (or freq 1.0) :phase (or phase 0.0)}
-      :square {:type :square :min min-val :max max-val :freq (or freq 1.0) :phase (or phase 0.0)}
+      :sawtooth {:type :sawtooth :min min-val :max max-val :period (or period 1.0) :phase (or phase 0.0)}
+      :square {:type :square :min min-val :max max-val :period (or period 1.0) :phase (or phase 0.0)}
       :beat-decay {:type :beat-decay :min min-val :max max-val}
-      :random {:type :random :min min-val :max max-val :freq (or freq 1.0)}
+      :random {:type :random :min min-val :max max-val :period (or period 1.0)}
       
       ;; Space-based modulators
       :pos-x {:type :pos-x :min min-val :max max-val}
@@ -689,7 +689,7 @@
       :angle {:type :angle :min min-val :max max-val}
       :point-index {:type :point-index :min min-val :max max-val :wrap? (boolean wrap?)}
       :point-wave {:type :point-wave :min min-val :max max-val :cycles (or cycles 1.0) :wave-type (or wave-type :sine)}
-      :pos-wave {:type :pos-wave :min min-val :max max-val :axis (or axis :x) :freq (or freq 1.0) :wave-type (or wave-type :sine)}
+      :pos-wave {:type :pos-wave :min min-val :max max-val :axis (or axis :x) :period (or period 1.0) :wave-type (or wave-type :sine)}
       
       ;; Animated modulators
       :pos-scroll {:type :pos-scroll :min min-val :max max-val :axis (or axis :x) :speed (or speed 1.0) :wave-type (or wave-type :sine)}
@@ -701,7 +701,7 @@
       :constant {:type :constant :value (or value min-val)}
       
       ;; Default to sine
-      {:type :sine :min (or min-val 0.0) :max (or max-val 1.0) :freq 1.0 :phase 0.0})))
+      {:type :sine :min (or min-val 0.0) :max (or max-val 1.0) :period 1.0 :phase 0.0})))
 
 (defn show-modulator-dialog!
   "Show dialog to configure a modulator for a parameter.
@@ -740,7 +740,7 @@
         ;; Initial values from existing config or defaults
         init-min (or (:min existing-config) param-min)
         init-max (or (:max existing-config) param-max)
-        init-freq (or (:freq existing-config) 1.0)
+        init-period (or (:period existing-config) 1.0)
         init-phase (or (:phase existing-config) 0.0)
         init-axis (or (:axis existing-config) :x)
         init-speed (or (:speed existing-config) 1.0)
@@ -762,9 +762,9 @@
         max-ctrl (slider/create-slider {:min param-min :max param-max :default init-max
                                         :label-fn #(format "%.2f" %)
                                         :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
-        freq-ctrl (slider/create-slider {:min 0.1 :max 8.0 :default init-freq
-                                         :label-fn #(format "%.1fx" %)
-                                         :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
+        period-ctrl (slider/create-slider {:min 0.0 :max 24.0 :default init-period
+                                           :label-fn #(format "%.2f" %)
+                                           :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
         phase-ctrl (slider/create-slider {:min 0.0 :max 1.0 :default init-phase
                                           :label-fn #(format "%.2f" %)
                                           :on-change (fn [_] (when-let [f @notify-fn-atom] (f)))})
@@ -857,12 +857,12 @@
                            [(:textfield max-ctrl) ""]]
                    :background (Color. 45 45 45))
         
-        freq-panel (mig/mig-panel
-                    :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
-                    :items [[(ss/label :text "Frequency:" :foreground Color/WHITE) ""]
-                            [(:slider freq-ctrl) "growx"]
-                            [(:textfield freq-ctrl) ""]]
-                    :background (Color. 45 45 45))
+        period-panel (mig/mig-panel
+                      :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
+                      :items [[(ss/label :text "Period (beats):" :foreground Color/WHITE) ""]
+                              [(:slider period-ctrl) "growx"]
+                              [(:textfield period-ctrl) ""]]
+                      :background (Color. 45 45 45))
         
         phase-panel (mig/mig-panel
                      :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
@@ -923,14 +923,14 @@
         update-params-visibility! (fn [mod-type-id]
                                     (.removeAll params-container)
                                     (let [type-def (get-modulator-type-by-id mod-type-id)
-                                          params-needed (set (or (:params type-def) [:min :max :freq :phase]))
+                                          params-needed (set (or (:params type-def) [:min :max :period :phase]))
                                           show-once-params? (= @loop-mode-atom :once)
                                           ;; Retrigger button is ALWAYS visible for both loop and once modes
                                           _ (ss/config! trigger-btn :visible? true)
                                           panel-items (cond-> []
                                                         (params-needed :min) (conj [min-panel "growx, wrap"])
                                                         (params-needed :max) (conj [max-panel "growx, wrap"])
-                                                        (params-needed :freq) (conj [freq-panel "growx, wrap"])
+                                                        (params-needed :period) (conj [period-panel "growx, wrap"])
                                                         (params-needed :phase) (conj [phase-panel "growx, wrap"])
                                                         (params-needed :speed) (conj [speed-panel "growx, wrap"])
                                                         (params-needed :cycles) (conj [cycles-panel "growx, wrap"])
@@ -1008,7 +1008,7 @@
                                                                         ;; Apply preset values
                                                                         (when (:min preset) ((:set-value! min-ctrl) (:min preset)))
                                                                         (when (:max preset) ((:set-value! max-ctrl) (:max preset)))
-                                                                        (when (:freq preset) ((:set-value! freq-ctrl) (:freq preset)))
+                                                                        (when (:period preset) ((:set-value! period-ctrl) (:period preset)))
                                                                         (when (:phase preset) ((:set-value! phase-ctrl) (:phase preset)))
                                                                         (when (:speed preset) ((:set-value! speed-ctrl) (:speed preset)))
                                                                         (when (:cycles preset) ((:set-value! cycles-ctrl) (:cycles preset)))
@@ -1046,7 +1046,7 @@
                                  loop-mode @loop-mode-atom
                                  params {:min-val ((:get-value min-ctrl))
                                          :max-val ((:get-value max-ctrl))
-                                         :freq ((:get-value freq-ctrl))
+                                         :period ((:get-value period-ctrl))
                                          :phase ((:get-value phase-ctrl))
                                          :speed ((:get-value speed-ctrl))
                                          :cycles ((:get-value cycles-ctrl))
