@@ -2,7 +2,6 @@
   "Main entry point for the Laser Show application.
    Refactored to use Uni-directional Data Flow."
 (:require [seesaw.core :as ss]
-            [laser-show.state.dynamic :as dyn]
             [laser-show.events.dispatch :as events]
             [laser-show.ui.window :as window]
             [laser-show.ui.layout :as layout]

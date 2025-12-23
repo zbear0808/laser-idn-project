@@ -6,7 +6,7 @@
    
    All grid mutations should go through this service to ensure
    proper state updates and event dispatch."
-  (:require [laser-show.state.dynamic :as dyn]))
+  (:require [laser-show.state.atoms :as state]))
 
 ;; ============================================================================
 ;; Cell Operations
@@ -21,7 +21,7 @@
    
    Returns: Cell data map or nil if empty"
   [col row]
-  (dyn/get-cell col row))
+  (state/get-cell col row))
 
 (defn set-cell-preset!
   "Assign a preset to a cell.
@@ -31,7 +31,7 @@
    - row: Row index
    - preset-id: The preset keyword to assign"
   [col row preset-id]
-  (dyn/set-cell-preset! col row preset-id))
+  (state/set-cell-preset! col row preset-id))
 
 (defn clear-cell!
   "Clear a cell, removing its preset.
@@ -40,7 +40,7 @@
    - col: Column index
    - row: Row index"
   [col row]
-  (dyn/clear-cell! col row))
+  (state/clear-cell! col row))
 
 (defn cell-empty?
   "Check if a cell is empty (no preset assigned).
@@ -75,19 +75,19 @@
    - col: Column index (or nil to deselect)
    - row: Row index (or nil to deselect)"
   [col row]
-  (dyn/set-selected-cell! col row))
+  (state/set-selected-cell! col row))
 
 (defn deselect-cell!
   "Deselect the currently selected cell."
   []
-  (dyn/clear-selected-cell!))
+  (state/clear-selected-cell!))
 
 (defn get-selected-cell
   "Get the currently selected cell coordinates.
    
    Returns: [col row] or nil if nothing selected"
   []
-  (dyn/get-selected-cell))
+  (state/get-selected-cell))
 
 ;; ============================================================================
 ;; Triggering / Playback
@@ -101,26 +101,26 @@
    - col: Column index
    - row: Row index"
   [col row]
-  (dyn/trigger-cell! col row))
+  (state/trigger-cell! col row))
 
 (defn stop-playback!
   "Stop playback and clear the active cell."
   []
-  (dyn/stop-playback!))
+  (state/stop-playback!))
 
 (defn get-active-cell
   "Get the currently active (playing) cell coordinates.
    
    Returns: [col row] or nil if nothing playing"
   []
-  (dyn/get-active-cell))
+  (state/get-active-cell))
 
 (defn playing?
   "Check if a cell is currently playing.
    
    Returns: true if playing, false otherwise"
   []
-  (dyn/playing?))
+  (state/playing?))
 
 ;; ============================================================================
 ;; Cell Movement / Copy Operations
@@ -135,7 +135,7 @@
    - to-col: Destination column
    - to-row: Destination row"
   [from-col from-row to-col to-row]
-  (dyn/move-cell! from-col from-row to-col to-row))
+  (state/move-cell! from-col from-row to-col to-row))
 
 (defn copy-cell!
   "Copy a cell from one position to another.
@@ -148,7 +148,7 @@
    - to-row: Destination row"
   [from-col from-row to-col to-row]
   (when-let [cell-data (get-cell from-col from-row)]
-    (dyn/set-cell! to-col to-row cell-data)))
+    (state/set-cell! to-col to-row cell-data)))
 
 (defn swap-cells!
   "Swap two cells.
@@ -160,10 +160,10 @@
   (let [cell1 (get-cell col1 row1)
         cell2 (get-cell col2 row2)]
     (if cell1
-      (dyn/set-cell! col2 row2 cell1)
+      (state/set-cell! col2 row2 cell1)
       (clear-cell! col2 row2))
     (if cell2
-      (dyn/set-cell! col1 row1 cell2)
+      (state/set-cell! col1 row1 cell2)
       (clear-cell! col1 row1))))
 
 ;; ============================================================================
@@ -175,14 +175,14 @@
    
    Returns: [cols rows]"
   []
-  (dyn/get-grid-size))
+  (state/get-grid-size))
 
 (defn get-all-cells
   "Get all non-empty cells in the grid.
    
    Returns: Map of [col row] -> cell-data"
   []
-  (dyn/get-grid-cells))
+  (state/get-grid-cells))
 
 (defn count-cells
   "Count the number of non-empty cells.

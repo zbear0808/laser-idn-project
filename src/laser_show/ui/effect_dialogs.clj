@@ -1121,42 +1121,89 @@
                                                (when on-cancel (on-cancel))
                                                (.dispose dialog))])
         
-        ;; Main content
-        content (mig/mig-panel
-                 :constraints ["insets 10, wrap 1", "[grow, fill]", "[][][grow, fill][grow, fill][]"]
-                 :items [;; Title
-                         [(ss/label :text (if existing-effect "Edit Effect" "New Effect")
-                                   :font (Font. "SansSerif" Font/BOLD 16)
-                                   :foreground Color/WHITE) ""]
-                         
-                         ;; Category selection (tab panel)
-                         [(:panel tab-panel) "growx"]
-                         
-                         ;; Effect list
-                         [(ss/border-panel
-                           :north (ss/label :text "Effects"
-                                           :font (Font. "SansSerif" Font/BOLD 11)
-                                           :foreground (Color. 180 180 180))
-                           :center (ss/scrollable effect-list 
-                                                 :border (border/line-border :color (Color. 60 60 60)))
-                           :background (Color. 45 45 45)) "grow, h 150!"]
-                         
-                         ;; Parameters panel
-                         [(ss/border-panel
-                           :north (ss/label :text "Parameters"
-                                           :font (Font. "SansSerif" Font/BOLD 11)
-                                           :foreground (Color. 180 180 180))
-                           :center (ss/scrollable params-container
-                                                 :border (border/line-border :color (Color. 60 60 60)))
-                           :background (Color. 45 45 45)) "grow"]
-                         
-                         ;; Buttons
-                         [(mig/mig-panel
-                           :constraints ["insets 10", "[grow][][]", ""]
-                           :items [[(ss/label) "growx"]
-                                   [cancel-btn ""]
-                                   [ok-btn ""]]
-                           :background (Color. 45 45 45)) "growx, dock south"]])]
+        ;; Detect if this is corner-pin effect for special layout
+        is-corner-pin? (or (and existing-effect (= (:effect-id existing-effect) :corner-pin))
+                          (and @selected-effect-atom (= (:id @selected-effect-atom) :corner-pin)))
+        
+        ;; Main content - use horizontal layout for corner-pin, vertical for others
+        content (if is-corner-pin?
+                  ;; Horizontal layout for corner-pin: controls on left, editor on right
+                  (let [left-panel (mig/mig-panel
+                                    :constraints ["insets 10, wrap 1", "[300!]", "[][][][grow][]"]
+                                    :items [;; Title
+                                            [(ss/label :text (if existing-effect "Edit Effect" "New Effect")
+                                                      :font (Font. "SansSerif" Font/BOLD 16)
+                                                      :foreground Color/WHITE) ""]
+                                            
+                                            ;; Category selection (tab panel)
+                                            [(:panel tab-panel) "growx"]
+                                            
+                                            ;; Effect list
+                                            [(ss/border-panel
+                                              :north (ss/label :text "Effects"
+                                                              :font (Font. "SansSerif" Font/BOLD 11)
+                                                              :foreground (Color. 180 180 180))
+                                              :center (ss/scrollable effect-list
+                                                                    :border (border/line-border :color (Color. 60 60 60)))
+                                              :background (Color. 45 45 45)) "grow"]
+                                            
+                                            ;; Buttons
+                                            [(mig/mig-panel
+                                              :constraints ["insets 10", "[grow][][]", ""]
+                                              :items [[(ss/label) "growx"]
+                                                      [cancel-btn ""]
+                                                      [ok-btn ""]]
+                                              :background (Color. 45 45 45)) "growx"]])
+                        
+                        right-panel (ss/border-panel
+                                     :north (ss/label :text "Corner Pin Editor"
+                                                     :font (Font. "SansSerif" Font/BOLD 11)
+                                                     :foreground (Color. 180 180 180))
+                                     :center params-container
+                                     :background (Color. 45 45 45)
+                                     :border (border/line-border :color (Color. 60 60 60)))]
+                    
+                    (ss/border-panel
+                     :west left-panel
+                     :center right-panel
+                     :background (Color. 45 45 45)))
+                  
+                  ;; Default vertical layout for other effects
+                  (mig/mig-panel
+                   :constraints ["insets 10, wrap 1", "[grow, fill]", "[][][grow, fill][grow, fill][]"]
+                   :items [;; Title
+                           [(ss/label :text (if existing-effect "Edit Effect" "New Effect")
+                                     :font (Font. "SansSerif" Font/BOLD 16)
+                                     :foreground Color/WHITE) ""]
+                           
+                           ;; Category selection (tab panel)
+                           [(:panel tab-panel) "growx"]
+                           
+                           ;; Effect list
+                           [(ss/border-panel
+                             :north (ss/label :text "Effects"
+                                             :font (Font. "SansSerif" Font/BOLD 11)
+                                             :foreground (Color. 180 180 180))
+                             :center (ss/scrollable effect-list
+                                                   :border (border/line-border :color (Color. 60 60 60)))
+                             :background (Color. 45 45 45)) "grow, h 150!"]
+                           
+                           ;; Parameters panel
+                           [(ss/border-panel
+                             :north (ss/label :text "Parameters"
+                                             :font (Font. "SansSerif" Font/BOLD 11)
+                                             :foreground (Color. 180 180 180))
+                             :center (ss/scrollable params-container
+                                                   :border (border/line-border :color (Color. 60 60 60)))
+                             :background (Color. 45 45 45)) "grow"]
+                           
+                           ;; Buttons
+                           [(mig/mig-panel
+                             :constraints ["insets 10", "[grow][][]", ""]
+                             :items [[(ss/label) "growx"]
+                                     [cancel-btn ""]
+                                     [ok-btn ""]]
+                             :background (Color. 45 45 45)) "growx, dock south"]]))]
     
     (style-dialog-panel content)
     

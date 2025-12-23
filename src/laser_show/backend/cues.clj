@@ -13,7 +13,7 @@
    And can store animation objects directly:
    - :animation - The actual animation object (not persisted, created from preset-id)"
   (:require [laser-show.state.persistent :as persist]
-            [laser-show.state.dynamic :as dyn]
+            [laser-show.state.atoms :as state]
             [laser-show.backend.zone-router :as router]
             [laser-show.animation.effects :as fx]))
 
@@ -115,23 +115,23 @@
   (when-let [cue (get-cue cue-id)]
     (let [trigger-time (System/currentTimeMillis)
           cue-with-trigger (assoc cue :trigger-time trigger-time)]
-      (swap! dyn/!playback assoc :active-cue cue-with-trigger)
+      (swap! state/!playback assoc :active-cue cue-with-trigger)
       cue-with-trigger)))
 
 (defn stop-cue!
   "Stop the currently playing cue."
   []
-  (swap! dyn/!playback assoc :active-cue nil))
+  (swap! state/!playback assoc :active-cue nil))
 
 (defn get-active-cue
   "Get the currently active cue."
   []
-  (:active-cue @dyn/!playback))
+  (:active-cue @state/!playback))
 
 (defn cue-active?
   "Check if a specific cue is currently active."
   [cue-id]
-  (= cue-id (:id (:active-cue @dyn/!playback))))
+  (= cue-id (:id (:active-cue @state/!playback))))
 
 ;; ============================================================================
 ;; Cue Queue
@@ -141,25 +141,25 @@
   "Add a cue to the queue."
   [cue-id]
   (when (get-cue cue-id)
-    (swap! dyn/!playback update :cue-queue conj cue-id)))
+    (swap! state/!playback update :cue-queue conj cue-id)))
 
 (defn dequeue-cue!
   "Remove and return the next cue from the queue."
   []
-  (let [queue (:cue-queue @dyn/!playback)]
+  (let [queue (:cue-queue @state/!playback)]
     (when (seq queue)
-      (swap! dyn/!playback update :cue-queue rest)
+      (swap! state/!playback update :cue-queue rest)
       (first queue))))
 
 (defn clear-queue!
   "Clear the cue queue."
   []
-  (swap! dyn/!playback assoc :cue-queue []))
+  (swap! state/!playback assoc :cue-queue []))
 
 (defn get-queue
   "Get the current cue queue."
   []
-  (:cue-queue @dyn/!playback))
+  (:cue-queue @state/!playback))
 
 (defn advance-queue!
   "Stop current cue and trigger the next one in queue."
@@ -331,12 +331,12 @@
 (defn get-active-cue-animation
   "Get the animation from the currently active cue."
   []
-  (:animation (:active-cue @dyn/!playback)))
+  (:animation (:active-cue @state/!playback)))
 
 (defn get-active-cue-effect-chain
   "Get the effect chain from the currently active cue."
   []
-  (:effect-chain (:active-cue @dyn/!playback)))
+  (:effect-chain (:active-cue @state/!playback)))
 
 ;; ============================================================================
 ;; Quick Cue Creation from Grid
@@ -429,7 +429,7 @@
    the trigger-time from when trigger-cue! was called. This is used to reset
    modulator phases when the cue is retriggered."
   [time-ms bpm]
-  (when-let [active-cue (:active-cue @dyn/!playback)]
+  (when-let [active-cue (:active-cue @state/!playback)]
     ;; Get animation and apply effects with the active cue's trigger-time
     (when-let [anim (:animation active-cue)]
       (let [frame (cond

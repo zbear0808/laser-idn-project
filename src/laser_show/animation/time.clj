@@ -1,7 +1,7 @@
 (ns laser-show.animation.time
   "Time utilities for BPM-synchronized effects.
    Handles BPM conversions, phase calculations, and time-based computations."
-  (:require [laser-show.state.dynamic :as dyn])
+  (:require [laser-show.state.atoms :as state])
   (:refer-clojure :exclude [mod]))
 
 ;; Use unchecked-remainder-double for faster modulo on primitives
@@ -16,12 +16,12 @@
   "Set the global BPM value."
   [bpm]
   {:pre [(number? bpm) (pos? bpm)]}
-  (dyn/set-bpm! (double bpm)))
+  (state/set-bpm! (double bpm)))
 
 (defn get-global-bpm
   "Get the current global BPM value."
   []
-  (dyn/get-bpm))
+  (state/get-bpm))
 
 ;; ============================================================================
 ;; BPM Conversions
@@ -266,7 +266,7 @@
   (let [now (System/currentTimeMillis)
         max-taps 8
         max-interval 2000]
-    (swap! dyn/!timing
+    (swap! state/!timing
            (fn [timing]
              (let [taps (:tap-times timing)
                    filtered (filterv #(< (- now %) max-interval) taps)
@@ -275,7 +275,7 @@
                                 (subvec updated (- (count updated) max-taps))
                                 updated)]
                (assoc timing :tap-times final-taps))))
-    (let [taps (dyn/get-tap-times)]
+    (let [taps (state/get-tap-times)]
       (when (>= (count taps) 2)
         (let [intervals (mapv - (rest taps) (butlast taps))
               avg-interval (/ (reduce + intervals) (count intervals))
@@ -287,4 +287,4 @@
 (defn reset-tap-tempo!
   "Reset the tap tempo buffer."
   []
-  (dyn/clear-tap-times!))
+  (state/clear-tap-times!))

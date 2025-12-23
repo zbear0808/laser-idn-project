@@ -1,6 +1,6 @@
 (ns laser-show.ui.window
   "Window lifecycle management for the Laser Show application.
-   Refactored to use Uni-directional Data Flow with dynamic state atoms."
+   Refactored to use Uni-directional Data Flow with state atoms."
 (:require
    [clojure.java.io :as io]
    [laser-show.animation.effects.color]
@@ -10,7 +10,7 @@
    [laser-show.animation.time :as anim-time]
    [laser-show.backend.frame-provider :as frame-provider]
    [laser-show.events.dispatch :as events]
-   [laser-show.state.dynamic :as dyn]
+   [laser-show.state.atoms :as state]
    [laser-show.ui.effect-dialogs :as effect-dialogs]
    [laser-show.ui.effects-grid :as effects-grid]
    [laser-show.ui.grid :as grid]
@@ -69,7 +69,7 @@
                            :on-new-effect (fn [cell-key]
                                             (let [original-data nil]
                                               (effect-dialogs/show-effect-dialog!
-                                                (dyn/get-main-frame)
+                                                (state/get-main-frame)
                                                 nil
                                                 (fn [effect-data]
                                                   (when (and effect-data @!effects-grid-ref)
@@ -93,7 +93,7 @@
                            :on-edit-effect (fn [cell-key cell-state]
                                              (let [original-data (:data cell-state)]
                                                (effect-dialogs/show-effect-dialog!
-                                                 (dyn/get-main-frame)
+                                                 (state/get-main-frame)
                                                  original-data
                                                  (fn [effect-data]
                                                    (when (and effect-data @!effects-grid-ref)
@@ -183,24 +183,24 @@
                    (fn [] (ss/alert frame "Laser Show - IDN Controller\n\nA laser show control application using IDN protocol.")))
         _ (.setJMenuBar frame menu-bar)
         
-        ;; Helper to convert dynamic state to legacy grid format
+        ;; Helper to convert runtime state to legacy grid format
         make-legacy-state (fn []
-                            {:playing? (dyn/playing?)
-                             :grid {:cells (dyn/get-grid-cells)
-                                    :active-cell (dyn/get-active-cell)
-                                    :selected-cell (dyn/get-selected-cell)
-                                    :size (dyn/get-grid-size)}})]
+                            {:playing? (state/playing?)
+                             :grid {:cells (state/get-grid-cells)
+                                    :active-cell (state/get-active-cell)
+                                    :selected-cell (state/get-selected-cell)
+                                    :size (state/get-grid-size)}})]
     
     (.addWindowListener frame
       (proxy [WindowAdapter] []
         (windowClosed [_e]
           (clean-up!)
-          (dyn/set-main-frame! nil))))
+          (state/set-main-frame! nil))))
     
     ;; --- Wire Up State Watchers ---
     ;; Watch !playback for trigger-time and active-cell changes (KEY for retriggering)
     
-    (add-watch dyn/!playback :preview-update
+    (add-watch state/!playback :preview-update
       (fn [_key _ref old-playback new-playback]
         (ss/invoke-later
           (let [old-trigger (:trigger-time old-playback)
@@ -217,7 +217,7 @@
               (or (not= old-trigger new-trigger)
                   (not= old-cell new-cell))
               (when new-cell
-                (let [cell (dyn/get-cell (first new-cell) (second new-cell))
+                (let [cell (state/get-cell (first new-cell) (second new-cell))
                       preset-id (:preset-id cell)]
                   (when preset-id
                     (let [anim (presets/create-animation-from-preset preset-id)]
@@ -227,19 +227,19 @@
               :else nil)))))
     
     ;; Watch !grid for grid UI updates
-    (add-watch dyn/!grid :grid-update
+    (add-watch state/!grid :grid-update
       (fn [_key _ref _old-grid _new-grid]
         (ss/invoke-later
           ((:update-view! grid-comp) (make-legacy-state)))))
     
     ;; Watch !playback for grid active-cell highlight
-    (add-watch dyn/!playback :grid-active-update
+    (add-watch state/!playback :grid-active-update
       (fn [_key _ref _old-playback _new-playback]
         (ss/invoke-later
           ((:update-view! grid-comp) (make-legacy-state)))))
     
     ;; Watch !idn for status bar updates
-    (add-watch dyn/!idn :status-bar-update
+    (add-watch state/!idn :status-bar-update
       (fn [_key _ref _old-idn new-idn]
         (ss/invoke-later
           ((:set-connection! status-bar) (:connected? new-idn) (:target new-idn)))))
@@ -274,19 +274,19 @@
         (FlatMacDarkLaf/setup)
         (FlatDarkLaf/setup))
       
-      (if-let [frame (dyn/get-main-frame)]
+      (if-let [frame (state/get-main-frame)]
         (do (.toFront frame) frame)
         (let [frame (create-main-window-internal)]
           (ss/show! frame)
-          (dyn/set-main-frame! frame)
+          (state/set-main-frame! frame)
           frame)))))
 
 (defn close-window! []
-  (when-let [frame (dyn/get-main-frame)]
+  (when-let [frame (state/get-main-frame)]
     (.dispose frame)))
 
 (defn window-open? []
-  (some? (dyn/get-main-frame)))
+  (some? (state/get-main-frame)))
 
 (defn get-frame []
-  (dyn/get-main-frame))
+  (state/get-main-frame))

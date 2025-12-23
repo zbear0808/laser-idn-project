@@ -12,7 +12,7 @@
             [laser-show.animation.effects :as effects]
             [laser-show.animation.time :as anim-time]
             [laser-show.animation.types :as t]
-            [laser-show.state.dynamic :as dyn]))
+            [laser-show.state.atoms :as state]))
 
 ;; ============================================================================
 ;; Animation Creation
@@ -87,10 +87,10 @@
    
    Returns: LaserFrame or nil if no active cell"
   []
-  (when-let [active-cell (dyn/get-active-cell)]
-    (let [cell (dyn/get-cell (first active-cell) (second active-cell))
+  (when-let [active-cell (state/get-active-cell)]
+    (let [cell (state/get-cell (first active-cell) (second active-cell))
           preset-id (:preset-id cell)
-          trigger-time (dyn/get-trigger-time)]
+          trigger-time (state/get-trigger-time)]
       (when preset-id
         (let [anim (create-animation preset-id)
               elapsed (- (System/currentTimeMillis) trigger-time)]
@@ -207,7 +207,7 @@
    
    Returns: Beat position as a double"
   []
-  (dyn/get-beat-position))
+  (state/get-beat-position))
 
 ;; ============================================================================
 ;; Playback Control
@@ -217,31 +217,31 @@
   "Retrigger the current animation.
    Resets the trigger time to now, restarting the animation."
   []
-  (dyn/trigger!))
+  (state/trigger!))
 
 (defn start-playback!
   "Start playback."
   []
-  (dyn/start-playback!))
+  (state/start-playback!))
 
 (defn stop-playback!
   "Stop playback."
   []
-  (dyn/stop-playback!))
+  (state/stop-playback!))
 
 (defn playing?
   "Check if currently playing.
    
    Returns: true if playing, false otherwise"
   []
-  (dyn/playing?))
+  (state/playing?))
 
 (defn get-trigger-time
   "Get the current trigger time.
    
    Returns: Timestamp in milliseconds"
   []
-  (dyn/get-trigger-time))
+  (state/get-trigger-time))
 
 ;; ============================================================================
 ;; Composite Operations
