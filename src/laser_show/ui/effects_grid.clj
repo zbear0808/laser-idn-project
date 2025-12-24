@@ -224,7 +224,7 @@
   (let [[col row] cell-key
         effect-data (get-effect-data-for-cell col row)
         has-effect? (has-effect? effect-data)
-        can-paste? (clipboard/can-paste-effect-assignment?)
+        can-paste? (clipboard/can-paste-effect-chain?)
         popup (JPopupMenu.)]
     
     (if has-effect?
@@ -239,10 +239,10 @@
         (.addSeparator popup)
         (.add popup (base-grid/create-menu-item 
                      "Copy"
-                     (fn [] (clipboard/copy-effect-assignment! effect-data))))
+                     (fn [] (clipboard/copy-effect-chain! effect-data))))
         (.add popup (base-grid/create-menu-item 
                      "Paste"
-                     (fn [] (when-let [pasted (clipboard/paste-effect-assignment)]
+                     (fn [] (when-let [pasted (clipboard/paste-effect-chain)]
                               (on-set-effect! col row pasted)))
                      :enabled? can-paste?))
         (.addSeparator popup)
@@ -258,7 +258,7 @@
         (.addSeparator popup)
         (.add popup (base-grid/create-menu-item 
                      "Paste"
-                     (fn [] (when-let [pasted (clipboard/paste-effect-assignment)]
+                     (fn [] (when-let [pasted (clipboard/paste-effect-chain)]
                               (on-set-effect! col row pasted)))
                      :enabled? can-paste?))))
     
@@ -397,10 +397,10 @@
                     (let [[col row] cell-key
                           effect-data (get-effect-data-for-cell col row)]
                       (when (has-effect? effect-data)
-                        (clipboard/copy-effect-assignment! effect-data))))
+                        (clipboard/copy-effect-chain! effect-data))))
          
          :on-paste (fn [cell-key]
-                     (when-let [effect-data (clipboard/paste-effect-assignment)]
+                     (when-let [effect-data (clipboard/paste-effect-chain)]
                        (let [[col row] cell-key]
                          (set-effect! col row effect-data))))}
         

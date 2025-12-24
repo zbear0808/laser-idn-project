@@ -31,11 +31,14 @@
             [seesaw.mig :as mig]
             [laser-show.animation.effects :as fx]
             [laser-show.state.atoms :as state]
+            [laser-show.state.clipboard :as clipboard]
             [laser-show.ui.colors :as colors]
+            [laser-show.ui.common :as ui-common]
             [laser-show.ui.drag-drop :as dnd]
             [laser-show.ui.components.slider :as slider])
   (:import [java.awt Color Font Cursor]
-           [javax.swing JDialog JPanel DefaultListModel ListSelectionModel BorderFactory]))
+           [java.awt.event KeyEvent InputEvent]
+           [javax.swing JDialog JPanel JPopupMenu JMenuItem DefaultListModel ListSelectionModel BorderFactory KeyStroke AbstractAction]))
 
 ;; ============================================================================
 ;; Effect Categories
@@ -55,7 +58,7 @@
 (defn- create-effect-list-item
   "Create a panel representing one effect in the chain.
    Supports drag-drop reordering via the provided callbacks."
-  [idx effect selected? on-select on-delete on-reorder]
+  [idx effect selected? on-select on-delete on-reorder on-copy on-paste]
   (let [effect-def (fx/get-effect (:effect-id effect))
         effect-name (or (:name effect-def) (name (:effect-id effect)))
         category (or (:category effect-def) :shape)
@@ -81,16 +84,13 @@
                               :font (Font. "SansSerif" Font/BOLD 14))
         
         panel (mig/mig-panel
-               :constraints ["insets 8", "[][25!][grow][]", ""]
+               :constraints ["insets 8", "[][grow][]", ""]
                :items [[drag-handle ""]
-                       [(ss/label :text (str (inc idx) ".")
-                                  :foreground colors/text-secondary
-                                  :font (Font. "SansSerif" Font/PLAIN 12)) ""]
                        [(ss/label :text effect-name
                                   :foreground colors/text-primary
-                                  :font (Font. "SansSerif" 
-                                              (if selected? Font/BOLD Font/PLAIN) 
-                                              13)) "growx"]
+                                  :font (Font. "SansSerif"
+                                              (if selected? Font/BOLD Font/PLAIN)
+                                              11)) "growx"]
                        [delete-btn "w 28!, h 28!"]]
                :background bg-color)
         
@@ -103,11 +103,33 @@
     (.setBorder panel default-border)
     (.setCursor panel (Cursor/getPredefinedCursor Cursor/HAND_CURSOR))
     
-    ;; Mouse listener for selection and hover
+    ;; Mouse listener for selection, hover, and right-click
     (.addMouseListener panel
       (reify java.awt.event.MouseListener
-        (mouseClicked [_ _] (on-select idx))
-        (mousePressed [_ _])
+        (mouseClicked [_ e] 
+          (when (= (.getButton e) java.awt.event.MouseEvent/BUTTON1)
+            (on-select idx)))
+        (mousePressed [_ e]
+          ;; Right-click shows context menu
+          (when (= (.getButton e) java.awt.event.MouseEvent/BUTTON3)
+            ;; Note: Don't call on-select here - it rebuilds the list and removes this panel
+            ;; from the hierarchy before the popup can display
+            (let [popup (JPopupMenu.)]
+              (.add popup (doto (JMenuItem. "Copy Effect")
+                            (.addActionListener 
+                              (reify java.awt.event.ActionListener
+                                (actionPerformed [_ _] (on-copy))))))
+              (.add popup (doto (JMenuItem. "Paste")
+                            (.addActionListener
+                              (reify java.awt.event.ActionListener
+                                (actionPerformed [_ _] (on-paste))))
+                            (.setEnabled (clipboard/can-paste-effects?))))
+              (.addSeparator popup)
+              (.add popup (doto (JMenuItem. "Delete")
+                            (.addActionListener
+                              (reify java.awt.event.ActionListener
+                                (actionPerformed [_ _] (on-delete idx))))))
+              (.show popup panel (.getX e) (.getY e)))))
         (mouseReleased [_ _])
         (mouseEntered [_ _] 
           (when-not selected?
@@ -232,6 +254,12 @@
         tab-panel (ss/horizontal-panel
                    :items (mapv first tab-buttons)
                    :background colors/background-dark)
+        
+        ;; Double-click handler for list
+        _ (ui-common/add-double-click-listener! effect-list
+            (fn [_]
+              (when-let [effect-def (.getSelectedValue effect-list)]
+                (on-effect-selected (:id effect-def)))))
         
         add-btn (ss/button :text "Add to Chain"
                            :font (Font. "SansSerif" Font/BOLD 12)
@@ -378,6 +406,10 @@
         ;; Ensure cell exists
         _ (state/ensure-effect-cell! col row)
         
+        ;; Forward references for copy/paste (used in list items)
+        !do-copy (atom nil)
+        !do-paste (atom nil)
+        
         ;; Rebuild params panel for selected effect
         rebuild-params! (fn []
                           (.removeAll params-panel-container)
@@ -428,7 +460,11 @@
                                                   ;; Update selection to follow the moved item
                                                   (when (= @!selected-idx from-idx)
                                                     (reset! !selected-idx to-idx))
-                                                  (when-let [f @!rebuild-all] (f))))]
+                                                  (when-let [f @!rebuild-all] (f)))
+                                                ;; On copy
+                                                (fn [] (when-let [f @!do-copy] (f)))
+                                                ;; On paste  
+                                                (fn [] (when-let [f @!do-paste] (f))))]
                                       (.add chain-list-panel item)))
                                   (.add chain-list-panel 
                                         (ss/label :text "No effects yet" 
@@ -460,20 +496,60 @@
                             :foreground colors/text-secondary
                             :halign :center)
         
+        ;; Copy/paste actions
+        _ (reset! !do-copy
+            (fn []
+              (let [cell (state/get-effect-cell col row)
+                    effects (:effects cell)]
+                (if-let [idx @!selected-idx]
+                  ;; Copy single selected effect
+                  (when-let [effect (get effects idx)]
+                    (clipboard/copy-effect! effect))
+                  ;; Copy entire chain if no selection
+                  (when (seq effects)
+                    (clipboard/copy-effect-chain! cell))))))
+        
+        _ (reset! !do-paste
+            (fn []
+              (when-let [effects-to-add (clipboard/get-effects-to-paste)]
+                ;; Add each effect to the chain
+                (doseq [effect effects-to-add]
+                  (state/add-effect-to-cell! col row effect))
+                ;; Select the last added effect
+                (let [new-count (state/get-effect-count col row)]
+                  (reset! !selected-idx (dec new-count)))
+                (rebuild-all!))))
+        
+        do-copy! (fn [] (@!do-copy))
+        do-paste! (fn [] (@!do-paste))
+        
+        ;; Copy/Paste buttons
+        copy-btn (ss/button :text "Copy"
+                            :font (Font. "SansSerif" Font/PLAIN 11)
+                            :focusable? false
+                            :listen [:action (fn [_] (do-copy!))])
+        paste-btn (ss/button :text "Paste"
+                             :font (Font. "SansSerif" Font/PLAIN 11)
+                             :focusable? false
+                             :listen [:action (fn [_] (do-paste!))])
+        
         ;; === LEFT PANEL: Effect Chain List ===
         left-panel (mig/mig-panel
-                    :constraints ["insets 5, wrap 1", "[180!, fill]", "[grow]"]
+                    :constraints ["insets 5, wrap 1", "[180!, fill]", "[grow][]"]
                     :items [[(ss/label :text "Effect Chain"
                                        :font (Font. "SansSerif" Font/BOLD 14)
                                        :foreground colors/text-primary) ""]
-                            [(ss/scrollable chain-list-panel :border nil) "grow, h 200::"]]
+                            [(ss/scrollable chain-list-panel :border nil) "grow, h 200::"]
+                            [(ss/horizontal-panel 
+                               :items [copy-btn paste-btn]
+                               :background colors/background-dark) "right"]]
                     :background colors/background-dark)
         
         ;; === RIGHT PANEL: Picker + Params ===
         right-panel (mig/mig-panel
                      :constraints ["insets 5, wrap 1", "[grow, fill]", "[][grow]"]
                      :items [[(:panel picker) "growx"]
-                             [separator "growx, gaptop 15"]
+                             [separator "growx, gaptop 5"]
                              [(ss/scrollable params-panel-container :border nil) "grow"]]
                      :background colors/background-dark)
         
@@ -497,6 +573,24 @@
     ;; - Slider changes write directly to atom (preview sees them automatically)
     ;; - Chain list rebuilds are triggered by add/remove/select callbacks above
     ;; - Adding an atom watch here would cause slider reset loops
+    
+    ;; Keyboard shortcuts for copy/paste - use dialog's root pane
+    (let [root-pane (.getRootPane dialog)
+          input-map (.getInputMap root-pane javax.swing.JComponent/WHEN_IN_FOCUSED_WINDOW)
+          action-map (.getActionMap root-pane)
+          
+          ctrl-c (KeyStroke/getKeyStroke KeyEvent/VK_C InputEvent/CTRL_DOWN_MASK)
+          ctrl-v (KeyStroke/getKeyStroke KeyEvent/VK_V InputEvent/CTRL_DOWN_MASK)]
+      
+      (.put input-map ctrl-c "copy-effect")
+      (.put action-map "copy-effect"
+            (proxy [AbstractAction] []
+              (actionPerformed [_] (do-copy!))))
+      
+      (.put input-map ctrl-v "paste-effect")
+      (.put action-map "paste-effect"
+            (proxy [AbstractAction] []
+              (actionPerformed [_] (do-paste!)))))
     
     (.setContentPane dialog main-panel)
     (.setSize dialog 650 500)

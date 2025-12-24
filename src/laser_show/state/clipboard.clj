@@ -35,7 +35,7 @@
 ;; ============================================================================
 
 (def clipboard-types
-  #{:cue :zone :projector :effect :cell-assignment :effect-assignment})
+  #{:cue :zone :projector :effect :effect-chain :cell-assignment})
 
 (defn valid-clipboard-type?
   [type]
@@ -250,11 +250,11 @@
   (clipboard-has-type? :projector))
 
 ;; ============================================================================
-;; Effect Assignment Copy/Paste (for effects grid)
+;; Effect Chain Copy/Paste (for effects grid)
 ;; ============================================================================
 ;; 
 ;; Effect cells use chain format:
-;; {:effects [{:effect-id :scale :params {...}} ...] :active true}
+;; {:type :effect-chain :effects [{:effect-id :scale :params {...}} ...] :active true}
 
 (defn- serialize-effect-params
   "Convert effect params to pure data configs for serialization.
@@ -296,15 +296,15 @@
             (update effect :params serialize-effect-params))
           effects)))
 
-(defn copy-effect-assignment!
-  "Copy an effect cell (with chain) to clipboard.
+(defn copy-effect-chain!
+  "Copy an effect chain to clipboard.
    Stores the full effect chain so it persists.
    Also copies to system clipboard as EDN.
    
    Expects cell-data in format: {:effects [{...}] :active true}"
   [cell-data]
   (when (and cell-data (seq (:effects cell-data)))
-    (let [clip-data {:type :effect-assignment
+    (let [clip-data {:type :effect-chain
                      :effects (serialize-effect-chain (:effects cell-data))
                      :active (:active cell-data true)
                      :copied-at (System/currentTimeMillis)}]
@@ -312,20 +312,71 @@
       (copy-to-system-clipboard! clip-data)
       true)))
 
-(defn paste-effect-assignment
-  "Get the effect cell from clipboard for pasting.
-   Returns cell data in chain format: {:effects [...] :active true}
+(defn paste-effect-chain
+  "Get the effect chain from clipboard for pasting.
+   Returns chain data: {:effects [...] :active true}
    or nil if clipboard doesn't contain one."
   []
-  (when (clipboard-has-type? :effect-assignment)
+  (when (clipboard-has-type? :effect-chain)
     (let [clip (get-clipboard)]
       {:effects (:effects clip [])
        :active (:active clip true)})))
 
-(defn can-paste-effect-assignment?
-  "Check if clipboard contains an effect assignment that can be pasted."
+(defn can-paste-effect-chain?
+  "Check if clipboard contains an effect chain that can be pasted."
   []
-  (clipboard-has-type? :effect-assignment))
+  (clipboard-has-type? :effect-chain))
+
+;; ============================================================================
+;; Single Effect Copy/Paste (for effect chain editor)
+;; ============================================================================
+
+(defn copy-effect!
+  "Copy a single effect to clipboard.
+   Effect format: {:type :effect :effect-id :scale :params {...}}"
+  [effect]
+  (when (and effect (:effect-id effect))
+    (let [clip-data (-> effect
+                        (update :params serialize-effect-params)
+                        (assoc :type :effect)
+                        (assoc :copied-at (System/currentTimeMillis)))]
+      (set-internal-clipboard! clip-data)
+      (copy-to-system-clipboard! clip-data)
+      true)))
+
+(defn paste-effect
+  "Get the effect from clipboard for pasting.
+   Returns effect map {:effect-id ... :params ...} (without :type) or nil."
+  []
+  (when (clipboard-has-type? :effect)
+    (let [clip (get-clipboard)]
+      (dissoc clip :type :copied-at))))
+
+(defn can-paste-effect?
+  "Check if clipboard contains a single effect that can be pasted."
+  []
+  (clipboard-has-type? :effect))
+
+;; ============================================================================
+;; Smart Effect Paste - handles both single effects and chains
+;; ============================================================================
+
+(defn can-paste-effects?
+  "Check if clipboard contains effects (single or chain) that can be pasted."
+  []
+  (or (clipboard-has-type? :effect)
+      (clipboard-has-type? :effect-chain)))
+
+(defn get-effects-to-paste
+  "Get effects from clipboard as a vector.
+   Works for both :effect (returns [effect]) and :effect-chain (returns effects vec).
+   Returns nil if clipboard doesn't contain pasteable effects."
+  []
+  (let [clip (get-clipboard)]
+    (case (:type clip)
+      :effect [(dissoc clip :type :copied-at)]
+      :effect-chain (:effects clip [])
+      nil)))
 
 ;; ============================================================================
 ;; Clipboard Info
@@ -334,18 +385,18 @@
 (defn get-clipboard-description
   "Get a human-readable description of clipboard contents."
   []
-  (if-let [{:keys [type data preset-id effects] :as clip} (get-internal-clipboard)]
+  (if-let [{:keys [type data preset-id effects effect-id] :as clip} (get-internal-clipboard)]
     (case type
       :cue (str "Cue: " (:name data))
       :cell-assignment (str "Preset: " (name preset-id))
       :zone (str "Zone: " (:name data))
       :projector (str "Projector: " (:name data))
-      :effect (str "Effect: " (:name data))
-      :effect-assignment (if (seq effects)
-                           (let [first-effect (first effects)
-                                 effect-count (count effects)]
-                             (str "Effect: " (name (:effect-id first-effect))
-                                  (when (> effect-count 1) (str " +" (dec effect-count)))))
-                           "Effect: (empty)")
+      :effect (str "Effect: " (name effect-id))
+      :effect-chain (if (seq effects)
+                      (let [first-effect (first effects)
+                            effect-count (count effects)]
+                        (str "Effects: " (name (:effect-id first-effect))
+                             (when (> effect-count 1) (str " +" (dec effect-count) " more"))))
+                      "Effects: (empty)")
       "Unknown")
     "Empty"))
