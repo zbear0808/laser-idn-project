@@ -200,11 +200,18 @@
    :path default-log-path})
 
 (def initial-effects-state
-  "Initial state for active effects.
+  "Initial state for effects grid.
    
    Keys:
-   - :active-effects - Map of [col row] -> effect-data for effects grid"
-  {:active-effects {}})
+   - :cells - Map of [col row] -> cell-data for effects grid
+     Cell data structure: {:effects [{:effect-id :scale :params {...}} ...] :active true}
+   
+   Each cell can contain a chain of effects that are applied in order.
+   The :active flag toggles the entire chain on/off.
+   
+   This is the single source of truth for all effects grid data.
+   UI-transient state (like :selected) is NOT stored here."
+  {:cells {}})
 
 (def initial-config-state
   "Initial state for application configuration.
@@ -858,40 +865,209 @@
   (:path @!logging))
 
 ;; ============================================================================
-;; Accessor Functions - Effects
+;; Accessor Functions - Effects (v2 - Chain-based)
 ;; ============================================================================
+;; 
+;; Effects grid cells now use a chain structure:
+;; {:effects [{:effect-id :scale :params {...}} ...] :active true}
+;; 
+;; The :effects vector contains multiple effects applied in order.
+;; The :active flag toggles the entire chain on/off.
 
-(defn get-active-effects
-  "Get all active effects from the effects grid.
-   Returns: Map of [col row] -> effect-data."
-  []
-  (:active-effects @!effects))
+;; --- Cell-Level Operations ---
 
-(defn get-effect-at
-  "Get the effect at a specific grid position.
+(defn get-effect-cell
+  "Get effect cell data at a specific grid position.
    Parameters:
    - col: Column index
    - row: Row index
-   Returns: Effect data map or nil."
+   Returns: Cell data map {:effects [...] :active true} or nil."
   [col row]
-  (get-in @!effects [:active-effects [col row]]))
+  (get-in @!effects [:cells [col row]]))
 
-(defn set-effect-at!
-  "Set an effect at a specific grid position.
+(defn set-effect-cell!
+  "Set entire cell data at a specific grid position.
    Parameters:
    - col: Column index
    - row: Row index
-   - effect-data: Effect configuration map"
-  [col row effect-data]
-  (swap! !effects assoc-in [:active-effects [col row]] effect-data))
+   - cell-data: Cell data map {:effects [...] :active true}"
+  [col row cell-data]
+  (swap! !effects assoc-in [:cells [col row]] cell-data))
 
-(defn clear-effect-at!
-  "Clear the effect at a specific grid position.
+(defn clear-effect-cell!
+  "Clear the effect cell at a specific grid position.
    Parameters:
    - col: Column index
    - row: Row index"
   [col row]
-  (swap! !effects update :active-effects dissoc [col row]))
+  (swap! !effects update :cells dissoc [col row]))
+
+(defn toggle-effect-cell-active!
+  "Toggle the :active flag for an effect cell at a specific grid position.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   Returns: New active state, or nil if no cell at position."
+  [col row]
+  (let [result (atom nil)]
+    (swap! !effects
+           (fn [effects]
+             (if-let [cell-data (get-in effects [:cells [col row]])]
+               (let [new-active (not (:active cell-data))]
+                 (reset! result new-active)
+                 (assoc-in effects [:cells [col row] :active] new-active))
+               effects)))
+    @result))
+
+(defn ensure-effect-cell!
+  "Ensure a cell exists at position, creating it if needed.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   Returns: The cell data (existing or newly created)."
+  [col row]
+  (swap! !effects
+         (fn [effects]
+           (if (get-in effects [:cells [col row]])
+             effects
+             (assoc-in effects [:cells [col row]] {:effects [] :active true}))))
+  (get-in @!effects [:cells [col row]]))
+
+;; --- Effect Chain Operations (within a cell) ---
+
+(defn add-effect-to-cell!
+  "Append an effect to a cell's chain. Creates cell if it doesn't exist.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   - effect: Effect map {:effect-id :keyword :params {...}}
+   Returns: The updated cell data."
+  [col row effect]
+  (ensure-effect-cell! col row)
+  (swap! !effects update-in [:cells [col row] :effects] conj effect)
+  (get-in @!effects [:cells [col row]]))
+
+(defn remove-effect-from-cell!
+  "Remove an effect at a specific index from a cell's chain.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   - idx: Index of effect to remove
+   Returns: The updated cell data, or nil if cell doesn't exist."
+  [col row idx]
+  (swap! !effects
+         (fn [effects]
+           (if-let [cell (get-in effects [:cells [col row]])]
+             (let [effects-vec (:effects cell)
+                   new-effects (vec (concat (subvec effects-vec 0 idx)
+                                            (subvec effects-vec (inc idx))))]
+               (assoc-in effects [:cells [col row] :effects] new-effects))
+             effects)))
+  (get-in @!effects [:cells [col row]]))
+
+(defn update-effect-in-cell!
+  "Replace an effect at a specific index in a cell's chain.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   - idx: Index of effect to replace
+   - effect: New effect map {:effect-id :keyword :params {...}}
+   Returns: The updated cell data, or nil if cell doesn't exist."
+  [col row idx effect]
+  (swap! !effects assoc-in [:cells [col row] :effects idx] effect)
+  (get-in @!effects [:cells [col row]]))
+
+(defn reorder-effects-in-cell!
+  "Move an effect from one position to another in the chain.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   - from-idx: Current index of effect
+   - to-idx: Target index to move to
+   Returns: The updated cell data, or nil if cell doesn't exist."
+  [col row from-idx to-idx]
+  (swap! !effects
+         (fn [effects]
+           (if-let [cell (get-in effects [:cells [col row]])]
+             (let [effects-vec (:effects cell)
+                   effect (nth effects-vec from-idx)
+                   without (vec (concat (subvec effects-vec 0 from-idx)
+                                        (subvec effects-vec (inc from-idx))))
+                   reordered (vec (concat (subvec without 0 to-idx)
+                                          [effect]
+                                          (subvec without to-idx)))]
+               (assoc-in effects [:cells [col row] :effects] reordered))
+             effects)))
+  (get-in @!effects [:cells [col row]]))
+
+;; --- Param-Level Operations ---
+
+(defn update-effect-param!
+  "Update a single parameter in an effect within a cell's chain.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   - effect-idx: Index of effect in chain
+   - param-key: Parameter key to update
+   - value: New value for the parameter
+   Returns: The updated cell data."
+  [col row effect-idx param-key value]
+  (swap! !effects assoc-in [:cells [col row] :effects effect-idx :params param-key] value)
+  (get-in @!effects [:cells [col row]]))
+
+(defn get-effect-param
+  "Get a parameter value from an effect within a cell's chain.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   - effect-idx: Index of effect in chain
+   - param-key: Parameter key to read
+   Returns: Parameter value or nil."
+  [col row effect-idx param-key]
+  (get-in @!effects [:cells [col row] :effects effect-idx :params param-key]))
+
+;; --- Query Operations ---
+
+(defn get-all-active-effect-instances
+  "Get all effect instances from active cells, flattened in row-major order.
+   Returns: Vector of effect instances (maps with :effect-id and :params).
+   Only includes effects from cells where :active is true."
+  []
+  (let [cells (:cells @!effects)
+        sorted-keys (sort-by (fn [[col row]] [row col]) (keys cells))]
+    (into []
+          (comp
+           (map #(get cells %))
+           (filter :active)
+           (mapcat :effects)
+           (map #(select-keys % [:effect-id :params])))
+          sorted-keys)))
+
+(defn cell-has-effects?
+  "Check if a cell has any effects in its chain.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   Returns: true if cell exists and has at least one effect."
+  [col row]
+  (let [cell (get-in @!effects [:cells [col row]])]
+    (boolean (and cell (seq (:effects cell))))))
+
+(defn get-effect-count
+  "Get the number of effects in a cell's chain.
+   Parameters:
+   - col: Column index
+   - row: Row index
+   Returns: Number of effects, or 0 if cell doesn't exist."
+  [col row]
+  (let [cell (get-in @!effects [:cells [col row]])]
+    (count (:effects cell))))
+
+(defn get-effects-cells
+  "Get all cells from the effects grid.
+   Returns: Map of [col row] -> cell-data."
+  []
+  (:cells @!effects))
 
 ;; ============================================================================
 ;; Accessor Functions - Config

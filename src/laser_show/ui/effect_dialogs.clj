@@ -1375,7 +1375,7 @@
                                                   ((:get-params pp))
                                                   {})
                                          effect-data {:effect-id (:id effect-def)
-                                                     :enabled true
+                                                     :active true
                                                      :params params}]
                                      (on-effect-change effect-data)))))
         
@@ -1497,9 +1497,13 @@
                                              (let [params (if-let [pp @params-panel-ref]
                                                            ((:get-params pp))
                                                            {})
+                                                   ;; Use :active to match effects grid data structure
+                                                   ;; Check both :active and :enabled for existing effects (backward compat)
                                                    effect-data {:effect-id (:id effect-def)
-                                                               :enabled (if existing-effect
-                                                                         (:enabled existing-effect true)
+                                                               :active (if existing-effect
+                                                                         (or (:active existing-effect)
+                                                                             (:enabled existing-effect)
+                                                                             true)
                                                                          true)
                                                                :params params}]
                                                (reset! result-atom effect-data)

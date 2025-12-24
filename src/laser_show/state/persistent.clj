@@ -19,14 +19,15 @@
 
 (def config-files
   "Map of config type to file path."
-  {:settings    "config/settings.edn"
-   :grid        "config/grid.edn"
-   :projectors  "config/projectors.edn"
-   :zones       "config/zones.edn"
-   :zone-groups "config/zone-groups.edn"
-   :cues        "config/cues.edn"
-   :cue-lists   "config/cue-lists.edn"
-   :effects     "config/effects.edn"})
+  {:settings     "config/settings.edn"
+   :grid         "config/grid.edn"
+   :projectors   "config/projectors.edn"
+   :zones        "config/zones.edn"
+   :zone-groups  "config/zone-groups.edn"
+   :cues         "config/cues.edn"
+   :cue-lists    "config/cue-lists.edn"
+   :effects      "config/effects.edn"
+   :effects-grid "config/effects-grid.edn"})
 
 ;; ============================================================================
 ;; Persistence Mapping
@@ -46,22 +47,24 @@
    
    When loading: data from file is merged into the atom
    When saving: if :keys is nil, save @atom; if :keys is a vector, save (select-keys @atom keys)"
-  {:settings    {:atom state/!config
-                 :keys nil}
-   :grid        {:atom state/!grid
-                 :keys [:cells]}  ; Only persist cells, not selected-cell or size
-   :projectors  {:atom state/!projectors
-                 :keys nil}
-   :zones       {:atom state/!zones
-                 :keys nil}
-   :zone-groups {:atom state/!zone-groups
-                 :keys nil}
-   :cues        {:atom state/!cues
-                 :keys nil}
-   :cue-lists   {:atom state/!cue-lists
-                 :keys nil}
-   :effects     {:atom state/!effect-registry
-                 :keys nil}})
+  {:settings     {:atom state/!config
+                  :keys nil}
+   :grid         {:atom state/!grid
+                  :keys [:cells]}  ; Only persist cells, not selected-cell or size
+   :projectors   {:atom state/!projectors
+                  :keys nil}
+   :zones        {:atom state/!zones
+                  :keys nil}
+   :zone-groups  {:atom state/!zone-groups
+                  :keys nil}
+   :cues         {:atom state/!cues
+                  :keys nil}
+   :cue-lists    {:atom state/!cue-lists
+                  :keys nil}
+   :effects      {:atom state/!effect-registry
+                  :keys nil}
+   :effects-grid {:atom state/!effects
+                  :keys [:cells]}}) ; Persist effect grid cell assignments
 
 ;; ============================================================================
 ;; Load Functions
@@ -141,14 +144,15 @@
    (get-project-file-paths \"/path/to/project\")
    => {:settings \"/path/to/project/settings.edn\", ...}"
   [project-folder]
-  {:settings    (str project-folder "/settings.edn")
-   :grid        (str project-folder "/grid.edn")
-   :projectors  (str project-folder "/projectors.edn")
-   :zones       (str project-folder "/zones.edn")
-   :zone-groups (str project-folder "/zone-groups.edn")
-   :cues        (str project-folder "/cues.edn")
-   :cue-lists   (str project-folder "/cue-lists.edn")
-   :effects     (str project-folder "/effects.edn")})
+  {:settings     (str project-folder "/settings.edn")
+   :grid         (str project-folder "/grid.edn")
+   :projectors   (str project-folder "/projectors.edn")
+   :zones        (str project-folder "/zones.edn")
+   :zone-groups  (str project-folder "/zone-groups.edn")
+   :cues         (str project-folder "/cues.edn")
+   :cue-lists    (str project-folder "/cue-lists.edn")
+   :effects      (str project-folder "/effects.edn")
+   :effects-grid (str project-folder "/effects-grid.edn")})
 
 (defn save-project!
   "Save all state to specified project folder.

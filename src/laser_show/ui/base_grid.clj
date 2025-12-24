@@ -103,7 +103,8 @@
    - :get-state - function to get current state
    - :update! - function to refresh appearance"
   [cell-key callbacks]
-  (let [!cell-state (atom {:data nil
+  (let [!cell-state (atom {:key cell-key
+                           :data nil
                            :selected false})
         borders (make-borders)
         

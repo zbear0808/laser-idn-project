@@ -9,7 +9,8 @@
             [laser-show.backend.zones :as zones]
             [laser-show.backend.projectors :as projectors]
             [laser-show.state.atoms :as state]
-            [laser-show.state.serialization :as ser])
+            [laser-show.state.serialization :as ser]
+            [laser-show.animation.modulation :as mod])
   (:import [java.awt Toolkit]
            [java.awt.datatransfer StringSelection DataFlavor Clipboard]))
 
@@ -251,32 +252,75 @@
 ;; ============================================================================
 ;; Effect Assignment Copy/Paste (for effects grid)
 ;; ============================================================================
+;; 
+;; Effect cells use chain format:
+;; {:effects [{:effect-id :scale :params {...}} ...] :active true}
+
+(defn- serialize-effect-params
+  "Convert effect params to pure data configs for serialization.
+   Modulator functions are converted to their config maps."
+  [params]
+  (when params
+    (into {}
+      (map (fn [[k v]]
+             (cond
+               ;; Modulator function with config - extract config only
+               (and (fn? v) (mod/modulator? v))
+               (if-let [config (mod/get-modulator-config v)]
+                 [k config]  ; Pure data config map
+                 [k 1.0])    ; Fallback if no config
+               
+               ;; Modulator config map - pass through as-is
+               (mod/modulator-config? v)
+               [k v]
+               
+               ;; Any other function - use default
+               (fn? v)
+               [k 1.0]
+               
+               ;; Atom or other derefable - deref it
+               (instance? clojure.lang.IDeref v)
+               [k @v]
+               
+               ;; Regular serializable value
+               :else
+               [k v]))
+           params))))
+
+(defn- serialize-effect-chain
+  "Serialize an effect chain for clipboard.
+   Each effect in the chain has its params serialized."
+  [effects]
+  (when effects
+    (mapv (fn [effect]
+            (update effect :params serialize-effect-params))
+          effects)))
 
 (defn copy-effect-assignment!
-  "Copy an effect instance to clipboard.
-   Stores the full effect configuration so it persists.
-   Also copies to system clipboard as EDN."
-  [effect-instance]
-  (when effect-instance
+  "Copy an effect cell (with chain) to clipboard.
+   Stores the full effect chain so it persists.
+   Also copies to system clipboard as EDN.
+   
+   Expects cell-data in format: {:effects [{...}] :active true}"
+  [cell-data]
+  (when (and cell-data (seq (:effects cell-data)))
     (let [clip-data {:type :effect-assignment
-                     :effect-id (:effect-id effect-instance)
-                     :enabled (:enabled effect-instance)
-                     :params (:params effect-instance)
+                     :effects (serialize-effect-chain (:effects cell-data))
+                     :active (:active cell-data true)
                      :copied-at (System/currentTimeMillis)}]
       (set-internal-clipboard! clip-data)
       (copy-to-system-clipboard! clip-data)
       true)))
 
 (defn paste-effect-assignment
-  "Get the effect instance from clipboard for pasting into a cell.
-   Returns an effect instance map, or nil if clipboard doesn't contain one.
-   Reads from system clipboard first, falls back to internal atom."
+  "Get the effect cell from clipboard for pasting.
+   Returns cell data in chain format: {:effects [...] :active true}
+   or nil if clipboard doesn't contain one."
   []
   (when (clipboard-has-type? :effect-assignment)
     (let [clip (get-clipboard)]
-      {:effect-id (:effect-id clip)
-       :enabled (:enabled clip true)
-       :params (:params clip {})})))
+      {:effects (:effects clip [])
+       :active (:active clip true)})))
 
 (defn can-paste-effect-assignment?
   "Check if clipboard contains an effect assignment that can be pasted."
@@ -290,13 +334,18 @@
 (defn get-clipboard-description
   "Get a human-readable description of clipboard contents."
   []
-  (if-let [{:keys [type data preset-id effect-id]} (get-internal-clipboard)]
+  (if-let [{:keys [type data preset-id effects] :as clip} (get-internal-clipboard)]
     (case type
       :cue (str "Cue: " (:name data))
       :cell-assignment (str "Preset: " (name preset-id))
       :zone (str "Zone: " (:name data))
       :projector (str "Projector: " (:name data))
       :effect (str "Effect: " (:name data))
-      :effect-assignment (str "Effect: " (name effect-id))
+      :effect-assignment (if (seq effects)
+                           (let [first-effect (first effects)
+                                 effect-count (count effects)]
+                             (str "Effect: " (name (:effect-id first-effect))
+                                  (when (> effect-count 1) (str " +" (dec effect-count)))))
+                           "Effect: (empty)")
       "Unknown")
     "Empty"))

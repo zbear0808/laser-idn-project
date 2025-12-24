@@ -11,7 +11,7 @@
    [laser-show.backend.frame-provider :as frame-provider]
    [laser-show.events.dispatch :as events]
    [laser-show.state.atoms :as state]
-   [laser-show.ui.effect-dialogs :as effect-dialogs]
+   [laser-show.ui.effect-chain-editor :as effect-chain-editor]
    [laser-show.ui.effects-grid :as effects-grid]
    [laser-show.ui.grid :as grid]
    [laser-show.ui.preview :as preview]
@@ -63,63 +63,23 @@
         
         preset-palette (grid/create-preset-palette events/dispatch!)
         
-        ;; Effects Grid with proper callbacks including live preview
+        ;; Effects Grid with simplified callbacks - uses new effect-chain-editor
+        ;; The new editor writes directly to !effects atom, so no callbacks needed
         effects-grid-comp (effects-grid/create-effects-grid-panel
                            :on-effects-change (fn [active-effects] 
                                                 (println "Active effects:" (count active-effects)))
+                           ;; Both new and edit use the same editor - it handles both cases
                            :on-new-effect (fn [cell-key]
-                                            (let [original-data nil]
-                                              (effect-dialogs/show-effect-dialog!
-                                                (state/get-main-frame)
-                                                nil
-                                                (fn [effect-data]
-                                                  (when (and effect-data @!effects-grid-ref)
-                                                    ((:set-cell-effect! @!effects-grid-ref) 
-                                                     (first cell-key) 
-                                                     (second cell-key) 
-                                                     effect-data)))
-                                                :on-effect-change (fn [effect-data]
-                                                                    ;; Live preview - temporarily apply effect
-                                                                    (when @!effects-grid-ref
-                                                                      ((:set-cell-effect! @!effects-grid-ref)
-                                                                       (first cell-key)
-                                                                       (second cell-key)
-                                                                       effect-data)))
-                                                :on-cancel (fn []
-                                                             ;; Revert on cancel
-                                                             (when @!effects-grid-ref
-                                                               ((:clear-cell! @!effects-grid-ref)
-                                                                (first cell-key)
-                                                                (second cell-key)))))))
-                           :on-edit-effect (fn [cell-key cell-state]
-                                             (let [original-data (:data cell-state)]
-                                               (effect-dialogs/show-effect-dialog!
-                                                 (state/get-main-frame)
-                                                 original-data
-                                                 (fn [effect-data]
-                                                   (when (and effect-data @!effects-grid-ref)
-                                                     ((:set-cell-effect! @!effects-grid-ref)
-                                                      (first cell-key)
-                                                      (second cell-key)
-                                                      effect-data)))
-                                                 :on-effect-change (fn [effect-data]
-                                                                     ;; Live preview - temporarily apply effect
-                                                                     (when @!effects-grid-ref
-                                                                       ((:set-cell-effect! @!effects-grid-ref)
-                                                                        (first cell-key)
-                                                                        (second cell-key)
-                                                                        effect-data)))
-                                                 :on-cancel (fn []
-                                                              ;; Revert on cancel
-                                                              (when (and @!effects-grid-ref original-data)
-                                                                ((:set-cell-effect! @!effects-grid-ref)
-                                                                 (first cell-key)
-                                                                 (second cell-key)
-                                                                 original-data))
-                                                              (when (and @!effects-grid-ref (nil? original-data))
-                                                                ((:clear-cell! @!effects-grid-ref)
-                                                                 (first cell-key)
-                                                                 (second cell-key))))))))
+                                            (effect-chain-editor/show-effect-chain-editor!
+                                              (state/get-main-frame)
+                                              (first cell-key)
+                                              (second cell-key)))
+                           :on-edit-effect (fn [cell-key _effect-data]
+                                             ;; No need to pass effect-data - editor reads from atom
+                                             (effect-chain-editor/show-effect-chain-editor!
+                                               (state/get-main-frame)
+                                               (first cell-key)
+                                               (second cell-key))))
         
         ;; Store reference for callbacks
         _ (reset! !effects-grid-ref effects-grid-comp)

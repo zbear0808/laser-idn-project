@@ -295,14 +295,21 @@
               (let [transferable (.getTransferable event)
                     data (extract-transfer-data transferable)]
                 (reset! current-data nil)
-                (when on-drag-exit
-                  (on-drag-exit))
+                ;; IMPORTANT: Call on-drop BEFORE on-drag-exit so drop callbacks
+                ;; can still access drag state (like drop zone indicators)
                 (if (and (check-accept data) on-drop)
                   (let [success (on-drop data)]
+                    (when on-drag-exit
+                      (on-drag-exit))
                     (.dropComplete event (boolean success)))
-                  (.dropComplete event false)))
+                  (do
+                    (when on-drag-exit
+                      (on-drag-exit))
+                    (.dropComplete event false))))
               (catch Exception e
                 (println "Drop failed:" (.getMessage e))
+                (when on-drag-exit
+                  (on-drag-exit))
                 (.dropComplete event false)))))]
     
     (DropTarget. component DnDConstants/ACTION_MOVE drop-target-listener true)))
