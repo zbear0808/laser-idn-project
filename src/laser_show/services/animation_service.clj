@@ -200,7 +200,7 @@
 (defn reset-tap-tempo!
   "Reset the tap tempo system."
   []
-  (anim-time/reset-tap-times!))
+  (anim-time/reset-tap-tempo!))
 
 (defn get-beat-position
   "Get the current position within the beat (0.0 to 1.0).

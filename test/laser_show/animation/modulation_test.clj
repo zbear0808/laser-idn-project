@@ -87,11 +87,11 @@
     (let [bpm 120
           ms-per-beat (/ 60000 bpm)
           modulator-1beat (mod/sine-mod 0.0 1.0 1.0)  ; 1 beat period
-          modulator-half-beat (mod/sine-mod 0.0 1.0 0.5)]  ; 0.5 beat period (faster)
+          modulator-half-beat (mod/sine-mod 0.0 1.0 0.5)
+          val-1-half (mod/resolve-param modulator-1beat (make-test-context (* 0.5 ms-per-beat) bpm))
+          val-half-quarter (mod/resolve-param modulator-half-beat (make-test-context (* 0.25 ms-per-beat) bpm))]  ; 0.5 beat period (faster)
       ;; At quarter beat with 0.5 period, should be same as half beat with 1.0 period
-      (let [val-1-half (mod/resolve-param modulator-1beat (make-test-context (* 0.5 ms-per-beat) bpm))
-            val-half-quarter (mod/resolve-param modulator-half-beat (make-test-context (* 0.25 ms-per-beat) bpm))]
-        (is (approx= val-1-half val-half-quarter 0.05))))))
+      (is (approx= val-1-half val-half-quarter 0.05)))))
 
 (deftest sine-mod-phase-offset-test
   (testing "Phase offset shifts the waveform"

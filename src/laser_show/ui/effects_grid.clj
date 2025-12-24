@@ -3,7 +3,8 @@
    Displays a grid of effect cells that can be toggled on/off.
    Effects are applied in row-major order (row 0 col 0, row 0 col 1, etc.)
    
-   Uses !effects atom as single source of truth for effect data.
+   Uses effects-service for all mutations (business logic layer).
+   Uses subscriptions for derived display data.
    base-grid is only used for UI-transient state (selection, hover).
    
    Usage:
@@ -18,7 +19,8 @@
             [laser-show.ui.drag-drop :as dnd]
             [laser-show.animation.effects :as fx]
             [laser-show.animation.modulation :as mod]
-            [laser-show.state.atoms :as state]
+            [laser-show.services.effects-service :as effects-service]
+            [laser-show.state.subscriptions :as subs]
             [laser-show.state.clipboard :as clipboard])
   (:import [javax.swing JPopupMenu]))
 
@@ -61,73 +63,79 @@
           effects)))
 
 ;; ============================================================================
-;; Cell Rendering - reads from !effects atom
+;; Cell Rendering - uses subscriptions for derived state
 ;; ============================================================================
 
 (defn- get-effect-data-for-cell
-  "Get effect data for a cell from !effects atom."
+  "Get raw effect data for a cell (for operations that need full data).
+   Uses effects-service since we need the full cell data for drag/drop, menus, etc."
   [col row]
-  (state/get-effect-cell col row))
+  (effects-service/get-effect-cell col row))
+
+(defn- get-effect-cell-display
+  "Get effect cell display data using subscriptions.
+   Returns: {:has-effect? :effect-count :first-effect-id :active? :modulated? :display-text}"
+  [col row]
+  (subs/effect-cell-display col row))
 
 (defn render-effect-content
   "Render the display text for an effect cell.
-   Reads from !effects atom. For chain, shows first effect name + count if multiple."
+   Uses subscriptions for derived display data."
   [cell-key _ui-state]
   (let [[col row] cell-key
-        cell-data (get-effect-data-for-cell col row)]
-    (if (has-effect? cell-data)
-      (let [effects (:effects cell-data)
-            first-effect (first effects)
-            effect-def (fx/get-effect (:effect-id first-effect))
-            effect-name (or (:name effect-def) (name (:effect-id first-effect)))
-            active? (:active cell-data)
-            effect-count (count effects)
-            modulated? (has-modulated-params? cell-data)]
-        (str (when modulated? "~ ")
+        cell-display (get-effect-cell-display col row)]
+    (if (:has-effect? cell-display)
+      (let [effect-def (when-let [eid (:first-effect-id cell-display)]
+                         (fx/get-effect eid))
+            effect-name (or (:name effect-def) 
+                           (when-let [eid (:first-effect-id cell-display)]
+                             (name eid)))
+            effect-count (:effect-count cell-display)]
+        (str (when (:modulated? cell-display) "~ ")
              effect-name
              (when (> effect-count 1) (str " +" (dec effect-count)))
-             (when-not active? " (off)")))
+             (when-not (:active? cell-display) " (off)")))
       "")))
 
 (defn get-effect-background
   "Get the background color for an effect cell.
-   Uses category of first effect in chain. Reads from !effects atom."
+   Uses subscriptions for active/effect state."
   [cell-key ui-state]
   (let [[col row] cell-key
-        cell-data (get-effect-data-for-cell col row)]
+        cell-display (get-effect-cell-display col row)]
     (cond
       ;; Selected state (from UI)
       (:selected ui-state)
       colors/cell-selected
       
-      ;; Has effect assigned (from !effects atom)
-      (has-effect? cell-data)
-      (let [first-effect (get-first-effect cell-data)
-            effect-def (fx/get-effect (:effect-id first-effect))
-            category (or (:category effect-def) :shape)
-            active? (:active cell-data)]
-        (colors/get-effect-category-color category (not active?)))
+      ;; Has effect assigned - from subscription
+      (:has-effect? cell-display)
+      (let [effect-def (when-let [eid (:first-effect-id cell-display)]
+                         (fx/get-effect eid))
+            category (or (:category effect-def) :shape)]
+        (colors/get-effect-category-color category (not (:active? cell-display))))
       
       ;; Empty cell
       :else
       colors/cell-empty)))
 
 (defn get-effect-border-type
-  "Get the border type for an effect cell."
+  "Get the border type for an effect cell.
+   Uses subscriptions for effect check."
   [cell-key _ui-state]
   (let [[col row] cell-key
-        effect-data (get-effect-data-for-cell col row)]
-    (if (has-effect? effect-data)
+        cell-display (get-effect-cell-display col row)]
+    (if (:has-effect? cell-display)
       :assigned
       :empty)))
 
 (defn is-effect-active?
   "Check if the effect cell is active (enabled).
-   Used for showing the green indicator."
+   Uses subscriptions for active state."
   [cell-key _ui-state]
   (let [[col row] cell-key
-        effect-data (get-effect-data-for-cell col row)]
-    (and (has-effect? effect-data) (:active effect-data))))
+        cell-display (get-effect-cell-display col row)]
+    (and (:has-effect? cell-display) (:active? cell-display))))
 
 ;; ============================================================================
 ;; Drag & Drop
@@ -314,19 +322,19 @@
                                  (fn [_key cell]
                                    ((:update! cell)))))
                               (when on-effects-change
-                                (on-effects-change (state/get-all-active-effect-instances))))
+                                (on-effects-change (effects-service/get-all-active-effects))))
         
-        ;; Effect operations - write to !effects atom
+        ;; Effect operations - write through effects-service for business logic
         set-effect! (fn [col row effect-data]
-                      (state/set-effect-cell! col row effect-data)
+                      (effects-service/set-effect-cell! col row effect-data)
                       (notify-and-refresh!))
         
         toggle-effect! (fn [col row]
-                         (state/toggle-effect-cell-active! col row)
+                         (effects-service/toggle-effect-active! col row)
                          (notify-and-refresh!))
         
         clear-effect! (fn [col row]
-                        (state/clear-effect-cell! col row)
+                        (effects-service/clear-effect-cell! col row)
                         (notify-and-refresh!))
         
         ;; Cell callbacks for base-grid
@@ -431,16 +439,16 @@
      :set-cell-effect! set-effect!
      
      :get-cell-effect (fn [col row]
-                        (state/get-effect-cell col row))
+                        (effects-service/get-effect-cell col row))
      
      :toggle-cell! toggle-effect!
      
      :clear-cell! clear-effect!
      
-     :get-active-effects state/get-all-active-effect-instances
+     :get-active-effects effects-service/get-all-active-effects
      
      :apply-to-frame (fn [frame time-ms bpm]
-                       (let [active-effects (state/get-all-active-effect-instances)]
+                       (let [active-effects (effects-service/get-all-active-effects)]
                          (reduce
                           (fn [f effect-data]
                             (let [instance (fx/make-effect-instance
@@ -452,9 +460,7 @@
                           active-effects)))
      
      :clear-all! (fn []
-                   (doseq [row (range rows)
-                           col (range cols)]
-                     (state/clear-effect-cell! col row))
+                   (effects-service/clear-all-effects!)
                    (notify-and-refresh!))
      
      :refresh-ui! notify-and-refresh!

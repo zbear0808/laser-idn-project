@@ -1,6 +1,8 @@
 (ns laser-show.state.serialization-test
-  (:require [clojure.test :refer [deftest testing is]]
-            [laser-show.state.serialization :as ser]))
+  (:require
+   [clojure.java.io :as io]
+   [clojure.test :refer [deftest is testing]]
+   [laser-show.state.serialization :as ser]))
 
 ;; ============================================================================
 ;; Basic Round-trip Tests
@@ -103,5 +105,5 @@
       (is (= test-data (ser/load-from-file test-file))))
     
     ;; Cleanup
-    (when (.exists (clojure.java.io/file test-file))
-      (.delete (clojure.java.io/file test-file)))))
+    (when (.exists (io/file test-file))
+      (.delete (io/file test-file)))))

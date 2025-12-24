@@ -116,7 +116,7 @@
       (let [[x1 y1] (normalized-to-screen -2.0 coord width height margin)
             [x2 y2] (normalized-to-screen 2.0 coord width height margin)]
         (.draw g2d (Line2D$Double. x1 y1 x2 y2)))))
-  
+
   ;; Draw major grid lines (at integer values: -2, -1, 0, 1, 2)
   (.setColor g2d grid-major-color)
   (.setStroke g2d (BasicStroke. 1.5))
@@ -168,18 +168,18 @@
                 dragging? handle-drag-color
                 hover? handle-hover-color
                 :else handle-normal-color)]
-    
+
     ;; Draw handle circle
     (.setColor g2d color)
     (.fill g2d (Ellipse2D$Double. (- sx handle-radius) (- sy handle-radius)
                                   handle-diameter handle-diameter))
-    
+
     ;; Draw border
     (.setColor g2d handle-border-color)
     (.setStroke g2d (BasicStroke. 2.0))
     (.draw g2d (Ellipse2D$Double. (- sx handle-radius) (- sy handle-radius)
                                   handle-diameter handle-diameter))
-    
+
     ;; Draw lock icon if fully modulated
     (when fully-modulated?
       (.setColor g2d text-color)
@@ -203,25 +203,25 @@
         bg-x (- label-x padding)
         bg-y (- label-y label-height)
         bg-width (+ label-width (* 2 padding))
-        bg-height (+ label-height (* 2 padding))]
-    
-    ;; Clamp label position to stay within canvas
-    (let [label-x (min label-x (- width margin label-width padding))
-          label-y (min label-y (- height margin))]
-      ;; Draw background
-      (.setColor g2d text-bg-color)
-      (.fill g2d (Rectangle2D$Double. (- label-x padding) (- label-y label-height)
-                                       bg-width bg-height))
-      ;; Draw text
-      (.setColor g2d text-color)
-      (.drawString g2d label (int label-x) (int label-y)))))
+        bg-height (+ label-height (* 2 padding))
+        ;; Clamp label position to stay within canvas
+        label-x (min label-x (- width margin label-width padding))
+        label-y (min label-y (- height margin))]
+
+    ;; Draw background
+    (.setColor g2d text-bg-color)
+    (.fill g2d (Rectangle2D$Double. (- label-x padding) (- label-y label-height)
+                                    bg-width bg-height))
+    ;; Draw text
+    (.setColor g2d text-color)
+    (.drawString g2d label (int label-x) (int label-y))))
 
 (defn- draw-modulation-indicators
   "Draw text indicators for modulated axes."
   [^java.awt.Graphics2D g2d width height margin x-mod? y-mod?]
   (.setFont g2d (Font. "SansSerif" Font/BOLD 12))
   (.setColor g2d modulated-text-color)
-  
+
   (cond
     (and x-mod? y-mod?)
     (let [text "FULLY MODULATED"
@@ -230,12 +230,12 @@
           x (/ (- width text-width) 2)
           y (+ margin 20)]
       (.drawString g2d text (int x) (int y)))
-    
+
     x-mod?
     (let [text "X: MODULATED"
           y (+ margin 20)]
       (.drawString g2d text (int (+ margin 5)) (int y)))
-    
+
     y-mod?
     (let [text "Y: MODULATED"
           y (+ margin 20)]
@@ -245,37 +245,37 @@
   "Main canvas rendering function."
   [^java.awt.Graphics2D g2d state width height]
   ;; Enable antialiasing
-  (.setRenderingHint g2d RenderingHints/KEY_ANTIALIASING 
+  (.setRenderingHint g2d RenderingHints/KEY_ANTIALIASING
                      RenderingHints/VALUE_ANTIALIAS_ON)
   (.setRenderingHint g2d RenderingHints/KEY_TEXT_ANTIALIASING
                      RenderingHints/VALUE_TEXT_ANTIALIAS_ON)
-  
+
   (let [{:keys [x y hover? dragging? x-modulated? y-modulated? margin]} state]
-    
+
     ;; Clear background
     (.setColor g2d Color/BLACK)
     (.fillRect g2d 0 0 width height)
-    
+
     ;; Draw grid
     (draw-grid g2d width height margin)
-    
+
     ;; Draw origin
     (draw-origin g2d width height margin)
-    
+
     ;; Draw vector arrow from origin to handle
     (draw-vector-arrow g2d x y width height margin x-modulated? y-modulated?)
-    
+
     ;; Draw handle
-    (draw-handle g2d x y width height margin hover? dragging? 
+    (draw-handle g2d x y width height margin hover? dragging?
                  x-modulated? y-modulated?)
-    
+
     ;; Draw coordinate label
     (draw-coordinate-label g2d x y width height margin)
-    
+
     ;; Draw modulation indicators
     (when (or x-modulated? y-modulated?)
-      (draw-modulation-indicators g2d width height margin 
-                                   x-modulated? y-modulated?))))
+      (draw-modulation-indicators g2d width height margin
+                                  x-modulated? y-modulated?))))
 
 ;; ============================================================================
 ;; Component Creation
@@ -304,7 +304,7 @@
            margin default-margin
            initial-x 0.0
            initial-y 0.0}}]
-  
+
   (let [!state (atom {:x (double initial-x)
                       :y (double initial-y)
                       :hover? false
@@ -313,12 +313,12 @@
                       :y-modulated? false
                       :margin margin
                       :on-change on-change})
-        
+
         canvas (proxy [JPanel] []
                  (paintComponent [g]
                    (proxy-super paintComponent g)
                    (render-canvas g @!state (.getWidth this) (.getHeight this))))
-        
+
         ;; Check if handle is under cursor
         handle-hit? (fn [mx my]
                       (let [state @!state
@@ -327,7 +327,7 @@
                             [hx hy] (normalized-to-screen (:x state) (:y state)
                                                           w h (:margin state))]
                         (point-in-handle? mx my hx hy (* handle-radius 1.5))))
-        
+
         ;; Mouse motion listener
         mouse-motion-listener
         (reify java.awt.event.MouseMotionListener
@@ -341,12 +341,12 @@
                 (.repaint canvas))
               ;; Update cursor (only if not dragging and can drag)
               (let [fully-mod? (and (:x-modulated? state) (:y-modulated? state))]
-                (.setCursor canvas 
-                           (cond
-                             fully-mod? (Cursor/getDefaultCursor)
-                             is-hover? (Cursor/getPredefinedCursor Cursor/HAND_CURSOR)
-                             :else (Cursor/getDefaultCursor))))))
-          
+                (.setCursor canvas
+                            (cond
+                              fully-mod? (Cursor/getDefaultCursor)
+                              is-hover? (Cursor/getPredefinedCursor Cursor/HAND_CURSOR)
+                              :else (Cursor/getDefaultCursor))))))
+
           (mouseDragged [_ e]
             (when (:dragging? @!state)
               (let [mx (.getX e)
@@ -366,7 +366,7 @@
                 ;; Trigger on-change callback
                 (when-let [on-change-fn (:on-change state)]
                   (on-change-fn final-x final-y))))))
-        
+
         ;; Mouse listener
         mouse-listener
         (reify java.awt.event.MouseListener
@@ -382,7 +382,7 @@
                 (swap! !state assoc :dragging? true)
                 (.setCursor canvas (Cursor/getPredefinedCursor Cursor/MOVE_CURSOR))
                 (.repaint canvas))))
-          
+
           (mouseReleased [_ e]
             (when (:dragging? @!state)
               (swap! !state assoc :dragging? false)
@@ -390,48 +390,48 @@
               (let [mx (.getX e)
                     my (.getY e)
                     is-hover? (handle-hit? mx my)]
-                (.setCursor canvas 
-                           (if is-hover?
-                             (Cursor/getPredefinedCursor Cursor/HAND_CURSOR)
-                             (Cursor/getDefaultCursor))))
+                (.setCursor canvas
+                            (if is-hover?
+                              (Cursor/getPredefinedCursor Cursor/HAND_CURSOR)
+                              (Cursor/getDefaultCursor))))
               (.repaint canvas)))
-          
+
           (mouseClicked [_ e])
           (mouseEntered [_ e])
           (mouseExited [_ e]
             (swap! !state assoc :hover? false)
             (.repaint canvas)))]
-    
+
     ;; Configure canvas
     (.setPreferredSize canvas (java.awt.Dimension. width height))
     (.setBackground canvas Color/BLACK)
     (.setOpaque canvas true)
     (.addMouseMotionListener canvas mouse-motion-listener)
     (.addMouseListener canvas mouse-listener)
-    
+
     ;; Return component API
     {:panel canvas
-     
+
      :set-x! (fn [x]
                (swap! !state assoc :x (double x))
                (.repaint canvas))
-     
+
      :set-y! (fn [y]
                (swap! !state assoc :y (double y))
                (.repaint canvas))
-     
+
      :set-position! (fn [x y]
                       (swap! !state assoc :x (double x) :y (double y))
                       (.repaint canvas))
-     
+
      :get-position (fn []
                      (let [state @!state]
                        {:x (:x state) :y (:y state)}))
-     
+
      :set-x-modulated! (fn [modulated?]
                          (swap! !state assoc :x-modulated? (boolean modulated?))
                          (.repaint canvas))
-     
+
      :set-y-modulated! (fn [modulated?]
                          (swap! !state assoc :y-modulated? (boolean modulated?))
                          (.repaint canvas))}))

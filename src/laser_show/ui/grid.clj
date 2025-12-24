@@ -1,6 +1,7 @@
 (ns laser-show.ui.grid
   "Launchpad-style grid UI for triggering laser animations.
    Refactored to use base-grid for shared UI infrastructure.
+   Uses subscriptions for derived state data.
    
    Usage:
    (create-grid-panel dispatch! :cols 5 :rows 4)"
@@ -12,16 +13,24 @@
             [laser-show.ui.drag-drop :as dnd]
             [laser-show.ui.layout :as layout]
             [laser-show.state.atoms :as state]
+            [laser-show.state.subscriptions :as subs]
             [laser-show.state.clipboard :as clipboard])
   (:import [java.awt Color Font]
            [javax.swing JPopupMenu]))
 
 ;; ============================================================================
-;; Cue Data Helpers
+;; Cue Data Helpers (using subscriptions)
 ;; ============================================================================
 
+(defn- get-cell-display
+  "Get cell display data using subscriptions.
+   Returns: {:preset-id :active? :selected? :has-content?}"
+  [col row]
+  (subs/grid-cell-display col row))
+
 (defn- get-cue-data-for-cell
-  "Get cue data for a cell from !grid atom."
+  "Get raw cue data for a cell (for drag/drop and context menu).
+   Uses state directly since we need the full cell data."
   [col row]
   (state/get-cell col row))
 
@@ -31,38 +40,40 @@
   (boolean (:preset-id cell-data)))
 
 ;; ============================================================================
-;; Cell Rendering - reads from !grid atom
+;; Cell Rendering - uses subscriptions for derived state
 ;; ============================================================================
 
 (defn render-cue-content
-  "Render the display text for a cue cell."
+  "Render the display text for a cue cell.
+   Uses subscriptions for cell data."
   [cell-state]
   (let [[col row] (:key cell-state)
-        cell-data (get-cue-data-for-cell col row)]
-    (if-let [preset-id (:preset-id cell-data)]
+        cell-display (get-cell-display col row)
+        preset-id (:preset-id cell-display)]
+    (if preset-id
       (if-let [preset (presets/get-preset preset-id)]
         (:name preset)
         (name preset-id))
       "")))
 
 (defn get-cue-background
-  "Get the background color for a cue cell."
+  "Get the background color for a cue cell.
+   Uses subscriptions for active/selected state."
   [cell-state]
   (let [[col row] (:key cell-state)
-        cell-data (get-cue-data-for-cell col row)
-        active-cell (state/get-active-cell)]
+        cell-display (get-cell-display col row)]
     (cond
-      ;; Active (currently playing)
-      (= [col row] active-cell)
+      ;; Active (currently playing) - from subscription
+      (:active? cell-display)
       colors/cell-active
       
-      ;; Selected state (from UI)
+      ;; Selected state (from UI cell-state, not subscription)
       (:selected cell-state)
       colors/cell-selected
       
-      ;; Has preset assigned (from !grid atom)
-      (has-preset? cell-data)
-      (if-let [preset (presets/get-preset (:preset-id cell-data))]
+      ;; Has preset assigned - from subscription
+      (:has-content? cell-display)
+      (if-let [preset (presets/get-preset (:preset-id cell-display))]
         (colors/get-category-color (:category preset))
         colors/cell-assigned)
       
@@ -71,21 +82,22 @@
       colors/cell-empty)))
 
 (defn get-cue-border-type
-  "Get the border type for a cue cell."
+  "Get the border type for a cue cell.
+   Uses subscriptions for content check."
   [cell-state]
   (let [[col row] (:key cell-state)
-        cell-data (get-cue-data-for-cell col row)]
-    (if (has-preset? cell-data)
+        cell-display (get-cell-display col row)]
+    (if (:has-content? cell-display)
       :assigned
       :empty)))
 
 (defn is-cue-active?
   "Check if the cue cell is currently playing.
-   Used for showing the green indicator."
+   Uses subscriptions for active state."
   [cell-state]
   (let [[col row] (:key cell-state)
-        active-cell (state/get-active-cell)]
-    (= [col row] active-cell)))
+        cell-display (get-cell-display col row)]
+    (:active? cell-display)))
 
 ;; ============================================================================
 ;; Drag & Drop

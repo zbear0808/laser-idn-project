@@ -66,26 +66,26 @@
                        [(ss/label "Channel ID:") ""]
                        [channel-field "wrap"]
                        [(ss/label "Status:") ""]
-                       [status-combo "wrap"]])]
+                       [status-combo "wrap"]])
+        result (JOptionPane/showConfirmDialog
+                parent
+                panel
+                title
+                JOptionPane/OK_CANCEL_OPTION
+                JOptionPane/PLAIN_MESSAGE)]
     
-    (let [result (JOptionPane/showConfirmDialog
-                  parent
-                  panel
-                  title
-                  JOptionPane/OK_CANCEL_OPTION
-                  JOptionPane/PLAIN_MESSAGE)]
-      (when (= result JOptionPane/OK_OPTION)
-        (let [id-str (ss/text id-field)
-              id-kw (if (empty? id-str)
-                      (keyword (str "projector-" (System/currentTimeMillis)))
-                      (keyword id-str))]
-          (projectors/make-projector
-           id-kw
-           (ss/text name-field)
-           (ss/text address-field)
-           :port (ss/value port-field)
-           :channel-id (ss/value channel-field)
-           :status (ss/selection status-combo)))))))
+    (when (= result JOptionPane/OK_OPTION)
+      (let [id-str (ss/text id-field)
+            id-kw (if (empty? id-str)
+                    (keyword (str "projector-" (System/currentTimeMillis)))
+                    (keyword id-str))]
+        (projectors/make-projector
+         id-kw
+         (ss/text name-field)
+         (ss/text address-field)
+         :port (ss/value port-field)
+         :channel-id (ss/value channel-field)
+         :status (ss/selection status-combo))))))
 
 ;; ============================================================================
 ;; Main Configuration Panel

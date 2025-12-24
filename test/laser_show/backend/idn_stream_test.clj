@@ -99,17 +99,16 @@
   (testing "Configuration header has correct structure"
     (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
           packet (idn/frame->packet-with-config frame 0 1000 33333)
-          config-offset 8]
+          config-offset 8
+          scwc (get-byte packet config-offset)
+          cfl (get-byte packet (+ config-offset 1))
+          service-id (get-byte packet (+ config-offset 2))
+          service-mode (get-byte packet (+ config-offset 3))] 
       
-      (let [scwc (get-byte packet config-offset)
-            cfl (get-byte packet (+ config-offset 1))
-            service-id (get-byte packet (+ config-offset 2))
-            service-mode (get-byte packet (+ config-offset 3))]
-        
-        (is (pos? scwc) "SCWC should be positive (tags present)")
-        (is (bit-test cfl 0) "Routing flag should be set")
-        (is (= 0 service-id) "Default service ID should be 0")
-        (is (= 0x02 service-mode) "Service mode should be GRAPHIC_DISCRETE"))))
+      (is (pos? scwc) "SCWC should be positive (tags present)")
+      (is (bit-test cfl 0) "Routing flag should be set")
+      (is (= 0 service-id) "Default service ID should be 0")
+      (is (= 0x02 service-mode) "Service mode should be GRAPHIC_DISCRETE")))
   
   (testing "Close flag is set when requested"
     (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])

@@ -85,24 +85,24 @@
                                       [(ss/label "Type:") ""]
                                       [type-combo "wrap"]]) "wrap"]
                             [(ss/scrollable zones-panel 
-                                            :preferred-size [350 :by 200]) "wrap"]])]
+                                            :preferred-size [350 :by 200]) "wrap"]])
+        result (JOptionPane/showConfirmDialog
+                parent
+                main-panel
+                title
+                JOptionPane/OK_CANCEL_OPTION
+                JOptionPane/PLAIN_MESSAGE)]
     
-    (let [result (JOptionPane/showConfirmDialog
-                  parent
-                  main-panel
-                  title
-                  JOptionPane/OK_CANCEL_OPTION
-                  JOptionPane/PLAIN_MESSAGE)]
-      (when (= result JOptionPane/OK_OPTION)
-        (let [id-str (ss/text id-field)
-              id-kw (if (empty? id-str)
-                      (keyword (str "group-" (System/currentTimeMillis)))
-                      (keyword id-str))]
-          (zone-groups/make-zone-group
-           id-kw
-           (ss/text name-field)
-           (get-selected-zone-ids zone-checkboxes)
-           :type (ss/selection type-combo)))))))
+    (when (= result JOptionPane/OK_OPTION)
+      (let [id-str (ss/text id-field)
+            id-kw (if (empty? id-str)
+                    (keyword (str "group-" (System/currentTimeMillis)))
+                    (keyword id-str))]
+        (zone-groups/make-zone-group
+         id-kw
+         (ss/text name-field)
+         (get-selected-zone-ids zone-checkboxes)
+         :type (ss/selection type-combo))))))
 
 ;; ============================================================================
 ;; Main Configuration Panel

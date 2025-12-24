@@ -1,8 +1,10 @@
 (ns laser-show.backend.packet-logger-test
   "Unit tests for IDN packet logging functionality."
-  (:require [clojure.test :refer [deftest testing is use-fixtures]]
-            [clojure.java.io :as io]
-            [laser-show.backend.packet-logger :as plog]))
+  (:require
+   [clojure.java.io :as io]
+   [clojure.string :as str]
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [laser-show.backend.packet-logger :as plog]))
 
 ;; ============================================================================
 ;; Test Fixtures
@@ -114,7 +116,7 @@
           (plog/stop-logging! writer)))
       
       (let [contents (slurp test-log-file)
-            lines (clojure.string/split-lines contents)]
+            lines (str/split-lines contents)]
         (is (= 3 (count lines)))
         (is (.contains (first lines) "PING_REQUEST"))
         (is (.contains (second lines) "RT_CHANNEL_MESSAGE"))

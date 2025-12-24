@@ -9,7 +9,7 @@
       "menuSelections": {
         "cljAliases": ["dev"]
       },
-      "afterCLJReplJackInCode": "(start)"
+      "afterPrimaryReplConnectedCode": "(start)"
     }
   ],
 

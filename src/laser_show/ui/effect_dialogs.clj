@@ -1584,7 +1584,6 @@
 
 (comment
   ;; Test effect dialog
-  (require '[seesaw.core :as ss])
   
   ;; Make sure effects are registered
   (require '[laser-show.animation.effects.shape])

@@ -247,23 +247,47 @@
 
 (def ^:private event-schemas
   "Schema definitions for known events.
-   Each entry is [event-id expected-arg-count validator-fn]."
-  {:grid/select-cell {:args 2 :validator (fn [[col row]] (and (integer? col) (integer? row)))}
+   Each entry is a map with:
+   - :args - expected argument count
+   - :validator - optional function that validates the args (receives args vector)"
+  {;; Grid Events
+   :grid/select-cell {:args 2 :validator (fn [[col row]] (and (integer? col) (integer? row)))}
    :grid/trigger-cell {:args 2 :validator (fn [[col row]] (and (integer? col) (integer? row)))}
    :grid/stop-active {:args 0}
    :grid/clear-cell {:args 2 :validator (fn [[col row]] (and (integer? col) (integer? row)))}
    :grid/set-preset {:args 3 :validator (fn [[col row preset-id]] 
                                           (and (integer? col) (integer? row) (keyword? preset-id)))}
+   :grid/set-selected-preset {:args 1 :validator (fn [[preset-id]] (keyword? preset-id))}
    :grid/move-cell {:args 4 :validator (fn [[fc fr tc tr]] 
                                          (and (integer? fc) (integer? fr) 
                                               (integer? tc) (integer? tr)))}
+   
+   ;; Transport Events
    :transport/stop {:args 0}
    :transport/play-pause {:args 0}
+   
+   ;; Timing Events
    :timing/set-bpm {:args 1 :validator (fn [[bpm]] (number? bpm))}
-   :timing/tap {:args 1 :validator (fn [[ts]] (number? ts))}
+   :timing/tap {:args 0}  ; tap-tempo! takes no args - it uses current time internally
    :timing/clear-taps {:args 0}
+   
+   ;; Playback Events
    :playback/trigger {:args 0}
    :playback/set-trigger-time {:args 1 :validator (fn [[ts]] (number? ts))}
+   
+   ;; Clipboard Events
+   :clipboard/copy-cell {:args 1 :validator (fn [[coords]] (and (vector? coords) (= 2 (count coords))))}
+   :clipboard/copy-selected {:args 0}
+   :clipboard/paste-cell {:args 1 :validator (fn [[coords]] (and (vector? coords) (= 2 (count coords))))}
+   :clipboard/paste-to-selected {:args 0}
+   
+   ;; UI Events
+   :ui/set-component {:args 2 :validator (fn [[key _component]] (keyword? key))}
+   
+   ;; IDN Events
+   :idn/set-connection-status {:args 3 :validator (fn [[connected? _target _engine]] (boolean? connected?))}
+   
+   ;; Logging Events
    :logging/set-enabled {:args 1 :validator (fn [[enabled?]] (boolean? enabled?))}})
 
 (defn validate-event
