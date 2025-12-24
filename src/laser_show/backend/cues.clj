@@ -36,17 +36,17 @@
    - {:type :zones :zone-ids #{:zone-1 :zone-2}} - Multiple zones
    - nil - Uses default zone"
   ([id name preset-id]
-   (make-cue id name preset-id {} nil nil))
+   (make-cue id name preset-id {} router/default-target nil))
   ([id name preset-id params]
-   (make-cue id name preset-id params nil nil))
+   (make-cue id name preset-id params router/default-target nil))
   ([id name preset-id params target]
    (make-cue id name preset-id params target nil))
   ([id name preset-id params target duration]
    {:id id
     :name name
     :preset-id preset-id
-    :params (or params {})
-    :target (or target router/default-target)
+    :params params
+    :target target
     :duration duration
     :created-at (System/currentTimeMillis)}))
 
@@ -339,10 +339,12 @@
 (defn create-cue-from-cell!
   "Create a cue from a grid cell assignment.
    Uses the cell position as part of the cue ID."
-  [col row preset-id & {:keys [name params duration]}]
+  [col row preset-id & {:keys [params duration]
+                        :or {name nil
+                             params {}}}]
   (let [cue-id (keyword (str "cell-" col "-" row))
         cue-name (or name (str "Cell " col "," row))
-        cue (make-cue cue-id cue-name preset-id (or params {}) duration)]
+        cue (make-cue cue-id cue-name preset-id params router/default-target duration)]
     (add-cue! cue)
     cue))
 
@@ -353,8 +355,9 @@
 (defn make-cue-with-effects
   "Create a cue with an effect chain.
    effects should be a vector of effect instances."
-  [id name preset-id effects & {:keys [params target duration]}]
-  (let [base-cue (make-cue id name preset-id (or params {}) target duration)]
+  [id name preset-id effects & {:keys [params target duration]
+                                 :or {params {}}}]
+  (let [base-cue (make-cue id name preset-id params target duration)]
     (assoc base-cue :effect-chain {:effects (vec effects)})))
 
 (defn create-effect-instance

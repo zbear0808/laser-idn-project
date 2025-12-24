@@ -149,19 +149,21 @@
       (map (fn [[k v]]
              (if (and (map? v) (:modulator-config v))
                ;; Reconstruct modulator from config
-               (let [{:keys [type min max freq phase loop-mode duration time-unit]} (:modulator-config v)
-                     lm (or loop-mode :loop)
-                     dur (or duration 1.0)
-                     tu (or time-unit :beats)]
+               (let [{:keys [type min max freq phase loop-mode duration time-unit]
+                      :or {freq 1.0
+                           phase 0.0
+                           loop-mode :loop
+                           duration 1.0
+                           time-unit :beats}} (:modulator-config v)]
                  [k (case type
-                      :sine (mod/sine-mod min max (or freq 1.0) (or phase 0.0) lm dur tu)
-                      :triangle (mod/triangle-mod min max (or freq 1.0) (or phase 0.0) lm dur tu)
-                      :sawtooth (mod/sawtooth-mod min max (or freq 1.0) (or phase 0.0))
-                      :square (mod/square-mod min max (or freq 1.0))
-                      :random (mod/random-mod min max (or freq 1.0))
+                      :sine (mod/sine-mod min max freq phase loop-mode duration time-unit)
+                      :triangle (mod/triangle-mod min max freq phase loop-mode duration time-unit)
+                      :sawtooth (mod/sawtooth-mod min max freq phase)
+                      :square (mod/square-mod min max freq)
+                      :random (mod/random-mod min max freq)
                       :beat-decay (mod/beat-decay max min)
                       ;; Default to sine
-                      (mod/sine-mod min max (or freq 1.0) (or phase 0.0) lm dur tu))])
+                      (mod/sine-mod min max freq phase loop-mode duration time-unit))])
                [k v]))
            params))))
 

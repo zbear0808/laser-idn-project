@@ -251,8 +251,8 @@
          max-v (double max-val)
          per (double period)
          offset (double phase-offset)
-         dur (double (or duration 1.0))
-         tunit (or time-unit :beats)]
+         dur (double duration)
+         tunit time-unit]
      (make-modulator
       (fn [context]
         (let [phase (calculate-modulator-phase context per offset loop-mode dur tunit)]
@@ -287,8 +287,8 @@
          max-v (double max-val)
          per (double period)
          offset (double phase-offset)
-         dur (double (or duration 1.0))
-         tunit (or time-unit :beats)]
+         dur (double duration)
+         tunit time-unit]
      (make-modulator
       (fn [context]
         (let [phase (calculate-modulator-phase context per offset loop-mode dur tunit)]
@@ -971,43 +971,45 @@
    Returns: Modulator function"
   [{:keys [type min max period phase axis speed wave-type cycles
            channel cc path value wrap? loop-mode duration time-unit]
-    :as _config}]
-  (let [min-val (or min 0.0)
-        max-val (or max 1.0)
-        per (or period 1.0)
-        phase-offset (or phase 0.0)
-        lm (or loop-mode :loop)
-        dur (or duration 2.0)
-        tu (or time-unit :beats)]
-    (case type
-      ;; Time-based waveform modulators
-      :sine (sine-mod min-val max-val per phase-offset lm dur tu)
-      :triangle (triangle-mod min-val max-val per phase-offset lm dur tu)
-      :sawtooth (sawtooth-mod min-val max-val per phase-offset)
-      :square (square-mod min-val max-val per)
-      
-      ;; Decay/envelope modulators
-      :beat-decay (beat-decay max-val min-val)
-      :exp-decay (exp-decay max-val min-val)
-      :random (random-mod min-val max-val per)
-      
-      ;; Position-based modulators
-      :pos-x (position-x-mod min-val max-val)
-      :pos-y (position-y-mod min-val max-val)
-      :radial (position-radial-mod min-val max-val)
-      :angle (position-angle-mod min-val max-val)
-      :point-index (point-index-mod min-val max-val (boolean wrap?))
-      :point-wave (point-index-wave min-val max-val (or cycles 1.0) (or wave-type :sine))
-      :pos-wave (position-wave min-val max-val (or axis :x) (period->frequency per) (or wave-type :sine))
-      
-      ;; Animated position modulators
-      :pos-scroll (position-scroll min-val max-val (or axis :x) (or speed 1.0) (or wave-type :sine))
-      :rainbow-hue (rainbow-hue (or axis :x) (or speed 60.0))
-      
-      ;; Control modulators
-      :midi (midi-mod (or channel 1) (or cc 1) min-val max-val)
-      :osc (osc-mod (or path "/control") min-val max-val)
-      :constant (constant (or value min-val))
-      
-      ;; Default fallback to sine
-      (sine-mod min-val max-val per phase-offset))))
+    :or {min 0.0
+         max 1.0
+         period 1.0
+         phase 0.0
+         loop-mode :loop
+         duration 2.0
+         time-unit :beats
+         cycles 1.0
+         speed 1.0}
+    :as config}]
+  (case type
+    ;; Time-based waveform modulators
+    :sine (sine-mod min max period phase loop-mode duration time-unit)
+    :triangle (triangle-mod min max period phase loop-mode duration time-unit)
+    :sawtooth (sawtooth-mod min max period phase)
+    :square (square-mod min max period)
+  
+    ;; Decay/envelope modulators
+    :beat-decay (beat-decay max min)
+    :exp-decay (exp-decay max min)
+    :random (random-mod min max period)
+  
+    ;; Position-based modulators
+    :pos-x (position-x-mod min max)
+    :pos-y (position-y-mod min max)
+    :radial (position-radial-mod min max)
+    :angle (position-angle-mod min max)
+    :point-index (point-index-mod min max (boolean wrap?))
+    :point-wave (point-index-wave min max cycles (get config :wave-type :sine))
+    :pos-wave (position-wave min max (get config :axis :x) (period->frequency period) (get config :wave-type :sine))
+  
+    ;; Animated position modulators
+    :pos-scroll (position-scroll min max (get config :axis :x) speed (get config :wave-type :sine))
+    :rainbow-hue (rainbow-hue (get config :axis :x) speed)
+  
+    ;; Control modulators
+    :midi (midi-mod (get config :channel 1) (get config :cc 1) min max)
+    :osc (osc-mod (get config :path "/control") min max)
+    :constant (constant (or value min))
+  
+    ;; Default fallback to sine
+    (sine-mod min max period phase)))

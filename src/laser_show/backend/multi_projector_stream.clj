@@ -36,10 +36,9 @@
 (defn get-current-time-ms
   "Get current time relative to engine start."
   []
-  (let [start-time (:start-time-ms @!multi-engine-state)]
-    (if start-time
-      (- (System/currentTimeMillis) start-time)
-      0)))
+  (if-let [start-time (:start-time-ms @!multi-engine-state)]
+    (- (System/currentTimeMillis) start-time)
+    0))
 
 ;; ============================================================================
 ;; Frame Provider Integration
@@ -71,7 +70,7 @@
             time-ms (get-current-time-ms)
             bpm (state/get-bpm)
             ;; Apply zone group and zone effects during routing
-            projector-frames (router/prepare-projector-frames-with-effects 
+            projector-frames (router/prepare-projector-frames-with-effects
                               base-frame target time-ms bpm)
             routed-frame (get projector-frames projector-id)]
         ;; Apply projector-level effects (calibration)
@@ -92,9 +91,9 @@
                           base-frame-provider
                           target-provider
                           projector-id)
-                         (create-projector-frame-provider 
-                          base-frame-provider 
-                          target-provider 
+                         (create-projector-frame-provider
+                          base-frame-provider
+                          target-provider
                           projector-id))]
     (engine/create-engine
      (:address projector)
@@ -133,16 +132,16 @@
    
    Returns the multi-engine state."
   [base-frame-provider target-provider & {:keys [fps log-callback use-effects?]
-                                           :or {fps 30 use-effects? true}}]
+                                          :or {fps 30 use-effects? true}}]
   (let [active-projectors (projectors/get-active-projectors)
         engines (into {}
                       (map (fn [proj]
                              [(:id proj)
-                              (create-engine-for-projector 
-                               proj 
-                               base-frame-provider 
+                              (create-engine-for-projector
+                               proj
+                               base-frame-provider
                                target-provider
-                               {:fps fps 
+                               {:fps fps
                                 :log-callback log-callback
                                 :use-effects? use-effects?})])
                            active-projectors))]
@@ -164,7 +163,7 @@
     (doseq [[proj-id _] (:engines @!multi-engine-state)]
       (start-engine-for-projector! proj-id))
     (swap! !multi-engine-state assoc :running? true)
-    (println "Multi-projector streaming started for" 
+    (println "Multi-projector streaming started for"
              (count (:engines @!multi-engine-state)) "projectors")))
 
 (defn stop-multi-engine!
@@ -194,9 +193,9 @@
       (let [base-frame-provider (:frame-provider @!multi-engine-state)
             target-provider (:target-provider @!multi-engine-state)
             log-callback @(:log-callback @!multi-engine-state)
-            new-engine (create-engine-for-projector 
-                        projector 
-                        base-frame-provider 
+            new-engine (create-engine-for-projector
+                        projector
+                        base-frame-provider
                         target-provider
                         {:log-callback log-callback})]
         (swap! !multi-engine-state assoc-in [:engines projector-id] new-engine)

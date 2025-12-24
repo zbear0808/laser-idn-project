@@ -12,7 +12,7 @@
    For integers, only digits and optional leading minus.
    For floats, allows formats like '1.5', '.5', '1.', '-.5', etc."
   [text integer?]
-  (let [trimmed (str/trim (or text ""))]
+  (let [trimmed (str/trim (str text))]
     (when-not (str/blank? trimmed)
       (if integer?
         (re-matches #"-?\d+" trimmed)
@@ -44,10 +44,10 @@
    - :get-value - fn [] returns current value
    - :set-value! - fn [v] sets the value programmatically
    - :set-range! - fn [new-min new-max new-value] updates slider range and value"
-  [{min-opt :min max-opt :max :keys [default integer? on-change decimal-places label-fn slider-steps]}]
+  [{min-opt :min max-opt :max :keys [default integer? on-change decimal-places label-fn slider-steps]
+    :or {decimal-places 3}}]
   (let [;; Determine defaults based on type
         integer? (boolean integer?)
-        decimal-places (or decimal-places 2)
         format-str (str "%." decimal-places "f")
         
         ;; Use atoms for min/max to support dynamic range updates

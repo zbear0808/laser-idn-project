@@ -120,9 +120,9 @@
 
 (defn- create-spinner
   "Create a spinner for numeric parameter editing."
-  [{:keys [min max default step on-change]}]
-  (let [step (or step 0.1)
-        model (SpinnerNumberModel. (double (or default min)) 
+  [{:keys [min max default step on-change]
+    :or {step 0.1}}]
+  (let [model (SpinnerNumberModel. (double (or default min))
                                    (double min) 
                                    (double max) 
                                    (double step))
@@ -294,8 +294,8 @@
         
         panel (case type
                 :float
-                (let [ctrl (slider/create-slider {:min (or min 0.0)
-                                                  :max (or max 1.0)
+                (let [ctrl (slider/create-slider {:min (get param-def :min 0.0)
+                                                  :max (get param-def :max 1.0)
                                                   :default default
                                                   :on-change (fn [_v] 
                                                                ;; Clear modulator when manually changed
@@ -322,9 +322,9 @@
                            [mod-indicator ""]]))
                 
                 :int
-                (let [ctrl (slider/create-slider 
-                            {:min (or min 0)
-                             :max (or max 255)
+                (let [ctrl (slider/create-slider
+                            {:min (get param-def :min 0)
+                             :max (get param-def :max 255)
                              :default default
                              :integer? true
                              :on-change (fn [_v]
@@ -381,7 +381,7 @@
                            [combo ""]]))
                 
                 ;; Default: treat as float
-                (let [ctrl (slider/create-slider {:min 0.0 :max 1.0 :default (or default 0.5)
+                (let [ctrl (slider/create-slider {:min 0.0 :max 1.0 :default (get param-def :default 0.5)
                                                   :on-change (fn [_v]
                                                                (when on-param-change (on-param-change)))})]
                   (reset! control-atom ctrl)
@@ -675,11 +675,13 @@
   [mod-type params]
   (let [{:keys [min-val max-val period phase axis speed wave-type cycles
                 channel cc path value wrap? loop-mode duration time-unit
-                timing-mode period-beats period-seconds phase-beats phase-seconds]} params
-        loop-mode (or loop-mode :loop)
-        duration (or duration 2.0)
-        time-unit (or time-unit :beats)
-        timing-mode (or timing-mode :beats)
+                timing-mode period-beats period-seconds phase-beats phase-seconds]
+         :or {loop-mode :loop
+              duration 2.0
+              time-unit :beats
+              timing-mode :beats
+              period 1.0
+              phase 0.0}} params
         ;; Dual storage values - may be nil if not yet calculated
         period-beats (or period-beats (when (= timing-mode :beats) period))
         period-seconds (or period-seconds (when (= timing-mode :seconds) period))
@@ -687,8 +689,8 @@
         phase-seconds (or phase-seconds (when (= timing-mode :seconds) phase))
         ;; Build time-based config with dual storage
         time-config {:timing-mode timing-mode
-                     :period (or period 1.0)
-                     :phase (or phase 0.0)
+                     :period period
+                     :phase phase
                      :period-beats period-beats
                      :period-seconds period-seconds
                      :phase-beats phase-beats
@@ -716,16 +718,31 @@
       :radial {:type :radial :min min-val :max max-val}
       :angle {:type :angle :min min-val :max max-val}
       :point-index {:type :point-index :min min-val :max max-val :wrap? (boolean wrap?)}
-      :point-wave {:type :point-wave :min min-val :max max-val :cycles (or cycles 1.0) :wave-type (or wave-type :sine)}
-      :pos-wave {:type :pos-wave :min min-val :max max-val :axis (or axis :x) :period (or period 1.0) :wave-type (or wave-type :sine)}
+      :point-wave {:type :point-wave :min min-val :max max-val
+                   :cycles (get params :cycles 1.0)
+                   :wave-type (get params :wave-type :sine)}
+      :pos-wave {:type :pos-wave :min min-val :max max-val
+                 :axis (get params :axis :x)
+                 :period (get params :period 1.0)
+                 :wave-type (get params :wave-type :sine)}
       
       ;; Animated modulators
-      :pos-scroll {:type :pos-scroll :min min-val :max max-val :axis (or axis :x) :speed (or speed 1.0) :wave-type (or wave-type :sine)}
-      :rainbow-hue {:type :rainbow-hue :axis (or axis :x) :speed (or speed 60.0)}
+      :pos-scroll {:type :pos-scroll :min min-val :max max-val
+                   :axis (get params :axis :x)
+                   :speed (get params :speed 1.0)
+                   :wave-type (get params :wave-type :sine)}
+      :rainbow-hue {:type :rainbow-hue
+                    :axis (get params :axis :x)
+                    :speed (get params :speed 60.0)}
       
       ;; Control modulators
-      :midi {:type :midi :channel (or channel 1) :cc (or cc 1) :min min-val :max max-val}
-      :osc {:type :osc :path (or path "/control") :min min-val :max max-val}
+      :midi {:type :midi
+             :channel (get params :channel 1)
+             :cc (get params :cc 1)
+             :min min-val :max max-val}
+      :osc {:type :osc
+            :path (get params :path "/control")
+            :min min-val :max max-val}
       :constant {:type :constant :value (or value min-val)}
       
       ;; Default to sine
