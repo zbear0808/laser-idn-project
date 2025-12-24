@@ -36,9 +36,9 @@
             [laser-show.ui.common :as ui-common]
             [laser-show.ui.drag-drop :as dnd]
             [laser-show.ui.components.slider :as slider])
-  (:import [java.awt Color Font Cursor]
-           [java.awt.event KeyEvent InputEvent]
-           [javax.swing JDialog JPanel JPopupMenu JMenuItem DefaultListModel ListSelectionModel BorderFactory KeyStroke AbstractAction]))
+  (:import [java.awt Color Font Cursor KeyboardFocusManager KeyEventDispatcher]
+           [java.awt.event KeyEvent InputEvent WindowAdapter]
+           [javax.swing JDialog JPanel JPopupMenu JMenuItem DefaultListModel ListSelectionModel BorderFactory KeyStroke AbstractAction SwingUtilities]))
 
 ;; ============================================================================
 ;; Effect Categories
@@ -57,8 +57,20 @@
 
 (defn- create-effect-list-item
   "Create a panel representing one effect in the chain.
-   Supports drag-drop reordering via the provided callbacks."
-  [idx effect selected? on-select on-delete on-reorder on-copy on-paste]
+   Supports drag-drop reordering via the provided callbacks.
+   
+   Parameters:
+   - idx: Index of this effect in the chain
+   - effect: The effect data
+   - selected?: Whether this item is currently selected
+   - on-click: (fn [idx ctrl? shift?]) - click handler with modifier info
+   - on-delete: (fn [idx]) - delete this single effect
+   - on-delete-selected: (fn []) - delete all selected effects
+   - on-reorder: (fn [from-idx to-idx]) - reorder via drag-drop
+   - on-copy: (fn []) - copy action
+   - on-paste: (fn []) - paste action
+   - selected-count: Number of currently selected items (for context menu)"
+  [idx effect selected? on-click on-delete on-delete-selected on-reorder on-copy on-paste selected-count]
   (let [effect-def (fx/get-effect (:effect-id effect))
         effect-name (or (:name effect-def) (name (:effect-id effect)))
         category (or (:category effect-def) :shape)
@@ -108,14 +120,23 @@
       (reify java.awt.event.MouseListener
         (mouseClicked [_ e] 
           (when (= (.getButton e) java.awt.event.MouseEvent/BUTTON1)
-            (on-select idx)))
+            (let [ctrl? (.isControlDown e)
+                  shift? (.isShiftDown e)]
+              (on-click idx ctrl? shift?))))
         (mousePressed [_ e]
           ;; Right-click shows context menu
           (when (= (.getButton e) java.awt.event.MouseEvent/BUTTON3)
-            ;; Note: Don't call on-select here - it rebuilds the list and removes this panel
+            ;; Note: Don't call on-click here - it rebuilds the list and removes this panel
             ;; from the hierarchy before the popup can display
-            (let [popup (JPopupMenu.)]
-              (.add popup (doto (JMenuItem. "Copy Effect")
+            (let [popup (JPopupMenu.)
+                  multi? (> selected-count 1)
+                  copy-label (if multi? 
+                               (str "Copy " selected-count " Effects")
+                               "Copy Effect")
+                  delete-label (if (and multi? selected?)
+                                 (str "Delete " selected-count " Effects")
+                                 "Delete")]
+              (.add popup (doto (JMenuItem. copy-label)
                             (.addActionListener 
                               (reify java.awt.event.ActionListener
                                 (actionPerformed [_ _] (on-copy))))))
@@ -125,10 +146,13 @@
                                 (actionPerformed [_ _] (on-paste))))
                             (.setEnabled (clipboard/can-paste-effects?))))
               (.addSeparator popup)
-              (.add popup (doto (JMenuItem. "Delete")
+              (.add popup (doto (JMenuItem. delete-label)
                             (.addActionListener
                               (reify java.awt.event.ActionListener
-                                (actionPerformed [_ _] (on-delete idx))))))
+                                (actionPerformed [_ _] 
+                                  (if (and multi? selected?)
+                                    (on-delete-selected)
+                                    (on-delete idx)))))))
               (.show popup panel (.getX e) (.getY e)))))
         (mouseReleased [_ _])
         (mouseEntered [_ _] 
@@ -391,7 +415,9 @@
                          true)
         
         ;; UI-local state (selection within dialog, not app state)
-        !selected-idx (atom nil)
+        ;; Multi-select: track set of selected indices and last-clicked for shift-select
+        !selected-indices (atom (sorted-set))
+        !last-clicked-idx (atom nil)
         
         ;; Forward reference atoms for recursive rebuild
         !rebuild-all (atom nil)
@@ -413,58 +439,117 @@
         ;; Rebuild params panel for selected effect
         rebuild-params! (fn []
                           (.removeAll params-panel-container)
-                          (if-let [idx @!selected-idx]
-                            (let [cell (state/get-effect-cell col row)
-                                  effect (get-in cell [:effects idx])
-                                  effect-def (when effect (fx/get-effect (:effect-id effect)))]
-                              (if effect-def
-                                (let [pp (create-params-panel effect-def effect col row idx)]
-                                  (.add params-panel-container (:panel pp) java.awt.BorderLayout/CENTER))
-                                (.add params-panel-container 
-                                      (ss/label :text "Select an effect" 
-                                                :foreground colors/text-secondary)
-                                      java.awt.BorderLayout/CENTER)))
-                            (.add params-panel-container 
-                                  (ss/label :text "Select an effect to edit parameters" 
-                                            :foreground colors/text-secondary
-                                            :halign :center)
-                                  java.awt.BorderLayout/CENTER))
+                          (let [selected @!selected-indices
+                                count (count selected)]
+                            (cond
+                              ;; No selection
+                              (zero? count)
+                              (.add params-panel-container 
+                                    (ss/label :text "Select an effect to edit parameters" 
+                                              :foreground colors/text-secondary
+                                              :halign :center)
+                                    java.awt.BorderLayout/CENTER)
+                              
+                              ;; Single selection - show params
+                              (= 1 count)
+                              (let [idx (first selected)
+                                    cell (state/get-effect-cell col row)
+                                    effect (get-in cell [:effects idx])
+                                    effect-def (when effect (fx/get-effect (:effect-id effect)))]
+                                (if effect-def
+                                  (let [pp (create-params-panel effect-def effect col row idx)]
+                                    (.add params-panel-container (:panel pp) java.awt.BorderLayout/CENTER))
+                                  (.add params-panel-container 
+                                        (ss/label :text "Select an effect" 
+                                                  :foreground colors/text-secondary)
+                                        java.awt.BorderLayout/CENTER)))
+                              
+                              ;; Multi selection - show message
+                              :else
+                              (.add params-panel-container 
+                                    (ss/label :text (str count " effects selected - use Copy/Delete") 
+                                              :foreground colors/text-secondary
+                                              :halign :center)
+                                    java.awt.BorderLayout/CENTER)))
                           (.revalidate params-panel-container)
                           (.repaint params-panel-container))
+        
+        ;; Delete selected effects (in descending order to avoid index shift issues)
+        delete-selected! (fn []
+                           (let [indices (sort > @!selected-indices)]
+                             (doseq [idx indices]
+                               (state/remove-effect-from-cell! col row idx))
+                             (reset! !selected-indices (sorted-set))
+                             (reset! !last-clicked-idx nil)
+                             (when-let [f @!rebuild-all] (f))))
         
         ;; Rebuild chain list
         rebuild-chain-list! (fn []
                               (.removeAll chain-list-panel)
                               (let [cell (state/get-effect-cell col row)
                                     effects (:effects cell)
-                                    selected @!selected-idx]
+                                    selected @!selected-indices
+                                    selected-count (count selected)]
                                 (if (seq effects)
                                   (doseq [[idx effect] (map-indexed vector effects)]
                                     (let [item (create-effect-list-item
                                                 idx effect
-                                                (= idx selected)
-                                                ;; On select
-                                                (fn [i]
-                                                  (reset! !selected-idx i)
+                                                (contains? selected idx)
+                                                ;; On click (with ctrl/shift info)
+                                                (fn [i ctrl? shift?]
+                                                  (let [effect-count (count effects)]
+                                                    (cond
+                                                      ;; Shift+click: range select from last-clicked
+                                                      shift?
+                                                      (if-let [last-idx @!last-clicked-idx]
+                                                        (let [start (min last-idx i)
+                                                              end (max last-idx i)
+                                                              range-indices (set (range start (inc end)))]
+                                                          (reset! !selected-indices (apply sorted-set range-indices)))
+                                                        ;; No prior click, just select this one
+                                                        (do
+                                                          (reset! !selected-indices (sorted-set i))
+                                                          (reset! !last-clicked-idx i)))
+                                                      
+                                                      ;; Ctrl+click: toggle this item
+                                                      ctrl?
+                                                      (do
+                                                        (if (contains? @!selected-indices i)
+                                                          (swap! !selected-indices disj i)
+                                                          (swap! !selected-indices conj i))
+                                                        (reset! !last-clicked-idx i))
+                                                      
+                                                      ;; Normal click: select only this item
+                                                      :else
+                                                      (do
+                                                        (reset! !selected-indices (sorted-set i))
+                                                        (reset! !last-clicked-idx i))))
                                                   (when-let [f @!rebuild-all] (f)))
-                                                ;; On delete
+                                                ;; On delete single
                                                 (fn [i]
                                                   (state/remove-effect-from-cell! col row i)
-                                                  (let [new-count (state/get-effect-count col row)]
-                                                    (when (and @!selected-idx (>= @!selected-idx new-count))
-                                                      (reset! !selected-idx (when (pos? new-count) (dec new-count)))))
+                                                  ;; Adjust selected indices after deletion
+                                                  (let [new-selected (->> @!selected-indices
+                                                                          (remove #(= % i))
+                                                                          (map #(if (> % i) (dec %) %))
+                                                                          (apply sorted-set))]
+                                                    (reset! !selected-indices new-selected))
                                                   (when-let [f @!rebuild-all] (f)))
+                                                ;; On delete selected
+                                                delete-selected!
                                                 ;; On reorder (drag-drop)
                                                 (fn [from-idx to-idx]
                                                   (state/reorder-effects-in-cell! col row from-idx to-idx)
-                                                  ;; Update selection to follow the moved item
-                                                  (when (= @!selected-idx from-idx)
-                                                    (reset! !selected-idx to-idx))
+                                                  ;; Clear multi-selection on reorder (too complex to maintain)
+                                                  (reset! !selected-indices (sorted-set to-idx))
+                                                  (reset! !last-clicked-idx to-idx)
                                                   (when-let [f @!rebuild-all] (f)))
                                                 ;; On copy
                                                 (fn [] (when-let [f @!do-copy] (f)))
                                                 ;; On paste  
-                                                (fn [] (when-let [f @!do-paste] (f))))]
+                                                (fn [] (when-let [f @!do-paste] (f)))
+                                                ;; Selected count
+                                                selected-count)]
                                       (.add chain-list-panel item)))
                                   (.add chain-list-panel 
                                         (ss/label :text "No effects yet" 
@@ -484,8 +569,11 @@
                         (let [default-params (fx/get-default-params effect-id)]
                           (state/add-effect-to-cell! col row {:effect-id effect-id
                                                               :params default-params})
-                          (let [new-count (state/get-effect-count col row)]
-                            (reset! !selected-idx (dec new-count)))
+                          ;; Select only the newly added effect
+                          (let [new-count (state/get-effect-count col row)
+                                new-idx (dec new-count)]
+                            (reset! !selected-indices (sorted-set new-idx))
+                            (reset! !last-clicked-idx new-idx))
                           (rebuild-all!)))
         
         picker (create-effect-picker on-add-effect)
@@ -500,24 +588,37 @@
         _ (reset! !do-copy
             (fn []
               (let [cell (state/get-effect-cell col row)
-                    effects (:effects cell)]
-                (if-let [idx @!selected-idx]
-                  ;; Copy single selected effect
-                  (when-let [effect (get effects idx)]
-                    (clipboard/copy-effect! effect))
-                  ;; Copy entire chain if no selection
+                    effects (:effects cell)
+                    selected @!selected-indices
+                    count (count selected)]
+                (cond
+                  ;; No selection - copy entire chain
+                  (zero? count)
                   (when (seq effects)
-                    (clipboard/copy-effect-chain! cell))))))
+                    (clipboard/copy-effect-chain! cell))
+                  
+                  ;; Single selection - copy as single effect
+                  (= 1 count)
+                  (when-let [effect (get effects (first selected))]
+                    (clipboard/copy-effect! effect))
+                  
+                  ;; Multi selection - copy selected effects as chain
+                  :else
+                  (let [selected-effects (mapv #(get effects %) (sort selected))]
+                    (clipboard/copy-effect-chain! {:effects selected-effects :active true}))))))
         
         _ (reset! !do-paste
             (fn []
               (when-let [effects-to-add (clipboard/get-effects-to-paste)]
-                ;; Add each effect to the chain
-                (doseq [effect effects-to-add]
-                  (state/add-effect-to-cell! col row effect))
-                ;; Select the last added effect
-                (let [new-count (state/get-effect-count col row)]
-                  (reset! !selected-idx (dec new-count)))
+                (let [start-idx (state/get-effect-count col row)]
+                  ;; Add each effect to the chain
+                  (doseq [effect effects-to-add]
+                    (state/add-effect-to-cell! col row effect))
+                  ;; Select only the pasted effects
+                  (let [new-count (state/get-effect-count col row)
+                        pasted-indices (range start-idx new-count)]
+                    (reset! !selected-indices (apply sorted-set pasted-indices))
+                    (reset! !last-clicked-idx (dec new-count))))
                 (rebuild-all!))))
         
         do-copy! (fn [] (@!do-copy))
@@ -535,11 +636,11 @@
         
         ;; === LEFT PANEL: Effect Chain List ===
         left-panel (mig/mig-panel
-                    :constraints ["insets 5, wrap 1", "[180!, fill]", "[grow][]"]
+                    :constraints ["insets 5, wrap 1", "[180!, fill]", "[][grow][]"]
                     :items [[(ss/label :text "Effect Chain"
                                        :font (Font. "SansSerif" Font/BOLD 14)
-                                       :foreground colors/text-primary) ""]
-                            [(ss/scrollable chain-list-panel :border nil) "grow, h 200::"]
+                                       :foreground colors/text-primary) "aligny top"]
+                            [(ss/scrollable chain-list-panel :border nil) "grow"]
                             [(ss/horizontal-panel 
                                :items [copy-btn paste-btn]
                                :background colors/background-dark) "right"]]
@@ -574,23 +675,59 @@
     ;; - Chain list rebuilds are triggered by add/remove/select callbacks above
     ;; - Adding an atom watch here would cause slider reset loops
     
-    ;; Keyboard shortcuts for copy/paste - use dialog's root pane
-    (let [root-pane (.getRootPane dialog)
-          input-map (.getInputMap root-pane javax.swing.JComponent/WHEN_IN_FOCUSED_WINDOW)
-          action-map (.getActionMap root-pane)
+    ;; Keyboard shortcuts using KeyEventDispatcher for global interception
+    ;; This catches Ctrl+C/V before text fields can consume them
+    (let [focus-manager (KeyboardFocusManager/getCurrentKeyboardFocusManager)
           
-          ctrl-c (KeyStroke/getKeyStroke KeyEvent/VK_C InputEvent/CTRL_DOWN_MASK)
-          ctrl-v (KeyStroke/getKeyStroke KeyEvent/VK_V InputEvent/CTRL_DOWN_MASK)]
+          key-dispatcher (reify KeyEventDispatcher
+                           (dispatchKeyEvent [_ e]
+                             ;; Only handle KEY_PRESSED events and only if our dialog is the focused window
+                             (if (and (= (.getID e) KeyEvent/KEY_PRESSED)
+                                      (= (SwingUtilities/getWindowAncestor (.getComponent e)) dialog))
+                               (cond
+                                 ;; Ctrl+C - Copy
+                                 (and (.isControlDown e) (= (.getKeyCode e) KeyEvent/VK_C))
+                                 (do
+                                   (println "[DEBUG] COPY (Ctrl+C) intercepted")
+                                   (do-copy!)
+                                   true)
+                                 
+                                 ;; Ctrl+X - Cut (copy then delete)
+                                 (and (.isControlDown e) (= (.getKeyCode e) KeyEvent/VK_X))
+                                 (do
+                                   (println "[DEBUG] CUT (Ctrl+X) intercepted")
+                                   (when (seq @!selected-indices)
+                                     (do-copy!)
+                                     (delete-selected!))
+                                   true)
+                                 
+                                 ;; Ctrl+V - Paste
+                                 (and (.isControlDown e) (= (.getKeyCode e) KeyEvent/VK_V))
+                                 (do
+                                   (println "[DEBUG] PASTE (Ctrl+V) intercepted")
+                                   (do-paste!)
+                                   true)
+                                 
+                                 ;; Delete - delete selected
+                                 (= (.getKeyCode e) KeyEvent/VK_DELETE)
+                                 (do
+                                   (println "[DEBUG] DELETE intercepted")
+                                   (when (seq @!selected-indices)
+                                     (delete-selected!))
+                                   true)
+                                 
+                                 :else false)
+                               false)))]
       
-      (.put input-map ctrl-c "copy-effect")
-      (.put action-map "copy-effect"
-            (proxy [AbstractAction] []
-              (actionPerformed [_] (do-copy!))))
+      ;; Add the dispatcher
+      (.addKeyEventDispatcher focus-manager key-dispatcher)
       
-      (.put input-map ctrl-v "paste-effect")
-      (.put action-map "paste-effect"
-            (proxy [AbstractAction] []
-              (actionPerformed [_] (do-paste!)))))
+      ;; Remove dispatcher when dialog closes to prevent memory leaks
+      (.addWindowListener dialog
+        (proxy [WindowAdapter] []
+          (windowClosed [_]
+            (println "[DEBUG] Dialog closed, removing key dispatcher")
+            (.removeKeyEventDispatcher focus-manager key-dispatcher)))))
     
     (.setContentPane dialog main-panel)
     (.setSize dialog 650 500)

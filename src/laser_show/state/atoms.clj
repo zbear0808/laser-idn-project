@@ -94,7 +94,7 @@
    - :selected-cell - [col row] of currently selected cell, or nil
    - :size - [cols rows] dimensions of the grid"
   {:cells {[0 0] {:preset-id :circle}
-           [1 0] {:preset-id :spinning-square}
+           [1 0] {:preset-id :square}
            [2 0] {:preset-id :triangle}
            [3 0] {:preset-id :star}
            [4 0] {:preset-id :spiral}
