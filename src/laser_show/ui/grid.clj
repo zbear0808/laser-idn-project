@@ -1,298 +1,252 @@
 (ns laser-show.ui.grid
   "Launchpad-style grid UI for triggering laser animations.
-   Refactored to use Uni-directional Data Flow."
+   Refactored to use base-grid for shared UI infrastructure.
+   
+   Usage:
+   (create-grid-panel dispatch! :cols 5 :rows 4)"
   (:require [seesaw.core :as ss]
-            [seesaw.border :as border]
             [seesaw.mig :as mig]
             [laser-show.animation.presets :as presets]
+            [laser-show.ui.base-grid :as base-grid]
             [laser-show.ui.colors :as colors]
+            [laser-show.ui.drag-drop :as dnd]
             [laser-show.ui.layout :as layout]
-            [laser-show.ui.drag-drop :as dnd])
-  (:import [java.awt Color Dimension Font BasicStroke Graphics2D RenderingHints BorderLayout]
-           [java.awt.event MouseAdapter MouseEvent KeyEvent InputEvent ActionEvent]
-           [javax.swing BorderFactory JPanel JPopupMenu JMenuItem KeyStroke AbstractAction JLabel]
-           [javax.swing.border Border]))
+            [laser-show.state.atoms :as state]
+            [laser-show.state.clipboard :as clipboard])
+  (:import [java.awt Color Font]
+           [javax.swing JPopupMenu]))
 
 ;; ============================================================================
-;; Custom Empty Cell Border (No changes, helper)
+;; Cue Data Helpers
 ;; ============================================================================
 
-(defn create-dashed-border
-  "Create a dashed border for empty cells."
-  [color thickness]
-  (proxy [Border] []
-    (getBorderInsets [_c]
-      (java.awt.Insets. thickness thickness thickness thickness))
-    (isBorderOpaque []
-      false)
-    (paintBorder [_c g x y width height]
-      (let [g2d ^Graphics2D (.create g)]
-        (.setRenderingHint g2d RenderingHints/KEY_ANTIALIASING RenderingHints/VALUE_ANTIALIAS_ON)
-        (.setColor g2d color)
-        (.setStroke g2d (BasicStroke. (float thickness) 
-                                       BasicStroke/CAP_BUTT 
-                                       BasicStroke/JOIN_MITER 
-                                       10.0 
-                                       (float-array [4.0 4.0]) 
-                                       0.0))
-        (.drawRect g2d x y (dec width) (dec height))
-        (.dispose g2d)))))
+(defn- get-cue-data-for-cell
+  "Get cue data for a cell from !grid atom."
+  [col row]
+  (state/get-cell col row))
+
+(defn has-preset?
+  "Check if cell has a preset assigned."
+  [cell-data]
+  (boolean (:preset-id cell-data)))
+
+;; ============================================================================
+;; Cell Rendering - reads from !grid atom
+;; ============================================================================
+
+(defn render-cue-content
+  "Render the display text for a cue cell."
+  [cell-state]
+  (let [[col row] (:key cell-state)
+        cell-data (get-cue-data-for-cell col row)]
+    (if-let [preset-id (:preset-id cell-data)]
+      (if-let [preset (presets/get-preset preset-id)]
+        (:name preset)
+        (name preset-id))
+      "")))
+
+(defn get-cue-background
+  "Get the background color for a cue cell."
+  [cell-state]
+  (let [[col row] (:key cell-state)
+        cell-data (get-cue-data-for-cell col row)
+        active-cell (state/get-active-cell)]
+    (cond
+      ;; Active (currently playing)
+      (= [col row] active-cell)
+      colors/cell-active
+      
+      ;; Selected state (from UI)
+      (:selected cell-state)
+      colors/cell-selected
+      
+      ;; Has preset assigned (from !grid atom)
+      (has-preset? cell-data)
+      (if-let [preset (presets/get-preset (:preset-id cell-data))]
+        (colors/get-category-color (:category preset))
+        colors/cell-assigned)
+      
+      ;; Empty cell
+      :else
+      colors/cell-empty)))
+
+(defn get-cue-border-type
+  "Get the border type for a cue cell."
+  [cell-state]
+  (let [[col row] (:key cell-state)
+        cell-data (get-cue-data-for-cell col row)]
+    (if (has-preset? cell-data)
+      :assigned
+      :empty)))
+
+(defn is-cue-active?
+  "Check if the cue cell is currently playing.
+   Used for showing the green indicator."
+  [cell-state]
+  (let [[col row] (:key cell-state)
+        active-cell (state/get-active-cell)]
+    (= [col row] active-cell)))
+
+;; ============================================================================
+;; Drag & Drop
+;; ============================================================================
+
+(defn get-cue-drag-data
+  "Get drag data for a cue cell."
+  [cell-state]
+  (let [[col row] (:key cell-state)
+        cell-data (get-cue-data-for-cell col row)]
+    (when (has-preset? cell-data)
+      {:type :cue-cell
+       :source-id :main-grid
+       :cell-key [col row]
+       :data cell-data})))
+
+(defn accept-cue-drop?
+  "Check if a drop should be accepted for a cue cell."
+  [cell-key transfer-data]
+  (and transfer-data
+       (= (:type transfer-data) :cue-cell)
+       (not= (:cell-key transfer-data) cell-key)))
 
 ;; ============================================================================
 ;; Context Menu
 ;; ============================================================================
 
-(defn create-cell-context-menu
-  "Create a context menu for a grid cell."
-  [cell-key cell-data dispatch!]
-  (let [popup (JPopupMenu.)
-        has-preset? (boolean (:preset-id cell-data))
-        ;; Simple placeholders for copy/paste dispatch
-        
-        copy-item (JMenuItem. "Copy")
-        paste-item (JMenuItem. "Paste")
-        clear-item (JMenuItem. "Clear")]
+(defn create-cue-context-menu
+  "Create context menu for a cue cell."
+  [cell-key dispatch!]
+  (let [[col row] cell-key
+        cell-data (get-cue-data-for-cell col row)
+        has-preset? (has-preset? cell-data)
+        can-paste? (clipboard/can-paste-cell-assignment?)
+        popup (JPopupMenu.)]
     
-    (.setEnabled copy-item has-preset?)
-    (.setEnabled paste-item true) ;; Assume always can paste for now
-    (.setEnabled clear-item has-preset?)
-    
-    (.addActionListener copy-item
-      (reify java.awt.event.ActionListener
-        (actionPerformed [_ _e]
-          ;; Dispatch copy event
-          (dispatch! [:clipboard/copy-cell cell-key]))))
-    
-    (.addActionListener paste-item
-      (reify java.awt.event.ActionListener
-        (actionPerformed [_ _e]
-          (dispatch! [:clipboard/paste-cell cell-key]))))
-    
-    (.addActionListener clear-item
-      (reify java.awt.event.ActionListener
-        (actionPerformed [_ _e]
-          (dispatch! [:grid/clear-cell (first cell-key) (second cell-key)]))))
-    
-    (.add popup copy-item)
-    (.add popup paste-item)
-    (.addSeparator popup)
-    (.add popup clear-item)
+    (if has-preset?
+      ;; Menu for assigned cell
+      (do
+        (.add popup (base-grid/create-menu-item 
+                     "Copy"
+                     (fn [] (dispatch! [:clipboard/copy-cell cell-key]))))
+        (.add popup (base-grid/create-menu-item 
+                     "Paste"
+                     (fn [] (dispatch! [:clipboard/paste-cell cell-key]))
+                     :enabled? can-paste?))
+        (.addSeparator popup)
+        (.add popup (base-grid/create-menu-item 
+                     "Clear"
+                     (fn [] (dispatch! [:grid/clear-cell col row])))))
+      
+      ;; Menu for empty cell
+      (.add popup (base-grid/create-menu-item 
+                   "Paste"
+                   (fn [] (dispatch! [:clipboard/paste-cell cell-key]))
+                   :enabled? can-paste?)))
     
     popup))
 
 ;; ============================================================================
-;; Cell Component
-;; ============================================================================
-
-(defn- create-cell-label
-  [text]
-  (ss/label :text (or text "")
-            :font (Font. "SansSerif" Font/BOLD 11)
-            :foreground Color/WHITE
-            :halign :center
-            :valign :center))
-
-(defn- create-active-indicator
-  "Create a small green circle indicator for active state."
-  []
-  (let [indicator-size 10
-        indicator (proxy [JPanel] []
-                    (paintComponent [^Graphics2D g]
-                      (proxy-super paintComponent g)
-                      (.setRenderingHint g RenderingHints/KEY_ANTIALIASING RenderingHints/VALUE_ANTIALIAS_ON)
-                      (.setColor g (Color. 0 200 100))  ;; Bright green
-                      (.fillOval g 2 2 (- indicator-size 4) (- indicator-size 4))))]
-    (.setOpaque indicator false)
-    (.setPreferredSize indicator (Dimension. indicator-size indicator-size))
-    (.setVisible indicator false)
-    indicator))
-
-(defn- create-cell-panel
-  "Create a single grid cell panel.
-   Interactions now dispatch events."
-  [col row dispatch!]
-  (let [cell-key [col row]
-        name-label (create-cell-label "")
-        
-        empty-border (create-dashed-border colors/border-light layout/cell-border-width)
-        assigned-border (BorderFactory/createLineBorder colors/border-dark layout/cell-border-width)
-        hover-border (BorderFactory/createLineBorder colors/border-highlight layout/cell-border-hover-width)
-        
-        ;; Active indicator (green circle in top-right corner)
-        active-indicator (create-active-indicator)
-        
-        ;; Top panel for indicator positioning
-        top-panel (doto (JPanel. (BorderLayout.))
-                    (.setOpaque false)
-                    (.add active-indicator BorderLayout/EAST))
-        
-        panel (ss/border-panel
-               :north top-panel
-               :center name-label
-               :background colors/cell-empty
-               :border empty-border)
-        
-        ;; Mutable state for UI interactions (hover) - not app state
-        !ui-state (atom {:hover false})
-        !last-render-state (atom nil)] ; Cache to avoid unnecessary Swing updates
-    
-    (.setPreferredSize panel (Dimension. 80 60))
-    (.setMinimumSize panel (Dimension. 60 50))
-    
-    ;; Mouse listeners
-    (.addMouseListener panel
-      (proxy [MouseAdapter] []
-        (mouseClicked [^MouseEvent e]
-          (cond
-            (= (.getButton e) MouseEvent/BUTTON3)
-            (let [popup (create-cell-context-menu 
-                         cell-key 
-                         (:data @!last-render-state) ;; Use last rendered data
-                         dispatch!)]
-              (.show popup panel (.getX e) (.getY e)))
-            
-            :else
-            (do
-              ;; Dispatch selection AND trigger
-              (dispatch! [:grid/select-cell col row])
-              (dispatch! [:grid/trigger-cell col row]))))
-        
-        (mouseEntered [^MouseEvent _e]
-          (swap! !ui-state assoc :hover true)
-          (.setBorder panel hover-border))
-        
-        (mouseExited [^MouseEvent _e]
-          (swap! !ui-state assoc :hover false)
-          ;; Restore border based on assigned state only
-          (let [{:keys [preset-id]} (:data @!last-render-state)]
-             (.setBorder panel (if preset-id assigned-border empty-border))))))
-    
-    ;; Drag and Drop - Enable dragging cells with simple ghost image
-    (dnd/make-cell-draggable! panel
-      {:cell-key cell-key
-       :get-data-fn (fn [] (:data @!last-render-state))
-       :data-type :cue-cell
-       :source-id :main-grid
-       :ghost-color colors/cell-assigned})
-    
-    ;; Make cell a drop target
-    (dnd/make-cell-drop-target! panel
-      {:cell-key cell-key
-       :accept-types #{:cue-cell}
-       :source-id :main-grid
-       :on-drop-fn (fn [source-key _data]
-                     (when source-key
-                       (dispatch! [:grid/move-cell 
-                                   (first source-key) (second source-key)
-                                   col row]))
-                     true)
-       :default-border empty-border})
-    
-    {:panel panel
-     :key cell-key
-     
-     ;; Update Function: Called when global state changes
-     :update-view! 
-     (fn [grid-state active-cell selected-cell]
-       (let [cell-data (get-in grid-state [:cells cell-key])
-             preset-id (:preset-id cell-data)
-             active?   (= active-cell cell-key)
-             selected? (= selected-cell cell-key)
-             
-             new-render-state {:data cell-data 
-                               :active active? 
-                               :selected selected?}]
-         
-         (when (not= new-render-state @!last-render-state)
-           (reset! !last-render-state new-render-state)
-           
-           (let [bg-color (cond
-                            active? colors/cell-active
-                            selected? colors/cell-selected
-                            preset-id (if-let [preset (presets/get-preset preset-id)]
-                                        (colors/get-category-color (:category preset))
-                                        colors/cell-assigned)
-                            :else colors/cell-empty)
-                 border (if preset-id assigned-border empty-border)]
-             
-             ;; Show/hide active indicator (green circle)
-             (.setVisible active-indicator active?)
-             
-             (ss/config! panel :background bg-color)
-             (when-not (:hover @!ui-state)
-               (ss/config! panel :border border))
-             (ss/config! name-label :text (if preset-id
-                                            (:name (presets/get-preset preset-id))
-                                            ""))))))}))
-
-;; ============================================================================
-;; Grid Panel
+;; Cue Grid Component
 ;; ============================================================================
 
 (defn create-grid-panel
-  "Create the main grid panel.
+  "Create the main cue grid panel.
    
-   arguments:
-   - dispatch!: function (fn [event-vector])
-   - cols, rows (optional)
+   Uses base-grid for shared UI infrastructure.
+   Cue data is stored in !grid atom.
    
-   returns map:
-   {:panel seesaw-panel
-    :update-view! (fn [app-state] ...)}"
+   Parameters:
+   - dispatch!: Function (fn [event-vector]) to dispatch events
+   - :cols - number of columns (default from layout config)
+   - :rows - number of rows (default from layout config)
+   
+   Returns a map with:
+   - :panel - the JPanel
+   - :update-view! - (fn [app-state]) to refresh UI from state"
   [dispatch! & {:keys [cols rows]
                 :or {cols layout/default-grid-cols
                      rows layout/default-grid-rows}}]
-  (let [;; We still store refernece to cells to update them
-        !cell-components (atom {}) 
+  
+  (let [;; Reference to base-grid component for UI updates
+        !base-grid-ref (atom nil)
         
-        layout-str (str "wrap " cols ", gap " layout/cell-gap ", insets " layout/panel-insets)
-        grid-panel (mig/mig-panel
-                    :constraints [layout-str]
-                    :background colors/background-dark)]
+        ;; Cell callbacks for base-grid
+        cell-callbacks
+        {:render-content render-cue-content
+         
+         :get-background get-cue-background
+         
+         :get-border-type get-cue-border-type
+         
+         :is-active? is-cue-active?
+         
+         ;; Click selects AND triggers the cell
+         :on-click (fn [cell-key _ui-state]
+                     (let [[col row] cell-key]
+                       (dispatch! [:grid/select-cell col row])
+                       (dispatch! [:grid/trigger-cell col row])))
+         
+         ;; Right-click shows context menu
+         :on-right-click (fn [cell-key _ui-state panel event]
+                           (let [menu (create-cue-context-menu cell-key dispatch!)]
+                             (base-grid/show-context-menu! menu panel event)))
+         
+         ;; Drag & drop
+         :get-drag-data get-cue-drag-data
+         
+         :accept-drop? accept-cue-drop?
+         
+         :on-drop (fn [cell-key transfer-data]
+                    (let [source-key (:cell-key transfer-data)
+                          [to-col to-row] cell-key
+                          [from-col from-row] source-key]
+                      ;; Move cell via dispatch
+                      (dispatch! [:grid/move-cell from-col from-row to-col to-row])
+                      true))
+         
+         :create-ghost (fn [panel cell-state]
+                         (let [[col row] (:key cell-state)
+                               cell-data (get-cue-data-for-cell col row)
+                               preset-id (:preset-id cell-data)
+                               preset (presets/get-preset preset-id)
+                               category (or (:category preset) :geometric)
+                               color (colors/get-category-color category)
+                               preset-name (or (:name preset) (name preset-id))]
+                           (dnd/create-simple-ghost-image
+                            (.getWidth panel) (.getHeight panel)
+                            color
+                            :opacity 0.7
+                            :text preset-name)))
+         
+         ;; Copy/paste via dispatch
+         :on-copy (fn [cell-key _ui-state]
+                    (dispatch! [:clipboard/copy-cell cell-key]))
+         
+         :on-paste (fn [cell-key]
+                     (dispatch! [:clipboard/paste-cell cell-key]))}
+        
+        ;; Create the base grid
+        base-grid-component (base-grid/create-grid-panel
+                             :cols cols
+                             :rows rows
+                             :cell-callbacks cell-callbacks)]
     
-    ;; Create cells
-    (doseq [row (range rows)
-            col (range cols)]
-      (let [cell-comp (create-cell-panel col row dispatch!)]
-        (swap! !cell-components assoc [col row] cell-comp)
-        (ss/add! grid-panel (:panel cell-comp))))
+    ;; Store reference for callbacks
+    (reset! !base-grid-ref base-grid-component)
     
-    ;; Set size
-     (let [total-width (+ (* cols (+ layout/cell-width layout/cell-gap)) (* 2 layout/panel-insets))
-           total-height (+ (* rows (+ layout/cell-height layout/cell-gap)) (* 2 layout/panel-insets))]
-       (.setPreferredSize grid-panel (Dimension. total-width total-height))
-       (.setMinimumSize grid-panel (Dimension. total-width total-height)))
-    
-    ;; Keyboard Shortcuts (Copy/Paste)
-    (let [input-map (.getInputMap grid-panel JPanel/WHEN_IN_FOCUSED_WINDOW)
-          action-map (.getActionMap grid-panel)
-          ctrl-c (KeyStroke/getKeyStroke KeyEvent/VK_C InputEvent/CTRL_DOWN_MASK)
-          ctrl-v (KeyStroke/getKeyStroke KeyEvent/VK_V InputEvent/CTRL_DOWN_MASK)]
-      
-      (.put input-map ctrl-c "copy-cell")
-      (.put action-map "copy-cell"
-            (proxy [AbstractAction] []
-              (actionPerformed [_ _]
-                (dispatch! [:clipboard/copy-selected]))))
-      
-      (.put input-map ctrl-v "paste-cell")
-      (.put action-map "paste-cell"
-            (proxy [AbstractAction] []
-              (actionPerformed [_ _]
-                (dispatch! [:clipboard/paste-to-selected])))))
-    
-    {:panel grid-panel
-     ;; This function is called by the parent (window) whenever app-state atom changes
-     :update-view! (fn [app-state]
-                     (let [grid-state (:grid app-state)
-                           active-cell (:active-cell grid-state)
-                           selected-cell (:selected-cell grid-state)]
-                       ;; Update all cells
-                       (doseq [[_ cell-comp] @!cell-components]
-                         ((:update-view! cell-comp) grid-state active-cell selected-cell))))}))
+    ;; Return the cue grid API
+    {:panel (:panel base-grid-component)
+     
+     ;; Update function called when app-state changes
+     :update-view! (fn [_app-state]
+                     ;; Refresh all cell appearances from !grid state
+                     (when-let [bg @!base-grid-ref]
+                       ((:for-each-cell bg)
+                        (fn [_key cell]
+                          ((:update! cell))))))}))
 
 ;; ============================================================================
-;; Preset Palette (unchanged, just use dispatch helper)
+;; Preset Palette
 ;; ============================================================================
 
 (defn create-preset-palette
