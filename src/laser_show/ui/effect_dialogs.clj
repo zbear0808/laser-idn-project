@@ -13,7 +13,8 @@
                                           get-effect-category-color get-modulator-category-color]]
             [laser-show.ui.components.slider :as slider]
             [laser-show.ui.components.corner-pin-editor :as corner-pin]
-            [laser-show.ui.components.translate-editor :as translate-editor])
+            [laser-show.ui.components.translate-editor :as translate-editor]
+            [laser-show.animation.time :as time])
   (:import [java.awt Color Font Dimension Cursor Graphics2D RenderingHints]
            [java.awt.geom RoundRectangle2D$Float]
            [javax.swing JDialog JSpinner SpinnerNumberModel DefaultListModel JPanel
@@ -35,22 +36,22 @@
   [{:id :time
     :name "Time"
     :icon "🕐"
-    :description "Modulators that vary over time, synced to BPM"
+    :description "Modulators that vary over time, synced to BPM or seconds"
     :types [{:id :sine :name "Sine Wave" :description "Smooth oscillation"
-             :params [:min :max :period :phase :loop-mode :duration :time-unit]}
+             :params [:min :max :timing-mode :period :phase :loop-mode :duration :time-unit]}
             {:id :triangle :name "Triangle Wave" :description "Linear up/down"
-             :params [:min :max :period :phase :loop-mode :duration :time-unit]}
+             :params [:min :max :timing-mode :period :phase :loop-mode :duration :time-unit]}
             {:id :sawtooth :name "Sawtooth Wave" :description "Ramp up, reset"
-             :params [:min :max :period :phase :loop-mode :duration :time-unit]}
+             :params [:min :max :timing-mode :period :phase :loop-mode :duration :time-unit]}
             {:id :square :name "Square Wave" :description "On/off toggle"
-             :params [:min :max :period :phase :loop-mode :duration :time-unit]}
+             :params [:min :max :timing-mode :period :phase :loop-mode :duration :time-unit]}
             :separator
-            {:id :beat-decay :name "Beat Decay" :description "Decay each beat"
-             :params [:min :max]}
-            {:id :random :name "Random" :description "Random values per beat"
-             :params [:min :max :period]}
+            {:id :exp-decay :name "Exp Decay" :description "Decay each cycle"
+             :params [:min :max :timing-mode]}
+            {:id :random :name "Random" :description "Random values per cycle"
+             :params [:min :max :timing-mode :period]}
             {:id :step :name "Step Sequencer" :description "Cycle through values"
-             :params [:values :period]}]}
+             :params [:values :timing-mode :period]}]}
    {:id :space
     :name "Space"
     :icon "📍"
@@ -663,26 +664,53 @@
    The modulator function will be created at runtime by resolve-param.
    
    Note: Trigger time is NOT stored in the config.
-   It comes from the modulation context at runtime (see effects.clj apply-effect)."
+   It comes from the modulation context at runtime (see effects.clj apply-effect).
+   
+   For time-based modulators, includes dual storage for period/phase:
+   - :timing-mode - :beats or :seconds (current display mode)
+   - :period - current period value (in current mode's units)
+   - :phase - current phase value (in current mode's units)
+   - :period-beats / :period-seconds - dual storage for mode switching
+   - :phase-beats / :phase-seconds - dual storage for mode switching"
   [mod-type params]
   (let [{:keys [min-val max-val period phase axis speed wave-type cycles
-                channel cc path value wrap? loop-mode duration time-unit]} params
+                channel cc path value wrap? loop-mode duration time-unit
+                timing-mode period-beats period-seconds phase-beats phase-seconds]} params
         loop-mode (or loop-mode :loop)
         duration (or duration 2.0)
-        time-unit (or time-unit :beats)]
+        time-unit (or time-unit :beats)
+        timing-mode (or timing-mode :beats)
+        ;; Dual storage values - may be nil if not yet calculated
+        period-beats (or period-beats (when (= timing-mode :beats) period))
+        period-seconds (or period-seconds (when (= timing-mode :seconds) period))
+        phase-beats (or phase-beats (when (= timing-mode :beats) phase))
+        phase-seconds (or phase-seconds (when (= timing-mode :seconds) phase))
+        ;; Build time-based config with dual storage
+        time-config {:timing-mode timing-mode
+                     :period (or period 1.0)
+                     :phase (or phase 0.0)
+                     :period-beats period-beats
+                     :period-seconds period-seconds
+                     :phase-beats phase-beats
+                     :phase-seconds phase-seconds}]
     ;; Return pure data config - the modulator function will be created at runtime
     (case mod-type
-      ;; Time-based modulators
-      :sine {:type :sine :min min-val :max max-val :period (or period 1.0) :phase (or phase 0.0)
-             :loop-mode loop-mode :duration duration :time-unit time-unit}
-      :triangle {:type :triangle :min min-val :max max-val :period (or period 1.0) :phase (or phase 0.0)
-                 :loop-mode loop-mode :duration duration :time-unit time-unit}
-      :sawtooth {:type :sawtooth :min min-val :max max-val :period (or period 1.0) :phase (or phase 0.0)}
-      :square {:type :square :min min-val :max max-val :period (or period 1.0) :phase (or phase 0.0)}
-      :beat-decay {:type :beat-decay :min min-val :max max-val}
-      :random {:type :random :min min-val :max max-val :period (or period 1.0)}
+      ;; Time-based modulators with dual storage
+      :sine (merge {:type :sine :min min-val :max max-val
+                    :loop-mode loop-mode :duration duration :time-unit time-unit}
+                   time-config)
+      :triangle (merge {:type :triangle :min min-val :max max-val
+                        :loop-mode loop-mode :duration duration :time-unit time-unit}
+                       time-config)
+      :sawtooth (merge {:type :sawtooth :min min-val :max max-val}
+                       time-config)
+      :square (merge {:type :square :min min-val :max max-val}
+                     time-config)
+      :exp-decay {:type :exp-decay :min min-val :max max-val :timing-mode timing-mode}
+      :random (merge {:type :random :min min-val :max max-val}
+                     time-config)
       
-      ;; Space-based modulators
+      ;; Space-based modulators (no timing mode)
       :pos-x {:type :pos-x :min min-val :max max-val}
       :pos-y {:type :pos-y :min min-val :max max-val}
       :radial {:type :radial :min min-val :max max-val}
@@ -737,11 +765,30 @@
         active-category-atom (atom init-category)
         selected-type-atom (atom (or (:type existing-config) :sine))
         
+        ;; Timing mode state - determines whether period/phase are in beats or seconds
+        init-timing-mode (or (:timing-mode existing-config) :beats)
+        timing-mode-atom (atom init-timing-mode)
+        
+        ;; Dual storage for period and phase values (preserves both when switching modes)
+        init-period-beats (or (:period-beats existing-config) (:period existing-config) 1.0)
+        init-period-seconds (or (:period-seconds existing-config) nil)  ;; nil means not yet calculated
+        init-phase-beats (or (:phase-beats existing-config) (:phase existing-config) 0.0)
+        init-phase-seconds (or (:phase-seconds existing-config) nil)
+        
+        stored-period-beats-atom (atom init-period-beats)
+        stored-period-seconds-atom (atom init-period-seconds)
+        stored-phase-beats-atom (atom init-phase-beats)
+        stored-phase-seconds-atom (atom init-phase-seconds)
+        
         ;; Initial values from existing config or defaults
         init-min (or (:min existing-config) param-min)
         init-max (or (:max existing-config) param-max)
-        init-period (or (:period existing-config) 1.0)
-        init-phase (or (:phase existing-config) 0.0)
+        init-period (if (= init-timing-mode :seconds)
+                      (or (:period-seconds existing-config) 0.5)
+                      init-period-beats)
+        init-phase (if (= init-timing-mode :seconds)
+                     (or (:phase-seconds existing-config) 0.0)
+                     init-phase-beats)
         init-axis (or (:axis existing-config) :x)
         init-speed (or (:speed existing-config) 1.0)
         init-cycles (or (:cycles existing-config) 1.0)
@@ -796,6 +843,82 @@
         
         ;; Trigger time atom for "once" preview
         trigger-time-atom (atom (System/currentTimeMillis))
+        
+        ;; Labels that need to be updated when timing mode changes
+        period-label (ss/label :text (if (= init-timing-mode :seconds) "Period (sec):" "Period (beats):")
+                               :foreground Color/WHITE)
+        phase-label (ss/label :text (if (= init-timing-mode :seconds) "Phase (sec):" "Phase (beats):")
+                              :foreground Color/WHITE)
+        
+        ;; Timing mode toggle button
+        timing-toggle-btn (ss/button :text (if (= init-timing-mode :seconds) "🕐 Seconds" "🥁 Beats")
+                                     :font (Font. "SansSerif" Font/BOLD 11))
+        
+        ;; Handler to switch timing mode
+        switch-timing-mode! (fn []
+                              (let [old-mode @timing-mode-atom
+                                    new-mode (if (= old-mode :beats) :seconds :beats)
+                                    current-bpm (time/get-global-bpm)
+                                    current-period ((:get-value period-ctrl))
+                                    current-phase ((:get-value phase-ctrl))]
+                                ;; Store current values in the appropriate atom
+                                (if (= old-mode :beats)
+                                  (do (reset! stored-period-beats-atom current-period)
+                                      (reset! stored-phase-beats-atom current-phase))
+                                  (do (reset! stored-period-seconds-atom current-period)
+                                      (reset! stored-phase-seconds-atom current-phase)))
+                                
+                                ;; Update mode
+                                (reset! timing-mode-atom new-mode)
+                                (ss/config! timing-toggle-btn :text (if (= new-mode :seconds) "🕐 Seconds" "🥁 Beats"))
+                                
+                                ;; Get the value for the new mode (existing or convert)
+                                (let [new-period-val (if (= new-mode :seconds)
+                                                       (or @stored-period-seconds-atom
+                                                           (time/beats->seconds current-period current-bpm))
+                                                       (or @stored-period-beats-atom
+                                                           (time/seconds->beats current-period current-bpm)))
+                                      new-phase-val (if (= new-mode :seconds)
+                                                      (or @stored-phase-seconds-atom
+                                                          (time/beats->seconds current-phase current-bpm))
+                                                      (or @stored-phase-beats-atom
+                                                          (time/seconds->beats current-phase current-bpm)))
+                                      ;; Determine ranges based on mode
+                                      period-max (if (= new-mode :seconds) 10.0 24.0)
+                                      phase-max 4.0]
+                                  
+                                  ;; Update period slider range and value
+                                  ((:set-range! period-ctrl) 0.0 period-max new-period-val)
+                                  
+                                  ;; Update phase slider range and value
+                                  ((:set-range! phase-ctrl) 0.0 phase-max new-phase-val)
+                                  
+                                  ;; Store the converted values in the new mode's atoms
+                                  (if (= new-mode :seconds)
+                                    (do (reset! stored-period-seconds-atom new-period-val)
+                                        (reset! stored-phase-seconds-atom new-phase-val))
+                                    (do (reset! stored-period-beats-atom new-period-val)
+                                        (reset! stored-phase-beats-atom new-phase-val))))
+                                
+                                ;; Update labels
+                                (ss/config! period-label :text (if (= new-mode :seconds) 
+                                                                  "Period (sec):" 
+                                                                  "Period (beats):"))
+                                (ss/config! phase-label :text (if (= new-mode :seconds) 
+                                                                 "Phase (sec):" 
+                                                                 "Phase (beats):"))
+                                
+                                ;; Notify for live preview
+                                (when-let [f @notify-fn-atom] (f))))
+        
+        _ (ss/listen timing-toggle-btn :action (fn [_] (switch-timing-mode!)))
+        
+        ;; Timing mode toggle panel
+        timing-mode-panel (mig/mig-panel
+                           :constraints ["insets 5", "[80!][100!]", ""]
+                           :items [[(ss/label :text "Timing:" :foreground Color/WHITE) ""]
+                                   [timing-toggle-btn "growx"]]
+                           :background (Color. 45 45 45))
         
         ;; Loop mode toggle button (instead of dropdown)
         update-params-visibility-ref (atom nil) ;; Forward reference for update function
@@ -859,14 +982,14 @@
         
         period-panel (mig/mig-panel
                       :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
-                      :items [[(ss/label :text "Period (beats):" :foreground Color/WHITE) ""]
+                      :items [[period-label ""]
                               [(:slider period-ctrl) "growx"]
                               [(:textfield period-ctrl) ""]]
                       :background (Color. 45 45 45))
         
         phase-panel (mig/mig-panel
                      :constraints ["insets 5", "[80!][grow, fill][90!]", ""]
-                     :items [[(ss/label :text "Phase:" :foreground Color/WHITE) ""]
+                     :items [[phase-label ""]
                              [(:slider phase-ctrl) "growx"]
                              [(:textfield phase-ctrl) ""]]
                      :background (Color. 45 45 45))
@@ -930,6 +1053,7 @@
                                           panel-items (cond-> []
                                                         (params-needed :min) (conj [min-panel "growx, wrap"])
                                                         (params-needed :max) (conj [max-panel "growx, wrap"])
+                                                        (params-needed :timing-mode) (conj [timing-mode-panel "growx, wrap"])
                                                         (params-needed :period) (conj [period-panel "growx, wrap"])
                                                         (params-needed :phase) (conj [phase-panel "growx, wrap"])
                                                         (params-needed :speed) (conj [speed-panel "growx, wrap"])
@@ -1044,6 +1168,7 @@
         create-modulator (fn []
                            (let [mod-type @selected-type-atom
                                  loop-mode @loop-mode-atom
+                                 timing-mode @timing-mode-atom
                                  params {:min-val ((:get-value min-ctrl))
                                          :max-val ((:get-value max-ctrl))
                                          :period ((:get-value period-ctrl))
@@ -1055,7 +1180,13 @@
                                          :wrap? (ss/value wrap-checkbox)
                                          :loop-mode loop-mode
                                          :duration ((:get-value duration-ctrl))
-                                         :time-unit (ss/selection time-unit-combo)}]
+                                         :time-unit (ss/selection time-unit-combo)
+                                         ;; Timing mode and dual storage
+                                         :timing-mode timing-mode
+                                         :period-beats @stored-period-beats-atom
+                                         :period-seconds @stored-period-seconds-atom
+                                         :phase-beats @stored-phase-beats-atom
+                                         :phase-seconds @stored-phase-seconds-atom}]
                              ;; Return pure data config - serializable to EDN
                              (create-modulator-config mod-type params)))
         

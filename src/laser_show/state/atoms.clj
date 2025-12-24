@@ -253,6 +253,17 @@
    Map of effect-id -> effect-definition."
   {})
 
+(def initial-project-state
+  "Initial state for project file management.
+   
+   Keys:
+   - :current-folder - Path to current project folder (nil = no project)
+   - :dirty? - Whether changes have been made since last save
+   - :last-saved - Timestamp of last save"
+  {:current-folder nil
+   :dirty? false
+   :last-saved nil})
+
 ;; ============================================================================
 ;; Atom Definitions
 ;; ============================================================================
@@ -304,6 +315,9 @@
 
 (defonce ^{:doc "Atom for effect registry. See `initial-effect-registry-state` for structure."}
   !effect-registry (atom initial-effect-registry-state))
+
+(defonce ^{:doc "Atom for project management state. See `initial-project-state` for structure."}
+  !project (atom initial-project-state))
 
 ;; ============================================================================
 ;; Reset Functions
@@ -389,6 +403,11 @@
   []
   (reset! !effect-registry initial-effect-registry-state))
 
+(defn reset-project!
+  "Reset project state to initial values."
+  []
+  (reset! !project initial-project-state))
+
 (defn reset-all!
   "Reset all state atoms to their initial values.
    USE WITH CAUTION - mainly for testing."
@@ -408,7 +427,8 @@
   (reset-zone-groups!)
   (reset-cues!)
   (reset-cue-lists!)
-  (reset-effect-registry!))
+  (reset-effect-registry!)
+  (reset-project!))
 
 ;; ============================================================================
 ;; Accessor Functions - Timing
@@ -1053,3 +1073,51 @@
   "Unregister an effect."
   [effect-id]
   (swap! !effect-registry dissoc effect-id))
+
+;; ============================================================================
+;; Accessor Functions - Project
+;; ============================================================================
+
+(defn get-project-folder
+  "Get the current project folder path.
+   Returns: Folder path string or nil if no project is open."
+  []
+  (:current-folder @!project))
+
+(defn set-project-folder!
+  "Set the current project folder path.
+   Parameters:
+   - folder-path: Path to project folder, or nil to clear"
+  [folder-path]
+  (swap! !project assoc :current-folder folder-path))
+
+(defn project-dirty?
+  "Check if the project has unsaved changes.
+   Returns: true if dirty, false otherwise."
+  []
+  (:dirty? @!project))
+
+(defn mark-project-dirty!
+  "Mark the project as having unsaved changes."
+  []
+  (swap! !project assoc :dirty? true))
+
+(defn mark-project-clean!
+  "Mark the project as saved (no unsaved changes).
+   Also updates the last-saved timestamp."
+  []
+  (swap! !project #(-> %
+                       (assoc :dirty? false)
+                       (assoc :last-saved (System/currentTimeMillis)))))
+
+(defn has-current-project?
+  "Check if a project folder is currently set.
+   Returns: true if a project is open, false otherwise."
+  []
+  (some? (:current-folder @!project)))
+
+(defn get-project-last-saved
+  "Get the timestamp when the project was last saved.
+   Returns: Timestamp in milliseconds or nil."
+  []
+  (:last-saved @!project))

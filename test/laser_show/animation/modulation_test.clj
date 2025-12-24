@@ -180,12 +180,24 @@
       ;; Should stay at end value after duration
       (is (approx= 0.0 (mod/resolve-param modulator (make-test-context 2000 120)))))))
 
-(deftest exp-decay-test
-  (testing "Exponential decay halves at half-life"
-    (let [modulator (mod/exp-decay 1.0 0.0 500 0)] ; half-life = 500ms
+(deftest halflife-decay-test
+  (testing "Halflife decay halves at half-life"
+    (let [modulator (mod/halflife-decay 1.0 0.0 500 0)] ; half-life = 500ms
       (is (approx= 1.0 (mod/resolve-param modulator (make-test-context 0 120))))
       (is (approx= 0.5 (mod/resolve-param modulator (make-test-context 500 120)) 0.05))
       (is (approx= 0.25 (mod/resolve-param modulator (make-test-context 1000 120)) 0.05)))))
+
+(deftest exp-decay-test
+  (testing "Exp decay (beat-synced) decays each beat"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)
+          modulator (mod/exp-decay 1.0 0.0 :linear)]
+      ;; Start of beat
+      (is (approx= 1.0 (mod/resolve-param modulator (make-test-context 0 bpm))))
+      ;; Middle of beat
+      (is (approx= 0.5 (mod/resolve-param modulator (make-test-context (* 0.5 ms-per-beat) bpm)) 0.05))
+      ;; End of beat (wraps to start of next)
+      (is (approx= 1.0 (mod/resolve-param modulator (make-test-context ms-per-beat bpm)) 0.05)))))
 
 (deftest beat-decay-test
   (testing "Beat decay resets each beat"

@@ -124,3 +124,148 @@
   "Get a list of all persistent state keys."
   []
   (keys persistent-state-mapping))
+
+;; ============================================================================
+;; Project-Based Persistence Functions
+;; ============================================================================
+
+(defn get-project-file-paths
+  "Get all file paths for a project folder.
+   
+   Parameters:
+   - project-folder - Base folder path for the project
+   
+   Returns: Map of file-key -> full-path
+   
+   Example:
+   (get-project-file-paths \"/path/to/project\")
+   => {:settings \"/path/to/project/settings.edn\", ...}"
+  [project-folder]
+  {:settings    (str project-folder "/settings.edn")
+   :grid        (str project-folder "/grid.edn")
+   :projectors  (str project-folder "/projectors.edn")
+   :zones       (str project-folder "/zones.edn")
+   :zone-groups (str project-folder "/zone-groups.edn")
+   :cues        (str project-folder "/cues.edn")
+   :cue-lists   (str project-folder "/cue-lists.edn")
+   :effects     (str project-folder "/effects.edn")})
+
+(defn save-project!
+  "Save all state to specified project folder.
+   Creates folder if it doesn't exist.
+   Updates project state atom with folder and marks as clean.
+   
+   Parameters:
+   - project-folder - Folder path where project should be saved
+   
+   Returns: true on success, false on failure
+   
+   Example:
+   (save-project! \"/path/to/my-project\")"
+  [project-folder]
+  (try
+    (let [file-paths (get-project-file-paths project-folder)]
+      ;; Save each file
+      (doseq [[file-key filepath] file-paths]
+        (when-let [mapping (get persistent-state-mapping file-key)]
+          (let [{:keys [atom keys]} mapping
+                data (if keys
+                       (select-keys @atom keys)
+                       @atom)]
+            (ser/save-to-file! filepath data))))
+      
+      ;; Update project state
+      (state/set-project-folder! project-folder)
+      (state/mark-project-clean!)
+      true)
+    (catch Exception e
+      (println "Error saving project:" (.getMessage e))
+      false)))
+
+(defn load-project!
+  "Load all state from specified project folder.
+   Merges loaded data into existing state atoms.
+   Updates project state atom with folder.
+   
+   Parameters:
+   - project-folder - Folder path to load project from
+   
+   Returns: true if successful, false if folder doesn't exist or load fails
+   
+   Example:
+   (load-project! \"/path/to/my-project\")"
+  [project-folder]
+  (try
+    (let [folder (java.io.File. project-folder)]
+      (if (.exists folder)
+        (let [file-paths (get-project-file-paths project-folder)]
+          ;; Load each file
+          (doseq [[file-key filepath] file-paths]
+            (when-let [mapping (get persistent-state-mapping file-key)]
+              (let [{:keys [atom keys]} mapping]
+                (when-let [data (ser/load-from-file filepath :if-not-found nil)]
+                  (if keys
+                    (swap! atom merge (select-keys data keys))
+                    (swap! atom merge data))))))
+          
+          ;; Update project state
+          (state/set-project-folder! project-folder)
+          (state/mark-project-clean!)
+          true)
+        (do
+          (println "Project folder does not exist:" project-folder)
+          false)))
+    (catch Exception e
+      (println "Error loading project:" (.getMessage e))
+      false)))
+
+(defn new-project!
+  "Reset all state atoms to initial values.
+   Clears current project folder and marks as clean.
+   This creates a fresh blank project.
+   
+   Returns: true (always succeeds)
+   
+   Example:
+   (new-project!)"
+  []
+  (try
+    ;; Reset all persistent state atoms
+    (state/reset-grid!)
+    (state/reset-config!)
+    (state/reset-projectors!)
+    (state/reset-zones!)
+    (state/reset-zone-groups!)
+    (state/reset-cues!)
+    (state/reset-cue-lists!)
+    (state/reset-effect-registry!)
+    (state/reset-effects!)
+    
+    ;; Clear project state
+    (state/reset-project!)
+    true
+    (catch Exception e
+      (println "Error creating new project:" (.getMessage e))
+      false)))
+
+(defn folder-has-project-files?
+  "Check if a folder contains any project files.
+   Useful for warning about overwriting existing projects.
+   
+   Parameters:
+   - project-folder - Folder path to check
+   
+   Returns: true if folder contains .edn files, false otherwise
+   
+   Example:
+   (folder-has-project-files? \"/path/to/folder\")"
+  [project-folder]
+  (try
+    (let [folder (java.io.File. project-folder)]
+      (if (.exists folder)
+        (let [edn-files (filter #(.endsWith (.getName %) ".edn")
+                                (.listFiles folder))]
+          (seq edn-files))
+        false))
+    (catch Exception e
+      false)))

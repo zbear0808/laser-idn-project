@@ -15,6 +15,7 @@
    [laser-show.ui.effects-grid :as effects-grid]
    [laser-show.ui.grid :as grid]
    [laser-show.ui.preview :as preview]
+   [laser-show.ui.project-actions :as project]
    [laser-show.ui.toolbar :as toolbar]
    [seesaw.border :as border]
    [seesaw.core :as ss])
@@ -177,11 +178,15 @@
         ;; Create and add menu bar after frame exists (needed for dialog parent)
         menu-bar (toolbar/create-menu-bar
                    frame
-                   (fn [] (println "File > New - not yet implemented"))
-                   (fn [] (println "File > Open - not yet implemented"))
-                   (fn [] (println "File > Save - not yet implemented"))
-                   (fn [] (ss/alert frame "Laser Show - IDN Controller\n\nA laser show control application using IDN protocol.")))
+                   (fn [] (project/handle-new-project! frame))      ; File > New
+                   (fn [] (project/handle-open-project! frame))     ; File > Open
+                   (fn [] (project/handle-save-project! frame))     ; File > Save
+                   (fn [] (project/handle-save-as-project! frame))  ; File > Save As
+                   (fn [] (ss/alert frame "Laser Show - IDN Controller\n\nA laser show control application using IDN protocol.")))  ; Help > About
         _ (.setJMenuBar frame menu-bar)
+        
+        ;; Set up dirty tracking for project management
+        _ (project/setup-dirty-tracking!)
         
         ;; Helper to convert runtime state to legacy grid format
         make-legacy-state (fn []

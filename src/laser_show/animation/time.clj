@@ -64,6 +64,18 @@
   (^double [^double ms ^double bpm ^double beats-per-bar]
    (/ ms (bpm->ms-per-bar bpm beats-per-bar))))
 
+(defn beats->seconds
+  "Convert beats to seconds at the given BPM.
+   Example: at 120 BPM, 1 beat = 0.5 seconds"
+  ^double [^double beats ^double bpm]
+  (* beats (/ 60.0 bpm)))
+
+(defn seconds->beats
+  "Convert seconds to beats at the given BPM.
+   Example: at 120 BPM, 0.5 seconds = 1 beat"
+  ^double [^double seconds ^double bpm]
+  (* seconds (/ bpm 60.0)))
+
 ;; ============================================================================
 ;; Phase Calculations
 ;; ============================================================================

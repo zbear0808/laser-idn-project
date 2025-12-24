@@ -140,28 +140,38 @@
    
    Parameters:
    - frame - the parent frame for dialogs
-   - on-new - fn [] called for File > New
-   - on-open - fn [] called for File > Open
-   - on-save - fn [] called for File > Save
+   - on-new - fn [] called for File > New Project
+   - on-open - fn [] called for File > Open Project
+   - on-save - fn [] called for File > Save Project
+   - on-save-as - fn [] called for File > Save Project As
    - on-about - fn [] called for Help > About
    
    Returns the menu bar component."
-  [frame on-new on-open on-save on-about]
+  [frame on-new on-open on-save on-save-as on-about]
   (ss/menubar
    :items [(ss/menu :text "File"
-                    :items [(ss/action :name "New Grid" :handler (fn [_] (on-new)))
-                            (ss/action :name "Open..." :handler (fn [_] (on-open)))
-                            (ss/action :name "Save..." :handler (fn [_] (on-save)))
+                    :items [(ss/action :name "New Project"
+                                       :key "menu N"
+                                       :handler (fn [_] (on-new)))
+                            (ss/action :name "Open Project..."
+                                       :key "menu O"
+                                       :handler (fn [_] (on-open)))
+                            (ss/action :name "Save Project"
+                                       :key "menu S"
+                                       :handler (fn [_] (on-save)))
+                            (ss/action :name "Save Project As..."
+                                       :key "menu shift S"
+                                       :handler (fn [_] (on-save-as)))
                             :separator
-                            (ss/action :name "Exit" :handler (fn [_] 
+                            (ss/action :name "Exit" :handler (fn [_]
                                                                ;; Just dispose the frame, don't exit JVM
                                                                (.dispose frame)))])
            (ss/menu :text "Configure"
-                    :items [(ss/action :name "Projectors..." 
+                    :items [(ss/action :name "Projectors..."
                                        :handler (fn [_] (projector-config/show-projector-config-dialog frame)))
-                            (ss/action :name "Zones..." 
+                            (ss/action :name "Zones..."
                                        :handler (fn [_] (zone-config/show-zone-config-dialog frame)))
-                            (ss/action :name "Zone Groups..." 
+                            (ss/action :name "Zone Groups..."
                                        :handler (fn [_] (zone-group-config/show-zone-group-config-dialog frame)))])
            (ss/menu :text "View"
                     :items [(ss/action :name "Reset Layout" :handler (fn [_] nil))])

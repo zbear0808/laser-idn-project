@@ -1,6 +1,7 @@
 (ns laser-show.ui.components.slider
   "Reusable slider component with synchronized text field.
-   Supports both float and integer values with bidirectional binding."
+   Supports both float and integer values with bidirectional binding.
+   Supports dynamic range updates via :set-range! function."
   (:require [clojure.string :as str])
   (:import [java.awt Color Font]
            [javax.swing JSlider JTextField]
@@ -41,42 +42,31 @@
    - :slider - The JSlider component
    - :textfield - The JTextField component
    - :get-value - fn [] returns current value
-   - :set-value! - fn [v] sets the value programmatically"
+   - :set-value! - fn [v] sets the value programmatically
+   - :set-range! - fn [new-min new-max new-value] updates slider range and value"
   [{min-opt :min max-opt :max :keys [default integer? on-change decimal-places label-fn slider-steps]}]
   (let [;; Determine defaults based on type
         integer? (boolean integer?)
-        min-val (if (number? min-opt) 
-                  (if integer? (int min-opt) (double min-opt))
-                  (if integer? 0 0.0))
-        max-val (if (number? max-opt)
-                  (if integer? (int max-opt) (double max-opt))
-                  (if integer? 100 1.0))
-        default-val (if (number? default)
-                      (if integer? (int default) (double default))
-                      min-val)
         decimal-places (or decimal-places 2)
         format-str (str "%." decimal-places "f")
         
+        ;; Use atoms for min/max to support dynamic range updates
+        !min-val (atom (if (number? min-opt) 
+                         (if integer? (int min-opt) (double min-opt))
+                         (if integer? 0 0.0)))
+        !max-val (atom (if (number? max-opt)
+                         (if integer? (int max-opt) (double max-opt))
+                         (if integer? 100 1.0)))
+        
+        default-val (if (number? default)
+                      (if integer? (int default) (double default))
+                      @!min-val)
+        
         ;; Slider steps - for floats use 1000 for fine granularity, for ints use actual range
-        slider-steps (or slider-steps
-                        (if integer?
-                          (- max-val min-val)
-                          1000))
-        
-        ;; Conversion helpers
-        value->slider (if integer?
-                        (fn [v] (- (int v) min-val))
-                        (fn [v]
-                          (let [range (- max-val min-val)]
-                            (if (zero? range)
-                              0
-                              (int (* (/ (- v min-val) range) slider-steps))))))
-        
-        slider->value (if integer?
-                        (fn [s] (+ s min-val))
-                        (fn [s]
-                          (let [range (- max-val min-val)]
-                            (+ min-val (* (/ s (double slider-steps)) range)))))
+        !slider-steps (atom (or slider-steps
+                               (if integer?
+                                 (- @!max-val @!min-val)
+                                 1000)))
         
         ;; Format value for display
         format-value (fn [v]
@@ -94,8 +84,23 @@
                          (Double/parseDouble (str/trim text)))
                        (catch Exception _ nil)))
         
+        ;; Conversion helpers - these use the atoms so they adapt to range changes
+        value->slider (fn [v]
+                        (if integer?
+                          (- (int v) @!min-val)
+                          (let [range (- @!max-val @!min-val)]
+                            (if (zero? range)
+                              0
+                              (int (* (/ (- v @!min-val) range) @!slider-steps))))))
+        
+        slider->value (fn [s]
+                        (if integer?
+                          (+ s @!min-val)
+                          (let [range (- @!max-val @!min-val)]
+                            (+ @!min-val (* (/ s (double @!slider-steps)) range)))))
+        
         ;; Create components
-        slider (JSlider. 0 slider-steps (value->slider default-val))
+        slider (JSlider. 0 @!slider-steps (value->slider default-val))
         
         textfield (doto (JTextField. (format-value default-val) 8)
                     (.setFont (Font. "Monospaced" Font/PLAIN 11))
@@ -123,12 +128,33 @@
                                        (when (valid-number-text? text integer?)
                                          (when-let [parsed (parse-text text)]
                                            (let [clamped (if integer?
-                                                          (max min-val (min max-val (int parsed)))
-                                                          (max min-val (min max-val (double parsed))))]
+                                                          (max @!min-val (min @!max-val (int parsed)))
+                                                          (max @!min-val (min @!max-val (double parsed))))]
                                              (reset! updating? true)
                                              (.setValue slider (value->slider clamped))
                                              (when on-change (on-change clamped))
-                                             (reset! updating? false)))))))]
+                                             (reset! updating? false)))))))
+        
+        ;; Function to update range dynamically
+        set-range! (fn [new-min new-max new-value]
+                     (reset! updating? true)
+                     ;; Update min/max atoms
+                     (reset! !min-val (if integer? (int new-min) (double new-min)))
+                     (reset! !max-val (if integer? (int new-max) (double new-max)))
+                     ;; Update slider steps for integer mode
+                     (when integer?
+                       (reset! !slider-steps (- @!max-val @!min-val)))
+                     ;; Update slider maximum
+                     (.setMaximum slider @!slider-steps)
+                     ;; Clamp and set the new value
+                     (let [clamped (if integer?
+                                     (max @!min-val (min @!max-val (int new-value)))
+                                     (max @!min-val (min @!max-val (double new-value))))]
+                       (.setValue slider (value->slider clamped))
+                       (.setText textfield (format-value clamped))
+                       (reset! updating? false)
+                       ;; Notify about the value change
+                       (when on-change (on-change clamped))))]
     
     ;; Style slider
     (.setBackground slider (Color. 50 50 50))
@@ -154,11 +180,14 @@
      :set-value! (fn [v]
                    (reset! updating? true)
                    (let [clamped (if integer?
-                                   (max min-val (min max-val (int v)))
-                                   (max min-val (min max-val (double v))))]
+                                   (max @!min-val (min @!max-val (int v)))
+                                   (max @!min-val (min @!max-val (double v))))]
                      (.setValue slider (value->slider clamped))
                      (.setText textfield (format-value clamped)))
-                   (reset! updating? false))}))
+                   (reset! updating? false))
+     :set-range! set-range!
+     :get-min (fn [] @!min-val)
+     :get-max (fn [] @!max-val)}))
 
 ;; Convenience aliases for backward compatibility
 (def create-float-slider create-slider)

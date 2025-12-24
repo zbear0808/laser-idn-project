@@ -51,7 +51,7 @@
   [x]
   (and (map? x)
        (contains? x :type)
-       (contains? #{:sine :triangle :sawtooth :square :beat-decay :random
+       (contains? #{:sine :triangle :sawtooth :square :beat-decay :exp-decay :random
                     :pos-x :pos-y :radial :angle :point-index :point-wave :pos-wave
                     :pos-scroll :rainbow-hue :midi :osc :constant}
                   (:type x))))
@@ -431,9 +431,9 @@
       (str "linear-decay(" start-val "->" end-val " over " duration-ms "ms)")
       nil))))
 
-(defn exp-decay
-  "Create an exponential decay modulator.
-   Decays exponentially from start-val toward end-val.
+(defn halflife-decay
+  "Create a half-life based exponential decay modulator.
+   Decays exponentially from start-val toward end-val based on half-life.
    
    Parameters:
    - start-val: Starting value
@@ -441,7 +441,7 @@
    - half-life-ms: Time for value to decay halfway
    - trigger-time: Time when decay started (default 0)"
   ([start-val end-val half-life-ms]
-   (exp-decay start-val end-val half-life-ms 0))
+   (halflife-decay start-val end-val half-life-ms 0))
   ([start-val end-val half-life-ms trigger-time]
    (let [start-v (double start-val)
          end-v (double end-val)
@@ -454,19 +454,22 @@
         (let [elapsed (- (double time-ms) trigger)
               decay-factor (Math/exp (- (/ (* elapsed ln2) half-life)))]
           (+ end-v (* decay-factor range-v))))
-      (str "exp-decay(" start-val "->" end-val " t½=" half-life-ms "ms)")
+      (str "halflife-decay(" start-val "->" end-val " t½=" half-life-ms "ms)")
       nil))))
 
-(defn beat-decay
-  "Create a decay that resets on each beat.
+(defn exp-decay
+  "Create an exponential decay modulator.
    Useful for beat-synced intensity effects.
    
+   NOTE: This was previously named 'beat-decay' but renamed to 'exp-decay'
+   to be timing-mode agnostic (works with both beats and seconds modes).
+   
    Parameters:
-   - start-val: Value at beat start
-   - end-val: Value at beat end
+   - start-val: Value at cycle start
+   - end-val: Value at cycle end
    - decay-type: :linear or :exp (default :linear)"
   ([start-val end-val]
-   (beat-decay start-val end-val :linear))
+   (exp-decay start-val end-val :linear))
   ([start-val end-val decay-type]
    (let [start-v (double start-val)
          end-v (double end-val)
@@ -480,8 +483,11 @@
                    (+ end-v (* decay-factor range-exp)))
             ;; :linear is default
             (+ start-v (* phase range-v)))))
-      (str "beat-decay(" start-val "->" end-val " " decay-type ")")
-      {:type :beat-decay :min end-val :max start-val :period 1.0 :phase 0.0}))))
+      (str "exp-decay(" start-val "->" end-val " " decay-type ")")
+      {:type :exp-decay :min end-val :max start-val :period-beats 1.0 :phase-beats 0.0}))))
+
+;; Backward compatibility alias
+(def beat-decay exp-decay)
 
 ;; ============================================================================
 ;; External Control Modulators
@@ -982,6 +988,7 @@
       
       ;; Decay/envelope modulators
       :beat-decay (beat-decay max-val min-val)
+      :exp-decay (exp-decay max-val min-val)
       :random (random-mod min-val max-val per)
       
       ;; Position-based modulators
