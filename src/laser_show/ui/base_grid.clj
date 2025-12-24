@@ -18,7 +18,7 @@
             [laser-show.ui.colors :as colors]
             [laser-show.ui.layout :as layout]
             [laser-show.ui.drag-drop :as dnd])
-  (:import [java.awt Color Dimension Font BasicStroke Graphics2D RenderingHints]
+  (:import [java.awt Color Dimension Font BasicStroke Graphics2D RenderingHints BorderLayout]
            [java.awt.event MouseAdapter MouseEvent KeyEvent InputEvent ActionEvent]
            [javax.swing BorderFactory JPanel JPopupMenu JMenuItem KeyStroke AbstractAction]
            [javax.swing.border Border]))
@@ -61,6 +61,25 @@
    :drop-target (dnd/create-highlight-border)})
 
 ;; ============================================================================
+;; Active Indicator
+;; ============================================================================
+
+(defn create-active-indicator
+  "Create a small green circle indicator for active state."
+  []
+  (let [indicator-size 10
+        indicator (proxy [JPanel] []
+                    (paintComponent [^Graphics2D g]
+                      (proxy-super paintComponent g)
+                      (.setRenderingHint g RenderingHints/KEY_ANTIALIASING RenderingHints/VALUE_ANTIALIAS_ON)
+                      (.setColor g (Color. 0 200 100))  ;; Bright green
+                      (.fillOval g 2 2 (- indicator-size 4) (- indicator-size 4))))]
+    (.setOpaque indicator false)
+    (.setPreferredSize indicator (Dimension. indicator-size indicator-size))
+    (.setVisible indicator false)
+    indicator))
+
+;; ============================================================================
 ;; Cell Label Component
 ;; ============================================================================
 
@@ -89,7 +108,8 @@
      - :on-right-click (fn [cell-key cell-state panel event]) - right click handler (shows context menu)
      - :render-content (fn [cell-state] -> text) - returns display text for cell
      - :get-background (fn [cell-state] -> Color) - returns background color
-     - :get-border-type (fn [cell-state] -> :empty/:assigned) - returns border type
+     - :get-border-type (fn [cell-state] -> :empty/:assigned/:active) - returns border type
+     - :is-active? (fn [cell-state] -> bool) - returns whether cell is active (shows green indicator)
      - :get-drag-data (fn [cell-state] -> data-map or nil) - returns data for drag, nil if not draggable
      - :accept-drop? (fn [cell-key transfer-data] -> bool) - whether to accept drop
      - :on-drop (fn [cell-key transfer-data] -> bool) - handle drop, return success
@@ -110,7 +130,16 @@
         
         name-label (create-cell-label)
         
+        ;; Active indicator (green circle in top-right corner)
+        active-indicator (create-active-indicator)
+        
+        ;; Top panel for indicator positioning
+        top-panel (doto (JPanel. (BorderLayout.))
+                    (.setOpaque false)
+                    (.add active-indicator BorderLayout/EAST))
+        
         panel (ss/border-panel
+               :north top-panel
                :center name-label
                :background colors/cell-empty
                :border (:empty borders))
@@ -130,7 +159,13 @@
                                    text (if-let [f (:render-content callbacks)]
                                           (f state)
                                           "")
-                                   border (get-current-border)]
+                                   border (get-current-border)
+                               ;; Check if cell is active (for green indicator)
+                               active? (boolean (if-let [f (:is-active? callbacks)]
+                                                  (f state)
+                                                  false))]
+                               ;; Show/hide active indicator
+                               (.setVisible active-indicator active?)
                                (ss/config! panel :background bg-color)
                                (ss/config! panel :border border)
                                (ss/config! name-label :text text)))]

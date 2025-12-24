@@ -8,9 +8,9 @@
             [laser-show.ui.colors :as colors]
             [laser-show.ui.layout :as layout]
             [laser-show.ui.drag-drop :as dnd])
-  (:import [java.awt Color Dimension Font BasicStroke Graphics2D RenderingHints]
+  (:import [java.awt Color Dimension Font BasicStroke Graphics2D RenderingHints BorderLayout]
            [java.awt.event MouseAdapter MouseEvent KeyEvent InputEvent ActionEvent]
-           [javax.swing BorderFactory JPanel JPopupMenu JMenuItem KeyStroke AbstractAction]
+           [javax.swing BorderFactory JPanel JPopupMenu JMenuItem KeyStroke AbstractAction JLabel]
            [javax.swing.border Border]))
 
 ;; ============================================================================
@@ -92,6 +92,21 @@
             :halign :center
             :valign :center))
 
+(defn- create-active-indicator
+  "Create a small green circle indicator for active state."
+  []
+  (let [indicator-size 10
+        indicator (proxy [JPanel] []
+                    (paintComponent [^Graphics2D g]
+                      (proxy-super paintComponent g)
+                      (.setRenderingHint g RenderingHints/KEY_ANTIALIASING RenderingHints/VALUE_ANTIALIAS_ON)
+                      (.setColor g (Color. 0 200 100))  ;; Bright green
+                      (.fillOval g 2 2 (- indicator-size 4) (- indicator-size 4))))]
+    (.setOpaque indicator false)
+    (.setPreferredSize indicator (Dimension. indicator-size indicator-size))
+    (.setVisible indicator false)
+    indicator))
+
 (defn- create-cell-panel
   "Create a single grid cell panel.
    Interactions now dispatch events."
@@ -103,7 +118,16 @@
         assigned-border (BorderFactory/createLineBorder colors/border-dark layout/cell-border-width)
         hover-border (BorderFactory/createLineBorder colors/border-highlight layout/cell-border-hover-width)
         
+        ;; Active indicator (green circle in top-right corner)
+        active-indicator (create-active-indicator)
+        
+        ;; Top panel for indicator positioning
+        top-panel (doto (JPanel. (BorderLayout.))
+                    (.setOpaque false)
+                    (.add active-indicator BorderLayout/EAST))
+        
         panel (ss/border-panel
+               :north top-panel
                :center name-label
                :background colors/cell-empty
                :border empty-border)
@@ -139,10 +163,7 @@
         
         (mouseExited [^MouseEvent _e]
           (swap! !ui-state assoc :hover false)
-          ;; We need to restore the border based on whether it's assigned or not.
-          ;; The 'update-view!' function needs to run frequently or we rely on the border
-          ;; being reset correctly here. Ideally, we re-run the appearance logic.
-          ;; For now, let's just trigger a re-render if we can, or simplified check:
+          ;; Restore border based on assigned state only
           (let [{:keys [preset-id]} (:data @!last-render-state)]
              (.setBorder panel (if preset-id assigned-border empty-border))))))
     
@@ -193,6 +214,9 @@
                                         colors/cell-assigned)
                             :else colors/cell-empty)
                  border (if preset-id assigned-border empty-border)]
+             
+             ;; Show/hide active indicator (green circle)
+             (.setVisible active-indicator active?)
              
              (ss/config! panel :background bg-color)
              (when-not (:hover @!ui-state)

@@ -62,6 +62,7 @@
 (def cell-gap 2)
 (def cell-border-width 1)
 (def cell-border-hover-width 2)
+(def cell-border-active-width 3)  ;; Thicker border for active cells
 
 (def cell-dimensions
   "Default cell dimension configuration."

@@ -121,6 +121,14 @@
       :assigned
       :empty)))
 
+(defn is-effect-active?
+  "Check if the effect cell is active (enabled).
+   Used for showing the green indicator."
+  [cell-key _ui-state]
+  (let [[col row] cell-key
+        effect-data (get-effect-data-for-cell col row)]
+    (and (has-effect? effect-data) (:active effect-data))))
+
 ;; ============================================================================
 ;; Drag & Drop
 ;; ============================================================================
@@ -337,6 +345,10 @@
          :get-border-type (fn [cell-state]
                             (let [cell-key (:key cell-state)]
                               (get-effect-border-type cell-key cell-state)))
+         
+         :is-active? (fn [cell-state]
+                       (let [cell-key (:key cell-state)]
+                         (is-effect-active? cell-key cell-state)))
          
          ;; Click toggles the effect
          :on-click (fn [cell-key _ui-state]

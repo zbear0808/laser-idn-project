@@ -53,6 +53,7 @@
 (def border-dark (rgb 20 20 20))
 (def border-light (rgb 80 80 80))
 (def border-highlight Color/WHITE)
+(def border-active (rgb 0 255 255))  ;; Bright cyan for active state
 
 (def text-primary Color/WHITE)
 (def text-secondary (rgb 180 180 180))
