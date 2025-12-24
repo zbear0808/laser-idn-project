@@ -14,7 +14,8 @@
             [laser-show.backend.zone-router :as router]
             [laser-show.backend.cues :as cues]
             [laser-show.animation.types :as t]
-            [laser-show.animation.effects :as fx]))
+            [laser-show.animation.effects :as fx]
+            [laser-show.state.atoms :as state]))
 
 ;; ============================================================================
 ;; Multi-Engine State
@@ -26,7 +27,6 @@
          :frame-provider nil   ; Function that returns base frame
          :target-provider nil  ; Function that returns current target
          :log-callback nil
-         :bpm 120.0            ; Global BPM for beat-synced effects
          :start-time-ms nil})) ; Start time for consistent timing
 
 ;; ============================================================================
@@ -40,16 +40,6 @@
     (if start-time
       (- (System/currentTimeMillis) start-time)
       0)))
-
-(defn get-bpm
-  "Get the current global BPM."
-  []
-  (:bpm @!multi-engine-state 120.0))
-
-(defn set-bpm!
-  "Set the global BPM for beat-synced effects."
-  [bpm]
-  (swap! !multi-engine-state assoc :bpm bpm))
 
 ;; ============================================================================
 ;; Frame Provider Integration
@@ -79,7 +69,7 @@
     (when-let [base-frame (base-frame-provider)]
       (let [target (or (target-provider) router/default-target)
             time-ms (get-current-time-ms)
-            bpm (get-bpm)
+            bpm (state/get-bpm)
             ;; Apply zone group and zone effects during routing
             projector-frames (router/prepare-projector-frames-with-effects 
                               base-frame target time-ms bpm)
@@ -139,12 +129,11 @@
    - opts: Optional map with:
      - :fps - Target frames per second (default 30)
      - :log-callback - Optional function called with each packet for logging
-     - :bpm - Initial BPM for beat-synced effects (default 120)
      - :use-effects? - Whether to apply effect chains (default true)
    
    Returns the multi-engine state."
-  [base-frame-provider target-provider & {:keys [fps log-callback bpm use-effects?]
-                                           :or {fps 30 bpm 120.0 use-effects? true}}]
+  [base-frame-provider target-provider & {:keys [fps log-callback use-effects?]
+                                           :or {fps 30 use-effects? true}}]
   (let [active-projectors (projectors/get-active-projectors)
         engines (into {}
                       (map (fn [proj]
@@ -163,7 +152,6 @@
              :frame-provider base-frame-provider
              :target-provider target-provider
              :log-callback (atom log-callback)
-             :bpm bpm
              :start-time-ms nil})
     @!multi-engine-state))
 
@@ -318,15 +306,14 @@
   []
   (fn []
     (when-let [active-cue (cues/get-active-cue)]
-      (let [time-ms (get-current-time-ms)
-            bpm (get-bpm)]
-        (cues/get-cue-frame-with-effects (:id active-cue) time-ms bpm)))))
+      (let [time-ms (get-current-time-ms)]
+        (cues/get-cue-frame-with-effects (:id active-cue) time-ms (state/get-bpm))))))
 
 (defn sync-bpm-to-cue!
-  "Sync the multi-engine BPM to the active cue's BPM setting.
+  "Sync the global BPM to the active cue's BPM setting.
    Returns the new BPM or nil if no active cue."
   []
   (when-let [active-cue (cues/get-active-cue)]
     (when-let [cue-bpm (:bpm active-cue)]
-      (set-bpm! cue-bpm)
+      (state/set-bpm! cue-bpm)
       cue-bpm)))

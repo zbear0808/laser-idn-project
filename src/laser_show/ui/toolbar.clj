@@ -5,7 +5,7 @@
             [laser-show.ui.projector-config :as projector-config]
             [laser-show.ui.zone-config :as zone-config]
             [laser-show.ui.zone-group-config :as zone-group-config]
-            [laser-show.backend.multi-projector-stream :as multi-stream])
+            [laser-show.state.atoms :as state])
   (:import [java.awt Color Dimension Font]
            [javax.swing JSpinner SpinnerNumberModel]
            [javax.swing.event ChangeListener]))
@@ -109,7 +109,7 @@
                                 (reify ChangeListener
                                   (stateChanged [_ _evt]
                                     (let [new-bpm (.getValue bpm-model)]
-                                      (multi-stream/set-bpm! new-bpm))))))]
+                                      (state/set-bpm! new-bpm))))))]
     
     (ss/listen play-btn :action (fn [_] (on-play)))
     (ss/listen stop-btn :action (fn [_] (on-stop)))
