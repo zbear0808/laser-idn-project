@@ -29,8 +29,8 @@
    - :get-target - fn [] to get target IP address
    - :log-checkbox - the log checkbox component"
   [on-connect on-log-toggle]
-  (let [target-field (ss/text :text "192.168.1.100"
-                              :columns 12
+  (let [target-field (ss/text :text "127.0.0.1"
+                               :columns 12
                               :font (Font. "Monospaced" Font/PLAIN 11))
         log-checkbox (ss/checkbox :text "Log Packets"
                                  :selected? false

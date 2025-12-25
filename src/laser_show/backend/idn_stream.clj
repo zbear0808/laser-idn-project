@@ -69,7 +69,7 @@
 ;; Default Configuration
 ;; ============================================================================
 
-(def ^:const DEFAULT_CHANNEL_ID 0)
+(def ^:const DEFAULT_CHANNEL_ID 1)
 (def ^:const DEFAULT_SERVICE_ID 1)
 
 ;; Maximum points per packet is determined by:

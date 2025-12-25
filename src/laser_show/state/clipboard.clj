@@ -258,23 +258,17 @@
 
 (defn- serialize-effect-params
   "Convert effect params to pure data configs for serialization.
-   Modulator functions are converted to their config maps."
+   Params should already be config maps - this just ensures they're serializable."
   [params]
   (when params
     (into {}
       (map (fn [[k v]]
              (cond
-               ;; Modulator function with config - extract config only
-               (and (fn? v) (mod/modulator? v))
-               (if-let [config (mod/get-modulator-config v)]
-                 [k config]  ; Pure data config map
-                 [k 1.0])    ; Fallback if no config
-               
                ;; Modulator config map - pass through as-is
                (mod/modulator-config? v)
                [k v]
                
-               ;; Any other function - use default
+               ;; Any function - use default (shouldn't happen with config-only approach)
                (fn? v)
                [k 1.0]
                

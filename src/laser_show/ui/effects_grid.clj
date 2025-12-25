@@ -52,13 +52,13 @@
   (first (:effects cell-data)))
 
 (defn has-modulated-params?
-  "Check if any effect in the chain has modulated parameters."
+  "Check if any effect in the chain has modulated parameters.
+   Checks for modulator config maps (pure data)."
   [cell-data]
   (when-let [effects (:effects cell-data)]
     (some (fn [effect]
             (when-let [params (:params effect)]
-              (some (fn [[_k v]]
-                      (and (fn? v) (mod/modulator? v)))
+              (some (fn [[_k v]] (mod/modulator-config? v))
                     params)))
           effects)))
 
@@ -143,26 +143,15 @@
 
 (defn- serialize-params-for-drag
   "Convert effect params to a serializable format.
-   Modulator functions are converted to their pure data config maps.
-   Params should already be configs, but this handles legacy function cases."
+   Params should be pure data configs - pass them through."
   [params]
   (when params
     (into {}
       (map (fn [[k v]]
              (cond
-               ;; Modulator function with config - extract config only
-               (and (fn? v) (mod/modulator? v))
-               (if-let [config (mod/get-modulator-config v)]
-                 [k config]  ; Just the config map, no wrapping
-                 [k 1.0])    ; Fallback if no config
-               
                ;; Modulator config map - pass through as-is
                (mod/modulator-config? v)
                [k v]
-               
-               ;; Any other function (non-modulator) - use default
-               (fn? v)
-               [k 1.0]
                
                ;; Atom or other derefable - deref it
                (instance? clojure.lang.IDeref v)
@@ -472,7 +461,7 @@
 ;; ============================================================================
 ;; Demo/Test Functions
 ;; ============================================================================
-
+#_
 (comment
   (require '[laser-show.state.atoms :as state])
   ;; Test creating an effects grid

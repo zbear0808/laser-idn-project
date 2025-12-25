@@ -10,7 +10,8 @@
    - Complex logic moved out of render functions
    - Easy to test subscriptions independently
    - Single source of truth for derived data"
-  (:require [laser-show.state.atoms :as state]))
+  (:require [laser-show.state.atoms :as state]
+            [laser-show.animation.modulation :as mod]))
 
 ;; ============================================================================
 ;; Grid Cell Subscriptions
@@ -82,7 +83,9 @@
      :effect-count effect-count
      :first-effect-id (:effect-id first-effect)
      :active? (:active cell)
-     :modulated? (boolean (some #(contains? (:params %) :modulator) effects))
+     :modulated? (boolean (some (fn [effect]
+                                  (some mod/modulator-config? (vals (:params effect))))
+                                effects))
      :display-text (when first-effect
                      (str (name (:effect-id first-effect))
                           (when (> effect-count 1)

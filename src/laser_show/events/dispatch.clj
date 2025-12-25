@@ -62,6 +62,33 @@
                                        (grid-service/set-cell-preset! (first selected) (second selected) preset-id)))
       
       ;; IDN Events
+      :idn/connect (let [[target frame-provider] args]
+                     (println "Connecting to IDN target:" target)
+                     (try
+                       (require '[laser-show.backend.streaming-engine :as engine])
+                       ;; Create and start streaming engine
+                       (let [eng ((resolve 'laser-show.backend.streaming-engine/create-and-start!)
+                                  target
+                                  frame-provider
+                                  :fps 30
+                                  :port 7255
+                                  :channel-id 0)]
+                         ;; Update state
+                         (state/set-idn-connection! true target eng)
+                         (println "✓ Connected to" target))
+                       (catch Exception e
+                         (println "✗ Connection failed:" (.getMessage e))
+                         (.printStackTrace e))))
+      
+      :idn/disconnect (try
+                        (when-let [eng (:streaming-engine @state/!idn)]
+                          (require '[laser-show.backend.streaming-engine :as engine])
+                          ((resolve 'laser-show.backend.streaming-engine/stop!) eng)
+                          (state/set-idn-connection! false nil nil)
+                          (println "✓ Disconnected from IDN"))
+                        (catch Exception e
+                          (println "✗ Disconnect error:" (.getMessage e))))
+      
       :idn/set-connection-status (let [[connected? target engine] args]
                                    (state/set-idn-connection! connected? target engine))
       
