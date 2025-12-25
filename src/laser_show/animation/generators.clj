@@ -39,6 +39,7 @@
 
 (defn generate-circle
   "Generate points for a circle.
+   Per IDN-Stream spec Section 6.2: First point must be blanked for beam positioning.
    Options:
    - :num-points - number of points (default 64)
    - :radius - radius in normalized coords (default 0.5)
@@ -50,15 +51,21 @@
            center [0 0]
            color [255 255 255]}}]
   (let [[cx cy] center
-        [r g b] color]
-    (for [i (range num-points)]
-      (let [angle (* TWO-PI (/ i num-points))
-            x (+ cx (* radius (Math/cos angle)))
-            y (+ cy (* radius (Math/sin angle)))]
-        (t/make-point x y r g b)))))
+        [r g b] color
+        ;; First point at angle 0 for blanked positioning
+        first-x (+ cx radius)
+        first-y cy]
+    (cons
+      (t/blanked-point first-x first-y)
+      (for [i (range num-points)]
+        (let [angle (* TWO-PI (/ i num-points))
+              x (+ cx (* radius (Math/cos angle)))
+              y (+ cy (* radius (Math/sin angle)))]
+          (t/make-point x y r g b))))))
 
 (defn generate-line
   "Generate points for a line segment.
+   Per IDN-Stream spec Section 6.2: First point must be blanked for beam positioning.
    Options:
    - :num-points - number of points (default 32)
    - :start - [x1 y1] start position (default [-0.5 0])
@@ -72,14 +79,17 @@
   (let [[x1 y1] start
         [x2 y2] end
         [r g b] color]
-    (for [i (range num-points)]
-      (let [t (/ i (dec num-points))
-            x (lerp x1 x2 t)
-            y (lerp y1 y2 t)]
-        (t/make-point x y r g b)))))
+    (cons
+      (t/blanked-point x1 y1)
+      (for [i (range num-points)]
+        (let [t (/ i (dec num-points))
+              x (lerp x1 x2 t)
+              y (lerp y1 y2 t)]
+          (t/make-point x y r g b))))))
 
 (defn generate-square
   "Generate points for a square.
+   Per IDN-Stream spec Section 6.2: First point must be blanked for beam positioning.
    Options:
    - :num-points - points per side (default 16)
    - :size - side length in normalized coords (default 0.5)
@@ -97,17 +107,21 @@
                  [(+ cx half) (- cy half)]   ; bottom-right
                  [(+ cx half) (+ cy half)]   ; top-right
                  [(- cx half) (+ cy half)]   ; top-left
-                 [(- cx half) (- cy half)]]] ; back to start
-    (mapcat (fn [[[x1 y1] [x2 y2]]]
-              (for [i (range num-points)]
-                (let [t (/ i num-points)
-                      x (lerp x1 x2 t)
-                      y (lerp y1 y2 t)]
-                  (t/make-point x y r g b))))
-            (partition 2 1 corners))))
+                 [(- cx half) (- cy half)]]  ; back to start
+        [first-x first-y] (first corners)]
+    (cons
+      (t/blanked-point first-x first-y)
+      (mapcat (fn [[[x1 y1] [x2 y2]]]
+                (for [i (range num-points)]
+                  (let [t (/ i num-points)
+                        x (lerp x1 x2 t)
+                        y (lerp y1 y2 t)]
+                    (t/make-point x y r g b))))
+              (partition 2 1 corners)))))
 
 (defn generate-triangle
   "Generate points for a triangle.
+   Per IDN-Stream spec Section 6.2: First point must be blanked for beam positioning.
    Options:
    - :num-points - points per side (default 21)
    - :size - size in normalized coords (default 0.5)
@@ -124,17 +138,21 @@
         top [cx (+ cy (* size 0.577))]        ; top vertex
         left [(- cx (/ size 2)) (- cy (* size 0.289))]   ; bottom-left
         right [(+ cx (/ size 2)) (- cy (* size 0.289))]  ; bottom-right
-        corners [top right left top]]  ; close the triangle
-    (mapcat (fn [[[x1 y1] [x2 y2]]]
-              (for [i (range num-points)]
-                (let [t (/ i num-points)
-                      x (lerp x1 x2 t)
-                      y (lerp y1 y2 t)]
-                  (t/make-point x y r g b))))
-            (partition 2 1 corners))))
+        corners [top right left top]  ; close the triangle
+        [first-x first-y] (first corners)]
+    (cons
+      (t/blanked-point first-x first-y)
+      (mapcat (fn [[[x1 y1] [x2 y2]]]
+                (for [i (range num-points)]
+                  (let [t (/ i num-points)
+                        x (lerp x1 x2 t)
+                        y (lerp y1 y2 t)]
+                    (t/make-point x y r g b))))
+              (partition 2 1 corners)))))
 
 (defn generate-spiral
   "Generate points for a spiral.
+   Per IDN-Stream spec Section 6.2: First point must be blanked for beam positioning.
    Options:
    - :num-points - total number of points (default 128)
    - :turns - number of spiral turns (default 3)
@@ -150,17 +168,23 @@
            center [0 0]
            color [255 255 255]}}]
   (let [[cx cy] center
-        [r g b] color]
-    (for [i (range num-points)]
-      (let [t (/ i (dec num-points))
-            angle (* TWO-PI turns t)
-            radius (lerp start-radius end-radius t)
-            x (+ cx (* radius (Math/cos angle)))
-            y (+ cy (* radius (Math/sin angle)))]
-        (t/make-point x y r g b)))))
+        [r g b] color
+        ;; First point at center of spiral (start-radius, angle 0)
+        first-x (+ cx start-radius)
+        first-y cy]
+    (cons
+      (t/blanked-point first-x first-y)
+      (for [i (range num-points)]
+        (let [t (/ i (dec num-points))
+              angle (* TWO-PI turns t)
+              radius (lerp start-radius end-radius t)
+              x (+ cx (* radius (Math/cos angle)))
+              y (+ cy (* radius (Math/sin angle)))]
+          (t/make-point x y r g b))))))
 
 (defn generate-star
   "Generate points for a star.
+   Per IDN-Stream spec Section 6.2: First point must be blanked for beam positioning.
    Options:
    - :num-points - points per segment (default 8)
    - :spikes - number of star spikes (default 5)
@@ -186,17 +210,21 @@
                      [(+ cx (* radius (Math/cos angle)))
                       (+ cy (* radius (Math/sin angle)))]))
         ;; Close the star
-        vertices (concat vertices [(first vertices)])]
-    (mapcat (fn [[[x1 y1] [x2 y2]]]
-              (for [i (range num-points)]
-                (let [t (/ i num-points)
-                      x (lerp x1 x2 t)
-                      y (lerp y1 y2 t)]
-                  (t/make-point x y r g b))))
-            (partition 2 1 vertices))))
+        vertices (concat vertices [(first vertices)])
+        [first-x first-y] (first vertices)]
+    (cons
+      (t/blanked-point first-x first-y)
+      (mapcat (fn [[[x1 y1] [x2 y2]]]
+                (for [i (range num-points)]
+                  (let [t (/ i num-points)
+                        x (lerp x1 x2 t)
+                        y (lerp y1 y2 t)]
+                    (t/make-point x y r g b))))
+              (partition 2 1 vertices)))))
 
 (defn generate-wave
   "Generate points for a sine wave.
+   Per IDN-Stream spec Section 6.2: First point must be blanked for beam positioning.
    Options:
    - :num-points - number of points (default 64)
    - :amplitude - wave amplitude (default 0.3)
@@ -213,12 +241,17 @@
            color [255 255 255]}}]
   (let [[cx cy] center
         [r g b] color
-        half-width (/ width 2)]
-    (for [i (range num-points)]
-      (let [t (/ i (dec num-points))
-            x (+ cx (- (* t width) half-width))
-            y (+ cy (* amplitude (Math/sin (* TWO-PI frequency t))))]
-        (t/make-point x y r g b)))))
+        half-width (/ width 2)
+        ;; First point at start of wave
+        first-x (+ cx (- half-width))
+        first-y cy]
+    (cons
+      (t/blanked-point first-x first-y)
+      (for [i (range num-points)]
+        (let [t (/ i (dec num-points))
+              x (+ cx (- (* t width) half-width))
+              y (+ cy (* amplitude (Math/sin (* TWO-PI frequency t))))]
+          (t/make-point x y r g b))))))
 
 ;; ============================================================================
 ;; Beam Effects
@@ -226,6 +259,8 @@
 
 (defn generate-beam
   "Generate a single beam (line from center outward).
+   Per IDN-Stream spec Section 6.2: First point must be blanked for beam positioning.
+   Note: generate-line already adds the blanked first point.
    Options:
    - :num-points - number of points (default 32)
    - :length - beam length (default 0.8)

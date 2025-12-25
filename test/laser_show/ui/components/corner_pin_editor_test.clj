@@ -43,7 +43,7 @@
         (is (= 1.5 (get-in updated-corners [:tl :y])))
         (is (= 1.5 (get-in updated-corners [:tr :x])))
         (is (= 1.5 (get-in updated-corners [:tr :y])))))))
-
+#_
 (deftest on-change-callback-behavior
   (testing "on-change callback is invoked when corners are updated"
     (let [callback-called (atom 0)

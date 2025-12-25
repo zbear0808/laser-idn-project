@@ -48,18 +48,27 @@
         (is (= 0x02 chunk-type) "Chunk type should be FRAME_SAMPLES (0x02)")
         (is (= 1000000 timestamp) "Timestamp should match input"))))
 
-  (testing "CCLF bit is set when config is present"
+  (testing "CNL byte structure - bit 7 always set for channel messages"
+    (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
+          packet-with-config (idn/frame->packet-with-config frame 5 1000 33333)
+          packet-without-config (idn/frame->packet frame 5 1000 33333)
+          cnl-with (get-byte packet-with-config 2)
+          cnl-without (get-byte packet-without-config 2)]
+      (is (bit-test cnl-with 7) "Bit 7 (channel msg) should ALWAYS be set")
+      (is (bit-test cnl-without 7) "Bit 7 (channel msg) should ALWAYS be set even without config")))
+
+  (testing "CCLF bit (bit 6) is set when config is present"
     (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
           packet (idn/frame->packet-with-config frame 5 1000 33333)
           cnl-byte (get-byte packet 2)]
-      (is (bit-test cnl-byte 7) "CCLF bit (bit 7) should be set when config present")
+      (is (bit-test cnl-byte 6) "CCLF bit (bit 6) should be set when config present")
       (is (= 5 (bit-and cnl-byte 0x3F)) "Channel ID should be in lower 6 bits")))
 
-  (testing "CCLF bit is clear when config is absent"
+  (testing "CCLF bit (bit 6) is clear when config is absent"
     (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
           packet (idn/frame->packet frame 5 1000 33333)
           cnl-byte (get-byte packet 2)]
-      (is (not (bit-test cnl-byte 7)) "CCLF bit should be clear when no config")
+      (is (not (bit-test cnl-byte 6)) "CCLF bit (bit 6) should be clear when no config")
       (is (= 5 (bit-and cnl-byte 0x3F)) "Channel ID should be in lower 6 bits"))))
 
 ;; ============================================================================
@@ -92,12 +101,15 @@
 ;; ============================================================================
 
 (deftest service-config-tags-test
-  (testing "Default tags match ISP-DB25 compatibility (Section 3.4.10)"
+  (testing "Default tags match ISP-DB25 compatibility (Section 3.4.10/3.4.11)"
+    ;; 7 descriptor tags for X(16-bit), Y(16-bit), R, G, B
+    ;; Plus TAG_VOID for 32-bit alignment (8 tags = 16 bytes = 4 words)
     (let [expected-tags [idn/TAG_X idn/TAG_PRECISION
                          idn/TAG_Y idn/TAG_PRECISION
                          idn/TAG_COLOR_RED
                          idn/TAG_COLOR_GREEN
-                         idn/TAG_COLOR_BLUE]]
+                         idn/TAG_COLOR_BLUE
+                         idn/TAG_VOID]]  ; Alignment padding per Section 3.4.2
       (is (= expected-tags idn/default-graphic-tags))))
 
   (testing "Tags are written correctly to packet"

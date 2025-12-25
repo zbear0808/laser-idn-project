@@ -69,8 +69,9 @@
 ;; Default Configuration
 ;; ============================================================================
 
-(def ^:const DEFAULT_CHANNEL_ID 1)
-(def ^:const DEFAULT_SERVICE_ID 1)
+(def ^:const DEFAULT_CHANNEL_ID 0)
+;; Per spec Section 2.2: Service ID 0x00 = connect to default service
+(def ^:const DEFAULT_SERVICE_ID 0)
 
 ;; Maximum points per packet is determined by:
 ;; - UDP max safe size: ~1400 bytes (to avoid fragmentation)
@@ -82,16 +83,40 @@
 
 (def default-graphic-tags
   "Default tag configuration for ISP-DB25 compatible X/Y/R/G/B format.
-   Per Section 3.4.10 and 3.4.11 of the spec."
+   Per Section 3.4.10 and 3.4.11 of the spec.
+   NOTE: Void tag added for required 32-bit alignment per Section 3.4.2"
   [TAG_X TAG_PRECISION        ; X coordinate, 16-bit
    TAG_Y TAG_PRECISION        ; Y coordinate, 16-bit
    TAG_COLOR_RED              ; Red, 8-bit
    TAG_COLOR_GREEN            ; Green, 8-bit
-   TAG_COLOR_BLUE])           ; Blue, 8-bit
+   TAG_COLOR_BLUE             ; Blue, 8-bit
+   TAG_VOID])                 ; Padding for 32-bit alignment (8 tags = 16 bytes = 4 words)
 
 (def bytes-per-sample
   "Bytes per sample for default configuration: X(2) + Y(2) + R(1) + G(1) + B(1) = 7"
   7)
+
+;; ============================================================================
+;; SCWC Calculation and Tag Alignment
+;; ============================================================================
+
+(defn calculate-scwc
+  "Calculate Service Configuration Word Count (SCWC) and ensure 32-bit alignment.
+   Per IDN-Stream spec Section 3.4.2: Tag arrays must be 32-bit (4 byte) aligned.
+   Tags are 16-bit (2 bytes) each, so we need an even number of tags.
+   
+   Returns [scwc padded-tags] where:
+   - scwc: Number of 32-bit words in the tag array
+   - padded-tags: Tag vector padded with TAG_VOID if necessary for alignment"
+  [tags]
+  (let [tag-count (count tags)
+        ;; Pad to even number of tags for 32-bit boundary alignment
+        padded-tags (if (odd? tag-count)
+                      (conj (vec tags) TAG_VOID)
+                      (vec tags))
+        ;; SCWC = number of 32-bit words = (tag-count / 2) after padding
+        scwc (quot (count padded-tags) 2)]
+    [scwc padded-tags]))
 
 ;; ============================================================================
 ;; Packet Size Calculations
@@ -148,12 +173,18 @@
    
    Per Section 2.1:
    - Total Size (2 bytes): Total message size
-   - CNL (1 byte): CCLF bit + Channel ID (0-63)
+   - CNL (1 byte): Channel message bit (always 1) + CCLF bit + Channel ID (0-63)
    - Chunk Type (1 byte): Type of data chunk
-   - Timestamp (4 bytes): Timestamp in microseconds"
+   - Timestamp (4 bytes): Timestamp in microseconds
+   
+   CNL byte structure (Section 2.1):
+   - Bit 7 (MSB): Always 1 for channel messages (content ID range 0x8000-0xFFFF)
+   - Bit 6: CCLF (config present for first fragment, last fragment flag for sequel)
+   - Bits 5-0: Channel ID (0-63)"
   [^ByteBuffer buf total-size channel-id chunk-type timestamp has-config?]
-  (let [cclf-bit (if has-config? 0x80 0x00)
-        cnl-byte (bit-or cclf-bit (bit-and channel-id 0x3F))]
+  (let [channel-msg-bit 0x80               ; Bit 7 ALWAYS 1 for channel messages
+        cclf-bit (if has-config? 0x40 0x00) ; Bit 6 is CCLF
+        cnl-byte (bit-or channel-msg-bit cclf-bit (bit-and channel-id 0x3F))]
     (.putShort buf (short total-size))
     (.put buf (unchecked-byte cnl-byte))
     (.put buf (unchecked-byte chunk-type))
@@ -230,8 +261,9 @@
                                                      single-scan? false}}]
   (let [points (take MAX_POINTS_PER_PACKET (:points frame))
         point-count (count points)
-        scwc (quot (count tags) 2)
-        total-size (packet-size-with-config point-count tags)
+        ;; Calculate SCWC with proper 32-bit alignment
+        [scwc padded-tags] (calculate-scwc tags)
+        total-size (packet-size-with-config point-count padded-tags)
         cfl-flags (bit-or CFL_ROUTING (if close? CFL_CLOSE 0))
         chunk-flags (if single-scan? 0x01 0x00)
         buf (ByteBuffer/allocate total-size)]
@@ -241,7 +273,7 @@
     (write-channel-message-header! buf total-size channel-id
                                    CHUNK_TYPE_FRAME_SAMPLES timestamp-us true)
     (write-channel-config-header! buf scwc cfl-flags service-id service-mode)
-    (write-service-config-tags! buf tags)
+    (write-service-config-tags! buf padded-tags)  ; Use padded tags
     (write-frame-chunk-header! buf chunk-flags duration-us)
 
     (doseq [point points]
@@ -308,7 +340,12 @@
 
 (defn parse-channel-message-header
   "Parse channel message header from byte array.
-   Returns map with header fields."
+   Returns map with header fields.
+   
+   CNL byte structure:
+   - Bit 7: Always 1 for channel messages
+   - Bit 6: CCLF (config present)
+   - Bits 5-0: Channel ID"
   [^bytes packet]
   (when (>= (alength packet) 8)
     (let [buf (ByteBuffer/wrap packet)]
@@ -318,7 +355,8 @@
             chunk-type (bit-and (.get buf) 0xFF)
             timestamp (.getInt buf)]
         {:total-size total-size
-         :has-config? (bit-test cnl-byte 7)
+         :is-channel-msg? (bit-test cnl-byte 7)  ; Bit 7: always 1 for channel messages
+         :has-config? (bit-test cnl-byte 6)      ; Bit 6: CCLF (config present)
          :channel-id (bit-and cnl-byte 0x3F)
          :chunk-type chunk-type
          :timestamp timestamp}))))
