@@ -9,7 +9,7 @@
       "menuSelections": {
         "cljAliases": ["dev"]
       },
-      "afterPrimaryReplConnectedCode": "(start)"
+      "afterPrimaryReplConnectedCode": "(do (fx-app/dev-start!))"
     }
   ],
 

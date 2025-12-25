@@ -2,33 +2,46 @@
  
  :deps {org.clojure/clojure {:mvn/version "1.12.4"}
         cljfx/cljfx {:mvn/version "1.10.6"}
+
+        ;; Core JavaFX modules (i think all required for complete GUI)
+        org.openjfx/javafx-base$win {:mvn/version "26-ea+19"}
+        org.openjfx/javafx-controls$win {:mvn/version "26-ea+19"}
+        org.openjfx/javafx-graphics$win {:mvn/version "26-ea+19"}
+        org.openjfx/javafx-media$win {:mvn/version "26-ea+19"}
+        org.openjfx/javafx-swing$win {:mvn/version "26-ea+19"}
+        org.openjfx/javafx-web$win {:mvn/version "26-ea+19"}
+
+
+
         seesaw/seesaw {:mvn/version "1.5.0"} ; deprecating seesaw in favor of cljfx
         com.formdev/flatlaf {:mvn/version "3.7"}
         overtone/midi-clj {:mvn/version "0.5.0"}
-        overtone/osc-clj {:mvn/version "0.9.0"}}
+        overtone/osc-clj {:mvn/version "0.9.0"}
+        
+        ;; JNA for native Windows API access (dark title bar)
+        net.java.dev.jna/jna {:mvn/version "5.15.0"}
+        net.java.dev.jna/jna-platform {:mvn/version "5.15.0"}}
  
  :aliases
  {:laser-show
-  {:main-opts ["-m" "laser-show.core"]
-   :jvm-opts ["--enable-native-access=ALL-UNNAMED"]}
+  {:jvm-opts ["-Djavafx.enablePreview=true"]
+   :main-opts ["-m" "laser-show.core"]}
   
   :idn-hello
-  {:main-opts ["-m" "idn-hello.core"]
-   :jvm-opts ["--enable-native-access=ALL-UNNAMED"]}
+  {:main-opts ["-m" "idn-hello.core"]}
   
   :repl
   {:extra-deps {nrepl/nrepl {:mvn/version "1.3.1"}
                 cider/cider-nrepl {:mvn/version "0.57.0"}}
    :main-opts ["-m" "nrepl.cmdline" 
-               "--middleware" "[cider.nrepl/cider-middleware]"]
-   :jvm-opts ["--enable-native-access=ALL-UNNAMED"]}
+               "--middleware" "[cider.nrepl/cider-middleware]"]}
   
   :dev
   {:extra-paths ["dev"]
+   :jvm-opts ["-Djavafx.enablePreview=true"]
    :extra-deps {nrepl/nrepl {:mvn/version "1.3.1"}
                 cider/cider-nrepl {:mvn/version "0.57.0"}
-                org.clojure/tools.namespace {:mvn/version "1.5.0"}}
-   :jvm-opts ["--enable-native-access=ALL-UNNAMED"]}
+                org.clojure/tools.namespace {:mvn/version "1.5.0"}}}
   
   :test
   {:extra-paths ["test"]
@@ -55,8 +68,7 @@
   
   :build
   {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
-   :ns-default build
-   :jvm-opts ["--enable-native-access=ALL-UNNAMED"]}
+   :ns-default build}
   
   :repl-mcp {:main-opts ["-m" "is.simm.repl-mcp"]
                :extra-paths ["test"] ;; If you want it to be able to run the tests

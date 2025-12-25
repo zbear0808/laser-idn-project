@@ -11,13 +11,28 @@ env:
 
 jobs:
   # ==========================================================================
-  # Build JAR (runs once on ubuntu)
+  # Build Platform-Specific JARs with JavaFX natives
   # ==========================================================================
-  build-jar:
-    runs-on: ubuntu-latest
-    outputs:
-      jar-name: ${{ steps.build.outputs.jar-name }}
-      
+  build-platform-jars:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+            artifact-name: jar-windows
+          - os: macos-latest
+            platform: mac
+            artifact-name: jar-macos-arm64
+          - os: macos-15-intel
+            platform: mac
+            artifact-name: jar-macos-intel
+          - os: ubuntu-latest
+            platform: linux
+            artifact-name: jar-linux
+    
+    runs-on: ${{ matrix.os }}
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -43,141 +58,38 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-clojure-
       
-      - name: Build uber JAR
-        id: build
+      - name: Update deps.edn for platform-specific JavaFX
+        shell: bash
+        run: |
+          # Replace $win with the current platform
+          sed -i.bak 's/\$win/\$${{ matrix.platform }}/g' deps.edn
+          echo "Updated deps.edn for ${{ matrix.platform }}:"
+          grep javafx deps.edn || echo "No javafx found in deps.edn"
+      
+      - name: Build platform-specific uber JAR
         run: |
           clojure -T:build uber
-          JAR_FILE=$(ls target/*-standalone.jar | head -1)
-          JAR_NAME=$(basename "$JAR_FILE")
-          echo "jar-name=$JAR_NAME" >> $GITHUB_OUTPUT
-          echo "Built JAR: $JAR_NAME"
+          echo "Built JAR for ${{ matrix.platform }}"
+          ls -lh target/
       
-      - name: Upload JAR artifact
+      - name: Upload platform JAR artifact
         uses: actions/upload-artifact@v4
         with:
-          name: uber-jar
+          name: ${{ matrix.artifact-name }}
           path: target/*-standalone.jar
           retention-days: 7
 
   # ==========================================================================
-  # Build Native Executables
+  # Build Native Executables (DISABLED - needs fixing)
   # ==========================================================================
-  build-native:
-    needs: build-jar
-    strategy:
-      fail-fast: false  # Continue other builds if one fails
-      matrix:
-        include:
-          # macOS ARM64 (Apple Silicon) - Native Optimized
-          - os: macos-latest
-            arch: aarch64
-            variant: native
-            march-flag: "-march=native"
-            artifact-name: laser-show-macos-arm64-native
-            executable-name: laser-show
-            
-          # macOS ARM64 (Apple Silicon) - Compatibility
-          - os: macos-latest
-            arch: aarch64
-            variant: compatibility
-            march-flag: "-march=compatibility"
-            artifact-name: laser-show-macos-arm64-compat
-            executable-name: laser-show
-            
-          # macOS Intel x86_64 - Native Optimized
-          - os: macos-15-intel
-            arch: x86_64
-            variant: native
-            march-flag: "-march=native"
-            artifact-name: laser-show-macos-intel-native
-            executable-name: laser-show
-            
-          # macOS Intel x86_64 - Compatibility
-          - os: macos-15-intel
-            arch: x86_64
-            variant: compatibility
-            march-flag: "-march=compatibility"
-            artifact-name: laser-show-macos-intel-compat
-            executable-name: laser-show
-            
-          # Windows x86_64 - Native Optimized
-          - os: windows-latest
-            arch: x86_64
-            variant: native
-            march-flag: "-march=native"
-            artifact-name: laser-show-windows-native
-            executable-name: laser-show.exe
-            
-          # Windows x86_64 - Compatibility
-          - os: windows-latest
-            arch: x86_64
-            variant: compatibility
-            march-flag: "-march=compatibility"
-            artifact-name: laser-show-windows-compat
-            executable-name: laser-show.exe
-
-    runs-on: ${{ matrix.os }}
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Download JAR artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: uber-jar
-          path: target/
-      
-      - name: Setup GraalVM
-        uses: graalvm/setup-graalvm@v1
-        with:
-          java-version: ${{ env.GRAALVM_VERSION }}
-          distribution: 'graalvm'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Display GraalVM info
-        run: |
-          echo "JAVA_HOME: $JAVA_HOME"
-          java -version
-          native-image --version
-      
-      # Windows-specific: Set up Visual Studio Build Tools
-      - name: Setup Visual Studio Build Tools (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-      
-      - name: Build native image (${{ matrix.variant }})
-        shell: bash
-        run: |
-          JAR_FILE=$(ls target/*-standalone.jar | head -1)
-          echo "Building ${{ matrix.variant }} native image from: $JAR_FILE"
-          echo "Using optimization flag: ${{ matrix.march-flag }}"
-          
-          native-image \
-            --no-fallback \
-            --verbose \
-            -H:+ReportExceptionStackTraces \
-            --initialize-at-build-time=java.awt,javax.swing,java.awt.color,java.awt.font,java.awt.geom,java.awt.image \
-            --initialize-at-run-time=java.awt.Toolkit,sun.java2d,sun.awt,com.sun.imageio \
-            -H:+AddAllCharsets \
-            -H:IncludeResourceBundles=sun.awt.resources.awtoptions \
-            ${{ matrix.march-flag }} \
-            -O3 \
-            -jar "$JAR_FILE" \
-            -o target/${{ matrix.executable-name }}
-      
-      - name: Upload native executable
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact-name }}
-          path: target/${{ matrix.executable-name }}
-          retention-days: 30
+  # build-native:
+  #   Commented out until JavaFX/GraalVM native-image issues are resolved
 
   # ==========================================================================
-  # Build JPackage Bundled Executables (with JRE)
+  # Build JPackage Bundled Executables (with JRE and custom icons)
   # ==========================================================================
   build-jpackage:
-    needs: build-jar
+    needs: build-platform-jars
     strategy:
       fail-fast: false
       matrix:
@@ -186,21 +98,29 @@ jobs:
           - os: windows-latest
             installer-type: msi
             artifact-name: laser-show-windows-jre-msi
+            jar-artifact: jar-windows
+            icon-file: resources/laser-warning-square.ico
             
           # macOS installer with bundled JRE (ARM64)
           - os: macos-latest
             installer-type: dmg
             artifact-name: laser-show-macos-arm64-jre-dmg
+            jar-artifact: jar-macos-arm64
+            icon-file: resources/laser-warning-square.icns
             
           # macOS installer with bundled JRE (Intel)
           - os: macos-15-intel
             installer-type: dmg
             artifact-name: laser-show-macos-intel-jre-dmg
+            jar-artifact: jar-macos-intel
+            icon-file: resources/laser-warning-square.icns
             
           # Linux installer with bundled JRE
           - os: ubuntu-latest
             installer-type: deb
             artifact-name: laser-show-linux-jre-deb
+            jar-artifact: jar-linux
+            icon-file: resources/laser-warning-square.png
 
     runs-on: ${{ matrix.os }}
     
@@ -208,10 +128,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Download JAR artifact
+      - name: Download platform-specific JAR artifact
         uses: actions/download-artifact@v4
         with:
-          name: uber-jar
+          name: ${{ matrix.jar-artifact }}
           path: target/
       
       - name: Setup Java (with jpackage)
@@ -220,19 +140,29 @@ jobs:
           distribution: 'temurin'
           java-version: ${{ env.JAVA_VERSION }}
       
+      - name: Verify icon file exists
+        shell: bash
+        run: |
+          if [ -f "${{ matrix.icon-file }}" ]; then
+            echo "✓ Icon file found: ${{ matrix.icon-file }}"
+            ls -lh "${{ matrix.icon-file }}"
+          else
+            echo "✗ Warning: Icon file not found: ${{ matrix.icon-file }}"
+            echo "Proceeding without custom icon"
+          fi
+      
       - name: Prepare JAR for jpackage
         shell: bash
         run: |
           JAR_FILE=$(ls target/*-standalone.jar | head -1)
           JAR_NAME=$(basename "$JAR_FILE")
           echo "JAR_NAME=$JAR_NAME" >> $GITHUB_ENV
-          echo "Main JAR: $JAR_NAME"
+          echo "Platform-specific JAR: $JAR_NAME"
       
       - name: Package installer with jpackage
         shell: bash
         run: |
-          echo "Creating ${{ matrix.installer-type }} installer..."
-          echo "Let jpackage automatically create the runtime with all required modules"
+          echo "Creating ${{ matrix.installer-type }} installer with custom icon..."
           
           # Build jpackage arguments
           JPACKAGE_ARGS=(
@@ -247,6 +177,12 @@ jobs:
             --java-options "-Xmx2048m"
             --verbose
           )
+          
+          # Add icon if file exists
+          if [ -f "${{ matrix.icon-file }}" ]; then
+            JPACKAGE_ARGS+=(--icon "${{ matrix.icon-file }}")
+            echo "Using custom icon: ${{ matrix.icon-file }}"
+          fi
           
           # Add macOS-specific bundle identifier
           if [[ "${{ runner.os }}" == "macOS" ]]; then
