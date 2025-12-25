@@ -1,15 +1,15 @@
 (ns laser-show.services.grid-service
-  "Grid service - orchestrates grid operations with business logic.
+  "Grid service - orchestrates grid operations with underlying logic.
    
    This service provides high-level operations for the cue grid,
-   coordinating between state management and business logic.
+   coordinating between state management and underlying logic.
    
    All grid mutations should go through this service to ensure:
    - Proper validation
    - Coordination between related state (e.g., active cell, selection)
    - Project dirty tracking
    
-   The service layer contains business logic; state/atoms.clj remains thin accessors."
+   The service layer contains underlying logic; state/atoms.clj remains thin accessors."
   (:require [laser-show.state.atoms :as state]))
 
 ;; ============================================================================
@@ -31,7 +31,7 @@
          (>= row 0) (< row rows))))
 
 ;; ============================================================================
-;; Cell Read Operations (no business logic needed)
+;; Cell Read Operations (no underlying logic needed)
 ;; ============================================================================
 
 (defn get-cell
@@ -68,7 +68,7 @@
   (some? (:preset-id (get-cell col row))))
 
 ;; ============================================================================
-;; Cell Write Operations (with business logic)
+;; Cell Write Operations (with underlying logic)
 ;; ============================================================================
 
 (defn set-cell-preset!
@@ -140,7 +140,7 @@
   (state/get-selected-cell))
 
 ;; ============================================================================
-;; Triggering / Playback (with business logic)
+;; Triggering / Playback (with underlying logic)
 ;; ============================================================================
 
 (defn trigger-cell!
@@ -179,7 +179,7 @@
   (state/playing?))
 
 ;; ============================================================================
-;; Cell Movement / Copy Operations (with business logic)
+;; Cell Movement / Copy Operations (with underlying logic)
 ;; ============================================================================
 
 (defn move-cell!
@@ -291,7 +291,7 @@
   (count (get-all-cells)))
 
 ;; ============================================================================
-;; Batch Operations (with business logic)
+;; Batch Operations (with underlying logic)
 ;; ============================================================================
 
 (defn clear-all-cells!

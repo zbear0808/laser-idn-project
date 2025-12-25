@@ -3,7 +3,7 @@
    Displays a grid of effect cells that can be toggled on/off.
    Effects are applied in row-major order (row 0 col 0, row 0 col 1, etc.)
    
-   Uses effects-service for all mutations (business logic layer).
+   Uses effects-service for all mutations (underlying logic layer).
    Uses subscriptions for derived display data.
    base-grid is only used for UI-transient state (selection, hover).
    
@@ -324,7 +324,7 @@
                               (when on-effects-change
                                 (on-effects-change (effects-service/get-all-active-effects))))
         
-        ;; Effect operations - write through effects-service for business logic
+        ;; Effect operations - write through effects-service for underlying logic
         set-effect! (fn [col row effect-data]
                       (effects-service/set-effect-cell! col row effect-data)
                       (notify-and-refresh!))
@@ -474,8 +474,8 @@
 ;; ============================================================================
 
 (comment
+  (require '[laser-show.state.atoms :as state])
   ;; Test creating an effects grid
-  (require '[seesaw.core :as ss])
   
   ;; Reset effects state
   (state/reset-effects!)

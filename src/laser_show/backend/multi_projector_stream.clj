@@ -8,14 +8,16 @@
    2. Zone group effects (applied during routing)
    3. Zone effects (applied during routing)
    4. Projector effects (applied here after routing)"
-  (:require [laser-show.backend.streaming-engine :as engine]
-            [laser-show.backend.projectors :as projectors]
-            [laser-show.backend.zones :as zones]
-            [laser-show.backend.zone-router :as router]
-            [laser-show.backend.cues :as cues]
-            [laser-show.animation.types :as t]
-            [laser-show.animation.effects :as fx]
-            [laser-show.state.atoms :as state]))
+  (:require
+   [clojure.set :as set]
+   [laser-show.animation.effects :as fx]
+   [laser-show.animation.types :as t]
+   [laser-show.backend.cues :as cues]
+   [laser-show.backend.projectors :as projectors]
+   [laser-show.backend.streaming-engine :as engine]
+   [laser-show.backend.zone-router :as router]
+   [laser-show.backend.zones :as zones]
+   [laser-show.state.atoms :as state]))
 
 ;; ============================================================================
 ;; Multi-Engine State
@@ -216,8 +218,8 @@
   []
   (let [active-proj-ids (set (projectors/get-active-projector-ids))
         current-engine-ids (set (keys (:engines @!multi-engine-state)))
-        to-add (clojure.set/difference active-proj-ids current-engine-ids)
-        to-remove (clojure.set/difference current-engine-ids active-proj-ids)]
+        to-add (set/difference active-proj-ids current-engine-ids)
+        to-remove (set/difference current-engine-ids active-proj-ids)]
     (doseq [proj-id to-remove]
       (remove-projector-engine! proj-id))
     (doseq [proj-id to-add]

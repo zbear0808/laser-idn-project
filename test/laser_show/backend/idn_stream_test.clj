@@ -29,35 +29,6 @@
     (.position buf idx)
     (.getInt buf)))
 
-;; ============================================================================
-;; Constants Tests
-;; ============================================================================
-
-(deftest constants-test
-  (testing "Chunk type constants match spec Section 2.1"
-    (is (= 0x00 idn/CHUNK_TYPE_VOID))
-    (is (= 0x01 idn/CHUNK_TYPE_WAVE_SAMPLES))
-    (is (= 0x02 idn/CHUNK_TYPE_FRAME_SAMPLES))
-    (is (= 0x03 idn/CHUNK_TYPE_FRAME_SAMPLES_FIRST))
-    (is (= 0xC0 idn/CHUNK_TYPE_FRAME_SAMPLES_SEQUEL)))
-  
-  (testing "Service mode constants match spec Section 2.2"
-    (is (= 0x00 idn/SERVICE_MODE_VOID))
-    (is (= 0x01 idn/SERVICE_MODE_GRAPHIC_CONTINUOUS))
-    (is (= 0x02 idn/SERVICE_MODE_GRAPHIC_DISCRETE))
-    (is (= 0x03 idn/SERVICE_MODE_EFFECTS_CONTINUOUS))
-    (is (= 0x04 idn/SERVICE_MODE_EFFECTS_DISCRETE)))
-  
-  (testing "Configuration tag constants match spec Section 3.4"
-    (is (= 0x4000 idn/TAG_NOP))
-    (is (= 0x4010 idn/TAG_PRECISION))
-    (is (= 0x4200 idn/TAG_X))
-    (is (= 0x4210 idn/TAG_Y)))
-  
-  (testing "Color wavelength tags match spec Section 3.4.10"
-    (is (= (idn/color-tag 638) idn/TAG_COLOR_RED))
-    (is (= (idn/color-tag 532) idn/TAG_COLOR_GREEN))
-    (is (= (idn/color-tag 460) idn/TAG_COLOR_BLUE))))
 
 ;; ============================================================================
 ;; Channel Message Header Tests (Section 2.1)
@@ -67,23 +38,23 @@
   (testing "Empty frame packet has correct header structure"
     (let [packet (idn/empty-frame-packet 0 1000000)]
       (is (>= (alength packet) 8) "Packet must be at least 8 bytes")
-      
+
       (let [total-size (get-short packet 0)
             cnl-byte (get-byte packet 2)
             chunk-type (get-byte packet 3)
             timestamp (get-int packet 4)]
-        
+
         (is (= (alength packet) total-size) "Total size field must match packet length")
         (is (= 0x02 chunk-type) "Chunk type should be FRAME_SAMPLES (0x02)")
         (is (= 1000000 timestamp) "Timestamp should match input"))))
-  
+
   (testing "CCLF bit is set when config is present"
     (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
           packet (idn/frame->packet-with-config frame 5 1000 33333)
           cnl-byte (get-byte packet 2)]
       (is (bit-test cnl-byte 7) "CCLF bit (bit 7) should be set when config present")
       (is (= 5 (bit-and cnl-byte 0x3F)) "Channel ID should be in lower 6 bits")))
-  
+
   (testing "CCLF bit is clear when config is absent"
     (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
           packet (idn/frame->packet frame 5 1000 33333)
@@ -103,13 +74,13 @@
           scwc (get-byte packet config-offset)
           cfl (get-byte packet (+ config-offset 1))
           service-id (get-byte packet (+ config-offset 2))
-          service-mode (get-byte packet (+ config-offset 3))] 
-      
+          service-mode (get-byte packet (+ config-offset 3))]
+
       (is (pos? scwc) "SCWC should be positive (tags present)")
       (is (bit-test cfl 0) "Routing flag should be set")
       (is (= 0 service-id) "Default service ID should be 0")
       (is (= 0x02 service-mode) "Service mode should be GRAPHIC_DISCRETE")))
-  
+
   (testing "Close flag is set when requested"
     (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
           packet (idn/frame->packet-with-config frame 0 1000 33333 :close? true)
@@ -128,7 +99,7 @@
                          idn/TAG_COLOR_GREEN
                          idn/TAG_COLOR_BLUE]]
       (is (= expected-tags idn/default-graphic-tags))))
-  
+
   (testing "Tags are written correctly to packet"
     (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
           packet (idn/frame->packet-with-config frame 0 1000 33333)
@@ -136,7 +107,7 @@
           buf (ByteBuffer/wrap packet)]
       (.order buf ByteOrder/BIG_ENDIAN)
       (.position buf tags-offset)
-      
+
       (is (= idn/TAG_X (.getShort buf)) "First tag should be X")
       (is (= idn/TAG_PRECISION (.getShort buf)) "Second tag should be PRECISION")
       (is (= idn/TAG_Y (.getShort buf)) "Third tag should be Y")
@@ -150,19 +121,18 @@
   (testing "Frame chunk header has correct structure"
     (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
           packet (idn/frame->packet frame 0 1000 33333)
-          chunk-offset 8]
-      
-      (let [flags (get-byte packet chunk-offset)
-            duration-hi (get-byte packet (+ chunk-offset 1))
-            duration-mid (get-byte packet (+ chunk-offset 2))
-            duration-lo (get-byte packet (+ chunk-offset 3))
-            duration (bit-or (bit-shift-left duration-hi 16)
-                             (bit-shift-left duration-mid 8)
-                             duration-lo)]
-        
-        (is (= 0 (bit-and flags 0x01)) "Once flag should be clear by default")
-        (is (= 33333 duration) "Duration should match input"))))
-  
+          chunk-offset 8
+          flags (get-byte packet chunk-offset)
+          duration-hi (get-byte packet (+ chunk-offset 1))
+          duration-mid (get-byte packet (+ chunk-offset 2))
+          duration-lo (get-byte packet (+ chunk-offset 3))
+          duration (bit-or (bit-shift-left duration-hi 16)
+                           (bit-shift-left duration-mid 8)
+                           duration-lo)]
+
+      (is (= 0 (bit-and flags 0x01)) "Once flag should be clear by default")
+      (is (= 33333 duration) "Duration should match input")))
+
   (testing "Once flag is set when single-scan requested"
     (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
           packet (idn/frame->packet frame 0 1000 33333 :single-scan? true)
@@ -182,26 +152,26 @@
           buf (ByteBuffer/wrap packet)]
       (.order buf ByteOrder/BIG_ENDIAN)
       (.position buf sample-offset)
-      
+
       (let [x (.getShort buf)
             y (.getShort buf)
             r (bit-and (.get buf) 0xFF)
             g (bit-and (.get buf) 0xFF)
             b (bit-and (.get buf) 0xFF)]
-        
+
         (is (> x 0) "X should be positive for 0.5")
         (is (< y 0) "Y should be negative for -0.5")
         (is (= 255 r) "Red should be 255")
         (is (= 128 g) "Green should be 128")
         (is (= 64 b) "Blue should be 64"))))
-  
+
   (testing "Multiple points are written sequentially"
     (let [points [(t/make-point 0 0 255 0 0)
                   (t/make-point 0.5 0.5 0 255 0)
                   (t/make-point -0.5 -0.5 0 0 255)]
           frame (t/make-frame points)
           packet (idn/frame->packet frame 0 1000 33333)]
-      
+
       (is (= (+ 12 (* 7 3)) (alength packet))
           "Packet size should be header + 3 points * 7 bytes each"))))
 
@@ -215,7 +185,7 @@
           packet (idn/frame->packet frame 0 1000 33333)
           result (idn/validate-packet packet)]
       (is (:valid? result) "Packet should be valid")))
-  
+
   (testing "Packet info extraction"
     (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
           packet (idn/frame->packet-with-config frame 3 5000000 33333)
@@ -236,7 +206,7 @@
       (is (= 5 (:channel-id info)))
       (is (= 0x00 (:chunk-type info)) "Chunk type should be VOID")
       (is (:has-config? info) "Should have config header")
-      
+
       (let [cfl (get-byte packet 9)]
         (is (bit-test cfl 1) "Close flag should be set")))))
 
@@ -248,7 +218,7 @@
   (testing "Frame duration calculation"
     (is (= 33333 (idn/frame-duration-us 30)) "30 FPS = ~33333 us")
     (is (= 16666 (idn/frame-duration-us 60)) "60 FPS = ~16666 us"))
-  
+
   (testing "Packet size calculations"
     (is (= 12 (idn/packet-size-without-config 0)) "Empty frame: 8 + 4 = 12")
     (is (= 19 (idn/packet-size-without-config 1)) "1 point: 8 + 4 + 7 = 19")

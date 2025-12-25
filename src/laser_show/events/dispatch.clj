@@ -2,7 +2,7 @@
   "Event system for the Laser Show application.
    Handles state transitions based on dispatched events.
    
-   Events update state through service layer (for business logic)
+   Events update state through service layer (for underlying logic)
    or directly through state.atoms (for simple operations).
    All events flow through middleware for logging, validation, and error handling."
   (:require [laser-show.state.atoms :as state]
@@ -26,7 +26,7 @@
   [event]
   (let [[event-id & args] event]
     (case event-id
-      ;; Grid Events - routed through grid-service for business logic
+      ;; Grid Events - routed through grid-service for underlying logic
       :grid/select-cell (apply grid-service/select-cell! args)
       :grid/trigger-cell (apply grid-service/trigger-cell! args)
       :grid/stop-active (grid-service/stop-playback!)
@@ -47,7 +47,7 @@
                                 (let [[c r] active-cell]
                                   (grid-service/trigger-cell! c r))))
       
-      ;; Clipboard Events - use grid-service for business logic
+      ;; Clipboard Events - use grid-service for underlying logic
       :clipboard/copy-cell (let [[[col row]] args
                                  cell (grid-service/get-cell col row)]
                              (laser-show.state.clipboard/copy-cell-assignment! (:preset-id cell)))

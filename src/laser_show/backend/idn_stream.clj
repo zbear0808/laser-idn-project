@@ -1,13 +1,10 @@
 (ns laser-show.backend.idn-stream
   "IDN-Stream packet format converter.
    Implements ILDA Digital Network Stream Specification (Revision 002, July 2025).
+   https://www.ilda.com/resources/StandardsDocs/ILDA-IDN-Stream-rev002.pdf
    Converts LaserFrame objects to binary IDN packet format for transmission."
   (:require [laser-show.animation.types :as t])
   (:import [java.nio ByteBuffer ByteOrder]))
-
-;; ============================================================================
-;; IDN-Stream Constants (from spec Section 2)
-;; ============================================================================
 
 (def ^:const CONTENT_ID_CHANNEL_MSG_BASE
   "Content identifier base for channel messages (0x8000-0xFFFF)"

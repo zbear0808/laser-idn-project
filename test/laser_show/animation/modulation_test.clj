@@ -454,22 +454,22 @@
 
 (deftest position-scroll-test
   (testing "Position scroll creates moving wave patterns"
-    (let [modulator (mod/position-scroll 0.0 1.0 :x 1.0 :sine)]
+    (let [modulator (mod/position-scroll 0.0 1.0 :x 1.0 :sine)
+          val-1 (mod/resolve-param modulator (make-point-context 0 120 0.0 0.0 0 100))
+          val-2 (mod/resolve-param modulator (make-point-context 0 120 0.3 0.0 0 100))
+          val-3 (mod/resolve-param modulator (make-point-context 500 120 0.0 0.0 0 100))]
       ;; Verify it combines position and time and returns valid values
-      (let [val-1 (mod/resolve-param modulator (make-point-context 0 120 0.0 0.0 0 100))
-            val-2 (mod/resolve-param modulator (make-point-context 0 120 0.3 0.0 0 100))
-            val-3 (mod/resolve-param modulator (make-point-context 500 120 0.0 0.0 0 100))]
-        ;; All values should be in valid range
-        (is (>= val-1 0.0))
-        (is (<= val-1 1.0))
-        (is (>= val-2 0.0))
-        (is (<= val-2 1.0))
-        (is (>= val-3 0.0))
-        (is (<= val-3 1.0))
-        ;; At least one pair should be different (either different X or different time)
-        (is (or (not (approx= val-1 val-2 0.01))
-                (not (approx= val-1 val-3 0.01)))
-            "Position-scroll should vary with position or time")))))
+      ;; All values should be in valid range
+      (is (>= val-1 0.0))
+      (is (<= val-1 1.0))
+      (is (>= val-2 0.0))
+      (is (<= val-2 1.0))
+      (is (>= val-3 0.0))
+      (is (<= val-3 1.0))
+      ;; At least one pair should be different (either different X or different time)
+      (is (or (not (approx= val-1 val-2 0.01))
+              (not (approx= val-1 val-3 0.01)))
+          "Position-scroll should vary with position or time"))))
 
 (deftest per-point-modulator-without-context-test
   (testing "Per-point modulators return default when context missing"

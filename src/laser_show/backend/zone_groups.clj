@@ -4,10 +4,12 @@
    
    Zone groups now support effect chains for group-wide effects:
    - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
-  (:require [laser-show.state.atoms :as state]
-            [laser-show.state.persistent :as persist]
-            [laser-show.backend.zones :as zones]
-            [laser-show.animation.effects :as fx]))
+  (:require
+   [clojure.set :as set]
+   [laser-show.animation.effects :as fx]
+   [laser-show.backend.zones :as zones]
+   [laser-show.state.atoms :as state]
+   [laser-show.state.persistent :as persist]))
 
 ;; ============================================================================
 ;; Zone Group Data Structure
@@ -133,7 +135,7 @@
   [group-id]
   (let [zone-ids (get-zones-in-group group-id)
         existing-zones (set (zones/get-zone-ids))
-        missing (clojure.set/difference zone-ids existing-zones)]
+        missing (set/difference zone-ids existing-zones)]
     {:valid? (empty? missing)
      :missing-zones missing}))
 
@@ -143,7 +145,7 @@
   (let [{:keys [missing-zones]} (validate-group-zones group-id)]
     (when (seq missing-zones)
       (let [group (get-group group-id)
-            valid-zones (clojure.set/difference (:zone-ids group) missing-zones)]
+            valid-zones (set/difference (:zone-ids group) missing-zones)]
         (update-group! group-id {:zone-ids valid-zones})))))
 
 ;; ============================================================================

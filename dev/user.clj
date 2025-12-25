@@ -9,9 +9,10 @@
      (stop)     - Close the window and clean up resources
      (reload)   - Reload changed namespaces without restarting
      (restart)  - Stop, reload code, and restart the application
-     (reset)    - Clear state and restart from scratch"
+     (reset)    - Clear state, reload ALL code, and restart from scratch"
   (:require [clojure.tools.namespace.repl :as repl]
             [laser-show.core :as core]
+            [laser-show.state.atoms :as state]
             [laser-show.ui.window :as window]))
 
 (repl/set-refresh-dirs "src")
@@ -44,33 +45,26 @@
   (repl/refresh :after 'user/start))
 
 (defn reset
-  "Reset everything: clear all state and restart from scratch.
+  "Reset everything: clear all state, reload ALL code, and restart from scratch.
    Warning: This will lose all your current application state!"
   []
   (stop)
-  (reset! window/app-state {:main-frame nil
-                            :grid nil
-                            :effects-grid nil
-                            :preview nil
-                            :idn-connected false
-                            :idn-target nil
-                            :playing false
-                            :current-animation nil
-                            :animation-start-time 0
-                            :streaming-engine nil
-                            :packet-logging-enabled false
-                            :packet-log-file nil
-                            :packet-log-path "idn-packets.log"
-                            :status-bar nil
-                            :toolbar nil})
-  (window/clear-on-close-callbacks!)
+  (state/reset-all!)
+  (window/clean-up!)
   (Thread/sleep 500)
-  (repl/refresh :after 'user/start))
+  (repl/refresh-all :after 'user/start))
 
 (defn current-state
-  "Show the current application state (useful for debugging)."
+  "Show the current application state (useful for debugging).
+   Returns a map of all state atoms."
   []
-  @window/app-state)
+  {:timing @state/!timing
+   :playback @state/!playback
+   :grid @state/!grid
+   :idn @state/!idn
+   :effects @state/!effects
+   :ui @state/!ui
+   :project @state/!project})
 
 (comment
   ;; === Laser Show Development REPL ===

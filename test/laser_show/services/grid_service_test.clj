@@ -1,5 +1,5 @@
 (ns laser-show.services.grid-service-test
-  "Tests for grid-service business logic and validation."
+  "Tests for grid-service underlying logic and validation."
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [laser-show.services.grid-service :as grid-service]
             [laser-show.state.atoms :as state]))

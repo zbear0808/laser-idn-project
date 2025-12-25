@@ -1,15 +1,15 @@
 (ns laser-show.services.effects-service
-  "Effects service - orchestrates effect cell operations with business logic.
+  "Effects service - orchestrates effect cell operations with underlying logic.
    
    This service provides high-level operations for the effects grid,
-   coordinating between state management and business logic.
+   coordinating between state management and underlying logic.
    
    All effect cell mutations should go through this service to ensure:
    - Proper validation
    - Project dirty tracking
    - Consistent coordination with other state
    
-   The service layer contains business logic; state/atoms.clj remains thin accessors."
+   The service layer contains underlying logic; state/atoms.clj remains thin accessors."
   (:require [laser-show.state.atoms :as state]
             [laser-show.animation.effects :as fx]
             [laser-show.ui.layout :as layout]))
@@ -97,7 +97,7 @@
   (:active (get-effect-cell col row)))
 
 ;; ============================================================================
-;; Cell Write Operations (with business logic)
+;; Cell Write Operations (with underlying logic)
 ;; ============================================================================
 
 (defn set-effect-cell!
