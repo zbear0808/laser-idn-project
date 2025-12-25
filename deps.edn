@@ -16,16 +16,16 @@
         seesaw/seesaw {:mvn/version "1.5.0"} ; deprecating seesaw in favor of cljfx
         com.formdev/flatlaf {:mvn/version "3.7"}
         overtone/midi-clj {:mvn/version "0.5.0"}
-        overtone/osc-clj {:mvn/version "0.9.0"}
-        
-        ;; JNA for native Windows API access (dark title bar)
-        net.java.dev.jna/jna {:mvn/version "5.15.0"}
-        net.java.dev.jna/jna-platform {:mvn/version "5.15.0"}}
+        overtone/osc-clj {:mvn/version "0.9.0"}}
  
  :aliases
  {:laser-show
   {:jvm-opts ["-Djavafx.enablePreview=true"]
    :main-opts ["-m" "laser-show.core"]}
+  
+  :laser-show-fx
+  {:jvm-opts ["-Djavafx.enablePreview=true"]
+   :main-opts ["-m" "laser-show.ui-fx.app"]}
   
   :idn-hello
   {:main-opts ["-m" "idn-hello.core"]}
