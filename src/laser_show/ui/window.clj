@@ -88,8 +88,13 @@
                      ;; Connect
                      (fn [target]
                        (println "Connect logic needs migration to events fully.")
-                       ;; For now, just fire an event
-                       (events/dispatch! [:idn/connect target (frame-provider/create-frame-provider)]))
+                       ;; For now, just fire an event - using frame provider WITH effects
+                       (events/dispatch! [:idn/connect target
+                                          (frame-provider/create-frame-provider-with-effects
+                                            (fn [frame time-ms bpm]
+                                              (if-let [effects-grid @!effects-grid-ref]
+                                                ((:apply-to-frame effects-grid) frame time-ms bpm)
+                                                frame)))]))
                      ;; Log
                      (fn [enabled]
                        (println "Logging toggle pending migration.")))

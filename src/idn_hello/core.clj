@@ -40,14 +40,16 @@
   "Creates a 4-byte IDN-Hello packet header.
    - command: Command byte (0x00-0xFF)
    - client-group: Client group number (0-15)
-   - sequence: Sequence number (0-65535)"
+   - sequence: Sequence number (0-65535, unsigned 16-bit)"
   [command client-group sequence]
   (let [flags (bit-and client-group 0x0F)  ; Client group in lower 4 bits
         buf (ByteBuffer/allocate 4)]
     (.order buf ByteOrder/BIG_ENDIAN)      ; Network byte order (big endian)
     (.put buf (byte command))
     (.put buf (byte flags))
-    (.putShort buf (short sequence))
+    ;; Use unchecked-short to handle full unsigned 16-bit range (0-65535)
+    ;; Java's short is signed (-32768 to 32767), but bit pattern is same
+    (.putShort buf (unchecked-short sequence))
     (.array buf)))
 
 (defn bytes-to-hex
