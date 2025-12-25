@@ -1,5 +1,8 @@
 (ns laser-show.ui-fx.views.grid
-  "Cue grid view component - launchpad-style grid for triggering animations."
+  "Cue grid view component - launchpad-style grid for triggering animations.
+   
+   Uses cljfx context for reactive subscriptions. Grid cells subscribe to their
+   specific cell data and will re-render when that data changes."
   (:require [cljfx.api :as fx]
             [laser-show.ui-fx.styles :as styles]
             [laser-show.ui-fx.subs :as subs]
@@ -50,13 +53,20 @@
 ;; ============================================================================
 
 (defn grid-cell-view
-  "Individual grid cell with data from subscriptions.
+  "Individual grid cell with data from context subscriptions.
+   
+   This is the KEY FIX for the drag-drop visual update bug.
+   By using fx/sub-ctx, cljfx tracks this component's dependency on cell data
+   and will re-render it when the cell changes.
    
    Props:
+   - :fx/context - cljfx context (passed automatically)
    - :col - Column index
    - :row - Row index"
-  [{:keys [col row]}]
-  (let [data (subs/cell-display-data col row)]
+  [{:keys [fx/context col row]}]
+  ;; Subscribe to cell data via context - cljfx tracks this dependency!
+  ;; Only ONE subscription needed - cell-display-data contains all we need
+  (let [data (fx/sub-ctx context subs/cell-display-data col row)]
     {:fx/type cell/grid-cell
      :col col
      :row row
@@ -73,15 +83,18 @@
      :on-right-click (fn [e]
                        (show-context-menu! e col row (:has-content? data)))
      
+     ;; Note: We don't need to store cell data in drag state since
+     ;; move-cell! reads from the grid atom directly
      :on-drag-start (fn []
                       (events/dispatch! {:event/type :drag/start
                                          :source-type :grid-cell
                                          :source-id :main-grid
                                          :source-key [col row]
-                                         :data (subs/grid-cell col row)}))
+                                         :data {:preset-id (:preset-id data)}}))
      
+     ;; Use :drag/drop-cell which also calls end-drag! to clean up state
      :on-drag-drop (fn [{:keys [from-col from-row to-col to-row]}]
-                     (events/dispatch! {:event/type :grid/move-cell
+                     (events/dispatch! {:event/type :drag/drop-cell
                                         :from-col from-col
                                         :from-row from-row
                                         :to-col to-col
@@ -95,6 +108,7 @@
   "Main cue grid panel.
    
    Props:
+   - :fx/context - cljfx context (passed automatically)
    - :cols - Number of columns (default 8)
    - :rows - Number of rows (default 4)"
   [{:keys [cols rows]
@@ -109,6 +123,7 @@
                         :spacing gap
                         :children (mapv (fn [col]
                                           {:fx/type grid-cell-view
+                                           :fx/key [col row]  ;; Key for efficient reordering
                                            :col col
                                            :row row})
                                         (range cols))})
@@ -122,6 +137,7 @@
   "Cue grid wrapped in a scroll pane.
    
    Props:
+   - :fx/context - cljfx context (passed automatically)
    - :cols - Number of columns
    - :rows - Number of rows"
   [{:keys [cols rows]
@@ -142,6 +158,7 @@
   "Complete grid panel with header.
    
    Props:
+   - :fx/context - cljfx context (passed automatically)
    - :title - Optional title
    - :cols - Number of columns
    - :rows - Number of rows"

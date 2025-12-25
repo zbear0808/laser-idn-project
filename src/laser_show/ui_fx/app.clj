@@ -1,21 +1,18 @@
 (ns laser-show.ui-fx.app
-  "Main cljfx application setup, renderer, and entry point."
+  "Main cljfx application setup using context-based rendering.
+   
+   Uses cljfx contexts for efficient subscription-based re-renders.
+   Components subscribe to state via fx/sub-val and fx/sub-ctx."
   (:require [cljfx.api :as fx]
-            [cljfx.ext.node :as fx.ext.node]
-            [laser-show.state.atoms :as state]
-            [laser-show.ui-fx.subs :as subs]
+            [laser-show.state.context :as ctx]
             [laser-show.ui-fx.events :as events]
             [laser-show.ui-fx.views.main :as main])
   (:import [javafx.application Platform]
            [javafx.scene.layout HeaderBar]))
 
 ;; ============================================================================
-;; HeaderBar Extension (JavaFX 25 preview feature)
+;; HeaderBar Extension (JavaFX 26 preview feature)
 ;; ============================================================================
-;; 
-;; HeaderBar is a new JavaFX 25 feature for extended title bar support.
-;; Since cljfx doesn't have built-in support, we create it imperatively.
-;; The main.clj view must use a different approach to include HeaderBar.
 
 (defn create-header-bar!
   "Imperatively create a HeaderBar and set its children.
@@ -54,55 +51,30 @@
     (events/handle-event event)))
 
 ;; ============================================================================
-;; Renderer
+;; Context-Based Renderer
 ;; ============================================================================
 
 (defn- create-renderer
-  "Create the cljfx renderer with map event handler."
+  "Create the cljfx renderer with context support.
+   
+   Key configuration:
+   - fx/wrap-context-desc: Passes context to all components
+   - fx/fn->lifecycle-with-context: Enables subscriptions in function components
+   - map-event-handler: Processes event maps"
   []
   (fx/create-renderer
-   :middleware (fx/wrap-map-desc (fn [state]
-                                   {:fx/type main/root
-                                    :state state}))
-   :opts {:fx.opt/map-event-handler map-event-handler}))
-
-;; ============================================================================
-;; State Sync
-;; ============================================================================
-
-(defn- get-combined-state
-  "Get the combined state from all atoms for rendering."
-  []
-  (subs/main-view-state))
-
-(defn- render!
-  "Trigger a render with the current state."
-  []
-  (when-let [renderer (:renderer @!app-state)]
-    (renderer (get-combined-state))))
-
-(defn- setup-atom-watchers!
-  "Set up watchers on state atoms to trigger re-renders."
-  []
-  ;; Watch all relevant atoms and re-render on changes
-  (add-watch state/!grid :fx-render (fn [_ _ _ _] (render!)))
-  (add-watch state/!playback :fx-render (fn [_ _ _ _] (render!)))
-  (add-watch state/!timing :fx-render (fn [_ _ _ _] (render!)))
-  (add-watch state/!idn :fx-render (fn [_ _ _ _] (render!)))
-  (add-watch state/!effects :fx-render (fn [_ _ _ _] (render!)))
-  (add-watch state/!ui :fx-render (fn [_ _ _ _] (render!)))
-  (add-watch state/!project :fx-render (fn [_ _ _ _] (render!))))
-
-(defn- remove-atom-watchers!
-  "Remove the render watchers from state atoms."
-  []
-  (remove-watch state/!grid :fx-render)
-  (remove-watch state/!playback :fx-render)
-  (remove-watch state/!timing :fx-render)
-  (remove-watch state/!idn :fx-render)
-  (remove-watch state/!effects :fx-render)
-  (remove-watch state/!ui :fx-render)
-  (remove-watch state/!project :fx-render))
+   :middleware (comp
+                ;; Pass context to all components via :fx/context key
+                fx/wrap-context-desc
+                ;; Map the context atom value to root component description
+                (fx/wrap-map-desc (fn [_] {:fx/type main/root})))
+   :opts {:fx.opt/type->lifecycle
+          ;; Use standard lifecycle for keywords (built-in components)
+          ;; Use context-aware lifecycle for functions (our components)
+          (fn [type]
+            (or (fx/keyword->lifecycle type)
+                (fx/fn->lifecycle-with-context type)))
+          :fx.opt/map-event-handler map-event-handler}))
 
 ;; ============================================================================
 ;; Initialization
@@ -119,23 +91,24 @@
 
 (defn init!
   "Initialize the cljfx application.
-   Creates the renderer and sets up atom watchers."
+   Sets up context and creates the renderer."
   []
   (when-not (:initialized? @!app-state)
     (ensure-javafx-initialized!)
+    ;; Initialize the context system (sets up atom watchers)
+    (ctx/init!)
+    ;; Create the renderer
     (let [renderer (create-renderer)]
       (swap! !app-state assoc
              :initialized? true
              :renderer renderer)
-      (setup-atom-watchers!)
-      (println "cljfx UI initialized"))))
+      (println "cljfx UI initialized with context support"))))
 
 (defn shutdown!
-  "Shutdown the cljfx application.
-   Removes watchers and cleans up."
+  "Shutdown the cljfx application."
   []
   (when (:initialized? @!app-state)
-    (remove-atom-watchers!)
+    (ctx/shutdown!)
     (swap! !app-state assoc
            :initialized? false
            :renderer nil)
@@ -147,10 +120,12 @@
 
 (defn show-window!
   "Show the main cljfx window.
-   Initializes if needed and triggers initial render."
+   Initializes if needed and mounts the renderer to the context."
   []
   (init!)
-  (render!))
+  ;; Mount renderer to context atom - it will watch for changes
+  (when-let [renderer (:renderer @!app-state)]
+    (fx/mount-renderer ctx/!context renderer)))
 
 (defn close-window!
   "Close the cljfx window."
@@ -161,9 +136,9 @@
      (Platform/exit))))
 
 (defn refresh!
-  "Force a refresh of the UI."
+  "Force a refresh of the UI by re-syncing context."
   []
-  (render!))
+  (ctx/sync-context!))
 
 ;; ============================================================================
 ;; Development Helpers
@@ -199,17 +174,8 @@
   (show-window!))
 
 ;; ============================================================================
-;; Alternative: Simple standalone launch
+;; Debug / REPL
 ;; ============================================================================
-
-(defn launch-standalone!
-  "Launch a standalone cljfx window without atom syncing.
-   Useful for quick testing."
-  []
-  (fx/on-fx-thread
-   (fx/create-component
-    {:fx/type main/root
-     :state (subs/main-view-state)})))
 
 (comment
   ;; REPL usage examples:
@@ -226,7 +192,6 @@
   ;; Force refresh
   (refresh!)
   
-  ;; Quick standalone test
-  (launch-standalone!)
-  
+  ;; Check context state
+  @ctx/!context
   )

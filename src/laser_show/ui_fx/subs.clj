@@ -1,263 +1,293 @@
 (ns laser-show.ui-fx.subs
-  "Subscriptions for cljfx - derived state from existing atoms.
-   These read from the state atoms and compute UI-relevant data."
-  (:require [laser-show.state.atoms :as state]
+  "Context-based subscriptions for cljfx UI.
+   
+   These subscription functions work with cljfx contexts to provide
+   efficient, memoized access to UI state.
+   
+   Two types of subscriptions:
+   - fx/sub-val: Simple value lookups (fast, always recalculated)
+   - fx/sub-ctx: Computed subscriptions (memoized, dependency-tracked)
+   
+   Usage in components:
+   (let [bpm (fx/sub-val context :timing :bpm)
+         cell-data (fx/sub-ctx context subs/cell-display-data col row)]
+     ...)"
+  (:require [cljfx.api :as fx]
             [laser-show.animation.presets :as presets]))
 
 ;; ============================================================================
 ;; Grid Subscriptions
 ;; ============================================================================
 
+(defn grid
+  "Subscribe to the entire grid state.
+   Returns: {:cells {} :selected-cell nil :size [cols rows]}"
+  [context]
+  (fx/sub-val context :grid))
+
 (defn grid-cells
-  "Get all grid cells.
+  "Subscribe to grid cells map.
    Returns: Map of [col row] -> {:preset-id keyword}"
-  []
-  (state/get-grid-cells))
+  [context]
+  (:cells (fx/sub-val context :grid)))
 
 (defn grid-cell
-  "Get a single grid cell.
+  "Subscribe to a specific grid cell.
    Returns: {:preset-id keyword} or nil"
-  [col row]
-  (state/get-cell col row))
+  [context col row]
+  (get (:cells (fx/sub-val context :grid)) [col row]))
 
 (defn grid-size
-  "Get grid dimensions.
+  "Subscribe to grid dimensions.
    Returns: [cols rows]"
-  []
-  (state/get-grid-size))
+  [context]
+  (:size (fx/sub-val context :grid)))
 
 (defn selected-cell
-  "Get the currently selected cell.
+  "Subscribe to the currently selected cell.
    Returns: [col row] or nil"
-  []
-  (state/get-selected-cell))
+  [context]
+  (:selected-cell (fx/sub-val context :grid)))
 
 (defn active-cell
-  "Get the currently playing cell.
+  "Subscribe to the currently playing cell.
    Returns: [col row] or nil"
-  []
-  (state/get-active-cell))
+  [context]
+  (:active-cell (fx/sub-val context :playback)))
 
 (defn cell-display-data
-  "Get complete display data for a cell.
+  "Compute complete display data for a cell.
+   This is a computed subscription - memoized based on dependencies.
+   
    Returns: {:col col :row row :preset-id keyword :preset preset-map
              :active? bool :selected? bool :has-content? bool}"
-  [col row]
-  (let [cell (state/get-cell col row)
-        preset-id (:preset-id cell)
+  [context col row]
+  (let [grid (fx/sub-val context :grid)
+        playback (fx/sub-val context :playback)
+        cell (get-in grid [:cells [col row]])
+        ;; Handle case where preset-id might be incorrectly nested
+        raw-preset-id (:preset-id cell)
+        preset-id (cond
+                    (keyword? raw-preset-id) raw-preset-id
+                    (and (map? raw-preset-id) (:preset-id raw-preset-id)) (:preset-id raw-preset-id)
+                    :else nil)
         preset (when preset-id (presets/get-preset preset-id))
-        active (state/get-active-cell)
-        selected (state/get-selected-cell)]
+        active (get playback :active-cell)
+        selected (get grid :selected-cell)]
     {:col col
      :row row
      :preset-id preset-id
      :preset preset
-     :preset-name (or (:name preset) (when preset-id (name preset-id)) "")
+     :preset-name (or (:name preset) (when (keyword? preset-id) (name preset-id)) "")
      :category (or (:category preset) :geometric)
      :active? (= [col row] active)
      :selected? (= [col row] selected)
      :has-content? (boolean preset-id)}))
 
-(defn all-cells-display-data
-  "Get display data for all cells in the grid.
-   Returns: Vector of cell display data maps in row-major order."
-  []
-  (let [[cols rows] (state/get-grid-size)]
-    (for [row (range rows)
-          col (range cols)]
-      (cell-display-data col row))))
-
 ;; ============================================================================
 ;; Playback Subscriptions
 ;; ============================================================================
 
+(defn playback
+  "Subscribe to the entire playback state.
+   Returns: {:playing? bool :trigger-time ms :active-cell [col row]}"
+  [context]
+  (fx/sub-val context :playback))
+
 (defn playing?
-  "Check if playback is active."
-  []
-  (state/playing?))
+  "Subscribe to playback active state.
+   Returns: true if playing"
+  [context]
+  (:playing? (fx/sub-val context :playback)))
 
 (defn trigger-time
-  "Get the trigger time for the current animation."
-  []
-  (state/get-trigger-time))
+  "Subscribe to animation trigger time.
+   Returns: timestamp in ms"
+  [context]
+  (:trigger-time (fx/sub-val context :playback)))
 
 ;; ============================================================================
 ;; Timing Subscriptions
 ;; ============================================================================
 
+(defn timing
+  "Subscribe to the entire timing state.
+   Returns: {:bpm 120 :beat-position 0.0 ...}"
+  [context]
+  (fx/sub-val context :timing))
+
 (defn bpm
-  "Get the current BPM."
-  []
-  (state/get-bpm))
+  "Subscribe to BPM.
+   Returns: BPM as double"
+  [context]
+  (:bpm (fx/sub-val context :timing)))
 
 (defn beat-position
-  "Get the current beat position (0.0 to 1.0)."
-  []
-  (state/get-beat-position))
+  "Subscribe to beat position (0.0 to 1.0).
+   Returns: double"
+  [context]
+  (:beat-position (fx/sub-val context :timing)))
 
 ;; ============================================================================
-;; IDN/Connection Subscriptions
+;; Connection Subscriptions
 ;; ============================================================================
+
+(defn connection
+  "Subscribe to connection state.
+   Returns: {:connected? bool :target string}"
+  [context]
+  (fx/sub-val context :connection))
 
 (defn connected?
-  "Check if connected to IDN target."
-  []
-  (state/idn-connected?))
+  "Subscribe to connection status.
+   Returns: true if connected"
+  [context]
+  (:connected? (fx/sub-val context :connection)))
 
 (defn connection-target
-  "Get the current connection target."
-  []
-  (state/get-idn-target))
-
-(defn connection-status
-  "Get complete connection status.
-   Returns: {:connected? bool :target string}"
-  []
-  {:connected? (state/idn-connected?)
-   :target (state/get-idn-target)})
+  "Subscribe to connection target.
+   Returns: hostname/IP string or nil"
+  [context]
+  (:target (fx/sub-val context :connection)))
 
 ;; ============================================================================
 ;; Effects Subscriptions
 ;; ============================================================================
 
+(defn effects
+  "Subscribe to entire effects state.
+   Returns: {:cells {}}"
+  [context]
+  (fx/sub-val context :effects))
+
 (defn effects-cells
-  "Get all effects grid cells.
+  "Subscribe to effects grid cells.
    Returns: Map of [col row] -> {:effects [...] :active bool}"
-  []
-  (state/get-effects-cells))
+  [context]
+  (:cells (fx/sub-val context :effects)))
 
 (defn effect-cell
-  "Get a single effect cell.
+  "Subscribe to a specific effect cell.
    Returns: {:effects [...] :active bool} or nil"
-  [col row]
-  (state/get-effect-cell col row))
+  [context col row]
+  (get (:cells (fx/sub-val context :effects)) [col row]))
 
 (defn effect-cell-display-data
-  "Get display data for an effect cell.
+  "Compute display data for an effect cell.
+   This is a computed subscription.
+   
    Returns: {:col col :row row :effects [...] :effect-count int
              :active? bool :has-effects? bool}"
-  [col row]
-  (let [cell (state/get-effect-cell col row)
-        effects (:effects cell)]
+  [context col row]
+  (let [effects-state (fx/sub-val context :effects)
+        cell (get-in effects-state [:cells [col row]])
+        effects-list (:effects cell)]
     {:col col
      :row row
-     :effects effects
-     :effect-count (count effects)
+     :effects effects-list
+     :effect-count (count effects-list)
      :active? (boolean (:active cell))
-     :has-effects? (boolean (seq effects))
-     :first-effect-id (some-> effects first :effect-id)}))
+     :has-effects? (boolean (seq effects-list))
+     :first-effect-id (some-> effects-list first :effect-id)}))
 
-(defn all-effect-cells-display-data
-  "Get display data for all effect cells.
-   Returns: Vector of effect cell display data maps."
-  []
-  (let [cells (state/get-effects-cells)]
-    (mapv (fn [[key cell]]
-            (let [[col row] key]
-              (assoc (effect-cell-display-data col row)
-                     :key key)))
-          cells)))
-
-(defn active-effects
-  "Get all active effect instances from the effects grid.
+(defn all-active-effect-instances
+  "Compute all active effect instances from the effects grid.
    Returns: Vector of {:effect-id keyword :params map}"
-  []
-  (state/get-all-active-effect-instances))
+  [context]
+  (let [effects-state (fx/sub-val context :effects)
+        cells (:cells effects-state)
+        sorted-keys (sort-by (fn [[col row]] [row col]) (keys cells))]
+    (into []
+          (comp
+           (map #(get cells %))
+           (filter :active)
+           (mapcat :effects)
+           (map #(select-keys % [:effect-id :params])))
+          sorted-keys)))
 
 ;; ============================================================================
-;; UI State Subscriptions
+;; UI Subscriptions
 ;; ============================================================================
+
+(defn ui
+  "Subscribe to UI state.
+   Returns: {:selected-preset :clipboard :drag}"
+  [context]
+  (fx/sub-val context :ui))
 
 (defn selected-preset
-  "Get the currently selected preset in the UI."
-  []
-  (state/get-selected-preset))
+  "Subscribe to selected preset in UI.
+   Returns: preset-id keyword or nil"
+  [context]
+  (:selected-preset (fx/sub-val context :ui)))
 
 (defn clipboard
-  "Get clipboard contents."
-  []
-  (state/get-clipboard))
+  "Subscribe to clipboard contents.
+   Returns: clipboard data or nil"
+  [context]
+  (:clipboard (fx/sub-val context :ui)))
 
 (defn dragging?
-  "Check if a drag operation is in progress."
-  []
-  (state/dragging?))
+  "Subscribe to drag state.
+   Returns: true if drag in progress"
+  [context]
+  (get-in (fx/sub-val context :ui) [:drag :active?]))
 
 (defn drag-data
-  "Get current drag operation data."
-  []
-  (state/get-drag-data))
-
-;; ============================================================================
-;; Preset Subscriptions
-;; ============================================================================
-
-(defn all-presets
-  "Get all available presets.
-   Returns: Vector of preset maps."
-  []
-  presets/all-presets)
-
-(defn presets-by-category
-  "Get presets grouped by category.
-   Returns: Map of category-keyword -> [preset ...]"
-  []
-  (group-by :category presets/all-presets))
-
-(defn preset-categories
-  "Get all preset category definitions.
-   Returns: Map of category-keyword -> {:name string :color [r g b]}"
-  []
-  presets/categories)
+  "Subscribe to drag operation data.
+   Returns: {:active? bool :source-type :source-id :source-key :data}"
+  [context]
+  (:drag (fx/sub-val context :ui)))
 
 ;; ============================================================================
 ;; Project Subscriptions
 ;; ============================================================================
 
+(defn project
+  "Subscribe to project state.
+   Returns: {:current-folder path :dirty? bool}"
+  [context]
+  (fx/sub-val context :project))
+
 (defn project-folder
-  "Get current project folder path."
-  []
-  (state/get-project-folder))
+  "Subscribe to project folder path.
+   Returns: path string or nil"
+  [context]
+  (:current-folder (fx/sub-val context :project)))
 
 (defn project-dirty?
-  "Check if project has unsaved changes."
-  []
-  (state/project-dirty?))
+  "Subscribe to project dirty state.
+   Returns: true if unsaved changes"
+  [context]
+  (:dirty? (fx/sub-val context :project)))
 
 (defn has-project?
-  "Check if a project is currently open."
+  "Subscribe to whether a project is open.
+   Returns: true if project folder is set"
+  [context]
+  (some? (:current-folder (fx/sub-val context :project))))
+
+;; ============================================================================
+;; Preset Subscriptions (Static - not from context)
+;; ============================================================================
+
+(defn all-presets
+  "Get all available presets.
+   Returns: Vector of preset maps.
+   Note: This is static data, not from context."
   []
-  (state/has-current-project?))
+  presets/all-presets)
 
-;; ============================================================================
-;; Combined State for Main View
-;; ============================================================================
-
-(defn main-view-state
-  "Get combined state for the main view.
-   This is the primary subscription for the app renderer."
+(defn presets-by-category
+  "Get presets grouped by category.
+   Returns: Map of category-keyword -> [preset ...]
+   Note: This is static data, not from context."
   []
-  {:grid {:cells (grid-cells)
-          :size (grid-size)
-          :selected (selected-cell)
-          :active (active-cell)}
-   :playback {:playing? (playing?)
-              :trigger-time (trigger-time)}
-   :timing {:bpm (bpm)
-            :beat-position (beat-position)}
-   :connection (connection-status)
-   :effects {:cells (effects-cells)}
-   :ui {:selected-preset (selected-preset)
-        :dragging? (dragging?)}
-   :project {:folder (project-folder)
-             :dirty? (project-dirty?)}})
+  (group-by :category presets/all-presets))
 
-;; ============================================================================
-;; cljfx Map Event State
-;; ============================================================================
-
-(defn fx-state
-  "Create a cljfx-compatible state map.
-   This is what gets passed to the root component."
+(defn preset-categories
+  "Get all preset category definitions.
+   Returns: Map of category-keyword -> {:name string :color [r g b]}
+   Note: This is static data, not from context."
   []
-  (main-view-state))
+  presets/categories)

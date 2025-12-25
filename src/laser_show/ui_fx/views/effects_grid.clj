@@ -1,5 +1,7 @@
 (ns laser-show.ui-fx.views.effects-grid
-  "Effects grid view component - grid for managing effect chains."
+  "Effects grid view component - grid for managing effect chains.
+   
+   Uses cljfx context for reactive subscriptions."
   (:require [cljfx.api :as fx]
             [laser-show.ui-fx.styles :as styles]
             [laser-show.ui-fx.subs :as subs]
@@ -63,13 +65,15 @@
 ;; ============================================================================
 
 (defn effect-cell-view
-  "Individual effect grid cell with data from subscriptions.
+  "Individual effect grid cell with data from context subscriptions.
    
    Props:
+   - :fx/context - cljfx context (passed automatically)
    - :col - Column index
    - :row - Row index"
-  [{:keys [col row]}]
-  (let [data (subs/effect-cell-display-data col row)]
+  [{:keys [fx/context col row]}]
+  ;; Subscribe to cell data via context
+  (let [data (fx/sub-ctx context subs/effect-cell-display-data col row)]
     {:fx/type cell/effect-cell
      :col col
      :row row
@@ -97,6 +101,7 @@
   "Effects grid panel.
    
    Props:
+   - :fx/context - cljfx context (passed automatically)
    - :cols - Number of columns (default 5)
    - :rows - Number of rows (default 2)"
   [{:keys [cols rows]
@@ -111,6 +116,7 @@
                         :spacing gap
                         :children (mapv (fn [col]
                                           {:fx/type effect-cell-view
+                                           :fx/key [col row]
                                            :col col
                                            :row row})
                                         (range cols))})
@@ -124,6 +130,7 @@
   "Effects grid with header and controls.
    
    Props:
+   - :fx/context - cljfx context (passed automatically)
    - :title - Optional title
    - :cols - Number of columns
    - :rows - Number of rows"
@@ -167,17 +174,18 @@
 (defn active-effects-summary
   "Shows a summary of currently active effects.
    
-   Props: None - reads from subscriptions"
-  [_]
-  (let [active (subs/active-effects)
-        count (count active)]
+   Props:
+   - :fx/context - cljfx context (passed automatically)"
+  [{:keys [fx/context]}]
+  (let [active (fx/sub-ctx context subs/all-active-effect-instances)
+        effect-count (count active)]
     {:fx/type :h-box
      :spacing 4
      :alignment :center-left
      :children [{:fx/type :label
-                 :text (str count " active effect" (when (not= count 1) "s"))
+                 :text (str effect-count " active effect" (when (not= effect-count 1) "s"))
                  :style (str "-fx-text-fill: " 
-                            (if (pos? count)
+                            (if (pos? effect-count)
                               (:success styles/colors)
                               (:text-secondary styles/colors))
                             ";"

@@ -1,6 +1,9 @@
 (ns laser-show.ui-fx.views.main
   "Main window layout for the cljfx UI.
-   Uses JavaFX 26's StageStyle.EXTENDED and HeaderBar for menu in title bar."
+   Uses JavaFX 26's StageStyle.EXTENDED and HeaderBar for menu in title bar.
+   
+   This is the root component - it receives fx/context and uses subscriptions
+   to get state, then passes props down to child components."
   (:require [cljfx.api :as fx]
             [laser-show.ui-fx.styles :as styles]
             [laser-show.ui-fx.subs :as subs]
@@ -23,6 +26,7 @@
   "Left side panel containing cue grid and effects grid.
    
    Props:
+   - :fx/context - cljfx context (passed automatically)
    - :grid-cols - Cue grid columns
    - :grid-rows - Cue grid rows
    - :effects-cols - Effects grid columns
@@ -48,6 +52,7 @@
   "Right side panel containing preview and preset palette.
    
    Props:
+   - :fx/context - cljfx context (passed automatically)
    - :preview-width - Preview panel width
    - :preview-height - Preview panel height"
   [{:keys [preview-width preview-height]
@@ -127,14 +132,15 @@
    Places MenuBar in the title bar area using HeaderBar.
    
    Props:
-   - :state - The application state map"
-  [{:keys [state]}]
-  (let [playing? (get-in state [:playback :playing?])
-        bpm (get-in state [:timing :bpm])
-        connected? (get-in state [:connection :connected?])
-        target (get-in state [:connection :target])
-        project-dirty? (get-in state [:project :dirty?])
-        project-folder (get-in state [:project :folder])
+   - :fx/context - cljfx context (passed automatically by renderer)"
+  [{:keys [fx/context]}]
+  ;; Subscribe to state via context
+  (let [playing? (fx/sub-ctx context subs/playing?)
+        bpm (fx/sub-ctx context subs/bpm)
+        connected? (fx/sub-ctx context subs/connected?)
+        target (fx/sub-ctx context subs/connection-target)
+        project-dirty? (fx/sub-ctx context subs/project-dirty?)
+        project-folder (fx/sub-ctx context subs/project-folder)
         title (str "Laser Show" (when project-dirty? " •"))]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [^Stage stage]

@@ -136,8 +136,15 @@
 
 (defmethod handle-event :clipboard/paste-cell
   [{:keys [col row]}]
-  (when-let [preset-id (clipboard/paste-cell-assignment)]
-    (state/set-cell! col row {:preset-id preset-id})))
+  (when-let [cell-data (clipboard/paste-cell-assignment)]
+    ;; paste-cell-assignment returns the cell data, not just preset-id
+    ;; Extract the preset-id properly
+    (let [preset-id (cond
+                      (keyword? cell-data) cell-data
+                      (map? cell-data) (:preset-id cell-data)
+                      :else nil)]
+      (when preset-id
+        (state/set-cell-preset! col row preset-id)))))
 
 (defmethod handle-event :clipboard/copy-effect-cell
   [{:keys [col row]}]

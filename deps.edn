@@ -11,12 +11,13 @@
         org.openjfx/javafx-swing$win {:mvn/version "26-ea+19"}
         org.openjfx/javafx-web$win {:mvn/version "26-ea+19"}
 
-
-
         seesaw/seesaw {:mvn/version "1.5.0"} ; deprecating seesaw in favor of cljfx
         com.formdev/flatlaf {:mvn/version "3.7"}
         overtone/midi-clj {:mvn/version "0.5.0"}
-        overtone/osc-clj {:mvn/version "0.9.0"}}
+        overtone/osc-clj {:mvn/version "0.9.0"}
+        
+        ;; Required for cljfx contexts (memoized subscriptions)
+        org.clojure/core.cache {:mvn/version "1.1.234"}}
  
  :aliases
  {:laser-show
