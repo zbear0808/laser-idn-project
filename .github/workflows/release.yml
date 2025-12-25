@@ -234,17 +234,26 @@ jobs:
           echo "Creating ${{ matrix.installer-type }} installer..."
           echo "Let jpackage automatically create the runtime with all required modules"
           
-          jpackage \
-            --type ${{ matrix.installer-type }} \
-            --input target \
-            --name LaserShow \
-            --main-jar "$JAR_NAME" \
-            --dest dist \
-            --app-version "1.0.0" \
-            --vendor "LaserShow" \
-            --description "Laser Show Control Application with bundled JRE" \
-            --java-options "-Xmx2048m" \
+          # Build jpackage arguments
+          JPACKAGE_ARGS=(
+            --type "${{ matrix.installer-type }}"
+            --input target
+            --name LaserShow
+            --main-jar "$JAR_NAME"
+            --dest dist
+            --app-version "1.0.0"
+            --vendor "LaserShow"
+            --description "Laser Show Control Application with bundled JRE"
+            --java-options "-Xmx2048m"
             --verbose
+          )
+          
+          # Add macOS-specific bundle identifier
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            JPACKAGE_ARGS+=(--mac-package-identifier com.zubair.lasershow)
+          fi
+          
+          jpackage "${JPACKAGE_ARGS[@]}"
           
           echo "Installer created:"
           ls -lh dist/
