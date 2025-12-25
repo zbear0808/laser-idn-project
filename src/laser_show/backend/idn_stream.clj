@@ -70,7 +70,7 @@
 ;; ============================================================================
 
 (def ^:const DEFAULT_CHANNEL_ID 0)
-(def ^:const DEFAULT_SERVICE_ID 0)
+(def ^:const DEFAULT_SERVICE_ID 1)
 
 ;; Maximum points per packet is determined by:
 ;; - UDP max safe size: ~1400 bytes (to avoid fragmentation)
@@ -223,11 +223,11 @@
    
    Returns: byte array ready to send"
   [frame channel-id timestamp-us duration-us & {:keys [service-id service-mode tags close? single-scan?]
-                                                  :or {service-id DEFAULT_SERVICE_ID
-                                                       service-mode SERVICE_MODE_GRAPHIC_DISCRETE
-                                                       tags default-graphic-tags
-                                                       close? false
-                                                       single-scan? false}}]
+                                                :or {service-id DEFAULT_SERVICE_ID
+                                                     service-mode SERVICE_MODE_GRAPHIC_DISCRETE
+                                                     tags default-graphic-tags
+                                                     close? false
+                                                     single-scan? false}}]
   (let [points (take MAX_POINTS_PER_PACKET (:points frame))
         point-count (count points)
         scwc (quot (count tags) 2)
@@ -235,18 +235,18 @@
         cfl-flags (bit-or CFL_ROUTING (if close? CFL_CLOSE 0))
         chunk-flags (if single-scan? 0x01 0x00)
         buf (ByteBuffer/allocate total-size)]
-    
+
     (.order buf ByteOrder/BIG_ENDIAN)
-    
-    (write-channel-message-header! buf total-size channel-id 
+
+    (write-channel-message-header! buf total-size channel-id
                                    CHUNK_TYPE_FRAME_SAMPLES timestamp-us true)
     (write-channel-config-header! buf scwc cfl-flags service-id service-mode)
     (write-service-config-tags! buf tags)
     (write-frame-chunk-header! buf chunk-flags duration-us)
-    
+
     (doseq [point points]
       (write-point! buf point))
-    
+
     (.array buf)))
 
 (defn frame->packet
@@ -263,22 +263,22 @@
    
    Returns: byte array ready to send"
   [frame channel-id timestamp-us duration-us & {:keys [single-scan?]
-                                                  :or {single-scan? false}}]
+                                                :or {single-scan? false}}]
   (let [points (take MAX_POINTS_PER_PACKET (:points frame))
         point-count (count points)
         total-size (packet-size-without-config point-count)
         chunk-flags (if single-scan? 0x01 0x00)
         buf (ByteBuffer/allocate total-size)]
-    
+
     (.order buf ByteOrder/BIG_ENDIAN)
-    
+
     (write-channel-message-header! buf total-size channel-id
                                    CHUNK_TYPE_FRAME_SAMPLES timestamp-us false)
     (write-frame-chunk-header! buf chunk-flags duration-us)
-    
+
     (doseq [point points]
       (write-point! buf point))
-    
+
     (.array buf)))
 
 (defn empty-frame-packet
@@ -293,13 +293,13 @@
   [channel-id timestamp-us]
   (let [total-size (+ (channel-message-header-size) (channel-config-header-size))
         buf (ByteBuffer/allocate total-size)]
-    
+
     (.order buf ByteOrder/BIG_ENDIAN)
-    
+
     (write-channel-message-header! buf total-size channel-id
                                    CHUNK_TYPE_VOID timestamp-us true)
     (write-channel-config-header! buf 0 CFL_CLOSE 0 SERVICE_MODE_VOID)
-    
+
     (.array buf)))
 
 ;; ============================================================================
@@ -356,19 +356,19 @@
   [^bytes packet]
   (try
     (when (< (alength packet) 8)
-      (throw (ex-info "Packet too small for channel message header" 
+      (throw (ex-info "Packet too small for channel message header"
                       {:size (alength packet) :min-required 8})))
-    
+
     (let [info (packet-info packet)
           expected-size (:total-size info)
           actual-size (alength packet)]
-      
+
       (when (not= expected-size actual-size)
         (throw (ex-info "Packet size mismatch"
                         {:expected expected-size :actual actual-size})))
-      
+
       {:valid? true :info info})
-    
+
     (catch Exception e
       {:valid? false
        :error (.getMessage e)
