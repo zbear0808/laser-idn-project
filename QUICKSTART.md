@@ -4,18 +4,12 @@
 
 1. **Install Java** (if not already installed)
    - Download from https://adoptium.net/
-   - Minimum version: Java 11
+   - Minimum version: idk, but I set it up to build using JDK 25
 
 2. **Install Clojure CLI tools**
    - Windows: https://clojure.org/guides/install_clojure#_windows
    - Or use: `scoop install clojure`
 
-3. **Clone or download this project**
-   ```bash
-   cd C:\Users\YourName\Documents\GitHub
-   git clone <your-repo-url> laser-idn-project
-   cd laser-idn-project
-   ```
 
 ## Running the Applications
 
@@ -37,30 +31,7 @@ This launches a graphical interface with:
 4. Right-click a cell to clear it
 5. Use "Connect IDN" to connect to laser hardware
 
-### Option 2: IDN-Hello (Command Line)
-
-```bash
-clj -M:idn-hello
-```
-
-This runs the IDN-Hello protocol demonstration. The output shows available functions.
-
-**To actually use IDN-Hello functions, start a REPL:**
-
-```bash
-clj -M:repl
-```
-
-Then in the REPL:
-
-```clojure
-;; Discover devices on your network
-(require '[idn-hello.core :as idn])
-(idn/discover-devices "192.168.1.255")  ; Use your network's broadcast address
-
-;; Ping a specific device
-(idn/ping-device "192.168.1.100")  ; Replace with actual device IP
-```
+If you use VS Code with Calva starting a repl should automatically launch the app and give you a repl in the `user.clj` namespace 
 
 ## Development Workflow
 
@@ -73,13 +44,9 @@ clj -M:repl
 The REPL will start and show a port number. Connect your editor:
 
 - **VS Code with Calva**: 
-  1. Ctrl+Shift+P → "Calva: Connect to a Running REPL Server"
-  2. Select "deps.edn"
-  3. Enter the port number shown in terminal
+  1. Ctrl+Shift+P → "Calva: Start a Project REPL and Connect (Jack-In)"
+  With this repo's configuration calva should automatically choose "deps.edn" and select the right port
 
-- **Emacs with CIDER**:
-  1. M-x cider-connect
-  2. Enter localhost and the port number
 
 ### Test Laser Show in REPL
 
@@ -88,37 +55,11 @@ The REPL will start and show a port number. Connect your editor:
 (require '[laser-show.core :as laser])
 (laser/start!)
 
-;; Test individual animations
-(require '[laser-show.animation.presets :as presets])
-(require '[laser-show.animation.types :as t])
-
-(def my-anim (presets/create-animation-from-preset :spinning-square))
-(t/get-frame my-anim 1000)  ; Get frame at 1 second
-
-;; Access the running application state
-@laser/app-state
 ```
 
-### Test IDN-Hello in REPL
-
-```clojure
-;; Load the IDN-Hello module
-(require '[idn-hello.core :as idn])
-
-;; Create a UDP socket
-(def socket (idn/create-udp-socket))
-
-;; Send a ping
-(idn/send-ping socket "192.168.1.100" 1)
-
-;; Receive response (with 5 second timeout)
-(idn/receive-packet socket 1024 5000)
-
-;; Close socket when done
-(.close socket)
-```
 
 ## Troubleshooting
+btw, i've only tested on Windows, if you're not on it maybe it'll cause issues
 
 ### "clj: command not found"
 - Clojure CLI tools are not installed
@@ -129,7 +70,7 @@ The REPL will start and show a port number. Connect your editor:
 - Run: `clj -P` to download all dependencies
 
 ### Laser Show window doesn't appear
-- Check Java version: `java -version` (should be 11+)
+- Check Java version: `java -version` (should be 25+ briefly tested 21, but not 100% sure it'll still work)
 - Try running with: `clj -M:laser-show` from project directory
 
 ### IDN-Hello can't find devices
@@ -141,29 +82,13 @@ The REPL will start and show a port number. Connect your editor:
 
 - Read the full [README.md](README.md) for detailed documentation
 - Explore the source code in `src/laser_show/` and `src/idn_hello/`
-- Create custom animations by modifying `src/laser_show/animation/presets.clj`
 - Integrate with your laser hardware using the IDN protocol
 
-## Project Structure
-
-```
-laser-idn-project/
-├── deps.edn              # Dependencies and run configurations
-├── README.md             # Full documentation
-├── QUICKSTART.md         # This file
-├── .gitignore           # Git ignore rules
-└── src/
-    ├── laser_show/       # Laser show GUI application
-    │   ├── core.clj
-    │   ├── animation/
-    │   └── ui/
-    └── idn_hello/        # IDN protocol implementation
-        └── core.clj
-```
 
 ## Support
 
 This is an independent project. For issues or questions:
-1. Check the README.md for detailed documentation
-2. Review the source code comments
-3. Test in a REPL for interactive debugging
+1. Post something in the Discussion
+2. Test in a REPL for interactive debugging
+3. Once you have repl commands to reproduce the issue then feel free to post an issue on github
+   - i would also gladly accept a PR
