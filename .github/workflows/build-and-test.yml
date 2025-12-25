@@ -26,7 +26,7 @@ jobs:
     - name: Setup Clojure
       uses: DeLaGuardo/setup-clojure@13.4
       with:
-        cli: '1.12.4.1582'
+        cli: '1.12.4'
     
     # Cache Clojure dependencies
     - name: Cache Maven dependencies
