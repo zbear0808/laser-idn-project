@@ -149,10 +149,7 @@
                              :updates {:selected-effect-idx effect-idx}}
           :children [{:fx/type :label
                       :text "⠿"
-                      :style "-fx-text-fill: #606060; -fx-font-size: 10; -fx-cursor: move;"}
-                     {:fx/type :label
-                      :text (str (inc effect-idx) ".")
-                      :style "-fx-text-fill: #808080; -fx-font-size: 11;"}
+                      :style "-fx-text-fill: #606060; -fx-font-size: 10; -fx-cursor: move;"} 
                      {:fx/type :label
                       :text (or (:name effect-def) "Unknown")
                       :style (str "-fx-text-fill: " (if selected? "white" "#E0E0E0") ";"
@@ -160,7 +157,7 @@
                      {:fx/type :region :h-box/hgrow :always}
                      {:fx/type :button
                       :text "✕"
-                      :style "-fx-background-color: #D32F2F; -fx-text-fill: white; -fx-padding: 1 5; -fx-font-size: 10;"
+                      :style "-fx-background-color: #D32F2F; -fx-text-fill: white; -fx-padding: 1 3; -fx-font-size: 5;"
                       :on-action {:event/type :effects/remove-from-chain-and-clear-selection
                                   :col col :row row
                                   :effect-idx effect-idx}}]}})
