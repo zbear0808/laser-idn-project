@@ -178,6 +178,7 @@
 ;;   (d/get-timing-bpm) => 120.0
 ;;   (d/set-timing-bpm! 140.0)
 
+#_
 (comment
   ;; Test the generated accessors
   (require '[laser-show.state.core :as core])
