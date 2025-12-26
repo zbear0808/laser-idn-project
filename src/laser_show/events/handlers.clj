@@ -199,6 +199,24 @@
   [{:keys [col row state]}]
   {:state (assoc-in state [:effects :selected-cell] [col row])})
 
+(defn- handle-effects-remove-from-chain-and-clear-selection
+  "Remove an effect from chain and clear the dialog selection if needed.
+   Used by the effect chain editor dialog."
+  [{:keys [col row effect-idx state]}]
+  (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
+        new-effects (vec (concat (subvec effects-vec 0 effect-idx)
+                                 (subvec effects-vec (inc effect-idx))))
+        current-selection (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-idx])
+        new-selection (cond
+                        (nil? current-selection) nil
+                        (= current-selection effect-idx) nil
+                        (> current-selection effect-idx) (dec current-selection)
+                        :else current-selection)]
+    {:state (-> state
+                (assoc-in [:effects :cells [col row] :effects] new-effects)
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-idx] new-selection)
+                mark-dirty)}))
+
 ;; ============================================================================
 ;; Timing Events
 ;; ============================================================================
@@ -272,6 +290,11 @@
   "Close a dialog."
   [{:keys [dialog-id state]}]
   {:state (assoc-in state [:ui :dialogs dialog-id :open?] false)})
+
+(defn- handle-ui-update-dialog-data
+  "Update data associated with a dialog (e.g., selected item within dialog)."
+  [{:keys [dialog-id updates state]}]
+  {:state (update-in state [:ui :dialogs dialog-id :data] merge updates)})
 
 (defn- handle-ui-start-drag
   "Start a drag operation."
@@ -562,6 +585,7 @@
     :effects/paste-cell (handle-effects-paste-cell event)
     :effects/move-cell (handle-effects-move-cell event)
     :effects/select-cell (handle-effects-select-cell event)
+    :effects/remove-from-chain-and-clear-selection (handle-effects-remove-from-chain-and-clear-selection event)
     
     ;; Timing events
     :timing/set-bpm (handle-timing-set-bpm event)
@@ -579,6 +603,7 @@
     :ui/select-preset (handle-ui-select-preset event)
     :ui/open-dialog (handle-ui-open-dialog event)
     :ui/close-dialog (handle-ui-close-dialog event)
+    :ui/update-dialog-data (handle-ui-update-dialog-data event)
     :ui/start-drag (handle-ui-start-drag event)
     :ui/end-drag (handle-ui-end-drag event)
     

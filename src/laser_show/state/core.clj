@@ -308,7 +308,7 @@
   []
   (pprint/pprint (get-registered-domains)))
 
-(comment
+#_(comment
   ;; Example usage:
   
   ;; Define a domain
