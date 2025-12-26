@@ -24,16 +24,17 @@
 
 ;; ============================================================================
 ;; Co-effects (inject data INTO events)
+;; Co-effect functions take no arguments and return data to inject.
 ;; ============================================================================
 
 (defn- co-effect-state
   "Co-effect that injects current state into event."
-  [_]
+  []
   (state/get-state))
 
 (defn- co-effect-time
   "Co-effect that injects current timestamp into event."
-  [_]
+  []
   (System/currentTimeMillis))
 
 ;; ============================================================================

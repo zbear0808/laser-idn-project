@@ -14,7 +14,8 @@
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.events.core :as events]
-            [laser-show.views.root :as root])
+            [laser-show.views.root :as root]
+            [laser-show.services.frame-service :as frame-service])
   (:gen-class))
 
 ;; ============================================================================
@@ -60,6 +61,9 @@
   (let [initial-state (domains/build-initial-state)]
     (state/init-state! initial-state))
   
+  ;; Start preview frame updates (30 FPS)
+  (frame-service/start-preview-updates! 30)
+  
   ;; Create and mount renderer
   (let [renderer (create-renderer)]
     (reset! *renderer renderer)
@@ -74,6 +78,9 @@
    Unmounts the renderer and shuts down state."
   []
   (println "Stopping Laser Show application...")
+  
+  ;; Stop preview updates
+  (frame-service/stop-preview-updates!)
   
   (when-let [renderer @*renderer]
     (fx/unmount-renderer (state/get-context-atom) renderer)
