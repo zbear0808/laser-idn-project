@@ -2,13 +2,15 @@
   "Effects chain editor dialog.
    
    Two-column layout:
-   - Left sidebar: Current effect chain with selection and reorder controls
+   - Left sidebar: Current effect chain with drag-and-drop reordering
    - Right section: Effect bank (tabbed by category) + parameter editor
    
    Effects are dynamically loaded from the effect registry."
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
-            [laser-show.animation.effects :as effects]))
+            [laser-show.animation.effects :as effects]
+            [laser-show.events.core :as events])
+  (:import [javafx.scene.input TransferMode ClipboardContent]))
 
 ;; ============================================================================
 ;; Effect Registry Access
@@ -33,84 +35,175 @@
               params-vector)))
 
 ;; ============================================================================
-;; Left Sidebar: Effect Chain List
+;; Left Sidebar: Effect Chain List with Drag-and-Drop
 ;; ============================================================================
 
-(defn- chain-item-card
-  "A single effect in the chain sidebar.
-   Shows effect name and control buttons."
-  [{:keys [col row effect-idx effect effect-def selected?]}]
-  {:fx/type :h-box
-   :spacing 6
-   :alignment :center-left
-   :style (str "-fx-background-color: " (if selected? "#4A6FA5" "#3D3D3D") ";"
-               "-fx-padding: 6 8;"
-               "-fx-background-radius: 4;"
-               "-fx-cursor: hand;")
-   :on-mouse-clicked {:event/type :ui/update-dialog-data
+(defn- setup-drag-source!
+  "Setup drag source handlers on a node for reordering effects."
+  [^javafx.scene.Node node effect-idx col row dispatch!]
+  (println "[DRAG-SOURCE] Setting up drag source for effect-idx:" effect-idx "col:" col "row:" row)
+  (.setOnDragDetected
+    node
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (println "[DRAG-DETECTED] Started dragging effect-idx:" effect-idx)
+        (let [dragboard (.startDragAndDrop node (into-array TransferMode [TransferMode/MOVE]))
+              content (ClipboardContent.)]
+          (.putString content (str effect-idx))
+          (.setContent dragboard content)
+          (println "[DRAG-DETECTED] Dragboard content set to:" (str effect-idx))
+          (println "[DRAG-DETECTED] Dispatching :ui/update-dialog-data with dragging-effect-idx:" effect-idx)
+          (dispatch! {:event/type :ui/update-dialog-data
                       :dialog-id :effect-chain-editor
-                      :updates {:selected-effect-idx effect-idx}}
-   :children [{:fx/type :label
-               :text (str (inc effect-idx) ".")
-               :style "-fx-text-fill: #808080; -fx-font-size: 11;"}
-              {:fx/type :label
-               :text (or (:name effect-def) "Unknown")
-               :style (str "-fx-text-fill: " (if selected? "white" "#E0E0E0") ";"
-                           "-fx-font-size: 12;")}
-              {:fx/type :region :h-box/hgrow :always}
-              {:fx/type :button
-               :text "↑"
-               :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-padding: 1 5; -fx-font-size: 10;"
-               :disable (= effect-idx 0)
-               :on-action {:event/type :effects/reorder
-                           :col col :row row
-                           :from-idx effect-idx
-                           :to-idx (max 0 (dec effect-idx))}}
-              {:fx/type :button
-               :text "↓"
-               :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-padding: 1 5; -fx-font-size: 10;"
-               :on-action {:event/type :effects/reorder
-                           :col col :row row
-                           :from-idx effect-idx
-                           :to-idx (inc effect-idx)}}
-              {:fx/type :button
-               :text "✕"
-               :style "-fx-background-color: #D32F2F; -fx-text-fill: white; -fx-padding: 1 5; -fx-font-size: 10;"
-               :on-action {:event/type :effects/remove-from-chain-and-clear-selection
-                           :col col :row row
-                           :effect-idx effect-idx}}]})
+                      :updates {:dragging-effect-idx effect-idx}})
+          (.consume event)))))
+  (.setOnDragDone
+    node
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (println "[DRAG-DONE] Drag completed, clearing drag state")
+        (dispatch! {:event/type :ui/update-dialog-data
+                    :dialog-id :effect-chain-editor
+                    :updates {:dragging-effect-idx nil
+                              :drop-target-idx nil}})
+        (.consume event)))))
+
+(defn- setup-drag-target!
+  "Setup drag target handlers on a node for accepting dropped effects."
+  [^javafx.scene.Node node effect-idx col row chain-count dispatch!]
+  (println "[DRAG-TARGET] Setting up drag target for effect-idx:" effect-idx "chain-count:" chain-count)
+  (.setOnDragOver
+    node
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (when (and (.getDragboard event)
+                   (.hasString (.getDragboard event)))
+          (.acceptTransferModes event (into-array TransferMode [TransferMode/MOVE])))
+        (.consume event))))
+  (.setOnDragEntered
+    node
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (println "[DRAG-ENTERED] Entered effect-idx:" effect-idx)
+        (when (.hasString (.getDragboard event))
+          (println "[DRAG-ENTERED] Dispatching drop-target-idx:" effect-idx)
+          (dispatch! {:event/type :ui/update-dialog-data
+                      :dialog-id :effect-chain-editor
+                      :updates {:drop-target-idx effect-idx}}))
+        (.consume event))))
+  (.setOnDragExited
+    node
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (println "[DRAG-EXITED] Exited effect-idx:" effect-idx)
+        (.consume event))))
+  (.setOnDragDropped
+    node
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (println "[DRAG-DROPPED] Drop on effect-idx:" effect-idx)
+        (let [dragboard (.getDragboard event)
+              from-idx (when (.hasString dragboard)
+                         (parse-long (.getString dragboard)))]
+          (println "[DRAG-DROPPED] from-idx:" from-idx "to effect-idx:" effect-idx)
+          (when (and from-idx (not= from-idx effect-idx))
+            (let [to-idx (if (> from-idx effect-idx)
+                           effect-idx
+                           (min effect-idx (dec chain-count)))]
+              (println "[DRAG-DROPPED] Calculated to-idx:" to-idx "(from-idx:" from-idx "chain-count:" chain-count ")")
+              (println "[DRAG-DROPPED] Dispatching :effects/reorder col:" col "row:" row "from-idx:" from-idx "to-idx:" to-idx)
+              (dispatch! {:event/type :effects/reorder
+                          :col col :row row
+                          :from-idx from-idx
+                          :to-idx to-idx})))
+          (.setDropCompleted event true)
+          (.consume event))))))
+
+(defn- chain-item-card
+  "A single effect in the chain sidebar with drag-and-drop support.
+   Shows effect name with a delete button. Reorder via drag-and-drop."
+  [{:keys [col row effect-idx effect effect-def selected? dragging? drop-target? chain-count]}]
+  {:fx/type fx/ext-on-instance-lifecycle
+   :on-created (fn [node]
+                 (println "[CHAIN-ITEM] on-created called for effect-idx:" effect-idx)
+                 ;; Use events/dispatch! directly - this handles state updates correctly
+                 (let [dispatch! (fn [event]
+                                   (println "[DISPATCH!] Dispatching event:" (:event/type event))
+                                   (events/dispatch! event))]
+                   (setup-drag-source! node effect-idx col row dispatch!)
+                   (setup-drag-target! node effect-idx col row chain-count dispatch!)))
+   :desc {:fx/type :h-box
+          :spacing 6
+          :alignment :center-left
+          :style (str "-fx-background-color: " (cond
+                                                  drop-target? "#5A8FCF"
+                                                  selected? "#4A6FA5"
+                                                  :else "#3D3D3D") ";"
+                      "-fx-padding: 6 8;"
+                      "-fx-background-radius: 4;"
+                      "-fx-cursor: hand;"
+                      (when drop-target? "-fx-border-color: #7AB8FF; -fx-border-width: 2 0 0 0;")
+                      (when dragging? "-fx-opacity: 0.5;"))
+          :on-mouse-clicked {:event/type :ui/update-dialog-data
+                             :dialog-id :effect-chain-editor
+                             :updates {:selected-effect-idx effect-idx}}
+          :children [{:fx/type :label
+                      :text "⠿"
+                      :style "-fx-text-fill: #606060; -fx-font-size: 10; -fx-cursor: move;"}
+                     {:fx/type :label
+                      :text (str (inc effect-idx) ".")
+                      :style "-fx-text-fill: #808080; -fx-font-size: 11;"}
+                     {:fx/type :label
+                      :text (or (:name effect-def) "Unknown")
+                      :style (str "-fx-text-fill: " (if selected? "white" "#E0E0E0") ";"
+                                  "-fx-font-size: 12;")}
+                     {:fx/type :region :h-box/hgrow :always}
+                     {:fx/type :button
+                      :text "✕"
+                      :style "-fx-background-color: #D32F2F; -fx-text-fill: white; -fx-padding: 1 5; -fx-font-size: 10;"
+                      :on-action {:event/type :effects/remove-from-chain-and-clear-selection
+                                  :col col :row row
+                                  :effect-idx effect-idx}}]}})
 
 (defn- chain-list-sidebar
-  "Left sidebar showing the effect chain."
-  [{:keys [col row effect-chain selected-effect-idx]}]
-  {:fx/type :v-box
-   :spacing 8
-   :pref-width 180
-   :min-width 180
-   :style "-fx-background-color: #252525; -fx-padding: 8;"
-   :children [{:fx/type :label
-               :text "CHAIN"
-               :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
-              (if (empty? effect-chain)
+  "Left sidebar showing the effect chain with drag-and-drop reordering."
+  [{:keys [col row effect-chain selected-effect-idx dragging-effect-idx drop-target-idx]}]
+  (let [chain-count (count effect-chain)]
+    {:fx/type :v-box
+     :spacing 8
+     :pref-width 180
+     :min-width 180
+     :style "-fx-background-color: #252525; -fx-padding: 8;"
+     :children [{:fx/type :label
+                 :text "CHAIN"
+                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
                 {:fx/type :label
-                 :text "No effects\nAdd from bank →"
-                 :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"}
-                {:fx/type :scroll-pane
-                 :fit-to-width true
-                 :v-box/vgrow :always
-                 :style "-fx-background-color: transparent; -fx-background: #252525;"
-                 :content {:fx/type :v-box
-                           :spacing 4
-                           :children (vec
-                                       (map-indexed
-                                         (fn [idx effect]
-                                           {:fx/type chain-item-card
-                                            :col col :row row
-                                            :effect-idx idx
-                                            :effect effect
-                                            :effect-def (effect-by-id (:effect-id effect))
-                                            :selected? (= idx selected-effect-idx)})
-                                         effect-chain))}})]})
+                 :text "(drag to reorder)"
+                 :style "-fx-text-fill: #505050; -fx-font-size: 9; -fx-font-style: italic;"}
+                (if (empty? effect-chain)
+                  {:fx/type :label
+                   :text "No effects\nAdd from bank →"
+                   :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"}
+                  {:fx/type :scroll-pane
+                   :fit-to-width true
+                   :v-box/vgrow :always
+                   :style "-fx-background-color: transparent; -fx-background: #252525;"
+                   :content {:fx/type :v-box
+                             :spacing 4
+                             :children (vec
+                                         (map-indexed
+                                           (fn [idx effect]
+                                             {:fx/type chain-item-card
+                                              :fx/key idx
+                                              :col col :row row
+                                              :effect-idx idx
+                                              :effect effect
+                                              :effect-def (effect-by-id (:effect-id effect))
+                                              :selected? (= idx selected-effect-idx)
+                                              :dragging? (= idx dragging-effect-idx)
+                                              :drop-target? (= idx drop-target-idx)
+                                              :chain-count chain-count})
+                                           effect-chain))}})]}))
 
 ;; ============================================================================
 ;; Right Top: Tabbed Effect Bank
@@ -308,7 +401,7 @@
   "Main content of the effect chain editor dialog."
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
-        {:keys [col row selected-effect-idx]} dialog-data
+        {:keys [col row selected-effect-idx dragging-effect-idx drop-target-idx]} dialog-data
         effects-state (fx/sub-val context :effects)
         cell-data (get-in effects-state [:cells [col row]])
         effect-chain (:effects cell-data [])
@@ -341,11 +434,13 @@
                 {:fx/type :h-box
                  :spacing 0
                  :v-box/vgrow :always
-                 :children [;; Left sidebar - chain list
+                 :children [;; Left sidebar - chain list with drag-and-drop
                             {:fx/type chain-list-sidebar
                              :col col :row row
                              :effect-chain effect-chain
-                             :selected-effect-idx selected-effect-idx}
+                             :selected-effect-idx selected-effect-idx
+                             :dragging-effect-idx dragging-effect-idx
+                             :drop-target-idx drop-target-idx}
                             
                             ;; Right section
                             {:fx/type :v-box
