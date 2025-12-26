@@ -12,8 +12,7 @@
             [laser-show.state.atoms :as state]
             [laser-show.state.serialization :as ser]
             [laser-show.animation.modulation :as mod])
-  (:import [java.awt Toolkit]
-           [java.awt.datatransfer StringSelection DataFlavor Clipboard]))
+  (:import [javafx.scene.input Clipboard ClipboardContent]))
 
 ;; ============================================================================
 ;; Clipboard State - uses database/dynamic.clj !ui atom
@@ -48,8 +47,8 @@
 
 (defn- get-system-clipboard
   "Get the system clipboard."
-  ^Clipboard []
-  (.getSystemClipboard (Toolkit/getDefaultToolkit)))
+  []
+  (Clipboard/getSystemClipboard))
 
 (defn- copy-to-system-clipboard!
   "Copy EDN data to the system clipboard as a string."
@@ -57,8 +56,9 @@
   (try
     (let [clipboard (get-system-clipboard)
           edn-str (ser/serialize-for-clipboard data)
-          selection (StringSelection. edn-str)]
-      (.setContents clipboard selection nil)
+          content (doto (ClipboardContent.)
+                    (.putString edn-str))]
+      (.setContent clipboard content)
       true)
     (catch Exception e
       (println "Failed to copy to system clipboard:" (.getMessage e))
@@ -71,8 +71,8 @@
   []
   (try
     (let [clipboard (get-system-clipboard)]
-      (when (.isDataFlavorAvailable clipboard DataFlavor/stringFlavor)
-        (let [content (.getData clipboard DataFlavor/stringFlavor)]
+      (when (.hasString clipboard)
+        (let [content (.getString clipboard)]
           (when (and (string? content)
                      ;; Quick check - must start with { to be valid EDN map
                      (str/starts-with? (str/trim content) "{"))
@@ -103,8 +103,9 @@
   (set-internal-clipboard! nil)
   (try
     (let [clipboard (get-system-clipboard)
-          selection (StringSelection. "")]
-      (.setContents clipboard selection nil))
+          content (doto (ClipboardContent.)
+                    (.putString ""))]
+      (.setContent clipboard content))
     (catch Exception _
       nil)))
 
