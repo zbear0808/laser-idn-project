@@ -5,7 +5,8 @@
    
    NOTE: Clipboard state is stored in atoms.clj at [:ui :clipboard]
    to maintain a single source of truth for all application state."
-  (:require [laser-show.backend.cues :as cues]
+  (:require [clojure.string :as str]
+            [laser-show.backend.cues :as cues]
             [laser-show.backend.zones :as zones]
             [laser-show.backend.projectors :as projectors]
             [laser-show.state.atoms :as state]
@@ -65,20 +66,24 @@
 
 (defn- read-from-system-clipboard
   "Read string content from the system clipboard and try to parse as EDN.
-   Only returns data if it's a valid clipboard data structure (has :type key)."
+   Only returns data if it's a valid clipboard data structure (has :type key).
+   Silently returns nil for non-EDN content (like text from other apps)."
   []
   (try
     (let [clipboard (get-system-clipboard)]
       (when (.isDataFlavorAvailable clipboard DataFlavor/stringFlavor)
         (let [content (.getData clipboard DataFlavor/stringFlavor)]
-          (when (string? content)
-            (ser/deserialize-from-clipboard content
-              :schema-fn (fn [data]
-                          (and (map? data)
-                               (contains? data :type)
-                               (valid-clipboard-type? (:type data)))))))))
-    (catch Exception e
-      (println "Failed to read from system clipboard:" (.getMessage e))
+          (when (and (string? content)
+                     ;; Quick check - must start with { to be valid EDN map
+                     (str/starts-with? (str/trim content) "{"))
+            ;; Use silent mode to avoid logging errors for non-EDN clipboard content
+            (let [data (ser/deserialize content :silent? true)]
+              (when (and (map? data)
+                         (contains? data :type)
+                         (valid-clipboard-type? (:type data)))
+                data))))))
+    (catch Exception _
+      ;; Silently return nil - system clipboard often contains non-parseable content
       nil)))
 
 ;; ============================================================================

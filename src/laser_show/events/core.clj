@@ -20,6 +20,7 @@
    - State updates preserve cljfx context memoization"
   (:require [cljfx.api :as fx]
             [laser-show.state.core :as state]
+            [laser-show.state.clipboard :as clipboard]
             [laser-show.events.handlers :as handlers]
             [laser-show.backend.streaming-engine :as streaming-engine]
             [laser-show.services.frame-service :as frame-service]))
@@ -143,6 +144,31 @@
         (println "Failed to load project:" (.getMessage e))))))
 
 ;; ============================================================================
+;; Clipboard Effects (for effect chain editor)
+;; ============================================================================
+
+(defn- effect-clipboard-copy-effect
+  "Effect that copies a single effect to the clipboard."
+  [effect _dispatch]
+  (clipboard/copy-effect! effect))
+
+(defn- effect-clipboard-copy-effects
+  "Effect that copies multiple effects to clipboard as a chain."
+  [effects _dispatch]
+  (clipboard/copy-effect-chain! {:effects effects :active true}))
+
+(defn- effect-clipboard-paste-effects
+  "Effect that pastes effects from clipboard into a chain.
+   Dispatches :effects/insert-pasted with the effects to insert."
+  [{:keys [col row insert-pos]} dispatch]
+  (when-let [effects (clipboard/get-effects-to-paste)]
+    (dispatch {:event/type :effects/insert-pasted
+               :col col
+               :row row  
+               :insert-pos insert-pos
+               :effects effects})))
+
+;; ============================================================================
 ;; Wrapped Event Handler
 ;; ============================================================================
 
@@ -180,7 +206,11 @@
          :idn/start-streaming effect-idn-start-streaming
          :idn/stop-streaming effect-idn-stop-streaming
          :project/save effect-save-project
-         :project/load effect-load-project})))
+         :project/load effect-load-project
+         ;; Clipboard effects for effect chain editor
+         :clipboard/copy-effect effect-clipboard-copy-effect
+         :clipboard/copy-effects effect-clipboard-copy-effects
+         :clipboard/paste-effects effect-clipboard-paste-effects})))
 
 ;; ============================================================================
 ;; Convenience Functions

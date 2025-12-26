@@ -5,12 +5,19 @@
    - Left sidebar: Current effect chain with drag-and-drop reordering
    - Right section: Effect bank (tabbed by category) + parameter editor
    
-   Effects are dynamically loaded from the effect registry."
+   Effects are dynamically loaded from the effect registry.
+   
+   Features:
+   - Multi-select with Click, Ctrl+Click, Shift+Click
+   - Keyboard shortcuts: Ctrl+C (copy), Ctrl+V (paste), Ctrl+A (select all), Delete
+   - Drag-and-drop reordering
+   - Copy/paste across cells"
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.animation.effects :as effects]
-            [laser-show.events.core :as events])
-  (:import [javafx.scene.input TransferMode ClipboardContent]))
+            [laser-show.events.core :as events]
+            [laser-show.state.clipboard :as clipboard])
+  (:import [javafx.scene.input TransferMode ClipboardContent KeyCode KeyCodeCombination KeyCombination$Modifier]))
 
 ;; ============================================================================
 ;; Effect Registry Access
@@ -41,18 +48,14 @@
 (defn- setup-drag-source!
   "Setup drag source handlers on a node for reordering effects."
   [^javafx.scene.Node node effect-idx col row dispatch!]
-  (println "[DRAG-SOURCE] Setting up drag source for effect-idx:" effect-idx "col:" col "row:" row)
   (.setOnDragDetected
     node
     (reify javafx.event.EventHandler
       (handle [_ event]
-        (println "[DRAG-DETECTED] Started dragging effect-idx:" effect-idx)
         (let [dragboard (.startDragAndDrop node (into-array TransferMode [TransferMode/MOVE]))
               content (ClipboardContent.)]
           (.putString content (str effect-idx))
           (.setContent dragboard content)
-          (println "[DRAG-DETECTED] Dragboard content set to:" (str effect-idx))
-          (println "[DRAG-DETECTED] Dispatching :ui/update-dialog-data with dragging-effect-idx:" effect-idx)
           (dispatch! {:event/type :ui/update-dialog-data
                       :dialog-id :effect-chain-editor
                       :updates {:dragging-effect-idx effect-idx}})
@@ -61,7 +64,6 @@
     node
     (reify javafx.event.EventHandler
       (handle [_ event]
-        (println "[DRAG-DONE] Drag completed, clearing drag state")
         (dispatch! {:event/type :ui/update-dialog-data
                     :dialog-id :effect-chain-editor
                     :updates {:dragging-effect-idx nil
@@ -71,7 +73,6 @@
 (defn- setup-drag-target!
   "Setup drag target handlers on a node for accepting dropped effects."
   [^javafx.scene.Node node effect-idx col row chain-count dispatch!]
-  (println "[DRAG-TARGET] Setting up drag target for effect-idx:" effect-idx "chain-count:" chain-count)
   (.setOnDragOver
     node
     (reify javafx.event.EventHandler
@@ -84,9 +85,7 @@
     node
     (reify javafx.event.EventHandler
       (handle [_ event]
-        (println "[DRAG-ENTERED] Entered effect-idx:" effect-idx)
         (when (.hasString (.getDragboard event))
-          (println "[DRAG-ENTERED] Dispatching drop-target-idx:" effect-idx)
           (dispatch! {:event/type :ui/update-dialog-data
                       :dialog-id :effect-chain-editor
                       :updates {:drop-target-idx effect-idx}}))
@@ -95,23 +94,18 @@
     node
     (reify javafx.event.EventHandler
       (handle [_ event]
-        (println "[DRAG-EXITED] Exited effect-idx:" effect-idx)
         (.consume event))))
   (.setOnDragDropped
     node
     (reify javafx.event.EventHandler
       (handle [_ event]
-        (println "[DRAG-DROPPED] Drop on effect-idx:" effect-idx)
         (let [dragboard (.getDragboard event)
               from-idx (when (.hasString dragboard)
                          (parse-long (.getString dragboard)))]
-          (println "[DRAG-DROPPED] from-idx:" from-idx "to effect-idx:" effect-idx)
           (when (and from-idx (not= from-idx effect-idx))
             (let [to-idx (if (> from-idx effect-idx)
                            effect-idx
                            (min effect-idx (dec chain-count)))]
-              (println "[DRAG-DROPPED] Calculated to-idx:" to-idx "(from-idx:" from-idx "chain-count:" chain-count ")")
-              (println "[DRAG-DROPPED] Dispatching :effects/reorder col:" col "row:" row "from-idx:" from-idx "to-idx:" to-idx)
               (dispatch! {:event/type :effects/reorder
                           :col col :row row
                           :from-idx from-idx
@@ -119,19 +113,40 @@
           (.setDropCompleted event true)
           (.consume event))))))
 
+(defn- setup-click-handler!
+  "Setup click handler on a node for multi-select behavior.
+   - Click: Select single
+   - Ctrl+Click: Toggle selection
+   - Shift+Click: Range select"
+  [^javafx.scene.Node node effect-idx]
+  (.setOnMouseClicked
+    node
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (let [ctrl? (.isControlDown event)
+              shift? (.isShiftDown event)]
+          (cond
+            ctrl? (events/dispatch! {:event/type :effects/toggle-effect-selection
+                                     :effect-idx effect-idx})
+            shift? (events/dispatch! {:event/type :effects/range-select
+                                      :effect-idx effect-idx})
+            :else (events/dispatch! {:event/type :effects/select-effect
+                                     :effect-idx effect-idx})))
+        (.consume event)))))
+
 (defn- chain-item-card
   "A single effect in the chain sidebar with drag-and-drop support.
-   Shows effect name with a delete button. Reorder via drag-and-drop."
+   Shows effect name with a delete button. Reorder via drag-and-drop.
+   Supports multi-select with Click/Ctrl+Click/Shift+Click."
   [{:keys [col row effect-idx effect effect-def selected? dragging? drop-target? chain-count]}]
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created (fn [node]
-                 (println "[CHAIN-ITEM] on-created called for effect-idx:" effect-idx)
                  ;; Use events/dispatch! directly - this handles state updates correctly
                  (let [dispatch! (fn [event]
-                                   (println "[DISPATCH!] Dispatching event:" (:event/type event))
                                    (events/dispatch! event))]
                    (setup-drag-source! node effect-idx col row dispatch!)
-                   (setup-drag-target! node effect-idx col row chain-count dispatch!)))
+                   (setup-drag-target! node effect-idx col row chain-count dispatch!)
+                   (setup-click-handler! node effect-idx)))
    :desc {:fx/type :h-box
           :spacing 6
           :alignment :center-left
@@ -144,9 +159,6 @@
                       "-fx-cursor: hand;"
                       (when drop-target? "-fx-border-color: #7AB8FF; -fx-border-width: 2 0 0 0;")
                       (when dragging? "-fx-opacity: 0.5;"))
-          :on-mouse-clicked {:event/type :ui/update-dialog-data
-                             :dialog-id :effect-chain-editor
-                             :updates {:selected-effect-idx effect-idx}}
           :children [{:fx/type :label
                       :text "⠿"
                       :style "-fx-text-fill: #606060; -fx-font-size: 10; -fx-cursor: move;"} 
@@ -163,20 +175,52 @@
                                   :effect-idx effect-idx}}]}})
 
 (defn- chain-list-sidebar
-  "Left sidebar showing the effect chain with drag-and-drop reordering."
-  [{:keys [col row effect-chain selected-effect-idx dragging-effect-idx drop-target-idx]}]
-  (let [chain-count (count effect-chain)]
+  "Left sidebar showing the effect chain with drag-and-drop reordering.
+   Supports multi-select via selected-effect-indices set."
+  [{:keys [col row effect-chain selected-effect-indices dragging-effect-idx drop-target-idx can-paste?]}]
+  (let [chain-count (count effect-chain)
+        selected-indices (or selected-effect-indices #{})
+        selection-count (count selected-indices)]
     {:fx/type :v-box
      :spacing 8
      :pref-width 180
      :min-width 180
      :style "-fx-background-color: #252525; -fx-padding: 8;"
-     :children [{:fx/type :label
-                 :text "CHAIN"
-                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+     :children [{:fx/type :h-box
+                 :alignment :center-left
+                 :children (filterv some?
+                             [{:fx/type :label
+                               :text "CHAIN"
+                               :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                              {:fx/type :region :h-box/hgrow :always}
+                              (when (pos? selection-count)
+                                {:fx/type :label
+                                 :text (str selection-count " selected")
+                                 :style "-fx-text-fill: #4A6FA5; -fx-font-size: 9;"})])}
                 {:fx/type :label
-                 :text "(drag to reorder)"
-                 :style "-fx-text-fill: #505050; -fx-font-size: 9; -fx-font-style: italic;"}
+                 :text "Ctrl+Click multi-select • Ctrl+C/V copy/paste"
+                 :style "-fx-text-fill: #505050; -fx-font-size: 8; -fx-font-style: italic;"}
+                ;; Action buttons for copy/paste
+                {:fx/type :h-box
+                 :spacing 4
+                 :children [{:fx/type :button
+                             :text "Copy"
+                             :disable (zero? selection-count)
+                             :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 9; -fx-padding: 2 6;"
+                             :on-action {:event/type :effects/copy-selected
+                                         :col col :row row}}
+                            {:fx/type :button
+                             :text "Paste"
+                             :disable (not can-paste?)
+                             :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 9; -fx-padding: 2 6;"
+                             :on-action {:event/type :effects/paste-into-chain
+                                         :col col :row row}}
+                            {:fx/type :button
+                             :text "Del"
+                             :disable (zero? selection-count)
+                             :style "-fx-background-color: #803030; -fx-text-fill: white; -fx-font-size: 9; -fx-padding: 2 6;"
+                             :on-action {:event/type :effects/delete-selected
+                                         :col col :row row}}]}
                 (if (empty? effect-chain)
                   {:fx/type :label
                    :text "No effects\nAdd from bank →"
@@ -196,7 +240,7 @@
                                               :effect-idx idx
                                               :effect effect
                                               :effect-def (effect-by-id (:effect-id effect))
-                                              :selected? (= idx selected-effect-idx)
+                                              :selected? (contains? selected-indices idx)
                                               :dragging? (= idx dragging-effect-idx)
                                               :drop-target? (= idx drop-target-idx)
                                               :chain-count chain-count})
@@ -391,6 +435,53 @@
                    :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"})]}))
 
 ;; ============================================================================
+;; Keyboard Handler Setup
+;; ============================================================================
+
+(defn- setup-keyboard-handler!
+  "Setup keyboard handler on root node for shortcuts.
+   - Ctrl+C: Copy selected effects
+   - Ctrl+V: Paste effects
+   - Ctrl+A: Select all effects
+   - Delete/Backspace: Delete selected effects"
+  [^javafx.scene.Node node col row]
+  (.setOnKeyPressed
+    node
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (let [code (.getCode event)
+              ctrl? (.isControlDown event)]
+          (cond
+            ;; Ctrl+C - Copy
+            (and ctrl? (= code KeyCode/C))
+            (do (events/dispatch! {:event/type :effects/copy-selected
+                                   :col col :row row})
+                (.consume event))
+            
+            ;; Ctrl+V - Paste
+            (and ctrl? (= code KeyCode/V))
+            (do (events/dispatch! {:event/type :effects/paste-into-chain
+                                   :col col :row row})
+                (.consume event))
+            
+            ;; Ctrl+A - Select all
+            (and ctrl? (= code KeyCode/A))
+            (do (events/dispatch! {:event/type :effects/select-all
+                                   :col col :row row})
+                (.consume event))
+            
+            ;; Delete or Backspace - Delete selected
+            (or (= code KeyCode/DELETE) (= code KeyCode/BACK_SPACE))
+            (do (events/dispatch! {:event/type :effects/delete-selected
+                                   :col col :row row})
+                (.consume event))
+            
+            ;; Escape - Clear selection
+            (= code KeyCode/ESCAPE)
+            (do (events/dispatch! {:event/type :effects/clear-selection})
+                (.consume event))))))))
+
+;; ============================================================================
 ;; Main Dialog Content
 ;; ============================================================================
 
@@ -398,71 +489,84 @@
   "Main content of the effect chain editor dialog."
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
-        {:keys [col row selected-effect-idx dragging-effect-idx drop-target-idx]} dialog-data
+        {:keys [col row selected-effect-indices dragging-effect-idx drop-target-idx]} dialog-data
+        ;; Convert old format to new if needed (backwards compat)
+        selected-indices (or selected-effect-indices #{})
         effects-state (fx/sub-val context :effects)
         cell-data (get-in effects-state [:cells [col row]])
         effect-chain (:effects cell-data [])
-        active? (:active cell-data false)]
-    {:fx/type :v-box
-     :spacing 0
-     :style "-fx-background-color: #2D2D2D;"
-     :pref-width 600
-     :pref-height 450
-     :children [;; Header
-                {:fx/type :h-box
-                 :alignment :center-left
-                 :spacing 8
-                 :padding 12
-                 :style "-fx-background-color: #252525;"
-                 :children [{:fx/type :label
-                             :text (str "Effects Chain - Cell "
-                                        (char (+ 65 row))
-                                        (inc col))
-                             :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
-                            {:fx/type :region :h-box/hgrow :always}
-                            {:fx/type :check-box
-                             :text "Active"
-                             :selected active?
-                             :style "-fx-text-fill: white;"
-                             :on-selected-changed {:event/type :effects/toggle-cell
-                                                   :col col :row row}}]}
-                
-                ;; Main content area
-                {:fx/type :h-box
-                 :spacing 0
-                 :v-box/vgrow :always
-                 :children [;; Left sidebar - chain list with drag-and-drop
-                            {:fx/type chain-list-sidebar
-                             :col col :row row
-                             :effect-chain effect-chain
-                             :selected-effect-idx selected-effect-idx
-                             :dragging-effect-idx dragging-effect-idx
-                             :drop-target-idx drop-target-idx}
-                            
-                            ;; Right section
-                            {:fx/type :v-box
-                             :spacing 0
-                             :h-box/hgrow :always
-                             :children [;; Effect bank tabs (top)
-                                        {:fx/type effect-bank-tabs
-                                         :col col :row row}
-                                        
-                                        ;; Parameter editor (bottom)
-                                        {:fx/type parameter-editor
-                                         :col col :row row
-                                         :selected-effect-idx selected-effect-idx
-                                         :effect-chain effect-chain}]}]}
-                
-                ;; Footer with close button
-                {:fx/type :h-box
-                 :alignment :center-right
-                 :padding 12
-                 :style "-fx-background-color: #252525;"
-                 :children [{:fx/type :button
-                             :text "Close"
-                             :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-padding: 6 20;"
-                             :on-action {:event/type :ui/close-dialog
-                                         :dialog-id :effect-chain-editor}}]}]}))
+        active? (:active cell-data false)
+        can-paste? (clipboard/can-paste-effects?)
+        ;; For parameter editor, use first selected if single select or nothing
+        first-selected-idx (when (= 1 (count selected-indices))
+                             (first selected-indices))]
+    {:fx/type fx/ext-on-instance-lifecycle
+     :on-created (fn [node]
+                   (setup-keyboard-handler! node col row)
+                   ;; Make node focusable to receive key events
+                   (.setFocusTraversable node true)
+                   (.requestFocus node))
+     :desc {:fx/type :v-box
+            :spacing 0
+            :style "-fx-background-color: #2D2D2D;"
+            :pref-width 600
+            :pref-height 450
+            :children [;; Header
+                       {:fx/type :h-box
+                        :alignment :center-left
+                        :spacing 8
+                        :padding 12
+                        :style "-fx-background-color: #252525;"
+                        :children [{:fx/type :label
+                                    :text (str "Effects Chain - Cell "
+                                               (char (+ 65 row))
+                                               (inc col))
+                                    :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
+                                   {:fx/type :region :h-box/hgrow :always}
+                                   {:fx/type :check-box
+                                    :text "Active"
+                                    :selected active?
+                                    :style "-fx-text-fill: white;"
+                                    :on-selected-changed {:event/type :effects/toggle-cell
+                                                          :col col :row row}}]}
+                       
+                       ;; Main content area
+                       {:fx/type :h-box
+                        :spacing 0
+                        :v-box/vgrow :always
+                        :children [;; Left sidebar - chain list with drag-and-drop
+                                   {:fx/type chain-list-sidebar
+                                    :col col :row row
+                                    :effect-chain effect-chain
+                                    :selected-effect-indices selected-indices
+                                    :dragging-effect-idx dragging-effect-idx
+                                    :drop-target-idx drop-target-idx
+                                    :can-paste? can-paste?}
+                                   
+                                   ;; Right section
+                                   {:fx/type :v-box
+                                    :spacing 0
+                                    :h-box/hgrow :always
+                                    :children [;; Effect bank tabs (top)
+                                               {:fx/type effect-bank-tabs
+                                                :col col :row row}
+                                               
+                                               ;; Parameter editor (bottom) - shows first selected
+                                               {:fx/type parameter-editor
+                                                :col col :row row
+                                                :selected-effect-idx first-selected-idx
+                                                :effect-chain effect-chain}]}]}
+                       
+                       ;; Footer with close button
+                       {:fx/type :h-box
+                        :alignment :center-right
+                        :padding 12
+                        :style "-fx-background-color: #252525;"
+                        :children [{:fx/type :button
+                                    :text "Close"
+                                    :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-padding: 6 20;"
+                                    :on-action {:event/type :ui/close-dialog
+                                                :dialog-id :effect-chain-editor}}]}]}}))
 
 ;; ============================================================================
 ;; Dialog Window

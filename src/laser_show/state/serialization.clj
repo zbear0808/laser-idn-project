@@ -42,6 +42,7 @@
    - :on-error - Error handler fn: (on-error exception) -> value
                  Default returns nil and prints error
    - :default - Default value to return on error (overrides :on-error)
+   - :silent? - Don't print errors (default false)
    
    Returns: Deserialized data or error value
    
@@ -51,7 +52,7 @@
    
    (deserialize \"invalid\" :default {})
    => {}"
-  [edn-str & {:keys [on-error default]}]
+  [edn-str & {:keys [on-error default silent?]}]
   (try
     (edn/read-string {:eof ::eof} edn-str)
     (catch Exception e
@@ -60,7 +61,9 @@
         (if on-error
           (on-error e)
           (do
-            (println "Deserialization error:" (.getMessage e))
+            (when-not silent?
+              (println "[serialization/deserialize] Deserialization error:" (.getMessage e))
+              (println "[serialization/deserialize] Input string (first 100 chars):" (subs (str edn-str) 0 (min 100 (count (str edn-str))))))
             nil))))))
 
 ;; ============================================================================

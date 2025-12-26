@@ -206,16 +206,133 @@
   (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
         new-effects (vec (concat (subvec effects-vec 0 effect-idx)
                                  (subvec effects-vec (inc effect-idx))))
-        current-selection (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-idx])
-        new-selection (cond
-                        (nil? current-selection) nil
-                        (= current-selection effect-idx) nil
-                        (> current-selection effect-idx) (dec current-selection)
-                        :else current-selection)]
+        selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
+        new-indices (-> selected-indices
+                        (disj effect-idx)
+                        (->> (mapv (fn [idx]
+                                     (if (> idx effect-idx)
+                                       (dec idx)
+                                       idx)))
+                             (into #{})))]
     {:state (-> state
                 (assoc-in [:effects :cells [col row] :effects] new-effects)
-                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-idx] new-selection)
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] new-indices)
                 mark-dirty)}))
+
+;; ============================================================================
+;; Effect Chain Editor Multi-Select Events
+;; ============================================================================
+
+(defn- handle-effects-select-effect
+  "Select a single effect in the chain editor (replaces existing selection)."
+  [{:keys [effect-idx state]}]
+  {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices]
+                    #{effect-idx})})
+
+(defn- handle-effects-toggle-effect-selection
+  "Toggle an effect's selection state (Ctrl+click behavior)."
+  [{:keys [effect-idx state]}]
+  (let [current-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
+        new-indices (if (contains? current-indices effect-idx)
+                      (disj current-indices effect-idx)
+                      (conj current-indices effect-idx))]
+    {:state (-> state
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] new-indices)
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :last-selected-idx] effect-idx))}))
+
+(defn- handle-effects-range-select
+  "Range select effects from last selected to clicked (Shift+click behavior)."
+  [{:keys [effect-idx state]}]
+  (let [last-idx (get-in state [:ui :dialogs :effect-chain-editor :data :last-selected-idx])
+        start-idx (or last-idx 0)
+        [from to] (if (<= start-idx effect-idx)
+                    [start-idx effect-idx]
+                    [effect-idx start-idx])
+        range-indices (into #{} (range from (inc to)))]
+    {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices]
+                      range-indices)}))
+
+(defn- handle-effects-select-all
+  "Select all effects in the current chain."
+  [{:keys [col row state]}]
+  (let [effects-count (count (get-in state [:effects :cells [col row] :effects] []))
+        all-indices (into #{} (range effects-count))]
+    {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices]
+                      all-indices)}))
+
+(defn- handle-effects-clear-selection
+  "Clear all effect selection in chain editor."
+  [{:keys [state]}]
+  {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})})
+
+(defn- handle-effects-copy-selected
+  "Copy selected effects to clipboard."
+  [{:keys [col row state]}]
+  (let [selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
+        effects-vec (get-in state [:effects :cells [col row] :effects] [])
+        sorted-indices (sort selected-indices)
+        selected-effects (mapv #(nth effects-vec % nil) sorted-indices)
+        valid-effects (filterv some? selected-effects)]
+    (if (seq valid-effects)
+      (if (= 1 (count valid-effects))
+        ;; Single effect - use :effect type
+        {:state state
+         :clipboard/copy-effect (first valid-effects)}
+        ;; Multiple effects - use :effect-chain type  
+        {:state state
+         :clipboard/copy-effects valid-effects})
+      {:state state})))
+
+(defn- handle-effects-paste-into-chain
+  "Paste effects from clipboard into current chain."
+  [{:keys [col row state]}]
+  (let [;; Get paste position (after last selected, or at end)
+        selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
+        effects-vec (get-in state [:effects :cells [col row] :effects] [])
+        insert-pos (if (seq selected-indices)
+                     (inc (apply max selected-indices))
+                     (count effects-vec))]
+    {:state state
+     :clipboard/paste-effects {:col col
+                               :row row
+                               :insert-pos insert-pos}}))
+
+(defn- handle-effects-insert-pasted
+  "Actually insert pasted effects into the chain (called by effect handler)."
+  [{:keys [col row insert-pos effects state]}]
+  (let [ensure-cell (fn [s]
+                      (if (get-in s [:effects :cells [col row]])
+                        s
+                        (assoc-in s [:effects :cells [col row]] {:effects [] :active true})))
+        current-effects (get-in state [:effects :cells [col row] :effects] [])
+        safe-pos (min insert-pos (count current-effects))
+        new-effects (vec (concat (subvec current-effects 0 safe-pos)
+                                 effects
+                                 (subvec current-effects safe-pos)))
+        ;; Select the newly pasted effects
+        new-indices (into #{} (range safe-pos (+ safe-pos (count effects))))]
+    {:state (-> state
+                ensure-cell
+                (assoc-in [:effects :cells [col row] :effects] new-effects)
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] new-indices)
+                mark-dirty)}))
+
+(defn- handle-effects-delete-selected
+  "Delete all selected effects from the chain."
+  [{:keys [col row state]}]
+  (let [selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
+        effects-vec (get-in state [:effects :cells [col row] :effects] [])]
+    (if (seq selected-indices)
+      (let [new-effects (vec (keep-indexed
+                               (fn [idx effect]
+                                 (when-not (contains? selected-indices idx)
+                                   effect))
+                               effects-vec))]
+        {:state (-> state
+                    (assoc-in [:effects :cells [col row] :effects] new-effects)
+                    (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
+                    mark-dirty)})
+      {:state state})))
 
 ;; ============================================================================
 ;; Timing Events
@@ -586,6 +703,17 @@
     :effects/move-cell (handle-effects-move-cell event)
     :effects/select-cell (handle-effects-select-cell event)
     :effects/remove-from-chain-and-clear-selection (handle-effects-remove-from-chain-and-clear-selection event)
+    
+    ;; Effect chain editor multi-select events
+    :effects/select-effect (handle-effects-select-effect event)
+    :effects/toggle-effect-selection (handle-effects-toggle-effect-selection event)
+    :effects/range-select (handle-effects-range-select event)
+    :effects/select-all (handle-effects-select-all event)
+    :effects/clear-selection (handle-effects-clear-selection event)
+    :effects/copy-selected (handle-effects-copy-selected event)
+    :effects/paste-into-chain (handle-effects-paste-into-chain event)
+    :effects/insert-pasted (handle-effects-insert-pasted event)
+    :effects/delete-selected (handle-effects-delete-selected event)
     
     ;; Timing events
     :timing/set-bpm (handle-timing-set-bpm event)
