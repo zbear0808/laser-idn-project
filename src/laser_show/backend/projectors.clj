@@ -6,7 +6,7 @@
    - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
   (:require [laser-show.state.atoms :as state]
             [laser-show.state.persistent :as persist]
-            [laser-show.animation.effects :as fx]))
+            [laser-show.animation.effects :as effects]))
 
 ;; ============================================================================
 ;; Constants
@@ -218,8 +218,8 @@
   "Add an effect to a projector's effect chain."
   [projector-id effect-instance]
   (let [projector (get-projector projector-id)
-        current-chain (or (:effect-chain projector) (fx/empty-effect-chain))
-        new-chain (fx/add-effect-to-chain current-chain effect-instance)]
+        current-chain (or (:effect-chain projector) (effects/empty-effect-chain))
+        new-chain (effects/add-effect-to-chain current-chain effect-instance)]
     (update-projector! projector-id {:effect-chain new-chain})))
 
 (defn remove-effect-from-projector!
@@ -227,7 +227,7 @@
   [projector-id effect-index]
   (when-let [projector (get-projector projector-id)]
     (when-let [chain (:effect-chain projector)]
-      (let [new-chain (fx/remove-effect-at chain effect-index)]
+      (let [new-chain (effects/remove-effect-at chain effect-index)]
         (update-projector! projector-id {:effect-chain new-chain})))))
 
 (defn update-projector-effect!
@@ -235,7 +235,7 @@
   [projector-id effect-index updates]
   (when-let [projector (get-projector projector-id)]
     (when-let [chain (:effect-chain projector)]
-      (let [new-chain (fx/update-effect-at chain effect-index updates)]
+      (let [new-chain (effects/update-effect-at chain effect-index updates)]
         (update-projector! projector-id {:effect-chain new-chain})))))
 
 (defn enable-projector-effect!
@@ -253,5 +253,5 @@
    This is typically used for projector-level calibration effects."
   [projector-id frame time-ms bpm]
   (if-let [chain (get-projector-effect-chain projector-id)]
-    (fx/apply-effect-chain frame chain time-ms bpm)
+    (effects/apply-effect-chain frame chain time-ms bpm)
     frame))

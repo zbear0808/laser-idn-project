@@ -19,7 +19,7 @@
    Per-point modulation (NEW!):
    {:effect-id :set-hue :params {:hue (mod/position-x-mod 0 360)}}  ; Rainbow gradient
    {:effect-id :set-hue :params {:hue (mod/rainbow-hue :x 60.0)}}  ; Animated rainbow"
-  (:require [laser-show.animation.effects :as fx]
+  (:require [laser-show.animation.effects :as effects]
             [laser-show.animation.effects.common :as common]
             [laser-show.animation.colors :as colors]
             [laser-show.animation.modulation :as mod]))
@@ -32,7 +32,7 @@
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? raw-params)
     ;; Per-point path
-    (fx/transform-colors-per-point
+    (effects/transform-colors-per-point
       frame time-ms bpm raw-params
       (fn [_idx _cnt _x _y r g b {:keys [degrees]}]
         (let [[h s v] (colors/rgb->hsv r g b)
@@ -42,14 +42,14 @@
     (let [context (mod/make-context {:time-ms time-ms :bpm bpm})
           resolved-params (mod/resolve-params raw-params context)
           degrees (:degrees resolved-params)]
-      (fx/transform-colors
+      (effects/transform-colors
         frame
         (fn [[r g b]]
           (let [[h s v] (colors/rgb->hsv r g b)
                 new-h (mod (+ h degrees) 360)]
             (colors/hsv->rgb new-h s v)))))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :hue-shift
   :name "Hue Shift"
   :category :color
@@ -70,7 +70,7 @@
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? raw-params)
     ;; Per-point path
-    (fx/transform-colors-per-point
+    (effects/transform-colors-per-point
       frame time-ms bpm raw-params
       (fn [_idx _cnt _x _y r g b {:keys [amount]}]
         (let [[h s v] (colors/rgb->hsv r g b)
@@ -80,14 +80,14 @@
     (let [context (mod/make-context {:time-ms time-ms :bpm bpm})
           resolved-params (mod/resolve-params raw-params context)
           amount (:amount resolved-params)]
-      (fx/transform-colors
+      (effects/transform-colors
         frame
         (fn [[r g b]]
           (let [[h s v] (colors/rgb->hsv r g b)
                 new-s (max 0.0 (min 1.0 (* s amount)))]
             (colors/hsv->rgb h new-s v)))))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :saturation
   :name "Saturation"
   :category :color
@@ -108,7 +108,7 @@
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? raw-params)
     ;; Per-point path
-    (fx/transform-colors-per-point
+    (effects/transform-colors-per-point
       frame time-ms bpm raw-params
       (fn [_idx _cnt _x _y r g b {:keys [r-mult g-mult b-mult]}]
         [(common/clamp-byte (* r r-mult))
@@ -120,14 +120,14 @@
           r-mult (:r-mult resolved-params)
           g-mult (:g-mult resolved-params)
           b-mult (:b-mult resolved-params)]
-      (fx/transform-colors
+      (effects/transform-colors
         frame
         (fn [[r g b]]
           [(common/clamp-byte (* r r-mult))
            (common/clamp-byte (* g g-mult))
            (common/clamp-byte (* b b-mult))])))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :color-filter
   :name "Color Filter"
   :category :color
@@ -157,14 +157,14 @@
 ;; ============================================================================
 
 (defn- apply-invert [frame _time-ms _bpm _params]
-  (fx/transform-colors
+  (effects/transform-colors
    frame
    (fn [[r g b]]
      [(- 255 r)
       (- 255 g)
       (- 255 b)])))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :invert
   :name "Invert Colors"
   :category :color
@@ -180,7 +180,7 @@
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? raw-params)
     ;; Per-point path - enables rainbow gradients!
-    (fx/transform-colors-per-point
+    (effects/transform-colors-per-point
       frame time-ms bpm raw-params
       (fn [_idx _cnt _x _y r g b {:keys [hue]}]
         (let [[_h s v] (colors/rgb->hsv r g b)]
@@ -192,7 +192,7 @@
     (let [context (mod/make-context {:time-ms time-ms :bpm bpm})
           resolved-params (mod/resolve-params raw-params context)
           hue (:hue resolved-params)]
-      (fx/transform-colors
+      (effects/transform-colors
         frame
         (fn [[r g b]]
           (let [[_h s v] (colors/rgb->hsv r g b)]
@@ -201,7 +201,7 @@
               (colors/hsv->rgb hue s v)
               [r g b])))))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :set-hue
   :name "Set Hue"
   :category :color
@@ -226,14 +226,14 @@
 (defn- apply-color-replace [frame _time-ms _bpm {:keys [from-r from-g from-b
                                                         to-r to-g to-b
                                                         tolerance]}]
-  (fx/transform-colors
+  (effects/transform-colors
    frame
    (fn [[r g b]]
      (if (<= (color-distance r g b from-r from-g from-b) tolerance)
        [to-r to-g to-b]
        [r g b]))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :color-replace
   :name "Color Replace"
   :category :color
@@ -287,14 +287,14 @@
 ;; ============================================================================
 
 (defn- apply-set-color [frame _time-ms _bpm {:keys [red green blue]}]
-  (fx/transform-colors
+  (effects/transform-colors
    frame
    (fn [[r g b]]
      (if (or (pos? r) (pos? g) (pos? b))
        [red green blue]
        [0 0 0]))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :set-color
   :name "Set Color"
   :category :color
@@ -333,7 +333,7 @@
 
 (defn- apply-rainbow-position [frame time-ms _bpm {:keys [speed axis]}]
   (let [time-offset (mod (* (/ time-ms 1000.0) speed) 360)]
-    (fx/transform-points
+    (effects/transform-points
      frame
      (fn [point]
        (let [x (/ (:x point) 32767.0)
@@ -356,7 +356,7 @@
                     :g (unchecked-byte ng)
                     :b (unchecked-byte nb)))))))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :rainbow-position
   :name "Rainbow Position (Special)"
   :category :color

@@ -136,9 +136,13 @@
                 mark-dirty)}))
 
 (defn- handle-effects-update-param
-  "Update a parameter in an effect."
-  [{:keys [col row effect-idx param-key value state]}]
-  {:state (assoc-in state [:effects :cells [col row] :effects effect-idx :params param-key] value)})
+  "Update a parameter in an effect.
+   Value comes from :fx/event when using map event handlers."
+  [{:keys [col row effect-idx param-key state] :as event}]
+  (let [value (or (:fx/event event) (:value event))
+        effects-vec (vec (get-in state [:effects :cells [col row] :effects] []))
+        updated-effects (assoc-in effects-vec [effect-idx :params param-key] value)]
+    {:state (assoc-in state [:effects :cells [col row] :effects] updated-effects)}))
 
 (defn- handle-effects-clear-cell
   "Clear all effects from a cell."
@@ -160,6 +164,40 @@
     {:state (-> state
                 (assoc-in [:effects :cells [col row] :effects] reordered)
                 mark-dirty)}))
+
+(defn- handle-effects-copy-cell
+  "Copy an effects cell to clipboard."
+  [{:keys [col row state]}]
+  (let [cell-data (get-in state [:effects :cells [col row]])]
+    {:state (assoc-in state [:ui :clipboard]
+                      {:type :effects-cell
+                       :data cell-data})}))
+
+(defn- handle-effects-paste-cell
+  "Paste clipboard to an effects cell."
+  [{:keys [col row state]}]
+  (let [clipboard (get-in state [:ui :clipboard])]
+    (if (and clipboard (= :effects-cell (:type clipboard)))
+      {:state (-> state
+                  (assoc-in [:effects :cells [col row]] (:data clipboard))
+                  mark-dirty)}
+      {:state state})))
+
+(defn- handle-effects-move-cell
+  "Move an effects cell from one position to another."
+  [{:keys [from-col from-row to-col to-row state]}]
+  (let [cell-data (get-in state [:effects :cells [from-col from-row]])]
+    (if cell-data
+      {:state (-> state
+                  (update-in [:effects :cells] dissoc [from-col from-row])
+                  (assoc-in [:effects :cells [to-col to-row]] cell-data)
+                  mark-dirty)}
+      {:state state})))
+
+(defn- handle-effects-select-cell
+  "Select an effects cell for editing."
+  [{:keys [col row state]}]
+  {:state (assoc-in state [:effects :selected-cell] [col row])})
 
 ;; ============================================================================
 ;; Timing Events
@@ -324,6 +362,173 @@
   {:state (assoc-in state (into [:config] path) value)})
 
 ;; ============================================================================
+;; File Menu Events
+;; ============================================================================
+
+(defn- handle-file-new-project
+  "Create a new project (TODO: Implement confirmation dialog if dirty)."
+  [{:keys [state]}]
+  (println "File > New Project")
+  ;; TODO: Show confirmation dialog if project is dirty
+  ;; For now, just log
+  {:state state})
+
+(defn- handle-file-open
+  "Open a project from disk (TODO: Implement file dialog)."
+  [{:keys [state]}]
+  (println "File > Open")
+  ;; TODO: Show file chooser dialog
+  ;; :file/open-dialog effect to be implemented
+  {:state state})
+
+(defn- handle-file-save
+  "Save the current project (TODO: Implement save logic)."
+  [{:keys [state]}]
+  (println "File > Save")
+  ;; TODO: Implement actual save to disk
+  ;; For now, just mark as clean
+  {:state (-> state
+              (assoc-in [:project :dirty?] false)
+              (assoc-in [:project :last-saved] (System/currentTimeMillis)))})
+
+(defn- handle-file-save-as
+  "Save the project to a new location (TODO: Implement file dialog)."
+  [{:keys [state]}]
+  (println "File > Save As")
+  ;; TODO: Show file chooser dialog and save
+  {:state state})
+
+(defn- handle-file-export
+  "Export project data (TODO: Implement export dialog)."
+  [{:keys [state]}]
+  (println "File > Export")
+  ;; TODO: Show export options dialog
+  {:state state})
+
+(defn- handle-file-exit
+  "Exit the application."
+  [{:keys [state]}]
+  (println "File > Exit")
+  ;; TODO: Show confirmation dialog if project is dirty
+  ;; For now, just exit
+  {:system/exit true})
+
+;; ============================================================================
+;; Edit Menu Events
+;; ============================================================================
+
+(defn- handle-edit-undo
+  "Undo the last action (TODO: Implement undo stack)."
+  [{:keys [state]}]
+  (println "Edit > Undo")
+  ;; TODO: Implement undo/redo system
+  {:state state})
+
+(defn- handle-edit-redo
+  "Redo the last undone action (TODO: Implement redo stack)."
+  [{:keys [state]}]
+  (println "Edit > Redo")
+  ;; TODO: Implement undo/redo system
+  {:state state})
+
+(defn- handle-edit-copy
+  "Copy selected cell to clipboard."
+  [{:keys [state]}]
+  (let [active-tab (get-in state [:ui :active-tab])
+        selected-cell (case active-tab
+                        :grid (get-in state [:grid :selected-cell])
+                        :effects (get-in state [:effects :selected-cell])
+                        nil)]
+    (if selected-cell
+      (let [[col row] selected-cell]
+        (case active-tab
+          :grid (handle-grid-copy-cell {:col col :row row :state state})
+          :effects (handle-effects-copy-cell {:col col :row row :state state})
+          {:state state}))
+      (do
+        (println "Edit > Copy: No cell selected")
+        {:state state}))))
+
+(defn- handle-edit-paste
+  "Paste clipboard to selected cell."
+  [{:keys [state]}]
+  (let [active-tab (get-in state [:ui :active-tab])
+        selected-cell (case active-tab
+                        :grid (get-in state [:grid :selected-cell])
+                        :effects (get-in state [:effects :selected-cell])
+                        nil)]
+    (if selected-cell
+      (let [[col row] selected-cell]
+        (case active-tab
+          :grid (handle-grid-paste-cell {:col col :row row :state state})
+          :effects (handle-effects-paste-cell {:col col :row row :state state})
+          {:state state}))
+      (do
+        (println "Edit > Paste: No cell selected")
+        {:state state}))))
+
+(defn- handle-edit-clear-cell
+  "Clear the selected cell."
+  [{:keys [state]}]
+  (let [active-tab (get-in state [:ui :active-tab])
+        selected-cell (case active-tab
+                        :grid (get-in state [:grid :selected-cell])
+                        :effects (get-in state [:effects :selected-cell])
+                        nil)]
+    (if selected-cell
+      (let [[col row] selected-cell]
+        (case active-tab
+          :grid (handle-grid-clear-cell {:col col :row row :state state})
+          :effects (handle-effects-clear-cell {:col col :row row :state state})
+          {:state state}))
+      (do
+        (println "Edit > Clear Cell: No cell selected")
+        {:state state}))))
+
+;; ============================================================================
+;; View Menu Events
+;; ============================================================================
+
+(defn- handle-view-toggle-preview
+  "Toggle preview panel visibility (TODO: Implement preview toggle)."
+  [{:keys [state]}]
+  (println "View > Toggle Preview")
+  ;; TODO: Implement preview panel show/hide
+  {:state (update-in state [:ui :preview-visible?] not)})
+
+(defn- handle-view-fullscreen
+  "Toggle fullscreen mode (TODO: Implement fullscreen)."
+  [{:keys [state]}]
+  (println "View > Fullscreen")
+  ;; TODO: Implement fullscreen toggle via JavaFX stage
+  {:state (update-in state [:ui :fullscreen?] not)})
+
+;; ============================================================================
+;; Help Menu Events
+;; ============================================================================
+
+(defn- handle-help-documentation
+  "Open documentation in browser."
+  [{:keys [state]}]
+  (println "Help > Documentation")
+  ;; TODO: Open URL in system browser
+  {:state state
+   :system/open-url "https://github.com/your-repo/docs"})
+
+(defn- handle-help-about
+  "Show About dialog."
+  [{:keys [state]}]
+  (println "Help > About")
+  {:state (assoc-in state [:ui :dialogs :about :open?] true)})
+
+(defn- handle-help-check-updates
+  "Check for application updates."
+  [{:keys [state]}]
+  (println "Help > Check for Updates")
+  ;; TODO: Implement update check
+  {:state state})
+
+;; ============================================================================
 ;; Main Event Handler
 ;; ============================================================================
 
@@ -353,6 +558,10 @@
     :effects/update-param (handle-effects-update-param event)
     :effects/clear-cell (handle-effects-clear-cell event)
     :effects/reorder (handle-effects-reorder event)
+    :effects/copy-cell (handle-effects-copy-cell event)
+    :effects/paste-cell (handle-effects-paste-cell event)
+    :effects/move-cell (handle-effects-move-cell event)
+    :effects/select-cell (handle-effects-select-cell event)
     
     ;; Timing events
     :timing/set-bpm (handle-timing-set-bpm event)
@@ -386,6 +595,30 @@
     
     ;; Config events
     :config/update (handle-config-update event)
+    
+    ;; File menu events
+    :file/new-project (handle-file-new-project event)
+    :file/open (handle-file-open event)
+    :file/save (handle-file-save event)
+    :file/save-as (handle-file-save-as event)
+    :file/export (handle-file-export event)
+    :file/exit (handle-file-exit event)
+    
+    ;; Edit menu events
+    :edit/undo (handle-edit-undo event)
+    :edit/redo (handle-edit-redo event)
+    :edit/copy (handle-edit-copy event)
+    :edit/paste (handle-edit-paste event)
+    :edit/clear-cell (handle-edit-clear-cell event)
+    
+    ;; View menu events
+    :view/toggle-preview (handle-view-toggle-preview event)
+    :view/fullscreen (handle-view-fullscreen event)
+    
+    ;; Help menu events
+    :help/documentation (handle-help-documentation event)
+    :help/about (handle-help-about event)
+    :help/check-updates (handle-help-check-updates event)
     
     ;; Unknown event
     (do

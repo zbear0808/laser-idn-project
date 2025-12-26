@@ -15,7 +15,7 @@
   (:require [laser-show.state.atoms :as state]
             [laser-show.state.persistent :as persist]
             [laser-show.backend.zone-router :as router]
-            [laser-show.animation.effects :as fx]))
+            [laser-show.animation.effects :as effects]))
 
 ;; ============================================================================
 ;; Cue Definition
@@ -271,8 +271,8 @@
   "Add an effect to a cue's effect chain."
   [cue-id effect-instance]
   (let [cue (get-cue cue-id)
-        current-chain (or (:effect-chain cue) (fx/empty-effect-chain))
-        new-chain (fx/add-effect-to-chain current-chain effect-instance)]
+        current-chain (or (:effect-chain cue) (effects/empty-effect-chain))
+        new-chain (effects/add-effect-to-chain current-chain effect-instance)]
     (update-cue! cue-id {:effect-chain new-chain})))
 
 (defn remove-effect-from-cue!
@@ -280,7 +280,7 @@
   [cue-id effect-index]
   (when-let [cue (get-cue cue-id)]
     (when-let [chain (:effect-chain cue)]
-      (let [new-chain (fx/remove-effect-at chain effect-index)]
+      (let [new-chain (effects/remove-effect-at chain effect-index)]
         (update-cue! cue-id {:effect-chain new-chain})))))
 
 (defn update-cue-effect!
@@ -288,7 +288,7 @@
   [cue-id effect-index updates]
   (when-let [cue (get-cue cue-id)]
     (when-let [chain (:effect-chain cue)]
-      (let [new-chain (fx/update-effect-at chain effect-index updates)]
+      (let [new-chain (effects/update-effect-at chain effect-index updates)]
         (update-cue! cue-id {:effect-chain new-chain})))))
 
 (defn enable-cue-effect!
@@ -296,7 +296,7 @@
   [cue-id effect-index]
   (when-let [cue (get-cue cue-id)]
     (when-let [chain (:effect-chain cue)]
-      (let [new-chain (fx/enable-effect-at chain effect-index)]
+      (let [new-chain (effects/enable-effect-at chain effect-index)]
         (update-cue! cue-id {:effect-chain new-chain})))))
 
 (defn disable-cue-effect!
@@ -304,7 +304,7 @@
   [cue-id effect-index]
   (when-let [cue (get-cue cue-id)]
     (when-let [chain (:effect-chain cue)]
-      (let [new-chain (fx/disable-effect-at chain effect-index)]
+      (let [new-chain (effects/disable-effect-at chain effect-index)]
         (update-cue! cue-id {:effect-chain new-chain})))))
 
 ;; ============================================================================
@@ -364,7 +364,7 @@
   "Create an effect instance for use in cues.
    Convenience wrapper for fx/make-effect-instance."
   [effect-id & {:keys [enabled params] :or {enabled true params {}}}]
-  (fx/make-effect-instance effect-id :enabled enabled :params params))
+  (effects/make-effect-instance effect-id :enabled enabled :params params))
 
 ;; ============================================================================
 ;; Frame Generation with Effects
@@ -400,7 +400,7 @@
                     :else nil)
             trigger-time (:trigger-time cue)]
         (if-let [chain (:effect-chain cue)]
-          (fx/apply-effect-chain frame chain time-ms bpm trigger-time)
+          (effects/apply-effect-chain frame chain time-ms bpm trigger-time)
           frame)))))
 
 (defn get-active-cue-frame-with-effects
@@ -421,5 +421,5 @@
                     :else nil)
             trigger-time (:trigger-time active-cue)]
         (if-let [chain (:effect-chain active-cue)]
-          (fx/apply-effect-chain frame chain time-ms bpm trigger-time)
+          (effects/apply-effect-chain frame chain time-ms bpm trigger-time)
           frame)))))

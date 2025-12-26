@@ -22,7 +22,7 @@
    Per-point modulation (NEW!):
    {:effect-id :intensity :params {:amount (mod/position-radial-mod 1.0 0.3)}}  ; Radial fade
    {:effect-id :intensity :params {:amount (mod/position-wave 0.5 1.0 :x 4.0)}}  ; Wave pattern"
-  (:require [laser-show.animation.effects :as fx]
+  (:require [laser-show.animation.effects :as effects]
             [laser-show.animation.effects.common :as common]
             [laser-show.animation.modulation :as mod]))
 
@@ -34,7 +34,7 @@
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? raw-params)
     ;; Per-point path - enables spatial brightness patterns!
-    (fx/transform-colors-per-point
+    (effects/transform-colors-per-point
       frame time-ms bpm raw-params
       (fn [_idx _cnt _x _y r g b {:keys [amount]}]
         [(common/clamp-byte (* r amount))
@@ -44,14 +44,14 @@
     (let [context (mod/make-context {:time-ms time-ms :bpm bpm})
           resolved-params (mod/resolve-params raw-params context)
           amount (:amount resolved-params)]
-      (fx/transform-colors
+      (effects/transform-colors
         frame
         (fn [[r g b]]
           [(common/clamp-byte (* r amount))
            (common/clamp-byte (* g amount))
            (common/clamp-byte (* b amount))])))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :intensity
   :name "Intensity"
   :category :intensity
@@ -70,13 +70,13 @@
 
 (defn- apply-blackout [frame _time-ms _bpm {:keys [enabled]}]
   (if enabled
-    (fx/transform-colors
+    (effects/transform-colors
      frame
      (fn [[_r _g _b]]
        [0 0 0]))
     frame))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :blackout
   :name "Blackout"
   :category :intensity
@@ -95,7 +95,7 @@
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? raw-params)
     ;; Per-point path
-    (fx/transform-colors-per-point
+    (effects/transform-colors-per-point
       frame time-ms bpm raw-params
       (fn [_idx _cnt _x _y r g b {:keys [threshold]}]
         (let [max-val (max r g b)]
@@ -106,7 +106,7 @@
     (let [context (mod/make-context {:time-ms time-ms :bpm bpm})
           resolved-params (mod/resolve-params raw-params context)
           threshold (:threshold resolved-params)]
-      (fx/transform-colors
+      (effects/transform-colors
         frame
         (fn [[r g b]]
           (let [max-val (max r g b)]
@@ -114,7 +114,7 @@
               [0 0 0]
               [r g b])))))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :threshold
   :name "Threshold"
   :category :intensity
@@ -135,7 +135,7 @@
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? raw-params)
     ;; Per-point path
-    (fx/transform-colors-per-point
+    (effects/transform-colors-per-point
       frame time-ms bpm raw-params
       (fn [_idx _cnt _x _y r g b {:keys [gamma]}]
         (let [inv-gamma (/ 1.0 gamma)]
@@ -147,14 +147,14 @@
           resolved-params (mod/resolve-params raw-params context)
           gamma (:gamma resolved-params)
           inv-gamma (/ 1.0 gamma)]
-      (fx/transform-colors
+      (effects/transform-colors
         frame
         (fn [[r g b]]
           [(common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) inv-gamma)))
            (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) inv-gamma)))
            (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) inv-gamma)))])))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :gamma
   :name "Gamma"
   :category :intensity

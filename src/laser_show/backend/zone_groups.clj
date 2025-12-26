@@ -6,7 +6,7 @@
    - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
   (:require
    [clojure.set :as set]
-   [laser-show.animation.effects :as fx]
+   [laser-show.animation.effects :as effects]
    [laser-show.backend.zones :as zones]
    [laser-show.state.atoms :as state]
    [laser-show.state.persistent :as persist]))
@@ -228,8 +228,8 @@
   "Add an effect to a zone group's effect chain."
   [group-id effect-instance]
   (let [group (get-group group-id)
-        current-chain (or (:effect-chain group) (fx/empty-effect-chain))
-        new-chain (fx/add-effect-to-chain current-chain effect-instance)]
+        current-chain (or (:effect-chain group) (effects/empty-effect-chain))
+        new-chain (effects/add-effect-to-chain current-chain effect-instance)]
     (update-group! group-id {:effect-chain new-chain})))
 
 (defn remove-effect-from-zone-group!
@@ -237,7 +237,7 @@
   [group-id effect-index]
   (when-let [group (get-group group-id)]
     (when-let [chain (:effect-chain group)]
-      (let [new-chain (fx/remove-effect-at chain effect-index)]
+      (let [new-chain (effects/remove-effect-at chain effect-index)]
         (update-group! group-id {:effect-chain new-chain})))))
 
 (defn update-zone-group-effect!
@@ -245,7 +245,7 @@
   [group-id effect-index updates]
   (when-let [group (get-group group-id)]
     (when-let [chain (:effect-chain group)]
-      (let [new-chain (fx/update-effect-at chain effect-index updates)]
+      (let [new-chain (effects/update-effect-at chain effect-index updates)]
         (update-group! group-id {:effect-chain new-chain})))))
 
 (defn get-zone-group-for-zone

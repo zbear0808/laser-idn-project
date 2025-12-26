@@ -18,11 +18,13 @@
    └── dialogs (via refs)"
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
+            [laser-show.views.components.menu-bar :as menu-bar]
             [laser-show.views.toolbar :as toolbar]
             [laser-show.views.status-bar :as status-bar]
             [laser-show.views.tabs.grid :as grid-tab]
             [laser-show.views.tabs.effects :as effects-tab]
-            [laser-show.views.components.preview :as preview]))
+            [laser-show.views.components.preview :as preview]
+            [laser-show.views.dialogs.effect-chain-editor :as effect-chain-editor]))
 
 ;; ============================================================================
 ;; Theme
@@ -150,7 +152,8 @@
   {:fx/type :border-pane
    :style "-fx-background-color: #1E1E1E;"
    :top {:fx/type :v-box
-         :children [{:fx/type toolbar/toolbar}
+         :children [{:fx/type menu-bar/menu-bar-view}
+                    {:fx/type toolbar/toolbar}
                     {:fx/type tab-bar}]}
    :center {:fx/type main-content}
    :bottom {:fx/type status-bar/status-bar}})
@@ -160,23 +163,33 @@
 ;; ============================================================================
 
 (defn root-view
-  "Root view with theming and dialog management."
+  "Root view with theming and dialog management.
+   
+   Uses fx/ext-many to manage multiple windows (main window + dialogs)."
   [{:keys [fx/context]}]
   (let [{:keys [title]} (fx/sub-ctx context subs/project-status)
-        window-config (fx/sub-ctx context subs/window-config)]
+        window-config (fx/sub-ctx context subs/window-config)
+        effect-editor-open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)]
     {:fx/type fx/ext-set-env
      :env {::theme theme}
-     :desc {:fx/type :stage
-            :title title
-            :width (:width window-config 1200)
-            :height (:height window-config 800)
-            :showing true
-            :on-close-request (fn [_] 
-                                ;; TODO: Check for unsaved changes
-                                (System/exit 0))
-            :scene {:fx/type :scene
-                    :stylesheets [(str "data:text/css,"
-                                       (java.net.URLEncoder/encode
-                                         ".root { -fx-base: #1E1E1E; -fx-background: #1E1E1E; }"
-                                         "UTF-8"))]
-                    :root {:fx/type main-layout}}}}))
+     :desc {:fx/type fx/ext-many
+            :desc (filterv
+                    some?
+                    [;; Main application window
+                     {:fx/type :stage
+                      :title title
+                      :width (:width window-config 1200)
+                      :height (:height window-config 800)
+                      :showing true
+                      :on-close-request (fn [_]
+                                          ;; TODO: Check for unsaved changes
+                                          (System/exit 0))
+                      :scene {:fx/type :scene
+                              :stylesheets [(str "data:text/css,"
+                                                 (java.net.URLEncoder/encode
+                                                   ".root { -fx-base: #1E1E1E; -fx-background: #1E1E1E; }"
+                                                   "UTF-8"))]
+                              :root {:fx/type main-layout}}}
+                     ;; Effect chain editor dialog
+                     (when effect-editor-open?
+                       {:fx/type effect-chain-editor/effect-chain-editor-dialog})])}}))

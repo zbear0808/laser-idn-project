@@ -11,7 +11,7 @@
             [laser-show.backend.zone-groups :as zone-groups]
             [laser-show.backend.projectors :as projectors]
             [laser-show.backend.zone-transform :as transform]
-            [laser-show.animation.effects :as fx]))
+            [laser-show.animation.effects :as effects]))
 
 ;; ============================================================================
 ;; Target Resolution
@@ -103,7 +103,7 @@
   [frame zone-id time-ms bpm]
   (if-let [group-id (zone-groups/get-zone-group-for-zone zone-id)]
     (if-let [chain (zone-groups/get-group-effect-chain group-id)]
-      (fx/apply-effect-chain frame chain time-ms bpm)
+      (effects/apply-effect-chain frame chain time-ms bpm)
       frame)
     frame))
 
@@ -111,7 +111,7 @@
   "Apply zone-level effects to a frame."
   [frame zone-id time-ms bpm]
   (if-let [chain (zones/get-zone-effect-chain zone-id)]
-    (fx/apply-effect-chain frame chain time-ms bpm)
+    (effects/apply-effect-chain frame chain time-ms bpm)
     frame))
 
 (defn prepare-frame-for-zone

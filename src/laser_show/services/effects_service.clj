@@ -11,7 +11,7 @@
    
    The service layer contains underlying logic; state/atoms.clj remains thin accessors."
   (:require [laser-show.state.atoms :as state]
-            [laser-show.animation.effects :as fx]
+            [laser-show.animation.effects :as effects]
             [laser-show.ui.layout :as layout]))
 
 ;; ============================================================================
@@ -42,7 +42,7 @@
    Returns: true if valid effect, false otherwise"
   [effect-id]
   (and (keyword? effect-id)
-       (some? (fx/get-effect effect-id))))
+       (some? (effects/get-effect effect-id))))
 
 (defn valid-effect-cell?
   "Check if effect cell data is valid.

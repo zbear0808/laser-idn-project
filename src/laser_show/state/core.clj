@@ -62,10 +62,28 @@
    - Testing
    - Debugging
    
+   NOTE: This uses fx/sub-val which should only be called from the UI thread
+   or within cljfx component render functions. For background thread access,
+   use get-raw-state instead.
+   
    Returns nil if context not initialized."
   []
   (when-let [ctx @*context]
     (fx/sub-val ctx identity)))
+
+(defn get-raw-state
+  "Get the raw state map from the context WITHOUT subscription tracking.
+   
+   Safe to use from background threads (timers, async tasks, etc.)
+   where fx/sub-val would cause assertion errors.
+   
+   Does not participate in cljfx's memoization/caching system.
+   Use get-state for UI thread access when possible.
+   
+   Returns nil if context not initialized."
+  []
+  (when-let [ctx @*context]
+    (:cljfx.context/m ctx)))
 
 ;; ============================================================================
 ;; State Mutation Functions

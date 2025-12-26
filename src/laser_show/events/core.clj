@@ -24,7 +24,7 @@
 
 ;; ============================================================================
 ;; Co-effects (inject data INTO events)
-;; Co-effect functions take no arguments and return data to inject.
+;; Co-effect functions take NO arguments and return data to inject.
 ;; ============================================================================
 
 (defn- co-effect-state
@@ -172,22 +172,32 @@
 ;; ============================================================================
 
 (defn dispatch!
-  "Dispatch an event directly.
+  "Dispatch an event directly, bypassing the wrapped handler.
    
    This is useful for:
    - REPL testing
    - Non-UI event sources (MIDI, OSC, keyboard)
+   - Imperative event handlers in UI (drag/drop, context menus)
    
    Usage:
    (dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})"
   [event]
-  (event-handler event))
+  ;; Manually inject co-effects and process effects
+  (let [enriched-event (assoc event 
+                               :state (state/get-state)
+                               :time (System/currentTimeMillis))
+        effects (handlers/handle-event enriched-event)]
+    ;; Apply state effect if present
+    (when-let [new-state (:state effects)]
+      (state/reset-state! new-state))
+    ;; Could also handle other effects here
+    effects))
 
 (defn dispatch-sync!
   "Dispatch an event and wait for effects to complete.
    Mainly for testing."
   [event]
-  (event-handler event))
+  (dispatch! event))
 
 ;; ============================================================================
 ;; Event Helpers

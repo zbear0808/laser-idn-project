@@ -8,7 +8,7 @@
   (:require [laser-show.state.atoms :as state]
             [laser-show.state.persistent :as persist]
             [laser-show.backend.projectors :as projectors]
-            [laser-show.animation.effects :as fx]))
+            [laser-show.animation.effects :as effects]))
 
 ;; ============================================================================
 ;; Constants
@@ -346,8 +346,8 @@
   "Add an effect to a zone's effect chain."
   [zone-id effect-instance]
   (let [zone (get-zone zone-id)
-        current-chain (or (:effect-chain zone) (fx/empty-effect-chain))
-        new-chain (fx/add-effect-to-chain current-chain effect-instance)]
+        current-chain (or (:effect-chain zone) (effects/empty-effect-chain))
+        new-chain (effects/add-effect-to-chain current-chain effect-instance)]
     (update-zone! zone-id {:effect-chain new-chain})))
 
 (defn remove-effect-from-zone!
@@ -355,7 +355,7 @@
   [zone-id effect-index]
   (when-let [zone (get-zone zone-id)]
     (when-let [chain (:effect-chain zone)]
-      (let [new-chain (fx/remove-effect-at chain effect-index)]
+      (let [new-chain (effects/remove-effect-at chain effect-index)]
         (update-zone! zone-id {:effect-chain new-chain})))))
 
 (defn update-zone-effect!
@@ -363,7 +363,7 @@
   [zone-id effect-index updates]
   (when-let [zone (get-zone zone-id)]
     (when-let [chain (:effect-chain zone)]
-      (let [new-chain (fx/update-effect-at chain effect-index updates)]
+      (let [new-chain (effects/update-effect-at chain effect-index updates)]
         (update-zone! zone-id {:effect-chain new-chain})))))
 
 ;; ============================================================================

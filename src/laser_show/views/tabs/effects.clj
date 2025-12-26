@@ -4,60 +4,11 @@
    Similar to the cue grid but for effect modifiers."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
-            [laser-show.subs :as subs]))
+            [laser-show.subs :as subs]
+            [laser-show.views.components.grid-cell :as cell]))
 
-;; ============================================================================
-;; Cell Colors
-;; ============================================================================
-
-(def effect-cell-colors
-  "Color scheme for effect cell states."
-  {:empty "#353535"
-   :has-effects "#5C6BC0"  ;; Purple-ish for effects
-   :active "#7E57C2"
-   :inactive "#424242"})
-
-(defn effect-cell-background-color
-  "Determine background color based on effect cell state."
-  [{:keys [has-effects? active?]}]
-  (cond
-    (and has-effects? active?) (:active effect-cell-colors)
-    has-effects? (:inactive effect-cell-colors)
-    :else (:empty effect-cell-colors)))
-
-;; ============================================================================
-;; Effect Cell Component
-;; ============================================================================
-
-(defn effect-cell
-  "A single effect grid cell."
-  [{:keys [fx/context col row]}]
-  (let [{:keys [effect-count first-effect-id active? has-effects?] :as display-data}
-        (fx/sub-ctx context subs/effect-cell-display-data col row)
-        bg-color (effect-cell-background-color display-data)
-        label-text (if has-effects?
-                     (str (when first-effect-id (-> first-effect-id name (str/replace "-" " ")))
-                          (when (> effect-count 1)
-                            (str " +" (dec effect-count))))
-                     "")]
-    {:fx/type :button
-     :pref-width 80
-     :pref-height 60
-     :text label-text
-     :style (str "-fx-background-color: " bg-color "; "
-                 "-fx-text-fill: white; "
-                 "-fx-font-size: 9; "
-                 "-fx-background-radius: 4; "
-                 "-fx-cursor: hand; "
-                 (when active?
-                   "-fx-effect: dropshadow(gaussian, #7E57C2, 8, 0.5, 0, 0);"))
-     :on-action {:event/type :effects/toggle-cell :col col :row row}
-     :on-mouse-clicked (fn [^javafx.scene.input.MouseEvent e]
-                         (when (.isSecondaryButtonDown e)
-                           ;; Right click - open editor
-                           {:event/type :ui/open-dialog 
-                            :dialog-id :effect-editor 
-                            :data {:col col :row row}}))}))
+;; Effect cell is now imported from laser-show.views.components.grid-cell
+;; It has full drag/drop and context menu support
 
 ;; ============================================================================
 ;; Effects Grid Layout
@@ -70,7 +21,7 @@
    :spacing 4
    :children (vec
                (for [col (range cols)]
-                 {:fx/type effect-cell
+                 {:fx/type cell/effects-cell
                   :fx/key [col row]
                   :col col
                   :row row}))})
@@ -136,17 +87,29 @@
 ;; ============================================================================
 
 (def available-effects
-  "List of available effects."
-  [{:id :scale :name "Scale" :category :transform}
-   {:id :rotate :name "Rotate" :category :transform}
-   {:id :offset :name "Offset" :category :transform}
-   {:id :mirror-x :name "Mirror X" :category :transform}
-   {:id :mirror-y :name "Mirror Y" :category :transform}
-   {:id :color-shift :name "Color Shift" :category :color}
-   {:id :rainbow :name "Rainbow" :category :color}
-   {:id :intensity :name "Intensity" :category :color}
-   {:id :strobe :name "Strobe" :category :modulation}
-   {:id :beat-pulse :name "Beat Pulse" :category :modulation}])
+  "List of available effects.
+   IDs must match registered effects in laser-show.animation.effects.*"
+  [;; Shape effects
+   {:id :scale :name "Scale" :category :shape}
+   {:id :rotation :name "Rotate" :category :shape}
+   {:id :translate :name "Translate" :category :shape}
+   {:id :viewport :name "Viewport" :category :shape}
+   {:id :pinch-bulge :name "Pinch/Bulge" :category :shape}
+   {:id :corner-pin :name "Corner Pin" :category :shape}
+   {:id :lens-distortion :name "Lens Distort" :category :shape}
+   {:id :wave-distort :name "Wave Distort" :category :shape}
+   ;; Color effects
+   {:id :hue-shift :name "Hue Shift" :category :color}
+   {:id :saturation :name "Saturation" :category :color}
+   {:id :color-filter :name "Color Filter" :category :color}
+   {:id :invert :name "Invert" :category :color}
+   {:id :set-color :name "Set Color" :category :color}
+   {:id :rainbow-position :name "Rainbow" :category :color}
+   ;; Intensity effects
+   {:id :intensity :name "Intensity" :category :intensity}
+   {:id :blackout :name "Blackout" :category :intensity}
+   {:id :threshold :name "Threshold" :category :intensity}
+   {:id :gamma :name "Gamma" :category :intensity}])
 
 (defn effect-palette-item
   "A single effect in the palette."

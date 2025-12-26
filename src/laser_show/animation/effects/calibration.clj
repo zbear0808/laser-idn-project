@@ -2,7 +2,7 @@
   "Calibration effects for projector-specific corrections.
    These are static effects applied at the projector level to compensate
    for hardware differences between laser projectors."
-  (:require [laser-show.animation.effects :as fx]
+  (:require [laser-show.animation.effects :as effects]
             [laser-show.animation.effects.common :as common]))
 
 
@@ -11,14 +11,14 @@
 ;; ============================================================================
 
 (defn- apply-rgb-calibration [frame _time-ms _bpm {:keys [r-gain g-gain b-gain]}]
-  (fx/transform-colors
+  (effects/transform-colors
    frame
    (fn [[r g b]]
      [(common/clamp-byte (* r r-gain))
       (common/clamp-byte (* g g-gain))
       (common/clamp-byte (* b b-gain))])))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :rgb-calibration
   :name "RGB Calibration"
   :category :calibration
@@ -51,14 +51,14 @@
   (let [r-inv (/ 1.0 r-gamma)
         g-inv (/ 1.0 g-gamma)
         b-inv (/ 1.0 b-gamma)]
-    (fx/transform-colors
+    (effects/transform-colors
      frame
      (fn [[r g b]]
        [(common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) r-inv)))
         (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) g-inv)))
         (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) b-inv)))]))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :gamma-correction
   :name "Gamma Correction"
   :category :calibration
@@ -88,7 +88,7 @@
 ;; ============================================================================
 
 (defn- apply-brightness-calibration [frame _time-ms _bpm {:keys [global-brightness min-threshold]}]
-  (fx/transform-colors
+  (effects/transform-colors
    frame
    (fn [[r g b]]
      (let [max-val (max r g b)]
@@ -98,7 +98,7 @@
           (common/clamp-byte (* g global-brightness))
           (common/clamp-byte (* b global-brightness))])))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :brightness-calibration
   :name "Brightness Calibration"
   :category :calibration
@@ -143,14 +143,14 @@
         r-mult (/ kr 255.0)
         g-mult (/ kg 255.0)
         b-mult (/ kb 255.0)]
-    (fx/transform-colors
+    (effects/transform-colors
      frame
      (fn [[r g b]]
        [(common/clamp-byte (* r r-mult))
         (common/clamp-byte (* g g-mult))
         (common/clamp-byte (* b b-mult))]))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :color-temperature
   :name "Color Temperature"
   :category :calibration
@@ -169,14 +169,14 @@
 
 (defn- apply-color-matrix [frame _time-ms _bpm {:keys [m00 m01 m02 m10 m11 m12 m20 m21 m22
                                                        offset-r offset-g offset-b]}]
-  (fx/transform-colors
+  (effects/transform-colors
    frame
    (fn [[r g b]]
      [(common/clamp-byte (+ (* r m00) (* g m01) (* b m02) offset-r))
       (common/clamp-byte (+ (* r m10) (* g m11) (* b m12) offset-g))
       (common/clamp-byte (+ (* r m20) (* g m21) (* b m22) offset-b))])))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :color-matrix
   :name "Color Matrix"
   :category :calibration
@@ -204,14 +204,14 @@
   (let [r-mult (if (pos? measured-r) (/ ref-r measured-r) 1.0)
         g-mult (if (pos? measured-g) (/ ref-g measured-g) 1.0)
         b-mult (if (pos? measured-b) (/ ref-b measured-b) 1.0)]
-    (fx/transform-colors
+    (effects/transform-colors
      frame
      (fn [[r g b]]
        [(common/clamp-byte (* r r-mult))
         (common/clamp-byte (* g g-mult))
         (common/clamp-byte (* b b-mult))]))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :white-balance
   :name "White Balance"
   :category :calibration
@@ -229,13 +229,13 @@
 ;; ============================================================================
 
 (defn- apply-projector-offset [frame _time-ms _bpm {:keys [x-offset y-offset]}]
-  (fx/transform-positions
+  (effects/transform-positions
    frame
    (fn [[x y]]
      [(+ x x-offset)
       (+ y y-offset)])))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :projector-offset
   :name "Projector Offset"
   :category :calibration
@@ -259,13 +259,13 @@
 ;; ============================================================================
 
 (defn- apply-projector-scale [frame _time-ms _bpm {:keys [x-scale y-scale]}]
-  (fx/transform-positions
+  (effects/transform-positions
    frame
    (fn [[x y]]
      [(* x x-scale)
       (* y y-scale)])))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :projector-scale
   :name "Projector Scale"
   :category :calibration
@@ -304,7 +304,7 @@
 
 (defn- apply-color-curves [frame _time-ms _bpm {:keys [r-curve g-curve b-curve]}]
   (let [default-curve [0 32 64 96 128 160 192 224 255]]
-    (fx/transform-colors
+    (effects/transform-colors
      frame
      (fn [[r g b]]
        (let [r-input (/ r 255.0)
@@ -314,7 +314,7 @@
           (common/clamp-byte (interpolate-curve (or g-curve default-curve) g-input))
           (common/clamp-byte (interpolate-curve (or b-curve default-curve) b-input))])))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :color-curves
   :name "Color Curves"
   :category :calibration
@@ -374,7 +374,7 @@
                     (recur (conj result curr) (rest remaining))))))]
         (assoc frame :points (vec limited-points))))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :scan-rate-limit
   :name "Scan Rate Limit"
   :category :calibration
@@ -394,13 +394,13 @@
 (defn- apply-axis-flip [frame _time-ms _bpm {:keys [flip-x flip-y]}]
   (if (and (not flip-x) (not flip-y))
     frame
-    (fx/transform-positions
+    (effects/transform-positions
      frame
      (fn [[x y]]
        [(if flip-x (- x) x)
         (if flip-y (- y) y)]))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :axis-flip
   :name "Axis Flip"
   :category :calibration
@@ -423,7 +423,7 @@
   (if (zero? angle)
     frame
     (let [radians (Math/toRadians angle)]
-      (fx/transform-positions
+      (effects/transform-positions
        frame
        (fn [[x y]]
          (let [cos-a (Math/cos radians)
@@ -431,7 +431,7 @@
            [(- (* x cos-a) (* y sin-a))
             (+ (* x sin-a) (* y cos-a))]))))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :rotation-offset
   :name "Rotation Offset"
   :category :calibration

@@ -16,7 +16,7 @@
    
    For animated rotation, use modulators:
    {:effect-id :rotation :params {:angle (mod/sawtooth-mod 0 360 1.0)}}"
-  (:require [laser-show.animation.effects :as fx]))
+  (:require [laser-show.animation.effects :as effects]))
 
 ;; ============================================================================
 ;; Transformation Helpers
@@ -36,13 +36,13 @@
 ;; ============================================================================
 
 (defn- apply-scale [frame _time-ms _bpm {:keys [x-scale y-scale]}]
-  (fx/transform-positions
+  (effects/transform-positions
    frame
    (fn [[x y]]
      [(* x x-scale)
       (* y y-scale)])))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :scale
   :name "Scale"
   :category :shape
@@ -66,13 +66,13 @@
 ;; ============================================================================
 
 (defn- apply-translate [frame _time-ms _bpm {:keys [x y]}]
-  (fx/transform-positions
+  (effects/transform-positions
    frame
    (fn [[px py]]
      [(+ px x)
       (+ py y)])))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :translate
   :name "Translate"
   :category :shape
@@ -103,12 +103,12 @@
 
 (defn- apply-rotation [frame _time-ms _bpm {:keys [angle]}]
   (let [radians (Math/toRadians angle)]
-    (fx/transform-positions
+    (effects/transform-positions
      frame
      (fn [[x y]]
        (rotate-point [x y] radians)))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :rotation
   :name "Rotation"
   :category :shape
@@ -129,7 +129,7 @@
 (defn- apply-viewport [frame _time-ms _bpm {:keys [x-min x-max y-min y-max]}]
   (let [viewport-width (- x-max x-min)
         viewport-height (- y-max y-min)]
-    (fx/transform-positions
+    (effects/transform-positions
      frame
      (fn [[x y]]
        (let [in-viewport? (and (>= x x-min) (<= x x-max)
@@ -143,7 +143,7 @@
               (- (* 2.0 (/ (- y y-min) viewport-height)) 1.0))]
            [0.0 0.0]))))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :viewport
   :name "Viewport"
   :category :shape
@@ -179,7 +179,7 @@
 ;; ============================================================================
 
 (defn- apply-pinch-bulge [frame _time-ms _bpm {:keys [amount]}]
-  (fx/transform-positions
+  (effects/transform-positions
    frame
    (fn [[x y]]
      (let [distance (Math/sqrt (+ (* x x) (* y y)))
@@ -189,7 +189,7 @@
        [(* x factor)
         (* y factor)]))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :pinch-bulge
   :name "Pinch/Bulge"
   :category :shape
@@ -216,7 +216,7 @@
    - bl (bottom-left): maps from (-1, -1)
    - br (bottom-right): maps from (1, -1)"
   [frame _time-ms _bpm {:keys [tl-x tl-y tr-x tr-y bl-x bl-y br-x br-y]}]
-  (fx/transform-positions
+  (effects/transform-positions
    frame
    (fn [[x y]]
      ;; Convert from [-1,1] to [0,1] for interpolation
@@ -236,7 +236,7 @@
                     (* u v tr-y))]
        [new-x new-y]))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :corner-pin
   :name "Corner Pin"
   :category :shape
@@ -296,7 +296,7 @@
 ;; ============================================================================
 
 (defn- apply-lens-distortion [frame _time-ms _bpm {:keys [k1 k2]}]
-  (fx/transform-positions
+  (effects/transform-positions
    frame
    (fn [[x y]]
      (let [r-sq (+ (* x x) (* y y))
@@ -304,7 +304,7 @@
        [(* x factor)
         (* y factor)]))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :lens-distortion
   :name "Lens Distortion"
   :category :shape
@@ -335,7 +335,7 @@
 
 (defn- apply-wave-distort [frame time-ms _bpm {:keys [amplitude frequency axis speed]}]
   (let [time-offset (* (/ time-ms 1000.0) speed)]
-    (fx/transform-positions
+    (effects/transform-positions
      frame
      (fn [[x y]]
        (case axis
@@ -343,7 +343,7 @@
          :y [(+ x (* amplitude (Math/sin (* 2.0 Math/PI (+ (* y frequency) time-offset))))) y]
          [x y])))))
 
-(fx/register-effect!
+(effects/register-effect!
  {:id :wave-distort
   :name "Wave Distort (Special)"
   :category :shape

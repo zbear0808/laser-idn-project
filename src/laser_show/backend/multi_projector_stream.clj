@@ -10,7 +10,7 @@
    4. Projector effects (applied here after routing)"
   (:require
    [clojure.set :as set]
-   [laser-show.animation.effects :as fx]
+   [laser-show.animation.effects :as effects]
    [laser-show.animation.types :as t]
    [laser-show.backend.cues :as cues]
    [laser-show.backend.projectors :as projectors]

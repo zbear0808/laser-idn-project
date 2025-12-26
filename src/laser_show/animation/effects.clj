@@ -207,6 +207,7 @@
    
    Parameters can be static values or modulators (from modulation.clj).
    Modulators are automatically resolved before the effect is applied.
+   Effect parameters are merged with defaults to ensure no nil values.
    
    Returns: Transformed frame"
   ([frame effect-instance time-ms]
@@ -216,15 +217,28 @@
   ([frame effect-instance time-ms bpm trigger-time]
    (if-not (effect-instance-enabled? effect-instance)
      frame
-     (if-let [effect-def (get-effect (:effect-id effect-instance))]
-       (let [apply-fn (:apply-fn effect-def)
-             raw-params (:params effect-instance)
-             context (mod/make-context {:time-ms time-ms :bpm bpm :trigger-time trigger-time})
-             resolved-params (mod/resolve-params raw-params context)]
-         (apply-fn frame time-ms bpm resolved-params))
-       (do
-         (println "Warning: Unknown effect:" (:effect-id effect-instance))
-         frame)))))
+     (let [effect-id (:effect-id effect-instance)]
+       (if-let [effect-def (get-effect effect-id)]
+         (let [apply-fn (:apply-fn effect-def)
+               user-params (:params effect-instance)
+               ;; Merge with defaults to ensure no nil parameter values
+               merged-params (merge-with-defaults effect-id user-params)
+               context (mod/make-context {:time-ms time-ms :bpm bpm :trigger-time trigger-time})
+               resolved-params (mod/resolve-params merged-params context)]
+           ;; Debug logging - uncomment to trace effect application
+           ;; (println "[DEBUG apply-effect]" effect-id "user-params:" user-params "merged:" merged-params "resolved:" resolved-params)
+           (try
+             (apply-fn frame time-ms bpm resolved-params)
+             (catch Exception e
+               (println "[ERROR apply-effect]" effect-id "failed:" (.getMessage e))
+               (println "  user-params:" user-params)
+               (println "  merged-params:" merged-params)
+               (println "  resolved-params:" resolved-params)
+               (println "  frame nil?" (nil? frame) "points count:" (count (:points frame)))
+               frame)))
+         (do
+           (println "Warning: Unknown effect:" effect-id)
+           frame))))))
 
 ;; ============================================================================
 ;; Effect Chain
