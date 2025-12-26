@@ -47,21 +47,21 @@
 ;; ============================================================================
 
 (defn effect-param-slider
-  "Slider for editing an effect parameter."
+  "Slider for editing a numeric effect parameter (:float or :int)."
   [{:keys [col row effect-idx param-key param-spec current-value]}]
   (let [{:keys [min max]} param-spec
-        value (or current-value (:default param-spec))]
+        value (or current-value (:default param-spec) 0)]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
      :children [{:fx/type :label
                  :text (name param-key)
-                 :pref-width 60
+                 :pref-width 80
                  :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
                 {:fx/type :slider
                  :min min
                  :max max
-                 :value value
+                 :value (double value)
                  :pref-width 120
                  :on-value-changed {:event/type :effects/update-param
                                     :col col :row row
@@ -71,6 +71,71 @@
                  :text (format "%.2f" (double value))
                  :pref-width 40
                  :style "-fx-text-fill: white; -fx-font-size: 11;"}]}))
+
+(defn effect-param-choice
+  "Combo-box for editing a choice parameter."
+  [{:keys [col row effect-idx param-key param-spec current-value]}]
+  (let [choices (:choices param-spec [])
+        value (or current-value (:default param-spec))]
+    {:fx/type :h-box
+     :spacing 8
+     :alignment :center-left
+     :children [{:fx/type :label
+                 :text (name param-key)
+                 :pref-width 80
+                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
+                {:fx/type :combo-box
+                 :items choices
+                 :value value
+                 :pref-width 120
+                 :button-cell (fn [item] {:text (if item (name item) "")})
+                 :cell-factory {:fx/cell-type :list-cell
+                                :describe (fn [item] {:text (if item (name item) "")})}
+                 :on-value-changed {:event/type :effects/update-param
+                                    :col col :row row
+                                    :effect-idx effect-idx
+                                    :param-key param-key}}]}))
+
+(defn effect-param-checkbox
+  "Checkbox for editing a boolean parameter."
+  [{:keys [col row effect-idx param-key param-spec current-value]}]
+  (let [value (if (some? current-value) current-value (:default param-spec false))]
+    {:fx/type :h-box
+     :spacing 8
+     :alignment :center-left
+     :children [{:fx/type :check-box
+                 :text (name param-key)
+                 :selected value
+                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"
+                 :on-selected-changed {:event/type :effects/update-param
+                                       :col col :row row
+                                       :effect-idx effect-idx
+                                       :param-key param-key}}]}))
+
+(defn effect-param-control
+  "Dispatcher that renders the appropriate control based on parameter type."
+  [{:keys [param-spec] :as props}]
+  (let [param-type (:type param-spec :float)]
+    (case param-type
+      :choice {:fx/type effect-param-choice
+               :col (:col props) :row (:row props)
+               :effect-idx (:effect-idx props)
+               :param-key (:param-key props)
+               :param-spec param-spec
+               :current-value (:current-value props)}
+      :bool {:fx/type effect-param-checkbox
+             :col (:col props) :row (:row props)
+             :effect-idx (:effect-idx props)
+             :param-key (:param-key props)
+             :param-spec param-spec
+             :current-value (:current-value props)}
+      ;; Default: numeric slider for :float, :int, and unknown types
+      {:fx/type effect-param-slider
+       :col (:col props) :row (:row props)
+       :effect-idx (:effect-idx props)
+       :param-key (:param-key props)
+       :param-spec param-spec
+       :current-value (:current-value props)})))
 
 (defn effect-chain-item
   "A single effect in the chain with controls.
@@ -113,13 +178,13 @@
                              :on-action {:event/type :effects/remove-effect
                                          :col col :row row
                                          :effect-idx effect-idx}}]}
-                ;; Parameter sliders
+                ;; Parameter controls (sliders, combo-boxes, checkboxes based on type)
                 {:fx/type :v-box
                  :spacing 4
                  :padding {:left 20}
                  :children (vec
                              (for [[param-key param-spec] params-map]
-                               {:fx/type effect-param-slider
+                               {:fx/type effect-param-control
                                 :col col :row row
                                 :effect-idx effect-idx
                                 :param-key param-key

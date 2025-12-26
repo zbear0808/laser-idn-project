@@ -104,7 +104,10 @@
 (defn connection-status
   "Connection status display."
   [{:keys [fx/context]}]
-  (let [{:keys [connected? connecting? status-text]} (fx/sub-ctx context subs/connection-status)]
+  (let [{:keys [connected? connecting? status-text]} (fx/sub-ctx context subs/connection-status)
+        idn-config (get (fx/sub-val context :config) :idn {:host "127.0.0.1" :port 7255})
+        host (:host idn-config)
+        port (:port idn-config)]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
@@ -118,8 +121,8 @@
                  :text (if connected? "Disconnect" "Connect")
                  :style "-fx-background-color: #3D3D3D; -fx-text-fill: white; -fx-font-size: 11; -fx-padding: 4 8; -fx-cursor: hand;"
                  :on-action {:event/type (if connected? :idn/disconnect :idn/connect)
-                             :host "localhost"
-                             :port 7255}}]}))
+                             :host host
+                             :port port}}]}))
 
 ;; ============================================================================
 ;; Main Toolbar

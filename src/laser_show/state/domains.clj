@@ -100,7 +100,7 @@
             :doc "window dimensions"}
    :preview {:default {:width 400 :height 400}
              :doc "preview panel dimensions"}
-   :idn {:default {:host nil :port 7255}
+   :idn {:default {:host "127.0.0.1" :port 7255}
          :doc "default IDN connection settings"}
    :osc {:default {:enabled false :port 8000}
          :doc "OSC server settings"}

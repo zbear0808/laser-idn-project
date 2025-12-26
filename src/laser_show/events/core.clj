@@ -20,7 +20,9 @@
    - State updates preserve cljfx context memoization"
   (:require [cljfx.api :as fx]
             [laser-show.state.core :as state]
-            [laser-show.events.handlers :as handlers]))
+            [laser-show.events.handlers :as handlers]
+            [laser-show.backend.streaming-engine :as streaming-engine]
+            [laser-show.services.frame-service :as frame-service]))
 
 ;; ============================================================================
 ;; Co-effects (inject data INTO events)
@@ -79,31 +81,44 @@
 
 (defn- effect-idn-start-streaming
   "Effect that starts IDN streaming to a target.
-   Async operation - dispatches success/failure events."
+   Creates a streaming engine with a frame provider that generates
+   the same frames shown in the preview window."
   [{:keys [host port]} dispatch]
-  ;; TODO: Implement actual IDN connection
-  ;; For now, simulate async connection
   (future
     (try
-      ;; Simulate connection delay
-      (Thread/sleep 100)
-      ;; TODO: Replace with actual streaming engine creation
-      ;; (let [engine (idn-stream/create-engine host port frame-provider)]
-      ;;   (dispatch {:event/type :idn/connected :engine engine :target host}))
-      (dispatch {:event/type :idn/connected 
-                 :engine :placeholder-engine
-                 :target host})
+      (println (format "Starting IDN streaming to %s:%d..." host (or port 7255)))
+      
+      ;; Create frame provider - this returns the same frames as preview
+      (let [frame-provider (frame-service/create-frame-provider)
+            ;; Create streaming engine
+            engine (streaming-engine/create-engine 
+                     host 
+                     frame-provider
+                     :port (or port 7255)
+                     :fps 30)]
+        ;; Start the engine
+        (streaming-engine/start! engine)
+        
+        (println "IDN streaming started successfully")
+        (dispatch {:event/type :idn/connected 
+                   :engine engine
+                   :target host}))
       (catch Exception e
+        (println "IDN streaming failed:" (.getMessage e))
         (dispatch {:event/type :idn/connection-failed
                    :error (.getMessage e)})))))
 
 (defn- effect-idn-stop-streaming
-  "Effect that stops IDN streaming."
+  "Effect that stops IDN streaming gracefully."
   [_ _dispatch]
-  ;; TODO: Implement actual streaming stop
-  ;; (when-let [engine (get-in (state/get-state) [:backend :idn :streaming-engine])]
-  ;;   (idn-stream/stop-engine! engine))
-  (println "IDN streaming stopped"))
+  (println "Stopping IDN streaming...")
+  (when-let [engine (get-in (state/get-state) [:backend :idn :streaming-engine])]
+    (when (and engine (not= engine :placeholder-engine))
+      (try
+        (streaming-engine/stop! engine)
+        (println "IDN streaming stopped")
+        (catch Exception e
+          (println "Error stopping IDN streaming:" (.getMessage e)))))))
 
 (defn- effect-save-project
   "Effect that saves the project to disk."
