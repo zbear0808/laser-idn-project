@@ -65,6 +65,36 @@
   {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
    :ns-default build}
   
+  :build-windows
+  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
+   :ns-default build
+   :override-deps {org.openjfx/javafx-base {:mvn/version "26-ea+19" :classifier "win"}
+                   org.openjfx/javafx-controls {:mvn/version "26-ea+19" :classifier "win"}
+                   org.openjfx/javafx-graphics {:mvn/version "26-ea+19" :classifier "win"}
+                   org.openjfx/javafx-media {:mvn/version "26-ea+19" :classifier "win"}
+                   org.openjfx/javafx-swing {:mvn/version "26-ea+19" :classifier "win"}
+                   org.openjfx/javafx-web {:mvn/version "26-ea+19" :classifier "win"}}}
+  
+  :build-mac
+  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
+   :ns-default build
+   :override-deps {org.openjfx/javafx-base {:mvn/version "26-ea+19" :classifier "mac"}
+                   org.openjfx/javafx-controls {:mvn/version "26-ea+19" :classifier "mac"}
+                   org.openjfx/javafx-graphics {:mvn/version "26-ea+19" :classifier "mac"}
+                   org.openjfx/javafx-media {:mvn/version "26-ea+19" :classifier "mac"}
+                   org.openjfx/javafx-swing {:mvn/version "26-ea+19" :classifier "mac"}
+                   org.openjfx/javafx-web {:mvn/version "26-ea+19" :classifier "mac"}}}
+  
+  :build-linux
+  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
+   :ns-default build
+   :override-deps {org.openjfx/javafx-base {:mvn/version "26-ea+19" :classifier "linux"}
+                   org.openjfx/javafx-controls {:mvn/version "26-ea+19" :classifier "linux"}
+                   org.openjfx/javafx-graphics {:mvn/version "26-ea+19" :classifier "linux"}
+                   org.openjfx/javafx-media {:mvn/version "26-ea+19" :classifier "linux"}
+                   org.openjfx/javafx-swing {:mvn/version "26-ea+19" :classifier "linux"}
+                   org.openjfx/javafx-web {:mvn/version "26-ea+19" :classifier "linux"}}}
+  
   :repl-mcp {:main-opts ["-m" "is.simm.repl-mcp"]
                :extra-paths ["test"] ;; If you want it to be able to run the tests
                ;; Option for clj-async-profiler

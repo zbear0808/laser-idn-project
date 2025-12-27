@@ -58,17 +58,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-clojure-
       
-      - name: Update deps.edn for platform-specific JavaFX
-        shell: bash
-        run: |
-          # Replace $win with the current platform
-          sed -i.bak 's/\$win/\$${{ matrix.platform }}/g' deps.edn
-          echo "Updated deps.edn for ${{ matrix.platform }}:"
-          grep javafx deps.edn || echo "No javafx found in deps.edn"
-      
       - name: Build platform-specific uber JAR
         run: |
-          clojure -T:build uber
+          clojure -T:build-${{ matrix.platform }} uber
           echo "Built JAR for ${{ matrix.platform }}"
           ls -lh target/
       

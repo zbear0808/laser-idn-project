@@ -15,12 +15,12 @@
   (b/copy-dir {:src-dirs ["src" "resources"]
                :target-dir class-dir})
   (b/compile-clj {:basis @basis
-                  :ns-compile '[laser-show.core]
+                  :ns-compile '[laser-show.app]
                   :class-dir class-dir})
   (b/uber {:class-dir class-dir
            :uber-file uber-file
            :basis @basis
-           :main 'laser-show.core
+           :main 'laser-show.app
            :conflict-handlers {"META-INF/.*\\.SF$" :ignore
                               "META-INF/.*\\.DSA$" :ignore
                               "META-INF/.*\\.RSA$" :ignore}}))
