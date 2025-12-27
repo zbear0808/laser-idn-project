@@ -272,8 +272,8 @@
 
 (defn ui-tab-event
   "Create a tab change event."
-  [tab]
-  {:event/type :ui/set-active-tab :tab tab})
+  [tab-id]
+  {:event/type :ui/set-active-tab :tab-id tab-id})
 
 (comment
   ;; Test dispatching events

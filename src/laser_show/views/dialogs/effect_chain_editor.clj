@@ -16,7 +16,8 @@
             [laser-show.subs :as subs]
             [laser-show.animation.effects :as effects]
             [laser-show.events.core :as events]
-            [laser-show.state.clipboard :as clipboard])
+            [laser-show.state.clipboard :as clipboard]
+            [laser-show.views.components.tabs :as tabs])
   (:import [javafx.scene.input TransferMode ClipboardContent KeyCode KeyEvent]))
 
 ;; ============================================================================
@@ -250,6 +251,12 @@
 ;; Right Top: Tabbed Effect Bank
 ;; ============================================================================
 
+(def effect-bank-tab-definitions
+  "Tab definitions for the effect bank categories."
+  [{:id :color :label "Color"}
+   {:id :shape :label "Shape"}
+   {:id :intensity :label "Intensity"}])
+
 (defn- add-effect-button
   "Button to add a specific effect to the chain."
   [{:keys [col row effect-def]}]
@@ -272,6 +279,7 @@
      :hgap 4
      :vgap 4
      :padding 8
+     :style "-fx-background-color: #1E1E1E;"
      :children (if (seq category-effects)
                  (vec (for [effect category-effects]
                         {:fx/type add-effect-button
@@ -281,28 +289,33 @@
                    :text "No effects"
                    :style "-fx-text-fill: #606060;"}])}))
 
+(defn- effect-bank-content-router
+  "Routes to the correct effect bank content based on active tab."
+  [{:keys [col row active-bank-tab]}]
+  (case active-bank-tab
+    :color {:fx/type effect-bank-tab-content :col col :row row :category :color}
+    :shape {:fx/type effect-bank-tab-content :col col :row row :category :shape}
+    :intensity {:fx/type effect-bank-tab-content :col col :row row :category :intensity}
+    {:fx/type effect-bank-tab-content :col col :row row :category :color}))
+
 (defn- effect-bank-tabs
-  "Tabbed effect bank - Color, Shape, Intensity."
-  [{:keys [col row]}]
-  {:fx/type :tab-pane
-   :tab-closing-policy :unavailable
-   :style "-fx-background-color: #2D2D2D;"
-   :pref-height 150
-   :tabs [{:fx/type :tab
-           :text "Color"
-           :content {:fx/type effect-bank-tab-content
-                     :col col :row row
-                     :category :color}}
-          {:fx/type :tab
-           :text "Shape"
-           :content {:fx/type effect-bank-tab-content
-                     :col col :row row
-                     :category :shape}}
-          {:fx/type :tab
-           :text "Intensity"
-           :content {:fx/type effect-bank-tab-content
-                     :col col :row row
-                     :category :intensity}}]})
+  "Tabbed effect bank using shared styled-tab-bar - Color, Shape, Intensity."
+  [{:keys [col row active-bank-tab]}]
+  (let [active-tab (or active-bank-tab :color)]
+    {:fx/type :v-box
+     :pref-height 150
+     :children [{:fx/type tabs/styled-tab-bar
+                 :tabs effect-bank-tab-definitions
+                 :active-tab active-tab
+                 :on-tab-change {:event/type :ui/update-dialog-data
+                                 :dialog-id :effect-chain-editor}}
+                {:fx/type :scroll-pane
+                 :fit-to-width true
+                 :v-box/vgrow :always
+                 :style "-fx-background-color: #1E1E1E; -fx-background: #1E1E1E;"
+                 :content {:fx/type effect-bank-content-router
+                           :col col :row row
+                           :active-bank-tab active-tab}}]}))
 
 ;; ============================================================================
 ;; Right Bottom: Parameter Editor
@@ -524,7 +537,7 @@
   "Main content of the effect chain editor dialog."
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
-        {:keys [col row selected-effect-indices dragging-effect-idx drop-target-idx]} dialog-data
+        {:keys [col row selected-effect-indices dragging-effect-idx drop-target-idx active-bank-tab]} dialog-data
         ;; Convert old format to new if needed (backwards compat)
         selected-indices (or selected-effect-indices #{})
         effects-state (fx/sub-val context :effects)
@@ -584,7 +597,8 @@
                                     :h-box/hgrow :always
                                     :children [;; Effect bank tabs (top)
                                                {:fx/type effect-bank-tabs
-                                                :col col :row row}
+                                                :col col :row row
+                                                :active-bank-tab active-bank-tab}
                                                
                                                ;; Parameter editor (bottom) - shows first selected
                                                {:fx/type parameter-editor

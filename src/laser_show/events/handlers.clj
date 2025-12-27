@@ -403,8 +403,8 @@
 
 (defn- handle-ui-set-active-tab
   "Change the active tab."
-  [{:keys [tab state]}]
-  {:state (assoc-in state [:ui :active-tab] tab)})
+  [{:keys [tab-id state]}]
+  {:state (assoc-in state [:ui :active-tab] tab-id)})
 
 (defn- handle-ui-select-preset
   "Select a preset in the browser."
@@ -424,9 +424,17 @@
   {:state (assoc-in state [:ui :dialogs dialog-id :open?] false)})
 
 (defn- handle-ui-update-dialog-data
-  "Update data associated with a dialog (e.g., selected item within dialog)."
-  [{:keys [dialog-id updates state]}]
-  {:state (update-in state [:ui :dialogs dialog-id :data] merge updates)})
+  "Update data associated with a dialog (e.g., selected item within dialog).
+   Supports:
+   - :updates - A map of keys to merge into dialog data
+   - :tab-id - If present without :updates, sets :active-bank-tab to this value
+               (used by styled-tab-bar in dialogs)"
+  [{:keys [dialog-id updates tab-id state]}]
+  (let [actual-updates (cond
+                         updates updates
+                         tab-id {:active-bank-tab tab-id}
+                         :else {})]
+    {:state (update-in state [:ui :dialogs dialog-id :data] merge actual-updates)}))
 
 (defn- handle-ui-start-drag
   "Start a drag operation."

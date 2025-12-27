@@ -19,6 +19,7 @@
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.views.components.menu-bar :as menu-bar]
+            [laser-show.views.components.tabs :as tabs]
             [laser-show.views.toolbar :as toolbar]
             [laser-show.views.status-bar :as status-bar]
             [laser-show.views.tabs.grid :as grid-tab]
@@ -84,46 +85,21 @@
 ;; Tab Bar
 ;; ============================================================================
 
-(defn tab-button
-  "A single tab button."
-  [{:keys [tab label active? on-action]}]
-  {:fx/type :button
-   :text label
-   :style (str "-fx-background-color: "
-               (if active? "#4CAF50" "#3D3D3D")
-               "; -fx-text-fill: white; "
-               "-fx-background-radius: 4 4 0 0; "
-               "-fx-padding: 8 16; "
-               "-fx-cursor: hand;")
-   :on-action on-action})
+(def main-tabs
+  "Tab definitions for the main window."
+  [{:id :grid :label "Grid"}
+   {:id :effects :label "Effects"}
+   {:id :projectors :label "Projectors"}
+   {:id :settings :label "Settings"}])
 
 (defn tab-bar
-  "Tab bar component."
+  "Tab bar component using shared styled-tab-bar."
   [{:keys [fx/context]}]
   (let [active-tab (fx/sub-ctx context subs/active-tab)]
-    {:fx/type :h-box
-     :style "-fx-background-color: #2D2D2D; -fx-padding: 8 8 0 8;"
-     :spacing 4
-     :children [{:fx/type tab-button
-                 :tab :grid
-                 :label "Grid"
-                 :active? (= active-tab :grid)
-                 :on-action {:event/type :ui/set-active-tab :tab :grid}}
-                {:fx/type tab-button
-                 :tab :effects
-                 :label "Effects"
-                 :active? (= active-tab :effects)
-                 :on-action {:event/type :ui/set-active-tab :tab :effects}}
-                {:fx/type tab-button
-                 :tab :projectors
-                 :label "Projectors"
-                 :active? (= active-tab :projectors)
-                 :on-action {:event/type :ui/set-active-tab :tab :projectors}}
-                {:fx/type tab-button
-                 :tab :settings
-                 :label "Settings"
-                 :active? (= active-tab :settings)
-                 :on-action {:event/type :ui/set-active-tab :tab :settings}}]}))
+    {:fx/type tabs/styled-tab-bar
+     :tabs main-tabs
+     :active-tab active-tab
+     :on-tab-change {:event/type :ui/set-active-tab}}))
 
 ;; ============================================================================
 ;; Main Content Area
