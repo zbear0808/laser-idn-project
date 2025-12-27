@@ -11,8 +11,7 @@
    
    The service layer contains underlying logic; state/atoms.clj remains thin accessors."
   (:require [laser-show.state.atoms :as state]
-            [laser-show.animation.effects :as effects]
-            [laser-show.ui.layout :as layout]))
+            [laser-show.animation.effects :as effects]))
 
 ;; ============================================================================
 ;; Validation Helpers
@@ -27,8 +26,8 @@
    
    Returns: true if valid, false otherwise"
   [col row]
-  (let [cols layout/default-effects-grid-cols
-        rows layout/default-effects-grid-rows]
+  (let [cols state/default-grid-cols
+        rows state/default-grid-rows]
     (and (integer? col) (integer? row)
          (>= col 0) (< col cols)
          (>= row 0) (< row rows))))
@@ -304,8 +303,8 @@
   "Clear all effect cells.
    Marks project as dirty."
   []
-  (let [cols layout/default-effects-grid-cols
-        rows layout/default-effects-grid-rows]
+  (let [cols state/default-grid-cols
+        rows state/default-grid-rows]
     (doseq [col (range cols)
             row (range rows)]
       (state/clear-effect-cell! col row))
@@ -316,8 +315,8 @@
   "Deactivate all effect cells (but don't clear them).
    Marks project as dirty."
   []
-  (let [cols layout/default-effects-grid-cols
-        rows layout/default-effects-grid-rows]
+  (let [cols state/default-grid-cols
+        rows state/default-grid-rows]
     (doseq [col (range cols)
             row (range rows)]
       (when-let [cell (get-effect-cell col row)]
@@ -330,8 +329,8 @@
   "Activate all effect cells that have effects.
    Marks project as dirty."
   []
-  (let [cols layout/default-effects-grid-cols
-        rows layout/default-effects-grid-rows]
+  (let [cols state/default-grid-cols
+        rows state/default-grid-rows]
     (doseq [col (range cols)
             row (range rows)]
       (when-let [cell (get-effect-cell col row)]
@@ -357,15 +356,15 @@
    
    Returns: [cols rows]"
   []
-  [layout/default-effects-grid-cols layout/default-effects-grid-rows])
+  [state/default-grid-cols state/default-grid-rows])
 
 (defn count-effect-cells
   "Count cells with effects.
    
    Returns: Number of cells with effects"
   []
-  (let [cols layout/default-effects-grid-cols
-        rows layout/default-effects-grid-rows]
+  (let [cols state/default-grid-cols
+        rows state/default-grid-rows]
     (count
      (for [col (range cols)
            row (range rows)
@@ -377,8 +376,8 @@
    
    Returns: Number of cells with active effects"
   []
-  (let [cols layout/default-effects-grid-cols
-        rows layout/default-effects-grid-rows]
+  (let [cols state/default-grid-cols
+        rows state/default-grid-rows]
     (count
      (for [col (range cols)
            row (range rows)

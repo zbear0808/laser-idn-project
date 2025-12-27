@@ -1,114 +1,150 @@
 (ns user
   "Development utilities for hot reloading.
    
-   This namespace provides REPL-driven development tools for the laser show application.
-   Load this by starting a REPL with: clj -M:dev
-   
    Usage:
-     (start)    - Start the cljfx application
-     (stop)     - Close the window and clean up resources
-     (reload)   - Reload changed namespaces without restarting
-     (restart)  - Stop, reload code, and restart the application
-     (reset)    - Clear state, reload ALL code, and restart from scratch"
+     (start)    - Start the app with automatic hot reload watching
+     (stop)     - Stop the app and file watcher
+     (restart)  - Full restart (stop, reload all code, start fresh)"
   (:require [clojure.tools.namespace.repl :as repl]
-            [laser-show.app :as app]
-            [laser-show.state.core :as state]
-            [laser-show.state.atoms :as atoms]))
+            [hawk.core :as hawk]))
 
 (repl/set-refresh-dirs "src")
 
 ;; ============================================================================
-;; cljfx Application Hot Reloading
+;; State
+;; ============================================================================
+
+(defonce ^:private !watcher (atom nil))
+(defonce ^:private !app-started? (atom false))
+
+;; ============================================================================
+;; Safe Reload
+;; ============================================================================
+
+(defn- safe-reload
+  "Reload changed namespaces with error handling.
+   Returns true if successful, false if there was an error."
+  []
+  (println "\n🔄 Reloading...")
+  (try
+    (let [result (repl/refresh)]
+      (if (instance? Throwable result)
+        (do
+          (println "❌ Reload failed:")
+          (println (.getMessage ^Throwable result))
+          (.printStackTrace ^Throwable result)
+          false)
+        (do
+          (println "✅ Reloaded successfully")
+          true)))
+    (catch Exception e
+      (println "❌ Compilation error:")
+      (println (.getMessage e))
+      (.printStackTrace e)
+      false)))
+
+;; ============================================================================
+;; File Watcher
+;; ============================================================================
+
+(defn- start-watcher!
+  "Start watching src/ for .clj file changes."
+  []
+  (when-not @!watcher
+    (reset! !watcher
+            (hawk/watch! [{:paths ["src"]
+                           :filter hawk/file?
+                           :handler (fn [ctx {:keys [kind file]}]
+                                      (when (and (#{:modify :create} kind)
+                                                 (.endsWith (.getName ^java.io.File file) ".clj"))
+                                        (println "\n📝 Changed:" (.getName ^java.io.File file))
+                                        (safe-reload))
+                                      ctx)}]))
+    (println "👁️  Watching src/ for changes...")))
+
+(defn- stop-watcher!
+  "Stop the file watcher."
+  []
+  (when-let [w @!watcher]
+    (hawk/stop! w)
+    (reset! !watcher nil)
+    (println "👁️  Stopped watching.")))
+
+;; ============================================================================
+;; App Lifecycle
 ;; ============================================================================
 
 (defn start
-  "Start the cljfx application.
-   This initializes the JavaFX application and shows the main window."
+  "Start the application with automatic hot reload.
+   
+   This will:
+   1. Start the cljfx application
+   2. Begin watching src/ for file changes
+   3. Automatically reload when .clj files are saved"
   []
-  (app/start!)
-  (println "✅ Laser Show application started."))
+  (if @!app-started?
+    (println "⚠️  App already started. Use (restart) to restart.")
+    (do
+      (println "\n🚀 Starting Laser Show...")
+      
+      ;; Start the app using require + resolve to avoid alias issues
+      (require 'laser-show.app)
+      ((resolve 'laser-show.app/start!))
+      
+      (reset! !app-started? true)
+      (start-watcher!)
+      
+      (println "\n✅ Ready! Save any .clj file to hot reload.")
+      (println "   Use (stop) to stop, (restart) for full restart."))))
 
 (defn stop
-  "Stop the application and clean up resources.
-   This closes the window but keeps the REPL running.
-   You can call start again to reopen it."
+  "Stop the application and file watcher."
   []
-  (app/stop!)
-  (println "✅ Application stopped."))
-
-(defn reload
-  "Hot reload without restarting.
-   This reloads changed namespaces.
-   Use this after making changes to views, components, or event handlers."
-  []
-  (println "Reloading changed namespaces...")
-  (let [result (repl/refresh)]
-    (if (instance? Throwable result)
-      (do
-        (println "❌ Reload failed:")
-        (println result))
-      (println "✅ Code reloaded successfully"))))
+  (println "\n🛑 Stopping...")
+  
+  (stop-watcher!)
+  
+  (when @!app-started?
+    (try
+      (require 'laser-show.app)
+      ((resolve 'laser-show.app/stop!))
+      (catch Exception e
+        (println "⚠️  Error stopping app:" (.getMessage e))))
+    (reset! !app-started? false))
+  
+  (println "✅ Stopped."))
 
 (defn restart
-  "Full restart of the application.
-   Stops the UI, reloads all changed code, then starts the UI again.
-   Use this when hot reload doesn't work or for structural changes."
+  "Full restart: stop everything, reload ALL code, start fresh.
+   
+   Use this when hot reload isn't enough (structural changes, 
+   state corruption, etc.)"
   []
-  (println "Restarting application...")
+  (println "\n🔄 Full restart...")
+  
   (stop)
   (Thread/sleep 500)
-  (repl/refresh :after 'user/start))
+  
+  ;; Clear all loaded state by refreshing everything
+  (println "📦 Reloading all namespaces...")
+  (try
+    (repl/refresh-all)
+    (catch Exception e
+      (println "⚠️  Refresh error:" (.getMessage e))))
+  
+  (Thread/sleep 200)
+  (start))
 
-(defn reset
-  "Complete reset: stop UI, clear all state, reload ALL code, and restart.
-   Warning: This will lose all your current application state!"
-  []
-  (println "Resetting everything...")
-  (stop)
-  (atoms/reset-all!)
-  (Thread/sleep 500)
-  (repl/refresh-all :after 'user/start))
-
-(defn current-state
-  "Show the current application state (useful for debugging).
-   Returns the current state map."
-  []
-  (state/get-state))
+;; ============================================================================
+;; REPL Quick Reference
+;; ============================================================================
 
 (comment
-  ;; === Laser Show Development REPL ===
-  ;;
-  ;; Quick Start:
-  ;;   (start)          - Launch the application
-  ;;   (reload)         - Hot reload your changes (keeps window open!)
-  ;;   (stop)           - Close the window
-  ;;
-  ;; Full Lifecycle:
-  ;;   (start)          - Start the application
-  ;;   (stop)           - Stop and clean up
-  ;;   (reload)         - Hot reload changed code (fast, preserves state)
-  ;;   (restart)        - Full restart (stop, reload, start)
-  ;;   (reset)          - Reset state and restart from scratch
-  ;;
-  ;; Hot Reload Workflow:
-  ;;   1. Make changes to any file (views, components, events, etc.)
-  ;;   2. Save the file
-  ;;   3. Run (reload) in the REPL
-  ;;   4. See your changes instantly in the running UI!
-  ;;
-  ;; Tips:
-  ;;   - Use (reload) for most changes (instant feedback)
-  ;;   - Changes to views, components, and styles hot reload perfectly
-  ;;   - State is preserved across reloads
-  ;;   - If something breaks, use (restart) or (reset)
-  ;;   - You can also evaluate individual functions with Ctrl+Enter
-  ;;
-  ;; Development Examples:
-  (start)
-  (reload)
-  (stop)
-  (restart)
-  (reset)
+  ;; Quick Start
+  (start)    ;; Start app + hot reload watcher
+  (stop)     ;; Stop everything
+  (restart)  ;; Full restart from scratch
   
-  ;; Debug helpers:
-  (current-state))
+  ;; Manual reload (if watcher isn't running)
+  (safe-reload)
+  )
