@@ -17,7 +17,7 @@
             [laser-show.animation.effects :as effects]
             [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard])
-  (:import [javafx.scene.input TransferMode ClipboardContent KeyCode KeyCodeCombination KeyCombination$Modifier]))
+  (:import [javafx.scene.input TransferMode ClipboardContent KeyCode KeyEvent]))
 
 ;; ============================================================================
 ;; Effect Registry Access
@@ -440,45 +440,74 @@
 
 (defn- setup-keyboard-handler!
   "Setup keyboard handler on root node for shortcuts.
+   Uses addEventFilter for Ctrl+C/V to intercept before system clipboard handling.
+   Uses setOnKeyPressed for other shortcuts (Ctrl+A, Delete, Escape).
+   
    - Ctrl+C: Copy selected effects
    - Ctrl+V: Paste effects
    - Ctrl+A: Select all effects
    - Delete/Backspace: Delete selected effects"
   [^javafx.scene.Node node col row]
+  (println "[DEBUG] setup-keyboard-handler! called for node:" (.getClass node) "col:" col "row:" row)
+  
+  ;; Use event filter for Ctrl+C and Ctrl+V - these are intercepted by the system
+  ;; at Scene level, so we need to catch them during capture phase
+  (.addEventFilter
+    node
+    KeyEvent/KEY_PRESSED
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (let [code (.getCode event)
+              ctrl? (.isControlDown event)
+              shift? (.isShiftDown event)
+              alt? (.isAltDown event)]
+          ;; Log ALL key presses in the filter
+          (println "[DEBUG FILTER] Key pressed:" code "ctrl?" ctrl? "shift?" shift? "alt?" alt?)
+          (cond
+            ;; Ctrl+C - Copy (must use filter to intercept system clipboard)
+            (and ctrl? (= code KeyCode/C))
+            (do (println "[DEBUG] Ctrl+C detected! Dispatching :effects/copy-selected")
+                (events/dispatch! {:event/type :effects/copy-selected
+                                   :col col :row row})
+                (println "[DEBUG] Ctrl+C dispatch complete, consuming event")
+                (.consume event))
+            
+            ;; Ctrl+V - Paste (must use filter to intercept system clipboard)
+            (and ctrl? (= code KeyCode/V))
+            (do (println "[DEBUG] Ctrl+V detected! Dispatching :effects/paste-into-chain")
+                (events/dispatch! {:event/type :effects/paste-into-chain
+                                   :col col :row row})
+                (println "[DEBUG] Ctrl+V dispatch complete, consuming event")
+                (.consume event)))))))
+  
+  ;; Use regular key handler for other shortcuts that don't conflict
   (.setOnKeyPressed
     node
     (reify javafx.event.EventHandler
       (handle [_ event]
         (let [code (.getCode event)
               ctrl? (.isControlDown event)]
+          ;; Log key presses in regular handler
+          (println "[DEBUG HANDLER] Key pressed:" code "ctrl?" ctrl?)
           (cond
-            ;; Ctrl+C - Copy
-            (and ctrl? (= code KeyCode/C))
-            (do (events/dispatch! {:event/type :effects/copy-selected
-                                   :col col :row row})
-                (.consume event))
-            
-            ;; Ctrl+V - Paste
-            (and ctrl? (= code KeyCode/V))
-            (do (events/dispatch! {:event/type :effects/paste-into-chain
-                                   :col col :row row})
-                (.consume event))
-            
             ;; Ctrl+A - Select all
             (and ctrl? (= code KeyCode/A))
-            (do (events/dispatch! {:event/type :effects/select-all
+            (do (println "[DEBUG] Ctrl+A detected! Dispatching :effects/select-all")
+                (events/dispatch! {:event/type :effects/select-all
                                    :col col :row row})
                 (.consume event))
             
             ;; Delete or Backspace - Delete selected
             (or (= code KeyCode/DELETE) (= code KeyCode/BACK_SPACE))
-            (do (events/dispatch! {:event/type :effects/delete-selected
+            (do (println "[DEBUG] Delete detected! Dispatching :effects/delete-selected")
+                (events/dispatch! {:event/type :effects/delete-selected
                                    :col col :row row})
                 (.consume event))
             
             ;; Escape - Clear selection
             (= code KeyCode/ESCAPE)
-            (do (events/dispatch! {:event/type :effects/clear-selection})
+            (do (println "[DEBUG] Escape detected! Dispatching :effects/clear-selection")
+                (events/dispatch! {:event/type :effects/clear-selection})
                 (.consume event))))))))
 
 ;; ============================================================================
@@ -569,27 +598,72 @@
                                                 :dialog-id :effect-chain-editor}}]}]}}))
 
 ;; ============================================================================
+;; Scene-level Event Filter Setup
+;; ============================================================================
+
+(defn- setup-scene-key-filter!
+  "Setup Scene-level event filter for Ctrl+C and Ctrl+V.
+   Scene-level filters catch events before any node handlers,
+   allowing us to intercept system clipboard shortcuts."
+  [^javafx.scene.Scene scene col row]
+  (println "[DEBUG] setup-scene-key-filter! called for scene, col:" col "row:" row)
+  (.addEventFilter
+    scene
+    KeyEvent/KEY_PRESSED
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (let [code (.getCode event)
+              ctrl? (.isControlDown event)]
+          (cond
+            ;; Ctrl+C - Copy
+            (and ctrl? (= code KeyCode/C))
+            (do (println "[DEBUG SCENE FILTER] Ctrl+C triggered! col:" col "row:" row)
+                (events/dispatch! {:event/type :effects/copy-selected
+                                   :col col :row row})
+                (.consume event))
+            
+            ;; Ctrl+V - Paste
+            (and ctrl? (= code KeyCode/V))
+            (do (println "[DEBUG SCENE FILTER] Ctrl+V triggered! col:" col "row:" row)
+                (events/dispatch! {:event/type :effects/paste-into-chain
+                                   :col col :row row})
+                (.consume event)))))))
+  (println "[DEBUG] Scene key filter registered"))
+
+;; ============================================================================
 ;; Dialog Window
 ;; ============================================================================
+
+(defn- effect-chain-editor-scene
+  "Scene component with event filter for Ctrl+C/V."
+  [{:keys [col row]}]
+  {:fx/type fx/ext-on-instance-lifecycle
+   :on-created (fn [^javafx.scene.Scene scene]
+                 (setup-scene-key-filter! scene col row))
+   :desc {:fx/type :scene
+          :stylesheets [(str "data:text/css,"
+                             (java.net.URLEncoder/encode
+                               ".root { -fx-base: #2D2D2D; -fx-background: #2D2D2D; }
+                                .tab-pane > .tab-header-area > .tab-header-background { -fx-background-color: #252525; }
+                                .tab { -fx-background-color: #3D3D3D; }
+                                .tab:selected { -fx-background-color: #4A6FA5; }
+                                .tab .tab-label { -fx-text-fill: white; }
+                                .scroll-pane { -fx-background-color: transparent; }
+                                .scroll-pane > .viewport { -fx-background-color: transparent; }"
+                               "UTF-8"))]
+          :root {:fx/type effect-chain-editor-content}}})
 
 (defn effect-chain-editor-dialog
   "The effect chain editor dialog window."
   [{:keys [fx/context]}]
-  (let [open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)]
+  (let [open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)
+        dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
+        {:keys [col row]} dialog-data]
     {:fx/type :stage
      :showing open?
      :title "Edit Effects Chain"
      :modality :application-modal
      :on-close-request {:event/type :ui/close-dialog :dialog-id :effect-chain-editor}
-     :scene {:fx/type :scene
-             :stylesheets [(str "data:text/css,"
-                                (java.net.URLEncoder/encode
-                                  ".root { -fx-base: #2D2D2D; -fx-background: #2D2D2D; }
-                                   .tab-pane > .tab-header-area > .tab-header-background { -fx-background-color: #252525; }
-                                   .tab { -fx-background-color: #3D3D3D; }
-                                   .tab:selected { -fx-background-color: #4A6FA5; }
-                                   .tab .tab-label { -fx-text-fill: white; }
-                                   .scroll-pane { -fx-background-color: transparent; }
-                                   .scroll-pane > .viewport { -fx-background-color: transparent; }"
-                                  "UTF-8"))]
-             :root {:fx/type effect-chain-editor-content}}}))
+     :scene {:fx/type effect-chain-editor-scene
+             :col col
+             :row row}}))

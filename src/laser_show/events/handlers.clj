@@ -16,7 +16,8 @@
    Usage:
    (handle-event {:event/type :grid/trigger-cell :col 0 :row 0 :state current-state})
    => {:state new-state}"
-  (:require [laser-show.animation.time :as anim-time]))
+  (:require [laser-show.animation.time :as anim-time]
+            [laser-show.common.util :refer :all]))
 
 ;; ============================================================================
 ;; Helper Functions
@@ -269,19 +270,15 @@
   "Copy selected effects to clipboard."
   [{:keys [col row state]}]
   (let [selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
-        effects-vec (get-in state [:effects :cells [col row] :effects] [])
-        sorted-indices (sort selected-indices)
-        selected-effects (mapv #(nth effects-vec % nil) sorted-indices)
-        valid-effects (filterv some? selected-effects)]
-    (if (seq valid-effects)
-      (if (= 1 (count valid-effects))
-        ;; Single effect - use :effect type
-        {:state state
-         :clipboard/copy-effect (first valid-effects)}
-        ;; Multiple effects - use :effect-chain type  
-        {:state state
-         :clipboard/copy-effects valid-effects})
-      {:state state})))
+        effects-vec (get-in state [:effects :cells [col row] :effects] []) 
+        valid-effects (filterv-indexed
+           (fn [idx effect]
+             (selected-indices idx))
+           effects-vec)] 
+    
+    (cond-> {:state state}
+      (seq valid-effects)
+      (assoc :clipboard/copy-effects valid-effects))))
 
 (defn- handle-effects-paste-into-chain
   "Paste effects from clipboard into current chain."

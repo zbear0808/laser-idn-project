@@ -328,21 +328,8 @@
   (clipboard-has-type? :effect-chain))
 
 ;; ============================================================================
-;; Single Effect Copy/Paste (for effect chain editor)
+;; Effect Paste (for backward compatibility - handles both :effect and :effect-chain)
 ;; ============================================================================
-
-(defn copy-effect!
-  "Copy a single effect to clipboard.
-   Effect format: {:type :effect :effect-id :scale :params {...}}"
-  [effect]
-  (when (and effect (:effect-id effect))
-    (let [clip-data (-> effect
-                        (update :params serialize-effect-params)
-                        (assoc :type :effect)
-                        (assoc :copied-at (System/currentTimeMillis)))]
-      (set-internal-clipboard! clip-data)
-      (copy-to-system-clipboard! clip-data)
-      true)))
 
 (defn paste-effect
   "Get the effect from clipboard for pasting.

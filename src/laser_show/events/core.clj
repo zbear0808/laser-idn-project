@@ -147,13 +147,8 @@
 ;; Clipboard Effects (for effect chain editor)
 ;; ============================================================================
 
-(defn- effect-clipboard-copy-effect
-  "Effect that copies a single effect to the clipboard."
-  [effect _dispatch]
-  (clipboard/copy-effect! effect))
-
 (defn- effect-clipboard-copy-effects
-  "Effect that copies multiple effects to clipboard as a chain."
+  "Effect that copies effects to clipboard as a chain."
   [effects _dispatch]
   (clipboard/copy-effect-chain! {:effects effects :active true}))
 
@@ -189,7 +184,9 @@
    - :idn/start-streaming - start IDN streaming
    - :idn/stop-streaming - stop IDN streaming
    - :project/save - save project to disk
-   - :project/load - load project from disk"
+   - :project/load - load project from disk
+   - :clipboard/copy-effects - copy effects to clipboard
+   - :clipboard/paste-effects - paste effects from clipboard"
   (-> handlers/handle-event
       
       ;; Inject co-effects into events
@@ -208,7 +205,6 @@
          :project/save effect-save-project
          :project/load effect-load-project
          ;; Clipboard effects for effect chain editor
-         :clipboard/copy-effect effect-clipboard-copy-effect
          :clipboard/copy-effects effect-clipboard-copy-effects
          :clipboard/paste-effects effect-clipboard-paste-effects})))
 
