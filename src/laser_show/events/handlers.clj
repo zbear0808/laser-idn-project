@@ -145,6 +145,22 @@
         updated-effects (assoc-in effects-vec [effect-idx :params param-key] value)]
     {:state (assoc-in state [:effects :cells [col row] :effects] updated-effects)}))
 
+(defn- handle-effects-update-param-from-text
+  "Update a parameter from text field input.
+   Parses the text, clamps to min/max bounds, and updates the param.
+   Called when user presses Enter in the parameter text field."
+  [{:keys [col row effect-idx param-key min max state] :as event}]
+  (let [action-event (:fx/event event)
+        text-field (.getSource action-event)
+        text (.getText text-field)
+        parsed (try (Double/parseDouble text) (catch Exception _ nil))]
+    (if parsed
+      (let [clamped (-> parsed (clojure.core/max min) (clojure.core/min max))
+            effects-vec (vec (get-in state [:effects :cells [col row] :effects] []))
+            updated-effects (assoc-in effects-vec [effect-idx :params param-key] clamped)]
+        {:state (assoc-in state [:effects :cells [col row] :effects] updated-effects)})
+      {:state state})))
+
 (defn- handle-effects-clear-cell
   "Clear all effects from a cell."
   [{:keys [col row state]}]
@@ -695,6 +711,7 @@
     :effects/add-effect (handle-effects-add-effect event)
     :effects/remove-effect (handle-effects-remove-effect event)
     :effects/update-param (handle-effects-update-param event)
+    :effects/update-param-from-text (handle-effects-update-param-from-text event)
     :effects/clear-cell (handle-effects-clear-cell event)
     :effects/reorder (handle-effects-reorder event)
     :effects/copy-cell (handle-effects-copy-cell event)

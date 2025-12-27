@@ -309,7 +309,8 @@
 ;; ============================================================================
 
 (defn- param-slider
-  "Slider control for numeric parameters."
+  "Slider control for numeric parameters with editable text field.
+   The text field allows typing a value and pressing Enter to update."
   [{:keys [col row effect-idx param-key param-spec current-value]}]
   (let [{:keys [min max]} param-spec
         value (or current-value (:default param-spec) 0)]
@@ -329,10 +330,15 @@
                                     :col col :row row
                                     :effect-idx effect-idx
                                     :param-key param-key}}
-                {:fx/type :label
+                {:fx/type :text-field
                  :text (format "%.2f" (double value))
-                 :pref-width 45
-                 :style "-fx-text-fill: white; -fx-font-size: 11;"}]}))
+                 :pref-width 55
+                 :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 11; -fx-padding: 2 4;"
+                 :on-action {:event/type :effects/update-param-from-text
+                             :col col :row row
+                             :effect-idx effect-idx
+                             :param-key param-key
+                             :min min :max max}}]}))
 
 (defn- param-choice
   "Combo-box for choice parameters."
