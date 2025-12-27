@@ -1,5 +1,5 @@
-(ns laser-show.views.components.header
-  "Application header component combining HeaderBar and MenuBar.
+(ns laser-show.views.components.title-bar
+  "Application header component using javafx preview feature HeaderBar
    
    This namespace provides:
    1. HeaderBar lifecycle - JavaFX 26 component for title bar integration
@@ -184,31 +184,46 @@
 (defn- file-menu
   [{:keys [fx/context]}]
   {:fx/type :menu
-   :text "File"
+   :text ""
+   :graphic {:fx/type :label
+             :text "File"
+             :style "-fx-text-fill: #e0e0e0;"}
    :items (file-menu-items context)})
 
 (defn- edit-menu
   [{:keys [fx/context]}]
   {:fx/type :menu
-   :text "Edit"
+   :text ""
+   :graphic {:fx/type :label
+             :text "Edit"
+             :style "-fx-text-fill: #e0e0e0;"}
    :items (edit-menu-items context)})
 
 (defn- transport-menu
   [{:keys [fx/context]}]
   {:fx/type :menu
-   :text "Transport"
+   :text ""
+   :graphic {:fx/type :label
+             :text "Transport"
+             :style "-fx-text-fill: #e0e0e0;"}
    :items (transport-menu-items context)})
 
 (defn- view-menu
   [{:keys [fx/context]}]
   {:fx/type :menu
-   :text "View"
+   :text ""
+   :graphic {:fx/type :label
+             :text "View"
+             :style "-fx-text-fill: #e0e0e0;"}
    :items (view-menu-items context)})
 
 (defn- help-menu
   [{:keys [fx/context]}]
   {:fx/type :menu
-   :text "Help"
+   :text ""
+   :graphic {:fx/type :label
+             :text "Help"
+             :style "-fx-text-fill: #e0e0e0;"}
    :items (help-menu-items context)})
 
 ;; ============================================================================
@@ -221,6 +236,7 @@
   {:fx/type :menu-bar
    :use-system-menu-bar false
    :style (str "-fx-background-color: #2D2D2D; "
+               "-fx-text-fill: #E0E0E0; "
                "-fx-border-color: #1E1E1E; "
                "-fx-border-width: 0 0 1 0; "
                "-fx-padding: 0;")

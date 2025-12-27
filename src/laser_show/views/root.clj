@@ -20,7 +20,7 @@
    [cljfx.api :as fx]
    [laser-show.subs :as subs]
    [laser-show.ui.styles :as styles]
-   [laser-show.views.components.header :as header]
+   [laser-show.views.components.title-bar :as title-bar]
    [laser-show.views.components.preview :as preview]
    [laser-show.views.components.tabs :as tabs]
    [laser-show.views.dialogs.effect-chain-editor :as effect-chain-editor]
@@ -130,7 +130,7 @@
   {:fx/type :border-pane
    :style "-fx-background-color: #1E1E1E;"
    :top {:fx/type :v-box
-         :children [{:fx/type header/header-view}
+         :children [{:fx/type title-bar/header-view}
                     {:fx/type toolbar/toolbar}
                     {:fx/type tab-bar}]}
    :center {:fx/type main-content}
