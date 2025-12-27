@@ -1,14 +1,47 @@
-(ns laser-show.views.components.menu-bar
-  "Menu bar component using cljfx declarative API.
+(ns laser-show.views.components.header
+  "Application header component combining HeaderBar and MenuBar.
    
-   This component creates a standard menu bar with File, Edit, Transport,
-   View, and Help menus. It integrates with the application's event system
-   and can reflect dynamic state through subscriptions.
+   This namespace provides:
+   1. HeaderBar lifecycle - JavaFX 26 component for title bar integration
+   2. Menu definitions - File, Edit, Transport, View, Help menus
+   3. header-view - The assembled header component for the app
    
    Usage:
-   {:fx/type menu-bar/menu-bar-view}"
+   {:fx/type header/header-view}"
   (:require [cljfx.api :as fx]
-            [laser-show.subs :as subs]))
+            [cljfx.composite :as composite]
+            [cljfx.lifecycle :as lifecycle]
+            [cljfx.fx.region :as fx.region]
+            [laser-show.subs :as subs])
+  (:import [javafx.scene.layout HeaderBar]))
+
+;; ============================================================================
+;; HeaderBar Lifecycle (JavaFX 26 Preview Feature)
+;; ============================================================================
+
+(def header-bar-props
+  "Property map for HeaderBar component.
+   
+   HeaderBar extends Region, so we inherit all Region props (style, padding, etc.)
+   plus HeaderBar-specific slots: leading, center, and trailing."
+  (merge
+    fx.region/props
+    (composite/props HeaderBar
+      :leading [:setter lifecycle/dynamic]
+      :center [:setter lifecycle/dynamic]
+      :trailing [:setter lifecycle/dynamic])))
+
+(def header-bar-lifecycle
+  "Cljfx lifecycle for HeaderBar.
+   
+   Use this as the :fx/type value:
+   {:fx/type header/header-bar-lifecycle
+    :leading {...}
+    :center {...}
+    :trailing {...}}"
+  (composite/describe HeaderBar
+    :ctor []
+    :props header-bar-props))
 
 ;; ============================================================================
 ;; Menu Item Definitions
@@ -64,13 +97,13 @@
     [{:fx/type :menu-item
       :text "Undo"
       :accelerator [:shortcut :z]
-      :disable true  ; TODO: Implement undo/redo
+      :disable true
       :on-action {:event/type :edit/undo}}
      
      {:fx/type :menu-item
       :text "Redo"
       :accelerator [:shortcut :shift :z]
-      :disable true  ; TODO: Implement undo/redo
+      :disable true
       :on-action {:event/type :edit/redo}}
      
      {:fx/type :separator-menu-item}
@@ -145,57 +178,45 @@
     :on-action {:event/type :help/check-updates}}])
 
 ;; ============================================================================
-;; Menu Definitions
+;; Menu Components
 ;; ============================================================================
 
 (defn- file-menu
-  "File menu component."
   [{:keys [fx/context]}]
   {:fx/type :menu
    :text "File"
    :items (file-menu-items context)})
 
 (defn- edit-menu
-  "Edit menu component."
   [{:keys [fx/context]}]
   {:fx/type :menu
    :text "Edit"
    :items (edit-menu-items context)})
 
 (defn- transport-menu
-  "Transport menu component."
   [{:keys [fx/context]}]
   {:fx/type :menu
    :text "Transport"
    :items (transport-menu-items context)})
 
 (defn- view-menu
-  "View menu component."
   [{:keys [fx/context]}]
   {:fx/type :menu
    :text "View"
    :items (view-menu-items context)})
 
 (defn- help-menu
-  "Help menu component."
   [{:keys [fx/context]}]
   {:fx/type :menu
    :text "Help"
    :items (help-menu-items context)})
 
 ;; ============================================================================
-;; Public API
+;; Menu Bar Component
 ;; ============================================================================
 
-(defn menu-bar-view
-  "Main menu bar component.
-   
-   This creates a MenuBar with all application menus. The menu bar
-   is styled to integrate with the dark theme and reflects application
-   state through subscriptions.
-   
-   Props:
-   - :fx/context - cljfx context (passed automatically by renderer)"
+(defn- menu-bar
+  "Internal menu bar component with all application menus."
   [{:keys [fx/context]}]
   {:fx/type :menu-bar
    :use-system-menu-bar false
@@ -208,3 +229,20 @@
            {:fx/type transport-menu}
            {:fx/type view-menu}
            {:fx/type help-menu}]})
+
+;; ============================================================================
+;; Public API
+;; ============================================================================
+
+(defn header-view
+  "Application header component.
+   
+   Uses JavaFX 26 HeaderBar to integrate the menu bar into the window title bar.
+   Requires :style :extended on the Stage for proper title bar integration.
+   
+   Props:
+   - :fx/context - cljfx context (passed automatically by renderer)"
+  [{:keys [fx/context]}]
+  {:fx/type header-bar-lifecycle
+   :style "-fx-background-color: #2D2D2D;"
+   :leading {:fx/type menu-bar}})

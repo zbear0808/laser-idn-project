@@ -20,7 +20,7 @@
    [cljfx.api :as fx]
    [laser-show.subs :as subs]
    [laser-show.ui.styles :as styles]
-   [laser-show.views.components.menu-bar :as menu-bar]
+   [laser-show.views.components.header :as header]
    [laser-show.views.components.preview :as preview]
    [laser-show.views.components.tabs :as tabs]
    [laser-show.views.dialogs.effect-chain-editor :as effect-chain-editor]
@@ -125,12 +125,12 @@
 ;; ============================================================================
 
 (defn main-layout
-  "Main application layout."
+  "Main application layout with HeaderBar in title bar area."
   [{:keys [fx/context]}]
   {:fx/type :border-pane
    :style "-fx-background-color: #1E1E1E;"
    :top {:fx/type :v-box
-         :children [{:fx/type menu-bar/menu-bar-view}
+         :children [{:fx/type header/header-view}
                     {:fx/type toolbar/toolbar}
                     {:fx/type tab-bar}]}
    :center {:fx/type main-content}
@@ -153,9 +153,10 @@
      :desc {:fx/type fx/ext-many
             :desc (filterv
                     some?
-                    [;; Main application window
+                    [;; Main application window with extended style for title bar integration
                      {:fx/type :stage
                       :title title
+                      :style :extended
                       :width (:width window-config 1200)
                       :height (:height window-config 800)
                       :showing true
