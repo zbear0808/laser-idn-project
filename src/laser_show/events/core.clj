@@ -231,7 +231,18 @@
     ;; Apply state effect if present
     (when-let [new-state (:state effects)]
       (state/reset-state! new-state))
-    ;; Could also handle other effects here
+    
+    ;; Handle clipboard effects (for keyboard shortcuts in effect chain editor)
+    (when-let [effects-to-copy (:clipboard/copy-effects effects)]
+      (effect-clipboard-copy-effects effects-to-copy nil)) 
+    
+    (when-let [paste-params (:clipboard/paste-effects effects)]
+      (effect-clipboard-paste-effects paste-params dispatch!))
+    
+    ;; Handle dispatch effect (for event chaining)
+    (when-let [event-to-dispatch (:dispatch effects)]
+      (dispatch! event-to-dispatch))
+    
     effects))
 
 (defn dispatch-sync!

@@ -225,10 +225,12 @@
 ;; ============================================================================
 
 (defn- handle-effects-select-effect
-  "Select a single effect in the chain editor (replaces existing selection)."
+  "Select a single effect in the chain editor (replaces existing selection).
+   Also sets last-selected-idx as anchor for shift+click range selection."
   [{:keys [effect-idx state]}]
-  {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices]
-                    #{effect-idx})})
+  {:state (-> state
+              (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{effect-idx})
+              (assoc-in [:ui :dialogs :effect-chain-editor :data :last-selected-idx] effect-idx))})
 
 (defn- handle-effects-toggle-effect-selection
   "Toggle an effect's selection state (Ctrl+click behavior)."
