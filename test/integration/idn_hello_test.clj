@@ -2,7 +2,7 @@
   "Integration tests for IDN-Hello protocol - tests that send actual network packets.
    These tests should only be run when you want to test against real network infrastructure."
   (:require [clojure.test :refer [deftest testing is]]
-            [idn-hello.core :as idn]))
+            [laser-show.idn.hello :as idn]))
 
 ;; ============================================================================
 ;; Network Send Tests (Integration)

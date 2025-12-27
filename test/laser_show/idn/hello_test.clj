@@ -1,8 +1,8 @@
-(ns idn-hello.core-test
+(ns laser-show.idn.hello-test
   "Unit tests for IDN-Hello protocol implementation."
   (:require [clojure.test :refer [deftest testing is]]
             [clojure.string :as str]
-            [idn-hello.core :as idn]))
+            [laser-show.idn.hello :as idn]))
 
 ;; ============================================================================
 ;; Test Fixtures - Pre-defined byte arrays for testing

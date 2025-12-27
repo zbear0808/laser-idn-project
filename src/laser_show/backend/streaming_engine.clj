@@ -2,9 +2,9 @@
   "IDN streaming engine - manages continuous frame streaming to laser hardware.
    Implements IDN-Stream spec compliant packet generation and transmission.
    Runs in a separate thread and sends frames at a configurable rate."
-  (:require [laser-show.backend.idn-stream :as idn-stream]
+  (:require [laser-show.idn.stream :as idn-stream]
             [laser-show.animation.types :as t]
-            [idn-hello.core :as idn])
+            [laser-show.idn.hello :as hello])
   (:import [java.net DatagramSocket]))
 
 ;; ============================================================================
@@ -127,10 +127,10 @@
           (let [frame (frame-provider)
                 frame (or frame (t/empty-frame))
                 idn-packet (create-idn-stream-packet engine frame)
-                hello-packet (idn/wrap-channel-message idn-packet)
+                hello-packet (hello/wrap-channel-message idn-packet)
                 log-fn @log-callback]
             
-            (idn/send-packet @socket hello-packet target-host target-port log-fn)
+            (hello/send-packet @socket hello-packet target-host target-port log-fn)
             
             (let [now (System/currentTimeMillis)
                   last-time (:last-frame-time @stats)
@@ -160,7 +160,7 @@
   (when @(:running? engine)
     (throw (ex-info "Engine already running" {})))
   
-  (let [socket (idn/create-udp-socket)]
+  (let [socket (hello/create-udp-socket)]
     (reset! (:socket engine) socket)
     (reset! (:running? engine) true)
     (reset! (:start-time-us engine) (* (System/currentTimeMillis) 1000))
@@ -193,8 +193,8 @@
       (try
         (let [timestamp-us (current-timestamp-us engine)
               close-packet (idn-stream/close-channel-packet (:channel-id engine) timestamp-us)
-              hello-packet (idn/wrap-channel-message close-packet)]
-          (idn/send-packet socket hello-packet (:target-host engine) (:target-port engine) nil))
+              hello-packet (hello/wrap-channel-message close-packet)]
+          (hello/send-packet socket hello-packet (:target-host engine) (:target-port engine) nil))
         (catch Exception e
           (println "Error sending close packet:" (.getMessage e))))
       

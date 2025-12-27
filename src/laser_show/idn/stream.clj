@@ -1,4 +1,4 @@
-(ns laser-show.backend.idn-stream
+(ns laser-show.idn.stream
   "IDN-Stream packet format converter.
    Implements ILDA Digital Network Stream Specification (Revision 002, July 2025).
    https://www.ilda.com/resources/StandardsDocs/ILDA-IDN-Stream-rev002.pdf

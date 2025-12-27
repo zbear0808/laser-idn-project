@@ -1,4 +1,4 @@
-(ns idn-hello.core
+(ns laser-show.idn.hello
   "IDN-Hello Protocol Implementation for Clojure
    Based on ILDA Digital Network Hello Protocol Specification (Draft 2022-03-27)"
   (:require [clojure.string :as str])
