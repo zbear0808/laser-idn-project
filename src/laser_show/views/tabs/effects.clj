@@ -111,32 +111,6 @@
    {:id :threshold :name "Threshold" :category :intensity}
    {:id :gamma :name "Gamma" :category :intensity}])
 
-(defn effect-palette-item
-  "A single effect in the palette."
-  [{:keys [effect]}]
-  {:fx/type :button
-   :text (:name effect)
-   :style "-fx-background-color: #3D3D3D; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 4 8; -fx-cursor: hand;"
-   :tooltip {:fx/type :tooltip :text (str "Drag to add " (:name effect))}
-   :on-action {:event/type :ui/select-preset :preset-id (:id effect)}})
-
-(defn effect-palette
-  "Palette of available effects."
-  [{:keys [fx/context]}]
-  {:fx/type :v-box
-   :spacing 8
-   :padding 8
-   :style "-fx-background-color: #252525; -fx-background-radius: 4;"
-   :children [{:fx/type :label
-               :text "Effects"
-               :style "-fx-text-fill: white; -fx-font-size: 12; -fx-font-weight: bold;"}
-              {:fx/type :flow-pane
-               :hgap 4
-               :vgap 4
-               :children (vec
-                           (for [effect available-effects]
-                             {:fx/type effect-palette-item
-                              :effect effect}))}]})
 
 ;; ============================================================================
 ;; Effects Tab
@@ -159,5 +133,4 @@
                :spacing 16
                :children [{:fx/type :v-box
                            :children [{:fx/type effects-grid-header}
-                                      {:fx/type effects-grid-with-labels}]}
-                          {:fx/type effect-palette}]}]})
+                                      {:fx/type effects-grid-with-labels}]}]}]})

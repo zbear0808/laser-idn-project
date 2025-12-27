@@ -12,11 +12,12 @@
    - Keyboard shortcuts: Ctrl+C (copy), Ctrl+V (paste), Ctrl+A (select all), Delete
    - Drag-and-drop reordering
    - Copy/paste across cells"
-  (:require [cljfx.api :as fx]
+(:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.animation.effects :as effects]
             [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
+            [laser-show.ui.styles :as styles]
             [laser-show.views.components.tabs :as tabs])
   (:import [javafx.scene.input TransferMode ClipboardContent KeyCode KeyEvent]))
 
@@ -654,6 +655,16 @@
 ;; Dialog Window
 ;; ============================================================================
 
+(def ^:private dialog-extra-css
+  "Additional CSS for the effect chain editor dialog."
+  ".root { -fx-base: #2D2D2D; -fx-background: #2D2D2D; }
+   .tab-pane > .tab-header-area > .tab-header-background { -fx-background-color: #252525; }
+   .tab { -fx-background-color: #3D3D3D; }
+   .tab:selected { -fx-background-color: #4A6FA5; }
+   .tab .tab-label { -fx-text-fill: white; }
+   .scroll-pane { -fx-background-color: transparent; }
+   .scroll-pane > .viewport { -fx-background-color: transparent; }")
+
 (defn- effect-chain-editor-scene
   "Scene component with event filter for Ctrl+C/V."
   [{:keys [col row]}]
@@ -661,16 +672,7 @@
    :on-created (fn [^javafx.scene.Scene scene]
                  (setup-scene-key-filter! scene col row))
    :desc {:fx/type :scene
-          :stylesheets [(str "data:text/css,"
-                             (java.net.URLEncoder/encode
-                               ".root { -fx-base: #2D2D2D; -fx-background: #2D2D2D; }
-                                .tab-pane > .tab-header-area > .tab-header-background { -fx-background-color: #252525; }
-                                .tab { -fx-background-color: #3D3D3D; }
-                                .tab:selected { -fx-background-color: #4A6FA5; }
-                                .tab .tab-label { -fx-text-fill: white; }
-                                .scroll-pane { -fx-background-color: transparent; }
-                                .scroll-pane > .viewport { -fx-background-color: transparent; }"
-                               "UTF-8"))]
+          :stylesheets (styles/all-stylesheets dialog-extra-css)
           :root {:fx/type effect-chain-editor-content}}})
 
 (defn effect-chain-editor-dialog

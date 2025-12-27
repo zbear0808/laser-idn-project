@@ -16,16 +16,18 @@
    │   └── preview-panel
    ├── status-bar
    └── dialogs (via refs)"
-  (:require [cljfx.api :as fx]
-            [laser-show.subs :as subs]
-            [laser-show.views.components.menu-bar :as menu-bar]
-            [laser-show.views.components.tabs :as tabs]
-            [laser-show.views.toolbar :as toolbar]
-            [laser-show.views.status-bar :as status-bar]
-            [laser-show.views.tabs.grid :as grid-tab]
-            [laser-show.views.tabs.effects :as effects-tab]
-            [laser-show.views.components.preview :as preview]
-            [laser-show.views.dialogs.effect-chain-editor :as effect-chain-editor]))
+(:require
+   [cljfx.api :as fx]
+   [laser-show.subs :as subs]
+   [laser-show.ui.styles :as styles]
+   [laser-show.views.components.menu-bar :as menu-bar]
+   [laser-show.views.components.preview :as preview]
+   [laser-show.views.components.tabs :as tabs]
+   [laser-show.views.dialogs.effect-chain-editor :as effect-chain-editor]
+   [laser-show.views.status-bar :as status-bar]
+   [laser-show.views.tabs.effects :as effects-tab]
+   [laser-show.views.tabs.grid :as grid-tab]
+   [laser-show.views.toolbar :as toolbar]))
 
 ;; ============================================================================
 ;; Theme
@@ -161,10 +163,7 @@
                                           ;; TODO: Check for unsaved changes
                                           (System/exit 0))
                       :scene {:fx/type :scene
-                              :stylesheets [(str "data:text/css,"
-                                                 (java.net.URLEncoder/encode
-                                                   ".root { -fx-base: #1E1E1E; -fx-background: #1E1E1E; }"
-                                                   "UTF-8"))]
+                              :stylesheets (styles/all-stylesheets)
                               :root {:fx/type main-layout}}}
                      ;; Effect chain editor dialog
                      (when effect-editor-open?

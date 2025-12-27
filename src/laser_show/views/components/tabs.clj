@@ -19,6 +19,7 @@
 (def tab-colors
   "Tab color scheme for consistent styling."
   {:active "#4CAF50"
+   :hover "#5CAF60"
    :inactive "#3D3D3D"
    :text "#FFFFFF"
    :background "#2D2D2D"})
@@ -38,12 +39,9 @@
   [{:keys [tab-id label active? on-action]}]
   {:fx/type :button
    :text label
-   :style (str "-fx-background-color: "
-               (if active? (:active tab-colors) (:inactive tab-colors))
-               "; -fx-text-fill: " (:text tab-colors) "; "
-               "-fx-background-radius: 4 4 0 0; "
-               "-fx-padding: 8 16; "
-               "-fx-cursor: hand;")
+   :style-class (if active?
+                  ["button" "tab-button" "tab-button-active"]
+                  ["button" "tab-button"])
    :on-action (if (map? on-action)
                 (assoc on-action :tab-id tab-id)
                 on-action)})
