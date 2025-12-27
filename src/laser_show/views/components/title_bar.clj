@@ -235,7 +235,7 @@
   [{:keys [fx/context]}]
   {:fx/type :menu-bar
    :use-system-menu-bar false
-   :style (str "-fx-background-color: #2D2D2D; "
+   :style (str "-fx-background-color: #1e1e1eff; "
                "-fx-text-fill: #E0E0E0; "
                "-fx-border-color: #1E1E1E; "
                "-fx-border-width: 0 0 1 0; "
@@ -260,5 +260,5 @@
    - :fx/context - cljfx context (passed automatically by renderer)"
   [{:keys [fx/context]}]
   {:fx/type header-bar-lifecycle
-   :style "-fx-background-color: #2D2D2D;"
+   :style "-fx-background-color: #1e1e1eff;"
    :leading {:fx/type menu-bar}})
