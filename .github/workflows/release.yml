@@ -19,7 +19,7 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            platform: win
+            platform: windows
             artifact-name: jar-windows
           - os: macos-latest
             platform: mac
@@ -58,8 +58,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-clojure-
       
-      - name: Build platform-specific uber JAR
+      - name: Setup Xvfb for Linux
+        if: runner.os == 'Linux'
         run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+      
+      - name: Build platform-specific uber JAR
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" == "Linux" ]; then
+            export DISPLAY=:99
+            Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+            sleep 3
+          fi
           clojure -T:build-${{ matrix.platform }} uber
           echo "Built JAR for ${{ matrix.platform }}"
           ls -lh target/
