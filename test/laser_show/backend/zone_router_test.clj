@@ -1,6 +1,6 @@
 (ns laser-show.backend.zone-router-test
   "Tests for zone routing and target resolution."
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [clojure.test :refer [deftest testing]]
             [laser-show.backend.zone-router :as router]))
 
 ;; ============================================================================

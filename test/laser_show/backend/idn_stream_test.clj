@@ -1,6 +1,6 @@
 (ns laser-show.backend.idn-stream-test
   "Tests for IDN-Stream packet format compliance with ILDA spec (Revision 002, July 2025)"
-  (:require [clojure.test :refer :all]
+  (:require [clojure.test :refer [deftest is testing]]
             [laser-show.idn.stream :as stream]
             [laser-show.animation.types :as t])
   (:import [java.nio ByteBuffer ByteOrder]))

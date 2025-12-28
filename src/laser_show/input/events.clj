@@ -3,10 +3,6 @@
    All input sources produce standardized events that can be routed
    to handlers throughout the application.")
 
-;; ============================================================================
-;; Event Types
-;; ============================================================================
-
 (def event-types
   "All supported event types in the system."
   #{:control-change   ; Continuous controller (knob, fader, etc.)
@@ -16,10 +12,6 @@
     :trigger-release  ; Generic trigger release
     :program-change   ; Program/preset change
     :pitch-bend})     ; Pitch bend wheel
-
-;; ============================================================================
-;; Event Creation
-;; ============================================================================
 
 (defn control-change
   "Creates a control change event (knob/fader movement).

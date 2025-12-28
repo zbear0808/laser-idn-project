@@ -277,19 +277,18 @@
 
 (comment
   ;; Test dispatching events
-  (require '[laser-show.state.core :as state]
-           '[laser-show.state.domains :as domains])
-  
+  (require '[laser-show.state.domains :as domains])
+
   ;; Initialize state first
   (state/init-state! (domains/build-initial-state))
-  
+
   ;; Dispatch events
   (dispatch! {:event/type :timing/set-bpm :bpm 140.0})
   (state/get-in-state [:timing :bpm]) ;; => 140.0
-  
+
   (dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})
   (state/get-in-state [:playback :active-cell]) ;; => [0 0]
-  
+
   (dispatch! {:event/type :transport/stop})
   (state/get-in-state [:playback :playing?]) ;; => false
   )

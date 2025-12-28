@@ -17,7 +17,7 @@
    (handle-event {:event/type :grid/trigger-cell :col 0 :row 0 :state current-state})
    => {:state new-state}"
   (:require [laser-show.animation.time :as anim-time]
-            [laser-show.common.util :refer :all]))
+            [laser-show.common.util :as u]))
 
 ;; ============================================================================
 ;; Helper Functions
@@ -289,7 +289,7 @@
   [{:keys [col row state]}]
   (let [selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
         effects-vec (get-in state [:effects :cells [col row] :effects] []) 
-        valid-effects (filterv-indexed
+        valid-effects (u/filterv-indexed
            (fn [idx effect]
              (selected-indices idx))
            effects-vec)] 

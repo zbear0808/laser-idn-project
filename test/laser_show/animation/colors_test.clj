@@ -1,6 +1,6 @@
 (ns laser-show.animation.colors-test
   "Tests for color utilities and conversions."
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [clojure.test :refer [deftest testing]]
             [laser-show.animation.colors :as colors]))
 
 ;; ============================================================================

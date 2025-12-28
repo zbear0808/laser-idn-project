@@ -1,5 +1,5 @@
 (ns laser-show.backend.streaming-engine-test
-  (:require [clojure.test :refer :all]
+  (:require [clojure.test :refer [deftest is testing]]
             [laser-show.backend.streaming-engine :as se]
             [laser-show.animation.types :as t]))
 

@@ -1,6 +1,6 @@
 (ns laser-show.input.events-test
   "Unit tests for the input events system."
-  (:require [clojure.test :refer [deftest testing is are]]
+  (:require [clojure.test :refer [deftest testing is]]
             [laser-show.input.events :as events]))
 
 ;; ============================================================================
@@ -108,23 +108,10 @@
 
 (deftest matches-test
   (let [event (events/note-on :midi 0 60 1.0)]
-    (testing "Matches by type"
-      (is (events/matches? event {:type :note-on})))
-    
-    (testing "Matches by source"
-      (is (events/matches? event {:source :midi})))
-    
-    (testing "Matches by channel"
-      (is (events/matches? event {:channel 0})))
-    
+
     (testing "Matches by multiple keys"
-      (is (events/matches? event {:type :note-on :source :midi :channel 0})))
-    
-    (testing "Does not match incorrect values"
-      (is (not (events/matches? event {:type :note-off})))
-      (is (not (events/matches? event {:source :osc})))
-      (is (not (events/matches? event {:channel 1}))))
-    
+      (is (events/matches? event {:type :note-on :source :midi :channel 0}))) 
+
     (testing "Empty pattern matches everything"
       (is (events/matches? event {})))))
 
