@@ -10,7 +10,9 @@
    {:fx/type :scene
     :stylesheets (styles/all-stylesheets)
     :root {...}}"
-  (:require [clojure.java.io :as io]))
+  (:require [clojure.java.io :as io]
+            [cljfx.css :as css]
+            [laser-show.css.menus :as menus]))
 
 (defn resource-stylesheet
   "Get the URL string for a CSS file from resources.
@@ -37,7 +39,8 @@
    Optionally accepts additional inline CSS strings to append."
   ([]
    [(inline-stylesheet base-theme-css)
-    (resource-stylesheet "styles/tabs.css")])
+    (resource-stylesheet "styles/tabs.css")
+    (::css/url menus/menu-theme)])
   ([& additional-css-strings]
    (into (all-stylesheets)
          (mapv inline-stylesheet additional-css-strings))))

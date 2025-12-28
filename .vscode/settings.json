@@ -7,9 +7,9 @@
       "autoSelectForJackIn": true,
       "autoSelectForConnect": true,
       "menuSelections": {
-        "cljAliases": ["dev"]
+        "cljAliases": ["dev", "repl"]
       },
-      "afterPrimaryReplConnectedCode": "(do (fx-app/dev-start!))"
+      "afterPrimaryReplConnectedCode": "(start)"
     }
   ],
 

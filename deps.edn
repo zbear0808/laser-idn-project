@@ -2,6 +2,7 @@
  
  :deps {org.clojure/clojure {:mvn/version "1.12.4"}
         cljfx/cljfx {:mvn/version "1.10.6"}
+        cljfx/css {:mvn/version "1.1.0"}
 
         ;; Core JavaFX modules (i think all required for complete GUI)
         org.openjfx/javafx-base$win {:mvn/version "26-ea+19"}

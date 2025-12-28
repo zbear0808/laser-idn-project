@@ -1,14 +1,11 @@
 (ns user
-  "Development utilities for hot reloading.
+  "Development utilities for auto-restart on file save.
    
    Usage:
-     (start)    - Start the app with automatic hot reload watching
+     (start)    - Start the app with auto-restart watching
      (stop)     - Stop the app and file watcher
-     (restart)  - Full restart (stop, reload all code, start fresh)"
-  (:require [clojure.tools.namespace.repl :as repl]
-            [hawk.core :as hawk]))
-
-(repl/set-refresh-dirs "src")
+     (restart)  - Manual restart (stop, reload code, start)"
+  (:require [hawk.core :as hawk]))
 
 ;; ============================================================================
 ;; State
@@ -16,36 +13,70 @@
 
 (defonce ^:private !watcher (atom nil))
 (defonce ^:private !app-started? (atom false))
+(defonce ^:private !restart-pending? (atom false))
 
 ;; ============================================================================
-;; Safe Reload
+;; Code Reloading
 ;; ============================================================================
 
-(defn- safe-reload
-  "Reload changed namespaces with error handling.
-   Returns true if successful, false if there was an error."
+(defn- reload-app-namespace!
+  "Reload the main app namespace and its dependencies.
+   Uses :reload to pick up changes without JVM restart."
   []
-  (println "\n🔄 Reloading...")
   (try
-    (let [result (repl/refresh)]
-      (if (instance? Throwable result)
-        (do
-          (println "❌ Reload failed:")
-          (println (.getMessage ^Throwable result))
-          (.printStackTrace ^Throwable result)
-          false)
-        (do
-          (println "✅ Reloaded successfully")
-          true)))
+    ;; Reload the root view namespace (pulls in most UI changes)
+    (require 'laser-show.views.root :reload)
+    ;; Reload the main app namespace
+    (require 'laser-show.app :reload)
+    true
     (catch Exception e
-      (println "❌ Compilation error:")
+      (println "❌ Reload failed:")
       (println (.getMessage e))
-      (.printStackTrace e)
       false)))
+
+;; ============================================================================
+;; UI Restart (not JVM restart)
+;; ============================================================================
+
+(defn- do-restart!
+  "Stop UI, reload code, restart UI. Preserves state, skips JVM startup."
+  []
+  (println "\n🔄 Restarting UI...")
+  (try
+    ;; Stop the UI
+    (when @!app-started?
+      (when-let [stop-fn (resolve 'laser-show.app/stop!)]
+        (stop-fn))
+      (reset! !app-started? false))
+    
+    (Thread/sleep 200)
+    
+    ;; Reload code
+    (println "📦 Reloading code...")
+    (when (reload-app-namespace!)
+      ;; Start the UI again
+      (when-let [start-fn (resolve 'laser-show.app/start!)]
+        (start-fn)
+        (reset! !app-started? true)
+        (println "✅ UI restarted!")))
+    
+    (catch Exception e
+      (println "❌ Restart failed:" (.getMessage e)))))
 
 ;; ============================================================================
 ;; File Watcher
 ;; ============================================================================
+
+(defn- schedule-restart!
+  "Schedule a restart to happen on the main thread.
+   We use an agent to avoid the *ns* binding issue in hawk's thread."
+  []
+  (when (compare-and-set! !restart-pending? false true)
+    ;; Use a future to run on a different thread that can do the restart
+    (future
+      (Thread/sleep 100) ; debounce rapid saves
+      (reset! !restart-pending? false)
+      (do-restart!))))
 
 (defn- start-watcher!
   "Start watching src/ for .clj file changes."
@@ -58,7 +89,7 @@
                                       (when (and (#{:modify :create} kind)
                                                  (.endsWith (.getName ^java.io.File file) ".clj"))
                                         (println "\n📝 Changed:" (.getName ^java.io.File file))
-                                        (safe-reload))
+                                        (schedule-restart!))
                                       ctx)}]))
     (println "👁️  Watching src/ for changes...")))
 
@@ -71,31 +102,33 @@
     (println "👁️  Stopped watching.")))
 
 ;; ============================================================================
-;; App Lifecycle
+;; Public API
 ;; ============================================================================
 
 (defn start
-  "Start the application with automatic hot reload.
+  "Start the application with auto-restart on file changes.
    
-   This will:
-   1. Start the cljfx application
-   2. Begin watching src/ for file changes
-   3. Automatically reload when .clj files are saved"
+   When you save a .clj file:
+   1. UI window closes briefly
+   2. Code is reloaded  
+   3. UI reopens with new code
+   
+   State is preserved (atoms are not reset)."
   []
   (if @!app-started?
     (println "⚠️  App already started. Use (restart) to restart.")
     (do
       (println "\n🚀 Starting Laser Show...")
       
-      ;; Start the app using require + resolve to avoid alias issues
+      ;; Load and start the app
       (require 'laser-show.app)
       ((resolve 'laser-show.app/start!))
       
       (reset! !app-started? true)
       (start-watcher!)
       
-      (println "\n✅ Ready! Save any .clj file to hot reload.")
-      (println "   Use (stop) to stop, (restart) for full restart."))))
+      (println "\n✅ Ready! Save any .clj file to auto-restart UI.")
+      (println "   Use (stop) to stop, (restart) for manual restart."))))
 
 (defn stop
   "Stop the application and file watcher."
@@ -115,25 +148,11 @@
   (println "✅ Stopped."))
 
 (defn restart
-  "Full restart: stop everything, reload ALL code, start fresh.
+  "Manual restart: stop UI, reload code, start UI.
    
-   Use this when hot reload isn't enough (structural changes, 
-   state corruption, etc.)"
+   Use this from the REPL. The file watcher does this automatically."
   []
-  (println "\n🔄 Full restart...")
-  
-  (stop)
-  (Thread/sleep 500)
-  
-  ;; Clear all loaded state by refreshing everything
-  (println "📦 Reloading all namespaces...")
-  (try
-    (repl/refresh-all)
-    (catch Exception e
-      (println "⚠️  Refresh error:" (.getMessage e))))
-  
-  (Thread/sleep 200)
-  (start))
+  (do-restart!))
 
 ;; ============================================================================
 ;; REPL Quick Reference
@@ -141,10 +160,7 @@
 
 (comment
   ;; Quick Start
-  (start)    ;; Start app + hot reload watcher
+  (start)    ;; Start app + auto-restart watcher
   (stop)     ;; Stop everything
-  (restart)  ;; Full restart from scratch
-  
-  ;; Manual reload (if watcher isn't running)
-  (safe-reload)
+  (restart)  ;; Manual restart
   )

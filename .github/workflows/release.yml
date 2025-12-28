@@ -174,11 +174,13 @@ jobs:
             --input target
             --name LaserShow
             --main-jar "$JAR_NAME"
+            --main-class laser_show.app
             --dest dist
             --app-version "1.0.0"
             --vendor "LaserShow"
             --description "Laser Show Control Application with bundled JRE"
             --java-options "-Xmx2048m"
+            --java-options "-Djavafx.enablePreview=true"
             --verbose
           )
           
