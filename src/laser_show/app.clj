@@ -11,11 +11,13 @@
    (stop!)   - Stop the application
    (-main)   - Main entry point"
   (:require [cljfx.api :as fx]
+            [cljfx.css :as css]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.events.core :as events]
             [laser-show.views.root :as root]
-            [laser-show.services.frame-service :as frame-service])
+            [laser-show.services.frame-service :as frame-service]
+            [laser-show.css.menus :as menus])
   (:gen-class))
 
 ;; ============================================================================
@@ -46,6 +48,20 @@
            events/event-handler}))
 
 ;; ============================================================================
+;; CSS Style Initialization
+;; ============================================================================
+
+(defn init-styles!
+  "Initialize CSS style URLs in state.
+   
+   This sets up the cljfx-css registered styles in the application state,
+   enabling hot-reload support. The style URLs are stored in state so that
+   when a var watch detects a change, updating state triggers a re-render."
+  []
+  (state/assoc-in-state! [:styles :menu-theme] (::css/url menus/menu-theme))
+  (println "✨ CSS styles initialized"))
+
+;; ============================================================================
 ;; Application Lifecycle
 ;; ============================================================================
 
@@ -60,6 +76,9 @@
   ;; Initialize state with domains
   (let [initial-state (domains/build-initial-state)]
     (state/init-state! initial-state))
+  
+  ;; Initialize CSS styles in state for hot-reload support
+  (init-styles!)
   
   ;; Start preview frame updates (30 FPS)
   (frame-service/start-preview-updates! 30)

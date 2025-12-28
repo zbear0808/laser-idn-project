@@ -158,9 +158,17 @@
 
 (defn build-initial-state
   "Build the complete initial state map from all registered domains.
-   Call this after all defstate forms have been evaluated."
+   Call this after all defstate forms have been evaluated.
+   
+   Also includes :styles for CSS hot-reload support. Styles are stored
+   in context for reactivity but not as a domain (they're view configuration,
+   not application domain state)."
   []
-  (build-initial-state-from-domains))
+  (merge
+    (build-initial-state-from-domains)
+    ;; Styles: stored in context for hot-reload reactivity
+    ;; Initialized to nil, set at app startup with actual CSS URLs
+    {:styles {:menu-theme nil}}))
 
 ;; ============================================================================
 ;; Convenience Re-exports

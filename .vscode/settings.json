@@ -9,7 +9,7 @@
       "menuSelections": {
         "cljAliases": ["dev", "repl"]
       },
-      "afterPrimaryReplConnectedCode": "(start)"
+      //"afterPrimaryReplConnectedCode": "(do (start) (watch-styles!) )"
     }
   ],
 

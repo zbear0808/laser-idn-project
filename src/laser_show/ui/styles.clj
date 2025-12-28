@@ -1,18 +1,25 @@
 (ns laser-show.ui.styles
-  "Centralized stylesheet management for the application.
+  "Stylesheet helpers for the application.
    
    Provides:
-   - all-stylesheets: Vector of all app CSS stylesheets for use in scenes
    - resource-stylesheet: Helper to get a stylesheet URL from resources
    - inline-stylesheet: Helper to create inline CSS stylesheet
+   - base-theme-css: Base theme CSS string
    
-   Usage in any scene:
+   Note: For hot-reloadable stylesheets, use the subs/stylesheet-urls subscription
+   which combines static and dynamic styles from state.
+   
+   Usage for scenes with hot-reload support:
    {:fx/type :scene
-    :stylesheets (styles/all-stylesheets)
+    :stylesheets (fx/sub-ctx context subs/stylesheet-urls)
+    :root {...}}
+   
+   For dialogs needing extra CSS:
+   {:fx/type :scene
+    :stylesheets (into (fx/sub-ctx context subs/stylesheet-urls)
+                       [(styles/inline-stylesheet extra-css)])
     :root {...}}"
-  (:require [clojure.java.io :as io]
-            [cljfx.css :as css]
-            [laser-show.css.menus :as menus]))
+  (:require [clojure.java.io :as io]))
 
 (defn resource-stylesheet
   "Get the URL string for a CSS file from resources.
@@ -32,15 +39,18 @@
   "Base theme CSS applied to all scenes."
   ".root { -fx-base: #1E1E1E; -fx-background: #1E1E1E; }")
 
+;; Note: all-stylesheets is kept for backwards compatibility with dialogs
+;; that need to append extra CSS. For main scenes, use subs/stylesheet-urls.
 (defn all-stylesheets
   "Returns a vector of all application stylesheets.
-   Use this in any scene to get consistent styling.
+   
+   DEPRECATED: Use subs/stylesheet-urls subscription for hot-reload support.
+   This function is kept for backwards compatibility with dialogs that need
+   to append extra CSS strings.
    
    Optionally accepts additional inline CSS strings to append."
-  ([]
-   [(inline-stylesheet base-theme-css)
-    (resource-stylesheet "styles/tabs.css")
-    (::css/url menus/menu-theme)])
-  ([& additional-css-strings]
-   (into (all-stylesheets)
+  ([base-stylesheets]
+   base-stylesheets)
+  ([base-stylesheets & additional-css-strings]
+   (into (vec base-stylesheets)
          (mapv inline-stylesheet additional-css-strings))))

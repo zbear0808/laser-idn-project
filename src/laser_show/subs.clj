@@ -20,7 +20,8 @@
      (let [bpm (fx/sub-val context :timing)   ;; Direct access
            data (fx/sub-ctx context cell-display-data 0 0)]  ;; Computed
        ...))"
-  (:require [cljfx.api :as fx]))
+  (:require [cljfx.api :as fx]
+            [laser-show.ui.styles :as styles]))
 
 ;; ============================================================================
 ;; Level 1: Direct Value Subscriptions
@@ -337,3 +338,30 @@
   "Get frame rendering statistics."
   [context]
   (get-in (fx/sub-val context :backend) [:streaming :frame-stats]))
+
+;; ============================================================================
+;; Stylesheet Subscriptions (CSS Hot-Reload)
+;; ============================================================================
+
+(defn menu-theme-url
+  "Get the menu theme CSS URL from state.
+   Returns the cljfx-css URL string, or nil if not yet initialized."
+  [context]
+  (get-in (fx/sub-val context :styles) [:menu-theme]))
+
+(defn stylesheet-urls
+  "Get all stylesheet URLs for scenes.
+   Combines static and dynamic (hot-reloadable) stylesheets.
+   
+   Static stylesheets:
+   - base-theme-css: Inline base theme
+   - tabs.css: Resource file for tab styling
+   
+   Dynamic stylesheets:
+   - menu-theme: cljfx-css registered style (hot-reloadable)"
+  [context]
+  (let [menu-url (fx/sub-ctx context menu-theme-url)]
+    (filterv some?
+             [(styles/inline-stylesheet styles/base-theme-css)
+              (styles/resource-stylesheet "styles/tabs.css")
+              menu-url])))

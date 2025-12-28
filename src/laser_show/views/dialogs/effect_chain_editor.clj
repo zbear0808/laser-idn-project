@@ -666,13 +666,14 @@
    .scroll-pane > .viewport { -fx-background-color: transparent; }")
 
 (defn- effect-chain-editor-scene
-  "Scene component with event filter for Ctrl+C/V."
-  [{:keys [col row]}]
+  "Scene component with event filter for Ctrl+C/V.
+   Stylesheets are passed in for hot-reload support."
+  [{:keys [col row stylesheets]}]
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created (fn [^javafx.scene.Scene scene]
                  (setup-scene-key-filter! scene col row))
    :desc {:fx/type :scene
-          :stylesheets (styles/all-stylesheets dialog-extra-css)
+          :stylesheets stylesheets
           :root {:fx/type effect-chain-editor-content}}})
 
 (defn effect-chain-editor-dialog
@@ -680,7 +681,11 @@
   [{:keys [fx/context]}]
   (let [open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)
         dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
-        {:keys [col row]} dialog-data]
+        {:keys [col row]} dialog-data
+        ;; Subscribe to stylesheets for hot-reload support
+        base-stylesheets (fx/sub-ctx context subs/stylesheet-urls)
+        stylesheets (into (vec base-stylesheets)
+                          [(styles/inline-stylesheet dialog-extra-css)])]
     {:fx/type :stage
      :showing open?
      :title "Edit Effects Chain"
@@ -688,4 +693,5 @@
      :on-close-request {:event/type :ui/close-dialog :dialog-id :effect-chain-editor}
      :scene {:fx/type effect-chain-editor-scene
              :col col
-             :row row}}))
+             :row row
+             :stylesheets stylesheets}}))

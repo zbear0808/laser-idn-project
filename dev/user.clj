@@ -1,122 +1,27 @@
 (ns user
-  "Development utilities for auto-restart on file save.
+  "Development utilities for REPL workflow.
    
    Usage:
-     (start)    - Start the app with auto-restart watching
-     (stop)     - Stop the app and file watcher
-     (restart)  - Manual restart (stop, reload code, start)"
-  (:require [hawk.core :as hawk]))
+     (start)           - Start the app
+     (stop)            - Stop the app
+     (watch-styles!)   - Enable CSS hot-reload (eval style def to update UI)
+     (unwatch-styles!) - Disable CSS hot-reload")
 
 ;; ============================================================================
 ;; State
 ;; ============================================================================
 
-(defonce ^:private !watcher (atom nil))
 (defonce ^:private !app-started? (atom false))
-(defonce ^:private !restart-pending? (atom false))
-
-;; ============================================================================
-;; Code Reloading
-;; ============================================================================
-
-(defn- reload-app-namespace!
-  "Reload the main app namespace and its dependencies.
-   Uses :reload to pick up changes without JVM restart."
-  []
-  (try
-    ;; Reload the root view namespace (pulls in most UI changes)
-    (require 'laser-show.views.root :reload)
-    ;; Reload the main app namespace
-    (require 'laser-show.app :reload)
-    true
-    (catch Exception e
-      (println "❌ Reload failed:")
-      (println (.getMessage e))
-      false)))
-
-;; ============================================================================
-;; UI Restart (not JVM restart)
-;; ============================================================================
-
-(defn- do-restart!
-  "Stop UI, reload code, restart UI. Preserves state, skips JVM startup."
-  []
-  (println "\n🔄 Restarting UI...")
-  (try
-    ;; Stop the UI
-    (when @!app-started?
-      (when-let [stop-fn (resolve 'laser-show.app/stop!)]
-        (stop-fn))
-      (reset! !app-started? false))
-    
-    (Thread/sleep 200)
-    
-    ;; Reload code
-    (println "📦 Reloading code...")
-    (when (reload-app-namespace!)
-      ;; Start the UI again
-      (when-let [start-fn (resolve 'laser-show.app/start!)]
-        (start-fn)
-        (reset! !app-started? true)
-        (println "✅ UI restarted!")))
-    
-    (catch Exception e
-      (println "❌ Restart failed:" (.getMessage e)))))
-
-;; ============================================================================
-;; File Watcher
-;; ============================================================================
-
-(defn- schedule-restart!
-  "Schedule a restart to happen on the main thread.
-   We use an agent to avoid the *ns* binding issue in hawk's thread."
-  []
-  (when (compare-and-set! !restart-pending? false true)
-    ;; Use a future to run on a different thread that can do the restart
-    (future
-      (Thread/sleep 100) ; debounce rapid saves
-      (reset! !restart-pending? false)
-      (do-restart!))))
-
-(defn- start-watcher!
-  "Start watching src/ for .clj file changes."
-  []
-  (when-not @!watcher
-    (reset! !watcher
-            (hawk/watch! [{:paths ["src"]
-                           :filter hawk/file?
-                           :handler (fn [ctx {:keys [kind file]}]
-                                      (when (and (#{:modify :create} kind)
-                                                 (.endsWith (.getName ^java.io.File file) ".clj"))
-                                        (println "\n📝 Changed:" (.getName ^java.io.File file))
-                                        (schedule-restart!))
-                                      ctx)}]))
-    (println "👁️  Watching src/ for changes...")))
-
-(defn- stop-watcher!
-  "Stop the file watcher."
-  []
-  (when-let [w @!watcher]
-    (hawk/stop! w)
-    (reset! !watcher nil)
-    (println "👁️  Stopped watching.")))
 
 ;; ============================================================================
 ;; Public API
 ;; ============================================================================
 
 (defn start
-  "Start the application with auto-restart on file changes.
-   
-   When you save a .clj file:
-   1. UI window closes briefly
-   2. Code is reloaded  
-   3. UI reopens with new code
-   
-   State is preserved (atoms are not reset)."
+  "Start the laser show application."
   []
   (if @!app-started?
-    (println "⚠️  App already started. Use (restart) to restart.")
+    (println "⚠️  App already started. Use (stop) first to restart.")
     (do
       (println "\n🚀 Starting Laser Show...")
       
@@ -125,17 +30,14 @@
       ((resolve 'laser-show.app/start!))
       
       (reset! !app-started? true)
-      (start-watcher!)
       
-      (println "\n✅ Ready! Save any .clj file to auto-restart UI.")
-      (println "   Use (stop) to stop, (restart) for manual restart."))))
+      (println "\n✅ Ready!")
+      (println "   Use (watch-styles!) for CSS hot-reload"))))
 
 (defn stop
-  "Stop the application and file watcher."
+  "Stop the application."
   []
   (println "\n🛑 Stopping...")
-  
-  (stop-watcher!)
   
   (when @!app-started?
     (try
@@ -147,20 +49,66 @@
   
   (println "✅ Stopped."))
 
-(defn restart
-  "Manual restart: stop UI, reload code, start UI.
+;; ============================================================================
+;; CSS Hot-Reload Support
+;; ============================================================================
+
+(defonce ^:private !style-watches (atom #{}))
+
+(def ^:private style-vars
+  "Style vars to watch for hot-reload.
+   Each entry maps a var symbol to its state key."
+  [{:var-sym 'laser-show.css.menus/menu-theme
+    :state-key :menu-theme}])
+
+(defn watch-styles!
+  "Enable CSS hot-reload. Re-evaluating style defs updates UI instantly.
    
-   Use this from the REPL. The file watcher does this automatically."
+   How it works:
+   1. Watches the style var (e.g., laser-show.css.menus/menu-theme)
+   2. When you eval the (def menu-theme ...) form, the var changes
+   3. The watch callback updates the CSS URL in state
+   4. cljfx sees the state change and re-renders with new styles
+   
+   Usage:
+   1. Call (watch-styles!) after starting the app
+   2. Edit src/laser_show/css/menus.clj
+   3. Eval the (def menu-theme ...) form (e.g., Ctrl+Enter in Calva)
+   4. UI updates instantly with new styles!
+   
+   Call (unwatch-styles!) when done iterating on styles."
   []
-  (do-restart!))
+  (doseq [{:keys [var-sym state-key]} style-vars]
+    (let [v (requiring-resolve var-sym)]
+      (add-watch v ::style-reload
+                 (fn [_ _ _ new-val]
+                   (println "🎨 Style updated:" var-sym)
+                   ((resolve 'laser-show.state.core/assoc-in-state!)
+                    [:styles state-key]
+                    (:cljfx.css/url new-val))))
+      (swap! !style-watches conj v)))
+  (println "👁️  Watching" (count style-vars) "style var(s) for hot-reload")
+  (println "   Edit css/menus.clj and eval the def to update styles instantly!"))
+
+(defn unwatch-styles!
+  "Stop watching style vars for hot-reload."
+  []
+  (doseq [v @!style-watches]
+    (remove-watch v ::style-reload))
+  (reset! !style-watches #{})
+  (println "👁️  Stopped watching styles"))
 
 ;; ============================================================================
 ;; REPL Quick Reference
 ;; ============================================================================
 
 (comment
-  ;; Quick Start
-  (start)    ;; Start app + auto-restart watcher
-  (stop)     ;; Stop everything
-  (restart)  ;; Manual restart
+  ;; App lifecycle
+  (start)  ;; Start the app
+  (stop)   ;; Stop the app
+  
+  ;; CSS Hot-Reload
+  (watch-styles!)    ;; Enable style watching
+  (unwatch-styles!)  ;; Disable style watching
+  ;; Then edit css/menus.clj and eval (def menu-theme ...) to see instant updates!
   )

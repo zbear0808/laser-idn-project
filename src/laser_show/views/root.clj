@@ -143,10 +143,12 @@
 (defn root-view
   "Root view with theming and dialog management.
    
-   Uses fx/ext-many to manage multiple windows (main window + dialogs)."
+   Uses fx/ext-many to manage multiple windows (main window + dialogs).
+   Stylesheets are subscribed from state for CSS hot-reload support."
   [{:keys [fx/context]}]
   (let [{:keys [title]} (fx/sub-ctx context subs/project-status)
         window-config (fx/sub-ctx context subs/window-config)
+        stylesheets (fx/sub-ctx context subs/stylesheet-urls)
         effect-editor-open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)]
     {:fx/type fx/ext-set-env
      :env {::theme theme}
@@ -164,7 +166,7 @@
                                           ;; TODO: Check for unsaved changes
                                           (System/exit 0))
                       :scene {:fx/type :scene
-                              :stylesheets (styles/all-stylesheets)
+                              :stylesheets stylesheets
                               :root {:fx/type main-layout}}}
                      ;; Effect chain editor dialog
                      (when effect-editor-open?
