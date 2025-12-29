@@ -1,4 +1,4 @@
-(ns laser-show.css.menus
+(ns laser-show.css.title-bar
   "Dark theme styling for menus and context menus using cljfx/css.
    
    This namespace provides:

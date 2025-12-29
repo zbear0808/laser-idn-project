@@ -17,20 +17,12 @@
             [laser-show.events.core :as events]
             [laser-show.views.root :as root]
             [laser-show.services.frame-service :as frame-service]
-            [laser-show.css.menus :as menus])
+            [laser-show.css.title-bar :as menus])
   (:gen-class))
-
-;; ============================================================================
-;; Application State
-;; ============================================================================
 
 (defonce ^{:private true :doc "The cljfx application instance."} *app (atom nil))
 
 (defonce ^{:private true :doc "The cljfx renderer instance."} *renderer (atom nil))
-
-;; ============================================================================
-;; Renderer Configuration
-;; ============================================================================
 
 (defn- create-renderer
   "Create the cljfx renderer with proper middleware."
@@ -47,9 +39,6 @@
            :fx.opt/map-event-handler
            events/event-handler}))
 
-;; ============================================================================
-;; CSS Style Initialization
-;; ============================================================================
 
 (defn init-styles!
   "Initialize CSS style URLs in state.

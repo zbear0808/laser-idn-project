@@ -12,8 +12,10 @@
             [cljfx.composite :as composite]
             [cljfx.lifecycle :as lifecycle]
             [cljfx.fx.region :as fx.region]
-            [laser-show.subs :as subs])
-  (:import [javafx.scene.layout HeaderBar]))
+            [laser-show.subs :as subs]
+            [clojure.java.io :as io])
+  (:import [javafx.scene.layout HeaderBar]
+           [javafx.scene.image Image]))
 
 ;; ============================================================================
 ;; HeaderBar Lifecycle (JavaFX 26 Preview Feature)
@@ -227,24 +229,50 @@
    :items (help-menu-items context)})
 
 ;; ============================================================================
+;; Icon Loading
+;; ============================================================================
+
+(def ^:private app-icon
+  "Lazy-loaded application icon image.
+   Loads the laser warning square icon from resources."
+  (delay
+    (when-let [icon-url (io/resource "laser-warning-square.png")]
+      (Image. (.toString icon-url)))))
+
+(defn- app-icon-view
+  "Application icon component - laser warning square."
+  [{:keys [fx/context]}]
+  {:fx/type :image-view
+   :image @app-icon
+   :fit-width 20
+   :fit-height 20
+   :preserve-ratio true
+   :style "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.3), 2, 0, 0, 1);"})
+
+;; ============================================================================
 ;; Menu Bar Component
 ;; ============================================================================
 
 (defn- menu-bar
-  "Internal menu bar component with all application menus."
+  "Internal menu bar component with all application menus and icon."
   [{:keys [fx/context]}]
-  {:fx/type :menu-bar
-   :use-system-menu-bar false
-   :style (str "-fx-background-color: #1e1e1eff; "
-               "-fx-text-fill: #E0E0E0; "
-               "-fx-border-color: #1E1E1E; "
-               "-fx-border-width: 0 0 1 0; "
-               "-fx-padding: 0;")
-   :menus [{:fx/type file-menu}
-           {:fx/type edit-menu}
-           {:fx/type transport-menu}
-           {:fx/type view-menu}
-           {:fx/type help-menu}]})
+  {:fx/type :h-box
+   :alignment :center-left
+   :spacing 8
+   :style "-fx-background-color: #1e1e1eff;"
+   :children [{:fx/type app-icon-view}
+              {:fx/type :menu-bar
+               :use-system-menu-bar false
+               :style (str "-fx-background-color: transparent; "
+                          "-fx-text-fill: #E0E0E0; "
+                          "-fx-border-color: transparent; "
+                          "-fx-border-width: 0; "
+                          "-fx-padding: 0;")
+               :menus [{:fx/type file-menu}
+                       {:fx/type edit-menu}
+                       {:fx/type transport-menu}
+                       {:fx/type view-menu}
+                       {:fx/type help-menu}]}]})
 
 ;; ============================================================================
 ;; Public API

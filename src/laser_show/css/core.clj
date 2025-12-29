@@ -18,7 +18,7 @@
             [laser-show.css.grid-cells :as grid-cells]
             [laser-show.css.dialogs :as dialogs]
             [laser-show.css.layout :as layout]
-            [laser-show.css.menus :as menus]))
+            [laser-show.css.title-bar :as title-bar]))
 
 ;; Re-export theme for convenient color access
 (def ^{:doc "Theme map with color constants. Access via keywords like ::theme/bg-dark"}
@@ -39,7 +39,7 @@
    (::css/url grid-cells/grid-cells)
    (::css/url dialogs/dialogs)
    (::css/url layout/layout)
-   (::css/url menus/menu-theme)])
+   (::css/url title-bar/menu-theme)])
 
 (defn dialog-stylesheet-urls
   "Returns stylesheet URLs appropriate for dialogs.
@@ -56,7 +56,7 @@
    (::css/url grid-cells/grid-cells)
    (::css/url layout/layout)
    (::css/url dialogs/dialogs)
-   (::css/url menus/menu-theme)])
+   (::css/url title-bar/menu-theme)])
 
 ;; ============================================================================
 ;; Theme color access helpers

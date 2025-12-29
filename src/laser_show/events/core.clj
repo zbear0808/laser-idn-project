@@ -245,11 +245,6 @@
     
     effects))
 
-(defn dispatch-sync!
-  "Dispatch an event and wait for effects to complete.
-   Mainly for testing."
-  [event]
-  (dispatch! event))
 
 ;; ============================================================================
 ;; Event Helpers
