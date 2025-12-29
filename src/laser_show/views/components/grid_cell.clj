@@ -12,28 +12,30 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.subs :as subs]
-            [laser-show.events.core :as events])
+            [laser-show.events.core :as events]
+            [laser-show.css.core :as css])
   (:import [javafx.scene.input MouseEvent MouseButton TransferMode DragEvent ClipboardContent]))
 
 ;; ============================================================================
-;; Cell Colors
+;; Cell Colors (from theme, with additional cell-specific colors)
 ;; ============================================================================
 
 (def cell-colors
-  "Color scheme for cell states."
-  {:empty "#424242"
-   :content "#616161"
-   :active "#4CAF50"
-   :selected "#2196F3"
-   :hover "#505050"
-   :drag-over "#FFA726"})
+  "Color scheme for cell states.
+   Using theme colors where applicable, custom colors for cell-specific states."
+  {:empty (css/bg-light)
+   :content "#616161"       ;; Slightly lighter for content cells
+   :active (css/accent-primary)
+   :selected (css/accent-blue)
+   :hover (css/bg-hover)
+   :effects "#7E57C2"})     ;; Purple for effects cells
 
 (defn cell-background-color
-  "Determine background color based on cell state."
-  [{:keys [active? selected? has-content?]}]
+  "Determine background color based on cell state.
+   Returns a color string - this remains dynamic/inline because it depends on cell content."
+  [{:keys [active? has-content?]}]
   (cond
     active? (:active cell-colors)
-    selected? (:selected cell-colors)
     has-content? (:content cell-colors)
     :else (:empty cell-colors)))
 
@@ -47,6 +49,18 @@
   (if preset-id
     (-> preset-id name (str/replace "-" " "))
     ""))
+
+;; ============================================================================
+;; Style Class Helpers
+;; ============================================================================
+
+(defn cell-style-classes
+  "Build style-class vector based on cell state.
+   Structural styles are in CSS, state-specific styles added dynamically."
+  [{:keys [selected? active?]}]
+  (cond-> ["grid-cell"]
+    selected? (conj "grid-cell-selected")
+    active? (conj "grid-cell-active")))
 
 ;; ============================================================================
 ;; Grid Cell Component
@@ -63,7 +77,11 @@
    - Left-click: Trigger the cell
    - Right-click: Select cell
    - Drag from cell: Start dragging cell content
-   - Drop on cell: Move cell content"
+   - Drop on cell: Move cell content
+   
+   Styling:
+   - Structural styles (border-radius, cursor) via CSS classes
+   - Background color is inline because it's computed from cell state"
   [{:keys [fx/context col row]}]
   (let [{:keys [preset-id active? selected? has-content?] :as display-data}
         (fx/sub-ctx context subs/cell-display-data col row)
@@ -72,13 +90,10 @@
     {:fx/type :stack-pane
      :pref-width 80
      :pref-height 60
-     :style (str "-fx-background-color: " bg-color "; "
-                 "-fx-background-radius: 4; "
-                 "-fx-cursor: hand; "
-                 (when selected?
-                   "-fx-border-color: #2196F3; -fx-border-width: 2; -fx-border-radius: 4;")
-                 (when active?
-                   "-fx-effect: dropshadow(gaussian, #4CAF50, 10, 0.5, 0, 0);"))
+     ;; Use style-class for structural/state styles
+     :style-class (cell-style-classes display-data)
+     ;; Background color is dynamic - keep inline
+     :style (str "-fx-background-color: " bg-color ";")
      
      ;; Mouse click handler - use function to check button, then dispatch
      :on-mouse-clicked (fn [^MouseEvent e]
@@ -140,12 +155,12 @@
                  :children (filterv some?
                                     [{:fx/type :label
                                       :text label-text
-                                      :style "-fx-text-fill: white; -fx-font-size: 10;"}
+                                      :style-class "grid-cell-label"}
                                      (when active?
                                        {:fx/type :region
                                         :pref-width 8
                                         :pref-height 8
-                                        :style "-fx-background-color: white; -fx-background-radius: 4;"})])}]}))
+                                        :style-class "grid-cell-active-indicator"})])}]}))
 
 ;; ============================================================================
 ;; Effects Cell Component (for effects grid)
@@ -156,23 +171,28 @@
    
    Props:
    - col: Column index
-   - row: Row index"
+   - row: Row index
+   
+   Styling:
+   - Structural styles via CSS classes
+   - Background color is inline because it's computed from cell state"
   [{:keys [fx/context col row]}]
   (let [{:keys [effect-count first-effect-id active? has-effects?] :as display-data}
         (fx/sub-ctx context subs/effect-cell-display-data col row)
         bg-color (cond
-                   active? "#4CAF50"
-                   has-effects? "#7E57C2"
-                   :else "#424242")
+                   active? (:active cell-colors)
+                   has-effects? (:effects cell-colors)
+                   :else (:empty cell-colors))
         label-text (if has-effects?
                      (str effect-count " fx")
                      "")]
     {:fx/type :stack-pane
      :pref-width 80
      :pref-height 60
-     :style (str "-fx-background-color: " bg-color "; "
-                 "-fx-background-radius: 4; "
-                 "-fx-cursor: hand;")
+     :style-class (cond-> ["grid-cell"]
+                    active? (conj "grid-cell-active"))
+     ;; Background color is dynamic - keep inline
+     :style (str "-fx-background-color: " bg-color ";")
      
      ;; Mouse click handler
      :on-mouse-clicked (fn [^MouseEvent e]
@@ -226,9 +246,9 @@
                  :children (filterv some?
                                     [{:fx/type :label
                                       :text label-text
-                                      :style "-fx-text-fill: white; -fx-font-size: 10;"}
+                                      :style-class "grid-cell-label"}
                                      (when active?
                                        {:fx/type :region
                                         :pref-width 8
                                         :pref-height 8
-                                        :style "-fx-background-color: white; -fx-background-radius: 4;"})])}]}))
+                                        :style-class "grid-cell-active-indicator"})])}]}))

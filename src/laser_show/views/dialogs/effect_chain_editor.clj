@@ -17,7 +17,7 @@
             [laser-show.animation.effects :as effects]
             [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
-            [laser-show.ui.styles :as styles]
+            [laser-show.css.core :as css]
             [laser-show.views.components.tabs :as tabs]
             [laser-show.views.components.custom-param-renderers :as custom-renderers])
   (:import [javafx.scene.input TransferMode ClipboardContent KeyCode KeyEvent]))
@@ -255,9 +255,10 @@
 
 (def effect-bank-tab-definitions
   "Tab definitions for the effect bank categories."
-  [{:id :color :label "Color"}
-   {:id :shape :label "Shape"}
-   {:id :intensity :label "Intensity"}])
+  [{:id :shape :label "Shape"}
+   {:id :color :label "Color"}
+   {:id :intensity :label "Intensity"}
+   {:id :zone :label "Zone"}])
 
 (defn- add-effect-button
   "Button to add a specific effect to the chain."
@@ -755,19 +756,12 @@
 ;; Dialog Window
 ;; ============================================================================
 
-(def ^:private dialog-extra-css
-  "Additional CSS for the effect chain editor dialog."
-  ".root { -fx-base: #2D2D2D; -fx-background: #2D2D2D; }
-   .tab-pane > .tab-header-area > .tab-header-background { -fx-background-color: #252525; }
-   .tab { -fx-background-color: #3D3D3D; }
-   .tab:selected { -fx-background-color: #4A6FA5; }
-   .tab .tab-label { -fx-text-fill: white; }
-   .scroll-pane { -fx-background-color: transparent; }
-   .scroll-pane > .viewport { -fx-background-color: transparent; }")
+;; NOTE: Dialog CSS is now defined in laser-show.css.dialogs
+;; The CSS string literal has been moved to the centralized CSS system
 
 (defn- effect-chain-editor-scene
   "Scene component with event filter for Ctrl+C/V.
-   Stylesheets are passed in for hot-reload support."
+   Stylesheets use the centralized CSS system."
   [{:keys [col row stylesheets]}]
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created (fn [^javafx.scene.Scene scene]
@@ -782,10 +776,8 @@
   (let [open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)
         dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
         {:keys [col row]} dialog-data
-        ;; Subscribe to stylesheets for hot-reload support
-        base-stylesheets (fx/sub-ctx context subs/stylesheet-urls)
-        stylesheets (into (vec base-stylesheets)
-                          [(styles/inline-stylesheet dialog-extra-css)])]
+        ;; Use centralized CSS system - dialogs includes all needed styles
+        stylesheets (css/dialog-stylesheet-urls)]
     {:fx/type :stage
      :showing open?
      :title "Edit Effects Chain"

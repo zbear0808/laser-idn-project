@@ -1,24 +1,20 @@
 (ns laser-show.views.toolbar
   "Toolbar component with transport controls, BPM, and connection status."
   (:require [cljfx.api :as fx]
-            [laser-show.subs :as subs]))
+            [laser-show.subs :as subs]
+            [laser-show.css.core :as css]))
 
 ;; ============================================================================
 ;; Transport Controls
 ;; ============================================================================
 
 (defn transport-button
-  "A transport control button (play/stop/etc)."
-  [{:keys [icon-text tooltip on-action style]}]
+  "A transport control button (play/stop/etc).
+   Uses style-class for base styling, inline :style only for dynamic active state."
+  [{:keys [icon-text tooltip on-action active?]}]
   {:fx/type :button
    :text icon-text
-   :style (str "-fx-background-color: #3D3D3D; "
-               "-fx-text-fill: white; "
-               "-fx-font-size: 14; "
-               "-fx-min-width: 40; "
-               "-fx-min-height: 32; "
-               "-fx-cursor: hand; "
-               style)
+   :style-class (if active? "transport-btn-active" "transport-btn")
    :tooltip {:fx/type :tooltip :text tooltip}
    :on-action on-action})
 
@@ -33,11 +29,12 @@
                  :icon-text (if playing? "■" "▶")
                  :tooltip (if playing? "Stop" "Play")
                  :on-action {:event/type (if playing? :transport/stop :transport/play)}
-                 :style (when playing? "-fx-background-color: #4CAF50;")}
+                 :active? playing?}
                 {:fx/type transport-button
                  :icon-text "↻"
                  :tooltip "Retrigger"
-                 :on-action {:event/type :transport/retrigger}}]}))
+                 :on-action {:event/type :transport/retrigger}
+                 :active? false}]}))
 
 ;; ============================================================================
 ;; BPM Controls
@@ -52,11 +49,11 @@
      :alignment :center-left
      :children [{:fx/type :label
                  :text "BPM:"
-                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 12;"}
+                 :style-class "label-secondary"}
                 {:fx/type :text-field
                  :text (format "%.1f" (double bpm))
                  :pref-width 60
-                 :style "-fx-background-color: #3D3D3D; -fx-text-fill: white; -fx-font-size: 12;"
+                 :style-class "text-field-dark-sm"
                  :on-action (fn [e]
                               (let [text (.getText (.getSource e))]
                                 (try
@@ -70,7 +67,7 @@
   [{:keys [fx/context]}]
   {:fx/type :button
    :text "TAP"
-   :style "-fx-background-color: #3D3D3D; -fx-text-fill: white; -fx-font-size: 11; -fx-padding: 4 12; -fx-cursor: hand;"
+   :style-class "btn-sm"
    :tooltip {:fx/type :tooltip :text "Tap to set BPM"}
    :on-action {:event/type :timing/tap-tempo}})
 
@@ -88,18 +85,17 @@
 ;; ============================================================================
 
 (defn connection-indicator
-  "Visual connection status indicator."
+  "Visual connection status indicator.
+   Uses dynamic inline style for color based on connection state."
   [{:keys [connected? connecting?]}]
   {:fx/type :region
    :pref-width 10
    :pref-height 10
-   :style (str "-fx-background-radius: 5; "
-               "-fx-background-color: "
-               (cond
-                 connected? "#4CAF50"
-                 connecting? "#FF9800"
-                 :else "#F44336")
-               ";")})
+   :style-class ["status-indicator"
+                 (cond
+                   connected? "status-indicator-connected"
+                   connecting? "status-indicator-connecting"
+                   :else "status-indicator-disconnected")]})
 
 (defn connection-status
   "Connection status display."
@@ -116,10 +112,10 @@
                  :connecting? connecting?}
                 {:fx/type :label
                  :text status-text
-                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
+                 :style-class "label-secondary"}
                 {:fx/type :button
                  :text (if connected? "Disconnect" "Connect")
-                 :style "-fx-background-color: #3D3D3D; -fx-text-fill: white; -fx-font-size: 11; -fx-padding: 4 8; -fx-cursor: hand;"
+                 :style-class "btn-sm"
                  :on-action {:event/type (if connected? :idn/disconnect :idn/connect)
                              :host host
                              :port port}}]}))
@@ -132,8 +128,7 @@
   "Main toolbar component."
   [{:keys [fx/context]}]
   {:fx/type :h-box
-   :style "-fx-background-color: #2D2D2D; -fx-padding: 8 16;"
-   :spacing 24
+   :style-class "toolbar"
    :alignment :center-left
    :children [{:fx/type transport-controls}
               {:fx/type :separator :orientation :vertical}

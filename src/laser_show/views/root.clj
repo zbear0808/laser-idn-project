@@ -19,7 +19,6 @@
 (:require
    [cljfx.api :as fx]
    [laser-show.subs :as subs]
-   [laser-show.ui.styles :as styles]
    [laser-show.views.components.title-bar :as title-bar]
    [laser-show.views.components.preview :as preview]
    [laser-show.views.components.tabs :as tabs]

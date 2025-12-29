@@ -5,24 +5,16 @@
    - styled-tab-button: Individual tab button with consistent styling
    - styled-tab-bar: Horizontal bar of tab buttons
    
+   Uses CSS classes from laser-show.css.buttons:
+   - .tab-btn: Base tab button style
+   - .tab-btn-active: Active tab button style
+   
    Usage:
    {:fx/type styled-tab-bar
     :tabs [{:id :color :label \"Color\"}
            {:id :shape :label \"Shape\"}]
     :active-tab :color
     :on-tab-change {:event/type :some/event}}")
-
-;; ============================================================================
-;; Theme Constants
-;; ============================================================================
-
-(def tab-colors
-  "Tab color scheme for consistent styling."
-  {:active "#4CAF50"
-   :hover "#5CAF60"
-   :inactive "#3D3D3D"
-   :text "#FFFFFF"
-   :background "#2D2D2D"})
 
 ;; ============================================================================
 ;; Tab Button Component
@@ -35,13 +27,14 @@
    - :tab-id - Unique identifier for this tab
    - :label - Display text for the tab
    - :active? - Whether this tab is currently active
-   - :on-action - Event map to dispatch when clicked (receives :tab-id in event)"
+   - :on-action - Event map to dispatch when clicked (receives :tab-id in event)
+   
+   Uses CSS classes: .tab-btn, .tab-btn-active"
   [{:keys [tab-id label active? on-action]}]
   {:fx/type :button
    :text label
-   :style-class (if active?
-                  ["button" "tab-button" "tab-button-active"]
-                  ["button" "tab-button"])
+   ;; Use CSS classes from buttons.clj
+   :style-class (if active? "tab-btn-active" "tab-btn")
    :on-action (if (map? on-action)
                 (assoc on-action :tab-id tab-id)
                 on-action)})
@@ -57,13 +50,13 @@
    - :tabs - Vector of tab definitions [{:id :tab-id :label \"Label\"} ...]
    - :active-tab - The currently active tab id
    - :on-tab-change - Event map for when a tab is clicked. Will receive :tab-id key.
-   - :style (optional) - Additional style string to apply to container
-   - :spacing (optional) - Spacing between tabs, default 4"
-  [{:keys [tabs active-tab on-tab-change style spacing]}]
+   - :spacing (optional) - Spacing between tabs, default 4
+   
+   Uses CSS class: .tab-header from layout.clj"
+  [{:keys [tabs active-tab on-tab-change spacing]}]
   {:fx/type :h-box
-   :style (str "-fx-background-color: " (:background tab-colors) "; "
-               "-fx-padding: 8 8 0 8;"
-               (when style (str " " style)))
+   ;; Use CSS class from layout.clj
+   :style-class "tab-header"
    :spacing (or spacing 4)
    :children (vec
                (for [{:keys [id label]} tabs]
@@ -82,10 +75,10 @@
    
    Props:
    - :children - Content to render (typically a single child based on active tab)
-   - :style (optional) - Additional style string"
-  [{:keys [children style]}]
+   
+   Uses CSS class: .tab-container from layout.clj"
+  [{:keys [children]}]
   {:fx/type :v-box
-   :style (str "-fx-background-color: #1E1E1E;"
-               (when style (str " " style)))
+   :style-class "tab-container"
    :v-box/vgrow :always
    :children (if (vector? children) children [children])})

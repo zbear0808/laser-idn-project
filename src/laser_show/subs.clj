@@ -21,7 +21,7 @@
            data (fx/sub-ctx context cell-display-data 0 0)]  ;; Computed
        ...))"
   (:require [cljfx.api :as fx]
-            [laser-show.ui.styles :as styles]))
+            [laser-show.css.core :as css]))
 
 ;; ============================================================================
 ;; Level 1: Direct Value Subscriptions
@@ -351,17 +351,16 @@
 
 (defn stylesheet-urls
   "Get all stylesheet URLs for scenes.
-   Combines static and dynamic (hot-reloadable) stylesheets.
+   Uses the centralized CSS system from laser-show.css.core.
    
-   Static stylesheets:
-   - base-theme-css: Inline base theme
-   - tabs.css: Resource file for tab styling
-   
-   Dynamic stylesheets:
-   - menu-theme: cljfx-css registered style (hot-reloadable)"
-  [context]
-  (let [menu-url (fx/sub-ctx context menu-theme-url)]
-    (filterv some?
-             [(styles/inline-stylesheet styles/base-theme-css)
-              (styles/resource-stylesheet "styles/tabs.css")
-              menu-url])))
+   Includes all application CSS:
+   - Theme (colors, typography, containers)
+   - Buttons (transport, action, tab)
+   - Forms (text fields, labels, sliders)
+   - Grid cells (cue and effect grids)
+   - Layout (toolbar, status bar, panels)
+   - Dialogs (dialog-specific styles)
+   - Menus (context menu styling)"
+  [_context]
+  ;; Use centralized CSS system - no longer depends on state
+  (css/all-stylesheet-urls))
