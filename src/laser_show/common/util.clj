@@ -1,9 +1,9 @@
 (ns laser-show.common.util)
 
 (defn clamp
-  "Given a numeric value, ensure it falls between the given values (inclusive).
-  If either boundary is nil, it will be ignored. If `x` is nil, the `default`
-  value is returned."
+  "Clamps numeric values (inclusive).
+  If either boundary is nil, it will be ignored.
+  If `x` is nil, the `default` value is returned."
   ([x low]
    (clamp x low nil nil))
   ([x low high]
@@ -47,19 +47,17 @@
    (into [] (map-indexed f) coll)))
 
 (defn keepv
-  "Like keep, but returns a vector."
   [f coll]
   (into [] (keep f) coll))
 
 (defn removev
-  "Like remove, but returns a vector."
   [pred coll]
   (into [] (remove pred) coll))
 
 (defn filter-keys
   "Takes a map `m` and returns a new map containing only the key-value pairs
   for which `f` returns logical true for the key."
-  [f m]
+  [m f]
   (when m
     (persistent!
      (reduce-kv
@@ -111,6 +109,8 @@
 
 
 (defmacro ->map&
+  "ex > (->map& a b :c 42 :d d-value)
+   => {:a a, :b b, :c 42, :d d-value}"
   [& args]
   (let [syms (take-while symbol? args)
         kvs  (drop-while symbol? args)

@@ -18,7 +18,8 @@
             [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.ui.styles :as styles]
-            [laser-show.views.components.tabs :as tabs])
+            [laser-show.views.components.tabs :as tabs]
+            [laser-show.views.components.custom-param-renderers :as custom-renderers])
   (:import [javafx.scene.input TransferMode ClipboardContent KeyCode KeyEvent]))
 
 ;; ============================================================================
@@ -418,15 +419,98 @@
      :param-spec param-spec
      :current-value (:current-value props)}))
 
+(defn- custom-param-renderer
+  "Renders parameters with custom UI and mode toggle.
+   
+   Props:
+   - :col, :row - Grid cell coordinates
+   - :effect-idx - Index in effect chain
+   - :effect-def - Effect definition with :ui-hints
+   - :current-params - Current parameter values
+   - :ui-mode - Current UI mode (:visual or :numeric)
+   - :params-map - Parameter specifications map"
+  [{:keys [col row effect-idx effect-def current-params ui-mode params-map]}]
+  (let [ui-hints (:ui-hints effect-def)
+        actual-mode (or ui-mode (:default-mode ui-hints :visual))]
+    {:fx/type :v-box
+     :spacing 8
+     :children [;; Mode toggle buttons
+                {:fx/type :h-box
+                 :spacing 6
+                 :alignment :center-left
+                 :padding {:bottom 8}
+                 :children [{:fx/type :label
+                            :text "Edit Mode:"
+                            :style "-fx-text-fill: #808080; -fx-font-size: 10;"}
+                           {:fx/type :button
+                            :text "👁 Visual"
+                            :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
+                                       (if (= actual-mode :visual)
+                                         "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
+                                         "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
+                            :on-action {:event/type :effects/set-param-ui-mode
+                                       :effect-idx effect-idx
+                                       :mode :visual}}
+                           {:fx/type :button
+                            :text "🔢 Numeric"
+                            :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
+                                       (if (= actual-mode :numeric)
+                                         "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
+                                         "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
+                            :on-action {:event/type :effects/set-param-ui-mode
+                                       :effect-idx effect-idx
+                                       :mode :numeric}}]}
+                
+                ;; Render based on mode
+                (if (= actual-mode :visual)
+                  ;; Custom visual renderer
+                  (case (:renderer ui-hints)
+                    :spatial-2d {:fx/type custom-renderers/translate-visual-editor
+                                :col col :row row
+                                :effect-idx effect-idx
+                                :current-params current-params
+                                :param-specs (:parameters effect-def)}
+                    
+                    :corner-pin-2d {:fx/type custom-renderers/corner-pin-visual-editor
+                                   :col col :row row
+                                   :effect-idx effect-idx
+                                   :current-params current-params
+                                   :param-specs (:parameters effect-def)}
+                    
+                    ;; Fallback to standard params
+                    {:fx/type :v-box
+                     :spacing 6
+                     :children (vec
+                                (for [[param-key param-spec] params-map]
+                                  {:fx/type param-control
+                                   :col col :row row
+                                   :effect-idx effect-idx
+                                   :param-key param-key
+                                   :param-spec param-spec
+                                   :current-value (get current-params param-key)}))})
+                  
+                  ;; Numeric mode - standard sliders
+                  {:fx/type :v-box
+                   :spacing 6
+                   :children (vec
+                              (for [[param-key param-spec] params-map]
+                                {:fx/type param-control
+                                 :col col :row row
+                                 :effect-idx effect-idx
+                                 :param-key param-key
+                                 :param-spec param-spec
+                                 :current-value (get current-params param-key)}))})]}))
+
 (defn- parameter-editor
   "Parameter editor for the selected effect."
-  [{:keys [col row selected-effect-idx effect-chain]}]
+  [{:keys [col row selected-effect-idx effect-chain dialog-data]}]
   (let [selected-effect (when selected-effect-idx
                           (nth effect-chain selected-effect-idx nil))
         effect-def (when selected-effect
                      (effect-by-id (:effect-id selected-effect)))
         current-params (:params selected-effect {})
-        params-map (params-vector->map (:parameters effect-def []))]
+        params-map (params-vector->map (:parameters effect-def []))
+        ui-mode (get-in dialog-data [:ui-modes selected-effect-idx])]
     {:fx/type :v-box
      :spacing 8
      :style "-fx-background-color: #2A2A2A; -fx-padding: 8;"
@@ -436,20 +520,35 @@
                          "PARAMETERS")
                  :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
                 (if effect-def
-                  {:fx/type :scroll-pane
-                   :fit-to-width true
-                   :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
-                   :content {:fx/type :v-box
-                             :spacing 6
-                             :padding {:top 4}
-                             :children (vec
+                  (if (:ui-hints effect-def)
+                    ;; Has custom UI - use custom renderer with mode toggle
+                    {:fx/type :scroll-pane
+                     :fit-to-width true
+                     :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
+                     :content {:fx/type custom-param-renderer
+                              :col col :row row
+                              :effect-idx selected-effect-idx
+                              :effect-def effect-def
+                              :current-params current-params
+                              :ui-mode ui-mode
+                              :params-map params-map}}
+                    
+                    ;; Standard parameters - use existing controls
+                    {:fx/type :scroll-pane
+                     :fit-to-width true
+                     :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
+                     :content {:fx/type :v-box
+                              :spacing 6
+                              :padding {:top 4}
+                              :children (vec
                                          (for [[param-key param-spec] params-map]
                                            {:fx/type param-control
                                             :col col :row row
                                             :effect-idx selected-effect-idx
                                             :param-key param-key
                                             :param-spec param-spec
-                                            :current-value (get current-params param-key)}))}}
+                                            :current-value (get current-params param-key)}))}})
+                  
                   {:fx/type :label
                    :text "Select an effect from the chain"
                    :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"})]}))
@@ -605,7 +704,8 @@
                                                {:fx/type parameter-editor
                                                 :col col :row row
                                                 :selected-effect-idx first-selected-idx
-                                                :effect-chain effect-chain}]}]}
+                                                :effect-chain effect-chain
+                                                :dialog-data dialog-data}]}]}
                        
                        ;; Footer with close button
                        {:fx/type :h-box

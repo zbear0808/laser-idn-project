@@ -244,7 +244,6 @@
         initial-var-name (symbol (str domain-name "-initial"))
         domain-getter-name (symbol (str "get-" domain-name))
         
-        ;; Build initial value map from field specs
         initial-value (into {}
                             (map (fn [[k v]] [k (:default v)]))
                             field-specs)
@@ -274,29 +273,22 @@
           field-specs)]
     
     `(do
-       ;; Define the initial value var
        (def ~initial-var-name
          ~(str "Initial state for " domain-name " domain. " docstring)
          ~initial-value)
        
-       ;; Register the domain
        (register-domain! ~domain-kw ~initial-value ~field-specs)
        
-       ;; Domain-level getter
        (defn ~domain-getter-name
          ~(str "Get the full " domain-name " state map. " docstring)
          []
          (get-in-state [~domain-kw]))
        
-       ;; Field-level accessors
        ~@field-accessors
        
        ;; Return the domain keyword for chaining
        ~domain-kw)))
 
-;; ============================================================================
-;; REPL / Debug Helpers
-;; ============================================================================
 
 (defn debug-state
   "Print current state for debugging."

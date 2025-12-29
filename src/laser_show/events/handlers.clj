@@ -350,6 +350,40 @@
       {:state state})))
 
 ;; ============================================================================
+;; Custom Parameter UI Events
+;; ============================================================================
+
+(defn- handle-effects-set-param-ui-mode
+  "Toggle between visual and numeric parameter editing mode for an effect."
+  [{:keys [effect-idx mode state]}]
+  {:state (assoc-in state
+                    [:ui :dialogs :effect-chain-editor :data :ui-modes effect-idx]
+                    mode)})
+
+(defn- handle-effects-update-spatial-params
+  "Update multiple related parameters from spatial drag (e.g., x and y together).
+   
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :effect-idx - Index in effect chain
+   - :point-id - ID of the dragged point (e.g., :center, :tl, :tr)
+   - :x, :y - New world coordinates
+   - :param-map - Map of point IDs to parameter key mappings
+                  e.g., {:center {:x :x :y :y}
+                         :tl {:x :tl-x :y :tl-y}}"
+  [{:keys [col row effect-idx point-id x y param-map state]}]
+  (let [point-params (get param-map point-id)
+        effects-vec (vec (get-in state [:effects :cells [col row] :effects] []))]
+    (if point-params
+      (let [x-key (:x point-params)
+            y-key (:y point-params)
+            updated-effects (-> effects-vec
+                               (assoc-in [effect-idx :params x-key] x)
+                               (assoc-in [effect-idx :params y-key] y))]
+        {:state (assoc-in state [:effects :cells [col row] :effects] updated-effects)})
+      {:state state})))
+
+;; ============================================================================
 ;; Timing Events
 ;; ============================================================================
 
@@ -738,6 +772,10 @@
     :effects/paste-into-chain (handle-effects-paste-into-chain event)
     :effects/insert-pasted (handle-effects-insert-pasted event)
     :effects/delete-selected (handle-effects-delete-selected event)
+    
+    ;; Custom parameter UI events
+    :effects/set-param-ui-mode (handle-effects-set-param-ui-mode event)
+    :effects/update-spatial-params (handle-effects-update-spatial-params event)
     
     ;; Timing events
     :timing/set-bpm (handle-timing-set-bpm event)

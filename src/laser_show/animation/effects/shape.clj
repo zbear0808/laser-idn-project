@@ -89,6 +89,9 @@
                 :default 0.0
                 :min -2.0
                 :max 2.0}]
+  :ui-hints {:renderer :spatial-2d
+             :params [:x :y]
+             :default-mode :visual}
   :apply-fn apply-translate})
 
 ;; ============================================================================
@@ -289,6 +292,12 @@
                 :default -1.0
                 :min -2.0
                 :max 2.0}]
+  :ui-hints {:renderer :corner-pin-2d
+             :corners {:tl [:tl-x :tl-y]
+                      :tr [:tr-x :tr-y]
+                      :bl [:bl-x :bl-y]
+                      :br [:br-x :br-y]}
+             :default-mode :visual}
   :apply-fn apply-corner-pin})
 
 ;; ============================================================================
