@@ -656,30 +656,11 @@
                    (.setFocusTraversable node true)
                    (.requestFocus node))
      :desc {:fx/type :v-box
-            :spacing 0
-            :style "-fx-background-color: #2D2D2D;"
-            :pref-width 600
-            :pref-height 450
-            :children [;; Header
-                       {:fx/type :h-box
-                        :alignment :center-left
-                        :spacing 8
-                        :padding 12
-                        :style "-fx-background-color: #252525;"
-                        :children [{:fx/type :label
-                                    :text (str "Effects Chain - Cell "
-                                               (char (+ 65 row))
-                                               (inc col))
-                                    :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
-                                   {:fx/type :region :h-box/hgrow :always}
-                                   {:fx/type :check-box
-                                    :text "Active"
-                                    :selected active?
-                                    :style "-fx-text-fill: white;"
-                                    :on-selected-changed {:event/type :effects/toggle-cell
-                                                          :col col :row row}}]}
-                       
-                       ;; Main content area
+             :spacing 0
+             :style "-fx-background-color: #2D2D2D;"
+             :pref-width 600
+             :pref-height 550
+             :children [;; Main content area
                        {:fx/type :h-box
                         :spacing 0
                         :v-box/vgrow :always
@@ -708,12 +689,20 @@
                                                 :effect-chain effect-chain
                                                 :dialog-data dialog-data}]}]}
                        
-                       ;; Footer with close button
+                       ;; Footer with Active checkbox and close button
                        {:fx/type :h-box
-                        :alignment :center-right
+                        :alignment :center-left
+                        :spacing 8
                         :padding 12
                         :style "-fx-background-color: #252525;"
-                        :children [{:fx/type :button
+                        :children [{:fx/type :check-box
+                                    :text "Active"
+                                    :selected active?
+                                    :style "-fx-text-fill: white;"
+                                    :on-selected-changed {:event/type :effects/toggle-cell
+                                                          :col col :row row}}
+                                   {:fx/type :region :h-box/hgrow :always}
+                                   {:fx/type :button
                                     :text "Close"
                                     :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-padding: 6 20;"
                                     :on-action {:event/type :ui/close-dialog
@@ -777,10 +766,14 @@
         dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
         {:keys [col row]} dialog-data
         ;; Use centralized CSS system - dialogs includes all needed styles
-        stylesheets (css/dialog-stylesheet-urls)]
+        stylesheets (css/dialog-stylesheet-urls)
+        ;; Generate window title with cell identifier
+        window-title (str "Effects Chain - Cell "
+                         (char (+ 65 row))
+                         (inc col))]
     {:fx/type :stage
      :showing open?
-     :title "Edit Effects Chain"
+     :title window-title
      :modality :application-modal
      :on-close-request {:event/type :ui/close-dialog :dialog-id :effect-chain-editor}
      :scene {:fx/type effect-chain-editor-scene
