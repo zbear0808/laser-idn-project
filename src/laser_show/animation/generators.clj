@@ -2,7 +2,8 @@
   "Shape generators for laser animations.
    Each generator produces a sequence of LaserPoints that form a shape."
   (:require [laser-show.animation.types :as t]
-            [laser-show.animation.colors :as colors]))
+            [laser-show.animation.colors :as colors]
+            [laser-show.common.util :as u]))
 
 ;; ============================================================================
 ;; Geometry Helpers
@@ -55,13 +56,13 @@
         ;; First point at angle 0 for blanked positioning
         first-x (+ cx radius)
         first-y cy]
-    (cons
-      (t/blanked-point first-x first-y)
-      (for [i (range num-points)]
-        (let [angle (* TWO-PI (/ i num-points))
-              x (+ cx (* radius (Math/cos angle)))
-              y (+ cy (* radius (Math/sin angle)))]
-          (t/make-point x y r g b))))))
+    (->> (range num-points)
+         (mapv (fn [i]
+                 (let [angle (* TWO-PI (/ i num-points))
+                       x (+ cx (* radius (Math/cos angle)))
+                       y (+ cy (* radius (Math/sin angle)))]
+                   (t/make-point x y r g b))))
+         (u/consv (t/blanked-point first-x first-y)))))
 
 (defn generate-line
   "Generate points for a line segment.
@@ -79,13 +80,13 @@
   (let [[x1 y1] start
         [x2 y2] end
         [r g b] color]
-    (cons
-      (t/blanked-point x1 y1)
-      (for [i (range num-points)]
-        (let [t (/ i (dec num-points))
-              x (lerp x1 x2 t)
-              y (lerp y1 y2 t)]
-          (t/make-point x y r g b))))))
+    (->> (range num-points)
+         (mapv (fn [i]
+                 (let [t (/ i (dec num-points))
+                       x (lerp x1 x2 t)
+                       y (lerp y1 y2 t)]
+                   (t/make-point x y r g b))))
+         (u/consv (t/blanked-point x1 y1)))))
 
 (defn generate-square
   "Generate points for a square.
@@ -109,15 +110,16 @@
                  [(- cx half) (+ cy half)]   ; top-left
                  [(- cx half) (- cy half)]]  ; back to start
         [first-x first-y] (first corners)]
-    (cons
-      (t/blanked-point first-x first-y)
-      (mapcat (fn [[[x1 y1] [x2 y2]]]
-                (for [i (range num-points)]
-                  (let [t (/ i num-points)
-                        x (lerp x1 x2 t)
-                        y (lerp y1 y2 t)]
-                    (t/make-point x y r g b))))
-              (partition 2 1 corners)))))
+    (->> corners
+         (partition 2 1)
+         (u/mapcatv (fn [[[x1 y1] [x2 y2]]]
+                      (mapv (fn [i]
+                              (let [t (/ i num-points)
+                                    x (lerp x1 x2 t)
+                                    y (lerp y1 y2 t)]
+                                (t/make-point x y r g b)))
+                            (range num-points))))
+         (u/consv (t/blanked-point first-x first-y)))))
 
 (defn generate-triangle
   "Generate points for a triangle.
@@ -140,15 +142,16 @@
         right [(+ cx (/ size 2)) (- cy (* size 0.289))]  ; bottom-right
         corners [top right left top]  ; close the triangle
         [first-x first-y] (first corners)]
-    (cons
-      (t/blanked-point first-x first-y)
-      (mapcat (fn [[[x1 y1] [x2 y2]]]
-                (for [i (range num-points)]
-                  (let [t (/ i num-points)
-                        x (lerp x1 x2 t)
-                        y (lerp y1 y2 t)]
-                    (t/make-point x y r g b))))
-              (partition 2 1 corners)))))
+    (->> corners
+         (partition 2 1)
+         (u/mapcatv (fn [[[x1 y1] [x2 y2]]]
+                      (mapv (fn [i]
+                              (let [t (/ i num-points)
+                                    x (lerp x1 x2 t)
+                                    y (lerp y1 y2 t)]
+                                (t/make-point x y r g b)))
+                            (range num-points))))
+         (u/consv (t/blanked-point first-x first-y)))))
 
 (defn generate-spiral
   "Generate points for a spiral.
@@ -172,15 +175,15 @@
         ;; First point at center of spiral (start-radius, angle 0)
         first-x (+ cx start-radius)
         first-y cy]
-    (cons
-      (t/blanked-point first-x first-y)
-      (for [i (range num-points)]
-        (let [t (/ i (dec num-points))
-              angle (* TWO-PI turns t)
-              radius (lerp start-radius end-radius t)
-              x (+ cx (* radius (Math/cos angle)))
-              y (+ cy (* radius (Math/sin angle)))]
-          (t/make-point x y r g b))))))
+    (->> (range num-points)
+         (mapv (fn [i]
+                 (let [t (/ i (dec num-points))
+                       angle (* TWO-PI turns t)
+                       radius (lerp start-radius end-radius t)
+                       x (+ cx (* radius (Math/cos angle)))
+                       y (+ cy (* radius (Math/sin angle)))]
+                   (t/make-point x y r g b))))
+         (u/consv (t/blanked-point first-x first-y)))))
 
 (defn generate-star
   "Generate points for a star.
@@ -204,23 +207,25 @@
         angle-step (/ TWO-PI spikes)
         half-step (/ angle-step 2)
         ;; Generate vertices alternating outer/inner
-        vertices (for [i (range (* 2 spikes))]
-                   (let [angle (* i half-step)
-                         radius (if (even? i) outer-radius inner-radius)]
-                     [(+ cx (* radius (Math/cos angle)))
-                      (+ cy (* radius (Math/sin angle)))]))
+        vertices (->> (range (* 2 spikes))
+                      (mapv (fn [i]
+                              (let [angle (* i half-step)
+                                    radius (if (even? i) outer-radius inner-radius)]
+                                [(+ cx (* radius (Math/cos angle)))
+                                 (+ cy (* radius (Math/sin angle)))]))))
         ;; Close the star
-        vertices (concat vertices [(first vertices)])
+        vertices (conj vertices (first vertices))
         [first-x first-y] (first vertices)]
-    (cons
-      (t/blanked-point first-x first-y)
-      (mapcat (fn [[[x1 y1] [x2 y2]]]
-                (for [i (range num-points)]
-                  (let [t (/ i num-points)
-                        x (lerp x1 x2 t)
-                        y (lerp y1 y2 t)]
-                    (t/make-point x y r g b))))
-              (partition 2 1 vertices)))))
+    (->> vertices
+         (partition 2 1)
+         (u/mapcatv (fn [[[x1 y1] [x2 y2]]]
+                      (mapv (fn [i]
+                              (let [t (/ i num-points)
+                                    x (lerp x1 x2 t)
+                                    y (lerp y1 y2 t)]
+                                (t/make-point x y r g b)))
+                            (range num-points))))
+         (u/consv (t/blanked-point first-x first-y)))))
 
 (defn generate-wave
   "Generate points for a sine wave.
@@ -245,13 +250,13 @@
         ;; First point at start of wave
         first-x (+ cx (- half-width))
         first-y cy]
-    (cons
-      (t/blanked-point first-x first-y)
-      (for [i (range num-points)]
-        (let [t (/ i (dec num-points))
-              x (+ cx (- (* t width) half-width))
-              y (+ cy (* amplitude (Math/sin (* TWO-PI frequency t))))]
-          (t/make-point x y r g b))))))
+    (->> (range num-points)
+         (mapv (fn [i]
+                 (let [t (/ i (dec num-points))
+                       x (+ cx (- (* t width) half-width))
+                       y (+ cy (* amplitude (Math/sin (* TWO-PI frequency t))))]
+                   (t/make-point x y r g b))))
+         (u/consv (t/blanked-point first-x first-y)))))
 
 ;; ============================================================================
 ;; Beam Effects
@@ -303,14 +308,14 @@
         angle-step (if (> num-beams 1)
                      (/ spread (dec num-beams))
                      0)]
-    (mapcat (fn [i]
-              (let [angle (+ start-angle (* i angle-step))
-                    ex (+ ox (* length (Math/cos angle)))
-                    ey (+ oy (* length (Math/sin angle)))]
-                ;; Blanked point to move to endpoint position, then lit point at endpoint
-                [(t/blanked-point ex ey)
-                 (t/make-point ex ey r g b)]))
-            (range num-beams))))
+    (->> (range num-beams)
+         (u/mapcatv (fn [i]
+                      (let [angle (+ start-angle (* i angle-step))
+                            ex (+ ox (* length (Math/cos angle)))
+                            ey (+ oy (* length (Math/sin angle)))]
+                        ;; Blanked point to move to endpoint position, then lit point at endpoint
+                        [(t/blanked-point ex ey)
+                         (t/make-point ex ey r g b)]))))))
 
 ;; ============================================================================
 ;; Animation-Ready Generators (return functions)
@@ -368,14 +373,14 @@
   (fn [time-ms params]
     (let [{:keys [amplitude frequency color]
            :or {amplitude 0.3 frequency 2 color [255 255 255]}} params
-          [r g b] color
-          points (mapv (fn [i]
-                         (let [t (/ (double i) 63.0)
-                               x (- t 0.5)
-                               y (* amplitude (Math/sin (* TWO-PI frequency t)))]
-                           (t/make-point x y r g b)))
-                       (range 64))]
-      (t/make-frame points))))
+          [r g b] color]
+      (->> (range 64)
+           (mapv (fn [i]
+                   (let [t (/ (double i) 63.0)
+                         x (- t 0.5)
+                         y (* amplitude (Math/sin (* TWO-PI frequency t)))]
+                     (t/make-point x y r g b))))
+           (t/make-frame)))))
 
 (defn beam-fan-animation
   "Create a beam fan animation generator function."
@@ -410,13 +415,13 @@
   (fn [time-ms params]
     (let [{:keys [radius]
            :or {radius 0.5}} params
-          num-points 64
-          points (mapv (fn [i]
-                         (let [t (/ (double i) num-points)
-                               angle (* TWO-PI t)
-                               x (* radius (Math/cos angle))
-                               y (* radius (Math/sin angle))
-                               [r g b] (colors/rainbow t)]
-                           (t/make-point x y r g b)))
-                       (range num-points))]
-      (t/make-frame points))))
+          num-points 64]
+      (->> (range num-points)
+           (mapv (fn [i]
+                   (let [t (/ (double i) num-points)
+                         angle (* TWO-PI t)
+                         x (* radius (Math/cos angle))
+                         y (* radius (Math/sin angle))
+                         [r g b] (colors/rainbow t)]
+                     (t/make-point x y r g b))))
+           (t/make-frame)))))

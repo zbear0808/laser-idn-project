@@ -58,6 +58,14 @@
   [f coll]
   (into [] (mapcat f) coll))
 
+(defn consv
+  [x coll]
+  (into [x] coll))
+
+(defn concatv
+  [& colls]
+  (into [] cat colls))
+
 (defn filter-keys
   "Takes a map `m` and returns a new map containing only the key-value pairs
   for which `f` returns logical true for the key."
