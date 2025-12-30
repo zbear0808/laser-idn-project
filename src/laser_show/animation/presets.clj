@@ -52,7 +52,7 @@
    :category :geometric
    :parameters [(float-param :radius "Radius" 0.5 0.1 1.0)
                 (color-param :color "Color" [255 255 255])]
-   :generator (gen/circle-animation)})
+   :generator gen/circle-animation})
 
 (def preset-square
   {:id :square
@@ -60,7 +60,7 @@
    :category :geometric
    :parameters [(float-param :size "Size" 0.5 0.1 1.0)
                 (color-param :color "Color" [255 255 255])]
-   :generator (gen/square-animation)})
+   :generator gen/square-animation})
 
 (def preset-triangle
   {:id :triangle
@@ -68,7 +68,7 @@
    :category :geometric
    :parameters [(float-param :size "Size" 0.5 0.1 1.0)
                 (color-param :color "Color" [255 255 255])]
-   :generator (gen/triangle-animation)})
+   :generator gen/triangle-animation})
 
 (def preset-spiral
   {:id :spiral
@@ -78,7 +78,7 @@
                 (float-param :start-radius "Inner Radius" 0.1 0.0 0.5)
                 (float-param :end-radius "Outer Radius" 0.5 0.2 1.0)
                 (color-param :color "Color" [255 255 255])]
-   :generator (gen/spiral-animation)})
+   :generator gen/spiral-animation})
 
 (def preset-star
   {:id :star
@@ -88,7 +88,7 @@
                 (float-param :outer-radius "Outer Radius" 0.5 0.2 1.0)
                 (float-param :inner-radius "Inner Radius" 0.25 0.1 0.5)
                 (color-param :color "Color" [255 255 255])]
-   :generator (gen/star-animation)})
+   :generator gen/star-animation})
 
 (def preset-wave
   {:id :wave
@@ -97,7 +97,7 @@
    :parameters [(float-param :amplitude "Amplitude" 0.3 0.1 0.8)
                 (int-param :frequency "Frequency" 2 1 8)
                 (color-param :color "Color" [0 255 255])]
-   :generator (gen/wave-animation)})
+   :generator gen/wave-animation})
 
 (def preset-beam-fan
   {:id :beam-fan
@@ -105,7 +105,7 @@
    :category :beam
    :parameters [(float-param :length "Length" 0.8 0.3 1.0)
                 (color-param :color "Color" [255 100 0])]
-   :generator (gen/beam-fan-animation)})
+   :generator gen/beam-fan-animation})
 
 (def preset-horizontal-line
   {:id :horizontal-line
@@ -113,14 +113,14 @@
    :category :beam
    :parameters [(float-param :length "Length" 1.0 0.1 2.0)
                 (color-param :color "Color" [255 255 255])]
-   :generator (gen/horizontal-line-animation)})
+   :generator gen/horizontal-line-animation})
 
 (def preset-rainbow-circle
   {:id :rainbow-circle
    :name "Rainbow Circle"
    :category :abstract
    :parameters [(float-param :radius "Radius" 0.5 0.1 1.0)]
-   :generator (gen/rainbow-circle-animation)})
+   :generator gen/rainbow-circle-animation})
 
 ;; ============================================================================
 ;; Preset Registry

@@ -318,110 +318,101 @@
                          (t/make-point ex ey r g b)]))))))
 
 ;; ============================================================================
-;; Animation-Ready Generators (return functions)
+;; Animation-Ready Generators
 ;; ============================================================================
 
 (defn circle-animation
-  "Create a circle animation generator function.
-   Returns (fn [time-ms params] -> LaserFrame)"
-  []
-  (fn [time-ms params]
-    (let [{:keys [radius color]
-           :or {radius 0.5 color [255 255 255]}} params
-          points (generate-circle :radius radius :color color)]
-      (t/make-frame points))))
+  "Circle animation generator function.
+   Takes [time-ms params] and returns LaserFrame."
+  [time-ms params]
+  (let [{:keys [radius color]
+         :or {radius 0.5 color [255 255 255]}} params
+        points (generate-circle :radius radius :color color)]
+    (t/make-frame points)))
 
 (defn square-animation
-  "Create a square animation generator function."
-  []
-  (fn [time-ms params]
-    (let [{:keys [size color]
-           :or {size 0.5 color [255 255 255]}} params
-          points (generate-square :size size :color color)]
-      (t/make-frame points))))
+  "Square animation generator function."
+  [time-ms params]
+  (let [{:keys [size color]
+         :or {size 0.5 color [255 255 255]}} params
+        points (generate-square :size size :color color)]
+    (t/make-frame points)))
 
 (defn triangle-animation
-  "Create a triangle animation generator function."
-  []
-  (fn [time-ms params]
-    (let [{:keys [size color]
-           :or {size 0.5 color [255 255 255]}} params
-          points (generate-triangle :size size :color color)]
-      (t/make-frame points))))
+  "Triangle animation generator function."
+  [time-ms params]
+  (let [{:keys [size color]
+         :or {size 0.5 color [255 255 255]}} params
+        points (generate-triangle :size size :color color)]
+    (t/make-frame points)))
 
 (defn spiral-animation
-  "Create a spiral animation generator function."
-  []
-  (fn [time-ms params]
-    (let [{:keys [turns start-radius end-radius color]
-           :or {turns 3 start-radius 0.1 end-radius 0.5 color [255 255 255]}} params
-          points (generate-spiral :turns turns :start-radius start-radius :end-radius end-radius :color color)]
-      (t/make-frame points))))
+  "Spiral animation generator function."
+  [time-ms params]
+  (let [{:keys [turns start-radius end-radius color]
+         :or {turns 3 start-radius 0.1 end-radius 0.5 color [255 255 255]}} params
+        points (generate-spiral :turns turns :start-radius start-radius :end-radius end-radius :color color)]
+    (t/make-frame points)))
 
 (defn star-animation
-  "Create a star animation generator function."
-  []
-  (fn [time-ms params]
-    (let [{:keys [spikes outer-radius inner-radius color]
-           :or {spikes 5 outer-radius 0.5 inner-radius 0.25 color [255 255 255]}} params
-          points (generate-star :spikes spikes :outer-radius outer-radius :inner-radius inner-radius :color color)]
-      (t/make-frame points))))
+  "Star animation generator function."
+  [time-ms params]
+  (let [{:keys [spikes outer-radius inner-radius color]
+         :or {spikes 5 outer-radius 0.5 inner-radius 0.25 color [255 255 255]}} params
+        points (generate-star :spikes spikes :outer-radius outer-radius :inner-radius inner-radius :color color)]
+    (t/make-frame points)))
 
 (defn wave-animation
-  "Create a wave animation generator function."
-  []
-  (fn [time-ms params]
-    (let [{:keys [amplitude frequency color]
-           :or {amplitude 0.3 frequency 2 color [255 255 255]}} params
-          [r g b] color]
-      (->> (range 64)
-           (mapv (fn [i]
-                   (let [t (/ (double i) 63.0)
-                         x (- t 0.5)
-                         y (* amplitude (Math/sin (* TWO-PI frequency t)))]
-                     (t/make-point x y r g b))))
-           (t/make-frame)))))
+  "Wave animation generator function."
+  [time-ms params]
+  (let [{:keys [amplitude frequency color]
+         :or {amplitude 0.3 frequency 2 color [255 255 255]}} params
+        [r g b] color]
+    (->> (range 64)
+         (mapv (fn [i]
+                 (let [t (/ (double i) 63.0)
+                       x (- t 0.5)
+                       y (* amplitude (Math/sin (* TWO-PI frequency t)))]
+                   (t/make-point x y r g b))))
+         (t/make-frame))))
 
 (defn beam-fan-animation
-  "Create a beam fan animation generator function."
-  []
-  (fn [time-ms params]
-    (let [{:keys [length color]
-           :or {length 0.8 color [255 255 255]}} params
-          half-length (/ length 2)
-          points (generate-line :num-points 32
-                               :start [(- half-length) 0]
-                               :end [half-length 0]
-                               :color color)]
-      (t/make-frame points))))
+  "Beam fan animation generator function."
+  [time-ms params]
+  (let [{:keys [length color]
+         :or {length 0.8 color [255 255 255]}} params
+        half-length (/ length 2)
+        points (generate-line :num-points 32
+                             :start [(- half-length) 0]
+                             :end [half-length 0]
+                             :color color)]
+    (t/make-frame points)))
 
 (defn horizontal-line-animation
-  "Create a horizontal line animation generator function.
+  "Horizontal line animation generator function.
    Line spans horizontally across the projection area."
-  []
-  (fn [time-ms params]
-    (let [{:keys [length color]
-           :or {length 1.0 color [255 255 255]}} params
-          half-length (/ length 2)
-          points (generate-line :num-points 64
-                               :start [(- half-length) 0]
-                               :end [half-length 0]
-                               :color color)]
-      (t/make-frame points))))
+  [time-ms params]
+  (let [{:keys [length color]
+         :or {length 1.0 color [255 255 255]}} params
+        half-length (/ length 2)
+        points (generate-line :num-points 64
+                             :start [(- half-length) 0]
+                             :end [half-length 0]
+                             :color color)]
+    (t/make-frame points)))
 
 (defn rainbow-circle-animation
-  "Create a rainbow-colored circle animation."
-  []
-  (fn [time-ms params]
-    (let [{:keys [radius]
-           :or {radius 0.5}} params
-          num-points 64]
-      (->> (range num-points)
-           (mapv (fn [i]
-                   (let [t (/ (double i) num-points)
-                         angle (* TWO-PI t)
-                         x (* radius (Math/cos angle))
-                         y (* radius (Math/sin angle))
-                         [r g b] (colors/rainbow t)]
-                     (t/make-point x y r g b))))
-           (t/make-frame)))))
+  "Rainbow-colored circle animation generator function."
+  [time-ms params]
+  (let [{:keys [radius]
+         :or {radius 0.5}} params
+        num-points 64]
+    (->> (range num-points)
+         (mapv (fn [i]
+                 (let [t (/ (double i) num-points)
+                       angle (* TWO-PI t)
+                       x (* radius (Math/cos angle))
+                       y (* radius (Math/sin angle))
+                       [r g b] (colors/rainbow t)]
+                   (t/make-point x y r g b))))
+         (t/make-frame))))
