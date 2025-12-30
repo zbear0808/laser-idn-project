@@ -28,7 +28,8 @@
           bg-hover "#404040"
           bg-focused "#3d3d3d"
           text-color "#e0e0e0"
-          border-color "#3d3d3d"]
+          border-color "#3d3d3d"
+          header-bg "#1e1e1eff"]
       
       {;; Store colors as keywords for code access
        ::background bg
@@ -37,8 +38,44 @@
        ::text text-color
        ::border border-color
        ::separator border-color
+       ::header-background header-bg
 
-       ;; The popup container that appears when clicking a menu
+       ".header-bar"
+       {:-fx-background-color header-bg}
+
+       ".menu-container"
+       {:-fx-background-color header-bg}
+
+       ".menu-bar-transparent"
+       {:-fx-background-color :transparent
+        :-fx-text-fill text-color
+        :-fx-border-color :transparent
+        :-fx-border-width "0"
+        :-fx-padding "0"}
+
+       ".menu-label"
+       {:-fx-text-fill text-color}
+
+       ".menu"
+       {:-fx-padding "2px"
+        :-fx-background-radius "4px"
+        
+        ":hover"
+        {:-fx-background-color "#3d3d3d"}
+        
+        ;; Hide the dropdown arrow 
+        " > .arrow-button"
+        {:-fx-padding "0"
+         :-fx-min-width "0"
+         :-fx-pref-width "0"
+         :-fx-max-width "0"} 
+        " > .arrow-button > .arrow"
+        {:-fx-padding "0"
+         :-fx-min-width "0"
+         :-fx-pref-width "0"
+         :-fx-max-width "0"
+         :-fx-shape ""}}
+
        ".context-menu"
        {:-fx-background-color bg
         :-fx-border-color border-color
@@ -46,23 +83,19 @@
         :-fx-background-radius "4px"
         :-fx-border-radius "4px"}
 
-       ;; Individual items within the menu
        ".menu-item"
        {:-fx-background-color bg
         :-fx-text-fill text-color
         :-fx-background-radius "2px"
 
-        ;; Hover state - when mouse is over the item
         ":hover"
         {:-fx-background-color bg-hover
          :-fx-cursor "hand"}
 
-        ;; Focused state - when navigating with keyboard
         ":focused"
         {:-fx-background-color bg-focused
          :-fx-border-width "1px"}
 
-        ;; Label text within menu item
         " .label"
         {:-fx-text-fill text-color}}
 

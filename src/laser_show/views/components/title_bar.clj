@@ -189,7 +189,7 @@
    :text ""
    :graphic {:fx/type :label
              :text "File"
-             :style "-fx-text-fill: #e0e0e0;"}
+             :style-class "menu-label"}
    :items (file-menu-items context)})
 
 (defn- edit-menu
@@ -198,7 +198,7 @@
    :text ""
    :graphic {:fx/type :label
              :text "Edit"
-             :style "-fx-text-fill: #e0e0e0;"}
+             :style-class "menu-label"}
    :items (edit-menu-items context)})
 
 (defn- transport-menu
@@ -207,7 +207,7 @@
    :text ""
    :graphic {:fx/type :label
              :text "Transport"
-             :style "-fx-text-fill: #e0e0e0;"}
+             :style-class "menu-label"}
    :items (transport-menu-items context)})
 
 (defn- view-menu
@@ -216,7 +216,7 @@
    :text ""
    :graphic {:fx/type :label
              :text "View"
-             :style "-fx-text-fill: #e0e0e0;"}
+             :style-class "menu-label"}
    :items (view-menu-items context)})
 
 (defn- help-menu
@@ -225,29 +225,29 @@
    :text ""
    :graphic {:fx/type :label
              :text "Help"
-             :style "-fx-text-fill: #e0e0e0;"}
+             :style-class "menu-label"}
    :items (help-menu-items context)})
 
 ;; ============================================================================
 ;; Icon Loading
 ;; ============================================================================
 
-(def ^:private app-icon
+(def app-icon
   "Lazy-loaded application icon image.
    Loads the laser warning square icon from resources."
-  (delay
-    (when-let [icon-url (io/resource "laser-warning-square.png")]
-      (Image. (.toString icon-url)))))
+  (-> "laser-warning-square.png"
+      (io/resource)
+      (.toString)
+      (Image.)))
 
 (defn- app-icon-view
   "Application icon component - laser warning square."
   [{:keys [fx/context]}]
   {:fx/type :image-view
-   :image @app-icon
+   :image app-icon
    :fit-width 20
    :fit-height 20
-   :preserve-ratio true
-   :style "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.3), 2, 0, 0, 1);"})
+   :preserve-ratio true})
 
 ;; ============================================================================
 ;; Menu Bar Component
@@ -259,15 +259,12 @@
   {:fx/type :h-box
    :alignment :center-left
    :spacing 8
-   :style "-fx-background-color: #1e1e1eff;"
+   :padding {:left 13}
+   :style-class "menu-container"
    :children [{:fx/type app-icon-view}
               {:fx/type :menu-bar
-               :use-system-menu-bar false
-               :style (str "-fx-background-color: transparent; "
-                          "-fx-text-fill: #E0E0E0; "
-                          "-fx-border-color: transparent; "
-                          "-fx-border-width: 0; "
-                          "-fx-padding: 0;")
+               :use-system-menu-bar true
+               :style-class "menu-bar-transparent"
                :menus [{:fx/type file-menu}
                        {:fx/type edit-menu}
                        {:fx/type transport-menu}
@@ -288,5 +285,5 @@
    - :fx/context - cljfx context (passed automatically by renderer)"
   [{:keys [fx/context]}]
   {:fx/type header-bar-lifecycle
-   :style "-fx-background-color: #1e1e1eff;"
+   :style-class "header-bar"
    :leading {:fx/type menu-bar}})
