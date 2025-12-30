@@ -11,12 +11,13 @@
 ;; ============================================================================
 
 (defn- apply-rgb-calibration [frame _time-ms _bpm {:keys [r-gain g-gain b-gain]}]
-  (effects/transform-colors
+  (effects/transform-point-full
    frame
-   (fn [[r g b]]
-     [(common/clamp-byte (* r r-gain))
-      (common/clamp-byte (* g g-gain))
-      (common/clamp-byte (* b b-gain))])))
+   (fn [{:keys [r g b] :as pt}]
+     (assoc pt
+       :r (int (common/clamp-byte (* r r-gain)))
+       :g (int (common/clamp-byte (* g g-gain)))
+       :b (int (common/clamp-byte (* b b-gain)))))))
 
 (effects/register-effect!
  {:id :rgb-calibration
@@ -51,12 +52,13 @@
   (let [r-inv (/ 1.0 r-gamma)
         g-inv (/ 1.0 g-gamma)
         b-inv (/ 1.0 b-gamma)]
-    (effects/transform-colors
+    (effects/transform-point-full
      frame
-     (fn [[r g b]]
-       [(common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) r-inv)))
-        (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) g-inv)))
-        (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) b-inv)))]))))
+     (fn [{:keys [r g b] :as pt}]
+       (assoc pt
+         :r (int (common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) r-inv))))
+         :g (int (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) g-inv))))
+         :b (int (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) b-inv)))))))))
 
 (effects/register-effect!
  {:id :gamma-correction
@@ -88,15 +90,16 @@
 ;; ============================================================================
 
 (defn- apply-brightness-calibration [frame _time-ms _bpm {:keys [global-brightness min-threshold]}]
-  (effects/transform-colors
+  (effects/transform-point-full
    frame
-   (fn [[r g b]]
+   (fn [{:keys [r g b] :as pt}]
      (let [max-val (max r g b)]
        (if (< max-val min-threshold)
-         [0 0 0]
-         [(common/clamp-byte (* r global-brightness))
-          (common/clamp-byte (* g global-brightness))
-          (common/clamp-byte (* b global-brightness))])))))
+         (assoc pt :r 0 :g 0 :b 0)
+         (assoc pt
+           :r (int (common/clamp-byte (* r global-brightness)))
+           :g (int (common/clamp-byte (* g global-brightness)))
+           :b (int (common/clamp-byte (* b global-brightness)))))))))
 
 (effects/register-effect!
  {:id :brightness-calibration
@@ -143,12 +146,13 @@
         r-mult (/ kr 255.0)
         g-mult (/ kg 255.0)
         b-mult (/ kb 255.0)]
-    (effects/transform-colors
+    (effects/transform-point-full
      frame
-     (fn [[r g b]]
-       [(common/clamp-byte (* r r-mult))
-        (common/clamp-byte (* g g-mult))
-        (common/clamp-byte (* b b-mult))]))))
+     (fn [{:keys [r g b] :as pt}]
+       (assoc pt
+         :r (int (common/clamp-byte (* r r-mult)))
+         :g (int (common/clamp-byte (* g g-mult)))
+         :b (int (common/clamp-byte (* b b-mult))))))))
 
 (effects/register-effect!
  {:id :color-temperature
@@ -169,12 +173,13 @@
 
 (defn- apply-color-matrix [frame _time-ms _bpm {:keys [m00 m01 m02 m10 m11 m12 m20 m21 m22
                                                        offset-r offset-g offset-b]}]
-  (effects/transform-colors
+  (effects/transform-point-full
    frame
-   (fn [[r g b]]
-     [(common/clamp-byte (+ (* r m00) (* g m01) (* b m02) offset-r))
-      (common/clamp-byte (+ (* r m10) (* g m11) (* b m12) offset-g))
-      (common/clamp-byte (+ (* r m20) (* g m21) (* b m22) offset-b))])))
+   (fn [{:keys [r g b] :as pt}]
+     (assoc pt
+       :r (int (common/clamp-byte (+ (* r m00) (* g m01) (* b m02) offset-r)))
+       :g (int (common/clamp-byte (+ (* r m10) (* g m11) (* b m12) offset-g)))
+       :b (int (common/clamp-byte (+ (* r m20) (* g m21) (* b m22) offset-b)))))))
 
 (effects/register-effect!
  {:id :color-matrix
@@ -204,12 +209,13 @@
   (let [r-mult (if (pos? measured-r) (/ ref-r measured-r) 1.0)
         g-mult (if (pos? measured-g) (/ ref-g measured-g) 1.0)
         b-mult (if (pos? measured-b) (/ ref-b measured-b) 1.0)]
-    (effects/transform-colors
+    (effects/transform-point-full
      frame
-     (fn [[r g b]]
-       [(common/clamp-byte (* r r-mult))
-        (common/clamp-byte (* g g-mult))
-        (common/clamp-byte (* b b-mult))]))))
+     (fn [{:keys [r g b] :as pt}]
+       (assoc pt
+         :r (int (common/clamp-byte (* r r-mult)))
+         :g (int (common/clamp-byte (* g g-mult)))
+         :b (int (common/clamp-byte (* b b-mult))))))))
 
 (effects/register-effect!
  {:id :white-balance
@@ -229,11 +235,12 @@
 ;; ============================================================================
 
 (defn- apply-projector-offset [frame _time-ms _bpm {:keys [x-offset y-offset]}]
-  (effects/transform-positions
+  (effects/transform-point-full
    frame
-   (fn [[x y]]
-     [(+ x x-offset)
-      (+ y y-offset)])))
+   (fn [{:keys [x y] :as pt}]
+     (assoc pt
+       :x (+ x x-offset)
+       :y (+ y y-offset)))))
 
 (effects/register-effect!
  {:id :projector-offset
@@ -259,11 +266,12 @@
 ;; ============================================================================
 
 (defn- apply-projector-scale [frame _time-ms _bpm {:keys [x-scale y-scale]}]
-  (effects/transform-positions
+  (effects/transform-point-full
    frame
-   (fn [[x y]]
-     [(* x x-scale)
-      (* y y-scale)])))
+   (fn [{:keys [x y] :as pt}]
+     (assoc pt
+       :x (* x x-scale)
+       :y (* y y-scale)))))
 
 (effects/register-effect!
  {:id :projector-scale
@@ -304,15 +312,16 @@
 
 (defn- apply-color-curves [frame _time-ms _bpm {:keys [r-curve g-curve b-curve]}]
   (let [default-curve [0 32 64 96 128 160 192 224 255]]
-    (effects/transform-colors
+    (effects/transform-point-full
      frame
-     (fn [[r g b]]
+     (fn [{:keys [r g b] :as pt}]
        (let [r-input (/ r 255.0)
              g-input (/ g 255.0)
              b-input (/ b 255.0)]
-         [(common/clamp-byte (interpolate-curve (or r-curve default-curve) r-input))
-          (common/clamp-byte (interpolate-curve (or g-curve default-curve) g-input))
-          (common/clamp-byte (interpolate-curve (or b-curve default-curve) b-input))])))))
+         (assoc pt
+           :r (int (common/clamp-byte (interpolate-curve (or r-curve default-curve) r-input)))
+           :g (int (common/clamp-byte (interpolate-curve (or g-curve default-curve) g-input)))
+           :b (int (common/clamp-byte (interpolate-curve (or b-curve default-curve) b-input)))))))))
 
 (effects/register-effect!
  {:id :color-curves
@@ -394,11 +403,12 @@
 (defn- apply-axis-flip [frame _time-ms _bpm {:keys [flip-x flip-y]}]
   (if (and (not flip-x) (not flip-y))
     frame
-    (effects/transform-positions
+    (effects/transform-point-full
      frame
-     (fn [[x y]]
-       [(if flip-x (- x) x)
-        (if flip-y (- y) y)]))))
+     (fn [{:keys [x y] :as pt}]
+       (assoc pt
+         :x (if flip-x (- x) x)
+         :y (if flip-y (- y) y))))))
 
 (effects/register-effect!
  {:id :axis-flip
@@ -422,14 +432,15 @@
 (defn- apply-rotation-offset [frame _time-ms _bpm {:keys [angle]}]
   (if (zero? angle)
     frame
-    (let [radians (Math/toRadians angle)]
-      (effects/transform-positions
+    (let [radians (Math/toRadians angle)
+          cos-a (Math/cos radians)
+          sin-a (Math/sin radians)]
+      (effects/transform-point-full
        frame
-       (fn [[x y]]
-         (let [cos-a (Math/cos radians)
-               sin-a (Math/sin radians)]
-           [(- (* x cos-a) (* y sin-a))
-            (+ (* x sin-a) (* y cos-a))]))))))
+       (fn [{:keys [x y] :as pt}]
+         (assoc pt
+           :x (- (* x cos-a) (* y sin-a))
+           :y (+ (* x sin-a) (* y cos-a))))))))
 
 (effects/register-effect!
  {:id :rotation-offset

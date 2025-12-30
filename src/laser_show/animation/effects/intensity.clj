@@ -33,23 +33,24 @@
 (defn- apply-intensity [frame time-ms bpm raw-params]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? raw-params)
-    ;; Per-point path - enables spatial brightness patterns!
+    ;; Per-point path - enables spatial brightness patterns! (uses legacy function for modulation support)
     (effects/transform-colors-per-point
       frame time-ms bpm raw-params
       (fn [_idx _cnt _x _y r g b {:keys [amount]}]
         [(common/clamp-byte (* r amount))
          (common/clamp-byte (* g amount))
          (common/clamp-byte (* b amount))]))
-    ;; Global path (backward compatible)
+    ;; Global path using new transform-point-full
     (let [context (mod/make-context {:time-ms time-ms :bpm bpm})
           resolved-params (mod/resolve-params raw-params context)
           amount (:amount resolved-params)]
-      (effects/transform-colors
+      (effects/transform-point-full
         frame
-        (fn [[r g b]]
-          [(common/clamp-byte (* r amount))
-           (common/clamp-byte (* g amount))
-           (common/clamp-byte (* b amount))])))))
+        (fn [{:keys [r g b] :as pt}]
+          (assoc pt
+            :r (int (common/clamp-byte (* r amount)))
+            :g (int (common/clamp-byte (* g amount)))
+            :b (int (common/clamp-byte (* b amount)))))))))
 
 (effects/register-effect!
  {:id :intensity
@@ -70,10 +71,10 @@
 
 (defn- apply-blackout [frame _time-ms _bpm {:keys [enabled]}]
   (if enabled
-    (effects/transform-colors
+    (effects/transform-point-full
      frame
-     (fn [[_r _g _b]]
-       [0 0 0]))
+     (fn [pt]
+       (assoc pt :r 0 :g 0 :b 0)))
     frame))
 
 (effects/register-effect!
@@ -89,12 +90,13 @@
 
 ;; ============================================================================
 ;; Threshold Effect (cut low intensities)
+;; NOTE: This effect can now delete points below threshold using nil return
 ;; ============================================================================
 
 (defn- apply-threshold [frame time-ms bpm raw-params]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? raw-params)
-    ;; Per-point path
+    ;; Per-point path (uses legacy function for modulation support)
     (effects/transform-colors-per-point
       frame time-ms bpm raw-params
       (fn [_idx _cnt _x _y r g b {:keys [threshold]}]
@@ -102,17 +104,17 @@
           (if (< max-val threshold)
             [0 0 0]
             [r g b]))))
-    ;; Global path (backward compatible)
+    ;; Global path using new transform-point-full
     (let [context (mod/make-context {:time-ms time-ms :bpm bpm})
           resolved-params (mod/resolve-params raw-params context)
           threshold (:threshold resolved-params)]
-      (effects/transform-colors
+      (effects/transform-point-full
         frame
-        (fn [[r g b]]
+        (fn [{:keys [r g b] :as pt}]
           (let [max-val (max r g b)]
             (if (< max-val threshold)
-              [0 0 0]
-              [r g b])))))))
+              (assoc pt :r 0 :g 0 :b 0)
+              pt)))))))
 
 (effects/register-effect!
  {:id :threshold
@@ -134,7 +136,7 @@
 (defn- apply-gamma [frame time-ms bpm raw-params]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? raw-params)
-    ;; Per-point path
+    ;; Per-point path (uses legacy function for modulation support)
     (effects/transform-colors-per-point
       frame time-ms bpm raw-params
       (fn [_idx _cnt _x _y r g b {:keys [gamma]}]
@@ -142,17 +144,18 @@
           [(common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) inv-gamma)))
            (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) inv-gamma)))
            (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) inv-gamma)))])))
-    ;; Global path (backward compatible)
+    ;; Global path using new transform-point-full
     (let [context (mod/make-context {:time-ms time-ms :bpm bpm})
           resolved-params (mod/resolve-params raw-params context)
           gamma (:gamma resolved-params)
           inv-gamma (/ 1.0 gamma)]
-      (effects/transform-colors
+      (effects/transform-point-full
         frame
-        (fn [[r g b]]
-          [(common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) inv-gamma)))
-           (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) inv-gamma)))
-           (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) inv-gamma)))])))))
+        (fn [{:keys [r g b] :as pt}]
+          (assoc pt
+            :r (int (common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) inv-gamma))))
+            :g (int (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) inv-gamma))))
+            :b (int (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) inv-gamma))))))))))
 
 (effects/register-effect!
  {:id :gamma

@@ -349,15 +349,98 @@
 ;; Utility Functions for Frame Transformation
 ;; ============================================================================
 
+(defn transform-point-full
+  "Apply a transformation function to all points in a frame with full context.
+   The transform-fn receives a flat map:
+   {:x norm-x :y norm-y :r r :g g :b b :count count}
+   
+   Returns: transformed map (same structure), or nil to delete the point.
+   Uses (into [] (keep ...)) to support point deletion.
+   
+   Note: Most effects should use this function. For effects that need point
+   index, use transform-point-full-indexed instead."
+  [frame transform-fn]
+  (let [points (:points frame)
+        point-count (count points)]
+    (assoc frame :points
+      (into []
+        (keep
+          (fn [point]
+            (let [norm-x (/ (:x point) 32767.0)
+                  norm-y (/ (:y point) 32767.0)
+                  r (bit-and (:r point) 0xFF)
+                  g (bit-and (:g point) 0xFF)
+                  b (bit-and (:b point) 0xFF)
+                  result (transform-fn {:x norm-x
+                                        :y norm-y
+                                        :r r
+                                        :g g
+                                        :b b
+                                        :count point-count})]
+              (when result
+                (assoc point
+                  :x (short (Math/round (* (max -1.0 (min 1.0 (:x result))) 32767.0)))
+                  :y (short (Math/round (* (max -1.0 (min 1.0 (:y result))) 32767.0)))
+                  :r (unchecked-byte (max 0 (min 255 (int (:r result)))))
+                  :g (unchecked-byte (max 0 (min 255 (int (:g result)))))
+                  :b (unchecked-byte (max 0 (min 255 (int (:b result)))))))))
+          points)))))
+
+(defn transform-point-full-indexed
+  "Apply a transformation function to all points in a frame with index.
+   The transform-fn receives a flat map:
+   {:x norm-x :y norm-y :r r :g g :b b :idx idx :count count}
+   
+   Returns: transformed map (same structure), or nil to delete the point.
+   Uses (into [] (keep-indexed ...)) to support point deletion.
+   
+   Note: Only use this for effects that specifically need point index.
+   For most effects, use transform-point-full instead."
+  [frame transform-fn]
+  (let [points (:points frame)
+        point-count (count points)]
+    (assoc frame :points
+      (into []
+        (keep-indexed
+          (fn [idx point]
+            (let [norm-x (/ (:x point) 32767.0)
+                  norm-y (/ (:y point) 32767.0)
+                  r (bit-and (:r point) 0xFF)
+                  g (bit-and (:g point) 0xFF)
+                  b (bit-and (:b point) 0xFF)
+                  result (transform-fn {:x norm-x
+                                        :y norm-y
+                                        :r r
+                                        :g g
+                                        :b b
+                                        :idx idx
+                                        :count point-count})]
+              (when result
+                (assoc point
+                  :x (short (Math/round (* (max -1.0 (min 1.0 (:x result))) 32767.0)))
+                  :y (short (Math/round (* (max -1.0 (min 1.0 (:y result))) 32767.0)))
+                  :r (unchecked-byte (max 0 (min 255 (int (:r result)))))
+                  :g (unchecked-byte (max 0 (min 255 (int (:g result)))))
+                  :b (unchecked-byte (max 0 (min 255 (int (:b result)))))))))
+          points)))))
+
+;; ============================================================================
+;; Legacy Transform Functions (for backward compatibility during transition)
+;; ============================================================================
+
 (defn transform-points
-  "Apply a transformation function to all points in a frame.
-   The transform-fn receives a point and returns a transformed point."
+  "LEGACY: Apply a transformation function to all points in a frame.
+   The transform-fn receives a point and returns a transformed point.
+   
+   NOTE: Consider using transform-point-full instead for new code."
   [frame transform-fn]
   (update frame :points #(mapv transform-fn %)))
 
 (defn transform-points-indexed
-  "Apply a transformation function to all points with index.
-   The transform-fn receives [index point] and returns a transformed point."
+  "LEGACY: Apply a transformation function to all points with index.
+   The transform-fn receives [index point] and returns a transformed point.
+   
+   NOTE: Consider using transform-point-full-indexed instead for new code."
   [frame transform-fn]
   (update frame :points
           (fn [points]
@@ -366,9 +449,11 @@
                   points))))
 
 (defn transform-colors
-  "Apply a transformation function to point colors.
+  "LEGACY: Apply a transformation function to point colors.
    The transform-fn receives [r g b] and returns [r g b].
-   Blanked points (r=g=b=0) are not transformed by default."
+   Blanked points (r=g=b=0) are not transformed by default.
+   
+   NOTE: Consider using transform-point-full instead for new code."
   [frame transform-fn & {:keys [transform-blanked] :or {transform-blanked false}}]
   (transform-points
    frame
@@ -386,8 +471,10 @@
                   :b (unchecked-byte (max 0 (min 255 (int nb)))))))))))
 
 (defn transform-positions
-  "Apply a transformation function to point positions.
-   The transform-fn receives [norm-x norm-y] in [-1,1] range and returns [norm-x norm-y]."
+  "LEGACY: Apply a transformation function to point positions.
+   The transform-fn receives [norm-x norm-y] in [-1,1] range and returns [norm-x norm-y].
+   
+   NOTE: Consider using transform-point-full instead for new code."
   [frame transform-fn]
   (transform-points
    frame
@@ -400,7 +487,7 @@
               :y (short (Math/round (* (max -1.0 (min 1.0 new-y)) 32767.0))))))))
 
 (defn transform-colors-per-point
-  "Apply a per-point transformation to colors.
+  "LEGACY: Apply a per-point transformation to colors.
    The transform-fn receives [point-index point-count x y r g b resolved-params]
    where resolved-params is a map of resolved parameters for that specific point.
    Returns [r g b].
@@ -416,7 +503,9 @@
    - bpm: Current BPM
    - raw-params: Parameter map that may contain per-point modulators
    - transform-fn: Function that receives [idx cnt x y r g b params] -> [r g b]
-   - transform-blanked: If true, transforms blanked points (default false)"
+   - transform-blanked: If true, transforms blanked points (default false)
+   
+   NOTE: Consider using transform-point-full-indexed instead for new code."
   [frame time-ms bpm raw-params transform-fn & {:keys [transform-blanked] :or {transform-blanked false}}]
   (let [points (:points frame)
         point-count (count points)

@@ -19,28 +19,16 @@
   (:require [laser-show.animation.effects :as effects]))
 
 ;; ============================================================================
-;; Transformation Helpers
-;; ============================================================================
-
-(defn clamp [v min-v max-v]
-  (max min-v (min max-v v)))
-
-(defn normalize-coord [coord]
-  (/ coord 32767.0))
-
-(defn denormalize-coord [coord]
-  (short (Math/round (* (clamp coord -1.0 1.0) 32767.0))))
-
-;; ============================================================================
 ;; Scale Effect
 ;; ============================================================================
 
 (defn- apply-scale [frame _time-ms _bpm {:keys [x-scale y-scale]}]
-  (effects/transform-positions
+  (effects/transform-point-full
    frame
-   (fn [[x y]]
-     [(* x x-scale)
-      (* y y-scale)])))
+   (fn [{:keys [x y] :as pt}]
+     (assoc pt
+       :x (* x x-scale)
+       :y (* y y-scale)))))
 
 (effects/register-effect!
  {:id :scale
@@ -66,11 +54,12 @@
 ;; ============================================================================
 
 (defn- apply-translate [frame _time-ms _bpm {:keys [x y]}]
-  (effects/transform-positions
+  (effects/transform-point-full
    frame
-   (fn [[px py]]
-     [(+ px x)
-      (+ py y)])))
+   (fn [{px :x py :y :as pt}]
+     (assoc pt
+       :x (+ px x)
+       :y (+ py y)))))
 
 (effects/register-effect!
  {:id :translate
@@ -98,18 +87,16 @@
 ;; Rotation Effect
 ;; ============================================================================
 
-(defn- rotate-point [[x y] angle]
-  (let [cos-a (Math/cos angle)
-        sin-a (Math/sin angle)]
-    [(- (* x cos-a) (* y sin-a))
-     (+ (* x sin-a) (* y cos-a))]))
-
 (defn- apply-rotation [frame _time-ms _bpm {:keys [angle]}]
-  (let [radians (Math/toRadians angle)]
-    (effects/transform-positions
+  (let [radians (Math/toRadians angle)
+        cos-a (Math/cos radians)
+        sin-a (Math/sin radians)]
+    (effects/transform-point-full
      frame
-     (fn [[x y]]
-       (rotate-point [x y] radians)))))
+     (fn [{:keys [x y] :as pt}]
+       (assoc pt
+         :x (- (* x cos-a) (* y sin-a))
+         :y (+ (* x sin-a) (* y cos-a)))))))
 
 (effects/register-effect!
  {:id :rotation
@@ -132,19 +119,20 @@
 (defn- apply-viewport [frame _time-ms _bpm {:keys [x-min x-max y-min y-max]}]
   (let [viewport-width (- x-max x-min)
         viewport-height (- y-max y-min)]
-    (effects/transform-positions
+    (effects/transform-point-full
      frame
-     (fn [[x y]]
+     (fn [{:keys [x y] :as pt}]
        (let [in-viewport? (and (>= x x-min) (<= x x-max)
                                (>= y y-min) (<= y y-max))]
          (if in-viewport?
-           [(if (zero? viewport-width)
-              0.0
-              (- (* 2.0 (/ (- x x-min) viewport-width)) 1.0))
-            (if (zero? viewport-height)
-              0.0
-              (- (* 2.0 (/ (- y y-min) viewport-height)) 1.0))]
-           [0.0 0.0]))))))
+           (assoc pt
+             :x (if (zero? viewport-width)
+                  0.0
+                  (- (* 2.0 (/ (- x x-min) viewport-width)) 1.0))
+             :y (if (zero? viewport-height)
+                  0.0
+                  (- (* 2.0 (/ (- y y-min) viewport-height)) 1.0)))
+           (assoc pt :x 0.0 :y 0.0)))))))
 
 (effects/register-effect!
  {:id :viewport
@@ -182,15 +170,16 @@
 ;; ============================================================================
 
 (defn- apply-pinch-bulge [frame _time-ms _bpm {:keys [amount]}]
-  (effects/transform-positions
+  (effects/transform-point-full
    frame
-   (fn [[x y]]
+   (fn [{:keys [x y] :as pt}]
      (let [distance (Math/sqrt (+ (* x x) (* y y)))
            factor (if (zero? distance)
                     1.0
                     (Math/pow distance amount))]
-       [(* x factor)
-        (* y factor)]))))
+       (assoc pt
+         :x (* x factor)
+         :y (* y factor))))))
 
 (effects/register-effect!
  {:id :pinch-bulge
@@ -219,9 +208,9 @@
    - bl (bottom-left): maps from (-1, -1)
    - br (bottom-right): maps from (1, -1)"
   [frame _time-ms _bpm {:keys [tl-x tl-y tr-x tr-y bl-x bl-y br-x br-y]}]
-  (effects/transform-positions
+  (effects/transform-point-full
    frame
-   (fn [[x y]]
+   (fn [{:keys [x y] :as pt}]
      ;; Convert from [-1,1] to [0,1] for interpolation
      (let [u (/ (+ x 1.0) 2.0)  ; 0 at left, 1 at right
            v (/ (+ y 1.0) 2.0)  ; 0 at bottom, 1 at top
@@ -237,7 +226,7 @@
                     (* u one-minus-v br-y)
                     (* one-minus-u v tl-y)
                     (* u v tr-y))]
-       [new-x new-y]))))
+       (assoc pt :x new-x :y new-y)))))
 
 (effects/register-effect!
  {:id :corner-pin
@@ -305,13 +294,14 @@
 ;; ============================================================================
 
 (defn- apply-lens-distortion [frame _time-ms _bpm {:keys [k1 k2]}]
-  (effects/transform-positions
+  (effects/transform-point-full
    frame
-   (fn [[x y]]
+   (fn [{:keys [x y] :as pt}]
      (let [r-sq (+ (* x x) (* y y))
            factor (+ 1.0 (* k1 r-sq) (* k2 r-sq r-sq))]
-       [(* x factor)
-        (* y factor)]))))
+       (assoc pt
+         :x (* x factor)
+         :y (* y factor))))))
 
 (effects/register-effect!
  {:id :lens-distortion
@@ -344,13 +334,13 @@
 
 (defn- apply-wave-distort [frame time-ms _bpm {:keys [amplitude frequency axis speed]}]
   (let [time-offset (* (/ time-ms 1000.0) speed)]
-    (effects/transform-positions
+    (effects/transform-point-full
      frame
-     (fn [[x y]]
+     (fn [{:keys [x y] :as pt}]
        (case axis
-         :x [x (+ y (* amplitude (Math/sin (* 2.0 Math/PI (+ (* x frequency) time-offset)))))]
-         :y [(+ x (* amplitude (Math/sin (* 2.0 Math/PI (+ (* y frequency) time-offset))))) y]
-         [x y])))))
+         :x (assoc pt :y (+ y (* amplitude (Math/sin (* 2.0 Math/PI (+ (* x frequency) time-offset))))))
+         :y (assoc pt :x (+ x (* amplitude (Math/sin (* 2.0 Math/PI (+ (* y frequency) time-offset))))))
+         pt)))))
 
 (effects/register-effect!
  {:id :wave-distort
