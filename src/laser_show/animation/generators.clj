@@ -55,10 +55,11 @@
         [r g b] color
         ;; First point at angle 0 for blanked positioning
         first-x (+ cx radius)
-        first-y cy]
+        first-y cy
+        num-segments (dec num-points)]  ; Divide by (n-1) to reach full circle at last point
     (->> (range num-points)
          (mapv (fn [i]
-                 (let [angle (* TWO-PI (/ i num-points))
+                 (let [angle (* TWO-PI (/ i num-segments))
                        x (+ cx (* radius (Math/cos angle)))
                        y (+ cy (* radius (Math/sin angle)))]
                    (t/make-point x y r g b))))
@@ -109,12 +110,13 @@
                  [(+ cx half) (+ cy half)]   ; top-right
                  [(- cx half) (+ cy half)]   ; top-left
                  [(- cx half) (- cy half)]]  ; back to start
-        [first-x first-y] (first corners)]
+        [first-x first-y] (first corners)
+        num-segments (dec num-points)]  ; Divide by (n-1) to reach corner at last point
     (->> corners
          (partition 2 1)
          (u/mapcatv (fn [[[x1 y1] [x2 y2]]]
                       (mapv (fn [i]
-                              (let [t (/ i num-points)
+                              (let [t (/ i num-segments)
                                     x (lerp x1 x2 t)
                                     y (lerp y1 y2 t)]
                                 (t/make-point x y r g b)))
@@ -141,12 +143,13 @@
         left [(- cx (/ size 2)) (- cy (* size 0.289))]   ; bottom-left
         right [(+ cx (/ size 2)) (- cy (* size 0.289))]  ; bottom-right
         corners [top right left top]  ; close the triangle
-        [first-x first-y] (first corners)]
+        [first-x first-y] (first corners)
+        num-segments (dec num-points)]  ; Divide by (n-1) to reach corner at last point
     (->> corners
          (partition 2 1)
          (u/mapcatv (fn [[[x1 y1] [x2 y2]]]
                       (mapv (fn [i]
-                              (let [t (/ i num-points)
+                              (let [t (/ i num-segments)
                                     x (lerp x1 x2 t)
                                     y (lerp y1 y2 t)]
                                 (t/make-point x y r g b)))
@@ -215,12 +218,13 @@
                                  (+ cy (* radius (Math/sin angle)))]))))
         ;; Close the star
         vertices (conj vertices (first vertices))
-        [first-x first-y] (first vertices)]
+        [first-x first-y] (first vertices)
+        num-segments (dec num-points)]  ; Divide by (n-1) to reach vertex at last point
     (->> vertices
          (partition 2 1)
          (u/mapcatv (fn [[[x1 y1] [x2 y2]]]
                       (mapv (fn [i]
-                              (let [t (/ i num-points)
+                              (let [t (/ i num-segments)
                                     x (lerp x1 x2 t)
                                     y (lerp y1 y2 t)]
                                 (t/make-point x y r g b)))
@@ -406,10 +410,11 @@
   [time-ms params]
   (let [{:keys [radius]
          :or {radius 0.5}} params
-        num-points 64]
+        num-points 64
+        num-segments (dec num-points)]  ; Divide by (n-1) to reach full circle at last point
     (->> (range num-points)
          (mapv (fn [i]
-                 (let [t (/ (double i) num-points)
+                 (let [t (/ (double i) num-segments)
                        angle (* TWO-PI t)
                        x (* radius (Math/cos angle))
                        y (* radius (Math/sin angle))
