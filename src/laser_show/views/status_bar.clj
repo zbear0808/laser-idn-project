@@ -64,17 +64,22 @@
 ;; ============================================================================
 
 (defn frame-stats-status
-  "Status showing frame rendering stats."
+  "Status showing frame generation latency stats."
   [{:keys [fx/context]}]
   (let [stats (fx/sub-ctx context subs/frame-stats)]
-    {:fx/type :h-box
-     :spacing 16
-     :children [{:fx/type status-item
-                 :label "Frame"
-                 :value (str (:last-render-ms stats 0) "ms")}
-                {:fx/type status-item
-                 :label "FPS"
-                 :value (str (:fps stats 0))}]}))
+    (if (and stats (:avg-latency-us stats))
+      {:fx/type :h-box
+       :spacing 16
+       :children [{:fx/type status-item
+                   :label "Latency (avg)"
+                   :value (str (long (:avg-latency-us stats)) "µs")}
+                  {:fx/type status-item
+                   :label "p95"
+                   :value (str (long (:p95-latency-us stats)) "µs")}
+                  {:fx/type status-item
+                   :label "max"
+                   :value (str (long (:max-latency-us stats)) "µs")}]}
+      {:fx/type :label :text "" :pref-width 0})))
 
 ;; ============================================================================
 ;; Project Status

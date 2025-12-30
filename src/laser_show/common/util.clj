@@ -54,6 +54,10 @@
   [pred coll]
   (into [] (remove pred) coll))
 
+(defn mapcatv
+  [f coll]
+  (into [] (mapcat f) coll))
+
 (defn filter-keys
   "Takes a map `m` and returns a new map containing only the key-value pairs
   for which `f` returns logical true for the key."

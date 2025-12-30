@@ -10,6 +10,8 @@
             [laser-show.animation.presets :as presets]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.types :as t]
+            [laser-show.common.timing :as timing]
+            [laser-show.profiling.frame-profiler :as profiler]
             ;; Require effect implementations to register them
             [laser-show.animation.effects.shape]
             [laser-show.animation.effects.color]
@@ -69,7 +71,9 @@
 (defn generate-current-frame
   "Generate the current animation frame based on state.
    Applies active effects from the effects grid to the base frame.
-   Returns a LaserFrame or nil if nothing to render."
+   Returns a LaserFrame or nil if nothing to render.
+   
+   Frame generation is profiled to track performance."
   []
   (when (is-playing?)
     (when-let [preset-id (get-active-cell-preset)]
@@ -77,17 +81,36 @@
         (let [trigger-time (get-trigger-time)
               elapsed (- (System/currentTimeMillis) trigger-time)
               bpm (get-bpm)
-              base-frame (t/get-frame anim elapsed)]
+              
+              ;; Measure base frame generation
+              base-start (timing/nanotime)
+              base-frame (t/get-frame anim elapsed)
+              base-end (timing/nanotime)]
+          
           (when base-frame
-            (let [effect-chain (get-active-effects)]
-              (if effect-chain
-                (try
-                  (effects/apply-effect-chain base-frame effect-chain elapsed bpm trigger-time)
-                  (catch Exception e
-                    (println "[ERROR generate-current-frame] Effect chain failed:" (.getMessage e))
-                    (println "  effect-chain:" effect-chain)
-                    base-frame))
-                base-frame))))))))
+            (let [effect-chain (get-active-effects)
+                  
+                  ;; Measure effect chain application
+                  effects-start (timing/nanotime)
+                  final-frame (if effect-chain
+                                (try
+                                  (effects/apply-effect-chain base-frame effect-chain elapsed bpm trigger-time)
+                                  (catch Exception e
+                                    (println "[ERROR generate-current-frame] Effect chain failed:" (.getMessage e))
+                                    (println "  effect-chain:" effect-chain)
+                                    base-frame))
+                                base-frame)
+                  effects-end (timing/nanotime)]
+              
+              ;; Record timing (profiler adds timestamp and calculates total)
+              (profiler/record-frame-timing!
+                {:base-time-us (timing/nanos->micros (- base-end base-start))
+                 :effects-time-us (if effect-chain
+                                    (timing/nanos->micros (- effects-end effects-start))
+                                    0)
+                 :effect-count (if effect-chain (count (:effects effect-chain)) 0)})
+              
+              final-frame)))))))
 
 ;; ============================================================================
 ;; Frame Conversion for Preview
@@ -135,8 +158,18 @@
   "Update the preview frame in state.
    Call this periodically to update the preview."
   []
-  (let [frame (get-preview-frame)]
-    (state/swap-state! assoc-in [:backend :streaming :current-frame] frame)))
+  (let [frame (get-preview-frame)
+        ;; Get recent profiler stats (last 30 frames = ~1 second at 30fps)
+        recent-stats (profiler/get-recent-stats 30)
+        frame-stats (when recent-stats
+                      {:avg-latency-us (:avg-total-us recent-stats)
+                       :p95-latency-us (:p95-total-us recent-stats)
+                       :max-latency-us (:max-total-us recent-stats)})]
+    (state/swap-state! 
+      (fn [s]
+        (cond-> s
+          true (assoc-in [:backend :streaming :current-frame] frame)
+          frame-stats (assoc-in [:backend :streaming :frame-stats] frame-stats))))))
 
 ;; ============================================================================
 ;; Preview Update Timer
@@ -207,4 +240,33 @@
   
   ;; Get frame
   (get-preview-frame)
+  
+  ;; ========================================
+  ;; Frame Profiler Testing
+  ;; ========================================
+  
+  ;; Check if profiler is enabled
+  (profiler/profiler-enabled?)
+  
+  ;; View current stats (after running preview for a while)
+  (profiler/print-stats)
+  
+  ;; View recent stats only
+  (profiler/print-stats 100)
+  
+  ;; Get raw stats data
+  (profiler/get-stats)
+  
+  ;; Get sample count
+  (profiler/get-sample-count)
+  
+  ;; Get raw samples
+  (profiler/get-samples 10)
+  
+  ;; Reset profiler (clear all samples)
+  (profiler/reset-profiler!)
+  
+  ;; Disable/enable profiler
+  (profiler/disable-profiler!)
+  (profiler/enable-profiler!)
   )
