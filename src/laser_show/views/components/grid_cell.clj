@@ -74,14 +74,17 @@
    - row: Row index
    
    Behavior:
-   - Left-click: Trigger the cell
+   - Left-click: Trigger the cell (if has content) or select (if empty)
    - Right-click: Select cell
    - Drag from cell: Start dragging cell content
    - Drop on cell: Move cell content
    
    Styling:
    - Structural styles (border-radius, cursor) via CSS classes
-   - Background color is inline because it's computed from cell state"
+   - Background color is inline because it's computed from cell state
+   
+   Note: Primary click handler uses map-based events with :fx/event for button detection.
+   Drag handlers still use functions as they require imperative JavaFX API calls."
   [{:keys [fx/context col row]}]
   (let [{:keys [preset-id active? selected? has-content?] :as display-data}
         (fx/sub-ctx context subs/cell-display-data col row)
@@ -95,23 +98,12 @@
      ;; Background color is dynamic - keep inline
      :style (str "-fx-background-color: " bg-color ";")
      
-     ;; Mouse click handler - use function to check button, then dispatch
-     :on-mouse-clicked (fn [^MouseEvent e]
-                         (let [button (.getButton e)
-                               event-map (cond
-                                           ;; Right click - select (for context menu later)
-                                           (= button MouseButton/SECONDARY)
-                                           {:event/type :grid/select-cell :col col :row row}
-                                           
-                                           ;; Left click on cell with content - trigger
-                                           has-content?
-                                           {:event/type :grid/trigger-cell :col col :row row}
-                                           
-                                           ;; Left click on empty - select
-                                           :else
-                                           {:event/type :grid/select-cell :col col :row row})]
-                           ;; Dispatch the event manually
-                           (events/dispatch! event-map)))
+     ;; Mouse click handler - use map-based event
+     ;; The event handler will receive :fx/event with the MouseEvent
+     :on-mouse-clicked {:event/type :grid/cell-clicked
+                        :col col
+                        :row row
+                        :has-content? has-content?}
      
      ;; Drag detection - start drag when content exists
      :on-drag-detected (fn [^MouseEvent e]

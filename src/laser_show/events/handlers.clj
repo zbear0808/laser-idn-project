@@ -17,7 +17,8 @@
    (handle-event {:event/type :grid/trigger-cell :col 0 :row 0 :state current-state})
    => {:state new-state}"
   (:require
-   [laser-show.common.util :as u]))
+   [laser-show.common.util :as u])
+  (:import [javafx.scene.input MouseButton]))
 
 
 ;; Helper Functions
@@ -36,6 +37,28 @@
 
 ;; Grid Events
 
+
+(defn- handle-grid-cell-clicked
+  "Handle grid cell click - dispatches to trigger or select based on mouse button.
+   Uses :fx/event to check which mouse button was clicked."
+  [{:keys [col row has-content? state fx/event]}]
+  (let [button (.getButton event)]
+    (cond
+      ;; Right click - select (for context menu later)
+      (= button MouseButton/SECONDARY)
+      {:state (assoc-in state [:grid :selected-cell] [col row])}
+      
+      ;; Left click on cell with content - trigger
+      has-content?
+      (let [now (current-time-ms {:time (System/currentTimeMillis)})]
+        {:state (-> state
+                    (assoc-in [:playback :active-cell] [col row])
+                    (assoc-in [:playback :playing?] true)
+                    (assoc-in [:playback :trigger-time] now))})
+      
+      ;; Left click on empty - select
+      :else
+      {:state (assoc-in state [:grid :selected-cell] [col row])})))
 
 (defn- handle-grid-trigger-cell
   "Trigger a cell to start playing its preset."
@@ -739,6 +762,7 @@
   [{:keys [event/type] :as event}]
   (case type
     ;; Grid events
+    :grid/cell-clicked (handle-grid-cell-clicked event)
     :grid/trigger-cell (handle-grid-trigger-cell event)
     :grid/select-cell (handle-grid-select-cell event)
     :grid/deselect-cell (handle-grid-deselect-cell event)

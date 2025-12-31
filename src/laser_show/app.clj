@@ -20,8 +20,6 @@
             [laser-show.css.title-bar :as menus])
   (:gen-class))
 
-(defonce ^{:private true :doc "The cljfx application instance."} *app (atom nil))
-
 (defonce ^{:private true :doc "The cljfx renderer instance."} *renderer (atom nil))
 
 (defn- create-renderer

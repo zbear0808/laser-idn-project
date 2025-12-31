@@ -4,7 +4,7 @@
    This file uses the defstate macro to declaratively define all state domains.
    Each domain generates:
    - Initial state map
-   - Accessor functions (get-*, set-*!, update-*!)
+   - Accessor functions (set-*!, update-*!)
    - Registration in the domain registry
    
    After loading this namespace, call (build-initial-state) to get the
@@ -32,32 +32,32 @@
 (defstate timing
   "Timing and BPM management for animation synchronization."
   {:bpm {:default default-bpm
-         :doc "beats per minute"}
+         :doc "Beats per minute"}
    :tap-times {:default []
-               :doc "vector of tap-tempo timestamps for BPM calculation"}
+               :doc "Vector of tap-tempo timestamps for BPM calculation"}
    :beat-position {:default 0.0
-                   :doc "position within current beat (0.0-1.0)"}
+                   :doc "Position within current beat (0.0-1.0)"}
    :bar-position {:default 0.0
-                  :doc "position within current bar (0.0-1.0)"}
+                  :doc "Position within current bar (0.0-1.0)"}
    :last-beat-time {:default 0
-                    :doc "timestamp of last beat"}
+                    :doc "Timestamp of last beat"}
    :beats-elapsed {:default 0
-                   :doc "total beats elapsed since start"}
+                   :doc "Total beats elapsed since start"}
    :quantization {:default :beat
-                  :doc "quantization mode (:beat :bar :none)"}})
+                  :doc "Quantization mode (:beat :bar :none)"}})
 
 (defstate playback
   "Playback control state for animation triggering."
   {:playing? {:default false
-              :doc "whether playback is active"}
+              :doc "Whether playback is active"}
    :trigger-time {:default 0
-                  :doc "timestamp when current animation was triggered"}
+                  :doc "Timestamp when current animation was triggered"}
    :active-cell {:default nil
                  :doc "[col row] of currently playing grid cell"}
    :active-cue {:default nil
-                :doc "currently active cue data"}
+                :doc "Currently active cue data"}
    :cue-queue {:default []
-               :doc "queue of pending cues"}})
+               :doc "Queue of pending cues"}})
 
 (defstate grid
   "Cue grid state - the main trigger interface."
@@ -69,7 +69,7 @@
                      [5 0] {:preset-id :wave}
                      [6 0] {:preset-id :beam-fan}
                      [7 0] {:preset-id :rainbow-circle}}
-           :doc "map of [col row] -> {:preset-id keyword}"}
+           :doc "Map of [col row] -> {:preset-id keyword}"}
    :selected-cell {:default nil
                    :doc "[col row] of selected cell for editing"}
    :size {:default [default-grid-cols default-grid-rows]
@@ -78,7 +78,7 @@
 (defstate effects
   "Effects grid state - chains of effects per cell."
   {:cells {:default {}
-           :doc "map of [col row] -> {:effects [...] :active true}"}})
+           :doc "Map of [col row] -> {:effects [...] :active true}"}})
 
 (defstate ui
   "UI interaction state including window, preview, and component references."

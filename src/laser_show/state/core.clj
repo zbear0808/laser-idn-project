@@ -49,16 +49,20 @@
 
 
 (defn get-state
-  "Get the raw state map from the context.
+  "Get the raw state map from the context with subscription tracking.
    
    Returns the unwrapped state map, useful for:
-   - Event handler co-effects
+   - Event handler co-effects (safe - not lazy)
+   - UI component rendering (memoized)
    - Testing
    - Debugging
    
-   NOTE: This uses fx/sub-val which should only be called from the UI thread
-   or within cljfx component render functions. For background thread access,
-   use get-raw-state instead.
+   IMPORTANT: This participates in cljfx's subscription tracking system.
+   Do NOT use in subscription functions that return lazy sequences, as
+   subscription tracking must complete before the function returns.
+   
+   For background thread access without subscription tracking (e.g., timers,
+   async tasks), use get-raw-state instead.
    
    Returns nil if context not initialized."
   []
@@ -262,4 +266,3 @@
        
        ;; Return the domain keyword for chaining
        ~domain-kw)))
-

@@ -19,7 +19,7 @@
    :children (vec
                (for [col (range cols)]
                  {:fx/type grid-cell/grid-cell
-                  :fx/key [col row]  ;; IMPORTANT: Key must be on outer description!
+                  :fx/key [col row]
                   :col col
                   :row row}))})
 

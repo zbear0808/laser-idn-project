@@ -20,7 +20,7 @@ pom.xml.asc
 .calva/
 .clj-kondo/*
 !.clj-kondo/config.edn
-!.clj-kondo/hooks/laser_show/state/core.clj
+!.clj-kondo/hooks/
 
 .lsp/
 .clinerules/
