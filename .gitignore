@@ -18,7 +18,10 @@ pom.xml.asc
 .vscode/*
 !.vscode/settings.json
 .calva/
-.clj-kondo/
+.clj-kondo/*
+!.clj-kondo/config.edn
+!.clj-kondo/hooks/laser_show/state/core.clj
+
 .lsp/
 .clinerules/
 

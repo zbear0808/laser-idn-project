@@ -4,11 +4,8 @@
   (:require [clojure.string :as str])
   (:import [java.net DatagramSocket DatagramPacket InetAddress]
            [java.nio ByteBuffer ByteOrder]))
-#_{:clojure-lsp/ignore [:clojure-lsp/unused-public-var]}
-
 
 ;; IDN-Hello Protocol Constants
-
 
 (def ^:const IDN_HELLO_PORT 7255)
 (def ^:const LINK_TIMEOUT_MS 1000)

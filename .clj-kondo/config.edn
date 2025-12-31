@@ -1,0 +1,15 @@
+{:linters
+ {:unused-import {:level :off}
+  :unused-binding {:level :off}
+  #_#_:unused-namespace {:level :off}
+  :unused-private-var {:level :off}
+  :unresolved-namespace {:level :error}
+  :unresolved-var {:level :error}}
+ 
+ :config-in-ns
+ {laser-show.idn.hello {:linters {:clojure-lsp/unused-public-var {:level :off}}}
+  laser-show.idn.stream {:linters {:clojure-lsp/unused-public-var {:level :off}}}}
+ 
+ :hooks
+ {:analyze-call
+  {laser-show.state.core/defstate hooks.laser-show.state.core/defstate}}}
