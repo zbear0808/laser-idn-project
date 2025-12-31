@@ -14,7 +14,7 @@
   ],
 
   "files.exclude": {
-    ".clj-kondo/": true,
+    ".clj-kondo/": false,
     ".calva/": true,
     ".cpcache/": true,
     ".lsp/": true,
