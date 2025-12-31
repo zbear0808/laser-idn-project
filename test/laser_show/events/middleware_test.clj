@@ -2,9 +2,9 @@
   (:require [clojure.test :refer [deftest testing is use-fixtures]]
             [laser-show.events.middleware :as mw]))
 
-;; ============================================================================
+
 ;; Test Fixtures
-;; ============================================================================
+
 
 (defn reset-middleware-state [f]
   (mw/clear-event-history!)
@@ -17,9 +17,9 @@
 
 (use-fixtures :each reset-middleware-state)
 
-;; ============================================================================
+
 ;; Event Validation Tests
-;; ============================================================================
+
 
 (deftest validate-event-test
   (testing "Valid events pass validation"
@@ -45,9 +45,9 @@
     (is (= {:valid? true :errors []} 
            (mw/validate-event [:custom/unknown-event 1 2 3])))))
 
-;; ============================================================================
+
 ;; Event History Tests
-;; ============================================================================
+
 
 (deftest event-history-test
   (testing "Initial state"
@@ -93,9 +93,9 @@
       ;; Nothing to redo yet
       (is (nil? (mw/get-redo-event))))))
 
-;; ============================================================================
+
 ;; Event Log Tests
-;; ============================================================================
+
 
 (deftest event-log-test
   (testing "Event logging"
@@ -120,9 +120,9 @@
       (is (= 0 (count (mw/get-event-log)))))
     (mw/enable-event-logging! true)))
 
-;; ============================================================================
+
 ;; Middleware Wrapper Tests
-;; ============================================================================
+
 
 (deftest wrap-validation-test
   (testing "Valid events pass through"
@@ -162,9 +162,9 @@
       (is (= :handled (wrapped [:tick])))
       (is (= 1 (count @calls))))))
 
-;; ============================================================================
+
 ;; Middleware Composition Tests
-;; ============================================================================
+
 
 (deftest compose-middleware-test
   (testing "Middleware composes correctly"
@@ -192,9 +192,9 @@
       (is (nil? (dispatcher [:grid/select-cell "bad"])))
       (is (= 0 (count @calls))))))
 
-;; ============================================================================
+
 ;; Undo/Redo Snapshot Tests
-;; ============================================================================
+
 
 (deftest snapshot-state-test
   (testing "Taking snapshots"

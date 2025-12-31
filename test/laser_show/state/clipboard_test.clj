@@ -50,15 +50,4 @@
     (is (not (clipboard/clipboard-has-type? :cue)))
     (is (not (clipboard/clipboard-has-type? :zone)))))
 
-(deftest can-paste-functions-test
-  (testing "can-paste functions return false when clipboard is empty"
-    (clipboard/clear-clipboard!)
-    (is (not (clipboard/can-paste-cell-assignment?)))
-    (is (not (clipboard/can-paste-cue?)))
-    (is (not (clipboard/can-paste-zone?)))
-    (is (not (clipboard/can-paste-projector?))))
-  
-  (testing "can-paste-cell-assignment? returns true after copy"
-    (clipboard/copy-cell-assignment! :star)
-    (is (clipboard/can-paste-cell-assignment?))
-    (is (not (clipboard/can-paste-cue?)))))
+

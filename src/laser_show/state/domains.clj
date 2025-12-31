@@ -13,9 +13,9 @@
    NOTE: This is the single source of truth for ALL application state."
   (:require [laser-show.state.core :refer [defstate build-initial-state-from-domains]]))
 
-;; ============================================================================
+
 ;; Default Constants
-;; ============================================================================
+
 
 (def default-bpm 120.0)
 (def default-osc-port 8000)
@@ -25,9 +25,9 @@
 (def default-grid-rows 4)
 (def default-log-path "idn-packets.log")
 
-;; ============================================================================
+
 ;; Core UI State Domains
-;; ============================================================================
+
 
 (defstate timing
   "Timing and BPM management for animation synchronization."
@@ -122,9 +122,9 @@
    :last-saved {:default nil
                 :doc "timestamp of last save"}})
 
-;; ============================================================================
+
 ;; Configuration Domains (persisted to disk)
-;; ============================================================================
+
 
 (defstate config
   "Application configuration settings."
@@ -171,9 +171,9 @@
   {:items {:default {}
            :doc "map of effect-id -> effect-definition"}})
 
-;; ============================================================================
+
 ;; Backend State Domain
-;; ============================================================================
+
 
 (defstate backend
   "Backend services state - IDN, streaming, input, logging."
@@ -211,9 +211,9 @@
                        :path default-log-path}
              :doc "Packet logging state"}})
 
-;; ============================================================================
+
 ;; State Builder
-;; ============================================================================
+
 
 (defn build-initial-state
   "Build the complete initial state map from all registered domains.

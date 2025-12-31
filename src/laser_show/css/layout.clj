@@ -23,9 +23,9 @@
            border-medium  ::theme/border-medium
            border-dark    ::theme/border-dark} theme/theme]
       
-      {;; ==================================================================
+      {
        ;; Toolbar
-       ;; ==================================================================
+       
        
        ".toolbar"
        {:-fx-background-color bg-medium
@@ -36,9 +36,9 @@
        {:-fx-spacing 8
         :-fx-alignment "center"}
        
-       ;; ==================================================================
+       
        ;; Status Bar
-       ;; ==================================================================
+       
        
        ".status-bar"
        {:-fx-background-color bg-dark
@@ -47,9 +47,9 @@
         :-fx-border-width ["1px" "0px" "0px" "0px"]
         :-fx-spacing 24}
        
-       ;; ==================================================================
+       
        ;; Title Bar / Menu Bar
-       ;; ==================================================================
+       
        
        ".title-bar"
        {:-fx-background-color bg-darkest}
@@ -66,9 +66,9 @@
        {" .label"
         {:-fx-text-fill text-primary}}
        
-       ;; ==================================================================
+       
        ;; Main Content Panels
-       ;; ==================================================================
+       
        
        ".main-content"
        {:-fx-background-color bg-darkest}
@@ -76,9 +76,9 @@
        ".side-panel"
        {:-fx-background-color bg-medium}
        
-       ;; ==================================================================
+       
        ;; Preview Panel
-       ;; ==================================================================
+       
        
        ".preview-panel"
        {:-fx-background-color bg-medium}
@@ -87,9 +87,9 @@
        {:-fx-background-color bg-dark
         :-fx-padding 8}
        
-       ;; ==================================================================
+       
        ;; Tab Container
-       ;; ==================================================================
+       
        
        ".tab-container"
        {:-fx-background-color bg-darkest}
@@ -98,16 +98,16 @@
        {:-fx-background-color bg-dark
         :-fx-padding ["8px" "8px" "0px" "8px"]}
        
-       ;; ==================================================================
+       
        ;; Split Pane
-       ;; ==================================================================
+       
        
        ".split-pane"
        {:-fx-background-color bg-darkest}
        
-       ;; ==================================================================
+       
        ;; Connection Status Indicator
-       ;; ==================================================================
+       
        
        ".status-indicator"
        {:-fx-background-radius 5}

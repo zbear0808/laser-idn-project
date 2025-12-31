@@ -16,9 +16,9 @@
     :active-tab :color
     :on-tab-change {:event/type :some/event}}")
 
-;; ============================================================================
+
 ;; Tab Button Component
-;; ============================================================================
+
 
 (defn styled-tab-button
   "A single styled tab button.
@@ -39,9 +39,9 @@
                 (assoc on-action :tab-id tab-id)
                 on-action)})
 
-;; ============================================================================
+
 ;; Tab Bar Component
-;; ============================================================================
+
 
 (defn styled-tab-bar
   "A horizontal tab bar with consistent styling.
@@ -66,19 +66,3 @@
                   :active? (= active-tab id)
                   :on-action on-tab-change}))})
 
-;; ============================================================================
-;; Tab Content Container
-;; ============================================================================
-
-(defn styled-tab-content-area
-  "Container for tab content with consistent styling.
-   
-   Props:
-   - :children - Content to render (typically a single child based on active tab)
-   
-   Uses CSS class: .tab-container from layout.clj"
-  [{:keys [children]}]
-  {:fx/type :v-box
-   :style-class "tab-container"
-   :v-box/vgrow :always
-   :children (if (vector? children) children [children])})

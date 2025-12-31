@@ -6,13 +6,18 @@
    
    Subscription Levels:
    
-   Level 1: fx/sub-val - Direct domain access
-            Fast, always recalculated, use for simple domain lookups
-            Example: (fx/sub-val context :timing)
+   Level 1 (fx/sub-val): Direct domain access
+           Fast, always recalculated, use for simple domain lookups
+           Example: (fx/sub-val context :timing)
    
-   Level 2: fx/sub-ctx - Computed subscriptions (memoized, dependency-tracked)
-            Use for derived values, computations, and data transformations
-            Example: (fx/sub-ctx context cell-display-data 0 0)
+   Level 2 (fx/sub-ctx): Composed subscriptions (memoized, dependency-tracked)
+           Use for derived values, computations, and data transformations
+           These compose from Level 1 or other Level 2 subscriptions
+           Example: (fx/sub-ctx context cell-display-data 0 0)
+   
+   For shared extraction logic, we use laser-show.state.extractors which provides
+   pure functions that work on raw state data. This eliminates duplication between
+   queries.clj and subs.clj.
    
    Usage in components:
    
@@ -21,43 +26,113 @@
            cell (fx/sub-ctx context cell-display-data 0 0)]  ; Computed
        ...))"
   (:require [cljfx.api :as fx]
+            [laser-show.state.extractors :as ex]
             [laser-show.css.core :as css]))
 
-;; ============================================================================
-;; Simple Direct Accessors (Level 1: fx/sub-val)
-;; These directly access domain fields without computation
-;; ============================================================================
+
+;; Level 1: Domain Accessors (fx/sub-val wrappers)
+;; These use fx/sub-val for direct domain access.
+;; Fast but always recalculated on context change.
+
 
 ;; --- Timing ---
-(defn bpm [context] (:bpm (fx/sub-val context :timing)))
-(defn beat-position [context] (:beat-position (fx/sub-val context :timing)))
+
+(defn bpm [context]
+  (ex/bpm (fx/sub-val context identity)))
+
 
 ;; --- Playback ---
-(defn playing? [context] (:playing? (fx/sub-val context :playback)))
-(defn active-cell [context] (:active-cell (fx/sub-val context :playback)))
+
+
+(defn playing? [context]
+  (ex/playing? (fx/sub-val context identity)))
+
+(defn active-cell [context]
+  (ex/active-cell (fx/sub-val context identity)))
 
 ;; --- Grid ---
-(defn grid-size [context] (:size (fx/sub-val context :grid)))
-(defn selected-cell [context] (:selected-cell (fx/sub-val context :grid)))
+
+
+(defn grid-size [context]
+  (ex/grid-size (fx/sub-val context identity)))
+
+(defn grid-cells [context]
+  (ex/grid-cells (fx/sub-val context identity)))
+
+(defn selected-cell [context]
+  (ex/selected-cell (fx/sub-val context identity)))
+
+;; --- Effects ---
+
+
+(defn effects-cells [context]
+  (ex/effects-cells (fx/sub-val context identity)))
 
 ;; --- UI ---
-(defn active-tab [context] (:active-tab (fx/sub-val context :ui)))
-(defn clipboard [context] (:clipboard (fx/sub-val context :ui)))
+
+
+(defn active-tab [context]
+  (:active-tab (fx/sub-val context :ui)))
+
+(defn clipboard [context]
+  (ex/clipboard (fx/sub-val context identity)))
+
+
 
 ;; --- Project ---
-(defn project-folder [context] (:current-folder (fx/sub-val context :project)))
-(defn project-dirty? [context] (:dirty? (fx/sub-val context :project)))
+(defn project [context]
+  (fx/sub-val context :project))
+
+(defn project-folder [context]
+  (ex/project-folder (fx/sub-val context identity)))
+
+(defn project-dirty? [context]
+  (ex/project-dirty? (fx/sub-val context identity)))
 
 ;; --- Config ---
-(defn window-config [context] (:window (fx/sub-val context :config)))
-(defn preview-config [context] (:preview (fx/sub-val context :config)))
 
-;; ============================================================================
-;; Grid Cell Subscriptions (Computed)
-;; ============================================================================
+
+(defn window-config [context]
+  (ex/window-config (fx/sub-val context identity)))
+
+(defn preview-config [context]
+  (ex/preview-config (fx/sub-val context identity)))
+
+
+;; Level 2: Simple Composed Subscriptions
+;; These depend on a single domain and extract specific data.
+;; Memoized via fx/sub-ctx, only recalculated when dependencies change.
+
+
+(defn idn-data
+  "Get IDN connection data from backend.
+   Depends on: backend domain"
+  [context]
+  (:idn (fx/sub-val context :backend)))
+
+(defn streaming-data
+  "Get streaming data from backend.
+   Depends on: backend domain"
+  [context]
+  (:streaming (fx/sub-val context :backend)))
+
+(defn dialogs-data
+  "Get dialogs data from UI.
+   Depends on: ui domain"
+  [context]
+  (:dialogs (fx/sub-val context :ui)))
+
+;; Level 2: Computed Grid Cell Subscriptions
+;; These compose from simpler subscriptions for better cache reuse.
+
 
 (defn cell-display-data
   "Computed display data for a grid cell.
+   
+   Depends on:
+   - grid-cells (for cell content)
+   - active-cell (for active state)
+   - selected-cell (for selection state)
    
    Returns map with:
    - :col, :row - position
@@ -66,67 +141,42 @@
    - :selected? - is this cell selected?
    - :has-content? - does cell have a preset?"
   [context col row]
-  (let [grid (fx/sub-val context :grid)
-        playback (fx/sub-val context :playback)
-        cell (get-in grid [:cells [col row]])]
+  (let [cells (fx/sub-ctx context grid-cells)
+        active (fx/sub-ctx context active-cell)
+        selected (fx/sub-ctx context selected-cell)
+        cell-data (get cells [col row])]
     {:col col
      :row row
-     :preset-id (:preset-id cell)
-     :active? (= [col row] (:active-cell playback))
-     :selected? (= [col row] (:selected-cell grid))
-     :has-content? (boolean (:preset-id cell))}))
+     :preset-id (:preset-id cell-data)
+     :active? (= [col row] active)
+     :selected? (= [col row] selected)
+     :has-content? (boolean (:preset-id cell-data))}))
 
 (defn active-cell-preset
   "Get the preset ID of the currently active cell.
+   
+   Depends on:
+   - active-cell
+   - grid-cells
+   
    Returns: preset-id keyword or nil if no cell is active"
   [context]
-  (let [playback (fx/sub-val context :playback)]
-    (when-let [[col row] (:active-cell playback)]
-      (let [grid (fx/sub-val context :grid)]
-        (get-in grid [:cells [col row] :preset-id])))))
+  (when-let [[col row] (fx/sub-ctx context active-cell)]
+    (let [cells (fx/sub-ctx context grid-cells)]
+      (get-in cells [[col row] :preset-id]))))
 
 (defn active-preset
   "Alias for active-cell-preset. Get preset of currently active cell."
   [context]
   (fx/sub-ctx context active-cell-preset))
 
-(defn all-grid-cells-display
-  "Get display data for all cells in the grid.
-   Returns: Map of [col row] -> cell-display-data"
-  [context]
-  (let [grid (fx/sub-val context :grid)
-        [cols rows] (:size grid)]
-    (into {}
-          (for [col (range cols)
-                row (range rows)]
-            [[col row] (fx/sub-ctx context cell-display-data col row)]))))
+;; Level 2: Computed Effect Cell Subscriptions
 
-(defn grid-positions
-  "Get all grid positions as sequence of [col row] vectors.
-   Useful for rendering grid."
-  [context]
-  (let [grid (fx/sub-val context :grid)
-        [cols rows] (:size grid)]
-    (for [row (range rows)
-          col (range cols)]
-      [col row])))
-
-(defn grid-rows
-  "Get grid as rows, each row is a vector of [col row] positions.
-   Useful for row-based rendering."
-  [context]
-  (let [grid (fx/sub-val context :grid)
-        [cols rows] (:size grid)]
-    (for [row (range rows)]
-      (vec (for [col (range cols)]
-             [col row])))))
-
-;; ============================================================================
-;; Effect Cell Subscriptions (Computed)
-;; ============================================================================
 
 (defn effect-cell-display-data
   "Computed display data for an effects grid cell.
+   
+   Depends on: effects-cells
    
    Returns map with:
    - :col, :row - position
@@ -136,91 +186,30 @@
    - :has-effects? - does cell have any effects?
    - :display-text - text to display in the cell"
   [context col row]
-  (let [effects (fx/sub-val context :effects)
-        cell (get-in effects [:cells [col row]])
-        effect-chain (:effects cell [])
+  (let [cells (fx/sub-ctx context effects-cells)
+        cell-data (get cells [col row])
+        effect-chain (:effects cell-data [])
         first-effect (first effect-chain)
         effect-count (count effect-chain)]
     {:col col
      :row row
      :effect-count effect-count
      :first-effect-id (:effect-id first-effect)
-     :active? (:active cell false)
+     :active? (:active cell-data false)
      :has-effects? (pos? effect-count)
      :display-text (when first-effect
                      (str (name (:effect-id first-effect))
                           (when (> effect-count 1)
                             (str " +" (dec effect-count)))))}))
 
-(defn all-active-effects
-  "Get all active effect instances in order.
-   Returns: Vector of {:effect-id :params} maps
-   Only includes effects from cells where :active is true."
-  [context]
-  (let [effects (fx/sub-val context :effects)
-        cells (:cells effects)
-        sorted-keys (sort-by (fn [[col row]] [row col]) (keys cells))]
-    (into []
-          (comp
-           (map #(get cells %))
-           (filter :active)
-           (mapcat :effects)
-           (map #(select-keys % [:effect-id :params])))
-          sorted-keys)))
 
-;; ============================================================================
-;; Playback Subscriptions (Computed)
-;; ============================================================================
+;; Level 2: Computed Project Subscriptions
 
-(defn playback-status
-  "Computed playback status.
-   
-   Returns map with:
-   - :playing? - is playback active?
-   - :active-cell - [col row] or nil if nothing playing
-   - :preset-id - current preset keyword or nil
-   - :elapsed-ms - milliseconds since trigger or nil"
-  [context]
-  (let [playback (fx/sub-val context :playback)
-        active-cell (:active-cell playback)
-        preset-id (fx/sub-ctx context active-cell-preset)
-        trigger-time (:trigger-time playback)
-        elapsed-ms (when (and trigger-time (pos? trigger-time))
-                     (- (System/currentTimeMillis) trigger-time))]
-    {:playing? (:playing? playback)
-     :active-cell active-cell
-     :preset-id preset-id
-     :elapsed-ms elapsed-ms}))
-
-;; ============================================================================
-;; Timing Subscriptions (Computed)
-;; ============================================================================
-
-(defn timing-info
-  "Get current timing information.
-   
-   Returns map with:
-   - :bpm - current beats per minute
-   - :beat-position - position within current beat (0.0-1.0)
-   - :bar-position - position within current bar (0.0-1.0)
-   - :ms-per-beat - milliseconds per beat
-   - :quantization - quantization mode"
-  [context]
-  (let [timing (fx/sub-val context :timing)
-        bpm (:bpm timing)
-        ms-per-beat (/ 60000.0 bpm)]
-    {:bpm bpm
-     :beat-position (:beat-position timing)
-     :bar-position (:bar-position timing)
-     :ms-per-beat ms-per-beat
-     :quantization (:quantization timing)}))
-
-;; ============================================================================
-;; Project Subscriptions (Computed)
-;; ============================================================================
 
 (defn project-status
   "Get current project status.
+   
+   Depends on: project
    
    Returns map with:
    - :has-project? - is a project folder set?
@@ -229,53 +218,25 @@
    - :last-saved - timestamp of last save or nil
    - :title - computed window title"
   [context]
-  (let [project (fx/sub-val context :project)
-        folder (:current-folder project)
-        dirty? (:dirty? project)]
+  (let [p (fx/sub-ctx context project)
+        folder (:current-folder p)
+        dirty? (:dirty? p)]
     {:has-project? (some? folder)
      :folder folder
      :dirty? dirty?
-     :last-saved (:last-saved project)
+     :last-saved (:last-saved p)
      :title (str "Laser Show"
                  (when folder (str " - " folder))
                  (when dirty? " *"))}))
 
-;; ============================================================================
-;; Connection Subscriptions (Computed)
-;; ============================================================================
 
-(defn idn-status
-  "Get IDN connection status.
-   
-   Returns map with:
-   - :connected? - is connected to IDN target?
-   - :connecting? - is connection in progress?
-   - :target - hostname/IP of target or nil
-   - :error - error message or nil"
-  [context]
-  (let [backend (fx/sub-val context :backend)
-        idn (:idn backend)]
-    {:connected? (:connected? idn)
-     :connecting? (:connecting? idn)
-     :target (:target idn)
-     :error (:error idn)}))
+;; Level 2: Computed Connection Subscriptions
 
-(defn streaming-status
-  "Get streaming status.
-   
-   Returns map with:
-   - :streaming? - is streaming active?
-   - :engine-count - number of active engines
-   - :connected-targets - set of connected target IDs"
-  [context]
-  (let [backend (fx/sub-val context :backend)
-        streaming (:streaming backend)]
-    {:streaming? (:running? streaming)
-     :engine-count (count (:engines streaming))
-     :connected-targets (:connected-targets streaming)}))
 
 (defn connection-status
   "Computed connection status for toolbar.
+   
+   Depends on: idn-data
    
    Returns map with:
    - :connected? - is connected?
@@ -284,173 +245,58 @@
    - :error - error message
    - :status-text - human-readable status"
   [context]
-  (let [backend (fx/sub-val context :backend)
-        idn (:idn backend)]
-    {:connected? (:connected? idn)
-     :connecting? (:connecting? idn)
-     :target (:target idn)
-     :error (:error idn)
+  (let [i (fx/sub-ctx context idn-data)]
+    {:connected? (:connected? i)
+     :connecting? (:connecting? i)
+     :target (:target i)
+     :error (:error i)
      :status-text (cond
-                    (:connected? idn) (str "Connected: " (:target idn))
-                    (:connecting? idn) "Connecting..."
-                    (:error idn) (str "Error: " (:error idn))
+                    (:connected? i) (str "Connected: " (:target i))
+                    (:connecting? i) "Connecting..."
+                    (:error i) (str "Error: " (:error i))
                     :else "Disconnected")}))
 
-;; ============================================================================
-;; UI State Subscriptions (Computed)
-;; ============================================================================
 
-(defn selection-state
-  "Get current selection state for grids.
-   
-   Returns map with:
-   - :selected-cell - [col row] or nil
-   - :selected-preset - preset keyword or nil"
-  [context]
-  (let [grid (fx/sub-val context :grid)
-        ui (fx/sub-val context :ui)]
-    {:selected-cell (:selected-cell grid)
-     :selected-preset (:selected-preset ui)}))
+;; Level 2: Computed UI State Subscriptions
 
-(defn drag-state
-  "Get current drag operation state.
-   Returns map with drag operation details or nil if not dragging"
-  [context]
-  (let [ui (fx/sub-val context :ui)
-        drag (:drag ui)]
-    (when (:active? drag)
-      drag)))
 
 (defn dialog-open?
-  "Check if a specific dialog is open."
+  "Check if a specific dialog is open.
+   
+   Depends on: dialogs-data"
   [context dialog-id]
-  (let [ui (fx/sub-val context :ui)]
-    (get-in ui [:dialogs dialog-id :open?] false)))
+  (get-in (fx/sub-ctx context dialogs-data) [dialog-id :open?] false))
 
 (defn dialog-data
-  "Get data associated with a dialog."
+  "Get data associated with a dialog.
+   
+   Depends on: dialogs-data"
   [context dialog-id]
-  (let [ui (fx/sub-val context :ui)]
-    (get-in ui [:dialogs dialog-id :data])))
+  (get-in (fx/sub-ctx context dialogs-data) [dialog-id :data]))
 
-;; ============================================================================
-;; Parameterized Entity Subscriptions
-;; ============================================================================
 
-(defn cell
-  "Get a grid cell by position."
-  [context col row]
-  (get-in (fx/sub-val context :grid) [:cells [col row]]))
-
-(defn effect-cell
-  "Get an effect cell by position."
-  [context col row]
-  (get-in (fx/sub-val context :effects) [:cells [col row]]))
-
-(defn projector
-  "Get a projector by ID."
-  [context projector-id]
-  (get-in (fx/sub-val context :projectors) [:items projector-id]))
-
-(defn zone
-  "Get a zone by ID."
-  [context zone-id]
-  (get-in (fx/sub-val context :zones) [:items zone-id]))
-
-(defn zone-group
-  "Get a zone group by ID."
-  [context group-id]
-  (get-in (fx/sub-val context :zone-groups) [:items group-id]))
-
-(defn cue
-  "Get a cue by ID."
-  [context cue-id]
-  (get-in (fx/sub-val context :cues) [:items cue-id]))
-
-(defn cue-list
-  "Get a cue list by ID."
-  [context list-id]
-  (get-in (fx/sub-val context :cue-lists) [:items list-id]))
-
-(defn registered-effect
-  "Get a registered effect by ID."
-  [context effect-id]
-  (get-in (fx/sub-val context :effect-registry) [:items effect-id]))
-
-;; ============================================================================
-;; Collection Subscriptions
-;; ============================================================================
-
-(defn projectors
-  "Get all projectors."
-  [context]
-  (get-in (fx/sub-val context :projectors) [:items]))
-
-(defn projector-ids
-  "Get all projector IDs."
-  [context]
-  (keys (fx/sub-ctx context projectors)))
-
-(defn zones
-  "Get all zones."
-  [context]
-  (get-in (fx/sub-val context :zones) [:items]))
-
-(defn zone-ids
-  "Get all zone IDs."
-  [context]
-  (keys (fx/sub-ctx context zones)))
-
-(defn zone-groups
-  "Get all zone groups."
-  [context]
-  (get-in (fx/sub-val context :zone-groups) [:items]))
-
-(defn zone-group-ids
-  "Get all zone group IDs."
-  [context]
-  (keys (fx/sub-ctx context zone-groups)))
-
-(defn cues
-  "Get all cues."
-  [context]
-  (get-in (fx/sub-val context :cues) [:items]))
-
-(defn cue-ids
-  "Get all cue IDs."
-  [context]
-  (keys (fx/sub-ctx context cues)))
-
-(defn cue-lists
-  "Get all cue lists."
-  [context]
-  (get-in (fx/sub-val context :cue-lists) [:items]))
-
-(defn streaming-engines
-  "Get all streaming engines."
-  [context]
-  (get-in (fx/sub-val context :streaming) [:engines]))
-
-;; ============================================================================
 ;; Frame/Preview Subscriptions
-;; ============================================================================
+
 
 (defn current-frame
   "Get the current preview frame data.
+   
+   Depends on: streaming-data
+   
    Returns frame with :points vector."
   [context]
-  (let [backend (fx/sub-val context :backend)]
-    (get-in backend [:streaming :current-frame])))
+  (:current-frame (fx/sub-ctx context streaming-data)))
 
 (defn frame-stats
-  "Get frame rendering statistics."
+  "Get frame rendering statistics.
+   
+   Depends on: streaming-data"
   [context]
-  (let [backend (fx/sub-val context :backend)]
-    (get-in backend [:streaming :frame-stats])))
+  (:frame-stats (fx/sub-ctx context streaming-data)))
 
-;; ============================================================================
+
 ;; Stylesheet Subscriptions (CSS Hot-Reload)
-;; ============================================================================
+
 
 (defn stylesheet-urls
   "Get all stylesheet URLs for scenes.

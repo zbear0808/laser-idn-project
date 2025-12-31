@@ -78,9 +78,9 @@
    :program program
    :timestamp (System/currentTimeMillis)})
 
-;; ============================================================================
+
 ;; Event Predicates
-;; ============================================================================
+
 
 (defn control-change?
   "Returns true if event is a control change."
@@ -127,9 +127,9 @@
   [event]
   (from-source? event :keyboard))
 
-;; ============================================================================
+
 ;; Event Matching
-;; ============================================================================
+
 
 (defn matches?
   "Returns true if event matches the given pattern.
@@ -154,9 +154,9 @@
     :program-change [(:source event) :program-change (:channel event)]
     [(:source event) (:type event)]))
 
-;; ============================================================================
+
 ;; Value Scaling Utilities
-;; ============================================================================
+
 
 (defn midi-to-normalized
   "Converts MIDI value (0-127) to normalized (0.0-1.0)."

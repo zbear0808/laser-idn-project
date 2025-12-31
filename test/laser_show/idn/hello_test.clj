@@ -4,9 +4,9 @@
             [clojure.string :as str]
             [laser-show.idn.hello :as idn]))
 
-;; ============================================================================
+
 ;; Test Fixtures - Pre-defined byte arrays for testing
-;; ============================================================================
+
 
 ;; Valid scan response: command=0x11, struct-size=36, version=2.5, status=0x91 (malfunction+occupied+realtime)
 ;; Hostname "TestDAC" starts at byte 24
@@ -23,9 +23,9 @@
                0x00 0x00 0x00 0x00   ; padding (bytes 36-39)
                0x00 0x00 0x00 0x00])); padding (bytes 40-43)
 
-;; ============================================================================
+
 ;; Packet Header Tests
-;; ============================================================================
+
 
 (deftest packet-header-test
   (testing "Creates and parses headers correctly"
@@ -56,9 +56,9 @@
     (is (= "FF" (idn/bytes-to-hex (byte-array [-1]))))
     (is (= "" (idn/bytes-to-hex (byte-array 0))))))
 
-;; ============================================================================
+
 ;; Scan Response Parsing Tests
-;; ============================================================================
+
 
 (deftest parse-scan-response-test
   (testing "Parses valid scan response"
@@ -74,9 +74,9 @@
   (testing "Returns nil for too-short response"
     (is (nil? (idn/parse-scan-response (byte-array 20))))))
 
-;; ============================================================================
+
 ;; Wrap Channel Message Tests
-;; ============================================================================
+
 
 (deftest wrap-channel-message-test
   (testing "Wraps message with header"
@@ -96,9 +96,9 @@
           parsed2 (idn/parse-packet-header (idn/wrap-channel-message (byte-array [0x00])))]
       (is (= 1 (- (:sequence parsed2) (:sequence parsed1)))))))
 
-;; ============================================================================
+
 ;; Socket Tests
-;; ============================================================================
+
 
 (deftest create-udp-socket-test
   (testing "Creates functional socket"
@@ -111,9 +111,9 @@
         (is (pos? (.getLocalPort socket)))
         (finally (.close socket))))))
 
-;; ============================================================================
+
 ;; DAC Registry Tests
-;; ============================================================================
+
 
 (deftest dac-registry-test
   (testing "Register, update, and unregister DACs"
@@ -141,9 +141,9 @@
     (idn/clear-dac-registry!)
     (is (empty? (idn/list-dacs)))))
 
-;; ============================================================================
+
 ;; Per-DAC Sequence Counter Tests
-;; ============================================================================
+
 
 (deftest dac-sequence-counter-test
   (testing "Independent sequence counters per DAC"
@@ -166,9 +166,9 @@
     (is (= 0 (idn/get-dac-sequence :wrap-test)))
     (is (= 1 (idn/get-dac-sequence :wrap-test)))))
 
-;; ============================================================================
+
 ;; Available DACs Filter Tests
-;; ============================================================================
+
 
 (deftest get-available-dacs-test
   (testing "Filters DACs by status"

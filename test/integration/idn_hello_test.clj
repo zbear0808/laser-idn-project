@@ -4,10 +4,10 @@
   (:require [clojure.test :refer [deftest testing is]]
             [laser-show.idn.hello :as idn]))
 
-;; ============================================================================
+
 ;; Network Send Tests (Integration)
 ;; These tests actually send UDP packets to localhost
-;; ============================================================================
+
 
 (deftest send-to-dac-test
   (testing "Send to registered and non-existent DACs"

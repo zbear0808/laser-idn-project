@@ -3,9 +3,9 @@
    Supports pattern-based subscriptions and multiple handlers per event type."
   (:require [laser-show.input.events :as events]))
 
-;; ============================================================================
+
 ;; Router State
-;; ============================================================================
+
 
 (defonce !router-state
   (atom {:handlers {}           ; Map of handler-id -> {:pattern handler-fn}
@@ -15,9 +15,9 @@
          :log-enabled false     ; Whether to log events
          :max-log-size 100}))   ; Max events to keep in log
 
-;; ============================================================================
+
 ;; Handler Registration
-;; ============================================================================
+
 
 (defn register-handler!
   "Registers a handler function for events matching a pattern.
@@ -55,9 +55,9 @@
   []
   (swap! !router-state assoc :handlers {} :global-handlers {}))
 
-;; ============================================================================
+
 ;; Event Dispatch
-;; ============================================================================
+
 
 (defn- log-event!
   "Adds event to the event log if logging is enabled."
@@ -101,9 +101,9 @@
   (doseq [event events]
     (dispatch! event)))
 
-;; ============================================================================
+
 ;; Router Control
-;; ============================================================================
+
 
 (defn enable!
   "Enables event routing."
@@ -115,14 +115,11 @@
   []
   (swap! !router-state assoc :enabled false))
 
-(defn enabled?
-  "Returns true if router is enabled."
-  []
-  (:enabled @!router-state))
 
-;; ============================================================================
+
+
 ;; Event Logging / Debugging
-;; ============================================================================
+
 
 (defn enable-logging!
   "Enables event logging for debugging."
@@ -144,9 +141,9 @@
   []
   (swap! !router-state assoc :event-log []))
 
-;; ============================================================================
+
 ;; Convenience Macros and Functions
-;; ============================================================================
+
 
 (defn on-note!
   "Registers a handler for note-on events on a specific channel/note.
@@ -180,9 +177,9 @@
   (let [pattern (if source {:source source} {})]
     (register-handler! handler-id pattern handler-fn)))
 
-;; ============================================================================
+
 ;; Handler Info
-;; ============================================================================
+
 
 (defn list-handlers
   "Returns a list of all registered handler IDs and their patterns."

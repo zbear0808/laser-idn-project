@@ -16,9 +16,9 @@
             [laser-show.css.core :as css])
   (:import [javafx.scene.input MouseEvent MouseButton TransferMode DragEvent ClipboardContent]))
 
-;; ============================================================================
+
 ;; Cell Colors (from theme, with additional cell-specific colors)
-;; ============================================================================
+
 
 (def cell-colors
   "Color scheme for cell states.
@@ -39,9 +39,9 @@
     has-content? (:content cell-colors)
     :else (:empty cell-colors)))
 
-;; ============================================================================
+
 ;; Cell Content
-;; ============================================================================
+
 
 (defn cell-label
   "Display text for a cell."
@@ -50,9 +50,9 @@
     (-> preset-id name (str/replace "-" " "))
     ""))
 
-;; ============================================================================
+
 ;; Style Class Helpers
-;; ============================================================================
+
 
 (defn cell-style-classes
   "Build style-class vector based on cell state.
@@ -62,9 +62,9 @@
     selected? (conj "grid-cell-selected")
     active? (conj "grid-cell-active")))
 
-;; ============================================================================
+
 ;; Grid Cell Component
-;; ============================================================================
+
 
 (defn grid-cell
   "A single grid cell button with drag/drop and context menu support.
@@ -162,9 +162,9 @@
                                         :pref-height 8
                                         :style-class "grid-cell-active-indicator"})])}]}))
 
-;; ============================================================================
+
 ;; Effects Cell Component (for effects grid)
-;; ============================================================================
+
 
 (defn effects-cell
   "A single effects grid cell with drag/drop and context menu support.

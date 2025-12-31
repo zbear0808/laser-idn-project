@@ -25,10 +25,8 @@
             [laser-show.backend.streaming-engine :as streaming-engine]
             [laser-show.services.frame-service :as frame-service]))
 
-;; ============================================================================
 ;; Co-effects (inject data INTO events)
 ;; Co-effect functions take NO arguments and return data to inject.
-;; ============================================================================
 
 (defn- co-effect-state
   "Co-effect that injects current state into event."
@@ -40,9 +38,7 @@
   []
   (System/currentTimeMillis))
 
-;; ============================================================================
 ;; Effects (handle side effects FROM events)
-;; ============================================================================
 
 (defn- effect-state
   "Effect that updates application state.
@@ -143,9 +139,7 @@
       (catch Exception e
         (println "Failed to load project:" (.getMessage e))))))
 
-;; ============================================================================
 ;; Clipboard Effects (for effect chain editor)
-;; ============================================================================
 
 (defn- effect-clipboard-copy-effects
   "Effect that copies effects to clipboard as a chain."
@@ -163,9 +157,7 @@
                :insert-pos insert-pos
                :effects effects})))
 
-;; ============================================================================
 ;; Wrapped Event Handler
-;; ============================================================================
 
 (def event-handler
   "Main event handler wrapped with co-effects and effects.
@@ -208,9 +200,7 @@
          :clipboard/copy-effects effect-clipboard-copy-effects
          :clipboard/paste-effects effect-clipboard-paste-effects})))
 
-;; ============================================================================
 ;; Convenience Functions
-;; ============================================================================
 
 (defn dispatch!
   "Dispatch an event directly, bypassing the wrapped handler.
@@ -245,45 +235,3 @@
     
     effects))
 
-
-;; ============================================================================
-;; Event Helpers
-;; ============================================================================
-
-(defn grid-trigger-event
-  "Create a grid trigger event."
-  [col row]
-  {:event/type :grid/trigger-cell :col col :row row})
-
-(defn grid-select-event
-  "Create a grid select event."
-  [col row]
-  {:event/type :grid/select-cell :col col :row row})
-
-(defn timing-set-bpm-event
-  "Create a set BPM event."
-  [bpm]
-  {:event/type :timing/set-bpm :bpm bpm})
-
-(defn ui-tab-event
-  "Create a tab change event."
-  [tab-id]
-  {:event/type :ui/set-active-tab :tab-id tab-id})
-
-(comment
-  ;; Test dispatching events
-  (require '[laser-show.state.domains :as domains])
-
-  ;; Initialize state first
-  (state/init-state! (domains/build-initial-state))
-
-  ;; Dispatch events
-  (dispatch! {:event/type :timing/set-bpm :bpm 140.0})
-  (state/get-in-state [:timing :bpm]) ;; => 140.0
-
-  (dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})
-  (state/get-in-state [:playback :active-cell]) ;; => [0 0]
-
-  (dispatch! {:event/type :transport/stop})
-  (state/get-in-state [:playback :playing?]) ;; => false
-  )

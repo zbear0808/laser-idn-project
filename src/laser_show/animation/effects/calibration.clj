@@ -6,9 +6,9 @@
             [laser-show.animation.effects.common :as common]))
 
 
-;; ============================================================================
+
 ;; RGB Balance Calibration
-;; ============================================================================
+
 
 (defn- apply-rgb-calibration [frame _time-ms _bpm {:keys [r-gain g-gain b-gain]}]
   (effects/transform-point-full
@@ -44,9 +44,9 @@
                 :max 2.0}]
   :apply-fn apply-rgb-calibration})
 
-;; ============================================================================
+
 ;; Per-Channel Gamma Correction
-;; ============================================================================
+
 
 (defn- apply-gamma-correction [frame _time-ms _bpm {:keys [r-gamma g-gamma b-gamma]}]
   (let [r-inv (/ 1.0 r-gamma)
@@ -85,9 +85,9 @@
                 :max 4.0}]
   :apply-fn apply-gamma-correction})
 
-;; ============================================================================
+
 ;; Brightness Calibration
-;; ============================================================================
+
 
 (defn- apply-brightness-calibration [frame _time-ms _bpm {:keys [global-brightness min-threshold]}]
   (effects/transform-point-full
@@ -120,9 +120,9 @@
                 :max 50}]
   :apply-fn apply-brightness-calibration})
 
-;; ============================================================================
+
 ;; Color Temperature Adjustment
-;; ============================================================================
+
 
 (defn- kelvin-to-rgb
   "Convert color temperature in Kelvin to RGB multipliers.
@@ -167,9 +167,9 @@
                 :max 10000}]
   :apply-fn apply-color-temperature})
 
-;; ============================================================================
+
 ;; Color Matrix Transform
-;; ============================================================================
+
 
 (defn- apply-color-matrix [frame _time-ms _bpm {:keys [m00 m01 m02 m10 m11 m12 m20 m21 m22
                                                        offset-r offset-g offset-b]}]
@@ -200,9 +200,9 @@
                {:key :offset-b :label "B Offset" :type :int :default 0 :min -128 :max 128}]
   :apply-fn apply-color-matrix})
 
-;; ============================================================================
+
 ;; White Balance
-;; ============================================================================
+
 
 (defn- apply-white-balance [frame _time-ms _bpm {:keys [ref-r ref-g ref-b
                                                         measured-r measured-g measured-b]}]
@@ -230,9 +230,9 @@
                {:key :measured-b :label "Measured B" :type :int :default 255 :min 1 :max 255}]
   :apply-fn apply-white-balance})
 
-;; ============================================================================
+
 ;; Projector Position Offset
-;; ============================================================================
+
 
 (defn- apply-projector-offset [frame _time-ms _bpm {:keys [x-offset y-offset]}]
   (effects/transform-point-full
@@ -261,9 +261,9 @@
                 :max 1.0}]
   :apply-fn apply-projector-offset})
 
-;; ============================================================================
+
 ;; Projector Scale
-;; ============================================================================
+
 
 (defn- apply-projector-scale [frame _time-ms _bpm {:keys [x-scale y-scale]}]
   (effects/transform-point-full
@@ -292,9 +292,9 @@
                 :max 2.0}]
   :apply-fn apply-projector-scale})
 
-;; ============================================================================
+
 ;; Per-Channel Color Curves (simplified LUT)
-;; ============================================================================
+
 
 (defn- interpolate-curve
   "Interpolate a value using a simplified curve definition.
@@ -342,9 +342,9 @@
                 :default [0 32 64 96 128 160 192 224 255]}]
   :apply-fn apply-color-curves})
 
-;; ============================================================================
+
 ;; Scan Rate Limiter (for safety)
-;; ============================================================================
+
 
 (defn- point-distance [p1 p2]
   (let [x1 (/ (:x p1) 32767.0)
@@ -396,9 +396,9 @@
                 :max 2.0}]
   :apply-fn apply-scan-rate-limit})
 
-;; ============================================================================
+
 ;; Axis Flip (for projector mounting variations)
-;; ============================================================================
+
 
 (defn- apply-axis-flip [frame _time-ms _bpm {:keys [flip-x flip-y]}]
   (if (and (not flip-x) (not flip-y))
@@ -425,9 +425,9 @@
                 :default false}]
   :apply-fn apply-axis-flip})
 
-;; ============================================================================
+
 ;; Rotation Offset (for projector mounting angle)
-;; ============================================================================
+
 
 (defn- apply-rotation-offset [frame _time-ms _bpm {:keys [angle]}]
   (if (zero? angle)

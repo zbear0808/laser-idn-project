@@ -22,9 +22,9 @@
            text-secondary ::theme/text-secondary
            text-muted   ::theme/text-muted} theme/theme]
       
-      {;; ==================================================================
+      {
        ;; Text Fields
-       ;; ==================================================================
+       
        
        ".text-field-dark"
        {:-fx-background-color bg-light
@@ -43,9 +43,9 @@
         :-fx-padding ["2px" "4px"]
         :-fx-background-radius 3}
        
-       ;; ==================================================================
+       
        ;; Labels
-       ;; ==================================================================
+       
        
        ".label-primary"
        {:-fx-text-fill text-primary}
@@ -69,25 +69,25 @@
         :-fx-font-size 11
         :-fx-font-weight "bold"}
        
-       ;; ==================================================================
+       
        ;; Combo Boxes
-       ;; ==================================================================
+       
        
        ".combo-box-dark"
        {:-fx-background-color bg-light
         :-fx-text-fill text-secondary
         :-fx-font-size 11}
        
-       ;; ==================================================================
+       
        ;; Checkboxes
-       ;; ==================================================================
+       
        
        ".check-box-dark"
        {:-fx-text-fill text-primary}
        
-       ;; ==================================================================
+       
        ;; Sliders
-       ;; ==================================================================
+       
        
        ;; Note: Slider styling in JavaFX requires targeting internal elements
        ;; This provides basic track/thumb styling

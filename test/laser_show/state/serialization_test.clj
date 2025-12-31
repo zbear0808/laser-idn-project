@@ -4,9 +4,9 @@
    [clojure.test :refer [deftest is testing]]
    [laser-show.state.serialization :as ser]))
 
-;; ============================================================================
+
 ;; Basic Round-trip Tests
-;; ============================================================================
+
 
 (deftest basic-round-trip-test
   (testing "Map round-trip"
@@ -17,9 +17,9 @@
     (let [data [:item1 :item2 :item3]]
       (is (= data (-> data ser/serialize ser/deserialize))))))
 
-;; ============================================================================
+
 ;; Data Structure Validation Tests
-;; ============================================================================
+
 
 (deftest deserialize-returns-valid-structures-test
   (testing "Deserialize returns map"
@@ -32,9 +32,9 @@
       (is (sequential? result))
       (is (= [1 2 3] result)))))
 
-;; ============================================================================
+
 ;; Type Validation Tests (Application-specific)
-;; ============================================================================
+
 
 (deftest type-check-validation-test
   (testing "Accept correct type"
@@ -92,9 +92,9 @@
       (is (some? result))
       (is (= effect result)))))
 
-;; ============================================================================
+
 ;; File Operations (Basic Smoke Tests)
-;; ============================================================================
+
 
 (deftest file-operations-test
   (let [test-file "test-serialization.edn"

@@ -18,9 +18,9 @@
             [laser-show.animation.effects.intensity]
             [laser-show.animation.effects.calibration]))
 
-;; ============================================================================
+
 ;; Frame Generation
-;; ============================================================================
+
 
 ;; NOTE: All these functions use get-raw-state instead of get-state because
 ;; they are called from a background timer thread (preview-update), not the
@@ -112,9 +112,9 @@
               
               final-frame)))))))
 
-;; ============================================================================
+
 ;; Frame Conversion for Preview
-;; ============================================================================
+
 
 (defn laser-point->preview-point
   "Convert a LaserPoint to a map suitable for preview rendering."
@@ -139,9 +139,9 @@
   []
   (frame->preview-data (generate-current-frame)))
 
-;; ============================================================================
+
 ;; Frame Provider for Streaming
-;; ============================================================================
+
 
 (defn create-frame-provider
   "Create a frame provider function for IDN streaming.
@@ -150,9 +150,9 @@
   (fn []
     (generate-current-frame)))
 
-;; ============================================================================
+
 ;; State Update Integration
-;; ============================================================================
+
 
 (defn update-preview-frame!
   "Update the preview frame in state.
@@ -171,9 +171,9 @@
           true (assoc-in [:backend :streaming :current-frame] frame)
           frame-stats (assoc-in [:backend :streaming :frame-stats] frame-stats))))))
 
-;; ============================================================================
+
 ;; Preview Update Timer
-;; ============================================================================
+
 
 (defonce ^:private preview-timer (atom nil))
 
@@ -206,67 +206,3 @@
      (reset! preview-timer timer)
      (println "Preview updates started at" fps "FPS"))))
 
-(defn preview-running?
-  "Check if preview updates are running."
-  []
-  (some? @preview-timer))
-
-;; ============================================================================
-;; REPL / Testing
-;; ============================================================================
-
-(comment
-  ;; Start preview updates
-  (start-preview-updates! 30)
-  
-  ;; Stop preview updates
-  (stop-preview-updates!)
-  
-  ;; Check current frame
-  (get-preview-frame)
-  
-  ;; Manual frame generation test
-  (require '[laser-show.state.core :as state]
-           '[laser-show.state.domains :as domains])
-  
-  ;; Initialize state
-  (state/init-state! (domains/build-initial-state))
-  
-  ;; Set up a test cell
-  (state/swap-state! assoc-in [:grid :cells [0 0]] {:preset-id :circle})
-  (state/swap-state! assoc-in [:playback :active-cell] [0 0])
-  (state/swap-state! assoc-in [:playback :playing?] true)
-  (state/swap-state! assoc-in [:playback :trigger-time] (System/currentTimeMillis))
-  
-  ;; Get frame
-  (get-preview-frame)
-  
-  ;; ========================================
-  ;; Frame Profiler Testing
-  ;; ========================================
-  
-  ;; Check if profiler is enabled
-  (profiler/profiler-enabled?)
-  
-  ;; View current stats (after running preview for a while)
-  (profiler/print-stats)
-  
-  ;; View recent stats only
-  (profiler/print-stats 100)
-  
-  ;; Get raw stats data
-  (profiler/get-stats)
-  
-  ;; Get sample count
-  (profiler/get-sample-count)
-  
-  ;; Get raw samples
-  (profiler/get-samples 10)
-  
-  ;; Reset profiler (clear all samples)
-  (profiler/reset-profiler!)
-  
-  ;; Disable/enable profiler
-  (profiler/disable-profiler!)
-  (profiler/enable-profiler!)
-  )

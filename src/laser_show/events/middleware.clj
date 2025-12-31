@@ -19,9 +19,9 @@
    
    (dispatch-with-middleware [:grid/select-cell 0 0])")
 
-;; ============================================================================
+
 ;; Event History (for undo/redo support)
-;; ============================================================================
+
 
 (defonce ^{:doc "Atom containing event history for undo/redo support."}
   !event-history 
@@ -90,9 +90,9 @@
     (when (< position (count events))
       (nth events position))))
 
-;; ============================================================================
+
 ;; Undo/Redo Implementation
-;; ============================================================================
+
 
 (def ^:private inverse-events
   "Map of event types to their inverse events.
@@ -195,9 +195,9 @@
                         state)
              state))))
 
-;; ============================================================================
+
 ;; Event Log (for debugging)
-;; ============================================================================
+
 
 (defonce ^{:doc "Atom containing recent events for debugging."}
   !event-log
@@ -212,11 +212,6 @@
   [enabled]
   (swap! !event-log assoc :enabled enabled))
 
-(defn event-logging-enabled?
-  "Check if event logging is enabled.
-   Returns: true if enabled."
-  []
-  (:enabled @!event-log))
 
 (defn get-event-log
   "Get all logged events.
@@ -241,9 +236,9 @@
                              new-events)]
                (assoc state :events trimmed))))))
 
-;; ============================================================================
+
 ;; Event Validation
-;; ============================================================================
+
 
 (def ^:private event-schemas
   "Schema definitions for known events.
@@ -314,9 +309,9 @@
     ;; Unknown events are considered valid (extensibility)
     {:valid? true :errors []}))
 
-;; ============================================================================
+
 ;; Middleware Functions
-;; ============================================================================
+
 
 (defn wrap-logging
   "Middleware that logs all events.
@@ -419,9 +414,9 @@
          (println "Slow event:" (first event) "took" duration-ms "ms"))
        result))))
 
-;; ============================================================================
+
 ;; Middleware Composition
-;; ============================================================================
+
 
 (defn compose-middleware
   "Compose multiple middleware functions.

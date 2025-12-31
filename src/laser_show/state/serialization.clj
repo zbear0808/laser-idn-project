@@ -15,9 +15,9 @@
             [clojure.java.io :as io]
             [clojure.pprint :as pprint]))
 
-;; ============================================================================
+
 ;; Core Serialization Functions
-;; ============================================================================
+
 
 (defn serialize
   "Serialize Clojure data to EDN string.
@@ -66,9 +66,9 @@
               (println "[serialization/deserialize] Input string (first 100 chars):" (subs (str edn-str) 0 (min 100 (count (str edn-str))))))
             nil))))))
 
-;; ============================================================================
+
 ;; Validation & Type Checking
-;; ============================================================================
+
 
 (defn deserialize-with-schema
   "Deserialize and validate against a schema predicate.
@@ -125,9 +125,9 @@
     (and (map? data)
          (every? #(contains? data %) required-keys))))
 
-;; ============================================================================
+
 ;; File Operations
-;; ============================================================================
+
 
 (defn- ensure-parent-dirs!
   "Ensure parent directories exist for the given filepath."
@@ -196,9 +196,9 @@
               (or default if-not-found)))))
       if-not-found)))
 
-;; ============================================================================
+
 ;; String/Clipboard Operations
-;; ============================================================================
+
 
 (defn serialize-for-clipboard
   "Serialize data for clipboard transfer.
@@ -233,41 +233,3 @@
                                :on-error on-error
                                :default default)
       (deserialize edn-str :on-error on-error :default default))))
-
-;; ============================================================================
-;; Safe Operations (Error Handling Guaranteed)
-;; ============================================================================
-
-(defn safe-serialize
-  "Serialize with guaranteed error handling.
-   
-   Returns: [success? result-or-error-msg]
-   
-   Example:
-   (safe-serialize {:type :cue})
-   => [true \"{:type :cue}\"]
-   
-   (safe-serialize (Object.))
-   => [false \"error message...\"]"
-  [data]
-  (try
-    [true (serialize data)]
-    (catch Exception e
-      [false (.getMessage e)])))
-
-(defn safe-deserialize
-  "Deserialize with guaranteed error handling.
-   
-   Returns: [success? result-or-error-msg]
-   
-   Example:
-   (safe-deserialize \"{:type :cue}\")
-   => [true {:type :cue}]
-   
-   (safe-deserialize \"invalid\")
-   => [false \"error message...\"]"
-  [edn-str]
-  (try
-    [true (edn/read-string edn-str)]
-    (catch Exception e
-      [false (.getMessage e)])))

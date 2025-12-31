@@ -4,12 +4,12 @@
    Provides visual editors for effects like:
    - Translate: 2D point dragging for X/Y position
    - Corner Pin: 4-corner quadrilateral manipulation"
-  (:require [cljfx.api :as fx]
+  (:require 
             [laser-show.views.components.spatial-canvas :as spatial-canvas]))
 
-;; ============================================================================
+
 ;; Translate Effect Visual Editor
-;; ============================================================================
+
 
 (defn translate-visual-editor
   "Visual editor for translate effect - single draggable center point.
@@ -66,9 +66,9 @@
                             :text (format "Y: %.3f" y)
                             :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11; -fx-font-family: 'Consolas', monospace;"}]}]}))
 
-;; ============================================================================
+
 ;; Corner Pin Effect Visual Editor
-;; ============================================================================
+
 
 (defn corner-pin-visual-editor
   "Visual editor for corner pin effect - 4 draggable corners.
@@ -153,16 +153,3 @@
                                        :text (format "BR: (%.2f, %.2f)" br-x br-y)
                                        :style "-fx-text-fill: #FFC107; -fx-font-size: 10; -fx-font-family: 'Consolas', monospace;"}]}]}]}))
 
-;; ============================================================================
-;; Standard Parameter List (Fallback)
-;; ============================================================================
-
-(defn standard-param-list
-  "Standard parameter list using sliders (fallback for numeric mode).
-   This will be handled by the effect-chain-editor's existing param rendering."
-  [{:keys [col row effect-idx param-specs current-params]}]
-  ;; This is a placeholder - the actual implementation will reuse
-  ;; the existing param-control logic from effect-chain-editor
-  {:fx/type :label
-   :text "Use standard parameter controls"
-   :style "-fx-text-fill: #606060; -fx-font-style: italic;"})

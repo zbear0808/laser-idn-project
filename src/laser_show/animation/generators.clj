@@ -5,9 +5,9 @@
             [laser-show.animation.colors :as colors]
             [laser-show.common.util :as u]))
 
-;; ============================================================================
+
 ;; Geometry Helpers
-;; ============================================================================
+
 
 (def ^:const TWO-PI (* 2 Math/PI))
 
@@ -16,27 +16,7 @@
   [a b t]
   (+ a (* (- b a) t)))
 
-(defn rotate-point
-  "Rotate a 2D point [x y] around origin by angle (radians)."
-  [[x y] angle]
-  (let [cos-a (Math/cos angle)
-        sin-a (Math/sin angle)]
-    [(- (* x cos-a) (* y sin-a))
-     (+ (* x sin-a) (* y cos-a))]))
-
-(defn scale-point
-  "Scale a 2D point [x y] by factor."
-  [[x y] factor]
-  [(* x factor) (* y factor)])
-
-(defn translate-point
-  "Translate a 2D point [x y] by offset [dx dy]."
-  [[x y] [dx dy]]
-  [(+ x dx) (+ y dy)])
-
-;; ============================================================================
 ;; Basic Shape Generators
-;; ============================================================================
 
 (defn generate-circle
   "Generate points for a circle.
@@ -231,99 +211,10 @@
                             (range num-points))))
          (u/consv (t/blanked-point first-x first-y)))))
 
-(defn generate-wave
-  "Generate points for a sine wave.
-   Per IDN-Stream spec Section 6.2: First point must be blanked for beam positioning.
-   Options:
-   - :num-points - number of points (default 64)
-   - :amplitude - wave amplitude (default 0.3)
-   - :frequency - wave frequency in cycles (default 2)
-   - :width - horizontal span (default 1.0)
-   - :center - [cx cy] center position (default [0 0])
-   - :color - [r g b] color (default [255 255 255])"
-  [& {:keys [num-points amplitude frequency width center color]
-      :or {num-points 64
-           amplitude 0.3
-           frequency 2
-           width 1.0
-           center [0 0]
-           color [255 255 255]}}]
-  (let [[cx cy] center
-        [r g b] color
-        half-width (/ width 2)
-        ;; First point at start of wave
-        first-x (+ cx (- half-width))
-        first-y cy]
-    (->> (range num-points)
-         (mapv (fn [i]
-                 (let [t (/ i (dec num-points))
-                       x (+ cx (- (* t width) half-width))
-                       y (+ cy (* amplitude (Math/sin (* TWO-PI frequency t))))]
-                   (t/make-point x y r g b))))
-         (u/consv (t/blanked-point first-x first-y)))))
 
-;; ============================================================================
-;; Beam Effects
-;; ============================================================================
 
-(defn generate-beam
-  "Generate a single beam (line from center outward).
-   Per IDN-Stream spec Section 6.2: First point must be blanked for beam positioning.
-   Note: generate-line already adds the blanked first point.
-   Options:
-   - :num-points - number of points (default 32)
-   - :length - beam length (default 0.8)
-   - :angle - beam angle in radians (default 0)
-   - :origin - [x y] beam origin (default [0 0])
-   - :color - [r g b] color (default [255 255 255])"
-  [& {:keys [num-points length angle origin color]
-      :or {num-points 32
-           length 0.8
-           angle 0
-           origin [0 0]
-           color [255 255 255]}}]
-  (let [[ox oy] origin
-        ex (+ ox (* length (Math/cos angle)))
-        ey (+ oy (* length (Math/sin angle)))]
-    (generate-line :num-points num-points
-                   :start origin
-                   :end [ex ey]
-                   :color color)))
 
-(defn generate-beam-fan
-  "Generate multiple beams as disconnected endpoint dots in a fan pattern.
-   Each beam is a single point at the endpoint with blanking in between.
-   Options:
-   - :num-beams - number of beams (default 8)
-   - :length - beam length / distance from origin (default 0.8)
-   - :spread - angular spread in radians (default PI)
-   - :start-angle - starting angle (default -PI/2)
-   - :origin - [x y] beam origin (default [0 -0.5])
-   - :color - [r g b] color (default [255 255 255])"
-  [& {:keys [num-beams length spread start-angle origin color]
-      :or {num-beams 8
-           length 0.8
-           spread Math/PI
-           start-angle (- (/ Math/PI 2))
-           origin [0 -0.5]
-           color [255 255 255]}}]
-  (let [[ox oy] origin
-        [r g b] color
-        angle-step (if (> num-beams 1)
-                     (/ spread (dec num-beams))
-                     0)]
-    (->> (range num-beams)
-         (u/mapcatv (fn [i]
-                      (let [angle (+ start-angle (* i angle-step))
-                            ex (+ ox (* length (Math/cos angle)))
-                            ey (+ oy (* length (Math/sin angle)))]
-                        ;; Blanked point to move to endpoint position, then lit point at endpoint
-                        [(t/blanked-point ex ey)
-                         (t/make-point ex ey r g b)]))))))
-
-;; ============================================================================
 ;; Animation-Ready Generators
-;; ============================================================================
 
 (defn circle-animation
   "Circle animation generator function.

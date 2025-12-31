@@ -18,9 +18,9 @@
    {:effect-id :rotation :params {:angle (mod/sawtooth-mod 0 360 1.0)}}"
   (:require [laser-show.animation.effects :as effects]))
 
-;; ============================================================================
+
 ;; Scale Effect
-;; ============================================================================
+
 
 (defn- apply-scale [frame _time-ms _bpm {:keys [x-scale y-scale]}]
   (effects/transform-point-full
@@ -49,9 +49,9 @@
                 :max 5.0}]
   :apply-fn apply-scale})
 
-;; ============================================================================
+
 ;; Translate Effect
-;; ============================================================================
+
 
 (defn- apply-translate [frame _time-ms _bpm {:keys [x y]}]
   (effects/transform-point-full
@@ -83,9 +83,9 @@
              :default-mode :visual}
   :apply-fn apply-translate})
 
-;; ============================================================================
+
 ;; Rotation Effect
-;; ============================================================================
+
 
 (defn- apply-rotation [frame _time-ms _bpm {:keys [angle]}]
   (let [radians (Math/toRadians angle)
@@ -112,9 +112,9 @@
   :apply-fn apply-rotation})
 
 
-;; ============================================================================
+
 ;; Viewport Effect
-;; ============================================================================
+
 
 (defn- apply-viewport [frame _time-ms _bpm {:keys [x-min x-max y-min y-max]}]
   (let [viewport-width (- x-max x-min)
@@ -165,9 +165,9 @@
                 :max 1.0}]
   :apply-fn apply-viewport})
 
-;; ============================================================================
+
 ;; Pinch/Bulge Effect
-;; ============================================================================
+
 
 (defn- apply-pinch-bulge [frame _time-ms _bpm {:keys [amount]}]
   (effects/transform-point-full
@@ -194,9 +194,9 @@
                 :max 3.0}]
   :apply-fn apply-pinch-bulge})
 
-;; ============================================================================
+
 ;; Corner Pin Effect (4-corner perspective/bilinear transform)
-;; ============================================================================
+
 
 (defn- apply-corner-pin
   "Maps the unit square [-1,1]x[-1,1] to a quadrilateral defined by four corners.
@@ -289,9 +289,9 @@
              :default-mode :visual}
   :apply-fn apply-corner-pin})
 
-;; ============================================================================
+
 ;; Lens Distortion Effect (barrel/pincushion)
-;; ============================================================================
+
 
 (defn- apply-lens-distortion [frame _time-ms _bpm {:keys [k1 k2]}]
   (effects/transform-point-full
@@ -322,15 +322,15 @@
                 :max 1.0}]
   :apply-fn apply-lens-distortion})
 
-;; ============================================================================
+
 ;; SPECIAL EFFECTS
 ;; These are more complex effects kept for specific use cases.
 ;; Consider using modulators with basic effects for more flexibility.
-;; ============================================================================
 
-;; ============================================================================
+
+
 ;; Wave Distortion Effect (Special)
-;; ============================================================================
+
 
 (defn- apply-wave-distort [frame time-ms _bpm {:keys [amplitude frequency axis speed]}]
   (let [time-offset (* (/ time-ms 1000.0) speed)]

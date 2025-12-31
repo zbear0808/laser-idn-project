@@ -3,9 +3,9 @@
   (:require [clojure.test :refer [deftest testing is]]
             [laser-show.animation.modulation :as mod]))
 
-;; ============================================================================
+
 ;; Helper Functions
-;; ============================================================================
+
 
 (defn approx=
   "Check if two numbers are approximately equal within tolerance."
@@ -30,9 +30,9 @@
    :midi-state {}
    :osc-state {}})
 
-;; ============================================================================
+
 ;; Basic Resolution Tests
-;; ============================================================================
+
 
 (deftest resolve-param-static-test
   (testing "Static values pass through unchanged"
@@ -58,9 +58,9 @@
       (is (= 1.5 (:static resolved)))
       (is (= 2.0 (:modulated resolved))))))
 
-;; ============================================================================
+
 ;; Constant Modulator Tests
-;; ============================================================================
+
 
 (deftest constant-test
   (testing "Constant modulator returns same value regardless of context"
@@ -69,9 +69,9 @@
       (is (= 42 (mod/resolve-param config (make-test-context 1000 120))))
       (is (= 42 (mod/resolve-param config (make-test-context 5000 60)))))))
 
-;; ============================================================================
+
 ;; Sine Wave Modulator Tests
-;; ============================================================================
+
 
 (deftest sine-mod-range-test
   (testing "Sine modulator stays within min/max bounds"
@@ -114,9 +114,9 @@
       ;; With 0.25 phase offset at t=0, should be at peak (like 0.25 phase without offset)
       (is (approx= 1.0 (mod/resolve-param config-quarter-offset (make-test-context 0 bpm)) 0.05)))))
 
-;; ============================================================================
+
 ;; Square Wave Modulator Tests
-;; ============================================================================
+
 
 (deftest square-mod-values-test
   (testing "Square modulator alternates between min and max"
@@ -142,9 +142,9 @@
       (is (= 0.0 (mod/resolve-param config (make-test-context (* 0.3 ms-per-beat) bpm))))
       (is (= 0.0 (mod/resolve-param config (make-test-context (* 0.75 ms-per-beat) bpm)))))))
 
-;; ============================================================================
+
 ;; Triangle Wave Modulator Tests
-;; ============================================================================
+
 
 (deftest triangle-mod-range-test
   (testing "Triangle modulator stays within bounds"
@@ -154,9 +154,9 @@
           (is (>= value 0.0))
           (is (<= value 1.0)))))))
 
-;; ============================================================================
+
 ;; Sawtooth Wave Modulator Tests
-;; ============================================================================
+
 
 (deftest sawtooth-mod-ramp-test
   (testing "Sawtooth ramps from min to max"
@@ -166,9 +166,9 @@
       (is (approx= 0.0 (mod/resolve-param config (make-test-context 0 bpm)) 0.05))
       (is (approx= 0.5 (mod/resolve-param config (make-test-context (* 0.5 ms-per-beat) bpm)) 0.05)))))
 
-;; ============================================================================
+
 ;; Hz-based Modulator Tests
-;; ============================================================================
+
 
 (deftest sine-hz-test
   (testing "Sine Hz modulator uses Hz instead of BPM"
@@ -180,9 +180,9 @@
       ;; At t=500ms (half cycle), back to midpoint
       (is (approx= 0.5 (mod/resolve-param config (make-test-context 500 120)) 0.05)))))
 
-;; ============================================================================
+
 ;; Decay Modulator Tests
-;; ============================================================================
+
 
 (deftest linear-decay-test
   (testing "Linear decay from start to end"
@@ -224,9 +224,9 @@
       ;; End of beat (wraps to start of next)
       (is (approx= 1.0 (mod/resolve-param config (make-test-context ms-per-beat bpm)) 0.05)))))
 
-;; ============================================================================
+
 ;; Random and Step Modulator Tests
-;; ============================================================================
+
 
 (deftest random-mod-range-test
   (testing "Random modulator stays within bounds"
@@ -255,9 +255,9 @@
       ;; Should wrap
       (is (= 1 (mod/resolve-param config (make-test-context (* 4 ms-per-beat) bpm)))))))
 
-;; ============================================================================
+
 ;; Preset Tests
-;; ============================================================================
+
 
 (deftest preset-test
   (testing "Presets are accessible and valid configs"
@@ -276,9 +276,9 @@
               value (mod/resolve-param config context)]
           (is (number? value) (str "Preset " preset-key " should produce a number")))))))
 
-;; ============================================================================
+
 ;; Per-Point Context Detection Tests
-;; ============================================================================
+
 
 (deftest config-requires-per-point-test
   (testing "Per-point configs are correctly flagged"
@@ -327,9 +327,9 @@
     ;; Empty params
     (is (not (mod/any-param-requires-per-point? {})))))
 
-;; ============================================================================
+
 ;; Position-Based Modulator Tests
-;; ============================================================================
+
 
 (deftest position-x-mod-test
   (testing "Position X modulator maps X coordinate to range"

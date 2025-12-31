@@ -5,9 +5,9 @@
             [laser-show.input.events :as events]
             [laser-show.input.router :as router]))
 
-;; ============================================================================
+
 ;; OSC State
-;; ============================================================================
+
 
 (defonce osc-state
   (atom {:enabled true
@@ -16,9 +16,9 @@
          :address-mappings {}  ; Map of OSC address -> event config
          :handlers {}}))       ; Registered OSC handlers
 
-;; ============================================================================
+
 ;; Default Address Mappings
-;; ============================================================================
+
 
 (def default-mappings
   "Default OSC address mappings for common controllers like TouchOSC.
@@ -65,9 +65,9 @@
    "/1/play" {:type :trigger :id :play}
    "/1/stop" {:type :trigger :id :stop}})
 
-;; ============================================================================
+
 ;; OSC Message Conversion
-;; ============================================================================
+
 
 (defn- parse-osc-value
   "Parses OSC argument value, normalizing to 0.0-1.0 range if numeric."
@@ -110,9 +110,9 @@
           
           [])))))
 
-;; ============================================================================
+
 ;; OSC Handler
-;; ============================================================================
+
 
 (defn- handle-osc-message
   "Handler function for incoming OSC messages."
@@ -127,9 +127,9 @@
   (fn [msg]
     (handle-osc-message msg)))
 
-;; ============================================================================
+
 ;; Server Management
-;; ============================================================================
+
 
 (defn start-server!
   "Starts the OSC server on the specified port.
@@ -172,9 +172,9 @@
   []
   (:port @osc-state))
 
-;; ============================================================================
+
 ;; Address Mapping
-;; ============================================================================
+
 
 (defn set-address-mapping!
   "Sets the mapping for a specific OSC address.
@@ -203,9 +203,9 @@
   []
   (:address-mappings @osc-state))
 
-;; ============================================================================
+
 ;; Dynamic Handler Registration
-;; ============================================================================
+
 
 (defn register-handler!
   "Registers a specific OSC handler for an address pattern.
@@ -225,9 +225,9 @@
       (o/osc-rm-handler server pattern)
       (swap! osc-state update :handlers dissoc handler-id))))
 
-;; ============================================================================
+
 ;; OSC Learn
-;; ============================================================================
+
 
 (defonce learn-state (atom nil))
 
@@ -258,9 +258,9 @@
   []
   (boolean @learn-state))
 
-;; ============================================================================
+
 ;; Enable/Disable
-;; ============================================================================
+
 
 (defn enable!
   "Enables OSC input processing."
@@ -277,9 +277,9 @@
   []
   (:enabled @osc-state))
 
-;; ============================================================================
+
 ;; Initialization
-;; ============================================================================
+
 
 (defn init!
   "Initializes OSC system with default mappings.

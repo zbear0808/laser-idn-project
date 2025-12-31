@@ -3,9 +3,9 @@
             [laser-show.backend.streaming-engine :as se]
             [laser-show.animation.types :as t]))
 
-;; ============================================================================
+
 ;; Behavioral Tests (not testing internal structure)
-;; ============================================================================
+
 
 (deftest engine-creation-test
   (testing "Can create engine with frame provider"

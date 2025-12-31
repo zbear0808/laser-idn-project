@@ -28,9 +28,9 @@
            [javafx.scene.paint Color]
            [javafx.scene.text Font FontWeight]))
 
-;; ============================================================================
+
 ;; Coordinate Transformations
-;; ============================================================================
+
 
 (defn- world-to-canvas
   "Convert world coordinates to canvas pixel coordinates.
@@ -56,9 +56,9 @@
   [(max x-min (min x-max x))
    (max y-min (min y-max y))])
 
-;; ============================================================================
+
 ;; Drawing Functions
-;; ============================================================================
+
 
 (defn- draw-grid
   "Draw grid lines on the canvas."
@@ -208,9 +208,9 @@
       (when (>= (count polygon-coords) 3)
         (point-in-polygon? mx my polygon-coords)))))
 
-;; ============================================================================
+
 ;; Main Canvas Component
-;; ============================================================================
+
 
 (defn spatial-canvas
   "2D spatial canvas for visual parameter editing.

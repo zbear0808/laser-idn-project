@@ -8,9 +8,9 @@
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.paint Color]))
 
-;; ============================================================================
+
 ;; Drawing Helpers
-;; ============================================================================
+
 
 (defn- normalize-coord
   "Convert normalized coordinate (-1 to 1) to pixel coordinate."
@@ -22,9 +22,9 @@
   [r g b]
   (Color/rgb (int r) (int g) (int b)))
 
-;; ============================================================================
+
 ;; Frame Drawing
-;; ============================================================================
+
 
 (defn- draw-background
   "Draw the preview background."
@@ -80,9 +80,9 @@
         y (/ height 2)]
     (.fillText gc text x y)))
 
-;; ============================================================================
+
 ;; Draw Function (called by cljfx Canvas :draw prop)
-;; ============================================================================
+
 
 (defn draw-preview
   "Main draw function for the preview canvas.
@@ -108,9 +108,9 @@
         (draw-frame-points gc width height frame))
       (draw-no-content gc width height))))
 
-;; ============================================================================
+
 ;; Preview Canvas Component
-;; ============================================================================
+
 
 (defn preview-canvas
   "Canvas component that displays the current laser frame.
@@ -125,9 +125,9 @@
      :height h
      :draw #(draw-preview % frame)}))
 
-;; ============================================================================
+
 ;; Preview Panel (with controls)
-;; ============================================================================
+
 
 (defn preview-header
   "Header for the preview panel."

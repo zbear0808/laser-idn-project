@@ -20,9 +20,9 @@
             [clojure.core.cache :as cache]
             [clojure.pprint :as pprint]))
 
-;; ============================================================================
+
 ;; Section 1: Core State Atom & Cache
-;; ============================================================================
+
 
 (defonce ^{:private true
            :doc "The single cljfx context atom. Initialized by init-state!"}
@@ -39,20 +39,15 @@
    Adjust :threshold based on app complexity."
   #(cache/lru-cache-factory % :threshold 512))
 
-;; ============================================================================
+
 ;; Section 2: Context Access Functions
-;; ============================================================================
+
 
 (defn get-context-atom
   "Get the raw context atom (for fx/create-app and fx/mount-renderer)."
   []
   *context)
 
-(defn get-context
-  "Get the current cljfx context value.
-   Use this when you need to pass context to subscriptions outside of components."
-  []
-  @*context)
 
 (defn get-state
   "Get the raw state map from the context.
@@ -85,9 +80,9 @@
   (when-let [ctx @*context]
     (:cljfx.context/m ctx)))
 
-;; ============================================================================
+
 ;; Section 3: State Mutation Primitives
-;; ============================================================================
+
 
 (defn swap-state!
   "Update state using a function, preserving context memoization.
@@ -158,9 +153,9 @@
   [path f & args]
   (apply swap-state! update-in path f args))
 
-;; ============================================================================
+
 ;; Section 4: Initialization & Lifecycle
-;; ============================================================================
+
 
 (defn init-state!
   "Initialize the state atom with the given initial state.
@@ -174,10 +169,6 @@
   (reset! *context (fx/create-context initial-state cache-factory))
   (println "State initialized with" (count initial-state) "top-level keys"))
 
-(defn initialized?
-  "Check if state has been initialized."
-  []
-  (some? @*context))
 
 (defn shutdown!
   "Shutdown the state system. Clears the context."
@@ -185,9 +176,9 @@
   (reset! *context nil)
   (println "State shutdown"))
 
-;; ============================================================================
+
 ;; Section 5: Domain Registration (used by defstate macro)
-;; ============================================================================
+
 
 (defn register-domain!
   "Register a state domain. Called by defstate macro.
@@ -213,9 +204,9 @@
         (map (fn [[k v]] [k (:initial v)]))
         @*domain-registry))
 
-;; ============================================================================
+
 ;; Section 6: defstate Macro
-;; ============================================================================
+
 
 (defmacro defstate
   "Define a state domain with automatic setter generation.

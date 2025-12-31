@@ -22,9 +22,9 @@
            accent-hover ::theme/accent-hover
            accent-red  ::theme/accent-red} theme/theme]
       
-      {;; ==================================================================
+      {
        ;; Base Button Styles
-       ;; ==================================================================
+       
        
        ;; Standard button - dark theme
        ".btn"
@@ -64,9 +64,9 @@
         ":hover"
         {:-fx-background-color bg-hover}}
        
-       ;; ==================================================================
+       
        ;; Action Button Variants
-       ;; ==================================================================
+       
        
        ;; Primary action button (green)
        ".btn-primary"
@@ -101,9 +101,9 @@
         ":hover"
         {:-fx-background-color "#B71C1C"}}
        
-       ;; ==================================================================
+       
        ;; Transport Buttons (for toolbar)
-       ;; ==================================================================
+       
        
        ".transport-btn"
        {:-fx-background-color bg-light
@@ -132,9 +132,9 @@
         ":hover"
         {:-fx-background-color accent-hover}}
        
-       ;; ==================================================================
+       
        ;; Tab Buttons
-       ;; ==================================================================
+       
        
        ".tab-btn"
        {:-fx-background-color bg-light
@@ -156,9 +156,9 @@
         ":hover"
         {:-fx-background-color accent-primary}}
        
-       ;; ==================================================================
+       
        ;; Effect Bank Buttons
-       ;; ==================================================================
+       
        
        ".effect-btn"
        {:-fx-background-color bg-active

@@ -3,9 +3,9 @@
   (:require [clojure.test :refer [deftest testing is]]
             [laser-show.input.events :as events]))
 
-;; ============================================================================
+
 ;; Event Creation Tests
-;; ============================================================================
+
 
 (deftest control-change-test
   (testing "Creates valid control change event"
@@ -64,9 +64,9 @@
       (is (= 0 (:channel event)))
       (is (= 5 (:program event))))))
 
-;; ============================================================================
+
 ;; Event Predicate Tests
-;; ============================================================================
+
 
 (deftest predicate-tests
   (testing "control-change?"
@@ -102,9 +102,9 @@
     (is (events/keyboard-event? (events/trigger :keyboard :play :pressed)))
     (is (not (events/keyboard-event? (events/trigger :midi :play :pressed))))))
 
-;; ============================================================================
+
 ;; Event Matching Tests
-;; ============================================================================
+
 
 (deftest matches-test
   (let [event (events/note-on :midi 0 60 1.0)]
@@ -128,9 +128,9 @@
     (let [event (events/trigger :keyboard :play :pressed)]
       (is (= [:keyboard :trigger :play] (events/event-id event))))))
 
-;; ============================================================================
+
 ;; Value Scaling Tests
-;; ============================================================================
+
 
 (deftest midi-to-normalized-test
   (testing "Converts MIDI values correctly"

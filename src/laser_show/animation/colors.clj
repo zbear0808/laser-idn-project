@@ -8,59 +8,20 @@
    - Conversion functions between bit depths
    - Color manipulation functions for laser points")
 
-;; ============================================================================
+
 ;; Bit Depth Constants
-;; ============================================================================
+
 
 (def ^:const bit-depth-8 8)
 (def ^:const bit-depth-16 16)
 (def ^:const max-8bit 255)
 (def ^:const max-16bit 65535)
 
-;; ============================================================================
-;; ILDA High Bit-Depth Colors (16-bit per channel)
-;; Values range from 0 to 65535
-;; ============================================================================
 
-(def ilda-red [65535 0 0])
-(def ilda-green [0 65535 0])
-(def ilda-blue [0 0 65535])
-(def ilda-white [65535 65535 65535])
-(def ilda-black [0 0 0])
 
-(def ilda-cyan [0 65535 65535])
-(def ilda-magenta [65535 0 65535])
-(def ilda-yellow [65535 65535 0])
-
-(def ilda-orange [65535 32768 0])
-(def ilda-pink [65535 32768 49152])
-(def ilda-purple [32768 0 65535])
-(def ilda-lime [32768 65535 0])
-
-(def ilda-warm-white [65535 61440 56320])
-(def ilda-cool-white [56320 61440 65535])
-
-(def ilda-colors
-  "Map of color names to 16-bit ILDA RGB vectors."
-  {:red ilda-red
-   :green ilda-green
-   :blue ilda-blue
-   :white ilda-white
-   :black ilda-black
-   :cyan ilda-cyan
-   :magenta ilda-magenta
-   :yellow ilda-yellow
-   :orange ilda-orange
-   :pink ilda-pink
-   :purple ilda-purple
-   :lime ilda-lime
-   :warm-white ilda-warm-white
-   :cool-white ilda-cool-white})
-
-;; ============================================================================
 ;; Standard 8-bit Colors (for UI display)
 ;; Values range from 0 to 255
-;; ============================================================================
+
 
 (def red [255 0 0])
 (def green [0 255 0])
@@ -97,9 +58,9 @@
    :warm-white warm-white
    :cool-white cool-white})
 
-;; ============================================================================
+
 ;; Bit Depth Conversion
-;; ============================================================================
+
 
 (defn convert-channel
   "Convert a single color channel between bit depths."
@@ -150,9 +111,9 @@
    (/ (double g) max-8bit)
    (/ (double b) max-8bit)])
 
-;; ============================================================================
+
 ;; ILDA Color Record (for type safety and clarity)
-;; ============================================================================
+
 
 (defrecord ILDAColor [^int r ^int g ^int b ^int bit-depth])
 
@@ -176,9 +137,9 @@
     [(:r color) (:g color) (:b color)]
     (ilda->8bit [(:r color) (:g color) (:b color)])))
 
-;; ============================================================================
+
 ;; HSV Color Conversion (8-bit)
-;; ============================================================================
+
 
 (defn hsv->rgb
   "Convert HSV to 8-bit RGB. h in [0, 360], s and v in [0, 1].
@@ -220,9 +181,9 @@
         v cmax]
     [(if (neg? h) (+ h 360) h) s v]))
 
-;; ============================================================================
+
 ;; HSV Color Conversion (16-bit ILDA)
-;; ============================================================================
+
 
 (defn hsv->ilda
   "Convert HSV to 16-bit ILDA RGB. h in [0, 360], s and v in [0, 1].
@@ -264,9 +225,9 @@
         v cmax]
     [(if (neg? h) (+ h 360) h) s v]))
 
-;; ============================================================================
+
 ;; Rainbow Color Generation (8-bit)
-;; ============================================================================
+
 
 (defn rainbow
   "Get a rainbow color based on position (0.0 to 1.0).
@@ -282,9 +243,9 @@
   [position offset]
   (hsv->rgb (+ (* position 360) offset) 1.0 1.0))
 
-;; ============================================================================
+
 ;; Rainbow Color Generation (16-bit ILDA)
-;; ============================================================================
+
 
 (defn rainbow-ilda
   "Get a rainbow color based on position (0.0 to 1.0).
@@ -300,9 +261,9 @@
   [position offset]
   (hsv->ilda (+ (* position 360) offset) 1.0 1.0))
 
-;; ============================================================================
+
 ;; Color Interpolation
-;; ============================================================================
+
 
 (defn lerp-color
   "Linear interpolation between two colors.
@@ -334,9 +295,9 @@
                     local-t (- scaled idx)]
                 (lerp-color (nth colors idx) (nth colors (inc idx)) local-t)))))))
 
-;; ============================================================================
+
 ;; Point Color Manipulation
-;; ============================================================================
+
 
 (defn recolor-point
   "Recolor a single point with a new [r g b] color.
@@ -417,9 +378,9 @@
            (recolor-point point [r g b])))
        points))
 
-;; ============================================================================
+
 ;; Color Effects
-;; ============================================================================
+
 
 (defn fade-points
   "Fade all points toward black by a factor (0.0 = no change, 1.0 = black)."
@@ -472,9 +433,9 @@
            (recolor-point point [nr ng nb])))
        points))
 
-;; ============================================================================
+
 ;; Animated Color Effects (time-based)
-;; ============================================================================
+
 
 (defn rainbow-cycle
   "Get a rainbow color that cycles over time.

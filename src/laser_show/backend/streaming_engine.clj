@@ -7,9 +7,9 @@
             [laser-show.idn.hello :as hello])
   (:import [java.net DatagramSocket]))
 
-;; ============================================================================
+
 ;; Constants
-;; ============================================================================
+
 
 ;; Default streaming FPS - 30 FPS provides smooth animation while being
 ;; achievable on most networks and hardware
@@ -26,9 +26,9 @@
 ;; This ensures robust streaming even with occasional network issues.
 (def ^:const CONFIG_RESEND_INTERVAL_MS 200)
 
-;; ============================================================================
+
 ;; Engine State
-;; ============================================================================
+
 
 (defn create-engine
   "Create a new streaming engine configuration.
@@ -62,9 +62,9 @@
                  :last-frame-time 0
                  :actual-fps 0.0})})
 
-;; ============================================================================
+
 ;; Timestamp Management
-;; ============================================================================
+
 
 (defn- current-timestamp-us
   "Get current timestamp in microseconds relative to engine start."
@@ -81,9 +81,9 @@
         last-config-ms @(:last-config-time-ms engine)]
     (>= (- now-ms last-config-ms) CONFIG_RESEND_INTERVAL_MS)))
 
-;; ============================================================================
+
 ;; Streaming Loop
-;; ============================================================================
+
 
 (defn- calculate-actual-fps
   "Calculate actual FPS based on frame timing."
@@ -148,9 +148,9 @@
           (when (pos? sleep-time)
             (Thread/sleep (long sleep-time))))))))
 
-;; ============================================================================
+
 ;; Engine Control
-;; ============================================================================
+
 
 (defn start!
   "Start the streaming engine.
@@ -221,13 +221,3 @@
   [engine callback]
   (reset! (:log-callback engine) callback))
 
-;; ============================================================================
-;; Convenience Functions
-;; ============================================================================
-
-(defn create-and-start!
-  "Create and immediately start a streaming engine.
-   Convenience function combining create-engine and start!"
-  [target-host frame-provider & opts]
-  (-> (apply create-engine target-host frame-provider opts)
-      (start!)))

@@ -2,25 +2,10 @@
   "Pre-built animation presets for the laser show application.
    Each preset is a map containing name, category, parameters spec, and generator."
   (:require [laser-show.animation.types :as t]
-            [laser-show.animation.generators :as gen]
-            [laser-show.ui.colors :as ui-colors]))
+            [laser-show.animation.generators :as gen]))
 
-;; ============================================================================
-;; Preset Categories
-;; ============================================================================
-
-(def categories
-  "Category definitions with names and colors.
-   Colors are stored as [r g b] vectors for compatibility."
-  {:geometric {:name "Geometric" :color (ui-colors/color->rgb-vec ui-colors/category-geometric)}
-   :beam      {:name "Beams" :color (ui-colors/color->rgb-vec ui-colors/category-beam)}
-   :wave      {:name "Waves" :color (ui-colors/color->rgb-vec ui-colors/category-wave)}
-   :abstract  {:name "Abstract" :color (ui-colors/color->rgb-vec ui-colors/category-abstract)}
-   :text      {:name "Text" :color (ui-colors/color->rgb-vec ui-colors/category-text)}})
-
-;; ============================================================================
 ;; Parameter Types
-;; ============================================================================
+
 
 (defn float-param
   "Define a float parameter."
@@ -37,14 +22,10 @@
   [key label default]
   {:key key :label label :type :color :default default})
 
-(defn enum-param
-  "Define an enum parameter."
-  [key label options default]
-  {:key key :label label :type :enum :options options :default default})
 
-;; ============================================================================
+
 ;; Built-in Presets
-;; ============================================================================
+
 
 (def preset-circle
   {:id :circle
@@ -122,9 +103,9 @@
    :parameters [(float-param :radius "Radius" 0.5 0.1 1.0)]
    :generator gen/rainbow-circle-animation})
 
-;; ============================================================================
+
 ;; Preset Registry
-;; ============================================================================
+
 
 (def all-presets
   "Vector of all available presets."
@@ -147,10 +128,6 @@
   [preset-id]
   (get presets-by-id preset-id))
 
-(defn get-presets-by-category
-  "Get all presets in a category."
-  [category]
-  (filter #(= (:category %) category) all-presets))
 
 (defn create-animation-from-preset
   "Create an Animation instance from a preset with default parameters."

@@ -65,9 +65,9 @@
 (def ^:const CFL_ROUTING 0x01)
 (def ^:const CFL_CLOSE 0x02)
 
-;; ============================================================================
+
 ;; Default Configuration
-;; ============================================================================
+
 
 (def ^:const DEFAULT_CHANNEL_ID 0)
 ;; Per spec Section 2.2: Service ID 0x00 = connect to default service
@@ -96,9 +96,9 @@
   "Bytes per sample for default configuration: X(2) + Y(2) + R(1) + G(1) + B(1) = 7"
   7)
 
-;; ============================================================================
+
 ;; SCWC Calculation and Tag Alignment
-;; ============================================================================
+
 
 (defn calculate-scwc
   "Calculate Service Configuration Word Count (SCWC) and ensure 32-bit alignment.
@@ -118,9 +118,9 @@
         scwc (quot (count padded-tags) 2)]
     [scwc padded-tags]))
 
-;; ============================================================================
+
 ;; Packet Size Calculations
-;; ============================================================================
+
 
 (defn channel-message-header-size
   "Size of channel message header (without configuration)"
@@ -164,9 +164,9 @@
   (quot (- max-size (channel-message-header-size) (frame-chunk-header-size))
         bytes-per-sample))
 
-;; ============================================================================
+
 ;; Binary Writing Helpers
-;; ============================================================================
+
 
 (defn write-channel-message-header!
   "Write IDN-Stream channel message header to ByteBuffer.
@@ -232,9 +232,9 @@
   (.put buf (unchecked-byte (:g point)))
   (.put buf (unchecked-byte (:b point))))
 
-;; ============================================================================
+
 ;; Frame to Packet Conversion
-;; ============================================================================
+
 
 (defn frame->packet-with-config
   "Convert a LaserFrame to an IDN packet with channel configuration.
@@ -334,9 +334,9 @@
 
     (.array buf)))
 
-;; ============================================================================
+
 ;; Packet Parsing (for validation and debugging)
-;; ============================================================================
+
 
 (defn parse-channel-message-header
   "Parse channel message header from byte array.
@@ -412,9 +412,9 @@
        :error (.getMessage e)
        :exception e})))
 
-;; ============================================================================
+
 ;; Utilities
-;; ============================================================================
+
 
 (defn microseconds-now
   "Get current time in microseconds (for timestamps)"

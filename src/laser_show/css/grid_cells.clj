@@ -24,9 +24,9 @@
            accent-blue    ::theme/accent-blue
            accent-primary ::theme/accent-primary} theme/theme]
       
-      {;; ==================================================================
+      {
        ;; Base Grid Cell
-       ;; ==================================================================
+       
        
        ".grid-cell"
        {:-fx-background-radius 4
@@ -38,9 +38,9 @@
         :-fx-background-radius 4
         :-fx-cursor "hand"}
        
-       ;; ==================================================================
+       
        ;; Grid Cell States
-       ;; ==================================================================
+       
        
        ;; Selected cell (blue border)
        ".grid-cell-selected"
@@ -57,17 +57,17 @@
        {:-fx-background-color text-primary
         :-fx-background-radius 4}
        
-       ;; ==================================================================
+       
        ;; Grid Cell Labels
-       ;; ==================================================================
+       
        
        ".grid-cell-label"
        {:-fx-text-fill text-primary
         :-fx-font-size 10}
        
-       ;; ==================================================================
+       
        ;; Effect Chain Item (in effect chain editor)
-       ;; ==================================================================
+       
        
        ".chain-item"
        {:-fx-background-color bg-light
@@ -95,9 +95,9 @@
         :-fx-font-size 10
         :-fx-cursor "move"}
        
-       ;; ==================================================================
+       
        ;; Grid Header (column letters, row numbers)
-       ;; ==================================================================
+       
        
        ".grid-header-label"
        {:-fx-text-fill text-primary

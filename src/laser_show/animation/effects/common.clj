@@ -2,9 +2,9 @@
   "Common utility functions shared across effect implementations.
    Extracted to avoid code duplication.")
 
-;; ============================================================================
+
 ;; Byte Clamping
-;; ============================================================================
+
 
 (defn clamp-byte
   "Clamp a value to valid byte range (0-255).
@@ -12,9 +12,9 @@
   [v]
   (max 0 (min 255 (int v))))
 
-;; ============================================================================
+
 ;; Coordinate Utilities
-;; ============================================================================
+
 
 (defn clamp
   "Clamp a value to the given range."

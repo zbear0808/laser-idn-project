@@ -17,9 +17,9 @@
   (:import [javafx.scene.layout HeaderBar]
            [javafx.scene.image Image]))
 
-;; ============================================================================
+
 ;; HeaderBar Lifecycle (JavaFX 26 Preview Feature)
-;; ============================================================================
+
 
 (def header-bar-props
   "Property map for HeaderBar component.
@@ -45,9 +45,9 @@
     :ctor []
     :props header-bar-props))
 
-;; ============================================================================
+
 ;; Menu Item Definitions
-;; ============================================================================
+
 
 (defn- file-menu-items
   "Create File menu items with dynamic state."
@@ -179,9 +179,9 @@
     :text "Check for Updates"
     :on-action {:event/type :help/check-updates}}])
 
-;; ============================================================================
+
 ;; Menu Components
-;; ============================================================================
+
 
 (defn- file-menu
   [{:keys [fx/context]}]
@@ -228,9 +228,9 @@
              :style-class "menu-label"}
    :items (help-menu-items context)})
 
-;; ============================================================================
+
 ;; Icon Loading
-;; ============================================================================
+
 
 (def app-icon
   "Lazy-loaded application icon image.
@@ -249,9 +249,9 @@
    :fit-height 20
    :preserve-ratio true})
 
-;; ============================================================================
+
 ;; Menu Bar Component
-;; ============================================================================
+
 
 (defn- menu-bar
   "Internal menu bar component with all application menus and icon."
@@ -271,9 +271,9 @@
                        {:fx/type view-menu}
                        {:fx/type help-menu}]}]})
 
-;; ============================================================================
+
 ;; Public API
-;; ============================================================================
+
 
 (defn header-view
   "Application header component.

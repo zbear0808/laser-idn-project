@@ -4,9 +4,9 @@
             [laser-show.input.events :as events]
             [laser-show.input.router :as router]))
 
-;; ============================================================================
+
 ;; Test Fixtures
-;; ============================================================================
+
 
 (defn reset-router-fixture
   "Resets router state before each test."
@@ -20,9 +20,9 @@
 
 (use-fixtures :each reset-router-fixture)
 
-;; ============================================================================
+
 ;; Handler Registration Tests
-;; ============================================================================
+
 
 (deftest register-handler-test
   (testing "Registers handler with pattern"
@@ -56,9 +56,9 @@
     (router/clear-handlers!)
     (is (= 0 (router/handler-count)))))
 
-;; ============================================================================
+
 ;; Event Dispatch Tests
-;; ============================================================================
+
 
 (deftest dispatch-basic-test
   (testing "Dispatches event to matching handler"
@@ -122,9 +122,9 @@
                               (events/note-on :midi 0 62 1.0)])
       (is (= 3 (count @received))))))
 
-;; ============================================================================
+
 ;; Router Control Tests
-;; ============================================================================
+
 
 (deftest enable-disable-test
   (testing "Disabled router does not dispatch"
@@ -139,9 +139,9 @@
       (router/dispatch! (events/note-on :midi 0 60 1.0))
       (is (some? @received)))))
 
-;; ============================================================================
+
 ;; Event Logging Tests
-;; ============================================================================
+
 
 (deftest event-logging-test
   (testing "Logs events when enabled"
@@ -165,9 +165,9 @@
     (router/clear-event-log!)
     (is (empty? (router/get-event-log)))))
 
-;; ============================================================================
+
 ;; Convenience Function Tests
-;; ============================================================================
+
 
 (deftest on-note-test
   (testing "on-note! registers note handler"
@@ -202,9 +202,9 @@
       (router/dispatch! (events/trigger :keyboard :play :pressed))
       (is (= 2 (count @received))))))
 
-;; ============================================================================
+
 ;; Handler Info Tests
-;; ============================================================================
+
 
 (deftest list-handlers-test
   (testing "Lists registered handlers"
@@ -216,9 +216,9 @@
       (is (= {:type :note-off} (get-in info [:handlers :handler2])))
       (is (some #{:global} (:global-handlers info))))))
 
-;; ============================================================================
+
 ;; Error Handling Tests
-;; ============================================================================
+
 
 (deftest handler-error-test
   (testing "Handler errors don't stop dispatch to other handlers"

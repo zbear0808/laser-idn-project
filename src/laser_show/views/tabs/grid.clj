@@ -7,9 +7,9 @@
             [laser-show.subs :as subs]
             [laser-show.views.components.grid-cell :as grid-cell]))
 
-;; ============================================================================
+
 ;; Grid Layout
-;; ============================================================================
+
 
 (defn grid-row
   "A single row of grid cells."
@@ -38,9 +38,9 @@
                     :row row
                     :cols cols}))}))
 
-;; ============================================================================
+
 ;; Grid Header
-;; ============================================================================
+
 
 (defn grid-header
   "Header above the grid with column numbers."
@@ -57,9 +57,9 @@
                     :alignment :center
                     :style "-fx-text-fill: #808080; -fx-font-size: 11;"}))}))
 
-;; ============================================================================
+
 ;; Grid with Row Labels
-;; ============================================================================
+
 
 (defn grid-with-labels
   "Grid with row labels on the left."
@@ -79,9 +79,9 @@
                                 :style "-fx-text-fill: #808080; -fx-font-size: 11;"}))}
                 {:fx/type cue-grid}]}))
 
-;; ============================================================================
+
 ;; Grid Tab
-;; ============================================================================
+
 
 (defn grid-tab
   "Complete grid tab with header and grid."

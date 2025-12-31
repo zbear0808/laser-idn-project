@@ -6,18 +6,15 @@
    NOTE: Clipboard state is stored in state.core at [:ui :clipboard]
    to maintain a single source of truth for all application state."
   (:require [clojure.string :as str]
-            [laser-show.backend.cues :as cues]
-            [laser-show.backend.zones :as zones]
-            [laser-show.backend.projectors :as projectors]
             [laser-show.state.core :as state]
             [laser-show.state.queries :as queries]
             [laser-show.state.serialization :as ser]
             [laser-show.animation.modulation :as mod])
   (:import [javafx.scene.input Clipboard ClipboardContent]))
 
-;; ============================================================================
+
 ;; Clipboard State - uses database/dynamic.clj !ui atom
-;; ============================================================================
+
 
 ;; No local atom - state is in state/!ui at [:clipboard]
 
@@ -31,9 +28,9 @@
   [data]
   (state/assoc-in-state! [:ui :clipboard] data))
 
-;; ============================================================================
+
 ;; Clipboard Types
-;; ============================================================================
+
 
 (def clipboard-types
   #{:cue :zone :projector :effect :effect-chain :cell-assignment})
@@ -42,9 +39,9 @@
   [type]
   (contains? clipboard-types type))
 
-;; ============================================================================
+
 ;; System Clipboard Operations
-;; ============================================================================
+
 
 (defn- get-system-clipboard
   "Get the system clipboard."
@@ -87,9 +84,9 @@
       ;; Silently return nil - system clipboard often contains non-parseable content
       nil)))
 
-;; ============================================================================
+
 ;; Generic Clipboard Operations
-;; ============================================================================
+
 
 (defn get-clipboard
   "Get the current clipboard contents.
@@ -121,45 +118,9 @@
   []
   (nil? (get-clipboard)))
 
-;; ============================================================================
-;; Cue Copy/Paste
-;; ============================================================================
 
-(defn copy-cue!
-  "Copy a cue to the clipboard by ID.
-   Stores the full cue data so it persists even if original is deleted.
-   Also copies to system clipboard as EDN."
-  [cue-id]
-  (when-let [cue (cues/get-cue cue-id)]
-    (let [clip-data {:type :cue
-                     :data cue
-                     :copied-at (System/currentTimeMillis)}]
-      (set-internal-clipboard! clip-data)
-      (copy-to-system-clipboard! clip-data)
-      true)))
-
-(defn paste-cue!
-  "Paste a cue from clipboard, creating a new cue with a unique ID.
-   Returns the new cue, or nil if clipboard doesn't contain a cue."
-  []
-  (when (clipboard-has-type? :cue)
-    (let [{:keys [data]} (get-internal-clipboard)
-          new-id (keyword (str "cue-" (System/currentTimeMillis)))
-          new-cue (assoc data 
-                         :id new-id 
-                         :name (str (:name data) " (copy)")
-                         :created-at (System/currentTimeMillis))]
-      (cues/add-cue! new-cue)
-      new-cue)))
-
-(defn can-paste-cue?
-  "Check if clipboard contains a cue that can be pasted."
-  []
-  (clipboard-has-type? :cue))
-
-;; ============================================================================
 ;; Cell Assignment Copy/Paste
-;; ============================================================================
+
 
 (defn copy-cell-assignment!
   "Copy a cell's preset assignment to clipboard.
@@ -188,77 +149,9 @@
   []
   (clipboard-has-type? :cell-assignment))
 
-;; ============================================================================
-;; Zone Copy/Paste (for future use)
-;; ============================================================================
 
-(defn copy-zone!
-  "Copy a zone to the clipboard by ID."
-  [zone-id]
-  (when-let [zone (zones/get-zone zone-id)]
-    (let [clip-data {:type :zone
-                     :data zone
-                     :copied-at (System/currentTimeMillis)}]
-      (set-internal-clipboard! clip-data)
-      (copy-to-system-clipboard! clip-data)
-      true)))
-
-(defn paste-zone!
-  "Paste a zone from clipboard, creating a new zone with a unique ID.
-   Returns the new zone, or nil if clipboard doesn't contain a zone."
-  []
-  (when (clipboard-has-type? :zone)
-    (let [{:keys [data]} (get-internal-clipboard)
-          new-id (keyword (str "zone-" (System/currentTimeMillis)))
-          new-zone (assoc data 
-                          :id new-id 
-                          :name (str (:name data) " (copy)")
-                          :created-at (System/currentTimeMillis))]
-      (zones/create-zone! new-zone)
-      new-zone)))
-
-(defn can-paste-zone?
-  "Check if clipboard contains a zone that can be pasted."
-  []
-  (clipboard-has-type? :zone))
-
-;; ============================================================================
-;; Projector Copy/Paste (for future use)
-;; ============================================================================
-
-(defn copy-projector!
-  "Copy a projector to the clipboard by ID."
-  [projector-id]
-  (when-let [projector (projectors/get-projector projector-id)]
-    (let [clip-data {:type :projector
-                     :data projector
-                     :copied-at (System/currentTimeMillis)}]
-      (set-internal-clipboard! clip-data)
-      (copy-to-system-clipboard! clip-data)
-      true)))
-
-(defn paste-projector!
-  "Paste a projector from clipboard, creating a new projector with a unique ID.
-   Returns the new projector, or nil if clipboard doesn't contain a projector."
-  []
-  (when (clipboard-has-type? :projector)
-    (let [{:keys [data]} (get-internal-clipboard)
-          new-id (keyword (str "projector-" (System/currentTimeMillis)))
-          new-projector (assoc data 
-                               :id new-id 
-                               :name (str (:name data) " (copy)")
-                               :created-at (System/currentTimeMillis))]
-      (projectors/register-projector! new-projector)
-      new-projector)))
-
-(defn can-paste-projector?
-  "Check if clipboard contains a projector that can be pasted."
-  []
-  (clipboard-has-type? :projector))
-
-;; ============================================================================
 ;; Effect Chain Copy/Paste (for effects grid)
-;; ============================================================================
+
 ;; 
 ;; Effect cells use chain format:
 ;; {:type :effect-chain :effects [{:effect-id :scale :params {...}} ...] :active true}
@@ -269,24 +162,24 @@
   [params]
   (when params
     (into {}
-      (map (fn [[k v]]
-             (cond
-               ;; Modulator config map - pass through as-is
-               (mod/modulator-config? v)
-               [k v]
-               
-               ;; Any function - use default (shouldn't happen with config-only approach)
-               (fn? v)
-               [k 1.0]
-               
-               ;; Atom or other derefable - deref it
-               (instance? clojure.lang.IDeref v)
-               [k @v]
-               
-               ;; Regular serializable value
-               :else
-               [k v]))
-           params))))
+          (map (fn [[k v]]
+                 (cond
+                   ;; Modulator config map - pass through as-is
+                   (mod/modulator-config? v)
+                   [k v]
+
+                   ;; Any function - use default (shouldn't happen with config-only approach)
+                   (fn? v)
+                   [k 1.0]
+
+                   ;; Atom or other derefable - deref it
+                   (instance? clojure.lang.IDeref v)
+                   [k @v]
+
+                   ;; Regular serializable value
+                   :else
+                   [k v]))
+               params))))
 
 (defn- serialize-effect-chain
   "Serialize an effect chain for clipboard.
@@ -313,41 +206,10 @@
       (copy-to-system-clipboard! clip-data)
       true)))
 
-(defn paste-effect-chain
-  "Get the effect chain from clipboard for pasting.
-   Returns chain data: {:effects [...] :active true}
-   or nil if clipboard doesn't contain one."
-  []
-  (when (clipboard-has-type? :effect-chain)
-    (let [clip (get-clipboard)]
-      {:effects (:effects clip [])
-       :active (:active clip true)})))
 
-(defn can-paste-effect-chain?
-  "Check if clipboard contains an effect chain that can be pasted."
-  []
-  (clipboard-has-type? :effect-chain))
 
-;; ============================================================================
-;; Effect Paste (for backward compatibility - handles both :effect and :effect-chain)
-;; ============================================================================
-
-(defn paste-effect
-  "Get the effect from clipboard for pasting.
-   Returns effect map {:effect-id ... :params ...} (without :type) or nil."
-  []
-  (when (clipboard-has-type? :effect)
-    (let [clip (get-clipboard)]
-      (dissoc clip :type :copied-at))))
-
-(defn can-paste-effect?
-  "Check if clipboard contains a single effect that can be pasted."
-  []
-  (clipboard-has-type? :effect))
-
-;; ============================================================================
 ;; Smart Effect Paste - handles both single effects and chains
-;; ============================================================================
+
 
 (defn can-paste-effects?
   "Check if clipboard contains effects (single or chain) that can be pasted."
@@ -366,9 +228,9 @@
       :effect-chain (:effects clip [])
       nil)))
 
-;; ============================================================================
+
 ;; Clipboard Info
-;; ============================================================================
+
 
 (defn get-clipboard-description
   "Get a human-readable description of clipboard contents."

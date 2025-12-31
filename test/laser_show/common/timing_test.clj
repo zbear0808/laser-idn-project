@@ -2,9 +2,9 @@
   (:require [clojure.test :refer [deftest testing is]]
             [laser-show.common.timing :as timing]))
 
-;; ============================================================================
+
 ;; High-Resolution Time Tests
-;; ============================================================================
+
 
 (deftest nanotime-test
   (testing "nanotime returns increasing values"
@@ -27,9 +27,9 @@
           t2 (timing/nanotime-ms)]
       (is (>= (- t2 t1) 10) "Should measure at least 10ms"))))
 
-;; ============================================================================
+
 ;; Precise Sleep Tests
-;; ============================================================================
+
 
 (deftest precise-sleep-until-accuracy-test
   (testing "precise-sleep-until accuracy within 1ms"
@@ -69,9 +69,9 @@
       (is (>= elapsed-ms duration-ms)
           "Should sleep at least 5ms"))))
 
-;; ============================================================================
+
 ;; Measurement Tests
-;; ============================================================================
+
 
 (deftest measure-nanos-test
   (testing "measure-nanos captures execution time"
@@ -89,9 +89,9 @@
     (let [{:keys [ms]} (timing/measure-ms #(Thread/sleep 5))]
       (is (>= ms 5) "Should measure at least 5ms"))))
 
-;; ============================================================================
+
 ;; Conversion Tests
-;; ============================================================================
+
 
 (deftest nanos-micros-conversion-test
   (testing "nanosecond to microsecond conversion"
@@ -108,9 +108,9 @@
     (is (= 1 (timing/micros->millis 1000)))
     (is (= 1000 (timing/millis->micros 1)))))
 
-;; ============================================================================
+
 ;; FPS Conversion Tests
-;; ============================================================================
+
 
 (deftest fps-interval-nanos-test
   (testing "FPS to nanosecond interval conversion"
@@ -133,9 +133,9 @@
     (is (< (Math/abs (- (timing/interval-us->fps (timing/fps->interval-us 60)) 60)) 0.01))
     (is (< (Math/abs (- (timing/interval-ms->fps (timing/fps->interval-ms 120)) 120)) 0.01))))
 
-;; ============================================================================
+
 ;; Integration Tests
-;; ============================================================================
+
 
 (deftest precise-timing-loop-test
   (testing "precise-sleep-until maintains consistent intervals"
@@ -163,9 +163,9 @@
         (is (< max-jitter 1000000)
             (str "Max jitter: " (quot max-jitter 1000) "μs, expected <1000μs"))))))
 
-;; ============================================================================
+
 ;; Performance Comparison Test (for documentation)
-;; ============================================================================
+
 
 (deftest ^:performance sleep-comparison-test
   (testing "Compare Thread/sleep vs precise-sleep"

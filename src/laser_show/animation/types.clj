@@ -60,9 +60,9 @@
    - Frames are sent in Discrete Graphic Mode (Service Mode 0x02)
    - Channel configuration is sent every 200ms per spec requirement")
 
-;; ============================================================================
+
 ;; Core Types
-;; ============================================================================
+
 
 (defrecord LaserPoint
   [^short x          ; X coordinate (-32768 to 32767)
@@ -77,9 +77,9 @@
    timestamp         ; Frame timestamp in milliseconds
    metadata])        ; Additional frame metadata (duration, etc.)
 
-;; ============================================================================
+
 ;; Point Construction Helpers
-;; ============================================================================
+
 
 (defn make-point
   "Create a LaserPoint with normalized coordinates.
@@ -128,9 +128,9 @@
        (zero? (:g point))
        (zero? (:b point))))
 
-;; ============================================================================
+
 ;; Frame Construction
-;; ============================================================================
+
 
 (defn make-frame
   "Create a LaserFrame from a sequence of points."
@@ -146,9 +146,9 @@
   []
   (make-frame []))
 
-;; ============================================================================
+
 ;; Animation Protocol
-;; ============================================================================
+
 
 (defprotocol IAnimation
   "Protocol for laser animations."
@@ -161,9 +161,9 @@
   (get-parameters [this]
     "Get the current parameters of the animation."))
 
-;; ============================================================================
+
 ;; Animation Record
-;; ============================================================================
+
 
 (defrecord Animation
   [name              ; Display name
@@ -191,19 +191,4 @@
   ([name generator-fn parameters duration]
    (->Animation name generator-fn parameters duration)))
 
-;; ============================================================================
-;; Animation Utilities
-;; ============================================================================
 
-(defn with-parameters
-  "Return a new animation with updated parameters."
-  [animation new-params]
-  (assoc animation :parameters (merge (:parameters animation) new-params)))
-
-(defn looping-time
-  "Convert absolute time to looping time based on duration.
-   Useful for creating looping animations."
-  [time-ms duration-ms]
-  (if duration-ms
-    (mod time-ms duration-ms)
-    time-ms))

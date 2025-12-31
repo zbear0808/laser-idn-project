@@ -3,9 +3,9 @@
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]))
 
-;; ============================================================================
+
 ;; Status Items
-;; ============================================================================
+
 
 (defn status-item
   "A single status bar item with label and value."
@@ -20,9 +20,9 @@
                :text (str value)
                :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}]})
 
-;; ============================================================================
+
 ;; Cell Status
-;; ============================================================================
+
 
 (defn cell-status
   "Status showing active/selected cell."
@@ -45,9 +45,9 @@
                  [{:fx/type :label :text "" :pref-width 0}]
                  children)}))
 
-;; ============================================================================
+
 ;; Preset Status
-;; ============================================================================
+
 
 (defn preset-status
   "Status showing active preset."
@@ -59,9 +59,9 @@
        :value (name preset)}
       {:fx/type :label :text "" :pref-width 0})))
 
-;; ============================================================================
+
 ;; Frame Stats
-;; ============================================================================
+
 
 (defn frame-stats-status
   "Status showing frame generation latency stats."
@@ -81,9 +81,9 @@
                    :value (str (long (:max-latency-us stats)) "µs")}]}
       {:fx/type :label :text "" :pref-width 0})))
 
-;; ============================================================================
+
 ;; Project Status
-;; ============================================================================
+
 
 (defn project-status
   "Status showing project dirty state."
@@ -97,9 +97,9 @@
                    "; -fx-font-size: 11;")}
       {:fx/type :label :text "" :pref-width 0})))
 
-;; ============================================================================
+
 ;; Main Status Bar
-;; ============================================================================
+
 
 (defn status-bar
   "Main status bar component."

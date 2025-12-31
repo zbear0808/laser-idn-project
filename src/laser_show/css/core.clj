@@ -20,9 +20,7 @@
             [laser-show.css.layout :as layout]
             [laser-show.css.title-bar :as title-bar]))
 
-;; Re-export theme for convenient color access
-(def ^{:doc "Theme map with color constants. Access via keywords like ::theme/bg-dark"}
-  theme theme/theme)
+
 
 (defn all-stylesheet-urls
   "Returns a vector of all CSS stylesheet URLs.
@@ -58,9 +56,9 @@
    (::css/url dialogs/dialogs)
    (::css/url title-bar/menu-theme)])
 
-;; ============================================================================
+
 ;; Theme color access helpers
-;; ============================================================================
+
 
 (defn bg-darkest [] (::theme/bg-darkest theme/theme))
 (defn bg-dark [] (::theme/bg-dark theme/theme))

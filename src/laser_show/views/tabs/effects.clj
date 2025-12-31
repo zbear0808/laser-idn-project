@@ -3,16 +3,15 @@
    
    Similar to the cue grid but for effect modifiers."
   (:require [cljfx.api :as fx]
-            [clojure.string :as str]
             [laser-show.subs :as subs]
             [laser-show.views.components.grid-cell :as cell]))
 
 ;; Effect cell is now imported from laser-show.views.components.grid-cell
 ;; It has full drag/drop and context menu support
 
-;; ============================================================================
+
 ;; Effects Grid Layout
-;; ============================================================================
+
 
 (defn effects-grid-row
   "A single row of effect cells."
@@ -41,9 +40,9 @@
                     :row row
                     :cols cols}))}))
 
-;; ============================================================================
+
 ;; Grid Header
-;; ============================================================================
+
 
 (defn effects-grid-header
   "Header above the effects grid with column numbers."
@@ -60,9 +59,9 @@
                     :alignment :center
                     :style "-fx-text-fill: #808080; -fx-font-size: 11;"}))}))
 
-;; ============================================================================
+
 ;; Grid with Row Labels
-;; ============================================================================
+
 
 (defn effects-grid-with-labels
   "Effects grid with row labels on the left."
@@ -82,39 +81,6 @@
                                 :style "-fx-text-fill: #808080; -fx-font-size: 11;"}))}
                 {:fx/type effects-grid}]}))
 
-;; ============================================================================
-;; Effect Palette
-;; ============================================================================
-
-(def available-effects
-  "List of available effects.
-   IDs must match registered effects in laser-show.animation.effects.*"
-  [;; Shape effects
-   {:id :scale :name "Scale" :category :shape}
-   {:id :rotation :name "Rotate" :category :shape}
-   {:id :translate :name "Translate" :category :shape}
-   {:id :viewport :name "Viewport" :category :shape}
-   {:id :pinch-bulge :name "Pinch/Bulge" :category :shape}
-   {:id :corner-pin :name "Corner Pin" :category :shape}
-   {:id :lens-distortion :name "Lens Distort" :category :shape}
-   {:id :wave-distort :name "Wave Distort" :category :shape}
-   ;; Color effects
-   {:id :hue-shift :name "Hue Shift" :category :color}
-   {:id :saturation :name "Saturation" :category :color}
-   {:id :color-filter :name "Color Filter" :category :color}
-   {:id :invert :name "Invert" :category :color}
-   {:id :set-color :name "Set Color" :category :color}
-   {:id :rainbow-position :name "Rainbow" :category :color}
-   ;; Intensity effects
-   {:id :intensity :name "Intensity" :category :intensity}
-   {:id :blackout :name "Blackout" :category :intensity}
-   {:id :threshold :name "Threshold" :category :intensity}
-   {:id :gamma :name "Gamma" :category :intensity}])
-
-
-;; ============================================================================
-;; Effects Tab
-;; ============================================================================
 
 (defn effects-tab
   "Complete effects tab with grid and palette."

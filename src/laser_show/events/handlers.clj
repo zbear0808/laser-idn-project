@@ -16,12 +16,12 @@
    Usage:
    (handle-event {:event/type :grid/trigger-cell :col 0 :row 0 :state current-state})
    => {:state new-state}"
-  (:require [laser-show.animation.time :as anim-time]
-            [laser-show.common.util :as u]))
+  (:require
+   [laser-show.common.util :as u]))
 
-;; ============================================================================
+
 ;; Helper Functions
-;; ============================================================================
+
 
 (defn- mark-dirty
   "Mark project as having unsaved changes."
@@ -33,9 +33,9 @@
   [event]
   (or (:time event) (System/currentTimeMillis)))
 
-;; ============================================================================
+
 ;; Grid Events
-;; ============================================================================
+
 
 (defn- handle-grid-trigger-cell
   "Trigger a cell to start playing its preset."
@@ -104,9 +104,9 @@
                   mark-dirty)}
       {:state state})))
 
-;; ============================================================================
+
 ;; Effects Grid Events
-;; ============================================================================
+
 
 (defn- handle-effects-toggle-cell
   "Toggle an effects cell on/off."
@@ -236,9 +236,9 @@
                 (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] new-indices)
                 mark-dirty)}))
 
-;; ============================================================================
+
 ;; Effect Chain Editor Multi-Select Events
-;; ============================================================================
+
 
 (defn- handle-effects-select-effect
   "Select a single effect in the chain editor (replaces existing selection).
@@ -319,7 +319,7 @@
                       (if (get-in s [:effects :cells [col row]])
                         s
                         (assoc-in s [:effects :cells [col row]] {:effects [] :active true})))
-        current-effects (get-in state [:effects :cells [col row] :effects] [])
+        current-effects (vec (get-in state [:effects :cells [col row] :effects] []))
         safe-pos (min insert-pos (count current-effects))
         new-effects (vec (concat (subvec current-effects 0 safe-pos)
                                  effects
@@ -349,9 +349,9 @@
                     mark-dirty)})
       {:state state})))
 
-;; ============================================================================
+
 ;; Custom Parameter UI Events
-;; ============================================================================
+
 
 (defn- handle-effects-set-param-ui-mode
   "Toggle between visual and numeric parameter editing mode for an effect."
@@ -383,9 +383,9 @@
         {:state (assoc-in state [:effects :cells [col row] :effects] updated-effects)})
       {:state state})))
 
-;; ============================================================================
+
 ;; Timing Events
-;; ============================================================================
+
 
 (defn- handle-timing-set-bpm
   "Set the BPM."
@@ -409,9 +409,9 @@
   [{:keys [mode state]}]
   {:state (assoc-in state [:timing :quantization] mode)})
 
-;; ============================================================================
+
 ;; Transport Events
-;; ============================================================================
+
 
 (defn- handle-transport-play
   "Start playback."
@@ -431,9 +431,9 @@
   (let [now (current-time-ms event)]
     {:state (assoc-in state [:playback :trigger-time] now)}))
 
-;; ============================================================================
+
 ;; UI Events
-;; ============================================================================
+
 
 (defn- handle-ui-set-active-tab
   "Change the active tab."
@@ -488,9 +488,9 @@
                      :source-key nil
                      :data nil})})
 
-;; ============================================================================
+
 ;; Project Events
-;; ============================================================================
+
 
 (defn- handle-project-mark-dirty
   "Mark project as having unsaved changes."
@@ -510,9 +510,9 @@
   [{:keys [folder state]}]
   {:state (assoc-in state [:project :current-folder] folder)})
 
-;; ============================================================================
+
 ;; IDN Connection Events
-;; ============================================================================
+
 
 (defn- handle-idn-connect
   "Start IDN connection."
@@ -549,18 +549,18 @@
               (assoc-in [:backend :idn :streaming-engine] nil))
    :idn/stop-streaming true})
 
-;; ============================================================================
+
 ;; Config Events
-;; ============================================================================
+
 
 (defn- handle-config-update
   "Update a config value."
   [{:keys [path value state]}]
   {:state (assoc-in state (into [:config] path) value)})
 
-;; ============================================================================
+
 ;; File Menu Events
-;; ============================================================================
+
 
 (defn- handle-file-new-project
   "Create a new project (TODO: Implement confirmation dialog if dirty)."
@@ -610,9 +610,9 @@
   ;; For now, just exit
   {:system/exit true})
 
-;; ============================================================================
+
 ;; Edit Menu Events
-;; ============================================================================
+
 
 (defn- handle-edit-undo
   "Undo the last action (TODO: Implement undo stack)."
@@ -682,9 +682,9 @@
         (println "Edit > Clear Cell: No cell selected")
         {:state state}))))
 
-;; ============================================================================
+
 ;; View Menu Events
-;; ============================================================================
+
 
 (defn- handle-view-toggle-preview
   "Toggle preview panel visibility (TODO: Implement preview toggle)."
@@ -700,9 +700,9 @@
   ;; TODO: Implement fullscreen toggle via JavaFX stage
   {:state (update-in state [:ui :fullscreen?] not)})
 
-;; ============================================================================
+
 ;; Help Menu Events
-;; ============================================================================
+
 
 (defn- handle-help-documentation
   "Open documentation in browser."
@@ -725,9 +725,9 @@
   ;; TODO: Implement update check
   {:state state})
 
-;; ============================================================================
+
 ;; Main Event Handler
-;; ============================================================================
+
 
 (defn handle-event
   "Main event handler - PURE FUNCTION.

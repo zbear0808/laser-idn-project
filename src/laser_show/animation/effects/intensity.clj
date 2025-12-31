@@ -26,9 +26,9 @@
             [laser-show.animation.effects.common :as common]
             [laser-show.animation.modulation :as mod]))
 
-;; ============================================================================
+
 ;; Intensity Effect (replaces dim/brighten)
-;; ============================================================================
+
 
 (defn- apply-intensity [frame time-ms bpm raw-params]
   ;; Check if any params use per-point modulators
@@ -65,9 +65,9 @@
                 :max 3.0}]
   :apply-fn apply-intensity})
 
-;; ============================================================================
+
 ;; Blackout Effect
-;; ============================================================================
+
 
 (defn- apply-blackout [frame _time-ms _bpm {:keys [enabled]}]
   (if enabled
@@ -88,10 +88,10 @@
                 :default false}]
   :apply-fn apply-blackout})
 
-;; ============================================================================
+
 ;; Threshold Effect (cut low intensities)
 ;; NOTE: This effect can now delete points below threshold using nil return
-;; ============================================================================
+
 
 (defn- apply-threshold [frame time-ms bpm raw-params]
   ;; Check if any params use per-point modulators
@@ -129,9 +129,9 @@
                 :max 255}]
   :apply-fn apply-threshold})
 
-;; ============================================================================
+
 ;; Gamma Correction Effect
-;; ============================================================================
+
 
 (defn- apply-gamma [frame time-ms bpm raw-params]
   ;; Check if any params use per-point modulators

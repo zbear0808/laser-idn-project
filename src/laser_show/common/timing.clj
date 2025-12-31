@@ -2,9 +2,9 @@
   "Timing utilities for precise time measurement and delays.
    Provides high-resolution timing functions for real-time applications.")
 
-;; ============================================================================
+
 ;; High-Resolution Time Measurement
-;; ============================================================================
+
 
 (defn nanotime
   "Get current time in nanoseconds from an arbitrary starting point.
@@ -28,9 +28,9 @@
   ^long []
   (quot (System/nanoTime) 1000000))
 
-;; ============================================================================
+
 ;; Precise Sleep/Delay Functions
-;; ============================================================================
+
 
 (defn precise-sleep-until
   "Sleep until target time with sub-millisecond precision.
@@ -141,9 +141,9 @@
   [duration-ms]
   (precise-sleep-nanos (* duration-ms 1000000)))
 
-;; ============================================================================
+
 ;; Timing Utilities
-;; ============================================================================
+
 
 (defn measure-nanos
   "Measure the execution time of a function in nanoseconds.
@@ -180,9 +180,9 @@
     {:result result
      :ms (quot nanos 1000000)}))
 
-;; ============================================================================
+
 ;; Time Conversion
-;; ============================================================================
+
 
 (defn nanos->micros
   "Convert nanoseconds to microseconds."
@@ -214,9 +214,9 @@
   ^long [millis]
   (* millis 1000))
 
-;; ============================================================================
+
 ;; FPS/Interval Calculations
-;; ============================================================================
+
 
 (defn fps->interval-nanos
   "Convert FPS to frame interval in nanoseconds.

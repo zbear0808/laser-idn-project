@@ -28,9 +28,9 @@
    [laser-show.views.tabs.grid :as grid-tab]
    [laser-show.views.toolbar :as toolbar]))
 
-;; ============================================================================
+
 ;; Theme
-;; ============================================================================
+
 
 (def theme
   "Application theme colors and styles."
@@ -52,9 +52,9 @@
    :fonts {:default "System"
            :mono "Consolas"}})
 
-;; ============================================================================
+
 ;; Tab Content Router
-;; ============================================================================
+
 
 (defn tab-content
   "Render the appropriate tab content based on active tab."
@@ -82,9 +82,9 @@
       ;; Default
       {:fx/type :label :text "Unknown tab"})))
 
-;; ============================================================================
+
 ;; Tab Bar
-;; ============================================================================
+
 
 (def main-tabs
   "Tab definitions for the main window."
@@ -102,9 +102,9 @@
      :active-tab active-tab
      :on-tab-change {:event/type :ui/set-active-tab}}))
 
-;; ============================================================================
+
 ;; Main Content Area
-;; ============================================================================
+
 
 (defn main-content
   "Main content area with tab content and preview panel."
@@ -119,9 +119,9 @@
             :style "-fx-background-color: #2D2D2D;"
             :center {:fx/type preview/preview-panel}}]})
 
-;; ============================================================================
+
 ;; Main Layout
-;; ============================================================================
+
 
 (defn main-layout
   "Main application layout with HeaderBar in title bar area."
@@ -135,9 +135,9 @@
    :center {:fx/type main-content}
    :bottom {:fx/type status-bar/status-bar}})
 
-;; ============================================================================
+
 ;; Root View
-;; ============================================================================
+
 
 (defn root-view
   "Root view with theming and dialog management.

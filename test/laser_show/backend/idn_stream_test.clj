@@ -5,14 +5,8 @@
             [laser-show.animation.types :as t])
   (:import [java.nio ByteBuffer ByteOrder]))
 
-;; ============================================================================
-;; Helper Functions
-;; ============================================================================
 
-(defn bytes->hex
-  "Convert byte array to hex string for debugging"
-  [^bytes arr]
-  (apply str (map #(format "%02X " (bit-and % 0xFF)) arr)))
+;; Helper Functions
 
 (defn get-byte [^bytes arr idx]
   (bit-and (aget arr idx) 0xFF))
@@ -30,9 +24,9 @@
     (.getInt buf)))
 
 
-;; ============================================================================
+
 ;; Channel Message Header Tests (Section 2.1)
-;; ============================================================================
+
 
 (deftest channel-message-header-test
   (testing "Empty frame packet has correct header structure"
@@ -71,9 +65,9 @@
       (is (not (bit-test cnl-byte 6)) "CCLF bit (bit 6) should be clear when no config")
       (is (= 5 (bit-and cnl-byte 0x3F)) "Channel ID should be in lower 6 bits"))))
 
-;; ============================================================================
+
 ;; Channel Configuration Header Tests (Section 2.2)
-;; ============================================================================
+
 
 (deftest channel-config-header-test
   (testing "Configuration header has correct structure"
@@ -96,9 +90,9 @@
           cfl (get-byte packet 9)]
       (is (bit-test cfl 1) "Close flag (bit 1) should be set"))))
 
-;; ============================================================================
+
 ;; Service Configuration Tags Tests (Section 3.4)
-;; ============================================================================
+
 
 (deftest service-config-tags-test
   (testing "Default tags match ISP-DB25 compatibility (Section 3.4.10/3.4.11)"
@@ -125,9 +119,9 @@
       (is (= stream/TAG_Y (.getShort buf)) "Third tag should be Y")
       (is (= stream/TAG_PRECISION (.getShort buf)) "Fourth tag should be PRECISION"))))
 
-;; ============================================================================
+
 ;; Frame Samples Data Chunk Tests (Section 6.2)
-;; ============================================================================
+
 
 (deftest frame-chunk-header-test
   (testing "Frame chunk header has correct structure"
@@ -151,9 +145,9 @@
           flags (get-byte packet 8)]
       (is (= 1 (bit-and flags 0x01)) "Once flag should be set"))))
 
-;; ============================================================================
+
 ;; Sample Data Tests
-;; ============================================================================
+
 
 (deftest sample-data-test
   (testing "Point data is written in correct format"
@@ -187,9 +181,9 @@
       (is (= (+ 12 (* 7 3)) (alength packet))
           "Packet size should be header + 3 points * 7 bytes each"))))
 
-;; ============================================================================
+
 ;; Packet Validation Tests
-;; ============================================================================
+
 
 (deftest packet-validation-test
   (testing "Valid packet passes validation"
@@ -207,9 +201,9 @@
       (is (= 0x02 (:chunk-type info)))
       (is (:has-config? info)))))
 
-;; ============================================================================
+
 ;; Close Channel Packet Tests
-;; ============================================================================
+
 
 (deftest close-channel-packet-test
   (testing "Close channel packet has correct structure"
@@ -222,9 +216,9 @@
       (let [cfl (get-byte packet 9)]
         (is (bit-test cfl 1) "Close flag should be set")))))
 
-;; ============================================================================
+
 ;; Utility Function Tests
-;; ============================================================================
+
 
 (deftest utility-functions-test
   (testing "Frame duration calculation"

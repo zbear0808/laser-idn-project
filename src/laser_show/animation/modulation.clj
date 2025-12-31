@@ -17,11 +17,11 @@
 
 ;; Forward declarations for modulator-config? and evaluators
 (declare modulator-config?)
-(declare get-modulator-evaluator)
 
-;; ============================================================================
+
+
 ;; Modulation Context
-;; ============================================================================
+
 
 (defn make-context
   "Create a modulation context for parameter resolution.
@@ -41,9 +41,9 @@
    :osc-state osc-state})
 
 
-;; ============================================================================
+
 ;; Period/Frequency Conversion
-;; ============================================================================
+
 
 (defn- period->frequency
   "Convert period (beats per cycle) to frequency (cycles per beat).
@@ -53,9 +53,9 @@
     1000000.0  ; effectively instant
     (/ 1.0 period)))
 
-;; ============================================================================
+
 ;; Once-Mode Helper Functions
-;; ============================================================================
+
 
 (defn- calculate-once-progress
   "Calculate progress (0.0 to 1.0) for once-mode modulators.
@@ -115,9 +115,9 @@
        (let [beats (time/ms->beats elapsed bpm)]
          (+ (* beats frequency) phase-offset))))))
 
-;; ============================================================================
+
 ;; Per-Point Context Detection
-;; ============================================================================
+
 
 (def ^:private per-point-types
   "Modulator types that require per-point context (x, y, point-index, point-count)."
@@ -147,9 +147,9 @@
     :else
     false))
 
-;; ============================================================================
+
 ;; Internal Modulator Implementations
-;; ============================================================================
+
 
 (defn- eval-sine
   "Evaluate sine wave modulator."
@@ -400,9 +400,9 @@
       (mod (+ (* position 360.0) time-offset) 360.0))
     0.0))
 
-;; ============================================================================
+
 ;; Modulator Evaluators Registry
-;; ============================================================================
+
 ;; 
 ;; This map defines all available modulator types and their evaluation functions.
 ;; New modulator types should be added here.
@@ -447,9 +447,9 @@
        (contains? x :type)
        (contains? modulator-types (:type x))))
 
-;; ============================================================================
+
 ;; Main Evaluation Function
-;; ============================================================================
+
 
 (defn evaluate-modulator
   "Evaluate a modulator config with the given context.
@@ -461,9 +461,9 @@
     ;; Default fallback for unknown types
     (get config :value (get config :min 0.0))))
 
-;; ============================================================================
+
 ;; Parameter Resolution
-;; ============================================================================
+
 
 (defn resolve-param
   "Resolve a parameter value.
@@ -481,9 +481,9 @@
         (map (fn [[k v]] [k (resolve-param v context)]))
         params))
 
-;; ============================================================================
+
 ;; Preset Modulator Configs
-;; ============================================================================
+
 
 (def presets
   "Common modulator preset configs (pure data)."

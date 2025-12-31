@@ -21,18 +21,18 @@
            text-muted     ::theme/text-muted
            accent-blue-dark ::theme/accent-blue-dark} theme/theme]
       
-      {;; ==================================================================
+      {
        ;; Dialog Root
-       ;; ==================================================================
+       
        
        ;; Dark dialog root override
        ".dialog-root"
        {:-fx-base bg-medium
         :-fx-background bg-medium}
        
-       ;; ==================================================================
+       
        ;; Dialog Sections
-       ;; ==================================================================
+       
        
        ".dialog-header"
        {:-fx-background-color bg-dark
@@ -45,9 +45,9 @@
        {:-fx-background-color bg-dark
         :-fx-padding 12}
        
-       ;; ==================================================================
+       
        ;; Tab Pane in Dialogs
-       ;; ==================================================================
+       
        
        ;; Tab header background
        ".tab-pane"
@@ -65,9 +65,9 @@
         " .tab-label"
         {:-fx-text-fill text-primary}}
        
-       ;; ==================================================================
+       
        ;; Effect Chain Editor Specific
-       ;; ==================================================================
+       
        
        ;; Chain panel (left side)
        ".chain-panel"
@@ -83,26 +83,26 @@
        {:-fx-background-color "#2A2A2A"
         :-fx-padding 8}
        
-       ;; ==================================================================
+       
        ;; Empty State Messages
-       ;; ==================================================================
+       
        
        ".empty-state-text"
        {:-fx-text-fill "#606060"
         :-fx-font-style "italic"
         :-fx-font-size 11}
        
-       ;; ==================================================================
+       
        ;; Selection Info
-       ;; ==================================================================
+       
        
        ".selection-count"
        {:-fx-text-fill accent-blue-dark
         :-fx-font-size 9}
        
-       ;; ==================================================================
+       
        ;; Scroll Pane Transparency (for dialogs)
-       ;; ==================================================================
+       
        
        ".scroll-pane"
        {:-fx-background-color "transparent"

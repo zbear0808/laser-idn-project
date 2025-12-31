@@ -4,10 +4,11 @@
   (:require [clojure.string :as str])
   (:import [java.net DatagramSocket DatagramPacket InetAddress]
            [java.nio ByteBuffer ByteOrder]))
+#_{:clojure-lsp/ignore [:clojure-lsp/unused-public-var]}
 
-;; ============================================================================
+
 ;; IDN-Hello Protocol Constants
-;; ============================================================================
+
 
 (def ^:const IDN_HELLO_PORT 7255)
 (def ^:const LINK_TIMEOUT_MS 1000)
@@ -32,9 +33,9 @@
 (def ^:const CMD_RT_ABORT 0x46)
 (def ^:const CMD_RT_ACKNOWLEDGE 0x47)
 
-;; ============================================================================
+
 ;; Packet Construction Helpers
-;; ============================================================================
+
 
 (defn create-packet-header
   "Creates a 4-byte IDN-Hello packet header.
@@ -57,9 +58,9 @@
   [byte-array]
   (str/join " " (map #(format "%02X" (bit-and % 0xFF)) byte-array)))
 
-;; ============================================================================
+
 ;; UDP Socket Management
-;; ============================================================================
+
 
 (defn create-udp-socket
   "Creates a UDP socket for sending IDN messages.
@@ -99,9 +100,9 @@
          (println "Receive timeout")
          nil)))))
 
-;; ============================================================================
+
 ;; IDN-Hello Protocol Messages
-;; ============================================================================
+
 
 (defn send-ping
   "Sends a ping request to an IDN-Hello server.
@@ -216,15 +217,15 @@
    (let [header (create-packet-header CMD_RT_ABORT client-group sequence)]
      (send-packet socket header host IDN_HELLO_PORT))))
 
-;; ============================================================================
+
 ;; IDN-Stream Message Wrapping
-;; ============================================================================
+
 
 (def ^:private sequence-counter (atom 0))
 
-;; ============================================================================
+
 ;; DAC Registry - Track discovered and configured laser DACs
-;; ============================================================================
+
 
 (defonce ^:private !dac-registry
   (atom {}))
@@ -280,9 +281,9 @@
     (swap! !dac-registry update dac-id merge updates
            {:last-seen (System/currentTimeMillis)})))
 
-;; ============================================================================
+
 ;; Per-DAC Sequence Counters
-;; ============================================================================
+
 
 (defonce ^:private !dac-sequence-counters
   (atom {}))
@@ -336,9 +337,9 @@
   []
   (reset! sequence-counter 0))
 
-;; ============================================================================
+
 ;; Response Parsing Helpers
-;; ============================================================================
+
 
 (defn parse-packet-header
   "Parses the 4-byte IDN-Hello packet header from received data.
@@ -380,9 +381,9 @@
        :unit-id (bytes-to-hex unit-id-bytes)
        :host-name (str/trim (String. host-name-bytes "UTF-8"))})))
 
-;; ============================================================================
+
 ;; Device Ping
-;; ============================================================================
+
 
 (defn ping-device
   "Pings an IDN-Hello device and measures round-trip time.
@@ -418,9 +419,9 @@
        (finally
          (.close socket))))))
 
-;; ============================================================================
+
 ;; DAC-Targeted Sending Functions
-;; ============================================================================
+
 
 (defn send-to-dac!
   "Send an IDN-Stream message to a specific registered DAC.
@@ -490,9 +491,9 @@
           seq-num (get-dac-sequence dac-id)]
       (send-rt-abort socket address seq-num client-group))))
 
-;; ============================================================================
+
 ;; Device Discovery
-;; ============================================================================
+
 
 (defn discover-devices
   "Scans the network for IDN-Hello devices.
@@ -572,9 +573,9 @@
                         (not (:occupied status))))]
      dac-id)))
 
-;; ============================================================================
+
 ;; Main Entry Point
-;; ============================================================================
+
 
 (defn -main
   "Example usage of the IDN-Hello protocol implementation"

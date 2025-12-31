@@ -24,9 +24,9 @@
             [laser-show.animation.colors :as colors]
             [laser-show.animation.modulation :as mod]))
 
-;; ============================================================================
+
 ;; Hue Shift Effect
-;; ============================================================================
+
 
 (defn- apply-hue-shift [frame time-ms bpm raw-params]
   ;; Check if any params use per-point modulators
@@ -65,9 +65,9 @@
                 :max 180.0}]
   :apply-fn apply-hue-shift})
 
-;; ============================================================================
+
 ;; Saturation Effect
-;; ============================================================================
+
 
 (defn- apply-saturation [frame time-ms bpm raw-params]
   ;; Check if any params use per-point modulators
@@ -106,9 +106,9 @@
                 :max 2.0}]
   :apply-fn apply-saturation})
 
-;; ============================================================================
+
 ;; Color Filter Effect
-;; ============================================================================
+
 
 (defn- apply-color-filter [frame time-ms bpm raw-params]
   ;; Check if any params use per-point modulators
@@ -159,9 +159,9 @@
                 :max 2.0}]
   :apply-fn apply-color-filter})
 
-;; ============================================================================
+
 ;; Invert Effect
-;; ============================================================================
+
 
 (defn- apply-invert [frame _time-ms _bpm _params]
   (effects/transform-point-full
@@ -180,9 +180,9 @@
   :parameters []
   :apply-fn apply-invert})
 
-;; ============================================================================
+
 ;; Set Hue Effect (sets all points to specific hue, preserving saturation/value)
-;; ============================================================================
+
 
 (defn- apply-set-hue [frame time-ms bpm raw-params]
   ;; Check if any params use per-point modulators
@@ -223,9 +223,9 @@
                 :max 360.0}]
   :apply-fn apply-set-hue})
 
-;; ============================================================================
+
 ;; Color Replace Effect
-;; ============================================================================
+
 
 (defn- color-distance [r1 g1 b1 r2 g2 b2]
   (Math/sqrt (+ (* (- r1 r2) (- r1 r2))
@@ -291,9 +291,9 @@
                 :max 255.0}]
   :apply-fn apply-color-replace})
 
-;; ============================================================================
+
 ;; Set Color Effect (replaces color of ALL points)
-;; ============================================================================
+
 
 (defn- apply-set-color [frame _time-ms _bpm {:keys [red green blue]}]
   (effects/transform-point-full
@@ -328,17 +328,17 @@
                 :max 255}]
   :apply-fn apply-set-color})
 
-;; ============================================================================
+
 ;; SPECIAL EFFECTS
 ;; These are more complex effects kept for specific use cases.
 ;; Consider using modulators with basic effects for more flexibility.
-;; ============================================================================
 
-;; ============================================================================
+
+
 ;; Rainbow Position Effect (Special)
 ;; Creates a rainbow effect based on point position.
 ;; For more control, use hue-shift with rainbow-hue modulator.
-;; ============================================================================
+
 
 (defn- apply-rainbow-position [frame time-ms _bpm {:keys [speed axis]}]
   (let [time-offset (mod (* (/ time-ms 1000.0) speed) 360)]

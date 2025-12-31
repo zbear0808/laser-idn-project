@@ -9,9 +9,9 @@
 (defn ^:private mod ^double [^double x ^double y]
   (clojure.core/mod x y))
 
-;; ============================================================================
+
 ;; Global BPM State (delegated to database)
-;; ============================================================================
+
 
 (defn set-global-bpm!
   "Set the global BPM value."
@@ -24,9 +24,9 @@
   []
   (queries/bpm))
 
-;; ============================================================================
+
 ;; BPM Conversions
-;; ============================================================================
+
 
 (defn bpm->ms-per-beat
   "Convert BPM to milliseconds per beat."
@@ -77,9 +77,9 @@
   ^double [^double seconds ^double bpm]
   (* seconds (/ bpm 60.0)))
 
-;; ============================================================================
+
 ;; Phase Calculations
-;; ============================================================================
+
 
 (defn time->phase
   "Calculate oscillation phase (0.0 to 1.0) from time.
@@ -113,9 +113,9 @@
   (^double [^double time-ms ^double bpm ^double beats-per-bar]
    (bar->phase (ms->beats time-ms bpm) beats-per-bar)))
 
-;; ============================================================================
+
 ;; Waveform Generation
-;; ============================================================================
+
 
 (defn sine-wave
   "Generate a sine wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0)."
@@ -165,9 +165,9 @@
   (^double [^double phase ^double duty-cycle]
    (if (< (mod phase 1.0) duty-cycle) 1.0 0.0)))
 
-;; ============================================================================
+
 ;; Value Oscillation
-;; ============================================================================
+
 
 (defn oscillate
   "Oscillate a value between min-val and max-val based on phase.
@@ -199,9 +199,9 @@
   (let [phase (time->phase (double time-ms) (double frequency))]
     (oscillate (double min-val) (double max-val) phase waveform)))
 
-;; ============================================================================
+
 ;; Quantization
-;; ============================================================================
+
 
 (defn quantize-to-beat
   "Quantize a time value to the nearest beat."
@@ -226,9 +226,9 @@
         sub-num (Math/round (/ time-ms ms-per-subdivision))]
     (* (double sub-num) ms-per-subdivision)))
 
-;; ============================================================================
+
 ;; Easing Functions
-;; ============================================================================
+
 
 (defn ease-in-quad
   "Quadratic ease-in: slow start, accelerating."
@@ -268,9 +268,9 @@
     (let [t1 (- t 1.0)]
       (+ 1.0 (* 4.0 t1 t1 t1)))))
 
-;; ============================================================================
+
 ;; Tap Tempo (delegated to state)
-;; ============================================================================
+
 
 (defn tap-tempo!
   "Record a tap for tap-tempo BPM detection.

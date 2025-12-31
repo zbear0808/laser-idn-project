@@ -11,9 +11,9 @@
    Access color constants directly: (::bg-dark theme)"
   (:require [cljfx.css :as css]))
 
-;; ============================================================================
+
 ;; Color Palette Constants (for reference/documentation)
-;; ============================================================================
+
 ;; These colors define our dark theme. They are also available as keyword keys
 ;; in the registered theme map for programmatic access.
 
@@ -55,9 +55,9 @@
                   accent-primary accent-hover accent-blue accent-blue-dark
                   accent-orange accent-red]} palette]
       
-      {;; ====================================================================
+      {
        ;; Color Constants (accessible from code)
-       ;; ====================================================================
+       
        ::bg-darkest bg-darkest
        ::bg-dark bg-dark
        ::bg-medium bg-medium
@@ -80,16 +80,16 @@
        ::accent-orange accent-orange
        ::accent-red accent-red
        
-       ;; ====================================================================
+       
        ;; Root Styles
-       ;; ====================================================================
+       
        ".root"
        {:-fx-base bg-darkest
         :-fx-background bg-darkest}
        
-       ;; ====================================================================
+       
        ;; Typography Classes
-       ;; ====================================================================
+       
        
        ;; Primary text styles
        ".text-primary"
@@ -126,9 +126,9 @@
         :-fx-font-size 11
         :-fx-font-style "italic"}
        
-       ;; ====================================================================
+       
        ;; Container/Panel Classes
-       ;; ====================================================================
+       
        
        ".panel-dark"
        {:-fx-background-color bg-darkest}
@@ -146,9 +146,9 @@
        ".panel-padded-sm"
        {:-fx-padding 8}
        
-       ;; ====================================================================
+       
        ;; Scroll Pane Styles
-       ;; ====================================================================
+       
        
        ".scroll-pane-transparent"
        {:-fx-background-color "transparent"

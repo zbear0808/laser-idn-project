@@ -22,9 +22,9 @@
             [laser-show.views.components.custom-param-renderers :as custom-renderers])
   (:import [javafx.scene.input TransferMode ClipboardContent KeyCode KeyEvent]))
 
-;; ============================================================================
+
 ;; Effect Registry Access
-;; ============================================================================
+
 
 (defn- effect-by-id
   "Get an effect definition by its ID from the registry."
@@ -44,9 +44,9 @@
         (mapv (fn [p] [(:key p) (dissoc p :key)])
               params-vector)))
 
-;; ============================================================================
+
 ;; Left Sidebar: Effect Chain List with Drag-and-Drop
-;; ============================================================================
+
 
 (defn- setup-drag-source!
   "Setup drag source handlers on a node for reordering effects."
@@ -249,9 +249,9 @@
                                               :chain-count chain-count})
                                            effect-chain))}})]}))
 
-;; ============================================================================
+
 ;; Right Top: Tabbed Effect Bank
-;; ============================================================================
+
 
 (def effect-bank-tab-definitions
   "Tab definitions for the effect bank categories."
@@ -320,9 +320,9 @@
                            :col col :row row
                            :active-bank-tab active-tab}}]}))
 
-;; ============================================================================
+
 ;; Right Bottom: Parameter Editor
-;; ============================================================================
+
 
 (defn- param-slider
   "Slider control for numeric parameters with editable text field.
@@ -554,9 +554,9 @@
                    :text "Select an effect from the chain"
                    :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"})]}))
 
-;; ============================================================================
+
 ;; Keyboard Handler Setup
-;; ============================================================================
+
 
 (defn- setup-keyboard-handler!
   "Setup keyboard handler on root node for shortcuts.
@@ -630,9 +630,9 @@
                 (events/dispatch! {:event/type :effects/clear-selection})
                 (.consume event))))))))
 
-;; ============================================================================
+
 ;; Main Dialog Content
-;; ============================================================================
+
 
 (defn- effect-chain-editor-content
   "Main content of the effect chain editor dialog."
@@ -708,9 +708,9 @@
                                     :on-action {:event/type :ui/close-dialog
                                                 :dialog-id :effect-chain-editor}}]}]}}))
 
-;; ============================================================================
+
 ;; Scene-level Event Filter Setup
-;; ============================================================================
+
 
 (defn- setup-scene-key-filter!
   "Setup Scene-level event filter for Ctrl+C and Ctrl+V.
@@ -741,9 +741,9 @@
                 (.consume event)))))))
   (println "[DEBUG] Scene key filter registered"))
 
-;; ============================================================================
+
 ;; Dialog Window
-;; ============================================================================
+
 
 ;; NOTE: Dialog CSS is now defined in laser-show.css.dialogs
 ;; The CSS string literal has been moved to the centralized CSS system

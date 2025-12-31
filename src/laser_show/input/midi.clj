@@ -5,9 +5,9 @@
             [laser-show.input.events :as events]
             [laser-show.input.router :as router]))
 
-;; ============================================================================
+
 ;; MIDI State
-;; ============================================================================
+
 
 (defonce midi-state
   (atom {:enabled true
@@ -17,9 +17,9 @@
          :note-mappings {}     ; Optional note remapping
          :cc-mappings {}}))    ; Optional CC remapping
 
-;; ============================================================================
+
 ;; Device Discovery
-;; ============================================================================
+
 
 (defn list-devices
   "Returns a list of available MIDI input devices."
@@ -42,9 +42,9 @@
                            (:name %))
                  (list-devices))))
 
-;; ============================================================================
+
 ;; MIDI Message Conversion
-;; ============================================================================
+
 
 (defn midi-msg->event
   "Converts a midi-clj message to a unified input event."
@@ -79,9 +79,9 @@
       ;; Unhandled message type
       :else nil)))
 
-;; ============================================================================
+
 ;; MIDI Message Handler
-;; ============================================================================
+
 
 (defn- create-midi-handler
   "Creates a handler function for MIDI messages."
@@ -96,9 +96,9 @@
           (when-let [event (midi-msg->event msg)]
             (router/dispatch! event)))))))
 
-;; ============================================================================
+
 ;; Device Connection
-;; ============================================================================
+
 
 (defn connect-device!
   "Connects to a MIDI input device by name.
@@ -149,9 +149,9 @@
   []
   (keys (:devices @midi-state)))
 
-;; ============================================================================
+
 ;; Configuration
-;; ============================================================================
+
 
 (defn set-channel-filter!
   "Sets which MIDI channels to listen to.
@@ -165,9 +165,9 @@
   []
   (swap! midi-state assoc :channel-filter nil))
 
-;; ============================================================================
+
 ;; Enable/Disable
-;; ============================================================================
+
 
 (defn enable!
   "Enables MIDI input processing."
@@ -184,9 +184,9 @@
   []
   (:enabled @midi-state))
 
-;; ============================================================================
+
 ;; MIDI Learn
-;; ============================================================================
+
 
 (defonce learn-state (atom nil))
 
@@ -217,9 +217,9 @@
   []
   (boolean @learn-state))
 
-;; ============================================================================
+
 ;; Auto-Connect
-;; ============================================================================
+
 
 (defn auto-connect!
   "Attempts to connect to the first available MIDI input device.
@@ -233,9 +233,9 @@
       (println "No MIDI input devices found")
       nil)))
 
-;; ============================================================================
+
 ;; Initialization
-;; ============================================================================
+
 
 (defn init!
   "Initializes MIDI system. Optionally auto-connects to first device."

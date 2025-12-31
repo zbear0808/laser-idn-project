@@ -1,12 +1,11 @@
 (ns laser-show.views.toolbar
   "Toolbar component with transport controls, BPM, and connection status."
   (:require [cljfx.api :as fx]
-            [laser-show.subs :as subs]
-            [laser-show.css.core :as css]))
+            [laser-show.subs :as subs]))
 
-;; ============================================================================
+
 ;; Transport Controls
-;; ============================================================================
+
 
 (defn transport-button
   "A transport control button (play/stop/etc).
@@ -36,9 +35,9 @@
                  :on-action {:event/type :transport/retrigger}
                  :active? false}]}))
 
-;; ============================================================================
+
 ;; BPM Controls
-;; ============================================================================
+
 
 (defn bpm-display
   "BPM display with editable value."
@@ -80,9 +79,9 @@
    :children [{:fx/type bpm-display}
               {:fx/type tap-tempo-button}]})
 
-;; ============================================================================
+
 ;; Connection Status
-;; ============================================================================
+
 
 (defn connection-indicator
   "Visual connection status indicator.
@@ -120,9 +119,9 @@
                              :host host
                              :port port}}]}))
 
-;; ============================================================================
+
 ;; Main Toolbar
-;; ============================================================================
+
 
 (defn toolbar
   "Main toolbar component."

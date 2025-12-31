@@ -11,9 +11,9 @@
   (:require [laser-show.state.core :as state]
             [laser-show.state.serialization :as ser]))
 
-;; ============================================================================
+
 ;; File Paths
-;; ============================================================================
+
 
 (def config-dir "config")
 
@@ -29,9 +29,9 @@
    :effects      "config/effects.edn"
    :effects-grid "config/effects-grid.edn"})
 
-;; ============================================================================
+
 ;; Persistence Mapping
-;; ============================================================================
+
 ;; Defines what state is persistent. Maps file keys to state paths.
 
 (def persistent-state-mapping
@@ -64,9 +64,9 @@
    :effects-grid {:path [:effects]
                   :keys [:cells]}}) ; Persist effect grid cell assignments
 
-;; ============================================================================
+
 ;; Load Functions
-;; ============================================================================
+
 
 (defn load-single!
   "Load a single config file and merge into state.
@@ -90,9 +90,9 @@
   (doseq [file-key (keys persistent-state-mapping)]
     (load-single! file-key)))
 
-;; ============================================================================
+
 ;; Save Functions
-;; ============================================================================
+
 
 (defn save-single!
   "Save a single config file from state.
@@ -113,23 +113,10 @@
   (doseq [file-key (keys persistent-state-mapping)]
     (save-single! file-key)))
 
-;; ============================================================================
-;; Utility Functions
-;; ============================================================================
 
-(defn get-config-path
-  "Get the file path for a config type."
-  [file-key]
-  (get config-files file-key))
 
-(defn persistent-keys
-  "Get a list of all persistent state keys."
-  []
-  (keys persistent-state-mapping))
-
-;; ============================================================================
 ;; Project-Based Persistence Functions
-;; ============================================================================
+
 
 (defn get-project-file-paths
   "Get all file paths for a project folder.
