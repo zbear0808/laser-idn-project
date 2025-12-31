@@ -1,15 +1,16 @@
 (ns laser-show.state.clipboard
   "Clipboard state management for copy/paste operations.
    Supports copying cues, zones, projectors, and effects (future).
-   Uses both the centralized state atoms and the system clipboard for EDN data.
+   Uses both the centralized state and the system clipboard for EDN data.
    
-   NOTE: Clipboard state is stored in atoms.clj at [:ui :clipboard]
+   NOTE: Clipboard state is stored in state.core at [:ui :clipboard]
    to maintain a single source of truth for all application state."
   (:require [clojure.string :as str]
             [laser-show.backend.cues :as cues]
             [laser-show.backend.zones :as zones]
             [laser-show.backend.projectors :as projectors]
-            [laser-show.state.atoms :as state]
+            [laser-show.state.core :as state]
+            [laser-show.state.queries :as queries]
             [laser-show.state.serialization :as ser]
             [laser-show.animation.modulation :as mod])
   (:import [javafx.scene.input Clipboard ClipboardContent]))
@@ -23,12 +24,12 @@
 (defn- get-internal-clipboard
   "Get the internal clipboard state from central store."
   []
-  (state/get-clipboard))
+  (queries/clipboard))
 
 (defn- set-internal-clipboard!
   "Set the internal clipboard state in central store."
   [data]
-  (state/set-clipboard! data))
+  (state/assoc-in-state! [:ui :clipboard] data))
 
 ;; ============================================================================
 ;; Clipboard Types

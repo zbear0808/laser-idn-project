@@ -4,20 +4,24 @@
    This module provides:
    - A single cljfx context atom for all application state
    - The `defstate` macro for declarative state domain definitions
-   - Generated accessor functions for each field
    - Context-aware state updates that preserve memoization cache
+   - Mutation functions for all state changes
+   
+   For READ operations:
+   - Backend/services: Use laser-show.state.queries (thread-safe, no memoization)
+   - UI components: Use laser-show.subs (memoized, context-based subscriptions)
    
    Usage:
-   1. Define state domains in laser-show.state.domains
-   2. Initialize with (init-state!)
-   3. Access via generated functions: (get-timing-bpm), (set-timing-bpm! 140)
-   4. Subscribe in UI via (fx/sub-val context :timing)"
+   1. Initialize with (init-state!)
+   2. Mutate via: (set-timing-bpm! 140), (add-projector! id config)
+   3. Read in backend: (queries/bpm), (queries/projector id)
+   4. Read in UI: (fx/sub-ctx context subs/bpm)"
   (:require [cljfx.api :as fx]
             [clojure.core.cache :as cache]
             [clojure.pprint :as pprint]))
 
 ;; ============================================================================
-;; Core State Atom
+;; Section 1: Core State Atom & Cache
 ;; ============================================================================
 
 (defonce ^{:private true
@@ -30,17 +34,13 @@
   *domain-registry
   (atom {}))
 
-;; ============================================================================
-;; Cache Configuration
-;; ============================================================================
-
 (def cache-factory
   "LRU cache factory for context memoization.
    Adjust :threshold based on app complexity."
   #(cache/lru-cache-factory % :threshold 512))
 
 ;; ============================================================================
-;; Context Access Functions
+;; Section 2: Context Access Functions
 ;; ============================================================================
 
 (defn get-context-atom
@@ -86,7 +86,7 @@
     (:cljfx.context/m ctx)))
 
 ;; ============================================================================
-;; State Mutation Functions
+;; Section 3: State Mutation Primitives
 ;; ============================================================================
 
 (defn swap-state!
@@ -122,6 +122,9 @@
 (defn get-in-state
   "Get a value at a path in state.
    
+   NOTE: Prefer using queries namespace for backend or subs namespace for UI.
+   This is a low-level primitive used internally.
+   
    Parameters:
    - path: Vector path into state
    
@@ -156,7 +159,7 @@
   (apply swap-state! update-in path f args))
 
 ;; ============================================================================
-;; Initialization
+;; Section 4: Initialization & Lifecycle
 ;; ============================================================================
 
 (defn init-state!
@@ -183,7 +186,7 @@
   (println "State shutdown"))
 
 ;; ============================================================================
-;; Domain Registration (used by defstate macro)
+;; Section 5: Domain Registration (used by defstate macro)
 ;; ============================================================================
 
 (defn register-domain!
@@ -211,17 +214,18 @@
         @*domain-registry))
 
 ;; ============================================================================
-;; defstate Macro
+;; Section 6: defstate Macro
 ;; ============================================================================
 
 (defmacro defstate
-  "Define a state domain with automatic accessor generation.
+  "Define a state domain with automatic setter generation.
    
    This macro:
    1. Registers the domain in the domain registry
    2. Defines a var with the initial state for this domain
-   3. Generates getter/setter/updater functions for each field
-   4. Generates a full-domain getter function
+   3. Generates setter/updater functions for each field
+   
+   NOTE: Getter functions are NOT generated - use queries.clj (backend) or subs.clj (UI)
    
    Parameters:
    - domain-name: Symbol naming the domain (e.g., timing)
@@ -236,32 +240,24 @@
    
    Generates:
    - timing-initial (var with initial state map)
-   - get-timing (returns full domain map)
-   - get-timing-bpm, set-timing-bpm!, update-timing-bpm!
-   - get-timing-tap-times, set-timing-tap-times!, update-timing-tap-times!"
+   - set-timing-bpm!, update-timing-bpm!
+   - set-timing-tap-times!, update-timing-tap-times!"
   [domain-name docstring field-specs]
   (let [domain-kw (keyword domain-name)
         initial-var-name (symbol (str domain-name "-initial"))
-        domain-getter-name (symbol (str "get-" domain-name))
         
         initial-value (into {}
                             (map (fn [[k v]] [k (:default v)]))
                             field-specs)
         
-        ;; Generate accessor functions for each field
+        ;; Generate setter/updater functions for each field (no getters)
         field-accessors
         (mapcat
           (fn [[field-name {:keys [doc]}]]
             (let [field-kw field-name
-                  getter-name (symbol (str "get-" domain-name "-" (name field-name)))
                   setter-name (symbol (str "set-" domain-name "-" (name field-name) "!"))
                   updater-name (symbol (str "update-" domain-name "-" (name field-name) "!"))]
-              [`(defn ~getter-name
-                  ~(str "Get " (or doc (name field-name)) " from " domain-name " domain.")
-                  []
-                  (get-in-state [~domain-kw ~field-kw]))
-               
-               `(defn ~setter-name
+              [`(defn ~setter-name
                   ~(str "Set " (or doc (name field-name)) " in " domain-name " domain.")
                   [~'value]
                   (assoc-in-state! [~domain-kw ~field-kw] ~'value))
@@ -279,57 +275,8 @@
        
        (register-domain! ~domain-kw ~initial-value ~field-specs)
        
-       (defn ~domain-getter-name
-         ~(str "Get the full " domain-name " state map. " docstring)
-         []
-         (get-in-state [~domain-kw]))
-       
        ~@field-accessors
        
        ;; Return the domain keyword for chaining
        ~domain-kw)))
 
-
-(defn debug-state
-  "Print current state for debugging."
-  []
-  (pprint/pprint (get-state)))
-
-(defn debug-domains
-  "Print registered domains."
-  []
-  (pprint/pprint (get-registered-domains)))
-
-#_(comment
-  ;; Example usage:
-  
-  ;; Define a domain
-  (defstate timing
-    "Timing and BPM management."
-    {:bpm {:default 120.0 :doc "Beats per minute"}
-     :tap-times {:default [] :doc "Tap tempo timestamps"}})
-  
-  ;; Initialize state
-  (init-state! (build-initial-state-from-domains))
-  
-  ;; Use generated accessors
-  (get-timing-bpm)          ;; => 120.0
-  (set-timing-bpm! 140.0)   
-  (get-timing-bpm)          ;; => 140.0
-  (update-timing-bpm! + 10) 
-  (get-timing-bpm)          ;; => 150.0
-  
-  ;; Get full domain
-  (get-timing)              ;; => {:bpm 150.0 :tap-times []}
-  
-  ;; Direct path access
-  (get-in-state [:timing :bpm])
-  (assoc-in-state! [:timing :bpm] 120.0)
-  
-  ;; Debug
-  (debug-state)
-  (debug-domains)
-  
-  ;; Shutdown
-  (shutdown!)
-  )

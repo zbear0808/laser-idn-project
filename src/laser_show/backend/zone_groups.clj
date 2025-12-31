@@ -8,7 +8,8 @@
    [clojure.set :as set]
    [laser-show.animation.effects :as effects]
    [laser-show.backend.zones :as zones]
-   [laser-show.state.atoms :as state]
+   [laser-show.state.core :as state]
+   [laser-show.state.queries :as queries]
    [laser-show.state.persistent :as persist]))
 
 ;; ============================================================================
@@ -49,7 +50,7 @@
    Can accept either a group map or individual parameters."
   ([group]
    (when (valid-zone-group? group)
-     (state/add-zone-group! (:id group) group)
+     (state/assoc-in-state! [:zone-groups :items (:id group)] group)
      group))
   ([id name zone-ids & opts]
    (let [group (apply make-zone-group id name zone-ids opts)]
@@ -58,35 +59,35 @@
 (defn get-group
   "Get a zone group by ID."
   [group-id]
-  (state/get-zone-group group-id))
+  (queries/zone-group group-id))
 
 (defn update-group!
   "Update a zone group's properties."
   [group-id updates]
   (when (get-group group-id)
     (let [updated (merge (get-group group-id) updates)]
-      (state/add-zone-group! group-id updated)
+      (state/assoc-in-state! [:zone-groups :items group-id] updated)
       updated)))
 
 (defn remove-group!
   "Remove a zone group from the registry."
   [group-id]
-  (state/remove-zone-group! group-id))
+  (state/update-in-state! [:zone-groups :items] dissoc group-id))
 
 (defn list-groups
   "Get all zone groups as a sequence."
   []
-  (vals (state/get-zone-groups)))
+  (vals (queries/zone-groups)))
 
 (defn get-group-ids
   "Get all zone group IDs."
   []
-  (keys (state/get-zone-groups)))
+  (keys (queries/zone-groups)))
 
 (defn clear-groups!
   "Clear all zone groups from the registry."
   []
-  (state/reset-zone-groups!))
+  (state/assoc-in-state! [:zone-groups :data] {}))
 
 ;; ============================================================================
 ;; Zone Membership
@@ -207,7 +208,7 @@
 (defn ensure-default-groups!
   "Ensure default zone groups exist."
   []
-  (when (empty? (state/get-zone-groups))
+  (when (empty? (queries/zone-groups))
     (create-all-zones-group!)))
 
 ;; ============================================================================

@@ -8,16 +8,30 @@
    - Registration in the domain registry
    
    After loading this namespace, call (build-initial-state) to get the
-   complete initial state map for the application."
+   complete initial state map for the application.
+   
+   NOTE: This is the single source of truth for ALL application state."
   (:require [laser-show.state.core :refer [defstate build-initial-state-from-domains]]))
 
 ;; ============================================================================
-;; UI State Domains (subscribed by components)
+;; Default Constants
+;; ============================================================================
+
+(def default-bpm 120.0)
+(def default-osc-port 8000)
+(def default-window-width 1200)
+(def default-window-height 800)
+(def default-grid-cols 8)
+(def default-grid-rows 4)
+(def default-log-path "idn-packets.log")
+
+;; ============================================================================
+;; Core UI State Domains
 ;; ============================================================================
 
 (defstate timing
   "Timing and BPM management for animation synchronization."
-  {:bpm {:default 120.0
+  {:bpm {:default default-bpm
          :doc "beats per minute"}
    :tap-times {:default []
                :doc "vector of tap-tempo timestamps for BPM calculation"}
@@ -25,6 +39,10 @@
                    :doc "position within current beat (0.0-1.0)"}
    :bar-position {:default 0.0
                   :doc "position within current bar (0.0-1.0)"}
+   :last-beat-time {:default 0
+                    :doc "timestamp of last beat"}
+   :beats-elapsed {:default 0
+                   :doc "total beats elapsed since start"}
    :quantization {:default :beat
                   :doc "quantization mode (:beat :bar :none)"}})
 
@@ -37,7 +55,9 @@
    :active-cell {:default nil
                  :doc "[col row] of currently playing grid cell"}
    :active-cue {:default nil
-                :doc "currently active cue data"}})
+                :doc "currently active cue data"}
+   :cue-queue {:default []
+               :doc "queue of pending cues"}})
 
 (defstate grid
   "Cue grid state - the main trigger interface."
@@ -52,7 +72,7 @@
            :doc "map of [col row] -> {:preset-id keyword}"}
    :selected-cell {:default nil
                    :doc "[col row] of selected cell for editing"}
-   :size {:default [8 4]
+   :size {:default [default-grid-cols default-grid-rows]
           :doc "[cols rows] grid dimensions"}})
 
 (defstate effects
@@ -61,7 +81,7 @@
            :doc "map of [col row] -> {:effects [...] :active true}"}})
 
 (defstate ui
-  "UI interaction state."
+  "UI interaction state including window, preview, and component references."
   {:selected-preset {:default nil
                      :doc "currently selected preset in browser"}
    :clipboard {:default nil
@@ -70,6 +90,7 @@
                 :doc "currently active tab (:grid :effects :projectors :settings)"}
    :drag {:default {:active? false
                     :source-type nil
+                    :source-id nil
                     :source-key nil
                     :data nil}
           :doc "current drag operation state"}
@@ -77,7 +98,20 @@
                        :projector-config {:open? false}
                        :effect-editor {:open? false :cell nil}
                        :settings {:open? false}}
-             :doc "dialog visibility and data states"}})
+             :doc "dialog visibility and data states"}
+   :preview {:default {:frame nil
+                       :last-render-time 0}
+             :doc "preview panel state"}
+   :window {:default {:width default-window-width
+                      :height default-window-height}
+            :doc "window dimensions"}
+   :components {:default {:main-frame nil
+                          :preview-panel nil
+                          :grid-panel nil
+                          :effects-panel nil
+                          :status-bar nil
+                          :toolbar nil}
+                :doc "references to UI components for programmatic access"}})
 
 (defstate project
   "Project file management state."
@@ -94,63 +128,88 @@
 
 (defstate config
   "Application configuration settings."
-  {:grid {:default {:cols 8 :rows 4}
+  {:grid {:default {:cols default-grid-cols :rows default-grid-rows}
           :doc "grid dimensions config"}
-   :window {:default {:width 1200 :height 800}
+   :window {:default {:width default-window-width :height default-window-height}
             :doc "window dimensions"}
    :preview {:default {:width 400 :height 400}
              :doc "preview panel dimensions"}
-   :idn {:default {:host "127.0.0.1" :port 7255}
+   :idn {:default {:host nil :port 7255}
          :doc "default IDN connection settings"}
-   :osc {:default {:enabled false :port 8000}
+   :osc {:default {:enabled false :port default-osc-port}
          :doc "OSC server settings"}
-   :midi {:default {:enabled true :device nil}
+   :midi {:default {:enabled false :device nil}
           :doc "MIDI input settings"}})
 
 (defstate projectors
-  "Projector configurations - map of projector-id to config."
-  {:entries {:default {}
-             :doc "map of projector-id -> {:name :host :port :zones}"}})
+  "Projector configurations."
+  {:items {:default {}
+           :doc "map of projector-id -> {:name :host :port :zones ...}"}})
 
 (defstate zones
   "Zone configurations for spatial mapping."
-  {:entries {:default {}
-             :doc "map of zone-id -> {:corners [...] :transform {...}}"}})
+  {:items {:default {}
+           :doc "map of zone-id -> {:corners [...] :transform {...} ...}"}})
 
 (defstate zone-groups
   "Zone group configurations for multi-zone output."
-  {:entries {:default {}
-             :doc "map of group-id -> {:name :zone-ids [...]}"}})
+  {:items {:default {}
+           :doc "map of group-id -> {:name :zone-ids [...]}"}})
+
+(defstate cues
+  "Cue definitions."
+  {:items {:default {}
+           :doc "map of cue-id -> {:name :preset-id :animation ...}"}})
+
+(defstate cue-lists
+  "Cue list definitions."
+  {:items {:default {}
+           :doc "map of list-id -> {:name :cues [...]}"}})
+
+(defstate effect-registry
+  "Effect type registry."
+  {:items {:default {}
+           :doc "map of effect-id -> effect-definition"}})
 
 ;; ============================================================================
-;; Backend State Domains (not directly subscribed by UI)
+;; Backend State Domain
 ;; ============================================================================
 
 (defstate backend
-  "Backend state for streaming and connections."
+  "Backend services state - IDN, streaming, input, logging."
   {:idn {:default {:connected? false
                    :connecting? false
                    :target nil
                    :streaming-engine nil
                    :error nil}
          :doc "IDN connection state"}
-   :streaming {:default {:running? false
-                         :engines {}
-                         :frame-stats {:last-render-ms 0
-                                       :fps 0}}
-               :doc "streaming engine state"}
+   :streaming {:default {:engines {}
+                         :running? false
+                         :connected-targets #{}
+                         :frame-stats {}
+                         :multi-engine-state nil
+                         :current-frame nil}
+               :doc "Streaming engine state for IDN output"}
    :input {:default {:midi {:enabled true
+                            :connected-devices #{}
+                            :learn-mode nil
                             :device nil
-                            :connected? false}
+                            :receiver nil}
                      :osc {:enabled false
-                           :server-running? false
-                           :port 8000}
-                     :keyboard {:enabled true}}
-           :doc "input handling state"}
+                           :server-running false
+                           :learn-mode nil
+                           :server nil
+                           :port default-osc-port}
+                     :keyboard {:enabled true
+                                :attached-components #{}}
+                     :router {:handlers {}
+                              :event-log []
+                              :enabled true}}
+           :doc "Input handling state for MIDI, OSC, and keyboard"}
    :logging {:default {:enabled? false
                        :file nil
-                       :path "idn-packets.log"}
-             :doc "packet logging state"}})
+                       :path default-log-path}
+             :doc "Packet logging state"}})
 
 ;; ============================================================================
 ;; State Builder
@@ -169,46 +228,3 @@
     ;; Styles: stored in context for hot-reload reactivity
     ;; Initialized to nil, set at app startup with actual CSS URLs
     {:styles {:menu-theme nil}}))
-
-;; ============================================================================
-;; Convenience Re-exports
-;; ============================================================================
-;; 
-;; The defstate macro generates accessor functions in this namespace.
-;; For example, (defstate timing ...) generates:
-;; - get-timing
-;; - get-timing-bpm, set-timing-bpm!, update-timing-bpm!
-;; - get-timing-tap-times, set-timing-tap-times!, update-timing-tap-times!
-;; etc.
-;;
-;; These can be used directly:
-;;   (require '[laser-show.state.domains :as d])
-;;   (d/get-timing-bpm) => 120.0
-;;   (d/set-timing-bpm! 140.0)
-
-#_
-(comment
-  ;; Test the generated accessors
-  (require '[laser-show.state.core :as core])
-  
-  ;; Initialize state
-  (core/init-state! (build-initial-state))
-  
-  ;; Now we can use generated accessors
-  (get-timing)              ;; => full timing map
-  (get-timing-bpm)          ;; => 120.0
-  (set-timing-bpm! 140.0)
-  (get-timing-bpm)          ;; => 140.0
-  
-  (get-grid-cells)          ;; => {[0 0] {:preset-id :circle} ...}
-  (get-grid-size)           ;; => [8 4]
-  
-  (get-playback-playing?)   ;; => false
-  (set-playback-playing?! true)
-  
-  ;; Check registered domains
-  (core/debug-domains)
-  
-  ;; Full state
-  (core/debug-state)
-  )

@@ -4,7 +4,8 @@
    
    Projectors support effect chains for projector-level calibration and effects:
    - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
-  (:require [laser-show.state.atoms :as state]
+  (:require [laser-show.state.core :as state]
+            [laser-show.state.queries :as queries]
             [laser-show.state.persistent :as persist]
             [laser-show.animation.effects :as effects]))
 
@@ -64,7 +65,7 @@
    Can accept either a projector map or individual parameters."
   ([projector]
    (when (valid-projector? projector)
-     (state/add-projector! (:id projector) projector)
+     (state/assoc-in-state! [:projectors :items (:id projector)] projector)
      projector))
   ([id name address & opts]
    (let [projector (apply make-projector id name address opts)]
@@ -73,35 +74,35 @@
 (defn get-projector
   "Get a projector by ID."
   [projector-id]
-  (state/get-projector projector-id))
+  (queries/projector projector-id))
 
 (defn update-projector!
   "Update a projector's properties."
   [projector-id updates]
   (when (get-projector projector-id)
     (let [updated (merge (get-projector projector-id) updates)]
-      (state/add-projector! projector-id updated)
+      (state/assoc-in-state! [:projectors :items projector-id] updated)
       updated)))
 
 (defn remove-projector!
   "Remove a projector from the registry."
   [projector-id]
-  (state/remove-projector! projector-id))
+  (state/update-in-state! [:projectors :items] dissoc projector-id))
 
 (defn list-projectors
   "Get all projectors as a sequence."
   []
-  (vals (state/get-projectors)))
+  (vals (queries/projectors)))
 
 (defn get-projector-ids
   "Get all projector IDs."
   []
-  (keys (state/get-projectors)))
+  (keys (queries/projectors)))
 
 (defn clear-projectors!
   "Clear all projectors from the registry."
   []
-  (state/reset-projectors!))
+  (state/assoc-in-state! [:projectors :data] {}))
 
 ;; ============================================================================
 ;; Status Management
@@ -175,7 +176,7 @@
   "Ensure at least one default projector exists.
    Creates :projector-1 if no projectors are registered."
   []
-  (when (empty? (state/get-projectors))
+  (when (empty? (queries/projectors))
     (register-projector!
      (make-projector :projector-1 "Default Projector" "192.168.1.100"))))
 

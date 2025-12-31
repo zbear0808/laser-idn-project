@@ -12,7 +12,8 @@
             [laser-show.animation.effects :as effects]
             [laser-show.animation.time :as anim-time]
             [laser-show.animation.types :as t]
-            [laser-show.state.atoms :as state]))
+            [laser-show.state.core :as state]
+            [laser-show.state.queries :as queries]))
 
 ;; ============================================================================
 ;; Animation Creation
@@ -87,10 +88,10 @@
    
    Returns: LaserFrame or nil if no active cell"
   []
-  (when-let [active-cell (state/get-active-cell)]
-    (let [cell (state/get-cell (first active-cell) (second active-cell))
+  (when-let [active-cell (queries/active-cell)]
+    (let [cell (queries/cell (first active-cell) (second active-cell))
           preset-id (:preset-id cell)
-          trigger-time (state/get-trigger-time)]
+          trigger-time (queries/trigger-time)]
       (when preset-id
         (let [anim (create-animation preset-id)
               elapsed (- (System/currentTimeMillis) trigger-time)]
@@ -207,7 +208,7 @@
    
    Returns: Beat position as a double"
   []
-  (state/get-beat-position))
+  (queries/beat-position))
 
 ;; ============================================================================
 ;; Playback Control
@@ -217,31 +218,35 @@
   "Retrigger the current animation.
    Resets the trigger time to now, restarting the animation."
   []
-  (state/trigger!))
+  (state/assoc-in-state! [:playback :trigger-time] (System/currentTimeMillis)))
 
 (defn start-playback!
   "Start playback."
   []
-  (state/start-playback!))
+  (state/swap-state! #(-> %
+                          (assoc-in [:playback :playing?] true)
+                          (assoc-in [:playback :trigger-time] (System/currentTimeMillis)))))
 
 (defn stop-playback!
   "Stop playback."
   []
-  (state/stop-playback!))
+  (state/swap-state! #(-> %
+                          (assoc-in [:playback :playing?] false)
+                          (assoc-in [:playback :active-cell] nil))))
 
 (defn playing?
   "Check if currently playing.
    
    Returns: true if playing, false otherwise"
   []
-  (state/playing?))
+  (queries/playing?))
 
 (defn get-trigger-time
   "Get the current trigger time.
    
    Returns: Timestamp in milliseconds"
   []
-  (state/get-trigger-time))
+  (queries/trigger-time))
 
 ;; ============================================================================
 ;; Composite Operations

@@ -12,7 +12,8 @@
    
    And can store animation objects directly:
    - :animation - The actual animation object (not persisted, created from preset-id)"
-  (:require [laser-show.state.atoms :as state]
+  (:require [laser-show.state.core :as state]
+            [laser-show.state.queries :as queries]
             [laser-show.state.persistent :as persist]
             [laser-show.backend.zone-router :as router]
             [laser-show.animation.effects :as effects]))
@@ -72,30 +73,30 @@
 (defn add-cue!
   "Add a cue to the cue library."
   [cue]
-  (state/add-cue! (:id cue) cue))
+  (state/assoc-in-state! [:cues :items (:id cue)] cue))
 
 (defn get-cue
   "Get a cue by ID."
   [cue-id]
-  (state/get-cue cue-id))
+  (queries/cue cue-id))
 
 (defn update-cue!
   "Update a cue's properties."
   [cue-id updates]
   (when (get-cue cue-id)
     (let [updated (merge (get-cue cue-id) updates)]
-      (state/add-cue! cue-id updated)
+      (state/assoc-in-state! [:cues :items cue-id] updated)
       updated)))
 
 (defn remove-cue!
   "Remove a cue from the library."
   [cue-id]
-  (state/remove-cue! cue-id))
+  (state/update-in-state! [:cues :items] dissoc cue-id))
 
 (defn list-cues
   "Get all cues as a sequence."
   []
-  (vals (state/get-cues)))
+  (vals (queries/cues)))
 
 ;; ============================================================================
 ;; Cue Triggering
@@ -109,23 +110,23 @@
   (when-let [cue (get-cue cue-id)]
     (let [trigger-time (System/currentTimeMillis)
           cue-with-trigger (assoc cue :trigger-time trigger-time)]
-      (swap! state/!playback assoc :active-cue cue-with-trigger)
+      (state/assoc-in-state! [:playback :active-cue] cue-with-trigger)
       cue-with-trigger)))
 
 (defn stop-cue!
   "Stop the currently playing cue."
   []
-  (swap! state/!playback assoc :active-cue nil))
+  (state/assoc-in-state! [:playback :active-cue] nil))
 
 (defn get-active-cue
   "Get the currently active cue."
   []
-  (:active-cue @state/!playback))
+  (queries/active-cue))
 
 (defn cue-active?
   "Check if a specific cue is currently active."
   [cue-id]
-  (= cue-id (:id (:active-cue @state/!playback))))
+  (= cue-id (:id (queries/active-cue))))
 
 ;; ============================================================================
 ;; Cue Queue
@@ -135,25 +136,25 @@
   "Add a cue to the queue."
   [cue-id]
   (when (get-cue cue-id)
-    (swap! state/!playback update :cue-queue conj cue-id)))
+    (state/update-in-state! [:playback :cue-queue] conj cue-id)))
 
 (defn dequeue-cue!
   "Remove and return the next cue from the queue."
   []
-  (let [queue (:cue-queue @state/!playback)]
+  (let [queue (queries/cue-queue)]
     (when (seq queue)
-      (swap! state/!playback update :cue-queue rest)
+      (state/update-in-state! [:playback :cue-queue] rest)
       (first queue))))
 
 (defn clear-queue!
   "Clear the cue queue."
   []
-  (swap! state/!playback assoc :cue-queue []))
+  (state/assoc-in-state! [:playback :cue-queue] []))
 
 (defn get-queue
   "Get the current cue queue."
   []
-  (:cue-queue @state/!playback))
+  (queries/cue-queue))
 
 (defn advance-queue!
   "Stop current cue and trigger the next one in queue."
@@ -180,30 +181,30 @@
 (defn add-cue-list!
   "Add a cue list."
   [cue-list]
-  (state/add-cue-list! (:id cue-list) cue-list))
+  (state/assoc-in-state! [:cue-lists :items (:id cue-list)] cue-list))
 
 (defn get-cue-list
   "Get a cue list by ID."
   [list-id]
-  (state/get-cue-list list-id))
+  (queries/cue-list list-id))
 
 (defn update-cue-list!
   "Update a cue list's properties."
   [list-id updates]
   (when (get-cue-list list-id)
     (let [updated (merge (get-cue-list list-id) updates)]
-      (state/add-cue-list! list-id updated)
+      (state/assoc-in-state! [:cue-lists :items list-id] updated)
       updated)))
 
 (defn remove-cue-list!
   "Remove a cue list."
   [list-id]
-  (state/remove-cue-list! list-id))
+  (state/update-in-state! [:cue-lists :items] dissoc list-id))
 
 (defn list-cue-lists
   "Get all cue lists as a sequence."
   []
-  (vals (state/get-cue-lists)))
+  (vals (queries/cue-lists)))
 
 (defn load-cue-list-to-queue!
   "Load all cues from a cue list into the queue."
@@ -325,12 +326,12 @@
 (defn get-active-cue-animation
   "Get the animation from the currently active cue."
   []
-  (:animation (:active-cue @state/!playback)))
+  (:animation (queries/active-cue)))
 
 (defn get-active-cue-effect-chain
   "Get the effect chain from the currently active cue."
   []
-  (:effect-chain (:active-cue @state/!playback)))
+  (:effect-chain (queries/active-cue)))
 
 ;; ============================================================================
 ;; Quick Cue Creation from Grid
@@ -412,7 +413,7 @@
    
    Returns the frame with effects applied, or nil if no active cue."
   [time-ms bpm]
-  (when-let [active-cue (:active-cue @state/!playback)]
+  (when-let [active-cue (queries/active-cue)]
     (when-let [anim (:animation active-cue)]
       (let [frame (cond
                     (fn? anim) (anim time-ms)

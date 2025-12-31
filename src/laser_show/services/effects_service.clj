@@ -9,8 +9,10 @@
    - Project dirty tracking
    - Consistent coordination with other state
    
-   The service layer contains underlying logic; state/atoms.clj remains thin accessors."
-  (:require [laser-show.state.atoms :as state]
+   The service layer contains underlying logic; state/core.clj remains thin accessors."
+  (:require [laser-show.state.core :as state]
+            [laser-show.state.queries :as queries]
+            [laser-show.state.domains :as domains]
             [laser-show.animation.effects :as effects]))
 
 ;; ============================================================================
@@ -26,8 +28,8 @@
    
    Returns: true if valid, false otherwise"
   [col row]
-  (let [cols state/default-grid-cols
-        rows state/default-grid-rows]
+  (let [cols domains/default-grid-cols
+        rows domains/default-grid-rows]
     (and (integer? col) (integer? row)
          (>= col 0) (< col cols)
          (>= row 0) (< row rows))))
@@ -70,7 +72,7 @@
    
    Returns: Effect cell data map or nil if empty"
   [col row]
-  (state/get-effect-cell col row))
+  (queries/effect-cell col row))
 
 (defn cell-has-effect?
   "Check if a cell has any effects assigned.
@@ -113,8 +115,8 @@
   [col row cell-data]
   (when (and (valid-position? col row)
              (valid-effect-cell? cell-data))
-    (state/set-effect-cell! col row cell-data)
-    (state/mark-project-dirty!)
+    (state/assoc-in-state! [:effects :cells [col row]] cell-data)
+    (state/assoc-in-state! [:project :dirty?] true)
     true))
 
 (defn clear-effect-cell!
@@ -129,8 +131,8 @@
    Returns: true if successful, nil if validation failed"
   [col row]
   (when (valid-position? col row)
-    (state/clear-effect-cell! col row)
-    (state/mark-project-dirty!)
+    (state/update-in-state! [:effects :cells] dissoc [col row])
+    (state/assoc-in-state! [:project :dirty?] true)
     true))
 
 (defn toggle-effect-active!
@@ -146,9 +148,11 @@
   [col row]
   (when (and (valid-position? col row)
              (cell-has-effect? col row))
-    (state/toggle-effect-cell-active! col row)
-    (state/mark-project-dirty!)
-    (:active (get-effect-cell col row))))
+    (let [current (get-effect-cell col row)
+          new-active (not (:active current))]
+      (state/assoc-in-state! [:effects :cells [col row] :active] new-active)
+      (state/assoc-in-state! [:project :dirty?] true)
+      new-active)))
 
 (defn set-effect-active!
   "Set effect cell active state explicitly.
@@ -166,8 +170,8 @@
              (boolean? active?)
              (cell-has-effect? col row))
     (let [cell (get-effect-cell col row)]
-      (state/set-effect-cell! col row (assoc cell :active active?))
-      (state/mark-project-dirty!)
+      (state/assoc-in-state! [:effects :cells [col row]] (assoc cell :active active?))
+      (state/assoc-in-state! [:project :dirty?] true)
       true)))
 
 ;; ============================================================================
@@ -190,8 +194,11 @@
   (when (and (valid-position? col row)
              (map? effect-data)
              (valid-effect-id? (:effect-id effect-data)))
-    (state/add-effect-to-cell! col row effect-data)
-    (state/mark-project-dirty!)
+    ;; Ensure cell exists first
+    (when-not (get-effect-cell col row)
+      (state/assoc-in-state! [:effects :cells [col row]] {:effects [] :active true}))
+    (state/update-in-state! [:effects :cells [col row] :effects] conj effect-data)
+    (state/assoc-in-state! [:project :dirty?] true)
     true))
 
 (defn remove-effect-from-cell!
@@ -216,9 +223,9 @@
         (let [new-effects (vec (concat (subvec effects 0 effect-index)
                                        (subvec effects (inc effect-index))))]
           (if (empty? new-effects)
-            (state/clear-effect-cell! col row)
-            (state/set-effect-cell! col row (assoc cell :effects new-effects)))
-          (state/mark-project-dirty!)
+            (state/update-in-state! [:effects :cells] dissoc [col row])
+            (state/assoc-in-state! [:effects :cells [col row]] (assoc cell :effects new-effects)))
+          (state/assoc-in-state! [:project :dirty?] true)
           true)))))
 
 (defn update-effect-params!
@@ -243,8 +250,8 @@
                  (>= effect-index 0)
                  (< effect-index (count effects)))
         (let [updated-effects (update-in effects [effect-index :params] merge params)]
-          (state/set-effect-cell! col row (assoc cell :effects updated-effects))
-          (state/mark-project-dirty!)
+          (state/assoc-in-state! [:effects :cells [col row]] (assoc cell :effects updated-effects))
+          (state/assoc-in-state! [:project :dirty?] true)
           true)))))
 
 ;; ============================================================================
@@ -268,9 +275,9 @@
              (valid-position? to-col to-row))
     (let [cell-data (get-effect-cell from-col from-row)]
       (when cell-data
-        (state/set-effect-cell! to-col to-row cell-data)
-        (state/clear-effect-cell! from-col from-row)
-        (state/mark-project-dirty!)
+        (state/assoc-in-state! [:effects :cells [to-col to-row]] cell-data)
+        (state/update-in-state! [:effects :cells] dissoc [from-col from-row])
+        (state/assoc-in-state! [:project :dirty?] true)
         true))))
 
 (defn copy-effect-cell!
@@ -291,8 +298,8 @@
              (valid-position? to-col to-row))
     (let [cell-data (get-effect-cell from-col from-row)]
       (when cell-data
-        (state/set-effect-cell! to-col to-row cell-data)
-        (state/mark-project-dirty!)
+        (state/assoc-in-state! [:effects :cells [to-col to-row]] cell-data)
+        (state/assoc-in-state! [:project :dirty?] true)
         true))))
 
 ;; ============================================================================
@@ -303,41 +310,41 @@
   "Clear all effect cells.
    Marks project as dirty."
   []
-  (let [cols state/default-grid-cols
-        rows state/default-grid-rows]
+  (let [cols domains/default-grid-cols
+        rows domains/default-grid-rows]
     (doseq [col (range cols)
             row (range rows)]
-      (state/clear-effect-cell! col row))
-    (state/mark-project-dirty!)
+      (state/update-in-state! [:effects :cells] dissoc [col row]))
+    (state/assoc-in-state! [:project :dirty?] true)
     true))
 
 (defn deactivate-all-effects!
   "Deactivate all effect cells (but don't clear them).
    Marks project as dirty."
   []
-  (let [cols state/default-grid-cols
-        rows state/default-grid-rows]
+  (let [cols domains/default-grid-cols
+        rows domains/default-grid-rows]
     (doseq [col (range cols)
             row (range rows)]
       (when-let [cell (get-effect-cell col row)]
         (when (:active cell)
-          (state/set-effect-cell! col row (assoc cell :active false)))))
-    (state/mark-project-dirty!)
+          (state/assoc-in-state! [:effects :cells [col row]] (assoc cell :active false)))))
+    (state/assoc-in-state! [:project :dirty?] true)
     true))
 
 (defn activate-all-effects!
   "Activate all effect cells that have effects.
    Marks project as dirty."
   []
-  (let [cols state/default-grid-cols
-        rows state/default-grid-rows]
+  (let [cols domains/default-grid-cols
+        rows domains/default-grid-rows]
     (doseq [col (range cols)
             row (range rows)]
       (when-let [cell (get-effect-cell col row)]
         (when (and (seq (:effects cell))
                    (not (:active cell)))
-          (state/set-effect-cell! col row (assoc cell :active true)))))
-    (state/mark-project-dirty!)
+          (state/assoc-in-state! [:effects :cells [col row]] (assoc cell :active true)))))
+    (state/assoc-in-state! [:project :dirty?] true)
     true))
 
 ;; ============================================================================
@@ -349,22 +356,22 @@
    
    Returns: Vector of effect instance maps sorted by grid position"
   []
-  (state/get-all-active-effect-instances))
+  (queries/all-active-effect-instances))
 
 (defn get-effects-grid-size
   "Get effects grid dimensions.
    
    Returns: [cols rows]"
   []
-  [state/default-grid-cols state/default-grid-rows])
+  [domains/default-grid-cols domains/default-grid-rows])
 
 (defn count-effect-cells
   "Count cells with effects.
    
    Returns: Number of cells with effects"
   []
-  (let [cols state/default-grid-cols
-        rows state/default-grid-rows]
+  (let [cols domains/default-grid-cols
+        rows domains/default-grid-rows]
     (count
      (for [col (range cols)
            row (range rows)
@@ -376,8 +383,8 @@
    
    Returns: Number of cells with active effects"
   []
-  (let [cols state/default-grid-cols
-        rows state/default-grid-rows]
+  (let [cols domains/default-grid-cols
+        rows domains/default-grid-rows]
     (count
      (for [col (range cols)
            row (range rows)

@@ -5,7 +5,7 @@
    [laser-show.animation.presets :as presets]
    [laser-show.animation.time :as anim-time]
    [laser-show.animation.types :as t]
-   [laser-show.state.atoms :as state]))
+   [laser-show.state.queries :as queries]))
 
 (defn create-frame-provider
   "Create a function that provides the current animation frame for streaming.
@@ -21,10 +21,10 @@
    - Global BPM for time-based animations"
   []
   (fn []
-    (let [active-cell (state/get-active-cell)
-          trigger-time (state/get-trigger-time)]
+    (let [active-cell (queries/active-cell)
+          trigger-time (queries/trigger-time)]
       (when active-cell
-        (let [cell (state/get-cell (first active-cell) (second active-cell))
+        (let [cell (queries/cell (first active-cell) (second active-cell))
               preset-id (:preset-id cell)]
           (when preset-id
             (let [anim (presets/create-animation-from-preset preset-id)

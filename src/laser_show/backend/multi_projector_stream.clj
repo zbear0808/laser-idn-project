@@ -17,7 +17,8 @@
    [laser-show.backend.streaming-engine :as engine]
    [laser-show.backend.zone-router :as router]
    [laser-show.backend.zones :as zones]
-   [laser-show.state.atoms :as state]))
+   [laser-show.state.core :as state]
+   [laser-show.state.queries :as queries]))
 
 ;; ============================================================================
 ;; Multi-Engine State
@@ -70,7 +71,7 @@
     (when-let [base-frame (base-frame-provider)]
       (let [target (or (target-provider) router/default-target)
             time-ms (get-current-time-ms)
-            bpm (state/get-bpm)
+            bpm (queries/bpm)
             ;; Apply zone group and zone effects during routing
             projector-frames (router/prepare-projector-frames-with-effects
                               base-frame target time-ms bpm)
@@ -308,7 +309,7 @@
   (fn []
     (when-let [active-cue (cues/get-active-cue)]
       (let [time-ms (get-current-time-ms)]
-        (cues/get-cue-frame-with-effects (:id active-cue) time-ms (state/get-bpm))))))
+        (cues/get-cue-frame-with-effects (:id active-cue) time-ms (queries/bpm))))))
 
 (defn sync-bpm-to-cue!
   "Sync the global BPM to the active cue's BPM setting.
@@ -316,5 +317,5 @@
   []
   (when-let [active-cue (cues/get-active-cue)]
     (when-let [cue-bpm (:bpm active-cue)]
-      (state/set-bpm! cue-bpm)
+      (state/assoc-in-state! [:timing :bpm] cue-bpm)
       cue-bpm)))

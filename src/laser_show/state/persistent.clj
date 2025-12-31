@@ -2,13 +2,13 @@
   "Persistence layer for application state.
    
    This namespace is responsible for:
-   - Defining WHICH state is persistent (the mapping lives here, not in atoms.clj)
+   - Defining WHICH state is persistent (the mapping lives here)
    - Loading persistent state from disk on app startup
    - Saving persistent state to disk on user request
    
-   The atoms.clj namespace is agnostic about persistence - it just holds state.
+   The state.core namespace is agnostic about persistence - it just holds state.
    This namespace decides what gets saved and loaded."
-  (:require [laser-show.state.atoms :as state]
+  (:require [laser-show.state.core :as state]
             [laser-show.state.serialization :as ser]))
 
 ;; ============================================================================
@@ -32,38 +32,36 @@
 ;; ============================================================================
 ;; Persistence Mapping
 ;; ============================================================================
-;; Defines what state is persistent. The atoms.clj namespace doesn't care
-;; about persistence - this mapping is the single source of truth for what
-;; gets saved/loaded.
+;; Defines what state is persistent. Maps file keys to state paths.
 
 (def persistent-state-mapping
-  "Defines the mapping between file keys, atoms, and what keys to persist.
+  "Defines the mapping between file keys and state paths.
    
-   Format: {:file-key {:atom atom-ref
+   Format: {:file-key {:path [:domain :field] or [:domain]
                        :keys nil-or-vector}}
    
-   - :atom - Reference to the atom in state namespace
-   - :keys - nil means save whole atom, vector means select-keys for partial save
+   - :path - Path into the unified state map
+   - :keys - nil means save whole domain, vector means select-keys for partial save
    
-   When loading: data from file is merged into the atom
-   When saving: if :keys is nil, save @atom; if :keys is a vector, save (select-keys @atom keys)"
-  {:settings     {:atom state/!config
+   When loading: data from file is merged into the state at :path
+   When saving: if :keys is nil, save full domain; if :keys is a vector, save (select-keys)"
+  {:settings     {:path [:config]
                   :keys nil}
-   :grid         {:atom state/!grid
+   :grid         {:path [:grid]
                   :keys [:cells]}  ; Only persist cells, not selected-cell or size
-   :projectors   {:atom state/!projectors
+   :projectors   {:path [:projectors :items]
                   :keys nil}
-   :zones        {:atom state/!zones
+   :zones        {:path [:zones :items]
                   :keys nil}
-   :zone-groups  {:atom state/!zone-groups
+   :zone-groups  {:path [:zone-groups :items]
                   :keys nil}
-   :cues         {:atom state/!cues
+   :cues         {:path [:cues :items]
                   :keys nil}
-   :cue-lists    {:atom state/!cue-lists
+   :cue-lists    {:path [:cue-lists :items]
                   :keys nil}
-   :effects      {:atom state/!effect-registry
+   :effects      {:path [:effect-registry :items]
                   :keys nil}
-   :effects-grid {:atom state/!effects
+   :effects-grid {:path [:effects]
                   :keys [:cells]}}) ; Persist effect grid cell assignments
 
 ;; ============================================================================
@@ -71,23 +69,23 @@
 ;; ============================================================================
 
 (defn load-single!
-  "Load a single config file and merge into its atom.
+  "Load a single config file and merge into state.
    Returns true if loaded successfully, false otherwise."
   [file-key]
   (let [filepath (get config-files file-key)
-        {:keys [atom keys]} (get persistent-state-mapping file-key)]
-    (when (and filepath atom)
+        {:keys [path keys]} (get persistent-state-mapping file-key)]
+    (when (and filepath path)
       (if-let [data (ser/load-from-file filepath)]
         (do
-          (if keys
-            (swap! atom merge (select-keys data keys))
-            (swap! atom merge data))
+          (let [data-to-merge (if keys (select-keys data keys) data)]
+            (state/swap-state! (fn [state]
+                                 (update-in state path merge data-to-merge))))
           true)
         false))))
 
 (defn load-from-disk!
   "Load all persistent state from disk. Called once at app startup.
-   Loads each config file and merges into the corresponding atom."
+   Loads each config file and merges into the state."
   []
   (doseq [file-key (keys persistent-state-mapping)]
     (load-single! file-key)))
@@ -97,15 +95,16 @@
 ;; ============================================================================
 
 (defn save-single!
-  "Save a single config file from its atom.
+  "Save a single config file from state.
    Returns true if saved successfully, false otherwise."
   [file-key]
   (let [filepath (get config-files file-key)
-        {:keys [atom keys]} (get persistent-state-mapping file-key)]
-    (when (and filepath atom)
-      (let [data (if keys
-                   (select-keys @atom keys)
-                   @atom)]
+        {:keys [path keys]} (get persistent-state-mapping file-key)]
+    (when (and filepath path)
+      (let [domain-data (state/get-in-state path)
+            data (if keys
+                   (select-keys domain-data keys)
+                   domain-data)]
         (ser/save-to-file! filepath data)))))
 
 (defn save-to-disk!
@@ -157,7 +156,7 @@
 (defn save-project!
   "Save all state to specified project folder.
    Creates folder if it doesn't exist.
-   Updates project state atom with folder and marks as clean.
+   Updates project state with folder and marks as clean.
    
    Parameters:
    - project-folder - Folder path where project should be saved
@@ -172,15 +171,18 @@
       ;; Save each file
       (doseq [[file-key filepath] file-paths]
         (when-let [mapping (get persistent-state-mapping file-key)]
-          (let [{:keys [atom keys]} mapping
+          (let [{:keys [path keys]} mapping
+                domain-data (state/get-in-state path)
                 data (if keys
-                       (select-keys @atom keys)
-                       @atom)]
+                       (select-keys domain-data keys)
+                       domain-data)]
             (ser/save-to-file! filepath data))))
       
       ;; Update project state
-      (state/set-project-folder! project-folder)
-      (state/mark-project-clean!)
+      (state/assoc-in-state! [:project :current-folder] project-folder)
+      (state/swap-state! #(-> %
+                              (assoc-in [:project :dirty?] false)
+                              (assoc-in [:project :last-saved] (System/currentTimeMillis))))
       true)
     (catch Exception e
       (println "Error saving project:" (.getMessage e))
@@ -188,8 +190,8 @@
 
 (defn load-project!
   "Load all state from specified project folder.
-   Merges loaded data into existing state atoms.
-   Updates project state atom with folder.
+   Merges loaded data into existing state.
+   Updates project state with folder.
    
    Parameters:
    - project-folder - Folder path to load project from
@@ -206,15 +208,17 @@
           ;; Load each file
           (doseq [[file-key filepath] file-paths]
             (when-let [mapping (get persistent-state-mapping file-key)]
-              (let [{:keys [atom keys]} mapping]
+              (let [{:keys [path keys]} mapping]
                 (when-let [data (ser/load-from-file filepath :if-not-found nil)]
-                  (if keys
-                    (swap! atom merge (select-keys data keys))
-                    (swap! atom merge data))))))
+                  (let [data-to-merge (if keys (select-keys data keys) data)]
+                    (state/swap-state! (fn [state]
+                                         (update-in state path merge data-to-merge))))))))
           
           ;; Update project state
-          (state/set-project-folder! project-folder)
-          (state/mark-project-clean!)
+          (state/assoc-in-state! [:project :current-folder] project-folder)
+          (state/swap-state! #(-> %
+                                  (assoc-in [:project :dirty?] false)
+                                  (assoc-in [:project :last-saved] (System/currentTimeMillis))))
           true)
         (do
           (println "Project folder does not exist:" project-folder)
@@ -224,7 +228,7 @@
       false)))
 
 (defn new-project!
-  "Reset all state atoms to initial values.
+  "Reset all state to initial values.
    Clears current project folder and marks as clean.
    This creates a fresh blank project.
    
@@ -234,19 +238,11 @@
    (new-project!)"
   []
   (try
-    ;; Reset all persistent state atoms
-    (state/reset-grid!)
-    (state/reset-config!)
-    (state/reset-projectors!)
-    (state/reset-zones!)
-    (state/reset-zone-groups!)
-    (state/reset-cues!)
-    (state/reset-cue-lists!)
-    (state/reset-effect-registry!)
-    (state/reset-effects!)
-    
-    ;; Clear project state
-    (state/reset-project!)
+    ;; Reset all state to initial values from registered domains
+    (let [domains (state/get-registered-domains)]
+      (state/reset-state! (into {}
+                                (map (fn [[k v]] [k (:initial v)]))
+                                domains)))
     true
     (catch Exception e
       (println "Error creating new project:" (.getMessage e))

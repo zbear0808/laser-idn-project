@@ -1,11 +1,18 @@
 (ns laser-show.state.persistent-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.state.persistent :as persist]
-            [laser-show.state.atoms :as state]
+            [laser-show.state.core :as state]
+            [laser-show.state.queries :as queries]
             [clojure.java.io :as io]))
 
 ;; Clean up test files and reset state before/after each test
 (defn cleanup-fixture [f]
+  ;; Ensure state is initialized
+  (when-not (state/initialized?)
+    (let [initial-state (require 'laser-show.state.domains)
+          domains-ns (find-ns 'laser-show.state.domains)]
+      (state/init-state! ((ns-resolve domains-ns 'build-initial-state)))))
+  
   ;; Reset all state before test
   (state/reset-all!)
   
@@ -42,14 +49,14 @@
     (state/reset-config!)
     
     ;; Verify reset worked
-    (is (= 8 (:cols (state/get-grid-config))))
+    (is (= 8 (:cols (queries/grid-config))))
     
     ;; Load settings
     (persist/load-single! :settings)
     
     ;; Check it was restored
-    (is (= 16 (:cols (state/get-grid-config))))
-    (is (= 8 (:rows (state/get-grid-config))))))
+    (is (= 16 (:cols (queries/grid-config))))
+    (is (= 8 (:rows (queries/grid-config))))))
 
 (deftest test-save-and-load-grid
   (testing "Save and load grid cell assignments"
@@ -67,14 +74,14 @@
     (state/reset-grid!)
     
     ;; Verify reset cleared our cells
-    (is (= {:preset-id :circle} (state/get-cell 0 0)))  ; default cell
+    (is (= {:preset-id :circle} (queries/cell 0 0)))  ; default cell
     
     ;; Load grid
     (persist/load-single! :grid)
     
     ;; Check cells were restored
-    (is (= {:preset-id :triangle} (state/get-cell 2 3)))
-    (is (= {:preset-id :spiral} (state/get-cell 5 1)))))
+    (is (= {:preset-id :triangle} (queries/cell 2 3)))
+    (is (= {:preset-id :spiral} (queries/cell 5 1)))))
 
 (deftest test-save-and-load-projectors
   (testing "Save and load projectors"
@@ -89,14 +96,14 @@
     (state/reset-projectors!)
     
     ;; Verify reset
-    (is (empty? (state/get-projectors)))
+    (is (empty? (queries/projectors)))
     
     ;; Load projectors
     (persist/load-single! :projectors)
     
     ;; Check they were restored
-    (is (= {:host "192.168.1.100" :port 7255} (state/get-projector :proj-1)))
-    (is (= {:host "192.168.1.101" :port 7255} (state/get-projector :proj-2)))))
+    (is (= {:host "192.168.1.100" :port 7255} (queries/projector :proj-1)))
+    (is (= {:host "192.168.1.101" :port 7255} (queries/projector :proj-2)))))
 
 (deftest test-save-and-load-zones
   (testing "Save and load zones"
@@ -111,14 +118,14 @@
     (state/reset-zones!)
     
     ;; Verify reset
-    (is (empty? (state/get-zones)))
+    (is (empty? (queries/zones)))
     
     ;; Load zones
     (persist/load-single! :zones)
     
     ;; Check they were restored
-    (is (= "Zone 1" (:name (state/get-zone :zone-1))))
-    (is (= "Zone 2" (:name (state/get-zone :zone-2))))))
+    (is (= "Zone 1" (:name (queries/zone :zone-1))))
+    (is (= "Zone 2" (:name (queries/zone :zone-2))))))
 
 (deftest test-save-and-load-cues
   (testing "Save and load cues"
@@ -133,14 +140,14 @@
     (state/reset-cues!)
     
     ;; Verify reset
-    (is (empty? (state/get-cues)))
+    (is (empty? (queries/cues)))
     
     ;; Load cues
     (persist/load-single! :cues)
     
     ;; Check they were restored
-    (is (= "Cue 1" (:name (state/get-cue :cue-1))))
-    (is (= :circle (:preset-id (state/get-cue :cue-1))))))
+    (is (= "Cue 1" (:name (queries/cue :cue-1))))
+    (is (= :circle (:preset-id (queries/cue :cue-1))))))
 
 ;; ============================================================================
 ;; Load/Save All Tests
@@ -164,21 +171,21 @@
     (state/reset-all!)
     
     ;; Verify reset worked
-    (is (= 8 (:cols (state/get-grid-config))))
-    (is (empty? (state/get-projectors)))
-    (is (empty? (state/get-zones)))
+    (is (= 8 (:cols (queries/grid-config))))
+    (is (empty? (queries/projectors)))
+    (is (empty? (queries/zones)))
     
     ;; Load all
     (persist/load-from-disk!)
     
     ;; Verify all restored
-    (is (= 12 (:cols (state/get-grid-config))))
-    (is (= {:preset-id :wave} (state/get-cell 3 2)))
-    (is (= {:host "10.0.0.1"} (state/get-projector :proj-test)))
-    (is (= "Test Zone" (:name (state/get-zone :zone-test))))
-    (is (= "Test Group" (:name (state/get-zone-group :group-test))))
-    (is (= "Test Cue" (:name (state/get-cue :cue-test))))
-    (is (= "Test List" (:name (state/get-cue-list :list-test))))))
+    (is (= 12 (:cols (queries/grid-config))))
+    (is (= {:preset-id :wave} (queries/cell 3 2)))
+    (is (= {:host "10.0.0.1"} (queries/projector :proj-test)))
+    (is (= "Test Zone" (:name (queries/zone :zone-test))))
+    (is (= "Test Group" (:name (queries/zone-group :group-test))))
+    (is (= "Test Cue" (:name (queries/cue :cue-test))))
+    (is (= "Test List" (:name (queries/cue-list :list-test))))))
 
 ;; ============================================================================
 ;; Utility Function Tests
@@ -230,5 +237,5 @@
     (persist/load-single! :projectors)
     
     ;; Projector should be restored, cue should still be there (wasn't reset)
-    (is (= {:data "test"} (state/get-projector :independent)))
-    (is (= "Temp" (:name (state/get-cue :temp-cue))))))
+    (is (= {:data "test"} (queries/projector :independent)))
+    (is (= "Temp" (:name (queries/cue :temp-cue))))))

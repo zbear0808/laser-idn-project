@@ -175,7 +175,7 @@
   (restart!)
   
   ;; Check state
-  (state/debug-state)
+  (prn (state/get-raw-state))
   
   ;; Dispatch test events
   (events/dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})

@@ -1,7 +1,8 @@
 (ns laser-show.animation.time
   "Time utilities for BPM-synchronized effects.
    Handles BPM conversions, phase calculations, and time-based computations."
-  (:require [laser-show.state.atoms :as state])
+  (:require [laser-show.state.core :as state]
+            [laser-show.state.queries :as queries])
   (:refer-clojure :exclude [mod]))
 
 ;; Use unchecked-remainder-double for faster modulo on primitives
@@ -16,12 +17,12 @@
   "Set the global BPM value."
   [bpm]
   {:pre [(number? bpm) (pos? bpm)]}
-  (state/set-bpm! (double bpm)))
+  (state/assoc-in-state! [:timing :bpm] (double bpm)))
 
 (defn get-global-bpm
   "Get the current global BPM value."
   []
-  (state/get-bpm))
+  (queries/bpm))
 
 ;; ============================================================================
 ;; BPM Conversions
@@ -268,7 +269,7 @@
       (+ 1.0 (* 4.0 t1 t1 t1)))))
 
 ;; ============================================================================
-;; Tap Tempo (delegated to database)
+;; Tap Tempo (delegated to state)
 ;; ============================================================================
 
 (defn tap-tempo!
@@ -278,16 +279,14 @@
   (let [now (System/currentTimeMillis)
         max-taps 8
         max-interval 2000]
-    (swap! state/!timing
-           (fn [timing]
-             (let [taps (:tap-times timing)
-                   filtered (filterv #(< (- now %) max-interval) taps)
-                   updated (conj filtered now)
-                   final-taps (if (> (count updated) max-taps)
-                                (subvec updated (- (count updated) max-taps))
-                                updated)]
-               (assoc timing :tap-times final-taps))))
-    (let [taps (state/get-tap-times)]
+    (state/update-in-state! [:timing :tap-times]
+                            (fn [taps]
+                              (let [filtered (filterv #(< (- now %) max-interval) (or taps []))
+                                    updated (conj filtered now)]
+                                (if (> (count updated) max-taps)
+                                  (subvec updated (- (count updated) max-taps))
+                                  updated))))
+    (let [taps (queries/tap-times)]
       (when (>= (count taps) 2)
         (let [intervals (mapv - (rest taps) (butlast taps))
               avg-interval (/ (reduce + intervals) (count intervals))
@@ -299,4 +298,4 @@
 (defn reset-tap-tempo!
   "Reset the tap tempo buffer."
   []
-  (state/clear-tap-times!))
+  (state/assoc-in-state! [:timing :tap-times] []))

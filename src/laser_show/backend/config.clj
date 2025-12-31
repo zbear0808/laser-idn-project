@@ -1,135 +1,93 @@
 (ns laser-show.backend.config
-  "Configuration API that delegates to the centralized state layer.
-   This namespace provides convenient APIs for common configuration access."
-  (:require [laser-show.state.atoms :as state]
-            [laser-show.state.persistent :as persist]))
+  "Configuration access layer for backend services.
+   Uses the queries namespace for thread-safe state access."
+  (:require [laser-show.state.queries :as queries]))
 
 ;; ============================================================================
 ;; Configuration Access
 ;; ============================================================================
 
-(defn get-config
-  "Get a configuration value by path (vector of keys)."
+(defn get-config-value
+  "Get a configuration value at the given path."
   [path]
-  (get-in (state/get-config) path))
+  (get-in (queries/config) path))
 
-(defn set-config!
-  "Set a configuration value by path (vector of keys)."
-  [path value]
-  (state/update-config! path value))
-
-(defn update-config!
-  "Update a configuration value by path using a function."
-  [path f]
-  (let [current-val (get-config path)
-        new-val (f current-val)]
-    (set-config! path new-val)))
+(defn get-config
+  "Get the full config map."
+  []
+  (queries/config))
 
 ;; ============================================================================
 ;; Grid Configuration
 ;; ============================================================================
 
-(defn get-grid-size
-  "Get the current grid size as [cols rows]."
+(defn get-grid-dimensions
+  "Get grid dimensions as [cols rows]."
   []
-  (let [{:keys [cols rows]} (state/get-grid-config)]
+  (let [{:keys [cols rows]} (queries/grid-config)]
     [cols rows]))
 
-(defn set-grid-size!
-  "Set the grid size."
-  [cols rows]
-  (state/update-config! [:grid] {:cols cols :rows rows}))
+(defn get-grid-config
+  "Get grid configuration {:cols :rows}."
+  []
+  (queries/grid-config))
 
 ;; ============================================================================
-;; Grid Cell Assignments
+;; Cell Access
 ;; ============================================================================
 
-(defn get-cell-assignment
-  "Get the preset assigned to a cell [col row].
-   Returns the cell data map or nil."
+(defn get-cell
+  "Get a cell at a grid position."
   [[col row]]
-  (state/get-cell col row))
+  (queries/cell col row))
 
-(defn set-cell-assignment!
-  "Assign a preset to a cell [col row]."
-  [[col row] preset-id]
-  (if preset-id
-    (state/set-cell-preset! col row preset-id)
-    (state/clear-cell! col row)))
+(defn get-cell-at
+  "Get a cell at a grid position (alternative API)."
+  [col row]
+  (queries/cell col row))
 
-(defn clear-cell-assignment!
-  "Clear the preset assignment for a cell."
-  [[col row]]
-  (state/clear-cell! col row))
-
-(defn clear-all-assignments!
-  "Clear all cell assignments."
+(defn get-all-cells
+  "Get all grid cells."
   []
-  (swap! state/!grid assoc :cells {}))
-
-(defn get-all-assignments
-  "Get all cell assignments as a map."
-  []
-  (state/get-grid-cells))
+  (queries/grid-cells))
 
 ;; ============================================================================
 ;; IDN Configuration
 ;; ============================================================================
 
 (defn get-idn-host
-  "Get the configured IDN host address."
+  "Get the IDN target host."
   []
-  (get-in (state/get-config) [:idn :host]))
-
-(defn set-idn-host!
-  "Set the IDN host address."
-  [host]
-  (state/update-config! [:idn :host] host))
+  (get-in (queries/config) [:idn :host]))
 
 (defn get-idn-port
-  "Get the configured IDN port."
+  "Get the IDN target port."
   []
-  (get-in (state/get-config) [:idn :port]))
-
-(defn set-idn-port!
-  "Set the IDN port."
-  [port]
-  (state/update-config! [:idn :port] port))
+  (get-in (queries/config) [:idn :port]))
 
 ;; ============================================================================
-;; Persistence Functions
+;; Window Configuration
 ;; ============================================================================
 
-(defn save-config!
-  "Save the current configuration to disk."
+(defn get-window-config
+  "Get window configuration {:width :height}."
   []
-  (persist/save-single! :settings))
-
-(defn load-config!
-  "Load configuration from disk."
-  []
-  (persist/load-single! :settings))
-
-(defn save-grid!
-  "Save grid cell assignments to disk."
-  []
-  (persist/save-single! :grid))
-
-(defn load-grid!
-  "Load grid cell assignments from disk."
-  []
-  (persist/load-single! :grid))
+  (queries/window-config))
 
 ;; ============================================================================
-;; Initialization
+;; Preview Configuration
 ;; ============================================================================
 
-(defn init!
-  "Initialize configuration by loading from disk."
+(defn get-preview-config
+  "Get preview panel configuration {:width :height}."
   []
-  (persist/load-from-disk!))
+  (queries/preview-config))
 
-(defn shutdown!
-  "Save configuration before shutdown."
+;; ============================================================================
+;; Time Utilities
+;; ============================================================================
+
+(defn get-current-time-ms
+  "Get the current time in milliseconds."
   []
-  (persist/save-to-disk!))
+  (System/currentTimeMillis))

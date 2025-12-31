@@ -5,7 +5,8 @@
    
    Zones now support effect chains for per-zone effects:
    - :effect-chain {:effects [{:effect-id ... :enabled true :params {...}} ...]}"
-  (:require [laser-show.state.atoms :as state]
+  (:require [laser-show.state.core :as state]
+            [laser-show.state.queries :as queries]
             [laser-show.state.persistent :as persist]
             [laser-show.backend.projectors :as projectors]
             [laser-show.animation.effects :as effects]))
@@ -85,7 +86,7 @@
    Can accept either a zone map or individual parameters."
   ([zone]
    (when (valid-zone? zone)
-     (state/add-zone! (:id zone) zone)
+     (state/assoc-in-state! [:zones :items (:id zone)] zone)
      zone))
   ([id name projector-id & opts]
    (let [zone (apply make-zone id name projector-id opts)]
@@ -94,35 +95,35 @@
 (defn get-zone
   "Get a zone by ID."
   [zone-id]
-  (state/get-zone zone-id))
+  (queries/zone zone-id))
 
 (defn update-zone!
   "Update a zone's properties."
   [zone-id updates]
   (when (get-zone zone-id)
     (let [updated (merge (get-zone zone-id) updates)]
-      (state/add-zone! zone-id updated)
+      (state/assoc-in-state! [:zones :items zone-id] updated)
       updated)))
 
 (defn remove-zone!
   "Remove a zone from the registry."
   [zone-id]
-  (state/remove-zone! zone-id))
+  (state/update-in-state! [:zones :items] dissoc zone-id))
 
 (defn list-zones
   "Get all zones as a sequence."
   []
-  (vals (state/get-zones)))
+  (vals (queries/zones)))
 
 (defn get-zone-ids
   "Get all zone IDs."
   []
-  (keys (state/get-zones)))
+  (keys (queries/zones)))
 
 (defn clear-zones!
   "Clear all zones from the registry."
   []
-  (state/reset-zones!))
+  (state/assoc-in-state! [:zones :data] {}))
 
 ;; ============================================================================
 ;; Zone Queries
@@ -317,7 +318,7 @@
   "Ensure at least one default zone exists.
    Creates :zone-1 mapped to the default projector if no zones are registered."
   []
-  (when (empty? (state/get-zones))
+  (when (empty? (queries/zones))
     (let [default-projector-id (projectors/get-default-projector-id)]
       (create-zone!
        (make-zone :zone-1 "Default Zone" default-projector-id)))))
