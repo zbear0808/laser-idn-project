@@ -16,7 +16,7 @@
    For animated hue rotation, use:
    {:effect-id :hue-shift :params {:degrees (mod/sawtooth-mod 0 360 1.0)}}
    
-   Per-point modulation (NEW!):
+   Per-point modulation:
    {:effect-id :set-hue :params {:hue (mod/position-x-mod 0 360)}}  ; Rainbow gradient
    {:effect-id :set-hue :params {:hue (mod/rainbow-hue :x 60.0)}}  ; Animated rainbow"
   (:require [laser-show.animation.effects :as effects]
@@ -28,29 +28,29 @@
 ;; Hue Shift Effect
 
 
-(defn- apply-hue-shift [frame time-ms bpm raw-params]
+(defn- hue-shift-xf [time-ms bpm params _ctx]
   ;; Check if any params use per-point modulators
-  (if (mod/any-param-requires-per-point? raw-params)
-    ;; Per-point path (uses legacy function for now due to modulation support)
-    (effects/transform-colors-per-point
-      frame time-ms bpm raw-params
-      (fn [_idx _cnt _x _y r g b {:keys [degrees]}]
-        (let [[h s v] (colors/rgb->hsv r g b)
-              new-h (mod (+ h degrees) 360)]
-          (colors/hsv->rgb new-h s v))))
-    ;; Global path using new transform-point-full
-    (let [context (mod/make-context {:time-ms time-ms :bpm bpm})
-          resolved-params (mod/resolve-params raw-params context)
-          degrees (:degrees resolved-params)]
-      (effects/transform-point-full
-        frame
-        (fn [{:keys [r g b] :as pt}]
-          (if (and (zero? r) (zero? g) (zero? b))
-            pt  ;; Skip blanked points
-            (let [[h s v] (colors/rgb->hsv r g b)
-                  new-h (mod (+ h degrees) 360)
-                  [nr ng nb] (colors/hsv->rgb new-h s v)]
-              (assoc pt :r (int nr) :g (int ng) :b (int nb)))))))))
+  (if (mod/any-param-requires-per-point? params)
+    ;; Per-point path
+    (map (fn [{:keys [x y r g b idx count] :as pt}]
+           (if (and (zero? r) (zero? g) (zero? b))
+             pt  ;; Skip blanked points
+             (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
+                   degrees (:degrees resolved)
+                   [h s v] (colors/rgb->hsv r g b)
+                   new-h (mod (+ h degrees) 360)
+                   [nr ng nb] (colors/hsv->rgb new-h s v)]
+               (assoc pt :r (int nr) :g (int ng) :b (int nb))))))
+    ;; Global path
+    (let [resolved (effects/resolve-params-global params time-ms bpm)
+          degrees (:degrees resolved)]
+      (map (fn [{:keys [r g b] :as pt}]
+             (if (and (zero? r) (zero? g) (zero? b))
+               pt  ;; Skip blanked points
+               (let [[h s v] (colors/rgb->hsv r g b)
+                     new-h (mod (+ h degrees) 360)
+                     [nr ng nb] (colors/hsv->rgb new-h s v)]
+                 (assoc pt :r (int nr) :g (int ng) :b (int nb)))))))))
 
 (effects/register-effect!
  {:id :hue-shift
@@ -63,35 +63,35 @@
                 :default 0.0
                 :min -180.0
                 :max 180.0}]
-  :apply-fn apply-hue-shift})
+  :apply-transducer hue-shift-xf})
 
 
 ;; Saturation Effect
 
 
-(defn- apply-saturation [frame time-ms bpm raw-params]
+(defn- saturation-xf [time-ms bpm params _ctx]
   ;; Check if any params use per-point modulators
-  (if (mod/any-param-requires-per-point? raw-params)
-    ;; Per-point path (uses legacy function for modulation support)
-    (effects/transform-colors-per-point
-      frame time-ms bpm raw-params
-      (fn [_idx _cnt _x _y r g b {:keys [amount]}]
-        (let [[h s v] (colors/rgb->hsv r g b)
-              new-s (max 0.0 (min 1.0 (* s amount)))]
-          (colors/hsv->rgb h new-s v))))
-    ;; Global path using new transform-point-full
-    (let [context (mod/make-context {:time-ms time-ms :bpm bpm})
-          resolved-params (mod/resolve-params raw-params context)
-          amount (:amount resolved-params)]
-      (effects/transform-point-full
-        frame
-        (fn [{:keys [r g b] :as pt}]
-          (if (and (zero? r) (zero? g) (zero? b))
-            pt  ;; Skip blanked points
-            (let [[h s v] (colors/rgb->hsv r g b)
-                  new-s (max 0.0 (min 1.0 (* s amount)))
-                  [nr ng nb] (colors/hsv->rgb h new-s v)]
-              (assoc pt :r (int nr) :g (int ng) :b (int nb)))))))))
+  (if (mod/any-param-requires-per-point? params)
+    ;; Per-point path
+    (map (fn [{:keys [x y r g b idx count] :as pt}]
+           (if (and (zero? r) (zero? g) (zero? b))
+             pt  ;; Skip blanked points
+             (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
+                   amount (:amount resolved)
+                   [h s v] (colors/rgb->hsv r g b)
+                   new-s (max 0.0 (min 1.0 (* s amount)))
+                   [nr ng nb] (colors/hsv->rgb h new-s v)]
+               (assoc pt :r (int nr) :g (int ng) :b (int nb))))))
+    ;; Global path
+    (let [resolved (effects/resolve-params-global params time-ms bpm)
+          amount (:amount resolved)]
+      (map (fn [{:keys [r g b] :as pt}]
+             (if (and (zero? r) (zero? g) (zero? b))
+               pt  ;; Skip blanked points
+               (let [[h s v] (colors/rgb->hsv r g b)
+                     new-s (max 0.0 (min 1.0 (* s amount)))
+                     [nr ng nb] (colors/hsv->rgb h new-s v)]
+                 (assoc pt :r (int nr) :g (int ng) :b (int nb)))))))))
 
 (effects/register-effect!
  {:id :saturation
@@ -104,35 +104,35 @@
                 :default 1.0
                 :min 0.0
                 :max 2.0}]
-  :apply-fn apply-saturation})
+  :apply-transducer saturation-xf})
 
 
 ;; Color Filter Effect
 
 
-(defn- apply-color-filter [frame time-ms bpm raw-params]
+(defn- color-filter-xf [time-ms bpm params _ctx]
   ;; Check if any params use per-point modulators
-  (if (mod/any-param-requires-per-point? raw-params)
-    ;; Per-point path (uses legacy function for modulation support)
-    (effects/transform-colors-per-point
-      frame time-ms bpm raw-params
-      (fn [_idx _cnt _x _y r g b {:keys [r-mult g-mult b-mult]}]
-        [(common/clamp-byte (* r r-mult))
-         (common/clamp-byte (* g g-mult))
-         (common/clamp-byte (* b b-mult))]))
-    ;; Global path using new transform-point-full
-    (let [context (mod/make-context {:time-ms time-ms :bpm bpm})
-          resolved-params (mod/resolve-params raw-params context)
-          r-mult (:r-mult resolved-params)
-          g-mult (:g-mult resolved-params)
-          b-mult (:b-mult resolved-params)]
-      (effects/transform-point-full
-        frame
-        (fn [{:keys [r g b] :as pt}]
-          (assoc pt
-            :r (int (common/clamp-byte (* r r-mult)))
-            :g (int (common/clamp-byte (* g g-mult)))
-            :b (int (common/clamp-byte (* b b-mult)))))))))
+  (if (mod/any-param-requires-per-point? params)
+    ;; Per-point path
+    (map (fn [{:keys [x y r g b idx count] :as pt}]
+           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
+                 r-mult (:r-mult resolved)
+                 g-mult (:g-mult resolved)
+                 b-mult (:b-mult resolved)]
+             (assoc pt
+               :r (int (common/clamp-byte (* r r-mult)))
+               :g (int (common/clamp-byte (* g g-mult)))
+               :b (int (common/clamp-byte (* b b-mult)))))))
+    ;; Global path
+    (let [resolved (effects/resolve-params-global params time-ms bpm)
+          r-mult (:r-mult resolved)
+          g-mult (:g-mult resolved)
+          b-mult (:b-mult resolved)]
+      (map (fn [{:keys [r g b] :as pt}]
+             (assoc pt
+               :r (int (common/clamp-byte (* r r-mult)))
+               :g (int (common/clamp-byte (* g g-mult)))
+               :b (int (common/clamp-byte (* b b-mult)))))))))
 
 (effects/register-effect!
  {:id :color-filter
@@ -157,20 +157,18 @@
                 :default 1.0
                 :min 0.0
                 :max 2.0}]
-  :apply-fn apply-color-filter})
+  :apply-transducer color-filter-xf})
 
 
 ;; Invert Effect
 
 
-(defn- apply-invert [frame _time-ms _bpm _params]
-  (effects/transform-point-full
-   frame
-   (fn [{:keys [r g b] :as pt}]
-     (assoc pt
-       :r (- 255 r)
-       :g (- 255 g)
-       :b (- 255 b)))))
+(defn- invert-xf [_time-ms _bpm _params _ctx]
+  (map (fn [{:keys [r g b] :as pt}]
+         (assoc pt
+           :r (- 255 r)
+           :g (- 255 g)
+           :b (- 255 b)))))
 
 (effects/register-effect!
  {:id :invert
@@ -178,37 +176,35 @@
   :category :color
   :timing :static
   :parameters []
-  :apply-fn apply-invert})
+  :apply-transducer invert-xf})
 
 
 ;; Set Hue Effect (sets all points to specific hue, preserving saturation/value)
 
 
-(defn- apply-set-hue [frame time-ms bpm raw-params]
+(defn- set-hue-xf [time-ms bpm params _ctx]
   ;; Check if any params use per-point modulators
-  (if (mod/any-param-requires-per-point? raw-params)
-    ;; Per-point path - enables rainbow gradients! (uses legacy function for modulation support)
-    (effects/transform-colors-per-point
-      frame time-ms bpm raw-params
-      (fn [_idx _cnt _x _y r g b {:keys [hue]}]
-        (let [[_h s v] (colors/rgb->hsv r g b)]
-          ;; Only apply to non-black points with some saturation
-          (if (and (pos? v) (or (pos? r) (pos? g) (pos? b)))
-            (colors/hsv->rgb hue s v)
-            [r g b]))))
-    ;; Global path using new transform-point-full
-    (let [context (mod/make-context {:time-ms time-ms :bpm bpm})
-          resolved-params (mod/resolve-params raw-params context)
-          hue (:hue resolved-params)]
-      (effects/transform-point-full
-        frame
-        (fn [{:keys [r g b] :as pt}]
-          (let [[_h s v] (colors/rgb->hsv r g b)]
-            ;; Only apply to non-black points with some saturation
-            (if (and (pos? v) (or (pos? r) (pos? g) (pos? b)))
-              (let [[nr ng nb] (colors/hsv->rgb hue s v)]
-                (assoc pt :r (int nr) :g (int ng) :b (int nb)))
-              pt)))))))
+  (if (mod/any-param-requires-per-point? params)
+    ;; Per-point path - enables rainbow gradients!
+    (map (fn [{:keys [x y r g b idx count] :as pt}]
+           (let [[_h s v] (colors/rgb->hsv r g b)]
+             ;; Only apply to non-black points with some saturation
+             (if (and (pos? v) (or (pos? r) (pos? g) (pos? b)))
+               (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
+                     hue (:hue resolved)
+                     [nr ng nb] (colors/hsv->rgb hue s v)]
+                 (assoc pt :r (int nr) :g (int ng) :b (int nb)))
+               pt))))
+    ;; Global path
+    (let [resolved (effects/resolve-params-global params time-ms bpm)
+          hue (:hue resolved)]
+      (map (fn [{:keys [r g b] :as pt}]
+             (let [[_h s v] (colors/rgb->hsv r g b)]
+               ;; Only apply to non-black points with some saturation
+               (if (and (pos? v) (or (pos? r) (pos? g) (pos? b)))
+                 (let [[nr ng nb] (colors/hsv->rgb hue s v)]
+                   (assoc pt :r (int nr) :g (int ng) :b (int nb)))
+                 pt)))))))
 
 (effects/register-effect!
  {:id :set-hue
@@ -221,7 +217,7 @@
                 :default 0.0
                 :min 0.0
                 :max 360.0}]
-  :apply-fn apply-set-hue})
+  :apply-transducer set-hue-xf})
 
 
 ;; Color Replace Effect
@@ -232,15 +228,19 @@
                 (* (- g1 g2) (- g1 g2))
                 (* (- b1 b2) (- b1 b2)))))
 
-(defn- apply-color-replace [frame _time-ms _bpm {:keys [from-r from-g from-b
-                                                        to-r to-g to-b
-                                                        tolerance]}]
-  (effects/transform-point-full
-   frame
-   (fn [{:keys [r g b] :as pt}]
-     (if (<= (color-distance r g b from-r from-g from-b) tolerance)
-       (assoc pt :r to-r :g to-g :b to-b)
-       pt))))
+(defn- color-replace-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        from-r (:from-r resolved)
+        from-g (:from-g resolved)
+        from-b (:from-b resolved)
+        to-r (:to-r resolved)
+        to-g (:to-g resolved)
+        to-b (:to-b resolved)
+        tolerance (:tolerance resolved)]
+    (map (fn [{:keys [r g b] :as pt}]
+           (if (<= (color-distance r g b from-r from-g from-b) tolerance)
+             (assoc pt :r to-r :g to-g :b to-b)
+             pt)))))
 
 (effects/register-effect!
  {:id :color-replace
@@ -289,19 +289,21 @@
                 :default 30.0
                 :min 0.0
                 :max 255.0}]
-  :apply-fn apply-color-replace})
+  :apply-transducer color-replace-xf})
 
 
 ;; Set Color Effect (replaces color of ALL points)
 
 
-(defn- apply-set-color [frame _time-ms _bpm {:keys [red green blue]}]
-  (effects/transform-point-full
-   frame
-   (fn [{:keys [r g b] :as pt}]
-     (if (or (pos? r) (pos? g) (pos? b))
-       (assoc pt :r red :g green :b blue)
-       pt))))
+(defn- set-color-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        red (:red resolved)
+        green (:green resolved)
+        blue (:blue resolved)]
+    (map (fn [{:keys [r g b] :as pt}]
+           (if (or (pos? r) (pos? g) (pos? b))
+             (assoc pt :r red :g green :b blue)
+             pt)))))
 
 (effects/register-effect!
  {:id :set-color
@@ -326,7 +328,7 @@
                 :default 255
                 :min 0
                 :max 255}]
-  :apply-fn apply-set-color})
+  :apply-transducer set-color-xf})
 
 
 ;; SPECIAL EFFECTS
@@ -340,22 +342,23 @@
 ;; For more control, use hue-shift with rainbow-hue modulator.
 
 
-(defn- apply-rainbow-position [frame time-ms _bpm {:keys [speed axis]}]
-  (let [time-offset (mod (* (/ time-ms 1000.0) speed) 360)]
-    (effects/transform-point-full
-     frame
-     (fn [{:keys [x y r g b] :as pt}]
-       (if (and (zero? r) (zero? g) (zero? b))
-         pt
-         (let [position (case axis
-                          :x (/ (+ x 1.0) 2.0)
-                          :y (/ (+ y 1.0) 2.0)
-                          :radial (Math/sqrt (+ (* x x) (* y y)))
-                          :angle (/ (+ (Math/atan2 y x) Math/PI) (* 2.0 Math/PI)))
-               brightness (/ (max r g b) 255.0)
-               hue (mod (+ (* position 360.0) time-offset) 360.0)
-               [nr ng nb] (colors/hsv->rgb hue 1.0 brightness)]
-           (assoc pt :r (int nr) :g (int ng) :b (int nb))))))))
+(defn- rainbow-position-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        speed (:speed resolved)
+        axis (:axis resolved)
+        time-offset (mod (* (/ time-ms 1000.0) speed) 360)]
+    (map (fn [{:keys [x y r g b] :as pt}]
+           (if (and (zero? r) (zero? g) (zero? b))
+             pt
+             (let [position (case axis
+                              :x (/ (+ x 1.0) 2.0)
+                              :y (/ (+ y 1.0) 2.0)
+                              :radial (Math/sqrt (+ (* x x) (* y y)))
+                              :angle (/ (+ (Math/atan2 y x) Math/PI) (* 2.0 Math/PI)))
+                   brightness (/ (max r g b) 255.0)
+                   hue (mod (+ (* position 360.0) time-offset) 360.0)
+                   [nr ng nb] (colors/hsv->rgb hue 1.0 brightness)]
+               (assoc pt :r (int nr) :g (int ng) :b (int nb))))))))
 
 (effects/register-effect!
  {:id :rainbow-position
@@ -373,4 +376,4 @@
                 :type :choice
                 :default :x
                 :choices [:x :y :radial :angle]}]
-  :apply-fn apply-rainbow-position})
+  :apply-transducer rainbow-position-xf})

@@ -16,19 +16,21 @@
    
    For animated rotation, use modulators:
    {:effect-id :rotation :params {:angle (mod/sawtooth-mod 0 360 1.0)}}"
-  (:require [laser-show.animation.effects :as effects]))
+  (:require [laser-show.animation.effects :as effects]
+            [laser-show.animation.modulation :as mod]))
 
 
 ;; Scale Effect
 
 
-(defn- apply-scale [frame _time-ms _bpm {:keys [x-scale y-scale]}]
-  (effects/transform-point-full
-   frame
-   (fn [{:keys [x y] :as pt}]
-     (assoc pt
-       :x (* x x-scale)
-       :y (* y y-scale)))))
+(defn- scale-xf [_time-ms _bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params _time-ms _bpm)
+        x-scale (:x-scale resolved)
+        y-scale (:y-scale resolved)]
+    (map (fn [{:keys [x y] :as pt}]
+           (assoc pt
+             :x (* x x-scale)
+             :y (* y y-scale))))))
 
 (effects/register-effect!
  {:id :scale
@@ -47,19 +49,20 @@
                 :default 1.0
                 :min -5.0
                 :max 5.0}]
-  :apply-fn apply-scale})
+  :apply-transducer scale-xf})
 
 
 ;; Translate Effect
 
 
-(defn- apply-translate [frame _time-ms _bpm {:keys [x y]}]
-  (effects/transform-point-full
-   frame
-   (fn [{px :x py :y :as pt}]
-     (assoc pt
-       :x (+ px x)
-       :y (+ py y)))))
+(defn- translate-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        dx (:x resolved)
+        dy (:y resolved)]
+    (map (fn [{px :x py :y :as pt}]
+           (assoc pt
+             :x (+ px dx)
+             :y (+ py dy))))))
 
 (effects/register-effect!
  {:id :translate
@@ -81,22 +84,22 @@
   :ui-hints {:renderer :spatial-2d
              :params [:x :y]
              :default-mode :visual}
-  :apply-fn apply-translate})
+  :apply-transducer translate-xf})
 
 
 ;; Rotation Effect
 
 
-(defn- apply-rotation [frame _time-ms _bpm {:keys [angle]}]
-  (let [radians (Math/toRadians angle)
+(defn- rotation-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        angle (:angle resolved)
+        radians (Math/toRadians angle)
         cos-a (Math/cos radians)
         sin-a (Math/sin radians)]
-    (effects/transform-point-full
-     frame
-     (fn [{:keys [x y] :as pt}]
-       (assoc pt
-         :x (- (* x cos-a) (* y sin-a))
-         :y (+ (* x sin-a) (* y cos-a)))))))
+    (map (fn [{:keys [x y] :as pt}]
+           (assoc pt
+             :x (- (* x cos-a) (* y sin-a))
+             :y (+ (* x sin-a) (* y cos-a)))))))
 
 (effects/register-effect!
  {:id :rotation
@@ -109,30 +112,33 @@
                 :default 0.0
                 :min -360.0
                 :max 360.0}]
-  :apply-fn apply-rotation})
+  :apply-transducer rotation-xf})
 
 
 
 ;; Viewport Effect
 
 
-(defn- apply-viewport [frame _time-ms _bpm {:keys [x-min x-max y-min y-max]}]
-  (let [viewport-width (- x-max x-min)
+(defn- viewport-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        x-min (:x-min resolved)
+        x-max (:x-max resolved)
+        y-min (:y-min resolved)
+        y-max (:y-max resolved)
+        viewport-width (- x-max x-min)
         viewport-height (- y-max y-min)]
-    (effects/transform-point-full
-     frame
-     (fn [{:keys [x y] :as pt}]
-       (let [in-viewport? (and (>= x x-min) (<= x x-max)
-                               (>= y y-min) (<= y y-max))]
-         (if in-viewport?
-           (assoc pt
-             :x (if (zero? viewport-width)
-                  0.0
-                  (- (* 2.0 (/ (- x x-min) viewport-width)) 1.0))
-             :y (if (zero? viewport-height)
-                  0.0
-                  (- (* 2.0 (/ (- y y-min) viewport-height)) 1.0)))
-           (assoc pt :x 0.0 :y 0.0)))))))
+    (map (fn [{:keys [x y] :as pt}]
+           (let [in-viewport? (and (>= x x-min) (<= x x-max)
+                                   (>= y y-min) (<= y y-max))]
+             (if in-viewport?
+               (assoc pt
+                 :x (if (zero? viewport-width)
+                      0.0
+                      (- (* 2.0 (/ (- x x-min) viewport-width)) 1.0))
+                 :y (if (zero? viewport-height)
+                      0.0
+                      (- (* 2.0 (/ (- y y-min) viewport-height)) 1.0)))
+               (assoc pt :x 0.0 :y 0.0)))))))
 
 (effects/register-effect!
  {:id :viewport
@@ -163,23 +169,23 @@
                 :default 1.0
                 :min -1.0
                 :max 1.0}]
-  :apply-fn apply-viewport})
+  :apply-transducer viewport-xf})
 
 
 ;; Pinch/Bulge Effect
 
 
-(defn- apply-pinch-bulge [frame _time-ms _bpm {:keys [amount]}]
-  (effects/transform-point-full
-   frame
-   (fn [{:keys [x y] :as pt}]
-     (let [distance (Math/sqrt (+ (* x x) (* y y)))
-           factor (if (zero? distance)
-                    1.0
-                    (Math/pow distance amount))]
-       (assoc pt
-         :x (* x factor)
-         :y (* y factor))))))
+(defn- pinch-bulge-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        amount (:amount resolved)]
+    (map (fn [{:keys [x y] :as pt}]
+           (let [distance (Math/sqrt (+ (* x x) (* y y)))
+                 factor (if (zero? distance)
+                          1.0
+                          (Math/pow distance amount))]
+             (assoc pt
+               :x (* x factor)
+               :y (* y factor)))))))
 
 (effects/register-effect!
  {:id :pinch-bulge
@@ -192,13 +198,13 @@
                 :default 1.0
                 :min -3.0
                 :max 3.0}]
-  :apply-fn apply-pinch-bulge})
+  :apply-transducer pinch-bulge-xf})
 
 
 ;; Corner Pin Effect (4-corner perspective/bilinear transform)
 
 
-(defn- apply-corner-pin
+(defn- corner-pin-xf
   "Maps the unit square [-1,1]x[-1,1] to a quadrilateral defined by four corners.
    Uses bilinear interpolation for the mapping.
    
@@ -207,26 +213,29 @@
    - tr (top-right): maps from (1, 1)
    - bl (bottom-left): maps from (-1, -1)
    - br (bottom-right): maps from (1, -1)"
-  [frame _time-ms _bpm {:keys [tl-x tl-y tr-x tr-y bl-x bl-y br-x br-y]}]
-  (effects/transform-point-full
-   frame
-   (fn [{:keys [x y] :as pt}]
-     ;; Convert from [-1,1] to [0,1] for interpolation
-     (let [u (/ (+ x 1.0) 2.0)  ; 0 at left, 1 at right
-           v (/ (+ y 1.0) 2.0)  ; 0 at bottom, 1 at top
-           ;; Bilinear interpolation
-           ;; P = (1-u)(1-v)*BL + u*(1-v)*BR + (1-u)*v*TL + u*v*TR
-           one-minus-u (- 1.0 u)
-           one-minus-v (- 1.0 v)
-           new-x (+ (* one-minus-u one-minus-v bl-x)
-                    (* u one-minus-v br-x)
-                    (* one-minus-u v tl-x)
-                    (* u v tr-x))
-           new-y (+ (* one-minus-u one-minus-v bl-y)
-                    (* u one-minus-v br-y)
-                    (* one-minus-u v tl-y)
-                    (* u v tr-y))]
-       (assoc pt :x new-x :y new-y)))))
+  [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        tl-x (:tl-x resolved) tl-y (:tl-y resolved)
+        tr-x (:tr-x resolved) tr-y (:tr-y resolved)
+        bl-x (:bl-x resolved) bl-y (:bl-y resolved)
+        br-x (:br-x resolved) br-y (:br-y resolved)]
+    (map (fn [{:keys [x y] :as pt}]
+           ;; Convert from [-1,1] to [0,1] for interpolation
+           (let [u (/ (+ x 1.0) 2.0)  ; 0 at left, 1 at right
+                 v (/ (+ y 1.0) 2.0)  ; 0 at bottom, 1 at top
+                 ;; Bilinear interpolation
+                 ;; P = (1-u)(1-v)*BL + u*(1-v)*BR + (1-u)*v*TL + u*v*TR
+                 one-minus-u (- 1.0 u)
+                 one-minus-v (- 1.0 v)
+                 new-x (+ (* one-minus-u one-minus-v bl-x)
+                          (* u one-minus-v br-x)
+                          (* one-minus-u v tl-x)
+                          (* u v tr-x))
+                 new-y (+ (* one-minus-u one-minus-v bl-y)
+                          (* u one-minus-v br-y)
+                          (* one-minus-u v tl-y)
+                          (* u v tr-y))]
+             (assoc pt :x new-x :y new-y))))))
 
 (effects/register-effect!
  {:id :corner-pin
@@ -287,21 +296,22 @@
                       :bl [:bl-x :bl-y]
                       :br [:br-x :br-y]}
              :default-mode :visual}
-  :apply-fn apply-corner-pin})
+  :apply-transducer corner-pin-xf})
 
 
 ;; Lens Distortion Effect (barrel/pincushion)
 
 
-(defn- apply-lens-distortion [frame _time-ms _bpm {:keys [k1 k2]}]
-  (effects/transform-point-full
-   frame
-   (fn [{:keys [x y] :as pt}]
-     (let [r-sq (+ (* x x) (* y y))
-           factor (+ 1.0 (* k1 r-sq) (* k2 r-sq r-sq))]
-       (assoc pt
-         :x (* x factor)
-         :y (* y factor))))))
+(defn- lens-distortion-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        k1 (:k1 resolved)
+        k2 (:k2 resolved)]
+    (map (fn [{:keys [x y] :as pt}]
+           (let [r-sq (+ (* x x) (* y y))
+                 factor (+ 1.0 (* k1 r-sq) (* k2 r-sq r-sq))]
+             (assoc pt
+               :x (* x factor)
+               :y (* y factor)))))))
 
 (effects/register-effect!
  {:id :lens-distortion
@@ -320,7 +330,7 @@
                 :default 0.0
                 :min -1.0
                 :max 1.0}]
-  :apply-fn apply-lens-distortion})
+  :apply-transducer lens-distortion-xf})
 
 
 ;; SPECIAL EFFECTS
@@ -332,15 +342,18 @@
 ;; Wave Distortion Effect (Special)
 
 
-(defn- apply-wave-distort [frame time-ms _bpm {:keys [amplitude frequency axis speed]}]
-  (let [time-offset (* (/ time-ms 1000.0) speed)]
-    (effects/transform-point-full
-     frame
-     (fn [{:keys [x y] :as pt}]
-       (case axis
-         :x (assoc pt :y (+ y (* amplitude (Math/sin (* 2.0 Math/PI (+ (* x frequency) time-offset))))))
-         :y (assoc pt :x (+ x (* amplitude (Math/sin (* 2.0 Math/PI (+ (* y frequency) time-offset))))))
-         pt)))))
+(defn- wave-distort-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        amplitude (:amplitude resolved)
+        frequency (:frequency resolved)
+        axis (:axis resolved)
+        speed (:speed resolved)
+        time-offset (* (/ time-ms 1000.0) speed)]
+    (map (fn [{:keys [x y] :as pt}]
+           (case axis
+             :x (assoc pt :y (+ y (* amplitude (Math/sin (* 2.0 Math/PI (+ (* x frequency) time-offset))))))
+             :y (assoc pt :x (+ x (* amplitude (Math/sin (* 2.0 Math/PI (+ (* y frequency) time-offset))))))
+             pt)))))
 
 (effects/register-effect!
  {:id :wave-distort
@@ -370,4 +383,4 @@
                 :default 2.0
                 :min 0.0
                 :max 10.0}]
-  :apply-fn apply-wave-distort})
+  :apply-transducer wave-distort-xf})

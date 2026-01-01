@@ -10,14 +10,16 @@
 ;; RGB Balance Calibration
 
 
-(defn- apply-rgb-calibration [frame _time-ms _bpm {:keys [r-gain g-gain b-gain]}]
-  (effects/transform-point-full
-   frame
-   (fn [{:keys [r g b] :as pt}]
-     (assoc pt
-       :r (int (common/clamp-byte (* r r-gain)))
-       :g (int (common/clamp-byte (* g g-gain)))
-       :b (int (common/clamp-byte (* b b-gain)))))))
+(defn- rgb-calibration-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        r-gain (:r-gain resolved)
+        g-gain (:g-gain resolved)
+        b-gain (:b-gain resolved)]
+    (map (fn [{:keys [r g b] :as pt}]
+           (assoc pt
+             :r (int (common/clamp-byte (* r r-gain)))
+             :g (int (common/clamp-byte (* g g-gain)))
+             :b (int (common/clamp-byte (* b b-gain))))))))
 
 (effects/register-effect!
  {:id :rgb-calibration
@@ -42,23 +44,22 @@
                 :default 1.0
                 :min 0.0
                 :max 2.0}]
-  :apply-fn apply-rgb-calibration})
+  :apply-transducer rgb-calibration-xf})
 
 
 ;; Per-Channel Gamma Correction
 
 
-(defn- apply-gamma-correction [frame _time-ms _bpm {:keys [r-gamma g-gamma b-gamma]}]
-  (let [r-inv (/ 1.0 r-gamma)
-        g-inv (/ 1.0 g-gamma)
-        b-inv (/ 1.0 b-gamma)]
-    (effects/transform-point-full
-     frame
-     (fn [{:keys [r g b] :as pt}]
-       (assoc pt
-         :r (int (common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) r-inv))))
-         :g (int (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) g-inv))))
-         :b (int (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) b-inv)))))))))
+(defn- gamma-correction-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        r-inv (/ 1.0 (:r-gamma resolved))
+        g-inv (/ 1.0 (:g-gamma resolved))
+        b-inv (/ 1.0 (:b-gamma resolved))]
+    (map (fn [{:keys [r g b] :as pt}]
+           (assoc pt
+             :r (int (common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) r-inv))))
+             :g (int (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) g-inv))))
+             :b (int (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) b-inv)))))))))
 
 (effects/register-effect!
  {:id :gamma-correction
@@ -83,23 +84,24 @@
                 :default 2.2
                 :min 0.5
                 :max 4.0}]
-  :apply-fn apply-gamma-correction})
+  :apply-transducer gamma-correction-xf})
 
 
 ;; Brightness Calibration
 
 
-(defn- apply-brightness-calibration [frame _time-ms _bpm {:keys [global-brightness min-threshold]}]
-  (effects/transform-point-full
-   frame
-   (fn [{:keys [r g b] :as pt}]
-     (let [max-val (max r g b)]
-       (if (< max-val min-threshold)
-         (assoc pt :r 0 :g 0 :b 0)
-         (assoc pt
-           :r (int (common/clamp-byte (* r global-brightness)))
-           :g (int (common/clamp-byte (* g global-brightness)))
-           :b (int (common/clamp-byte (* b global-brightness)))))))))
+(defn- brightness-calibration-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        global-brightness (:global-brightness resolved)
+        min-threshold (:min-threshold resolved)]
+    (map (fn [{:keys [r g b] :as pt}]
+           (let [max-val (max r g b)]
+             (if (< max-val min-threshold)
+               (assoc pt :r 0 :g 0 :b 0)
+               (assoc pt
+                 :r (int (common/clamp-byte (* r global-brightness)))
+                 :g (int (common/clamp-byte (* g global-brightness)))
+                 :b (int (common/clamp-byte (* b global-brightness))))))))))
 
 (effects/register-effect!
  {:id :brightness-calibration
@@ -118,7 +120,7 @@
                 :default 5
                 :min 0
                 :max 50}]
-  :apply-fn apply-brightness-calibration})
+  :apply-transducer brightness-calibration-xf})
 
 
 ;; Color Temperature Adjustment
@@ -141,18 +143,18 @@
        (common/clamp-byte (* 288.122 (Math/pow (- temp 60) -0.0755)))
        (* 255 1.0)])))
 
-(defn- apply-color-temperature [frame _time-ms _bpm {:keys [kelvin]}]
-  (let [[kr kg kb] (kelvin-to-rgb kelvin)
+(defn- color-temperature-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        kelvin (:kelvin resolved)
+        [kr kg kb] (kelvin-to-rgb kelvin)
         r-mult (/ kr 255.0)
         g-mult (/ kg 255.0)
         b-mult (/ kb 255.0)]
-    (effects/transform-point-full
-     frame
-     (fn [{:keys [r g b] :as pt}]
-       (assoc pt
-         :r (int (common/clamp-byte (* r r-mult)))
-         :g (int (common/clamp-byte (* g g-mult)))
-         :b (int (common/clamp-byte (* b b-mult))))))))
+    (map (fn [{:keys [r g b] :as pt}]
+           (assoc pt
+             :r (int (common/clamp-byte (* r r-mult)))
+             :g (int (common/clamp-byte (* g g-mult)))
+             :b (int (common/clamp-byte (* b b-mult))))))))
 
 (effects/register-effect!
  {:id :color-temperature
@@ -165,21 +167,25 @@
                 :default 6500
                 :min 2000
                 :max 10000}]
-  :apply-fn apply-color-temperature})
+  :apply-transducer color-temperature-xf})
 
 
 ;; Color Matrix Transform
 
 
-(defn- apply-color-matrix [frame _time-ms _bpm {:keys [m00 m01 m02 m10 m11 m12 m20 m21 m22
-                                                       offset-r offset-g offset-b]}]
-  (effects/transform-point-full
-   frame
-   (fn [{:keys [r g b] :as pt}]
-     (assoc pt
-       :r (int (common/clamp-byte (+ (* r m00) (* g m01) (* b m02) offset-r)))
-       :g (int (common/clamp-byte (+ (* r m10) (* g m11) (* b m12) offset-g)))
-       :b (int (common/clamp-byte (+ (* r m20) (* g m21) (* b m22) offset-b)))))))
+(defn- color-matrix-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        m00 (:m00 resolved) m01 (:m01 resolved) m02 (:m02 resolved)
+        m10 (:m10 resolved) m11 (:m11 resolved) m12 (:m12 resolved)
+        m20 (:m20 resolved) m21 (:m21 resolved) m22 (:m22 resolved)
+        offset-r (:offset-r resolved)
+        offset-g (:offset-g resolved)
+        offset-b (:offset-b resolved)]
+    (map (fn [{:keys [r g b] :as pt}]
+           (assoc pt
+             :r (int (common/clamp-byte (+ (* r m00) (* g m01) (* b m02) offset-r)))
+             :g (int (common/clamp-byte (+ (* r m10) (* g m11) (* b m12) offset-g)))
+             :b (int (common/clamp-byte (+ (* r m20) (* g m21) (* b m22) offset-b))))))))
 
 (effects/register-effect!
  {:id :color-matrix
@@ -198,24 +204,26 @@
                {:key :offset-r :label "R Offset" :type :int :default 0 :min -128 :max 128}
                {:key :offset-g :label "G Offset" :type :int :default 0 :min -128 :max 128}
                {:key :offset-b :label "B Offset" :type :int :default 0 :min -128 :max 128}]
-  :apply-fn apply-color-matrix})
+  :apply-transducer color-matrix-xf})
 
 
 ;; White Balance
 
 
-(defn- apply-white-balance [frame _time-ms _bpm {:keys [ref-r ref-g ref-b
-                                                        measured-r measured-g measured-b]}]
-  (let [r-mult (if (pos? measured-r) (/ ref-r measured-r) 1.0)
+(defn- white-balance-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        ref-r (:ref-r resolved) ref-g (:ref-g resolved) ref-b (:ref-b resolved)
+        measured-r (:measured-r resolved)
+        measured-g (:measured-g resolved)
+        measured-b (:measured-b resolved)
+        r-mult (if (pos? measured-r) (/ ref-r measured-r) 1.0)
         g-mult (if (pos? measured-g) (/ ref-g measured-g) 1.0)
         b-mult (if (pos? measured-b) (/ ref-b measured-b) 1.0)]
-    (effects/transform-point-full
-     frame
-     (fn [{:keys [r g b] :as pt}]
-       (assoc pt
-         :r (int (common/clamp-byte (* r r-mult)))
-         :g (int (common/clamp-byte (* g g-mult)))
-         :b (int (common/clamp-byte (* b b-mult))))))))
+    (map (fn [{:keys [r g b] :as pt}]
+           (assoc pt
+             :r (int (common/clamp-byte (* r r-mult)))
+             :g (int (common/clamp-byte (* g g-mult)))
+             :b (int (common/clamp-byte (* b b-mult))))))))
 
 (effects/register-effect!
  {:id :white-balance
@@ -228,19 +236,20 @@
                {:key :measured-r :label "Measured R" :type :int :default 255 :min 1 :max 255}
                {:key :measured-g :label "Measured G" :type :int :default 255 :min 1 :max 255}
                {:key :measured-b :label "Measured B" :type :int :default 255 :min 1 :max 255}]
-  :apply-fn apply-white-balance})
+  :apply-transducer white-balance-xf})
 
 
 ;; Projector Position Offset
 
 
-(defn- apply-projector-offset [frame _time-ms _bpm {:keys [x-offset y-offset]}]
-  (effects/transform-point-full
-   frame
-   (fn [{:keys [x y] :as pt}]
-     (assoc pt
-       :x (+ x x-offset)
-       :y (+ y y-offset)))))
+(defn- projector-offset-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        x-offset (:x-offset resolved)
+        y-offset (:y-offset resolved)]
+    (map (fn [{:keys [x y] :as pt}]
+           (assoc pt
+             :x (+ x x-offset)
+             :y (+ y y-offset))))))
 
 (effects/register-effect!
  {:id :projector-offset
@@ -259,19 +268,20 @@
                 :default 0.0
                 :min -1.0
                 :max 1.0}]
-  :apply-fn apply-projector-offset})
+  :apply-transducer projector-offset-xf})
 
 
 ;; Projector Scale
 
 
-(defn- apply-projector-scale [frame _time-ms _bpm {:keys [x-scale y-scale]}]
-  (effects/transform-point-full
-   frame
-   (fn [{:keys [x y] :as pt}]
-     (assoc pt
-       :x (* x x-scale)
-       :y (* y y-scale)))))
+(defn- projector-scale-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        x-scale (:x-scale resolved)
+        y-scale (:y-scale resolved)]
+    (map (fn [{:keys [x y] :as pt}]
+           (assoc pt
+             :x (* x x-scale)
+             :y (* y y-scale))))))
 
 (effects/register-effect!
  {:id :projector-scale
@@ -290,7 +300,7 @@
                 :default 1.0
                 :min -2.0
                 :max 2.0}]
-  :apply-fn apply-projector-scale})
+  :apply-transducer projector-scale-xf})
 
 
 ;; Per-Channel Color Curves (simplified LUT)
@@ -310,18 +320,20 @@
             v1 (nth curve (inc idx))]
         (+ v0 (* frac (- v1 v0)))))))
 
-(defn- apply-color-curves [frame _time-ms _bpm {:keys [r-curve g-curve b-curve]}]
-  (let [default-curve [0 32 64 96 128 160 192 224 255]]
-    (effects/transform-point-full
-     frame
-     (fn [{:keys [r g b] :as pt}]
-       (let [r-input (/ r 255.0)
-             g-input (/ g 255.0)
-             b-input (/ b 255.0)]
-         (assoc pt
-           :r (int (common/clamp-byte (interpolate-curve (or r-curve default-curve) r-input)))
-           :g (int (common/clamp-byte (interpolate-curve (or g-curve default-curve) g-input)))
-           :b (int (common/clamp-byte (interpolate-curve (or b-curve default-curve) b-input)))))))))
+(defn- color-curves-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        default-curve [0 32 64 96 128 160 192 224 255]
+        r-curve (or (:r-curve resolved) default-curve)
+        g-curve (or (:g-curve resolved) default-curve)
+        b-curve (or (:b-curve resolved) default-curve)]
+    (map (fn [{:keys [r g b] :as pt}]
+           (let [r-input (/ r 255.0)
+                 g-input (/ g 255.0)
+                 b-input (/ b 255.0)]
+             (assoc pt
+               :r (int (common/clamp-byte (interpolate-curve r-curve r-input)))
+               :g (int (common/clamp-byte (interpolate-curve g-curve g-input)))
+               :b (int (common/clamp-byte (interpolate-curve b-curve b-input)))))))))
 
 (effects/register-effect!
  {:id :color-curves
@@ -340,75 +352,22 @@
                 :label "Blue Curve"
                 :type :curve
                 :default [0 32 64 96 128 160 192 224 255]}]
-  :apply-fn apply-color-curves})
-
-
-;; Scan Rate Limiter (for safety)
-
-
-(defn- point-distance [p1 p2]
-  (let [x1 (/ (:x p1) 32767.0)
-        y1 (/ (:y p1) 32767.0)
-        x2 (/ (:x p2) 32767.0)
-        y2 (/ (:y p2) 32767.0)]
-    (Math/sqrt (+ (* (- x2 x1) (- x2 x1))
-                  (* (- y2 y1) (- y2 y1))))))
-
-(defn- apply-scan-rate-limit [frame _time-ms _bpm {:keys [max-jump-distance]}]
-  (let [points (:points frame)]
-    (if (< (count points) 2)
-      frame
-      (let [limited-points
-            (loop [result [(first points)]
-                   remaining (rest points)]
-              (if (empty? remaining)
-                result
-                (let [prev (last result)
-                      curr (first remaining)
-                      distance (point-distance prev curr)]
-                  (if (> distance max-jump-distance)
-                    (let [num-interp (int (Math/ceil (/ distance max-jump-distance)))
-                          interp-points
-                          (for [i (range 1 (inc num-interp))]
-                            (let [t (/ i (double num-interp))
-                                  x (+ (:x prev) (* t (- (:x curr) (:x prev))))
-                                  y (+ (:y prev) (* t (- (:y curr) (:y prev))))]
-                              (assoc curr
-                                     :x (short (Math/round x))
-                                     :y (short (Math/round y))
-                                     :r (unchecked-byte 0)
-                                     :g (unchecked-byte 0)
-                                     :b (unchecked-byte 0))))]
-                      (recur (into result interp-points) (rest remaining)))
-                    (recur (conj result curr) (rest remaining))))))]
-        (assoc frame :points (vec limited-points))))))
-
-(effects/register-effect!
- {:id :scan-rate-limit
-  :name "Scan Rate Limit"
-  :category :calibration
-  :timing :static
-  :parameters [{:key :max-jump-distance
-                :label "Max Jump Distance"
-                :type :float
-                :default 0.5
-                :min 0.1
-                :max 2.0}]
-  :apply-fn apply-scan-rate-limit})
+  :apply-transducer color-curves-xf})
 
 
 ;; Axis Flip (for projector mounting variations)
 
 
-(defn- apply-axis-flip [frame _time-ms _bpm {:keys [flip-x flip-y]}]
-  (if (and (not flip-x) (not flip-y))
-    frame
-    (effects/transform-point-full
-     frame
-     (fn [{:keys [x y] :as pt}]
-       (assoc pt
-         :x (if flip-x (- x) x)
-         :y (if flip-y (- y) y))))))
+(defn- axis-flip-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        flip-x (:flip-x resolved)
+        flip-y (:flip-y resolved)]
+    (if (and (not flip-x) (not flip-y))
+      (map identity)
+      (map (fn [{:keys [x y] :as pt}]
+             (assoc pt
+               :x (if flip-x (- x) x)
+               :y (if flip-y (- y) y)))))))
 
 (effects/register-effect!
  {:id :axis-flip
@@ -423,24 +382,24 @@
                 :label "Flip Y"
                 :type :bool
                 :default false}]
-  :apply-fn apply-axis-flip})
+  :apply-transducer axis-flip-xf})
 
 
 ;; Rotation Offset (for projector mounting angle)
 
 
-(defn- apply-rotation-offset [frame _time-ms _bpm {:keys [angle]}]
-  (if (zero? angle)
-    frame
-    (let [radians (Math/toRadians angle)
-          cos-a (Math/cos radians)
-          sin-a (Math/sin radians)]
-      (effects/transform-point-full
-       frame
-       (fn [{:keys [x y] :as pt}]
-         (assoc pt
-           :x (- (* x cos-a) (* y sin-a))
-           :y (+ (* x sin-a) (* y cos-a))))))))
+(defn- rotation-offset-xf [time-ms bpm params _ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm)
+        angle (:angle resolved)]
+    (if (zero? angle)
+      (map identity)
+      (let [radians (Math/toRadians angle)
+            cos-a (Math/cos radians)
+            sin-a (Math/sin radians)]
+        (map (fn [{:keys [x y] :as pt}]
+               (assoc pt
+                 :x (- (* x cos-a) (* y sin-a))
+                 :y (+ (* x sin-a) (* y cos-a)))))))))
 
 (effects/register-effect!
  {:id :rotation-offset
@@ -453,4 +412,4 @@
                 :default 0.0
                 :min -180.0
                 :max 180.0}]
-  :apply-fn apply-rotation-offset})
+  :apply-transducer rotation-offset-xf})
