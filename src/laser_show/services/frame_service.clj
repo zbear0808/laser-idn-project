@@ -117,13 +117,19 @@
 
 
 (defn laser-point->preview-point
-  "Convert a LaserPoint to a map suitable for preview rendering."
+  "Convert a LaserPoint to a map suitable for preview rendering.
+   
+   LaserPoints now use normalized values:
+   - x, y: -1.0 to 1.0 (already normalized)
+   - r, g, b: 0.0 to 1.0 (already normalized)
+   
+   Preview uses the same format, so we just pass through the values."
   [^laser_show.animation.types.LaserPoint point]
-  {:x (/ (:x point) 32767.0)  ;; Convert back to -1..1 range
-   :y (/ (:y point) 32767.0)
-   :r (bit-and (int (:r point)) 0xFF)  ;; Convert byte to unsigned
-   :g (bit-and (int (:g point)) 0xFF)
-   :b (bit-and (int (:b point)) 0xFF)
+  {:x (:x point)           ;; Already normalized (-1.0 to 1.0)
+   :y (:y point)           ;; Already normalized (-1.0 to 1.0)
+   :r (:r point)           ;; Already normalized (0.0 to 1.0)
+   :g (:g point)           ;; Already normalized (0.0 to 1.0)
+   :b (:b point)           ;; Already normalized (0.0 to 1.0)
    :blanked? (t/blanked? point)})
 
 (defn frame->preview-data

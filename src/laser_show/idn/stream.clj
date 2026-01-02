@@ -284,10 +284,12 @@
       (do (.put buf (unchecked-byte x-out))
           (.put buf (unchecked-byte y-out))))
     ;; Write RGB
+    ;; Note: For 16-bit unsigned values (0-65535), we use unchecked-short
+    ;; because Java short is signed (-32768 to 32767)
     (if (= color-bit-depth 16)
-      (do (.putShort buf (short r-out))
-          (.putShort buf (short g-out))
-          (.putShort buf (short b-out)))
+      (do (.putShort buf (unchecked-short r-out))
+          (.putShort buf (unchecked-short g-out))
+          (.putShort buf (unchecked-short b-out)))
       (do (.put buf (unchecked-byte r-out))
           (.put buf (unchecked-byte g-out))
           (.put buf (unchecked-byte b-out))))))

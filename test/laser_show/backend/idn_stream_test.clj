@@ -151,11 +151,13 @@
 
 
 (deftest sample-data-test
-  (testing "Point data is written in correct format"
+  (testing "Point data is written in correct format (8-bit color, standard config)"
     ;; Using normalized values: 1.0, 0.5 (128/255), 0.25 (64/255)
+    ;; Testing with standard-config (8-bit color, 16-bit XY) for predictable byte values
     (let [point (t/make-point 0.5 -0.5 1.0 0.5 0.25)
           frame (t/make-frame [point])
-          packet (stream/frame->packet frame 0 1000 33333)
+          packet (stream/frame->packet frame 0 1000 33333
+                                       :output-config output-config/standard-config)
           sample-offset 12
           buf (ByteBuffer/wrap packet)]
       (.order buf ByteOrder/BIG_ENDIAN)
@@ -173,15 +175,26 @@
         (is (= 127 g) "Green should be 127 (0.5 normalized)")
         (is (= 63 b) "Blue should be 63 (0.25 normalized)"))))
 
-  (testing "Multiple points are written sequentially"
+  (testing "Multiple points are written sequentially (8-bit color)"
+    (let [points [(t/make-point 0 0 1.0 0 0)
+                  (t/make-point 0.5 0.5 0 1.0 0)
+                  (t/make-point -0.5 -0.5 0 0 1.0)]
+          frame (t/make-frame points)
+          packet (stream/frame->packet frame 0 1000 33333
+                                       :output-config output-config/standard-config)]
+
+      (is (= (+ 12 (* 7 3)) (alength packet))
+          "Packet size should be header + 3 points * 7 bytes each")))
+
+  (testing "Multiple points with 16-bit color (default config)"
     (let [points [(t/make-point 0 0 1.0 0 0)
                   (t/make-point 0.5 0.5 0 1.0 0)
                   (t/make-point -0.5 -0.5 0 0 1.0)]
           frame (t/make-frame points)
           packet (stream/frame->packet frame 0 1000 33333)]
-
-      (is (= (+ 12 (* 7 3)) (alength packet))
-          "Packet size should be header + 3 points * 7 bytes each"))))
+      ;; 16-bit XY (4 bytes) + 16-bit RGB (6 bytes) = 10 bytes per point
+      (is (= (+ 12 (* 10 3)) (alength packet))
+          "Packet size should be header + 3 points * 10 bytes each"))))
 
 
 ;; Packet Validation Tests
@@ -227,20 +240,20 @@
     (is (= 33333 (stream/frame-duration-us 30)) "30 FPS = ~33333 us")
     (is (= 16666 (stream/frame-duration-us 60)) "60 FPS = ~16666 us"))
 
-  (testing "Packet size calculations with default config (16-bit XY, 8-bit color)"
-    (let [config output-config/default-config]
+  (testing "Packet size calculations with standard config (16-bit XY, 8-bit color)"
+    (let [config output-config/standard-config]
       (is (= 12 (stream/packet-size-without-config 0 config)) "Empty frame: 8 + 4 = 12")
       (is (= 19 (stream/packet-size-without-config 1 config)) "1 point: 8 + 4 + 7 = 19")
       (is (= 26 (stream/packet-size-without-config 2 config)) "2 points: 8 + 4 + 14 = 26")))
 
-  (testing "Packet size calculations with 16-bit color"
-    (let [config output-config/high-precision-config]
+  (testing "Packet size calculations with default config (16-bit color, 16-bit XY)"
+    (let [config output-config/default-config]
       ;; 16-bit XY (4 bytes) + 16-bit RGB (6 bytes) = 10 bytes per point
       (is (= 12 (stream/packet-size-without-config 0 config)) "Empty frame: 8 + 4 = 12")
       (is (= 22 (stream/packet-size-without-config 1 config)) "1 point: 8 + 4 + 10 = 22")
       (is (= 32 (stream/packet-size-without-config 2 config)) "2 points: 8 + 4 + 20 = 32")))
 
-  (testing "Packet size calculations with 8-bit XY"
+  (testing "Packet size calculations with compact config (8-bit XY, 8-bit color)"
     (let [config output-config/compact-config]
       ;; 8-bit XY (2 bytes) + 8-bit RGB (3 bytes) = 5 bytes per point
       (is (= 12 (stream/packet-size-without-config 0 config)) "Empty frame: 8 + 4 = 12")

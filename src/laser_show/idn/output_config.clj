@@ -8,9 +8,8 @@
    - Color: 8-bit (0-255) or 16-bit (0-65535)
    - XY Position: 8-bit (0-255) or 16-bit (-32768 to 32767)
    
-   The default configuration (8-bit color, 16-bit XY) is compatible with
-   standard ISP-DB25 laser systems. Higher precision configurations may
-   require hardware that supports the extended IDN-Stream sample formats.")
+   The default configuration is 16-bit for both color and position (maximum precision).
+   Use standard-config for ISP-DB25 compatibility (8-bit color, 16-bit XY).")
 
 
 ;; Bit Depth Constants
@@ -32,14 +31,14 @@
 
 
 (def default-config
-  "Default configuration: 8-bit color, 16-bit XY (standard ISP-DB25).
-   This is the most widely compatible configuration."
-  (->OutputConfig BIT_DEPTH_8 BIT_DEPTH_16))
-
-(def high-precision-config
-  "High precision configuration: 16-bit color, 16-bit XY.
-   Use this for maximum color precision when supported by hardware."
+  "Default configuration: 16-bit color, 16-bit XY (maximum precision).
+   Use standard-config for ISP-DB25 compatibility."
   (->OutputConfig BIT_DEPTH_16 BIT_DEPTH_16))
+
+(def standard-config
+  "Standard ISP-DB25 configuration: 8-bit color, 16-bit XY.
+   Use this for maximum compatibility with existing laser hardware."
+  (->OutputConfig BIT_DEPTH_8 BIT_DEPTH_16))
 
 (def compact-config
   "Compact configuration: 8-bit color, 8-bit XY.
@@ -162,16 +161,16 @@
   [config]
   (cond
     (= config default-config)
-    "Standard ISP-DB25 compatible (most widely supported)"
-    
-    (= config high-precision-config)
     "High precision (16-bit color and position)"
     
+    (= config standard-config)
+    "Standard ISP-DB25 compatible (8-bit color, 16-bit position)"
+    
     (= config compact-config)
-    "Compact (smallest packet size, reduced precision)"
+    "Compact (smallest packet size, 8-bit all)"
     
     (= config high-color-config)
-    "High color precision with standard position"
+    "High color precision (16-bit color, 8-bit position)"
     
     :else
     (config-name config)))
