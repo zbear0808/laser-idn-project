@@ -1,8 +1,15 @@
 (ns laser-show.backend.streaming-engine
   "IDN streaming engine - manages continuous frame streaming to laser hardware.
    Implements IDN-Stream spec compliant packet generation and transmission.
-   Runs in a separate thread and sends frames at a configurable rate."
+   Runs in a separate thread and sends frames at a configurable rate.
+   
+   Supports configurable output formats:
+   - 8-bit or 16-bit color (RGB)
+   - 8-bit or 16-bit position (XY)
+   
+   Default is standard ISP-DB25 format (8-bit color, 16-bit XY)."
   (:require [laser-show.idn.stream :as idn-stream]
+            [laser-show.idn.output-config :as output-config]
             [laser-show.animation.types :as t]
             [laser-show.idn.hello :as hello])
   (:import [java.net DatagramSocket]))
@@ -40,18 +47,21 @@
      - :fps - Target frames per second (default 30)
      - :port - Target UDP port (default 7255)
      - :channel-id - IDN channel ID (default 0)
+     - :output-config - OutputConfig for bit depth (default 8-bit color, 16-bit XY)
      - :log-callback - Optional function called with each packet for logging
    
    Returns an engine map that can be started with start!"
-  [target-host frame-provider & {:keys [fps port channel-id log-callback]
+  [target-host frame-provider & {:keys [fps port channel-id output-config log-callback]
                                   :or {fps DEFAULT_FPS
                                        port DEFAULT_PORT
-                                       channel-id DEFAULT_CHANNEL_ID}}]
+                                       channel-id DEFAULT_CHANNEL_ID
+                                       output-config output-config/default-config}}]
   {:target-host target-host
    :target-port port
    :frame-provider frame-provider
    :fps fps
    :channel-id channel-id
+   :output-config output-config
    :log-callback (atom log-callback)
    :running? (atom false)
    :socket (atom nil)
@@ -95,29 +105,35 @@
 
 (defn- create-idn-stream-packet
   "Create an IDN-Stream packet for the given frame.
-   Includes configuration periodically per spec requirements."
+   Includes configuration periodically per spec requirements.
+   Uses the engine's output-config for bit depth settings."
   [engine frame]
   (let [channel-id (:channel-id engine)
         timestamp-us (current-timestamp-us engine)
         duration-us (idn-stream/frame-duration-us (:fps engine))
+        output-cfg (:output-config engine)
         include-config? (should-resend-config? engine)]
     
     (when include-config?
       (reset! (:last-config-time-ms engine) (System/currentTimeMillis)))
     
     (if include-config?
-      (idn-stream/frame->packet-with-config frame channel-id timestamp-us duration-us)
-      (idn-stream/frame->packet frame channel-id timestamp-us duration-us))))
+      (idn-stream/frame->packet-with-config frame channel-id timestamp-us duration-us
+                                            :output-config output-cfg)
+      (idn-stream/frame->packet frame channel-id timestamp-us duration-us
+                                :output-config output-cfg))))
 
 (defn- streaming-loop
   "Main streaming loop - runs in a separate thread.
    Continuously gets frames from the provider and sends them as IDN packets."
   [engine]
   (let [{:keys [target-host target-port frame-provider fps
-                log-callback running? socket stats]} engine
+                log-callback running? socket stats output-config]} engine
         frame-interval-ms (/ 1000.0 fps)]
     
-    (println (format "Streaming loop started: %s:%d @ %d FPS" target-host target-port fps))
+    (println (format "Streaming loop started: %s:%d @ %d FPS (%s)"
+                     target-host target-port fps
+                     (output-config/config-name output-config)))
     
     (reset! (:last-config-time-ms engine) 0)
     
@@ -174,9 +190,10 @@
       (reset! (:thread engine) thread)
       (.start thread))
     
-    (println (format "Streaming engine started: %s:%d"
+    (println (format "Streaming engine started: %s:%d (%s)"
                      (:target-host engine)
-                     (:target-port engine)))
+                     (:target-port engine)
+                     (output-config/config-name (:output-config engine))))
     engine))
 
 (defn stop!
@@ -221,3 +238,14 @@
   [engine callback]
   (reset! (:log-callback engine) callback))
 
+(defn get-output-config
+  "Get the current output configuration."
+  [engine]
+  (:output-config engine))
+
+(defn set-output-config!
+  "Update the output configuration.
+   Note: This only takes effect on the next packet, not mid-stream.
+   For a clean transition, stop and restart the engine."
+  [engine new-config]
+  (assoc engine :output-config new-config))

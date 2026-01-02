@@ -1,12 +1,15 @@
 (ns laser-show.animation.colors
-  "ILDA color utilities and point color manipulation functions.
+  "Color utilities and point color manipulation functions.
    
-   ILDA/IDN supports high bit-depth colors (16-bit per channel).
-   This module provides:
-   - High bit-depth color representation (16-bit per channel, 0-65535)
-   - Standard 8-bit color representation (0-255) for UI display
-   - Conversion functions between bit depths
-   - Color manipulation functions for laser points")
+   This module uses NORMALIZED COLOR VALUES (0.0 to 1.0) internally.
+   All color operations work with normalized floats for maximum precision.
+   
+   Provides:
+   - Normalized color constants (0.0-1.0 per channel)
+   - Conversion functions between normalized, 8-bit, and 16-bit formats (for IDN output)
+   - HSV color space conversions (using normalized values)
+   - Color manipulation functions for laser points
+   - Rainbow and gradient generators")
 
 
 ;; Bit Depth Constants
@@ -18,48 +21,51 @@
 (def ^:const max-16bit 65535)
 
 
-
-;; Standard 8-bit Colors (for UI display)
-;; Values range from 0 to 255
-
-
-(def red [255 0 0])
-(def green [0 255 0])
-(def blue [0 0 255])
-(def white [255 255 255])
-(def black [0 0 0])
-
-(def cyan [0 255 255])
-(def magenta [255 0 255])
-(def yellow [255 255 0])
-
-(def orange [255 128 0])
-(def pink [255 128 192])
-(def purple [128 0 255])
-(def lime [128 255 0])
-
-(def warm-white [255 240 220])
-(def cool-white [220 240 255])
-
-(def colors
-  "Map of color names to 8-bit RGB vectors."
-  {:red red
-   :green green
-   :blue blue
-   :white white
-   :black black
-   :cyan cyan
-   :magenta magenta
-   :yellow yellow
-   :orange orange
-   :pink pink
-   :purple purple
-   :lime lime
-   :warm-white warm-white
-   :cool-white cool-white})
+;;; ============================================================
+;;; Normalized Color Constants (PRIMARY - 0.0 to 1.0)
+;;; ============================================================
 
 
-;; Bit Depth Conversion
+(def red-n [1.0 0.0 0.0])
+(def green-n [0.0 1.0 0.0])
+(def blue-n [0.0 0.0 1.0])
+(def white-n [1.0 1.0 1.0])
+(def black-n [0.0 0.0 0.0])
+
+(def cyan-n [0.0 1.0 1.0])
+(def magenta-n [1.0 0.0 1.0])
+(def yellow-n [1.0 1.0 0.0])
+
+(def orange-n [1.0 0.5 0.0])
+(def pink-n [1.0 0.5 0.75])
+(def purple-n [0.5 0.0 1.0])
+(def lime-n [0.5 1.0 0.0])
+
+(def warm-white-n [1.0 0.94 0.86])
+(def cool-white-n [0.86 0.94 1.0])
+
+(def colors-normalized
+  "Map of color names to normalized RGB vectors (0.0-1.0)."
+  {:red red-n
+   :green green-n
+   :blue blue-n
+   :white white-n
+   :black black-n
+   :cyan cyan-n
+   :magenta magenta-n
+   :yellow yellow-n
+   :orange orange-n
+   :pink pink-n
+   :purple purple-n
+   :lime lime-n
+   :warm-white warm-white-n
+   :cool-white cool-white-n})
+
+
+
+;;; ============================================================
+;;; Bit Depth Conversion Functions
+;;; ============================================================
 
 
 (defn convert-channel
@@ -67,83 +73,53 @@
   [value from-max to-max]
   (int (Math/round (* (/ (double value) from-max) to-max))))
 
-(defn ilda->8bit
-  "Convert a 16-bit ILDA color [r g b] to 8-bit [r g b].
-   Input: values 0-65535, Output: values 0-255"
-  [[r g b]]
-  [(convert-channel r max-16bit max-8bit)
-   (convert-channel g max-16bit max-8bit)
-   (convert-channel b max-16bit max-8bit)])
 
-(defn rgb8->ilda
-  "Convert an 8-bit color [r g b] to 16-bit ILDA [r g b].
-   Input: values 0-255, Output: values 0-65535"
-  [[r g b]]
-  [(convert-channel r max-8bit max-16bit)
-   (convert-channel g max-8bit max-16bit)
-   (convert-channel b max-8bit max-16bit)])
-
-(defn ilda->normalized
-  "Convert a 16-bit ILDA color to normalized floats [0.0-1.0]."
-  [[r g b]]
-  [(/ (double r) max-16bit)
-   (/ (double g) max-16bit)
-   (/ (double b) max-16bit)])
-
-(defn normalized->ilda
-  "Convert normalized floats [0.0-1.0] to 16-bit ILDA color."
-  [[r g b]]
-  [(int (* r max-16bit))
-   (int (* g max-16bit))
-   (int (* b max-16bit))])
+;; Normalized <-> 8-bit conversions
 
 (defn normalized->8bit
-  "Convert normalized floats [0.0-1.0] to 8-bit color."
+  "Convert normalized [r g b] (0.0-1.0) to 8-bit [r g b] (0-255)."
   [[r g b]]
-  [(int (* r max-8bit))
-   (int (* g max-8bit))
-   (int (* b max-8bit))])
+  [(int (* (double r) max-8bit))
+   (int (* (double g) max-8bit))
+   (int (* (double b) max-8bit))])
 
-(defn rgb8->normalized
-  "Convert 8-bit color to normalized floats [0.0-1.0]."
+(defn color-8bit->normalized
+  "Convert 8-bit [r g b] (0-255) to normalized [r g b] (0.0-1.0)."
   [[r g b]]
   [(/ (double r) max-8bit)
    (/ (double g) max-8bit)
    (/ (double b) max-8bit)])
 
 
-;; ILDA Color Record (for type safety and clarity)
+;; Normalized <-> 16-bit conversions
+
+(defn normalized->16bit
+  "Convert normalized [r g b] (0.0-1.0) to 16-bit [r g b] (0-65535)."
+  [[r g b]]
+  [(int (* (double r) max-16bit))
+   (int (* (double g) max-16bit))
+   (int (* (double b) max-16bit))])
+
+(defn color-16bit->normalized
+  "Convert 16-bit [r g b] (0-65535) to normalized [r g b] (0.0-1.0)."
+  [[r g b]]
+  [(/ (double r) max-16bit)
+   (/ (double g) max-16bit)
+   (/ (double b) max-16bit)])
 
 
-(defrecord ILDAColor [^int r ^int g ^int b ^int bit-depth])
 
-(defn make-ilda-color
-  "Create an ILDA color with explicit bit depth.
-   Default is 16-bit."
-  ([r g b]
-   (make-ilda-color r g b bit-depth-16))
-  ([r g b bit-depth]
-   (->ILDAColor r g b bit-depth)))
-
-(defn ilda-color->vec
-  "Convert ILDAColor record to [r g b] vector."
-  [^ILDAColor color]
-  [(:r color) (:g color) (:b color)])
-
-(defn ilda-color->8bit
-  "Convert ILDAColor to 8-bit [r g b] vector for display."
-  [^ILDAColor color]
-  (if (= (:bit-depth color) bit-depth-8)
-    [(:r color) (:g color) (:b color)]
-    (ilda->8bit [(:r color) (:g color) (:b color)])))
+;;; ============================================================
+;;; HSV Color Conversion (Normalized Output)
+;;; ============================================================
 
 
-;; HSV Color Conversion (8-bit)
-
-
-(defn hsv->rgb
-  "Convert HSV to 8-bit RGB. h in [0, 360], s and v in [0, 1].
-   Returns [r g b] with values in [0, 255]."
+(defn hsv->normalized
+  "Convert HSV to normalized RGB (0.0-1.0).
+   h: hue in degrees [0, 360]
+   s: saturation [0, 1]
+   v: value/brightness [0, 1]
+   Returns: [r g b] with values in [0.0, 1.0]"
   [h s v]
   (let [h (double (mod h 360))
         s (double s)
@@ -158,17 +134,18 @@
                      (< h 240.0) [0.0 x c]
                      (< h 300.0) [x 0.0 c]
                      :else       [c 0.0 x])]
-    [(int (* max-8bit (+ r' m)))
-     (int (* max-8bit (+ g' m)))
-     (int (* max-8bit (+ b' m)))]))
+    [(+ r' m)
+     (+ g' m)
+     (+ b' m)]))
 
-(defn rgb->hsv
-  "Convert 8-bit RGB to HSV. r, g, b in [0, 255].
-   Returns [h s v] with h in [0, 360], s and v in [0, 1]."
+(defn normalized->hsv
+  "Convert normalized RGB to HSV.
+   r, g, b: color values in [0.0, 1.0]
+   Returns: [h s v] with h in [0, 360], s and v in [0, 1]"
   [r g b]
-  (let [r' (/ r (double max-8bit))
-        g' (/ g (double max-8bit))
-        b' (/ b (double max-8bit))
+  (let [r' (double r)
+        g' (double g)
+        b' (double b)
         cmax (max r' g' b')
         cmin (min r' g' b')
         delta (- cmax cmin)
@@ -182,108 +159,52 @@
     [(if (neg? h) (+ h 360) h) s v]))
 
 
-;; HSV Color Conversion (16-bit ILDA)
+
+;;; ============================================================
+;;; Rainbow Color Generation (Normalized)
+;;; ============================================================
 
 
-(defn hsv->ilda
-  "Convert HSV to 16-bit ILDA RGB. h in [0, 360], s and v in [0, 1].
-   Returns [r g b] with values in [0, 65535]."
-  [h s v]
-  (let [h (double (mod h 360))
-        s (double s)
-        v (double v)
-        c (* v s)
-        x (* c (- 1.0 (Math/abs (- (mod (/ h 60.0) 2.0) 1.0))))
-        m (- v c)
-        [r' g' b'] (cond
-                     (< h 60.0)  [c x 0.0]
-                     (< h 120.0) [x c 0.0]
-                     (< h 180.0) [0.0 c x]
-                     (< h 240.0) [0.0 x c]
-                     (< h 300.0) [x 0.0 c]
-                     :else       [c 0.0 x])]
-    [(int (* max-16bit (+ r' m)))
-     (int (* max-16bit (+ g' m)))
-     (int (* max-16bit (+ b' m)))]))
-
-(defn ilda->hsv
-  "Convert 16-bit ILDA RGB to HSV. r, g, b in [0, 65535].
-   Returns [h s v] with h in [0, 360], s and v in [0, 1]."
-  [r g b]
-  (let [r' (/ r (double max-16bit))
-        g' (/ g (double max-16bit))
-        b' (/ b (double max-16bit))
-        cmax (max r' g' b')
-        cmin (min r' g' b')
-        delta (- cmax cmin)
-        h (cond
-            (zero? delta) 0
-            (= cmax r') (* 60 (mod (/ (- g' b') delta) 6))
-            (= cmax g') (* 60 (+ (/ (- b' r') delta) 2))
-            :else (* 60 (+ (/ (- r' g') delta) 4)))
-        s (if (zero? cmax) 0 (/ delta cmax))
-        v cmax]
-    [(if (neg? h) (+ h 360) h) s v]))
-
-
-;; Rainbow Color Generation (8-bit)
-
-
-(defn rainbow
+(defn rainbow-normalized
   "Get a rainbow color based on position (0.0 to 1.0).
-   Returns 8-bit [r g b] vector (0-255)."
+   Returns normalized [r g b] vector (0.0-1.0)."
   [position]
-  (hsv->rgb (* position 360) 1.0 1.0))
+  (hsv->normalized (* position 360) 1.0 1.0))
 
-(defn rainbow-shifted
+(defn rainbow-normalized-shifted
   "Get a rainbow color with a hue offset.
    position: 0.0 to 1.0
    offset: hue offset in degrees (0-360)
-   Returns 8-bit [r g b] vector (0-255)."
+   Returns normalized [r g b] vector (0.0-1.0)."
   [position offset]
-  (hsv->rgb (+ (* position 360) offset) 1.0 1.0))
+  (hsv->normalized (+ (* position 360) offset) 1.0 1.0))
 
 
-;; Rainbow Color Generation (16-bit ILDA)
+
+;;; ============================================================
+;;; Color Interpolation (Normalized)
+;;; ============================================================
 
 
-(defn rainbow-ilda
-  "Get a rainbow color based on position (0.0 to 1.0).
-   Returns 16-bit ILDA [r g b] vector (0-65535)."
-  [position]
-  (hsv->ilda (* position 360) 1.0 1.0))
-
-(defn rainbow-ilda-shifted
-  "Get a rainbow color with a hue offset.
-   position: 0.0 to 1.0
-   offset: hue offset in degrees (0-360)
-   Returns 16-bit ILDA [r g b] vector (0-65535)."
-  [position offset]
-  (hsv->ilda (+ (* position 360) offset) 1.0 1.0))
-
-
-;; Color Interpolation
-
-
-(defn lerp-color
-  "Linear interpolation between two colors.
+(defn lerp-color-normalized
+  "Linear interpolation between two normalized colors.
    t should be in [0, 1]."
   [[r1 g1 b1] [r2 g2 b2] t]
-  [(int (+ r1 (* (- r2 r1) t)))
-   (int (+ g1 (* (- g2 g1) t)))
-   (int (+ b1 (* (- b2 b1) t)))])
+  [(+ r1 (* (- r2 r1) t))
+   (+ g1 (* (- g2 g1) t))
+   (+ b1 (* (- b2 b1) t))])
 
-(defn gradient
-  "Generate a gradient between two colors.
-   Returns a function that takes position (0.0 to 1.0) and returns [r g b]."
+(defn gradient-normalized
+  "Generate a gradient between two normalized colors.
+   Returns a function that takes position (0.0 to 1.0) and returns normalized [r g b]."
   [color1 color2]
   (fn [t]
-    (lerp-color color1 color2 t)))
+    (lerp-color-normalized color1 color2 t)))
 
-(defn multi-gradient
-  "Generate a gradient through multiple colors.
-   colors: vector of [r g b] colors
-   Returns a function that takes position (0.0 to 1.0) and returns [r g b]."
+(defn multi-gradient-normalized
+  "Generate a gradient through multiple normalized colors.
+   colors: vector of normalized [r g b] colors
+   Returns a function that takes position (0.0 to 1.0) and returns normalized [r g b]."
   [colors]
   (let [n (count colors)
         segments (dec n)]
@@ -293,17 +214,21 @@
               (let [scaled (* t segments)
                     idx (int scaled)
                     local-t (- scaled idx)]
-                (lerp-color (nth colors idx) (nth colors (inc idx)) local-t)))))))
+                (lerp-color-normalized (nth colors idx) (nth colors (inc idx)) local-t)))))))
 
 
-;; Point Color Manipulation
+
+;;; ============================================================
+;;; Point Color Manipulation (Normalized)
+;;; ============================================================
 
 
 (defn recolor-point
-  "Recolor a single point with a new [r g b] color.
-   Preserves x, y, and intensity."
+  "Recolor a single point with a new normalized [r g b] color.
+   Preserves x, y coordinates.
+   Color values must be normalized (0.0-1.0)."
   [point [r g b]]
-  (assoc point :r (unchecked-byte r) :g (unchecked-byte g) :b (unchecked-byte b)))
+  (assoc point :r r :g g :b b))
 
 (defn recolor-points
   "Recolor all points in a collection with a single [r g b] color."
@@ -313,7 +238,7 @@
 (defn rainbow-by-index
   "Apply rainbow colors to points based on their index in the sequence.
    offset: optional hue offset (0-360, default 0)
-   Returns a new sequence of points with rainbow colors."
+   Returns a new sequence of points with normalized rainbow colors."
   ([points]
    (rainbow-by-index points 0))
   ([points offset]
@@ -321,21 +246,22 @@
      (map-indexed
       (fn [i point]
         (let [t (/ i (max 1 (dec n)))
-              [r g b] (rainbow-shifted t offset)]
+              [r g b] (rainbow-normalized-shifted t offset)]
           (recolor-point point [r g b])))
       points))))
 
 (defn rainbow-by-position
   "Apply rainbow colors to points based on their x position.
    offset: optional hue offset (0-360, default 0)
-   Returns a new sequence of points with rainbow colors."
+   Returns a new sequence of points with normalized rainbow colors."
   ([points]
    (rainbow-by-position points 0))
   ([points offset]
    (map (fn [point]
           (let [x (:x point)
-                t (/ (+ x 32768) 65536.0)
-                [r g b] (rainbow-shifted t offset)]
+                ;; x is already normalized (-1.0 to 1.0), convert to 0-1 range
+                t (/ (+ x 1.0) 2.0)
+                [r g b] (rainbow-normalized-shifted t offset)]
             (recolor-point point [r g b])))
         points)))
 
@@ -347,17 +273,17 @@
    (rainbow-by-position-2d points 0))
   ([points offset]
    (map (fn [point]
-          (let [x (/ (:x point) 32767.0)
-                y (/ (:y point) 32767.0)
+          (let [x (:x point)  ; Already normalized
+                y (:y point)  ; Already normalized
                 angle (Math/atan2 y x)
                 t (/ (+ angle Math/PI) (* 2 Math/PI))
-                [r g b] (rainbow-shifted t offset)]
+                [r g b] (rainbow-normalized-shifted t offset)]
             (recolor-point point [r g b])))
         points)))
 
 (defn gradient-by-index
   "Apply a gradient to points based on their index.
-   gradient-fn: function that takes t (0-1) and returns [r g b]"
+   gradient-fn: function that takes t (0-1) and returns normalized [r g b]"
   [points gradient-fn]
   (let [n (count points)]
     (map-indexed
@@ -369,89 +295,99 @@
 
 (defn gradient-by-position
   "Apply a gradient to points based on their x position.
-   gradient-fn: function that takes t (0-1) and returns [r g b]"
+   gradient-fn: function that takes t (0-1) and returns normalized [r g b]"
   [points gradient-fn]
   (map (fn [point]
-         (let [x (:x point)
-               t (/ (+ x 32768) 65536.0)
+         (let [x (:x point)  ; Already normalized (-1.0 to 1.0)
+               t (/ (+ x 1.0) 2.0)
                [r g b] (gradient-fn t)]
            (recolor-point point [r g b])))
        points))
 
 
-;; Color Effects
+;;; ============================================================
+;;; Color Effects (Normalized)
+;;; ============================================================
 
 
 (defn fade-points
-  "Fade all points toward black by a factor (0.0 = no change, 1.0 = black)."
+  "Fade all points toward black by a factor (0.0 = no change, 1.0 = black).
+   Works with normalized color values."
   [points factor]
   (let [f (- 1.0 factor)]
     (map (fn [point]
-           (let [r (int (* (bit-and (:r point) 0xFF) f))
-                 g (int (* (bit-and (:g point) 0xFF) f))
-                 b (int (* (bit-and (:b point) 0xFF) f))]
-             (recolor-point point [r g b])))
+           (assoc point
+             :r (* (:r point) f)
+             :g (* (:g point) f)
+             :b (* (:b point) f)))
          points)))
 
 (defn brighten-points
-  "Brighten all points toward white by a factor (0.0 = no change, 1.0 = white)."
+  "Brighten all points toward white by a factor (0.0 = no change, 1.0 = white).
+   Works with normalized color values."
   [points factor]
   (map (fn [point]
-         (let [r (bit-and (:r point) 0xFF)
-               g (bit-and (:g point) 0xFF)
-               b (bit-and (:b point) 0xFF)
-               nr (int (+ r (* (- 255 r) factor)))
-               ng (int (+ g (* (- 255 g) factor)))
-               nb (int (+ b (* (- 255 b) factor)))]
-           (recolor-point point [nr ng nb])))
+         (let [r (:r point)
+               g (:g point)
+               b (:b point)]
+           (assoc point
+             :r (+ r (* (- 1.0 r) factor))
+             :g (+ g (* (- 1.0 g) factor))
+             :b (+ b (* (- 1.0 b) factor)))))
        points))
 
 (defn saturate-points
   "Adjust saturation of all points.
-   factor > 1.0 increases saturation, < 1.0 decreases."
+   factor > 1.0 increases saturation, < 1.0 decreases.
+   Works with normalized color values."
   [points factor]
   (map (fn [point]
-         (let [r (bit-and (:r point) 0xFF)
-               g (bit-and (:g point) 0xFF)
-               b (bit-and (:b point) 0xFF)
-               [h s v] (rgb->hsv r g b)
+         (let [r (:r point)
+               g (:g point)
+               b (:b point)
+               [h s v] (normalized->hsv r g b)
                new-s (min 1.0 (max 0.0 (* s factor)))
-               [nr ng nb] (hsv->rgb h new-s v)]
-           (recolor-point point [nr ng nb])))
+               [nr ng nb] (hsv->normalized h new-s v)]
+           (assoc point :r nr :g ng :b nb)))
        points))
 
 (defn shift-hue-points
-  "Shift the hue of all points by a given amount (in degrees)."
+  "Shift the hue of all points by a given amount (in degrees).
+   Works with normalized color values."
   [points degrees]
   (map (fn [point]
-         (let [r (bit-and (:r point) 0xFF)
-               g (bit-and (:g point) 0xFF)
-               b (bit-and (:b point) 0xFF)
-               [h s v] (rgb->hsv r g b)
+         (let [r (:r point)
+               g (:g point)
+               b (:b point)
+               [h s v] (normalized->hsv r g b)
                new-h (mod (+ h degrees) 360)
-               [nr ng nb] (hsv->rgb new-h s v)]
-           (recolor-point point [nr ng nb])))
+               [nr ng nb] (hsv->normalized new-h s v)]
+           (assoc point :r nr :g ng :b nb)))
        points))
 
 
-;; Animated Color Effects (time-based)
+;;; ============================================================
+;;; Animated Color Effects (time-based)
+;;; ============================================================
 
 
 (defn rainbow-cycle
   "Get a rainbow color that cycles over time.
    time-ms: current time in milliseconds
-   cycle-duration-ms: duration of one full rainbow cycle"
+   cycle-duration-ms: duration of one full rainbow cycle
+   Returns normalized [r g b]."
   [time-ms cycle-duration-ms]
   (let [t (/ (mod time-ms cycle-duration-ms) cycle-duration-ms)]
-    (rainbow t)))
+    (rainbow-normalized t)))
 
 (defn pulse-color
   "Pulse a color's brightness over time.
-   color: base [r g b] color
+   color: base normalized [r g b] color
    time-ms: current time in milliseconds
    pulse-duration-ms: duration of one pulse cycle
    min-brightness: minimum brightness (0-1, default 0.3)
-   max-brightness: maximum brightness (0-1, default 1.0)"
+   max-brightness: maximum brightness (0-1, default 1.0)
+   Returns normalized [r g b]."
   ([color time-ms pulse-duration-ms]
    (pulse-color color time-ms pulse-duration-ms 0.3 1.0))
   ([color time-ms pulse-duration-ms min-brightness max-brightness]
@@ -460,6 +396,8 @@
                        (* (- max-brightness min-brightness)
                           (/ (+ 1 (Math/sin (* t 2 Math/PI))) 2)))
          [r g b] color]
-     [(int (* r brightness))
-      (int (* g brightness))
-      (int (* b brightness))])))
+     [(* r brightness)
+      (* g brightness)
+      (* b brightness)])))
+
+

@@ -2,6 +2,7 @@
   "Tests for IDN-Stream packet format compliance with ILDA spec (Revision 002, July 2025)"
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.idn.stream :as stream]
+            [laser-show.idn.output-config :as output-config]
             [laser-show.animation.types :as t])
   (:import [java.nio ByteBuffer ByteOrder]))
 
@@ -43,7 +44,7 @@
         (is (= 1000000 timestamp) "Timestamp should match input"))))
 
   (testing "CNL byte structure - bit 7 always set for channel messages"
-    (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
           packet-with-config (stream/frame->packet-with-config frame 5 1000 33333)
           packet-without-config (stream/frame->packet frame 5 1000 33333)
           cnl-with (get-byte packet-with-config 2)
@@ -52,14 +53,14 @@
       (is (bit-test cnl-without 7) "Bit 7 (channel msg) should ALWAYS be set even without config")))
 
   (testing "CCLF bit (bit 6) is set when config is present"
-    (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
           packet (stream/frame->packet-with-config frame 5 1000 33333)
           cnl-byte (get-byte packet 2)]
       (is (bit-test cnl-byte 6) "CCLF bit (bit 6) should be set when config present")
       (is (= 5 (bit-and cnl-byte 0x3F)) "Channel ID should be in lower 6 bits")))
 
   (testing "CCLF bit (bit 6) is clear when config is absent"
-    (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
           packet (stream/frame->packet frame 5 1000 33333)
           cnl-byte (get-byte packet 2)]
       (is (not (bit-test cnl-byte 6)) "CCLF bit (bit 6) should be clear when no config")
@@ -71,7 +72,7 @@
 
 (deftest channel-config-header-test
   (testing "Configuration header has correct structure"
-    (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
           packet (stream/frame->packet-with-config frame 0 1000 33333)
           config-offset 8
           scwc (get-byte packet config-offset)
@@ -85,7 +86,7 @@
       (is (= 0x02 service-mode) "Service mode should be GRAPHIC_DISCRETE")))
 
   (testing "Close flag is set when requested"
-    (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
           packet (stream/frame->packet-with-config frame 0 1000 33333 :close? true)
           cfl (get-byte packet 9)]
       (is (bit-test cfl 1) "Close flag (bit 1) should be set"))))
@@ -107,7 +108,7 @@
       (is (= expected-tags stream/default-graphic-tags))))
 
   (testing "Tags are written correctly to packet"
-    (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
           packet (stream/frame->packet-with-config frame 0 1000 33333)
           tags-offset 12
           buf (ByteBuffer/wrap packet)]
@@ -125,7 +126,7 @@
 
 (deftest frame-chunk-header-test
   (testing "Frame chunk header has correct structure"
-    (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
           packet (stream/frame->packet frame 0 1000 33333)
           chunk-offset 8
           flags (get-byte packet chunk-offset)
@@ -140,7 +141,7 @@
       (is (= 33333 duration) "Duration should match input")))
 
   (testing "Once flag is set when single-scan requested"
-    (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
           packet (stream/frame->packet frame 0 1000 33333 :single-scan? true)
           flags (get-byte packet 8)]
       (is (= 1 (bit-and flags 0x01)) "Once flag should be set"))))
@@ -151,7 +152,8 @@
 
 (deftest sample-data-test
   (testing "Point data is written in correct format"
-    (let [point (t/make-point 0.5 -0.5 255 128 64)
+    ;; Using normalized values: 1.0, 0.5 (128/255), 0.25 (64/255)
+    (let [point (t/make-point 0.5 -0.5 1.0 0.5 0.25)
           frame (t/make-frame [point])
           packet (stream/frame->packet frame 0 1000 33333)
           sample-offset 12
@@ -167,14 +169,14 @@
 
         (is (> x 0) "X should be positive for 0.5")
         (is (< y 0) "Y should be negative for -0.5")
-        (is (= 255 r) "Red should be 255")
-        (is (= 128 g) "Green should be 128")
-        (is (= 64 b) "Blue should be 64"))))
+        (is (= 255 r) "Red should be 255 (1.0 normalized)")
+        (is (= 127 g) "Green should be 127 (0.5 normalized)")
+        (is (= 63 b) "Blue should be 63 (0.25 normalized)"))))
 
   (testing "Multiple points are written sequentially"
-    (let [points [(t/make-point 0 0 255 0 0)
-                  (t/make-point 0.5 0.5 0 255 0)
-                  (t/make-point -0.5 -0.5 0 0 255)]
+    (let [points [(t/make-point 0 0 1.0 0 0)
+                  (t/make-point 0.5 0.5 0 1.0 0)
+                  (t/make-point -0.5 -0.5 0 0 1.0)]
           frame (t/make-frame points)
           packet (stream/frame->packet frame 0 1000 33333)]
 
@@ -187,13 +189,13 @@
 
 (deftest packet-validation-test
   (testing "Valid packet passes validation"
-    (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
           packet (stream/frame->packet frame 0 1000 33333)
           result (stream/validate-packet packet)]
       (is (:valid? result) "Packet should be valid")))
 
   (testing "Packet info extraction"
-    (let [frame (t/make-frame [(t/make-point 0 0 255 255 255)])
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
           packet (stream/frame->packet-with-config frame 3 5000000 33333)
           info (stream/packet-info packet)]
       (is (= 3 (:channel-id info)))
@@ -225,7 +227,22 @@
     (is (= 33333 (stream/frame-duration-us 30)) "30 FPS = ~33333 us")
     (is (= 16666 (stream/frame-duration-us 60)) "60 FPS = ~16666 us"))
 
-  (testing "Packet size calculations"
-    (is (= 12 (stream/packet-size-without-config 0)) "Empty frame: 8 + 4 = 12")
-    (is (= 19 (stream/packet-size-without-config 1)) "1 point: 8 + 4 + 7 = 19")
-    (is (= 26 (stream/packet-size-without-config 2)) "2 points: 8 + 4 + 14 = 26")))
+  (testing "Packet size calculations with default config (16-bit XY, 8-bit color)"
+    (let [config output-config/default-config]
+      (is (= 12 (stream/packet-size-without-config 0 config)) "Empty frame: 8 + 4 = 12")
+      (is (= 19 (stream/packet-size-without-config 1 config)) "1 point: 8 + 4 + 7 = 19")
+      (is (= 26 (stream/packet-size-without-config 2 config)) "2 points: 8 + 4 + 14 = 26")))
+
+  (testing "Packet size calculations with 16-bit color"
+    (let [config output-config/high-precision-config]
+      ;; 16-bit XY (4 bytes) + 16-bit RGB (6 bytes) = 10 bytes per point
+      (is (= 12 (stream/packet-size-without-config 0 config)) "Empty frame: 8 + 4 = 12")
+      (is (= 22 (stream/packet-size-without-config 1 config)) "1 point: 8 + 4 + 10 = 22")
+      (is (= 32 (stream/packet-size-without-config 2 config)) "2 points: 8 + 4 + 20 = 32")))
+
+  (testing "Packet size calculations with 8-bit XY"
+    (let [config output-config/compact-config]
+      ;; 8-bit XY (2 bytes) + 8-bit RGB (3 bytes) = 5 bytes per point
+      (is (= 12 (stream/packet-size-without-config 0 config)) "Empty frame: 8 + 4 = 12")
+      (is (= 17 (stream/packet-size-without-config 1 config)) "1 point: 8 + 4 + 5 = 17")
+      (is (= 22 (stream/packet-size-without-config 2 config)) "2 points: 8 + 4 + 10 = 22"))))

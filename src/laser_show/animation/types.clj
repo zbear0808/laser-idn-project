@@ -2,23 +2,29 @@
   "Core types for laser animation system.
    Defines LaserPoint, LaserFrame, and Animation abstractions.
    
+   Internal Data Format
+   ====================
+   
+   LaserPoint uses NORMALIZED VALUES internally for maximum precision:
+   - Coordinates (x, y): -1.0 to 1.0 (normalized)
+   - Colors (r, g, b): 0.0 to 1.0 (normalized)
+   
+   This allows effects and calculations to work with full floating-point
+   precision. Conversion to hardware-specific formats (8-bit or 16-bit)
+   happens at the IDN output stage.
+   
    IDN-Stream Specification Compliance (Revision 002, July 2025)
    =============================================================
    
-   This namespace defines the internal data structures used by the application.
-   These structures are designed to map directly to IDN-Stream packet format.
+   At output time, LaserPoint values are converted to IDN-Stream format:
    
-   LaserPoint -> IDN-Stream Sample (Section 6.2)
-   ---------------------------------------------
-   Our LaserPoint record maps to IDN-Stream frame samples as follows:
-   
-   | LaserPoint Field | IDN-Stream Field | Size    | Range              |
-   |------------------|------------------|---------|---------------------|
-   | :x               | X coordinate     | 16-bit  | -32768 to 32767    |
-   | :y               | Y coordinate     | 16-bit  | -32768 to 32767    |
-   | :r               | Red (638nm)      | 8-bit   | 0 to 255           |
-   | :g               | Green (532nm)    | 8-bit   | 0 to 255           |
-   | :b               | Blue (460nm)     | 8-bit   | 0 to 255           |
+   | LaserPoint Field | IDN-Stream Range    | Configurable |
+   |------------------|---------------------|--------------|
+   | :x (-1.0 to 1.0) | 8-bit or 16-bit     | Yes          |
+   | :y (-1.0 to 1.0) | 8-bit or 16-bit     | Yes          |
+   | :r (0.0 to 1.0)  | 8-bit or 16-bit     | Yes          |
+   | :g (0.0 to 1.0)  | 8-bit or 16-bit     | Yes          |
+   | :b (0.0 to 1.0)  | 8-bit or 16-bit     | Yes          |
    
    Coordinate System (Section 3.4.7):
    - X: Positive = right, Negative = left (front projection)
@@ -26,7 +32,7 @@
    - Origin (0,0) is at center of projection area
    
    Blanking (Section 3.4.11):
-   - Blanking is indicated by r=g=b=0 (all color intensities zero)
+   - Blanking is indicated by r=g=b=0.0 (all color intensities zero)
    - There is no separate 'intensity' or 'blanking' field
    - Use `blanked-point` to create invisible points for beam repositioning
    
@@ -65,12 +71,12 @@
 
 
 (defrecord LaserPoint
-  [^short x          ; X coordinate (-32768 to 32767)
-   ^short y          ; Y coordinate (-32768 to 32767)
-   ^byte r           ; Red (0-255)
-   ^byte g           ; Green (0-255)
-   ^byte b])         ; Blue (0-255)
-                     ; Note: Blanking is indicated by r=g=b=0 per IDN-Stream spec
+  [^double x    ; X coordinate, normalized (-1.0 to 1.0)
+   ^double y    ; Y coordinate, normalized (-1.0 to 1.0)
+   ^double r    ; Red, normalized (0.0 to 1.0)
+   ^double g    ; Green, normalized (0.0 to 1.0)
+   ^double b])  ; Blue, normalized (0.0 to 1.0)
+               ; Note: Blanking is indicated by r=g=b=0.0 per IDN-Stream spec
 
 (defrecord LaserFrame
   [points            ; Vector of LaserPoint
@@ -82,51 +88,68 @@
 
 
 (defn make-point
-  "Create a LaserPoint with normalized coordinates.
-   x, y should be in range [-1.0, 1.0] and will be scaled to 16-bit range.
-   Values outside this range are clamped to prevent overflow.
-   r, g, b should be in range [0, 255] or [0.0, 1.0].
-   Per IDN-Stream spec, blanking is indicated by r=g=b=0."
+  "Create a LaserPoint with normalized coordinates and colors.
+   
+   All values must be normalized:
+   - x, y: range [-1.0, 1.0], clamped if outside
+   - r, g, b: range [0.0, 1.0], clamped if outside
+   
+   Per IDN-Stream spec, blanking is indicated by r=g=b=0.0."
   ([x y]
-   (make-point x y 255 255 255))
+   (make-point x y 1.0 1.0 1.0))
   ([x y r g b]
-   (let [;; Clamp coordinates to [-1.0, 1.0] to prevent short overflow
-         scale-coord (fn [v] (short (* (max -1.0 (min 1.0 (double v))) 32767)))
-         scale-color (fn [v] (if (float? v)
-                               (unchecked-byte (* (max 0.0 (min 1.0 v)) 255))
-                               (unchecked-byte (max 0 (min 255 v)))))]
-     (->LaserPoint
-      (scale-coord x)
-      (scale-coord y)
-      (scale-color r)
-      (scale-color g)
-      (scale-color b))))
-  ([x y r g b _intensity]
-   ;; Backward compatibility: intensity parameter is ignored
-   ;; Blanking should be done by setting r=g=b=0
-   (make-point x y r g b)))
-
-(defn make-point-raw
-  "Create a LaserPoint with raw 16-bit coordinates and 8-bit colors.
-   Per IDN-Stream spec, blanking is indicated by r=g=b=0."
-  ([x y r g b]
-   (->LaserPoint (short x) (short y) (unchecked-byte r) (unchecked-byte g) (unchecked-byte b)))
-  ([x y r g b _intensity]
-   ;; Backward compatibility: intensity parameter is ignored
-   (make-point-raw x y r g b)))
+   (->LaserPoint
+    (max -1.0 (min 1.0 (double x)))
+    (max -1.0 (min 1.0 (double y)))
+    (max 0.0 (min 1.0 (double r)))
+    (max 0.0 (min 1.0 (double g)))
+    (max 0.0 (min 1.0 (double b))))))
 
 (defn blanked-point
   "Create a blanked (invisible) point for beam repositioning.
    Per IDN-Stream spec Section 3.4.11, blanking is done by setting all color intensities to 0."
   [x y]
-  (make-point x y 0 0 0))
+  (make-point x y 0.0 0.0 0.0))
 
 (defn blanked?
-  "Check if a point is blanked (invisible)."
+  "Check if a point is blanked (invisible).
+   A point is blanked when all color channels are zero (or very close to zero)."
   [point]
-  (and (zero? (:r point))
-       (zero? (:g point))
-       (zero? (:b point))))
+  (let [epsilon 1e-6]
+    (and (< (:r point) epsilon)
+         (< (:g point) epsilon)
+         (< (:b point) epsilon))))
+
+
+;; Point Value Extraction (for output conversion)
+
+
+(defn point->8bit-color
+  "Extract color from a LaserPoint as 8-bit values [r g b]."
+  [point]
+  [(int (* (:r point) 255))
+   (int (* (:g point) 255))
+   (int (* (:b point) 255))])
+
+(defn point->16bit-color
+  "Extract color from a LaserPoint as 16-bit values [r g b]."
+  [point]
+  [(int (* (:r point) 65535))
+   (int (* (:g point) 65535))
+   (int (* (:b point) 65535))])
+
+(defn point->16bit-xy
+  "Extract coordinates from a LaserPoint as 16-bit signed values [x y]."
+  [point]
+  [(short (* (:x point) 32767))
+   (short (* (:y point) 32767))])
+
+(defn point->8bit-xy
+  "Extract coordinates from a LaserPoint as 8-bit unsigned values [x y].
+   Maps -1.0 to 0, 0.0 to 128, 1.0 to 255."
+  [point]
+  [(int (* (+ (:x point) 1.0) 127.5))
+   (int (* (+ (:y point) 1.0) 127.5))])
 
 
 ;; Frame Construction
@@ -190,5 +213,3 @@
    (make-animation name generator-fn parameters nil))
   ([name generator-fn parameters duration]
    (->Animation name generator-fn parameters duration)))
-
-

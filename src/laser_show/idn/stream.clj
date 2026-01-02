@@ -2,8 +2,12 @@
   "IDN-Stream packet format converter.
    Implements ILDA Digital Network Stream Specification (Revision 002, July 2025).
    https://www.ilda.com/resources/StandardsDocs/ILDA-IDN-Stream-rev002.pdf
-   Converts LaserFrame objects to binary IDN packet format for transmission."
-  (:require [laser-show.animation.types :as t])
+   
+   Converts LaserFrame objects (with normalized point values) to binary IDN 
+   packet format for transmission. Supports configurable bit depths for both
+   color (8/16-bit) and position (8/16-bit)."
+  (:require [laser-show.animation.types :as t]
+            [laser-show.idn.output-config :as output-config])
   (:import [java.nio ByteBuffer ByteOrder]))
 
 (def ^:const CONTENT_ID_CHANNEL_MSG_BASE
@@ -73,28 +77,60 @@
 ;; Per spec Section 2.2: Service ID 0x00 = connect to default service
 (def ^:const DEFAULT_SERVICE_ID 0)
 
-;; Maximum points per packet is determined by:
-;; - UDP max safe size: ~1400 bytes (to avoid fragmentation)
-;; - Packet headers: ~16 bytes
-;; - Per-point data: 7 bytes (X:2, Y:2, R:1, G:1, B:1)
-;; - Safe limit: (1400 - 16) / 7 ≈ 197 points
-;; - Conservative value: 150 points = ~1066 bytes total (well under MTU)
+;; Maximum points per packet - conservative value to avoid UDP fragmentation
 (def ^:const MAX_POINTS_PER_PACKET 150)
 
-(def default-graphic-tags
-  "Default tag configuration for ISP-DB25 compatible X/Y/R/G/B format.
-   Per Section 3.4.10 and 3.4.11 of the spec.
-   NOTE: Void tag added for required 32-bit alignment per Section 3.4.2"
-  [TAG_X TAG_PRECISION        ; X coordinate, 16-bit
-   TAG_Y TAG_PRECISION        ; Y coordinate, 16-bit
-   TAG_COLOR_RED              ; Red, 8-bit
-   TAG_COLOR_GREEN            ; Green, 8-bit
-   TAG_COLOR_BLUE             ; Blue, 8-bit
-   TAG_VOID])                 ; Padding for 32-bit alignment (8 tags = 16 bytes = 4 words)
 
-(def bytes-per-sample
-  "Bytes per sample for default configuration: X(2) + Y(2) + R(1) + G(1) + B(1) = 7"
-  7)
+;; Tag Configurations for Different Bit Depths
+
+
+(def tags-16bit-xy-8bit-color
+  "Standard ISP-DB25: 16-bit XY, 8-bit RGB"
+  [TAG_X TAG_PRECISION    ; X, 16-bit
+   TAG_Y TAG_PRECISION    ; Y, 16-bit
+   TAG_COLOR_RED          ; Red, 8-bit
+   TAG_COLOR_GREEN        ; Green, 8-bit
+   TAG_COLOR_BLUE         ; Blue, 8-bit
+   TAG_VOID])             ; Padding for 32-bit alignment
+
+(def tags-16bit-xy-16bit-color
+  "High precision: 16-bit XY, 16-bit RGB"
+  [TAG_X TAG_PRECISION        ; X, 16-bit
+   TAG_Y TAG_PRECISION        ; Y, 16-bit
+   TAG_COLOR_RED TAG_PRECISION    ; Red, 16-bit
+   TAG_COLOR_GREEN TAG_PRECISION  ; Green, 16-bit
+   TAG_COLOR_BLUE TAG_PRECISION]) ; Blue, 16-bit (10 bytes, no padding needed)
+
+(def tags-8bit-xy-8bit-color
+  "Compact: 8-bit XY, 8-bit RGB"
+  [TAG_X                  ; X, 8-bit
+   TAG_Y                  ; Y, 8-bit
+   TAG_COLOR_RED          ; Red, 8-bit
+   TAG_COLOR_GREEN        ; Green, 8-bit
+   TAG_COLOR_BLUE         ; Blue, 8-bit
+   TAG_VOID])             ; Padding (5 bytes -> 6 for alignment)
+
+(def tags-8bit-xy-16bit-color
+  "High color: 8-bit XY, 16-bit RGB"
+  [TAG_X                      ; X, 8-bit
+   TAG_Y                      ; Y, 8-bit
+   TAG_COLOR_RED TAG_PRECISION    ; Red, 16-bit
+   TAG_COLOR_GREEN TAG_PRECISION  ; Green, 16-bit
+   TAG_COLOR_BLUE TAG_PRECISION   ; Blue, 16-bit
+   TAG_VOID])                 ; Padding for alignment
+
+;; Default tags (for backward compatibility)
+(def default-graphic-tags tags-16bit-xy-8bit-color)
+
+(defn get-tags-for-config
+  "Get appropriate tag configuration for output config."
+  [{:keys [color-bit-depth xy-bit-depth]}]
+  (case [xy-bit-depth color-bit-depth]
+    [16 8]  tags-16bit-xy-8bit-color
+    [16 16] tags-16bit-xy-16bit-color
+    [8 8]   tags-8bit-xy-8bit-color
+    [8 16]  tags-8bit-xy-16bit-color
+    tags-16bit-xy-8bit-color)) ; default
 
 
 ;; SCWC Calculation and Tag Alignment
@@ -144,25 +180,28 @@
 
 (defn packet-size-with-config
   "Calculate total IDN message size with channel configuration"
-  [point-count tags]
-  (+ (channel-message-header-size)
-     (channel-config-header-size)
-     (service-config-size tags)
-     (frame-chunk-header-size)
-     (* bytes-per-sample point-count)))
+  [point-count tags output-config]
+  (let [bytes-per-pt (output-config/bytes-per-sample output-config)]
+    (+ (channel-message-header-size)
+       (channel-config-header-size)
+       (service-config-size tags)
+       (frame-chunk-header-size)
+       (* bytes-per-pt point-count))))
 
 (defn packet-size-without-config
   "Calculate total IDN message size without channel configuration"
-  [point-count]
-  (+ (channel-message-header-size)
-     (frame-chunk-header-size)
-     (* bytes-per-sample point-count)))
+  [point-count output-config]
+  (let [bytes-per-pt (output-config/bytes-per-sample output-config)]
+    (+ (channel-message-header-size)
+       (frame-chunk-header-size)
+       (* bytes-per-pt point-count))))
 
 (defn max-points-for-size
   "Calculate maximum points that fit in given packet size (without config)"
-  [max-size]
-  (quot (- max-size (channel-message-header-size) (frame-chunk-header-size))
-        bytes-per-sample))
+  [max-size output-config]
+  (let [bytes-per-pt (output-config/bytes-per-sample output-config)]
+    (quot (- max-size (channel-message-header-size) (frame-chunk-header-size))
+          bytes-per-pt)))
 
 
 ;; Binary Writing Helpers
@@ -223,14 +262,35 @@
   (.put buf (unchecked-byte (bit-and duration-us 0xFF))))
 
 (defn write-point!
-  "Write a single LaserPoint to ByteBuffer in default format.
-   Format: X (16-bit signed), Y (16-bit signed), R, G, B (8-bit unsigned each)"
-  [^ByteBuffer buf point]
-  (.putShort buf (:x point))
-  (.putShort buf (:y point))
-  (.put buf (unchecked-byte (:r point)))
-  (.put buf (unchecked-byte (:g point)))
-  (.put buf (unchecked-byte (:b point))))
+  "Write a single LaserPoint to ByteBuffer based on output config.
+   
+   Point values are normalized:
+   - x, y: -1.0 to 1.0
+   - r, g, b: 0.0 to 1.0
+   
+   Output format depends on config bit depths."
+  [^ByteBuffer buf point output-config]
+  (let [{:keys [color-bit-depth xy-bit-depth]} output-config
+        ;; Convert using output-config functions
+        x-out (output-config/normalized->output-xy (:x point) xy-bit-depth)
+        y-out (output-config/normalized->output-xy (:y point) xy-bit-depth)
+        r-out (output-config/normalized->output-color (:r point) color-bit-depth)
+        g-out (output-config/normalized->output-color (:g point) color-bit-depth)
+        b-out (output-config/normalized->output-color (:b point) color-bit-depth)]
+    ;; Write XY
+    (if (= xy-bit-depth 16)
+      (do (.putShort buf (short x-out))
+          (.putShort buf (short y-out)))
+      (do (.put buf (unchecked-byte x-out))
+          (.put buf (unchecked-byte y-out))))
+    ;; Write RGB
+    (if (= color-bit-depth 16)
+      (do (.putShort buf (short r-out))
+          (.putShort buf (short g-out))
+          (.putShort buf (short b-out)))
+      (do (.put buf (unchecked-byte r-out))
+          (.put buf (unchecked-byte g-out))
+          (.put buf (unchecked-byte b-out))))))
 
 
 ;; Frame to Packet Conversion
@@ -241,29 +301,30 @@
    Use this when opening a channel or when configuration needs to be sent.
    
    Parameters:
-   - frame: LaserFrame record with :points vector
+   - frame: LaserFrame record with :points vector (normalized values)
    - channel-id: IDN channel ID (0-63)
    - timestamp-us: Timestamp in microseconds
    - duration-us: Frame duration in microseconds
    - opts: Optional map with:
      - :service-id - Target service ID (default 0)
      - :service-mode - Service mode (default GRAPHIC_DISCRETE)
-     - :tags - Configuration tags (default ISP-DB25 compatible)
+     - :output-config - OutputConfig for bit depth (default 8-bit color, 16-bit XY)
      - :close? - Set close flag (default false)
      - :single-scan? - Draw frame only once (default false)
    
    Returns: byte array ready to send"
-  [frame channel-id timestamp-us duration-us & {:keys [service-id service-mode tags close? single-scan?]
+  [frame channel-id timestamp-us duration-us & {:keys [service-id service-mode output-config close? single-scan?]
                                                 :or {service-id DEFAULT_SERVICE_ID
                                                      service-mode SERVICE_MODE_GRAPHIC_DISCRETE
-                                                     tags default-graphic-tags
+                                                     output-config output-config/default-config
                                                      close? false
                                                      single-scan? false}}]
   (let [points (take MAX_POINTS_PER_PACKET (:points frame))
         point-count (count points)
+        tags (get-tags-for-config output-config)
         ;; Calculate SCWC with proper 32-bit alignment
         [scwc padded-tags] (calculate-scwc tags)
-        total-size (packet-size-with-config point-count padded-tags)
+        total-size (packet-size-with-config point-count padded-tags output-config)
         cfl-flags (bit-or CFL_ROUTING (if close? CFL_CLOSE 0))
         chunk-flags (if single-scan? 0x01 0x00)
         buf (ByteBuffer/allocate total-size)]
@@ -277,7 +338,7 @@
     (write-frame-chunk-header! buf chunk-flags duration-us)
 
     (doseq [point points]
-      (write-point! buf point))
+      (write-point! buf point output-config))
 
     (.array buf)))
 
@@ -286,19 +347,21 @@
    Use this for subsequent frames after channel is already configured.
    
    Parameters:
-   - frame: LaserFrame record with :points vector
+   - frame: LaserFrame record with :points vector (normalized values)
    - channel-id: IDN channel ID (0-63)
    - timestamp-us: Timestamp in microseconds
    - duration-us: Frame duration in microseconds
    - opts: Optional map with:
+     - :output-config - OutputConfig for bit depth (default 8-bit color, 16-bit XY)
      - :single-scan? - Draw frame only once (default false)
    
    Returns: byte array ready to send"
-  [frame channel-id timestamp-us duration-us & {:keys [single-scan?]
-                                                :or {single-scan? false}}]
+  [frame channel-id timestamp-us duration-us & {:keys [output-config single-scan?]
+                                                :or {output-config output-config/default-config
+                                                     single-scan? false}}]
   (let [points (take MAX_POINTS_PER_PACKET (:points frame))
         point-count (count points)
-        total-size (packet-size-without-config point-count)
+        total-size (packet-size-without-config point-count output-config)
         chunk-flags (if single-scan? 0x01 0x00)
         buf (ByteBuffer/allocate total-size)]
 
@@ -309,15 +372,18 @@
     (write-frame-chunk-header! buf chunk-flags duration-us)
 
     (doseq [point points]
-      (write-point! buf point))
+      (write-point! buf point output-config))
 
     (.array buf)))
 
 (defn empty-frame-packet
   "Create a packet for an empty frame (no points).
    Per spec Section 6.2: empty sample array voids the frame buffer."
-  [channel-id timestamp-us]
-  (frame->packet (t/empty-frame) channel-id timestamp-us 0))
+  ([channel-id timestamp-us]
+   (empty-frame-packet channel-id timestamp-us output-config/default-config))
+  ([channel-id timestamp-us output-config]
+   (frame->packet (t/empty-frame) channel-id timestamp-us 0
+                  :output-config output-config)))
 
 (defn close-channel-packet
   "Create a packet to close a channel.
@@ -425,3 +491,10 @@
   "Calculate frame duration in microseconds for given FPS"
   [fps]
   (long (/ 1000000 fps)))
+
+
+;; Legacy compatibility - bytes-per-sample for default config
+(def bytes-per-sample
+  "Bytes per sample for default configuration (8-bit color, 16-bit XY): 
+   X(2) + Y(2) + R(1) + G(1) + B(1) = 7"
+  7)

@@ -2,6 +2,9 @@
   "Intensity effects for laser frames.
    Includes intensity control, blackout, threshold, and gamma effects.
    
+   NOTE: All color values are NORMALIZED (0.0-1.0), not 8-bit (0-255).
+   This provides full precision for intensity calculations.
+   
    All effects support both static values and modulators:
    ;; Static
    {:effect-id :intensity :params {:amount 0.5}}
@@ -38,17 +41,17 @@
            (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
                  amount (:amount resolved)]
              (assoc pt
-               :r (int (common/clamp-byte (* r amount)))
-               :g (int (common/clamp-byte (* g amount)))
-               :b (int (common/clamp-byte (* b amount)))))))
+               :r (common/clamp-normalized (* r amount))
+               :g (common/clamp-normalized (* g amount))
+               :b (common/clamp-normalized (* b amount))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm)
           amount (:amount resolved)]
       (map (fn [{:keys [r g b] :as pt}]
              (assoc pt
-               :r (int (common/clamp-byte (* r amount)))
-               :g (int (common/clamp-byte (* g amount)))
-               :b (int (common/clamp-byte (* b amount)))))))))
+               :r (common/clamp-normalized (* r amount))
+               :g (common/clamp-normalized (* g amount))
+               :b (common/clamp-normalized (* b amount))))))))
 
 (effects/register-effect!
  {:id :intensity
@@ -72,7 +75,7 @@
         enabled (:enabled resolved)]
     (if enabled
       (map (fn [pt]
-             (assoc pt :r 0 :g 0 :b 0)))
+             (assoc pt :r 0.0 :g 0.0 :b 0.0)))
       (map identity))))
 
 (effects/register-effect!
@@ -96,18 +99,20 @@
     ;; Per-point path
     (map (fn [{:keys [x y r g b idx count] :as pt}]
            (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
-                 threshold (:threshold resolved)
+                 ;; Convert threshold from 0-255 to 0.0-1.0
+                 threshold (/ (:threshold resolved) 255.0)
                  max-val (max r g b)]
              (if (< max-val threshold)
-               (assoc pt :r 0 :g 0 :b 0)
+               (assoc pt :r 0.0 :g 0.0 :b 0.0)
                pt))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm)
-          threshold (:threshold resolved)]
+          ;; Convert threshold from 0-255 to 0.0-1.0
+          threshold (/ (:threshold resolved) 255.0)]
       (map (fn [{:keys [r g b] :as pt}]
              (let [max-val (max r g b)]
                (if (< max-val threshold)
-                 (assoc pt :r 0 :g 0 :b 0)
+                 (assoc pt :r 0.0 :g 0.0 :b 0.0)
                  pt)))))))
 
 (effects/register-effect!
@@ -136,18 +141,18 @@
                  gamma (:gamma resolved)
                  inv-gamma (/ 1.0 gamma)]
              (assoc pt
-               :r (int (common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) inv-gamma))))
-               :g (int (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) inv-gamma))))
-               :b (int (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) inv-gamma))))))))
+               :r (common/clamp-normalized (Math/pow r inv-gamma))
+               :g (common/clamp-normalized (Math/pow g inv-gamma))
+               :b (common/clamp-normalized (Math/pow b inv-gamma))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm)
           gamma (:gamma resolved)
           inv-gamma (/ 1.0 gamma)]
       (map (fn [{:keys [r g b] :as pt}]
              (assoc pt
-               :r (int (common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) inv-gamma))))
-               :g (int (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) inv-gamma))))
-               :b (int (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) inv-gamma))))))))))
+               :r (common/clamp-normalized (Math/pow r inv-gamma))
+               :g (common/clamp-normalized (Math/pow g inv-gamma))
+               :b (common/clamp-normalized (Math/pow b inv-gamma))))))))
 
 (effects/register-effect!
  {:id :gamma

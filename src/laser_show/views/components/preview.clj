@@ -2,9 +2,13 @@
   "Preview panel component for displaying laser frame output.
    
    This component renders the current laser frame to a JavaFX Canvas.
-   The :draw prop is a function that receives the Canvas and renders to it."
+   The :draw prop is a function that receives the Canvas and renders to it.
+   
+   NOTE: LaserPoints now use NORMALIZED colors (0.0-1.0).
+   This module converts normalized values to 8-bit for JavaFX Color display."
   (:require [cljfx.api :as fx]
-            [laser-show.subs :as subs])
+            [laser-show.subs :as subs]
+            [laser-show.animation.types :as t])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.paint Color]))
 
@@ -17,10 +21,30 @@
   [normalized size]
   (* (+ normalized 1.0) 0.5 size))
 
-(defn- color-from-rgb
-  "Create JavaFX Color from RGB values (0-255)."
+(defn- color-from-normalized
+  "Create JavaFX Color from normalized RGB values (0.0-1.0).
+   Clamps values to valid range."
   [r g b]
-  (Color/rgb (int r) (int g) (int b)))
+  (Color/color (max 0.0 (min 1.0 (double (or r 1.0))))
+               (max 0.0 (min 1.0 (double (or g 1.0))))
+               (max 0.0 (min 1.0 (double (or b 1.0))))))
+
+;; Legacy helper for backward compatibility
+(defn- color-from-rgb
+  "Create JavaFX Color from RGB values.
+   Handles both normalized (0.0-1.0) and 8-bit (0-255) values."
+  [r g b]
+  (let [r (or r 1.0)
+        g (or g 1.0)
+        b (or b 1.0)]
+    ;; Detect if values are normalized or 8-bit
+    (if (or (> r 1.0) (> g 1.0) (> b 1.0))
+      ;; 8-bit values
+      (Color/rgb (int (max 0 (min 255 r)))
+                 (int (max 0 (min 255 g)))
+                 (int (max 0 (min 255 b))))
+      ;; Normalized values (0.0-1.0)
+      (color-from-normalized r g b))))
 
 
 ;; Frame Drawing
@@ -39,15 +63,22 @@
   ;; Vertical center line
   (.strokeLine gc (/ width 2) 0 (/ width 2) height))
 
+(defn- point-blanked?
+  "Check if a point is blanked.
+   Works with both normalized colors and legacy :blanked? key."
+  [{:keys [r g b blanked?]}]
+  (or blanked?
+      (t/blanked? {:r (or r 0) :g (or g 0) :b (or b 0)})))
+
 (defn- draw-frame-points
   "Draw frame points as dots."
   [^GraphicsContext gc width height frame]
   (when-let [points (:points frame)]
-    (doseq [{:keys [x y r g b blanked?]} points]
-      (when-not blanked?
+    (doseq [{:keys [x y r g b] :as pt} points]
+      (when-not (point-blanked? pt)
         (let [px (normalize-coord x width)
               py (normalize-coord (- y) height)  ;; Flip Y for screen coords
-              color (color-from-rgb (or r 255) (or g 255) (or b 255))]
+              color (color-from-rgb r g b)]
           (.setFill gc color)
           (.fillOval gc (- px 2) (- py 2) 4 4))))))
 
@@ -57,14 +88,12 @@
   (when-let [points (:points frame)]
     (let [point-pairs (partition 2 1 points)]
       (doseq [[p1 p2] point-pairs]
-        (when (and (not (:blanked? p1)) (not (:blanked? p2)))
+        (when (and (not (point-blanked? p1)) (not (point-blanked? p2)))
           (let [x1 (normalize-coord (:x p1) width)
                 y1 (normalize-coord (- (:y p1)) height)
                 x2 (normalize-coord (:x p2) width)
                 y2 (normalize-coord (- (:y p2)) height)
-                color (color-from-rgb (or (:r p1) 255) 
-                                      (or (:g p1) 255) 
-                                      (or (:b p1) 255))]
+                color (color-from-rgb (:r p1) (:g p1) (:b p1))]
             (.setStroke gc color)
             (.setLineWidth gc 2)
             (.strokeLine gc x1 y1 x2 y2)))))))

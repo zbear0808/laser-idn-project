@@ -18,17 +18,18 @@
      ;; Returns a transducer that transforms normalized points
      (map (fn [pt] ...)))
    
-   Normalized point format:
+   Normalized point format (ALL VALUES ARE NORMALIZED FLOATS):
    {:x double (-1.0 to 1.0)
     :y double (-1.0 to 1.0)
-    :r int (0-255)
-    :g int (0-255)
-    :b int (0-255)
+    :r double (0.0 to 1.0) - normalized red
+    :g double (0.0 to 1.0) - normalized green
+    :b double (0.0 to 1.0) - normalized blue
     :idx int (point index)
     :count int (total points)
-    :raw map (original point for pass-through)}"
+    :raw map (original LaserPoint for pass-through)}"
   (:require [laser-show.animation.time :as time]
-            [laser-show.animation.modulation :as mod]))
+            [laser-show.animation.modulation :as mod]
+            [laser-show.animation.types :as t]))
 
 
 ;; Timing Modes
@@ -134,41 +135,49 @@
 
 
 ;; Point Normalization Transducers
+;;
+;; Since LaserPoint now uses normalized values internally (x, y: -1.0 to 1.0,
+;; r, g, b: 0.0 to 1.0), normalization is simpler - we just copy the values
+;; and add the :raw reference for reconstruction.
 
 
 (defn normalize-point
-  "Convert a raw frame point to normalized format.
+  "Convert a LaserPoint to normalized working format for effects.
    
-   Raw format: {:x short :y short :r byte :g byte :b byte}
-   Normalized: {:x [-1.0, 1.0] :y [-1.0, 1.0] :r [0-255] :g [0-255] :b [0-255] :raw original}"
+   LaserPoint format (already normalized):
+   {:x double (-1.0 to 1.0), :y double (-1.0 to 1.0),
+    :r double (0.0-1.0), :g double (0.0-1.0), :b double (0.0-1.0)}
+   
+   Working format adds :raw reference:
+   {:x double, :y double, :r double, :g double, :b double, :raw LaserPoint}"
   [point]
-  {:x (/ (:x point) 32767.0)
-   :y (/ (:y point) 32767.0)
-   :r (bit-and (:r point) 0xFF)
-   :g (bit-and (:g point) 0xFF)
-   :b (bit-and (:b point) 0xFF)
+  {:x (:x point)
+   :y (:y point)
+   :r (:r point)
+   :g (:g point)
+   :b (:b point)
    :raw point})
 
 (defn denormalize-point
-  "Convert a normalized point back to raw frame format.
+  "Convert a normalized working point back to LaserPoint.
    Returns nil if input is nil (supports point filtering).
    
-   Clamps coordinates to [-1.0, 1.0] and colors to [0, 255]."
+   Clamps coordinates to [-1.0, 1.0] and colors to [0.0, 1.0]."
   [pt]
   (when pt
-    (assoc (:raw pt)
-      :x (short (Math/round (* (max -1.0 (min 1.0 (double (:x pt)))) 32767.0)))
-      :y (short (Math/round (* (max -1.0 (min 1.0 (double (:y pt)))) 32767.0)))
-      :r (unchecked-byte (max 0 (min 255 (int (:r pt)))))
-      :g (unchecked-byte (max 0 (min 255 (int (:g pt)))))
-      :b (unchecked-byte (max 0 (min 255 (int (:b pt))))))))
+    (t/make-point
+     (:x pt)
+     (:y pt)
+     (:r pt)
+     (:g pt)
+     (:b pt))))
 
 (def normalize-xf
-  "Transducer that normalizes raw frame points."
+  "Transducer that converts LaserPoints to normalized working format."
   (map normalize-point))
 
 (def denormalize-xf
-  "Transducer that converts normalized points back to raw format.
+  "Transducer that converts normalized working points back to LaserPoints.
    Uses `keep` to support point deletion (nil -> filtered out)."
   (keep denormalize-point))
 
@@ -353,15 +362,43 @@
 (defn color-xf
   "Create a color transformation transducer that skips blanked points.
    
-   The transform-fn receives {:r :g :b} and returns {:r :g :b}.
-   Blanked points (r=g=b=0) are passed through unchanged.
+   The transform-fn receives {:r :g :b} with NORMALIZED values (0.0-1.0)
+   and returns {:r :g :b} also with normalized values.
    
-   Example:
+   Blanked points (r=g=b=0.0) are passed through unchanged.
+   
+   Example (invert colors):
    (color-xf
      (fn [{:keys [r g b]}]
-       {:r (- 255 r) :g (- 255 g) :b (- 255 b)}))"
+       {:r (- 1.0 r) :g (- 1.0 g) :b (- 1.0 b)}))"
   [transform-fn]
-  (map (fn [{:keys [r g b] :as pt}]
-         (if (and (zero? r) (zero? g) (zero? b))
-           pt  ;; Skip blanked points
-           (merge pt (transform-fn pt))))))
+  (let [epsilon 1e-6]
+    (map (fn [{:keys [r g b] :as pt}]
+           (if (and (< r epsilon) (< g epsilon) (< b epsilon))
+             pt  ;; Skip blanked points
+             (merge pt (transform-fn pt)))))))
+
+
+;;; ============================================================
+;;; Precision Notes
+;;; ============================================================
+;;
+;; LaserPoint uses Java `double` (64-bit IEEE 754) for all values:
+;; - x, y: normalized coordinates (-1.0 to 1.0)
+;; - r, g, b: normalized colors (0.0 to 1.0)
+;;
+;; Precision guarantee:
+;; - 64-bit double has 52 bits of mantissa precision
+;; - 16-bit integer requires only 16 bits of precision
+;; - Therefore double can represent every possible 16-bit step
+;;   (1/65535 ≈ 1.5e-5) with negligible error (~1e-16)
+;;
+;; When converting back to integer:
+;; - `(int (* normalized 65535))` preserves full 16-bit precision
+;; - `(int (* normalized 255))` preserves full 8-bit precision
+;; - No quantization artifacts from intermediate calculations
+;;
+;; This approach gives us:
+;; - Full precision for effects and color calculations
+;; - Lossless conversion to any output bit depth (8, 16, or even higher)
+;; - Better interpolation quality than integer math
