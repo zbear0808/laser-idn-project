@@ -128,9 +128,10 @@
 
 
 (defn effect-instance-enabled?
-  "Check if an effect instance is enabled."
+  "Check if an effect instance is enabled.
+   Returns true if :enabled? is true or missing (for backward compatibility)."
   [instance]
-  (:enabled instance true))
+  (:enabled? instance true))
 
 
 

@@ -139,43 +139,60 @@
 
 (defn- chain-item-card
   "A single effect in the chain sidebar with drag-and-drop support.
-   Shows effect name with a delete button. Reorder via drag-and-drop.
-   Supports multi-select with Click/Ctrl+Click/Shift+Click."
+   Shows enable checkbox, effect name with delete button.
+   Supports multi-select with Click/Ctrl+Click/Shift+Click on the name label."
   [{:keys [col row effect-idx effect effect-def selected? dragging? drop-target? chain-count]}]
-  {:fx/type fx/ext-on-instance-lifecycle
-   :on-created (fn [node]
-                 ;; Use events/dispatch! directly - this handles state updates correctly
-                 (let [dispatch! (fn [event]
-                                   (events/dispatch! event))]
-                   (setup-drag-source! node effect-idx col row dispatch!)
-                   (setup-drag-target! node effect-idx col row chain-count dispatch!)
-                   (setup-click-handler! node effect-idx)))
-   :desc {:fx/type :h-box
-          :spacing 6
-          :alignment :center-left
-          :style (str "-fx-background-color: " (cond
-                                                  drop-target? "#5A8FCF"
-                                                  selected? "#4A6FA5"
-                                                  :else "#3D3D3D") ";"
-                      "-fx-padding: 6 8;"
-                      "-fx-background-radius: 4;"
-                      "-fx-cursor: hand;"
-                      (when drop-target? "-fx-border-color: #7AB8FF; -fx-border-width: 2 0 0 0;")
-                      (when dragging? "-fx-opacity: 0.5;"))
-          :children [{:fx/type :label
-                      :text "⠿"
-                      :style "-fx-text-fill: #606060; -fx-font-size: 10; -fx-cursor: move;"} 
-                     {:fx/type :label
-                      :text (or (:name effect-def) "Unknown")
-                      :style (str "-fx-text-fill: " (if selected? "white" "#E0E0E0") ";"
-                                  "-fx-font-size: 12;")}
-                     {:fx/type :region :h-box/hgrow :always}
-                     {:fx/type :button
-                      :text "✕"
-                      :style "-fx-background-color: #D32F2F; -fx-text-fill: white; -fx-padding: 1 3; -fx-font-size: 5;"
-                      :on-action {:event/type :effects/remove-from-chain-and-clear-selection
-                                  :col col :row row
-                                  :effect-idx effect-idx}}]}})
+  (let [enabled? (:enabled? effect true)]
+    {:fx/type fx/ext-on-instance-lifecycle
+     :on-created (fn [node]
+                   ;; Use events/dispatch! directly - this handles state updates correctly
+                   (let [dispatch! (fn [event]
+                                     (events/dispatch! event))]
+                     (setup-drag-source! node effect-idx col row dispatch!)
+                     (setup-drag-target! node effect-idx col row chain-count dispatch!)))
+     :desc {:fx/type :h-box
+            :spacing 6
+            :alignment :center-left
+            :style (str "-fx-background-color: " (cond
+                                                    drop-target? "#5A8FCF"
+                                                    selected? "#4A6FA5"
+                                                    :else "#3D3D3D") ";"
+                        "-fx-padding: 6 8;"
+                        "-fx-background-radius: 4;"
+                        (when drop-target? "-fx-border-color: #7AB8FF; -fx-border-width: 2 0 0 0;")
+                        (when dragging? "-fx-opacity: 0.5;")
+                        (when-not enabled? "-fx-opacity: 0.6;"))
+            :children [{:fx/type :label
+                        :text "⠿"
+                        :style "-fx-text-fill: #606060; -fx-font-size: 10; -fx-cursor: move;"}
+                       
+                       ;; Enable/disable checkbox (does NOT trigger selection)
+                       {:fx/type :check-box
+                        :selected enabled?
+                        :on-selected-changed {:event/type :effects/set-effect-enabled
+                                              :col col :row row
+                                              :effect-idx effect-idx}}
+                       
+                       ;; Effect name - clickable for selection
+                       {:fx/type fx/ext-on-instance-lifecycle
+                        :on-created (fn [node]
+                                      (setup-click-handler! node effect-idx))
+                        :desc {:fx/type :label
+                               :text (or (:name effect-def) "Unknown")
+                               :style (str "-fx-text-fill: "
+                                          (cond
+                                            (not enabled?) "#808080"
+                                            selected? "white"
+                                            :else "#E0E0E0") ";"
+                                          "-fx-font-size: 12;"
+                                          "-fx-cursor: hand;")}}
+                       {:fx/type :region :h-box/hgrow :always}
+                       {:fx/type :button
+                        :text "✕"
+                        :style "-fx-background-color: #D32F2F; -fx-text-fill: white; -fx-padding: 1 3; -fx-font-size: 5;"
+                        :on-action {:event/type :effects/remove-from-chain-and-clear-selection
+                                    :col col :row row
+                                    :effect-idx effect-idx}}]}}))
 
 (defn- chain-list-sidebar
   "Left sidebar showing the effect chain with drag-and-drop reordering.

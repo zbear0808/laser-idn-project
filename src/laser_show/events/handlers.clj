@@ -143,10 +143,22 @@
   (let [ensure-cell (fn [s]
                       (if (get-in s [:effects :cells [col row]])
                         s
-                        (assoc-in s [:effects :cells [col row]] {:effects [] :active true})))]
+                        (assoc-in s [:effects :cells [col row]] {:effects [] :active true})))
+        effect-with-enabled (cond-> effect
+                              (not (contains? effect :enabled?))
+                              (assoc :enabled? true))]
     {:state (-> state
                 ensure-cell
-                (update-in [:effects :cells [col row] :effects] conj effect)
+                (update-in [:effects :cells [col row] :effects] conj effect-with-enabled)
+                mark-dirty)}))
+
+(defn- handle-effects-set-effect-enabled
+  "Set an individual effect's enabled state within the chain.
+   The enabled value comes from the checkbox's :fx/event."
+  [{:keys [col row effect-idx state] :as event}]
+  (let [enabled? (:fx/event event)]
+    {:state (-> state
+                (assoc-in [:effects :cells [col row] :effects effect-idx :enabled?] enabled?)
                 mark-dirty)}))
 
 (defn- handle-effects-remove-effect
@@ -785,6 +797,7 @@
     :effects/move-cell (handle-effects-move-cell event)
     :effects/select-cell (handle-effects-select-cell event)
     :effects/remove-from-chain-and-clear-selection (handle-effects-remove-from-chain-and-clear-selection event)
+    :effects/set-effect-enabled (handle-effects-set-effect-enabled event)
     
     ;; Effect chain editor multi-select events
     :effects/select-effect (handle-effects-select-effect event)
