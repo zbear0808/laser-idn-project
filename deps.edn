@@ -20,14 +20,16 @@
  
  :aliases
  {:laser-show
-  {:jvm-opts ["-Djavafx.enablePreview=true"]
+  {:jvm-opts ["-Djavafx.enablePreview=true"
+              "-Djavafx.suppressPreviewWarning=true"]
    :main-opts ["-m" "laser-show.app"]}
   
   :idn-hello
   {:main-opts ["-m" "idn-hello.core"]}
   
   :repl
-  {:jvm-opts ["-Djavafx.enablePreview=true"]
+  {:jvm-opts ["-Djavafx.enablePreview=true"
+              "-Djavafx.suppressPreviewWarning=true"]
    :extra-deps {nrepl/nrepl {:mvn/version "1.3.1"}
                 cider/cider-nrepl {:mvn/version "0.57.0"}}
    :main-opts ["-m" "nrepl.cmdline" 
@@ -35,7 +37,8 @@
   
   :dev
   {:extra-paths ["dev"]
-   :jvm-opts ["-Djavafx.enablePreview=true"]
+   :jvm-opts ["-Djavafx.enablePreview=true"
+              "-Djavafx.suppressPreviewWarning=true"]
    :extra-deps {nrepl/nrepl {:mvn/version "1.3.1"}
                 cider/cider-nrepl {:mvn/version "0.57.0"}
                 org.clojure/tools.namespace {:mvn/version "1.5.0"}
@@ -43,7 +46,8 @@
   
   :test
   {:extra-paths ["test"]
-   :jvm-opts ["-Djavafx.enablePreview=true"]
+   :jvm-opts ["-Djavafx.enablePreview=true"
+              "-Djavafx.suppressPreviewWarning=true"]
    :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" 
                                                        :git/sha "dfb30dd"}}
    :main-opts ["-m" "cognitect.test-runner" 
@@ -53,7 +57,8 @@
   
   :test-integration
   {:extra-paths ["test"]
-   :jvm-opts ["-Djavafx.enablePreview=true"]
+   :jvm-opts ["-Djavafx.enablePreview=true"
+              "-Djavafx.suppressPreviewWarning=true"]
    :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" 
                                                        :git/sha "dfb30dd"}}
    :main-opts ["-m" "cognitect.test-runner" "-d" "test/integration"]
@@ -61,7 +66,8 @@
   
   :test-all
   {:extra-paths ["test"]
-   :jvm-opts ["-Djavafx.enablePreview=true"]
+   :jvm-opts ["-Djavafx.enablePreview=true"
+              "-Djavafx.suppressPreviewWarning=true"]
    :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" 
                                                        :git/sha "dfb30dd"}}
    :main-opts ["-m" "cognitect.test-runner"]
@@ -105,6 +111,7 @@
                :extra-paths ["test"] ;; If you want it to be able to run the tests
                ;; Option for clj-async-profiler
                :jvm-opts ["-Djavafx.enablePreview=true"
+                          "-Djavafx.suppressPreviewWarning=true"
                           "-Djdk.attach.allowAttachSelf"
                           "-XX:+UnlockDiagnosticVMOptions"
                           "-XX:+DebugNonSafepoints"
