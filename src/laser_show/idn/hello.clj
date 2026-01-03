@@ -379,6 +379,110 @@
        :host-name (str/trim (String. host-name-bytes "UTF-8"))})))
 
 
+;; Service Map Response Parsing
+;; Per IDN-Hello spec section 4.2
+
+
+(defn- parse-service-map-entry
+ "Parse a single service map entry (24 bytes per entry).
+  
+  Entry structure:
+  - Octet 0: Service ID (1-255 for services, 0 for relays)
+  - Octet 1: Service Type (defines the type of service, e.g., laser output)
+  - Octet 2: Flags (bit 0 = DSID default service marker)
+  - Octet 3: Relay Number (0 = root service, 1-255 = relay reference)
+  - Octet 4-23: Name (20 bytes UTF-8, null-padded)"
+ [^bytes data offset entry-size]
+ (when (>= (- (alength data) offset) entry-size)
+   (let [buf (ByteBuffer/wrap data offset entry-size)]
+     (.order buf ByteOrder/BIG_ENDIAN)
+     (let [service-id (bit-and (.get buf) 0xFF)
+           service-type (bit-and (.get buf) 0xFF)
+           flags (.get buf)
+           relay-number (bit-and (.get buf) 0xFF)
+           ;; Name is 20 bytes in standard entry size of 24
+           name-length (- entry-size 4)
+           name-bytes (byte-array name-length)
+           _ (.get buf name-bytes)]
+       {:service-id service-id
+        :service-type service-type
+        :flags {:default-service (bit-test flags 0)}
+        :relay-number relay-number
+        :name (str/trim (String. name-bytes "UTF-8"))}))))
+
+(defn parse-service-map-response
+ "Parse a service map response packet to extract available services.
+  
+  Response structure:
+  - Octet 0-3: IDN-Hello header
+  - Octet 4: Struct Size (response header size)
+  - Octet 5: Entry Size (size of each table entry)
+  - Octet 6: Relay Count (number of relay entries)
+  - Octet 7: Service Count (number of service entries)
+  - Followed by: Relay table (relay-count × entry-size bytes)
+  - Followed by: Service table (service-count × entry-size bytes)
+  
+  Returns {:relays [...] :services [...]} where each entry contains:
+  - :service-id - Service identifier (1-255)
+  - :service-type - Type of service (per IDN-Stream spec)
+  - :flags - {:default-service true/false}
+  - :relay-number - 0 for root services, or relay table index
+  - :name - Human-readable service name"
+ [data]
+ (when (>= (count data) 8)  ; 4 byte header + 4 byte response header minimum
+   (let [buf (ByteBuffer/wrap data 4 4)
+         _ (.order buf ByteOrder/BIG_ENDIAN)
+         struct-size (bit-and (.get buf) 0xFF)
+         entry-size (bit-and (.get buf) 0xFF)
+         relay-count (bit-and (.get buf) 0xFF)
+         service-count (bit-and (.get buf) 0xFF)
+         ;; Calculate table offsets
+         header-end (+ 4 struct-size)  ; After IDN-Hello header + response header
+         relay-table-end (+ header-end (* relay-count entry-size))]
+     (when (>= (count data) (+ relay-table-end (* service-count entry-size)))
+       {:struct-size struct-size
+        :entry-size entry-size
+        :relay-count relay-count
+        :service-count service-count
+        :relays (vec (for [i (range relay-count)]
+                       (parse-service-map-entry
+                         (byte-array data)
+                         (+ header-end (* i entry-size))
+                         entry-size)))
+        :services (vec (for [i (range service-count)]
+                         (parse-service-map-entry
+                           (byte-array data)
+                           (+ relay-table-end (* i entry-size))
+                           entry-size)))}))))
+
+
+;; Service Type Constants (from IDN-Stream spec)
+;; Service types 0x00 to 0x3F specify interfaces
+;; Service types 0x80 to 0xBF specify media types
+
+
+(def ^:const SERVICE_TYPE_VOID 0x00)
+(def ^:const SERVICE_TYPE_UART 0x04)
+(def ^:const SERVICE_TYPE_DMX512 0x05)
+(def ^:const SERVICE_TYPE_MIDI 0x08)
+(def ^:const SERVICE_TYPE_LASER_OUTPUT 0x80)
+(def ^:const SERVICE_TYPE_AUDIO 0x84)
+
+(def service-type-names
+  "Human-readable names for IDN service types"
+  {0x00 "Void/Unknown"
+   0x04 "Generic UART Interface"
+   0x05 "Generic DMX512 Interface"
+   0x08 "Generic MIDI Interface"
+   0x80 "Standard Laser Projector"
+   0x84 "Standard Audio Processing"})
+
+(defn service-type-name
+  "Get human-readable name for a service type, or return hex string if unknown"
+  [type]
+  (get service-type-names type (format "Unknown (0x%02X)" type)))
+
+
 ;; Device Ping
 
 
@@ -569,6 +673,150 @@
                     (or (not exclude-occupied)
                         (not (:occupied status))))]
      dac-id)))
+
+
+;; Service Enumeration
+;; Query individual devices for their available output services
+
+
+(defn enumerate-device-services
+  "Query a discovered device for its available services/outputs.
+   Sends a Service Map Request and parses the response.
+   
+   - host: Device IP address
+   - timeout-ms: Response timeout (default 2000ms)
+   
+   Returns {:relays [...] :services [...]} or nil if no response.
+   Each service entry contains:
+   - :service-id - Unique service identifier (1-255)
+   - :service-type - Type of service (1 = laser output)
+   - :name - Human-readable service name
+   - :flags - {:default-service true/false}"
+  ([host]
+   (enumerate-device-services host 2000))
+  ([host timeout-ms]
+   (let [socket (create-udp-socket)]
+     (try
+       (println (format "[DEBUG] Sending Service Map Request to %s" host))
+       (send-service-map-request socket host 1)
+       (if-let [response (receive-packet socket 1024 timeout-ms)]
+         (do
+           (println (format "[DEBUG] Received response from %s:%d, length=%d bytes"
+                           (.getHostAddress (:address response))
+                           (:port response)
+                           (:length response)))
+           (println (format "[DEBUG] Raw data: %s" (bytes-to-hex (:data response))))
+           (let [header (parse-packet-header (:data response))
+                 cmd-byte (bit-and (:command header) 0xFF)]
+             (println (format "[DEBUG] Header: command=0x%02X, client-group=%d, sequence=%d"
+                             cmd-byte
+                             (:client-group header)
+                             (:sequence header)))
+             (if (= cmd-byte CMD_SERVICE_MAP_RESPONSE)
+               (let [parsed (parse-service-map-response (:data response))]
+                 (println (format "[DEBUG] Parsed service map: struct-size=%d, entry-size=%d, relay-count=%d, service-count=%d"
+                                 (:struct-size parsed)
+                                 (:entry-size parsed)
+                                 (:relay-count parsed)
+                                 (:service-count parsed)))
+                 (println (format "[DEBUG] Services: %s" (pr-str (:services parsed))))
+                 parsed)
+               (do
+                 (println (format "[DEBUG] Unexpected command: expected 0x%02X (SERVICE_MAP_RESPONSE), got 0x%02X"
+                                 CMD_SERVICE_MAP_RESPONSE cmd-byte))
+                 nil))))
+         (do
+           (println "[DEBUG] No response received (timeout)")
+           nil))
+       (finally
+         (.close socket))))))
+
+(defn filter-laser-services
+  "Filter services to only include laser output services (type 1).
+   
+   - services: Vector of service maps from enumerate-device-services
+   
+   Returns filtered vector of laser output services."
+  [services]
+  (filterv #(= (:service-type %) SERVICE_TYPE_LASER_OUTPUT) services))
+
+(defn discover-devices-with-services
+  "Discover devices and enumerate their services in one operation.
+   
+   - broadcast-address: Network broadcast address (e.g., '192.168.1.255')
+   - timeout-ms: How long to wait for scan responses (default 3000ms)
+   - service-timeout-ms: Timeout for each service map request (default 1000ms)
+   
+   Returns a vector of device maps, each with an additional :services key
+   containing the laser output services available on that device."
+  ([broadcast-address]
+   (discover-devices-with-services broadcast-address 3000 1000))
+  ([broadcast-address timeout-ms]
+   (discover-devices-with-services broadcast-address timeout-ms 1000))
+  ([broadcast-address timeout-ms service-timeout-ms]
+   (let [devices (discover-devices broadcast-address timeout-ms)]
+     (vec (for [device devices]
+            (let [service-map (enumerate-device-services (:address device) service-timeout-ms)
+                  laser-services (when service-map
+                                   (filter-laser-services (:services service-map)))]
+              (assoc device
+                     :services (or laser-services [])
+                     :relays (get service-map :relays []))))))))
+
+(defn discover-and-register-with-services!
+  "Scans the network for devices, enumerates their services, and registers
+   each service as a separate DAC entry.
+   
+   This creates one DAC registry entry per laser output service, allowing
+   multiple outputs per device to be configured independently.
+   
+   - broadcast-address: Network broadcast address
+   - timeout-ms: Scan timeout
+   - service-timeout-ms: Service map request timeout
+   - opts: Optional map with:
+     - :clear-existing - If true, clears registry first
+     - :only-laser-outputs - If true (default), only register laser output services
+   
+   Returns vector of registered DAC IDs."
+  ([broadcast-address]
+   (discover-and-register-with-services! broadcast-address 3000 1000 {}))
+  ([broadcast-address timeout-ms]
+   (discover-and-register-with-services! broadcast-address timeout-ms 1000 {}))
+  ([broadcast-address timeout-ms service-timeout-ms]
+   (discover-and-register-with-services! broadcast-address timeout-ms service-timeout-ms {}))
+  ([broadcast-address timeout-ms service-timeout-ms {:keys [clear-existing only-laser-outputs]
+                                                      :or {clear-existing false
+                                                           only-laser-outputs true}}]
+   (when clear-existing
+     (clear-dac-registry!))
+   (let [devices (discover-devices-with-services broadcast-address timeout-ms service-timeout-ms)]
+     (doseq [device devices]
+       (let [host-name (or (:host-name device) (:address device))
+             services (if only-laser-outputs
+                        (filter-laser-services (:services device))
+                        (:services device))]
+         ;; If device has services, register each one
+         (if (seq services)
+           (doseq [service services]
+             (let [service-name (str host-name " - " (or (:name service) (str "Output " (:service-id service))))
+                   dac-id (keyword (str/lower-case
+                                    (str/replace
+                                     (str (:address device) "-" (:service-id service))
+                                     #"[\s\.]+" "-")))]
+               (register-dac! dac-id
+                              (assoc device
+                                     :service-id (:service-id service)
+                                     :service-name (:name service)
+                                     :service-type (:service-type service)
+                                     :display-name service-name))
+               (println (format "Registered: %s -> %s (service %d)"
+                               dac-id (:address device) (:service-id service)))))
+           ;; No services found, register device as-is (service-id 0 = default)
+           (let [dac-id (keyword (str/lower-case (str/replace host-name #"[\s\.]+" "-")))]
+             (register-dac! dac-id (assoc device :service-id 0 :display-name host-name))
+             (println (format "Registered: %s -> %s (default service)"
+                             dac-id (:address device)))))))
+     (vec (list-dacs)))))
 
 
 ;; Main Entry Point
