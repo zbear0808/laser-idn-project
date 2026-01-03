@@ -27,7 +27,8 @@
        ...))"
   (:require [cljfx.api :as fx]
             [laser-show.state.extractors :as ex]
-            [laser-show.css.core :as css]))
+            [laser-show.css.core :as css]
+            [laser-show.animation.effects :as effects]))
 
 
 ;; Level 1: Domain Accessors (fx/sub-val wrappers)
@@ -180,8 +181,8 @@
    
    Returns map with:
    - :col, :row - position
-   - :effect-count - number of effects in chain
-   - :first-effect-id - id of first effect
+   - :effect-count - number of actual effects in chain (flattened, excludes groups)
+   - :first-effect-id - id of first effect (not group)
    - :active? - is effect chain active?
    - :has-effects? - does cell have any effects?
    - :display-text - text to display in the cell"
@@ -189,8 +190,10 @@
   (let [cells (fx/sub-ctx context effects-cells)
         cell-data (get cells [col row])
         effect-chain (:effects cell-data [])
-        first-effect (first effect-chain)
-        effect-count (count effect-chain)]
+        ;; Flatten the chain to get actual effects (not groups)
+        flattened-effects (effects/flatten-chain effect-chain)
+        first-effect (first flattened-effects)
+        effect-count (count flattened-effects)]
     {:col col
      :row row
      :effect-count effect-count

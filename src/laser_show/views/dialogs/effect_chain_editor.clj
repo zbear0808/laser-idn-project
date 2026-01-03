@@ -19,8 +19,9 @@
             [laser-show.state.clipboard :as clipboard]
             [laser-show.css.core :as css]
             [laser-show.views.components.tabs :as tabs]
-            [laser-show.views.components.custom-param-renderers :as custom-renderers])
-  (:import [javafx.scene.input TransferMode ClipboardContent KeyCode KeyEvent]))
+            [laser-show.views.components.custom-param-renderers :as custom-renderers]
+            [laser-show.views.components.effect-chain-sidebar :as sidebar])
+  (:import [javafx.scene.input KeyCode KeyEvent]))
 
 
 ;; Effect Registry Access
@@ -43,228 +44,6 @@
   (into {}
         (mapv (fn [p] [(:key p) (dissoc p :key)])
               params-vector)))
-
-
-;; Left Sidebar: Effect Chain List with Drag-and-Drop
-
-
-(defn- setup-drag-source!
-  "Setup drag source handlers on a node for reordering effects."
-  [^javafx.scene.Node node effect-idx col row dispatch!]
-  (.setOnDragDetected
-    node
-    (reify javafx.event.EventHandler
-      (handle [_ event]
-        (let [dragboard (.startDragAndDrop node (into-array TransferMode [TransferMode/MOVE]))
-              content (ClipboardContent.)]
-          (.putString content (str effect-idx))
-          (.setContent dragboard content)
-          (dispatch! {:event/type :ui/update-dialog-data
-                      :dialog-id :effect-chain-editor
-                      :updates {:dragging-effect-idx effect-idx}})
-          (.consume event)))))
-  (.setOnDragDone
-    node
-    (reify javafx.event.EventHandler
-      (handle [_ event]
-        (dispatch! {:event/type :ui/update-dialog-data
-                    :dialog-id :effect-chain-editor
-                    :updates {:dragging-effect-idx nil
-                              :drop-target-idx nil}})
-        (.consume event)))))
-
-(defn- setup-drag-target!
-  "Setup drag target handlers on a node for accepting dropped effects."
-  [^javafx.scene.Node node effect-idx col row chain-count dispatch!]
-  (.setOnDragOver
-    node
-    (reify javafx.event.EventHandler
-      (handle [_ event]
-        (when (and (.getDragboard event)
-                   (.hasString (.getDragboard event)))
-          (.acceptTransferModes event (into-array TransferMode [TransferMode/MOVE])))
-        (.consume event))))
-  (.setOnDragEntered
-    node
-    (reify javafx.event.EventHandler
-      (handle [_ event]
-        (when (.hasString (.getDragboard event))
-          (dispatch! {:event/type :ui/update-dialog-data
-                      :dialog-id :effect-chain-editor
-                      :updates {:drop-target-idx effect-idx}}))
-        (.consume event))))
-  (.setOnDragExited
-    node
-    (reify javafx.event.EventHandler
-      (handle [_ event]
-        (.consume event))))
-  (.setOnDragDropped
-    node
-    (reify javafx.event.EventHandler
-      (handle [_ event]
-        (let [dragboard (.getDragboard event)
-              from-idx (when (.hasString dragboard)
-                         (parse-long (.getString dragboard)))]
-          (when (and from-idx (not= from-idx effect-idx))
-            (let [to-idx (if (> from-idx effect-idx)
-                           effect-idx
-                           (min effect-idx (dec chain-count)))]
-              (dispatch! {:event/type :effects/reorder
-                          :col col :row row
-                          :from-idx from-idx
-                          :to-idx to-idx})))
-          (.setDropCompleted event true)
-          (.consume event))))))
-
-(defn- setup-click-handler!
-  "Setup click handler on a node for multi-select behavior.
-   - Click: Select single
-   - Ctrl+Click: Toggle selection
-   - Shift+Click: Range select"
-  [^javafx.scene.Node node effect-idx]
-  (.setOnMouseClicked
-    node
-    (reify javafx.event.EventHandler
-      (handle [_ event]
-        (let [ctrl? (.isControlDown event)
-              shift? (.isShiftDown event)]
-          (cond
-            ctrl? (events/dispatch! {:event/type :effects/toggle-effect-selection
-                                     :effect-idx effect-idx})
-            shift? (events/dispatch! {:event/type :effects/range-select
-                                      :effect-idx effect-idx})
-            :else (events/dispatch! {:event/type :effects/select-effect
-                                     :effect-idx effect-idx})))
-        (.consume event)))))
-
-(defn- chain-item-card
-  "A single effect in the chain sidebar with drag-and-drop support.
-   Shows enable checkbox, effect name with delete button.
-   Supports multi-select with Click/Ctrl+Click/Shift+Click on the name label."
-  [{:keys [col row effect-idx effect effect-def selected? dragging? drop-target? chain-count]}]
-  (let [enabled? (:enabled? effect true)]
-    {:fx/type fx/ext-on-instance-lifecycle
-     :on-created (fn [node]
-                   ;; Use events/dispatch! directly - this handles state updates correctly
-                   (let [dispatch! (fn [event]
-                                     (events/dispatch! event))]
-                     (setup-drag-source! node effect-idx col row dispatch!)
-                     (setup-drag-target! node effect-idx col row chain-count dispatch!)))
-     :desc {:fx/type :h-box
-            :spacing 6
-            :alignment :center-left
-            :style (str "-fx-background-color: " (cond
-                                                    drop-target? "#5A8FCF"
-                                                    selected? "#4A6FA5"
-                                                    :else "#3D3D3D") ";"
-                        "-fx-padding: 6 8;"
-                        "-fx-background-radius: 4;"
-                        (when drop-target? "-fx-border-color: #7AB8FF; -fx-border-width: 2 0 0 0;")
-                        (when dragging? "-fx-opacity: 0.5;")
-                        (when-not enabled? "-fx-opacity: 0.6;"))
-            :children [{:fx/type :label
-                        :text "⠿"
-                        :style "-fx-text-fill: #606060; -fx-font-size: 10; -fx-cursor: move;"}
-                       
-                       ;; Enable/disable checkbox (does NOT trigger selection)
-                       {:fx/type :check-box
-                        :selected enabled?
-                        :on-selected-changed {:event/type :effects/set-effect-enabled
-                                              :col col :row row
-                                              :effect-idx effect-idx}}
-                       
-                       ;; Effect name - clickable for selection
-                       {:fx/type fx/ext-on-instance-lifecycle
-                        :on-created (fn [node]
-                                      (setup-click-handler! node effect-idx))
-                        :desc {:fx/type :label
-                               :text (or (:name effect-def) "Unknown")
-                               :style (str "-fx-text-fill: "
-                                          (cond
-                                            (not enabled?) "#808080"
-                                            selected? "white"
-                                            :else "#E0E0E0") ";"
-                                          "-fx-font-size: 12;"
-                                          "-fx-cursor: hand;")}}
-                       {:fx/type :region :h-box/hgrow :always}
-                       {:fx/type :button
-                        :text "✕"
-                        :style "-fx-background-color: #D32F2F; -fx-text-fill: white; -fx-padding: 1 3; -fx-font-size: 5;"
-                        :on-action {:event/type :effects/remove-from-chain-and-clear-selection
-                                    :col col :row row
-                                    :effect-idx effect-idx}}]}}))
-
-(defn- chain-list-sidebar
-  "Left sidebar showing the effect chain with drag-and-drop reordering.
-   Supports multi-select via selected-effect-indices set."
-  [{:keys [col row effect-chain selected-effect-indices dragging-effect-idx drop-target-idx can-paste?]}]
-  (let [chain-count (count effect-chain)
-        selected-indices (or selected-effect-indices #{})
-        selection-count (count selected-indices)]
-    {:fx/type :v-box
-     :spacing 8
-     :pref-width 180
-     :min-width 180
-     :style "-fx-background-color: #252525; -fx-padding: 8;"
-     :children [{:fx/type :h-box
-                 :alignment :center-left
-                 :children (filterv some?
-                             [{:fx/type :label
-                               :text "CHAIN"
-                               :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
-                              {:fx/type :region :h-box/hgrow :always}
-                              (when (pos? selection-count)
-                                {:fx/type :label
-                                 :text (str selection-count " selected")
-                                 :style "-fx-text-fill: #4A6FA5; -fx-font-size: 9;"})])}
-                {:fx/type :label
-                 :text "Ctrl+Click multi-select • Ctrl+C/V copy/paste"
-                 :style "-fx-text-fill: #505050; -fx-font-size: 8; -fx-font-style: italic;"}
-                ;; Action buttons for copy/paste
-                {:fx/type :h-box
-                 :spacing 4
-                 :children [{:fx/type :button
-                             :text "Copy"
-                             :disable (zero? selection-count)
-                             :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 9; -fx-padding: 2 6;"
-                             :on-action {:event/type :effects/copy-selected
-                                         :col col :row row}}
-                            {:fx/type :button
-                             :text "Paste"
-                             :disable (not can-paste?)
-                             :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 9; -fx-padding: 2 6;"
-                             :on-action {:event/type :effects/paste-into-chain
-                                         :col col :row row}}
-                            {:fx/type :button
-                             :text "Del"
-                             :disable (zero? selection-count)
-                             :style "-fx-background-color: #803030; -fx-text-fill: white; -fx-font-size: 9; -fx-padding: 2 6;"
-                             :on-action {:event/type :effects/delete-selected
-                                         :col col :row row}}]}
-                (if (empty? effect-chain)
-                  {:fx/type :label
-                   :text "No effects\nAdd from bank →"
-                   :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"}
-                  {:fx/type :scroll-pane
-                   :fit-to-width true
-                   :v-box/vgrow :always
-                   :style "-fx-background-color: transparent; -fx-background: #252525;"
-                   :content {:fx/type :v-box
-                             :spacing 4
-                             :children (vec
-                                         (map-indexed
-                                           (fn [idx effect]
-                                             {:fx/type chain-item-card
-                                              :fx/key idx
-                                              :col col :row row
-                                              :effect-idx idx
-                                              :effect effect
-                                              :effect-def (effect-by-id (:effect-id effect))
-                                              :selected? (contains? selected-indices idx)
-                                              :dragging? (= idx dragging-effect-idx)
-                                              :drop-target? (= idx drop-target-idx)
-                                              :chain-count chain-count})
-                                           effect-chain))}})]}))
 
 
 ;; Right Top: Tabbed Effect Bank
@@ -343,8 +122,9 @@
 
 (defn- param-slider
   "Slider control for numeric parameters with editable text field.
-   The text field allows typing a value and pressing Enter to update."
-  [{:keys [col row effect-idx param-key param-spec current-value]}]
+   The text field allows typing a value and pressing Enter to update.
+   Supports both :effect-idx (legacy, top-level) and :effect-path (nested)."
+  [{:keys [col row effect-idx effect-path param-key param-spec current-value]}]
   (let [{:keys [min max]} param-spec
         value (or current-value (:default param-spec) 0)]
     {:fx/type :h-box
@@ -362,6 +142,7 @@
                  :on-value-changed {:event/type :effects/update-param
                                     :col col :row row
                                     :effect-idx effect-idx
+                                    :effect-path effect-path
                                     :param-key param-key}}
                 {:fx/type :text-field
                  :text (format "%.2f" (double value))
@@ -370,12 +151,14 @@
                  :on-action {:event/type :effects/update-param-from-text
                              :col col :row row
                              :effect-idx effect-idx
+                             :effect-path effect-path
                              :param-key param-key
                              :min min :max max}}]}))
 
 (defn- param-choice
-  "Combo-box for choice parameters."
-  [{:keys [col row effect-idx param-key param-spec current-value]}]
+  "Combo-box for choice parameters.
+   Supports both :effect-idx (legacy, top-level) and :effect-path (nested)."
+  [{:keys [col row effect-idx effect-path param-key param-spec current-value]}]
   (let [choices (:choices param-spec [])
         value (or current-value (:default param-spec))]
     {:fx/type :h-box
@@ -395,11 +178,13 @@
                  :on-value-changed {:event/type :effects/update-param
                                     :col col :row row
                                     :effect-idx effect-idx
+                                    :effect-path effect-path
                                     :param-key param-key}}]}))
 
 (defn- param-checkbox
-  "Checkbox for boolean parameters."
-  [{:keys [col row effect-idx param-key param-spec current-value]}]
+  "Checkbox for boolean parameters.
+   Supports both :effect-idx (legacy, top-level) and :effect-path (nested)."
+  [{:keys [col row effect-idx effect-path param-key param-spec current-value]}]
   (let [value (if (some? current-value) current-value (:default param-spec false))]
     {:fx/type :h-box
      :spacing 8
@@ -411,21 +196,25 @@
                  :on-selected-changed {:event/type :effects/update-param
                                        :col col :row row
                                        :effect-idx effect-idx
+                                       :effect-path effect-path
                                        :param-key param-key}}]}))
 
 (defn- param-control
-  "Render appropriate control based on parameter type."
+  "Render appropriate control based on parameter type.
+   Supports both :effect-idx (legacy, top-level) and :effect-path (nested)."
   [{:keys [param-spec] :as props}]
   (case (:type param-spec :float)
     :choice {:fx/type param-choice
              :col (:col props) :row (:row props)
              :effect-idx (:effect-idx props)
+             :effect-path (:effect-path props)
              :param-key (:param-key props)
              :param-spec param-spec
              :current-value (:current-value props)}
     :bool {:fx/type param-checkbox
            :col (:col props) :row (:row props)
            :effect-idx (:effect-idx props)
+           :effect-path (:effect-path props)
            :param-key (:param-key props)
            :param-spec param-spec
            :current-value (:current-value props)}
@@ -433,6 +222,7 @@
     {:fx/type param-slider
      :col (:col props) :row (:row props)
      :effect-idx (:effect-idx props)
+     :effect-path (:effect-path props)
      :param-key (:param-key props)
      :param-spec param-spec
      :current-value (:current-value props)}))
@@ -442,12 +232,13 @@
    
    Props:
    - :col, :row - Grid cell coordinates
-   - :effect-idx - Index in effect chain
+   - :effect-idx - Index in effect chain (legacy, for top-level only)
+   - :effect-path - Path to effect (supports nested effects)
    - :effect-def - Effect definition with :ui-hints
    - :current-params - Current parameter values
    - :ui-mode - Current UI mode (:visual or :numeric)
    - :params-map - Parameter specifications map"
-  [{:keys [col row effect-idx effect-def current-params ui-mode params-map]}]
+  [{:keys [col row effect-idx effect-path effect-def current-params ui-mode params-map]}]
   (let [ui-hints (:ui-hints effect-def)
         actual-mode (or ui-mode (:default-mode ui-hints :visual))]
     {:fx/type :v-box
@@ -468,6 +259,7 @@
                                          "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
                             :on-action {:event/type :effects/set-param-ui-mode
                                        :effect-idx effect-idx
+                                       :effect-path effect-path
                                        :mode :visual}}
                            {:fx/type :button
                             :text "🔢 Numeric"
@@ -477,6 +269,7 @@
                                          "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
                             :on-action {:event/type :effects/set-param-ui-mode
                                        :effect-idx effect-idx
+                                       :effect-path effect-path
                                        :mode :numeric}}]}
                 
                 ;; Render based on mode
@@ -486,12 +279,14 @@
                     :spatial-2d {:fx/type custom-renderers/translate-visual-editor
                                 :col col :row row
                                 :effect-idx effect-idx
+                                :effect-path effect-path
                                 :current-params current-params
                                 :param-specs (:parameters effect-def)}
                     
                     :corner-pin-2d {:fx/type custom-renderers/corner-pin-visual-editor
                                    :col col :row row
                                    :effect-idx effect-idx
+                                   :effect-path effect-path
                                    :current-params current-params
                                    :param-specs (:parameters effect-def)}
                     
@@ -503,6 +298,7 @@
                                   {:fx/type param-control
                                    :col col :row row
                                    :effect-idx effect-idx
+                                   :effect-path effect-path
                                    :param-key param-key
                                    :param-spec param-spec
                                    :current-value (get current-params param-key)}))})
@@ -515,20 +311,32 @@
                                 {:fx/type param-control
                                  :col col :row row
                                  :effect-idx effect-idx
+                                 :effect-path effect-path
                                  :param-key param-key
                                  :param-spec param-spec
                                  :current-value (get current-params param-key)}))})]}))
 
 (defn- parameter-editor
-  "Parameter editor for the selected effect."
-  [{:keys [col row selected-effect-idx effect-chain dialog-data]}]
-  (let [selected-effect (when selected-effect-idx
-                          (nth effect-chain selected-effect-idx nil))
+  "Parameter editor for the selected effect.
+   Supports both :selected-effect-idx (legacy, top-level only) and
+   :selected-effect-path (nested effects via get-in)."
+  [{:keys [col row selected-effect-idx selected-effect-path effect-chain dialog-data]}]
+  (let [;; Use path-based lookup if available, otherwise fall back to index
+        selected-effect (cond
+                          selected-effect-path
+                          (get-in effect-chain (vec selected-effect-path))
+                          
+                          selected-effect-idx
+                          (nth effect-chain selected-effect-idx nil)
+                          
+                          :else nil)
         effect-def (when selected-effect
                      (effect-by-id (:effect-id selected-effect)))
         current-params (:params selected-effect {})
         params-map (params-vector->map (:parameters effect-def []))
-        ui-mode (get-in dialog-data [:ui-modes selected-effect-idx])]
+        ;; For UI mode lookup, use path if available (stringified for map key)
+        ui-mode-key (or selected-effect-path selected-effect-idx)
+        ui-mode (get-in dialog-data [:ui-modes ui-mode-key])]
     {:fx/type :v-box
      :spacing 8
      :style "-fx-background-color: #2A2A2A; -fx-padding: 8;"
@@ -546,6 +354,7 @@
                      :content {:fx/type custom-param-renderer
                               :col col :row row
                               :effect-idx selected-effect-idx
+                              :effect-path selected-effect-path
                               :effect-def effect-def
                               :current-params current-params
                               :ui-mode ui-mode
@@ -563,6 +372,7 @@
                                            {:fx/type param-control
                                             :col col :row row
                                             :effect-idx selected-effect-idx
+                                            :effect-path selected-effect-path
                                             :param-key param-key
                                             :param-spec param-spec
                                             :current-value (get current-params param-key)}))}})
@@ -585,8 +395,6 @@
    - Ctrl+A: Select all effects
    - Delete/Backspace: Delete selected effects"
   [^javafx.scene.Node node col row]
-  (println "[DEBUG] setup-keyboard-handler! called for node:" (.getClass node) "col:" col "row:" row)
-  
   ;; Use event filter for Ctrl+C and Ctrl+V - these are intercepted by the system
   ;; at Scene level, so we need to catch them during capture phase
   (.addEventFilter
@@ -595,26 +403,18 @@
     (reify javafx.event.EventHandler
       (handle [_ event]
         (let [code (.getCode event)
-              ctrl? (.isControlDown event)
-              shift? (.isShiftDown event)
-              alt? (.isAltDown event)]
-          ;; Log ALL key presses in the filter
-          (println "[DEBUG FILTER] Key pressed:" code "ctrl?" ctrl? "shift?" shift? "alt?" alt?)
+              ctrl? (.isControlDown event)]
           (cond
             ;; Ctrl+C - Copy (must use filter to intercept system clipboard)
             (and ctrl? (= code KeyCode/C))
-            (do (println "[DEBUG] Ctrl+C detected! Dispatching :effects/copy-selected")
-                (events/dispatch! {:event/type :effects/copy-selected
+            (do (events/dispatch! {:event/type :effects/copy-selected
                                    :col col :row row})
-                (println "[DEBUG] Ctrl+C dispatch complete, consuming event")
                 (.consume event))
             
             ;; Ctrl+V - Paste (must use filter to intercept system clipboard)
             (and ctrl? (= code KeyCode/V))
-            (do (println "[DEBUG] Ctrl+V detected! Dispatching :effects/paste-into-chain")
-                (events/dispatch! {:event/type :effects/paste-into-chain
+            (do (events/dispatch! {:event/type :effects/paste-into-chain
                                    :col col :row row})
-                (println "[DEBUG] Ctrl+V dispatch complete, consuming event")
                 (.consume event)))))))
   
   ;; Use regular key handler for other shortcuts that don't conflict
@@ -624,27 +424,22 @@
       (handle [_ event]
         (let [code (.getCode event)
               ctrl? (.isControlDown event)]
-          ;; Log key presses in regular handler
-          (println "[DEBUG HANDLER] Key pressed:" code "ctrl?" ctrl?)
           (cond
             ;; Ctrl+A - Select all
             (and ctrl? (= code KeyCode/A))
-            (do (println "[DEBUG] Ctrl+A detected! Dispatching :effects/select-all")
-                (events/dispatch! {:event/type :effects/select-all
+            (do (events/dispatch! {:event/type :effects/select-all
                                    :col col :row row})
                 (.consume event))
             
             ;; Delete or Backspace - Delete selected
             (or (= code KeyCode/DELETE) (= code KeyCode/BACK_SPACE))
-            (do (println "[DEBUG] Delete detected! Dispatching :effects/delete-selected")
-                (events/dispatch! {:event/type :effects/delete-selected
+            (do (events/dispatch! {:event/type :effects/delete-selected
                                    :col col :row row})
                 (.consume event))
             
             ;; Escape - Clear selection
             (= code KeyCode/ESCAPE)
-            (do (println "[DEBUG] Escape detected! Dispatching :effects/clear-selection")
-                (events/dispatch! {:event/type :effects/clear-selection})
+            (do (events/dispatch! {:event/type :effects/clear-selection})
                 (.consume event))))))))
 
 
@@ -655,16 +450,28 @@
   "Main content of the effect chain editor dialog."
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
-        {:keys [col row selected-effect-indices dragging-effect-idx drop-target-idx active-bank-tab]} dialog-data
-        ;; Convert old format to new if needed (backwards compat)
+        {:keys [col row selected-effect-indices selected-paths
+                dragging-effect-idx dragging-path dragging-paths
+                drop-target-idx drop-target-path drop-position
+                renaming-path
+                active-bank-tab]} dialog-data
+        ;; Support both legacy index selection and new path selection
         selected-indices (or selected-effect-indices #{})
+        selected-paths-set (or selected-paths
+                               (when (seq selected-indices)
+                                 (into #{} (map vector selected-indices))))
         effects-state (fx/sub-val context :effects)
         cell-data (get-in effects-state [:cells [col row]])
         effect-chain (:effects cell-data [])
         active? (:active cell-data false)
         can-paste? (clipboard/can-paste-effects?)
-        ;; For parameter editor, use first selected if single select or nothing
-        first-selected-idx (when (= 1 (count selected-indices))
+        ;; For parameter editor, use first selected if single select
+        ;; Path-based selection takes precedence over index-based
+        first-selected-path (when (= 1 (count selected-paths-set))
+                              (first selected-paths-set))
+        ;; Legacy index support - only if no paths and exactly one index selected
+        first-selected-idx (when (and (nil? first-selected-path)
+                                      (= 1 (count selected-indices)))
                              (first selected-indices))]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
@@ -682,13 +489,16 @@
                         :spacing 0
                         :v-box/vgrow :always
                         :children [;; Left sidebar - chain list with drag-and-drop
-                                   {:fx/type chain-list-sidebar
-                                    :col col :row row
-                                    :effect-chain effect-chain
-                                    :selected-effect-indices selected-indices
-                                    :dragging-effect-idx dragging-effect-idx
-                                    :drop-target-idx drop-target-idx
-                                    :can-paste? can-paste?}
+                                   {:fx/type sidebar/chain-list-sidebar
+                                      :col col :row row
+                                      :effect-chain effect-chain
+                                      :selected-effect-indices selected-indices
+                                      :selected-paths selected-paths-set
+                                      :dragging-paths dragging-paths
+                                      :drop-target-path drop-target-path
+                                      :drop-position drop-position
+                                      :renaming-path renaming-path
+                                      :can-paste? can-paste?}
                                    
                                    ;; Right section
                                    {:fx/type :v-box
@@ -703,6 +513,7 @@
                                                {:fx/type parameter-editor
                                                 :col col :row row
                                                 :selected-effect-idx first-selected-idx
+                                                :selected-effect-path first-selected-path
                                                 :effect-chain effect-chain
                                                 :dialog-data dialog-data}]}]}
                        
@@ -734,7 +545,6 @@
    Scene-level filters catch events before any node handlers,
    allowing us to intercept system clipboard shortcuts."
   [^javafx.scene.Scene scene col row]
-  (println "[DEBUG] setup-scene-key-filter! called for scene, col:" col "row:" row)
   (.addEventFilter
     scene
     KeyEvent/KEY_PRESSED
@@ -745,18 +555,15 @@
           (cond
             ;; Ctrl+C - Copy
             (and ctrl? (= code KeyCode/C))
-            (do (println "[DEBUG SCENE FILTER] Ctrl+C triggered! col:" col "row:" row)
-                (events/dispatch! {:event/type :effects/copy-selected
+            (do (events/dispatch! {:event/type :effects/copy-selected
                                    :col col :row row})
                 (.consume event))
             
             ;; Ctrl+V - Paste
             (and ctrl? (= code KeyCode/V))
-            (do (println "[DEBUG SCENE FILTER] Ctrl+V triggered! col:" col "row:" row)
-                (events/dispatch! {:event/type :effects/paste-into-chain
+            (do (events/dispatch! {:event/type :effects/paste-into-chain
                                    :col col :row row})
-                (.consume event)))))))
-  (println "[DEBUG] Scene key filter registered"))
+                (.consume event))))))))
 
 
 ;; Dialog Window

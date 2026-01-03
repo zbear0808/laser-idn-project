@@ -124,8 +124,21 @@
 
 
 
-;; Effect Instance
+;; Effect Instance & Groups
 
+
+(defn group?
+  "Check if an item is a group (contains nested effects).
+   Groups have {:type :group :items [...]}."
+  [item]
+  (= :group (:type item)))
+
+(defn effect?
+  "Check if an item is an effect (not a group).
+   Items without :type or with :type :effect are effects."
+  [item]
+  (or (nil? (:type item))
+      (= :effect (:type item))))
 
 (defn effect-instance-enabled?
   "Check if an effect instance is enabled.
@@ -133,6 +146,125 @@
   [instance]
   (:enabled? instance true))
 
+
+;; Group Utilities
+
+
+(def max-nesting-depth
+  "Maximum allowed nesting depth for groups (0 = flat, 3 = up to 3 levels)."
+  3)
+
+(defn flatten-chain
+  "Flatten a nested effect chain into a sequence of effects for processing.
+   Respects enabled? flags at both effect and group level.
+   Groups with enabled?=false have all their effects skipped.
+   
+   This is used at processing time to get the linear list of effects to apply."
+  [items]
+  (mapcat
+    (fn [item]
+      (cond
+        ;; Disabled item - skip entirely
+        (not (:enabled? item true))
+        []
+        
+        ;; Group - recursively flatten if enabled
+        (group? item)
+        (flatten-chain (:items item []))
+        
+        ;; Effect - include it
+        :else
+        [item]))
+    items))
+
+(defn nesting-depth
+  "Calculate the maximum nesting depth of a chain.
+   Returns 0 for flat chains, 1 for one level of groups, etc."
+  [items]
+  (if (empty? items)
+    0
+    (apply max
+      (map (fn [item]
+             (if (group? item)
+               (inc (nesting-depth (:items item [])))
+               0))
+           items))))
+
+(defn can-add-group-at-path?
+  "Check if a new group can be added at the given path without exceeding max depth.
+   Path is a vector like [1 :items 0] where :items segments indicate group nesting."
+  [_chain path]
+  (let [current-depth (count (filter #(= :items %) path))]
+    (< current-depth max-nesting-depth)))
+
+(defn paths-in-chain
+  "Generate all paths in a chain for iteration or select-all operations.
+   Returns a sequence of paths like [[0] [1] [1 :items 0] [1 :items 1] [2]]."
+  ([items] (paths-in-chain items []))
+  ([items prefix]
+   (mapcat
+     (fn [idx item]
+       (let [path (conj prefix idx)]
+         (if (group? item)
+           (cons path (paths-in-chain (:items item []) (conj path :items)))
+           [path])))
+     (range)
+     items)))
+
+(defn get-item-at-path
+  "Get an item from a chain at the given path.
+   Path is a vector like [1 :items 0]."
+  [items path]
+  (get-in items path))
+
+(defn count-effects-recursive
+  "Count total effects in a chain, including those inside groups."
+  [items]
+  (reduce
+    (fn [acc item]
+      (if (group? item)
+        (+ acc (count-effects-recursive (:items item [])))
+        (inc acc)))
+    0
+    items))
+
+(defn find-path-by-id
+  "Find the path to an item with the given ID in a chain.
+   Returns nil if not found.
+   
+   Parameters:
+   - items: Vector of effects/groups (the chain)
+   - id: UUID or other ID to find
+   
+   Returns: Path vector like [1 :items 0] or nil if not found"
+  ([items id] (find-path-by-id items id []))
+  ([items id prefix]
+   (reduce
+     (fn [_ idx]
+       (let [item (nth items idx)
+             path (conj prefix idx)]
+         (cond
+           ;; Found it!
+           (= id (:id item))
+           (reduced path)
+           
+           ;; It's a group - search recursively
+           (group? item)
+           (if-let [found (find-path-by-id (:items item []) id (conj path :items))]
+             (reduced found)
+             nil)
+           
+           ;; Not this item
+           :else nil)))
+     nil
+     (range (count items)))))
+
+(defn ensure-item-id
+  "Ensure an effect or group has an :id field. Returns item with ID."
+  [item]
+  (if (:id item)
+    item
+    (assoc item :id (random-uuid))))
 
 
 ;; Point Normalization Transducers
@@ -227,8 +359,11 @@
 (defn compose-effect-transducers
   "Compose transducers from a chain of effects.
    
+   Supports nested groups - the chain is flattened before processing,
+   respecting enabled? flags at both effect and group level.
+   
    Parameters:
-   - chain: Effect chain {:effects [...]}
+   - chain: Effect chain {:effects [...]} - may contain groups
    - time-ms: Current time in milliseconds
    - bpm: Current BPM
    - trigger-time: When effects were triggered
@@ -237,7 +372,9 @@
    Returns: A single composed transducer, or (map identity) for empty chains."
   [chain time-ms bpm trigger-time frame-ctx]
   (let [effects (:effects chain)
-        transducers (keep #(make-effect-transducer % time-ms bpm trigger-time frame-ctx) effects)]
+        ;; Flatten the chain to handle nested groups
+        flat-effects (flatten-chain effects)
+        transducers (keep #(make-effect-transducer % time-ms bpm trigger-time frame-ctx) flat-effects)]
     (if (empty? transducers)
       (map identity)
       (apply comp transducers))))

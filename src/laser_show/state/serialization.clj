@@ -202,12 +202,12 @@
 
 (defn serialize-for-clipboard
   "Serialize data for clipboard transfer.
-   Always uses compact format suitable for clipboard.
+   Uses pretty-printed format so users can see full EDN in clipboard.
    
    Example:
    (serialize-for-clipboard {:type :cell-assignment :preset-id :circle})"
   [data]
-  (serialize data :pretty? false))
+  (serialize data :pretty? true))
 
 (defn deserialize-from-clipboard
   "Deserialize clipboard data with optional validation.

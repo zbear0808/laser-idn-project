@@ -16,10 +16,11 @@
    
    Props:
    - :col, :row - Grid cell coordinates
-   - :effect-idx - Index in effect chain
+   - :effect-idx - Index in effect chain (legacy, top-level)
+   - :effect-path - Path to effect (supports nested)
    - :current-params - Current parameter values {:x ... :y ...}
    - :param-specs - Parameter specifications from effect definition"
-  [{:keys [col row effect-idx current-params param-specs]}]
+  [{:keys [col row effect-idx effect-path current-params param-specs]}]
   (let [x (get current-params :x 0.0)
         y (get current-params :y 0.0)
         x-spec (first (filter #(= :x (:key %)) param-specs))
@@ -37,20 +38,21 @@
                  :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-style: italic;"}
                 
                 {:fx/type spatial-canvas/spatial-canvas
-                 :fx/key [col row effect-idx]
+                 :fx/key [col row (or effect-path effect-idx)]
                  :width 280
                  :height 280
                  :bounds {:x-min x-min :x-max x-max
                          :y-min y-min :y-max y-max}
-                 :points [{:id :center 
-                          :x x 
-                          :y y 
-                          :color "#4CAF50" 
+                 :points [{:id :center
+                          :x x
+                          :y y
+                          :color "#4CAF50"
                           :label ""}]
                  :on-point-drag {:event/type :effects/update-spatial-params
-                                :col col 
-                                :row row 
+                                :col col
+                                :row row
                                 :effect-idx effect-idx
+                                :effect-path effect-path
                                 :param-map {:center {:x :x :y :y}}}
                  :show-grid true
                  :show-axes true
@@ -75,10 +77,11 @@
    
    Props:
    - :col, :row - Grid cell coordinates
-   - :effect-idx - Index in effect chain
+   - :effect-idx - Index in effect chain (legacy, top-level)
+   - :effect-path - Path to effect (supports nested)
    - :current-params - Current parameter values {:tl-x :tl-y :tr-x ...}
    - :param-specs - Parameter specifications from effect definition"
-  [{:keys [col row effect-idx current-params param-specs]}]
+  [{:keys [col row effect-idx effect-path current-params param-specs]}]
   (let [;; Get corner positions
         tl-x (get current-params :tl-x -1.0)
         tl-y (get current-params :tl-y 1.0)
@@ -106,7 +109,7 @@
                  :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-style: italic;"}
                 
                 {:fx/type spatial-canvas/spatial-canvas
-                 :fx/key [col row effect-idx]
+                 :fx/key [col row (or effect-path effect-idx)]
                  :width 280
                  :height 280
                  :bounds {:x-min x-min :x-max x-max
@@ -121,9 +124,10 @@
                          {:from :bl :to :tl :color "#7AB8FF" :line-width 2}]
                  :polygon {:points [:tl :tr :br :bl] :color "#4A6FA520"}
                  :on-point-drag {:event/type :effects/update-spatial-params
-                                :col col 
-                                :row row 
+                                :col col
+                                :row row
                                 :effect-idx effect-idx
+                                :effect-path effect-path
                                 :param-map {:tl {:x :tl-x :y :tl-y}
                                            :tr {:x :tr-x :y :tr-y}
                                            :bl {:x :bl-x :y :bl-y}
