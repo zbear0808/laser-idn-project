@@ -8,7 +8,8 @@
    This module converts normalized values to 8-bit for JavaFX Color display."
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
-            [laser-show.animation.types :as t])
+            [laser-show.animation.types :as t]
+            [laser-show.common.util :as u])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.paint Color]))
 
@@ -25,9 +26,9 @@
   "Create JavaFX Color from normalized RGB values (0.0-1.0).
    Clamps values to valid range."
   [r g b]
-  (Color/color (max 0.0 (min 1.0 (double (or r 1.0))))
-               (max 0.0 (min 1.0 (double (or g 1.0))))
-               (max 0.0 (min 1.0 (double (or b 1.0))))))
+  (Color/color (u/clamp (double (or r 1.0)) 0.0 1.0)
+               (u/clamp (double (or g 1.0)) 0.0 1.0)
+               (u/clamp (double (or b 1.0)) 0.0 1.0)))
 
 ;; Legacy helper for backward compatibility
 (defn- color-from-rgb
@@ -40,9 +41,9 @@
     ;; Detect if values are normalized or 8-bit
     (if (or (> r 1.0) (> g 1.0) (> b 1.0))
       ;; 8-bit values
-      (Color/rgb (int (max 0 (min 255 r)))
-                 (int (max 0 (min 255 g)))
-                 (int (max 0 (min 255 b))))
+      (Color/rgb (int (u/clamp r 0 255))
+                 (int (u/clamp g 0 255))
+                 (int (u/clamp b 0 255)))
       ;; Normalized values (0.0-1.0)
       (color-from-normalized r g b))))
 

@@ -9,7 +9,8 @@
    - XY Position: 8-bit (0-255) or 16-bit (-32768 to 32767)
    
    The default configuration is 16-bit for both color and position (maximum precision).
-   Use standard-config for ISP-DB25 compatibility (8-bit color, 16-bit XY).")
+   Use standard-config for ISP-DB25 compatibility (8-bit color, 16-bit XY)."
+  (:require [laser-show.common.util :as u]))
 
 
 ;; Bit Depth Constants
@@ -100,11 +101,12 @@
    For 16-bit: maps to -32768 to 32767 (signed)
    For 8-bit: maps to 0 to 255 (unsigned, -1.0->0, 0.0->128, 1.0->255)"
   [value bit-depth]
-  (if (= bit-depth BIT_DEPTH_16)
-    ;; 16-bit signed: -1.0 -> -32767, 0.0 -> 0, 1.0 -> 32767
-    (short (* (max -1.0 (min 1.0 (double value))) 32767))
-    ;; 8-bit unsigned: -1.0 -> 0, 0.0 -> 128, 1.0 -> 255
-    (int (* (+ (max -1.0 (min 1.0 (double value))) 1.0) 127.5))))
+  (let [clamped (u/clamp (double value) -1.0 1.0)]
+    (if (= bit-depth BIT_DEPTH_16)
+      ;; 16-bit signed: -1.0 -> -32767, 0.0 -> 0, 1.0 -> 32767
+      (short (* clamped 32767))
+      ;; 8-bit unsigned: -1.0 -> 0, 0.0 -> 128, 1.0 -> 255
+      (int (* (+ clamped 1.0) 127.5)))))
 
 (defn normalized->output-color
   "Convert normalized color (0.0 to 1.0) to output format.
@@ -112,7 +114,7 @@
    For 16-bit: maps to 0 to 65535
    For 8-bit: maps to 0 to 255"
   [value bit-depth]
-  (let [clamped (max 0.0 (min 1.0 (double value)))]
+  (let [clamped (u/clamp (double value) 0.0 1.0)]
     (if (= bit-depth BIT_DEPTH_16)
       (int (* clamped 65535))
       (int (* clamped 255)))))

@@ -2,7 +2,8 @@
   "Pre-built animation presets for the laser show application.
    Each preset is a map containing name, category, parameters spec, and generator."
   (:require [laser-show.animation.types :as t]
-            [laser-show.animation.generators :as gen]))
+            [laser-show.animation.generators :as gen]
+            [laser-show.common.util :as u]))
 
 ;; Parameter Types
 
@@ -121,7 +122,7 @@
 
 (def presets-by-id
   "Map of preset ID to preset definition."
-  (into {} (map (juxt :id identity) all-presets)))
+  (u/map-into :id identity all-presets))
 
 (defn get-preset
   "Get a preset by ID."
@@ -133,8 +134,7 @@
   "Create an Animation instance from a preset with default parameters."
   [preset-id]
   (when-let [preset (get-preset preset-id)]
-    (let [default-params (into {} (map (fn [p] [(:key p) (:default p)])
-                                       (:parameters preset)))]
+    (let [default-params (u/map-into :key :default (:parameters preset))]
       (t/make-animation (:name preset)
                         (:generator preset)
                         default-params
@@ -144,8 +144,7 @@
   "Create an Animation instance from a preset with custom parameters."
   [preset-id params]
   (when-let [preset (get-preset preset-id)]
-    (let [default-params (into {} (map (fn [p] [(:key p) (:default p)])
-                                       (:parameters preset)))
+    (let [default-params (u/map-into :key :default (:parameters preset))
           merged-params (merge default-params params)]
       (t/make-animation (:name preset)
                         (:generator preset)

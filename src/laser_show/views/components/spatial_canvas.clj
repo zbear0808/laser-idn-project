@@ -22,7 +22,8 @@
     :show-grid true
     :show-axes true}"
   (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events])
+            [laser-show.events.core :as events]
+            [laser-show.common.util :as u])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.input MouseEvent]
            [javafx.scene.paint Color]
@@ -53,8 +54,8 @@
 (defn- clamp-to-bounds
   "Clamp world coordinates to bounds."
   [x y {:keys [x-min x-max y-min y-max]}]
-  [(max x-min (min x-max x))
-   (max y-min (min y-max y))])
+  [(u/clamp x x-min x-max)
+   (u/clamp y y-min y-max)])
 
 
 ;; Drawing Functions

@@ -29,7 +29,8 @@
     :raw map (original LaserPoint for pass-through)}"
   (:require [laser-show.animation.time :as time]
             [laser-show.animation.modulation :as mod]
-            [laser-show.animation.types :as t]))
+            [laser-show.animation.types :as t]
+            [laser-show.common.util :as u]))
 
 
 ;; Timing Modes
@@ -111,9 +112,7 @@
   "Get default parameter values for an effect."
   [effect-id]
   (when-let [effect-def (get-effect effect-id)]
-    (into {}
-          (map (fn [p] [(:key p) (:default p)])
-               (:parameters effect-def)))))
+    (u/map-into :key :default (:parameters effect-def))))
 
 
 

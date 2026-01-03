@@ -9,7 +9,8 @@
    - Conversion functions between normalized, 8-bit, and 16-bit formats (for IDN output)
    - HSV color space conversions (using normalized values)
    - Color manipulation functions for laser points
-   - Rainbow and gradient generators")
+   - Rainbow and gradient generators"
+  (:require [laser-show.common.util :as u]))
 
 
 ;; Bit Depth Constants
@@ -346,7 +347,7 @@
                g (:g point)
                b (:b point)
                [h s v] (normalized->hsv r g b)
-               new-s (min 1.0 (max 0.0 (* s factor)))
+               new-s (u/clamp (* s factor) 0.0 1.0)
                [nr ng nb] (hsv->normalized h new-s v)]
            (assoc point :r nr :g ng :b nb)))
        points))

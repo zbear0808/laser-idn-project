@@ -501,11 +501,9 @@
       
       ;; Legacy index-based selection
       (seq selected-indices)
-      (let [new-effects (vec (keep-indexed
-                               (fn [idx effect]
-                                 (when-not (contains? selected-indices idx)
-                                   effect))
-                               effects-vec))]
+      (let [new-effects (u/removev-indexed
+                          (fn [idx _] (contains? selected-indices idx))
+                          effects-vec)]
         {:state (-> state
                     (assoc-in [:effects :cells [col row] :effects] new-effects)
                     (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})

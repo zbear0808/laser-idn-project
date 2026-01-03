@@ -23,7 +23,8 @@
             [laser-show.state.clipboard :as clipboard]
             [laser-show.events.handlers :as handlers]
             [laser-show.backend.streaming-engine :as streaming-engine]
-            [laser-show.services.frame-service :as frame-service]))
+            [laser-show.services.frame-service :as frame-service]
+            [laser-show.common.util :as u]))
 
 ;; Co-effects (inject data INTO events)
 ;; Co-effect functions take NO arguments and return data to inject.
@@ -73,7 +74,7 @@
             avg-interval (/ (reduce + intervals) (count intervals))
             bpm (/ 60000.0 avg-interval)
             ;; Clamp to reasonable range
-            clamped-bpm (max 40.0 (min 300.0 bpm))]
+            clamped-bpm (u/clamp bpm 40.0 300.0)]
         (dispatch {:event/type :timing/set-bpm :bpm clamped-bpm})))))
 
 (defn- effect-idn-start-streaming

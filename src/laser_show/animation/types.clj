@@ -38,7 +38,7 @@
    
    Color Wavelengths (Section 3.4.10):
    - Red: 638nm (TAG_COLOR_RED = 0x527E)
-   - Green: 532nm (TAG_COLOR_GREEN = 0x5214)  
+   - Green: 532nm (TAG_COLOR_GREEN = 0x5214)
    - Blue: 460nm (TAG_COLOR_BLUE = 0x51CC)
    
    LaserFrame -> IDN-Stream Frame Samples Chunk (Section 6.2)
@@ -64,7 +64,8 @@
    
    - Animation runs on a single IDN channel
    - Frames are sent in Discrete Graphic Mode (Service Mode 0x02)
-   - Channel configuration is sent every 200ms per spec requirement")
+   - Channel configuration is sent every 200ms per spec requirement"
+  (:require [laser-show.common.util :as u]))
 
 
 ;; Core Types
@@ -99,11 +100,11 @@
    (make-point x y 1.0 1.0 1.0))
   ([x y r g b]
    (->LaserPoint
-    (max -1.0 (min 1.0 (double x)))
-    (max -1.0 (min 1.0 (double y)))
-    (max 0.0 (min 1.0 (double r)))
-    (max 0.0 (min 1.0 (double g)))
-    (max 0.0 (min 1.0 (double b))))))
+    (u/clamp (double x) -1.0 1.0)
+    (u/clamp (double y) -1.0 1.0)
+    (u/clamp (double r) 0.0 1.0)
+    (u/clamp (double g) 0.0 1.0)
+    (u/clamp (double b) 0.0 1.0))))
 
 (defn blanked-point
   "Create a blanked (invisible) point for beam repositioning.

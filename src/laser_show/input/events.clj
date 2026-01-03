@@ -1,7 +1,8 @@
 (ns laser-show.input.events
   "Unified input event system for MIDI, OSC, and Keyboard inputs.
    All input sources produce standardized events that can be routed
-   to handlers throughout the application.")
+   to handlers throughout the application."
+  (:require [laser-show.common.util :as u]))
 
 (def event-types
   "All supported event types in the system."
@@ -24,7 +25,7 @@
    :source source
    :channel channel
    :control control
-   :value (max 0.0 (min 1.0 (double value)))
+   :value (u/clamp (double value) 0.0 1.0)
    :timestamp (System/currentTimeMillis)})
 
 (defn note-on
@@ -38,7 +39,7 @@
    :source source
    :channel channel
    :note note
-   :velocity (max 0.0 (min 1.0 (double velocity)))
+   :velocity (u/clamp (double velocity) 0.0 1.0)
    :timestamp (System/currentTimeMillis)})
 
 (defn note-off

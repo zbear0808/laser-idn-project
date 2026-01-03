@@ -82,7 +82,7 @@
              (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
                    amount (:amount resolved)
                    [h s v] (colors/normalized->hsv r g b)
-                   new-s (max 0.0 (min 1.0 (* s amount)))
+                   new-s (common/clamp-normalized (* s amount))
                    [nr ng nb] (colors/hsv->normalized h new-s v)]
                (assoc pt :r nr :g ng :b nb)))))
     ;; Global path
@@ -92,7 +92,7 @@
              (if (common/blanked? pt)
                pt  ;; Skip blanked points
                (let [[h s v] (colors/normalized->hsv r g b)
-                     new-s (max 0.0 (min 1.0 (* s amount)))
+                     new-s (common/clamp-normalized (* s amount))
                      [nr ng nb] (colors/hsv->normalized h new-s v)]
                  (assoc pt :r nr :g ng :b nb))))))))
 

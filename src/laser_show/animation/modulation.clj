@@ -13,7 +13,8 @@
    
    ;; MIDI controlled
    {:effect-id :scale :params {:x-scale {:type :midi :channel 1 :cc 7 :min 0.5 :max 2.0}}}"
-  (:require [laser-show.animation.time :as time]))
+  (:require [laser-show.animation.time :as time]
+            [laser-show.common.util :as u]))
 
 ;; Forward declarations for modulator-config? and evaluators
 (declare modulator-config?)
@@ -75,7 +76,7 @@
                       (* duration 1000.0)
                       (time/beats->ms duration bpm))]
     (if (pos? duration-ms)
-      (min 1.0 (max 0.0 (/ elapsed duration-ms)))
+      (u/clamp (/ elapsed duration-ms) 0.0 1.0)
       1.0)))
 
 (defn- resolve-trigger-time
