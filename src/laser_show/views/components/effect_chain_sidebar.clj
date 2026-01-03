@@ -201,7 +201,32 @@
                    (let [dispatch! events/dispatch!
                          target-id (:id group)]
                      (setup-drag-source! node path col row dispatch!)
-                     (setup-drag-target! node target-id path true col row dispatch!)))
+                     (setup-drag-target! node target-id path true col row dispatch!)
+                     ;; Add double-click-to-rename on the whole row
+                     (.setOnMouseClicked node
+                       (reify javafx.event.EventHandler
+                         (handle [_ event]
+                           (let [click-count (.getClickCount event)
+                                 ctrl? (.isControlDown event)
+                                 shift? (.isShiftDown event)]
+                             (cond
+                               ;; Double-click anywhere on group row - start rename
+                               (= click-count 2)
+                               (do
+                                 (dispatch! {:event/type :effects/start-rename-group
+                                             :path path})
+                                 (.consume event))
+                               
+                               ;; Single-click - select (unless on checkbox/buttons)
+                               :else
+                               (do
+                                 (dispatch! {:event/type :effects/select-item-at-path
+                                             :path path
+                                             :col col
+                                             :row row
+                                             :ctrl? ctrl?
+                                             :shift? shift?})
+                                 (.consume event)))))))))
      :desc {:fx/type :h-box
             :spacing 6
             :alignment :center-left
@@ -261,41 +286,17 @@
                                  :on-focused-changed (fn [focused?]
                                                        (when-not focused?
                                                          (events/dispatch! {:event/type :effects/cancel-rename-group})))}}
-                         ;; Label for display
-                         {:fx/type fx/ext-on-instance-lifecycle
-                          :on-created (fn [node]
-                                        ;; Combined click handler for both single and double-click
-                                        (.setOnMouseClicked node
-                                          (reify javafx.event.EventHandler
-                                            (handle [_ event]
-                                              (let [click-count (.getClickCount event)
-                                                    ctrl? (.isControlDown event)
-                                                    shift? (.isShiftDown event)]
-                                                (cond
-                                                  ;; Double-click - start rename
-                                                  (= click-count 2)
-                                                  (events/dispatch! {:event/type :effects/start-rename-group
-                                                                     :path path})
-                                                  
-                                                  ;; Single-click - select
-                                                  :else
-                                                  (events/dispatch! {:event/type :effects/select-item-at-path
-                                                                     :path path
-                                                                     :col col
-                                                                     :row row
-                                                                     :ctrl? ctrl?
-                                                                     :shift? shift?}))
-                                                (.consume event))))))
-                          :desc {:fx/type :label
-                                 :text (or (:name group) "Group")
-                                 :style (str "-fx-text-fill: "
-                                            (cond
-                                              effectively-disabled? "#808080"
-                                              selected? "white"
-                                              :else border-color) ";"
-                                            "-fx-font-size: 12;"
-                                            "-fx-font-weight: bold;"
-                                            "-fx-cursor: hand;")}})
+                         ;; Label for display (click handled by parent h-box)
+                         {:fx/type :label
+                          :text (or (:name group) "Group")
+                          :style (str "-fx-text-fill: "
+                                     (cond
+                                       effectively-disabled? "#808080"
+                                       selected? "white"
+                                       :else border-color) ";"
+                                     "-fx-font-size: 12;"
+                                     "-fx-font-weight: bold;"
+                                     "-fx-cursor: hand;")})
                        
                        ;; Item count badge
                        {:fx/type :label
@@ -368,14 +369,7 @@
                                      effectively-disabled? "#808080"
                                      selected? "white"
                                      :else "#E0E0E0") ";"
-                                   "-fx-font-size: 12;")}
-                       {:fx/type :region :h-box/hgrow :always}
-                       {:fx/type :button
-                        :text "✕"
-                        :style "-fx-background-color: #D32F2F; -fx-text-fill: white; -fx-padding: 1 3; -fx-font-size: 5;"
-                        :on-action {:event/type :effects/remove-from-chain-and-clear-selection
-                                    :col col :row row
-                                    :effect-idx (last path)}}]}}))
+                                   "-fx-font-size: 12;")}]}}))
 
 
 ;; Recursive Chain Item Renderer

@@ -98,6 +98,10 @@
     (assoc item :id (random-uuid))))
 
 
+;; Forward declarations for helper functions used in delete-selected
+(declare path-is-ancestor? filter-to-root-paths)
+
+
 ;; Grid Events
 
 
@@ -472,7 +476,8 @@
 
 (defn- handle-effects-delete-selected
   "Delete all selected effects from the chain.
-   Supports both path-based selection (for groups) and legacy index-based selection."
+   Supports both path-based selection (for groups) and legacy index-based selection.
+   When deleting a group, all children are deleted with it (not promoted to parent)."
   [{:keys [col row state]}]
   (let [selected-paths (get-in state [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
         selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
@@ -480,8 +485,12 @@
     (cond
       ;; Path-based selection (supports groups)
       (seq selected-paths)
-      (let [;; Sort paths by depth (deepest first) to avoid index issues
-            sorted-paths (sort-by (comp - count) selected-paths)
+      (let [;; Filter to root paths only - if a group is selected, don't separately delete
+            ;; its children (they'll be deleted with the group). This prevents issues where
+            ;; children get deleted first, shifting indices and causing unexpected behavior.
+            root-paths (filter-to-root-paths selected-paths)
+            ;; Sort paths by depth (deepest first) to avoid index issues
+            sorted-paths (sort-by (comp - count) root-paths)
             ;; Remove each path
             new-effects (reduce remove-at-path effects-vec sorted-paths)]
         {:state (-> state
@@ -579,35 +588,44 @@
 (defn- handle-effects-group-selected
   "Group currently selected effects into a new group.
    Selected effects are removed and replaced with a group containing them.
+   Works with path-based selection to support nested items.
    Event keys:
    - :col, :row - Grid cell coordinates
    - :name (optional) - Group name"
   [{:keys [col row name state]}]
   (let [group-name (or name "New Group")
-        selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
+        selected-paths (get-in state [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
         effects-vec (get-in state [:effects :cells [col row] :effects] [])]
-    (if (seq selected-indices)
-      (let [;; Get sorted indices for consistent ordering
-            sorted-indices (sort selected-indices)
-            ;; Extract selected effects
-            selected-effects (mapv #(nth effects-vec %) sorted-indices)
+    (if (seq selected-paths)
+      (let [;; Filter to root paths only - if a group is selected, don't separately include its children
+            root-paths (filter-to-root-paths selected-paths)
+            ;; Sort by visual order to maintain relative ordering in the new group
+            all-paths (vec (effects/paths-in-chain effects-vec))
+            sorted-paths (sort-by #(.indexOf all-paths %) root-paths)
+            ;; Extract items at those paths in order
+            selected-items (mapv #(get-in effects-vec (vec %)) sorted-paths)
             ;; Create the new group
-            new-group (make-group group-name selected-effects)
-            ;; Find insertion point (where first selected effect was)
-            insert-at (first sorted-indices)
-            ;; Remove selected effects and insert group
-            remaining (vec (keep-indexed
-                            (fn [idx item]
-                              (when-not (contains? selected-indices idx)
-                                item))
-                            effects-vec))
-            new-effects (vec (concat (subvec remaining 0 (min insert-at (count remaining)))
+            new-group (make-group group-name selected-items)
+            ;; Find insertion point - where the first selected item was (at top level)
+            ;; For nested items, we insert at the top level where their root parent is
+            first-path (first sorted-paths)
+            insert-at (first first-path)  ;; Use top-level index
+            ;; Remove selected items (deepest first to avoid index shifting)
+            after-remove (reduce remove-at-path effects-vec
+                                 (sort-by (comp - count) sorted-paths))
+            ;; Insert the new group at the position where first item was
+            ;; Need to adjust insert position if we removed items before it
+            removed-before (count (filter #(< (first %) insert-at) sorted-paths))
+            adjusted-insert (- insert-at removed-before)
+            new-effects (vec (concat (subvec after-remove 0 adjusted-insert)
                                      [new-group]
-                                     (subvec remaining (min insert-at (count remaining)))))]
+                                     (subvec after-remove adjusted-insert)))
+            ;; Select the newly created group
+            new-group-path [adjusted-insert]]
         {:state (-> state
                     (assoc-in [:effects :cells [col row] :effects] new-effects)
-                    ;; Select the new group
-                    (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{insert-at})
+                    ;; Select the new group using path-based selection
+                    (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{new-group-path})
                     mark-dirty)})
       {:state state})))
 
