@@ -1213,6 +1213,217 @@
   {:state (assoc-in state (into [:config] path) value)})
 
 
+;; Projector Events
+
+
+(defn- handle-projectors-scan-network
+  "Start scanning the network for IDN devices."
+  [{:keys [state]}]
+  (let [broadcast-addr (get-in state [:projectors :broadcast-address] "255.255.255.255")]
+    {:state (assoc-in state [:projectors :scanning?] true)
+     :projectors/scan {:broadcast-address broadcast-addr}}))
+
+(defn- handle-projectors-scan-complete
+  "Handle scan completion - update discovered devices list."
+  [{:keys [devices state]}]
+  {:state (-> state
+              (assoc-in [:projectors :scanning?] false)
+              (assoc-in [:projectors :discovered-devices] (vec devices)))})
+
+(defn- handle-projectors-scan-failed
+  "Handle scan failure."
+  [{:keys [error state]}]
+  (println "Network scan failed:" error)
+  {:state (assoc-in state [:projectors :scanning?] false)})
+
+(defn- handle-projectors-add-device
+  "Add a discovered device as a configured projector."
+  [{:keys [device state]}]
+  (let [host (:address device)
+        name (or (:host-name device) host)
+        projector-id (keyword (str "projector-" (System/currentTimeMillis)))
+        ;; Default effect chain with color calibration and corner pin
+        default-effects [{:effect-id :rgb-calibration
+                          :id (random-uuid)
+                          :enabled? true
+                          :params {:r-gain 1.0 :g-gain 1.0 :b-gain 1.0}}
+                         {:effect-id :corner-pin
+                          :id (random-uuid)
+                          :enabled? true
+                          :params {:tl-x -1.0 :tl-y 1.0
+                                   :tr-x 1.0 :tr-y 1.0
+                                   :bl-x -1.0 :bl-y -1.0
+                                   :br-x 1.0 :br-y -1.0}}]
+        projector-config {:name name
+                          :host host
+                          :port (:port device 7255)
+                          :unit-id (:unit-id device)
+                          :enabled? true
+                          :effects default-effects
+                          :output-config {:color-bit-depth 8
+                                          :xy-bit-depth 16}
+                          :status {:connected? false}}]
+    {:state (-> state
+                (assoc-in [:projectors :items projector-id] projector-config)
+                (assoc-in [:projectors :active-projector] projector-id)
+                mark-dirty)}))
+
+(defn- handle-projectors-add-manual
+  "Add a projector manually (not from discovery)."
+  [{:keys [name host port state]}]
+  (let [projector-id (keyword (str "projector-" (System/currentTimeMillis)))
+        default-effects [{:effect-id :rgb-calibration
+                          :id (random-uuid)
+                          :enabled? true
+                          :params {:r-gain 1.0 :g-gain 1.0 :b-gain 1.0}}
+                         {:effect-id :corner-pin
+                          :id (random-uuid)
+                          :enabled? true
+                          :params {:tl-x -1.0 :tl-y 1.0
+                                   :tr-x 1.0 :tr-y 1.0
+                                   :bl-x -1.0 :bl-y -1.0
+                                   :br-x 1.0 :br-y -1.0}}]
+        projector-config {:name (or name host)
+                          :host host
+                          :port (or port 7255)
+                          :unit-id nil
+                          :enabled? true
+                          :effects default-effects
+                          :output-config {:color-bit-depth 8
+                                          :xy-bit-depth 16}
+                          :status {:connected? false}}]
+    {:state (-> state
+                (assoc-in [:projectors :items projector-id] projector-config)
+                (assoc-in [:projectors :active-projector] projector-id)
+                mark-dirty)}))
+
+(defn- handle-projectors-select-projector
+  "Select a projector for editing."
+  [{:keys [projector-id state]}]
+  {:state (assoc-in state [:projectors :active-projector] projector-id)})
+
+(defn- handle-projectors-remove-projector
+  "Remove a projector configuration."
+  [{:keys [projector-id state]}]
+  (let [active (get-in state [:projectors :active-projector])
+        items (get-in state [:projectors :items])
+        new-items (dissoc items projector-id)
+        ;; If removing active projector, select first remaining
+        new-active (if (= active projector-id)
+                     (first (keys new-items))
+                     active)]
+    {:state (-> state
+                (assoc-in [:projectors :items] new-items)
+                (assoc-in [:projectors :active-projector] new-active)
+                mark-dirty)}))
+
+(defn- handle-projectors-update-settings
+  "Update projector settings (name, host, port, enabled, output-config)."
+  [{:keys [projector-id updates state]}]
+  {:state (-> state
+              (update-in [:projectors :items projector-id] merge updates)
+              mark-dirty)})
+
+(defn- handle-projectors-toggle-enabled
+  "Toggle a projector's enabled state."
+  [{:keys [projector-id state]}]
+  (let [current (get-in state [:projectors :items projector-id :enabled?] true)]
+    {:state (-> state
+                (assoc-in [:projectors :items projector-id :enabled?] (not current))
+                mark-dirty)}))
+
+(defn- handle-projectors-add-effect
+  "Add an effect to a projector's chain."
+  [{:keys [projector-id effect state]}]
+  (let [effect-with-fields (cond-> effect
+                             (not (contains? effect :enabled?))
+                             (assoc :enabled? true)
+                             (not (contains? effect :id))
+                             (assoc :id (random-uuid)))]
+    {:state (-> state
+                (update-in [:projectors :items projector-id :effects] conj effect-with-fields)
+                mark-dirty)}))
+
+(defn- handle-projectors-remove-effect
+  "Remove an effect from a projector's chain."
+  [{:keys [projector-id effect-idx state]}]
+  (let [effects-vec (get-in state [:projectors :items projector-id :effects] [])
+        new-effects (vec (concat (subvec effects-vec 0 effect-idx)
+                                 (subvec effects-vec (inc effect-idx))))]
+    {:state (-> state
+                (assoc-in [:projectors :items projector-id :effects] new-effects)
+                mark-dirty)}))
+
+(defn- handle-projectors-update-effect-param
+  "Update a parameter in a projector's effect."
+  [{:keys [projector-id effect-idx param-key state] :as event}]
+  (let [value (or (:fx/event event) (:value event))]
+    {:state (assoc-in state
+                      [:projectors :items projector-id :effects effect-idx :params param-key]
+                      value)}))
+
+(defn- handle-projectors-reorder-effects
+  "Reorder effects in a projector's chain."
+  [{:keys [projector-id from-idx to-idx state]}]
+  (let [effects-vec (get-in state [:projectors :items projector-id :effects] [])
+        effect (nth effects-vec from-idx)
+        without (vec (concat (subvec effects-vec 0 from-idx)
+                             (subvec effects-vec (inc from-idx))))
+        reordered (vec (concat (subvec without 0 to-idx)
+                               [effect]
+                               (subvec without to-idx)))]
+    {:state (-> state
+                (assoc-in [:projectors :items projector-id :effects] reordered)
+                mark-dirty)}))
+
+(defn- handle-projectors-set-test-pattern
+  "Set or clear the test pattern mode."
+  [{:keys [pattern state]}]
+  {:state (assoc-in state [:projectors :test-pattern-mode] pattern)})
+
+(defn- handle-projectors-set-broadcast-address
+  "Set the broadcast address for network scanning."
+  [{:keys [address state]}]
+  {:state (assoc-in state [:projectors :broadcast-address] address)})
+
+(defn- handle-projectors-update-connection-status
+  "Update a projector's connection status (called by streaming service)."
+  [{:keys [projector-id status state]}]
+  {:state (update-in state [:projectors :items projector-id :status] merge status)})
+
+(defn- handle-projectors-select-effect
+  "Select an effect in the projector's chain for editing."
+  [{:keys [projector-id effect-idx state]}]
+  {:state (assoc-in state [:projectors :selected-effect-idx] effect-idx)})
+
+(defn- handle-projectors-update-corner-pin
+  "Update corner pin parameters from spatial drag.
+   Event keys:
+   - :projector-id - ID of the projector
+   - :effect-idx - Index of the corner pin effect
+   - :point-id - Corner being dragged (:tl, :tr, :bl, :br)
+   - :x, :y - New coordinates
+   - :param-map - Mapping of point IDs to param keys"
+  [{:keys [projector-id effect-idx point-id x y param-map state]}]
+  (let [point-params (get param-map point-id)]
+    (if point-params
+      (let [x-key (:x point-params)
+            y-key (:y point-params)]
+        {:state (-> state
+                    (assoc-in [:projectors :items projector-id :effects effect-idx :params x-key] x)
+                    (assoc-in [:projectors :items projector-id :effects effect-idx :params y-key] y))})
+      {:state state})))
+
+(defn- handle-projectors-reset-corner-pin
+  "Reset corner pin effect to default values."
+  [{:keys [projector-id effect-idx state]}]
+  {:state (assoc-in state [:projectors :items projector-id :effects effect-idx :params]
+                    {:tl-x -1.0 :tl-y 1.0
+                     :tr-x 1.0 :tr-y 1.0
+                     :bl-x -1.0 :bl-y -1.0
+                     :br-x 1.0 :br-y -1.0})})
+
+
 ;; File Menu Events
 
 
@@ -1483,6 +1694,27 @@
     
     ;; Config events
     :config/update (handle-config-update event)
+    
+    ;; Projector events
+    :projectors/scan-network (handle-projectors-scan-network event)
+    :projectors/scan-complete (handle-projectors-scan-complete event)
+    :projectors/scan-failed (handle-projectors-scan-failed event)
+    :projectors/add-device (handle-projectors-add-device event)
+    :projectors/add-manual (handle-projectors-add-manual event)
+    :projectors/select-projector (handle-projectors-select-projector event)
+    :projectors/remove-projector (handle-projectors-remove-projector event)
+    :projectors/update-settings (handle-projectors-update-settings event)
+    :projectors/toggle-enabled (handle-projectors-toggle-enabled event)
+    :projectors/add-effect (handle-projectors-add-effect event)
+    :projectors/remove-effect (handle-projectors-remove-effect event)
+    :projectors/update-effect-param (handle-projectors-update-effect-param event)
+    :projectors/reorder-effects (handle-projectors-reorder-effects event)
+    :projectors/set-test-pattern (handle-projectors-set-test-pattern event)
+    :projectors/set-broadcast-address (handle-projectors-set-broadcast-address event)
+    :projectors/update-connection-status (handle-projectors-update-connection-status event)
+    :projectors/select-effect (handle-projectors-select-effect event)
+    :projectors/update-corner-pin (handle-projectors-update-corner-pin event)
+    :projectors/reset-corner-pin (handle-projectors-reset-corner-pin event)
     
     ;; File menu events
     :file/new-project (handle-file-new-project event)

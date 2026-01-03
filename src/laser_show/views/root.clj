@@ -23,9 +23,11 @@
    [laser-show.views.components.preview :as preview]
    [laser-show.views.components.tabs :as tabs]
    [laser-show.views.dialogs.effect-chain-editor :as effect-chain-editor]
+   [laser-show.views.dialogs.add-projector-manual :as add-projector-dialog]
    [laser-show.views.status-bar :as status-bar]
    [laser-show.views.tabs.effects :as effects-tab]
    [laser-show.views.tabs.grid :as grid-tab]
+   [laser-show.views.tabs.projectors :as projectors-tab]
    [laser-show.views.toolbar :as toolbar]))
 
 
@@ -63,14 +65,7 @@
     (case active-tab
       :grid {:fx/type grid-tab/grid-tab}
       :effects {:fx/type effects-tab/effects-tab}
-      :projectors {:fx/type :v-box
-                   :padding 20
-                   :children [{:fx/type :label
-                               :text "Projectors Configuration"
-                               :style "-fx-font-size: 18; -fx-text-fill: white;"}
-                              {:fx/type :label
-                               :text "Coming soon..."
-                               :style "-fx-text-fill: #808080;"}]}
+      :projectors {:fx/type projectors-tab/projectors-tab}
       :settings {:fx/type :v-box
                  :padding 20
                  :children [{:fx/type :label
@@ -148,7 +143,8 @@
   (let [{:keys [title]} (fx/sub-ctx context subs/project-status)
         window-config (fx/sub-ctx context subs/window-config)
         stylesheets (fx/sub-ctx context subs/stylesheet-urls)
-        effect-editor-open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)]
+        effect-editor-open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)
+        add-projector-open? (fx/sub-ctx context subs/dialog-open? :add-projector-manual)]
     {:fx/type fx/ext-set-env
      :env {::theme theme}
      :desc {:fx/type fx/ext-many
@@ -169,4 +165,7 @@
                               :root {:fx/type main-layout}}}
                      ;; Effect chain editor dialog
                      (when effect-editor-open?
-                       {:fx/type effect-chain-editor/effect-chain-editor-dialog})])}}))
+                       {:fx/type effect-chain-editor/effect-chain-editor-dialog})
+                     ;; Add projector manually dialog
+                     (when add-projector-open?
+                       {:fx/type add-projector-dialog/add-projector-manual-dialog})])}}))

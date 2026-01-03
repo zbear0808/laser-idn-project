@@ -142,9 +142,31 @@
           :doc "MIDI input settings"}})
 
 (defstate projectors
-  "Projector configurations."
+  "Projector configurations with effect chains for color calibration and safety zoning.
+   
+   Each projector entry contains:
+   - :name - User-friendly name
+   - :host - IP address
+   - :port - IDN port (default 7255)
+   - :unit-id - Hardware unit ID from discovery
+   - :enabled? - Whether to send output to this projector
+   - :effects - Effect chain applied to output (color cal, corner pin, etc.)
+   - :output-config - Bit depth settings
+   - :status - Runtime connection status (not persisted)"
   {:items {:default {}
-           :doc "map of projector-id -> {:name :host :port :zones ...}"}})
+           :doc "Map of projector-id -> projector configuration"}
+   :active-projector {:default nil
+                      :doc "Currently selected projector ID for editing"}
+   :selected-effect-idx {:default nil
+                         :doc "Index of currently selected effect in projector's chain"}
+   :test-pattern-mode {:default nil
+                       :doc "Active test pattern: nil, :grid, or :corners"}
+   :discovered-devices {:default []
+                        :doc "List of devices from last network scan"}
+   :scanning? {:default false
+               :doc "Whether a network scan is in progress"}
+   :broadcast-address {:default "255.255.255.255"
+                       :doc "Broadcast address for device discovery"}})
 
 (defstate zones
   "Zone configurations for spatial mapping."

@@ -298,6 +298,77 @@
   (:frame-stats (fx/sub-ctx context streaming-data)))
 
 
+;; Level 2: Projector Subscriptions
+
+
+(defn projectors-data
+  "Get projectors domain data.
+   Depends on: projectors domain"
+  [context]
+  (fx/sub-val context :projectors))
+
+(defn projectors-list
+  "Get list of configured projectors as [{:id :proj-1 :name ...} ...].
+   Depends on: projectors-data"
+  [context]
+  (let [data (fx/sub-ctx context projectors-data)
+        items (:items data {})]
+    (mapv (fn [[id config]] (assoc config :id id)) items)))
+
+(defn active-projector-id
+  "Get the ID of the currently selected projector.
+   Depends on: projectors-data"
+  [context]
+  (:active-projector (fx/sub-ctx context projectors-data)))
+
+(defn active-projector
+  "Get the full config of the currently selected projector.
+   Depends on: projectors-data, active-projector-id"
+  [context]
+  (let [data (fx/sub-ctx context projectors-data)
+        active-id (fx/sub-ctx context active-projector-id)]
+    (when active-id
+      (assoc (get-in data [:items active-id]) :id active-id))))
+
+(defn discovered-devices
+  "Get list of devices from the last network scan.
+   Depends on: projectors-data"
+  [context]
+  (:discovered-devices (fx/sub-ctx context projectors-data) []))
+
+(defn projector-scanning?
+  "Check if a network scan is in progress.
+   Depends on: projectors-data"
+  [context]
+  (:scanning? (fx/sub-ctx context projectors-data) false))
+
+(defn configured-projector-hosts
+  "Get set of already-configured projector hosts.
+   Useful for indicating which discovered devices are already configured.
+   Depends on: projectors-data"
+  [context]
+  (let [items (:items (fx/sub-ctx context projectors-data) {})]
+    (into #{} (map :host (vals items)))))
+
+(defn test-pattern-mode
+  "Get the current test pattern mode (:grid, :corners, or nil).
+   Depends on: projectors-data"
+  [context]
+  (:test-pattern-mode (fx/sub-ctx context projectors-data)))
+
+(defn enabled-projectors
+  "Get list of enabled projectors.
+   Depends on: projectors-list"
+  [context]
+  (filterv :enabled? (fx/sub-ctx context projectors-list)))
+
+(defn selected-projector-effect-idx
+  "Get the index of the selected effect in the projector's chain.
+   Depends on: projectors-data"
+  [context]
+  (:selected-effect-idx (fx/sub-ctx context projectors-data)))
+
+
 ;; Stylesheet Subscriptions (CSS Hot-Reload)
 
 

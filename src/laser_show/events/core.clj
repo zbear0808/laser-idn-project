@@ -19,12 +19,14 @@
    - Side effects are isolated and explicit
    - State updates preserve cljfx context memoization"
   (:require [cljfx.api :as fx]
+            [clojure.string :as str]
             [laser-show.state.core :as state]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.events.handlers :as handlers]
             [laser-show.backend.streaming-engine :as streaming-engine]
             [laser-show.services.frame-service :as frame-service]
-            [laser-show.common.util :as u]))
+            [laser-show.common.util :as u]
+            [laser-show.idn.hello :as idn-hello]))
 
 ;; Co-effects (inject data INTO events)
 ;; Co-effect functions take NO arguments and return data to inject.
@@ -154,9 +156,41 @@
   (when-let [effects (clipboard/get-effects-to-paste)]
     (dispatch {:event/type :effects/insert-pasted
                :col col
-               :row row  
+               :row row
                :insert-pos insert-pos
                :effects effects})))
+
+;; Projector Scanning Effects
+
+(defn- effect-projectors-scan
+  "Effect that scans the network for IDN devices using IDN-Hello protocol.
+   Uses broadcast UDP to discover devices, then dispatches results."
+  [{:keys [broadcast-address]} dispatch]
+  (future
+    (try
+      (println (format "Scanning network for IDN devices (broadcast: %s)..." broadcast-address))
+      ;; Use actual IDN-Hello discovery protocol
+      (let [discovered (idn-hello/discover-devices broadcast-address 3000)
+            ;; Transform discovered devices to the format expected by UI
+            devices (mapv (fn [device]
+                            {:address (:address device)
+                             :host-name (let [name (:host-name device)]
+                                          (if (str/blank? name)
+                                            (:address device)
+                                            name))
+                             :unit-id (:unit-id device)
+                             :port (or (:port device) 7255)
+                             :status (:status device)
+                             :protocol-version (:protocol-version device)})
+                          discovered)]
+        (println (format "Found %d IDN device(s)" (count devices)))
+        (dispatch {:event/type :projectors/scan-complete
+                   :devices devices}))
+      (catch Exception e
+        (println "Network scan failed:" (.getMessage e))
+        (.printStackTrace e)
+        (dispatch {:event/type :projectors/scan-failed
+                   :error (.getMessage e)})))))
 
 ;; Wrapped Event Handler
 
@@ -179,7 +213,8 @@
    - :project/save - save project to disk
    - :project/load - load project from disk
    - :clipboard/copy-effects - copy effects to clipboard
-   - :clipboard/paste-effects - paste effects from clipboard"
+   - :clipboard/paste-effects - paste effects from clipboard
+   - :projectors/scan - scan network for IDN devices"
   (-> handlers/handle-event
       
       ;; Inject co-effects into events
@@ -199,7 +234,9 @@
          :project/load effect-load-project
          ;; Clipboard effects for effect chain editor
          :clipboard/copy-effects effect-clipboard-copy-effects
-         :clipboard/paste-effects effect-clipboard-paste-effects})))
+         :clipboard/paste-effects effect-clipboard-paste-effects
+         ;; Projector scanning effects
+         :projectors/scan effect-projectors-scan})))
 
 ;; Convenience Functions
 

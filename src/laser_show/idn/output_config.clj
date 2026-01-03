@@ -158,21 +158,3 @@
   [{:keys [color-bit-depth xy-bit-depth]}]
   (str xy-bit-depth "-bit XY, " color-bit-depth "-bit color"))
 
-(defn config-description
-  "Get a description of the configuration."
-  [config]
-  (cond
-    (= config default-config)
-    "High precision (16-bit color and position)"
-    
-    (= config standard-config)
-    "Standard ISP-DB25 compatible (8-bit color, 16-bit position)"
-    
-    (= config compact-config)
-    "Compact (smallest packet size, 8-bit all)"
-    
-    (= config high-color-config)
-    "High color precision (16-bit color, 8-bit position)"
-    
-    :else
-    (config-name config)))
