@@ -18,7 +18,8 @@
             [laser-show.css.grid-cells :as grid-cells]
             [laser-show.css.dialogs :as dialogs]
             [laser-show.css.layout :as layout]
-            [laser-show.css.title-bar :as title-bar]))
+            [laser-show.css.title-bar :as title-bar]
+            [laser-show.css.effect-chain-sidebar :as effect-chain-sidebar]))
 
 
 
@@ -37,7 +38,8 @@
    (::css/url grid-cells/grid-cells)
    (::css/url dialogs/dialogs)
    (::css/url layout/layout)
-   (::css/url title-bar/menu-theme)])
+   (::css/url title-bar/menu-theme)
+   (::css/url effect-chain-sidebar/effect-chain-sidebar)])
 
 (defn dialog-stylesheet-urls
   "Returns stylesheet URLs appropriate for dialogs.
@@ -54,7 +56,8 @@
    (::css/url grid-cells/grid-cells)
    (::css/url layout/layout)
    (::css/url dialogs/dialogs)
-   (::css/url title-bar/menu-theme)])
+   (::css/url title-bar/menu-theme)
+   (::css/url effect-chain-sidebar/effect-chain-sidebar)])
 
 
 ;; Theme color access helpers

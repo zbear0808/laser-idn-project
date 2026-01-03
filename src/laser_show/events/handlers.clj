@@ -102,6 +102,47 @@
 (declare path-is-ancestor? filter-to-root-paths)
 
 
+;; Two-Phase Operation Helpers
+;; These avoid index-shifting bugs by collecting items first, then operating
+
+
+(defn- collect-items-by-ids
+  "Recursively collect all items matching the given ID set.
+   Returns a vector of items (preserving order as encountered)."
+  [items id-set]
+  (reduce
+    (fn [acc item]
+      (let [acc (if (contains? id-set (:id item))
+                  (conj acc item)
+                  acc)]
+        ;; Recurse into groups
+        (if (effects/group? item)
+          (into acc (collect-items-by-ids (:items item []) id-set))
+          acc)))
+    []
+    items))
+
+(defn- remove-items-by-ids
+  "Recursively remove all items matching the given ID set.
+   Returns the chain with matching items filtered out."
+  [items id-set]
+  (vec
+    (keep
+      (fn [item]
+        (when-not (contains? id-set (:id item))
+          (if (effects/group? item)
+            (update item :items #(remove-items-by-ids % id-set))
+            item)))
+      items)))
+
+(defn- insert-items-at-index
+  "Insert items at a specific index in the vector."
+  [vec idx items]
+  (let [safe-idx (max 0 (min idx (count vec)))]
+    (into (subvec vec 0 safe-idx)
+          (concat items (subvec vec safe-idx)))))
+
+
 ;; Grid Events
 
 
@@ -396,12 +437,18 @@
                       range-indices)}))
 
 (defn- handle-effects-select-all
-  "Select all effects in the current chain."
+  "Select all effects and groups in the current chain.
+   Uses path-based selection to include nested items within groups."
   [{:keys [col row state]}]
-  (let [effects-count (count (get-in state [:effects :cells [col row] :effects] []))
+  (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
+        ;; Get all paths including nested items using the effects module helper
+        all-paths (into #{} (effects/paths-in-chain effects-vec))
+        ;; Also support legacy index-based selection for compatibility
+        effects-count (count effects-vec)
         all-indices (into #{} (range effects-count))]
-    {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices]
-                      all-indices)}))
+    {:state (-> state
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] all-paths)
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] all-indices))}))
 
 (defn- handle-effects-clear-selection
   "Clear all effect selection in chain editor."
@@ -598,6 +645,12 @@
   "Group currently selected effects into a new group.
    Selected effects are removed and replaced with a group containing them.
    Works with path-based selection to support nested items.
+   
+   Uses two-phase operation to avoid index-shifting bugs:
+   1. Collect selected items by ID
+   2. Remove items by ID set (no index dependencies)
+   3. Insert new group at computed position
+   
    Event keys:
    - :col, :row - Grid cell coordinates
    - :name (optional) - Group name"
@@ -611,24 +664,36 @@
             ;; Sort by visual order to maintain relative ordering in the new group
             all-paths (vec (effects/paths-in-chain effects-vec))
             sorted-paths (sort-by #(.indexOf all-paths %) root-paths)
-            ;; Extract items at those paths in order
+            
+            ;; PHASE 1: Extract items in visual order (using paths, which are still valid)
             selected-items (mapv #(get-in effects-vec (vec %)) sorted-paths)
-            ;; Create the new group
-            new-group (make-group group-name selected-items)
-            ;; Find insertion point - where the first selected item was (at top level)
-            ;; For nested items, we insert at the top level where their root parent is
+            
+            ;; Collect IDs of items to remove (for two-phase operation)
+            ids-to-remove (into #{} (map :id selected-items))
+            
+            ;; Find insertion point - the top-level index of the first selected item
             first-path (first sorted-paths)
-            insert-at (first first-path)  ;; Use top-level index
-            ;; Remove selected items (deepest first to avoid index shifting)
-            after-remove (reduce remove-at-path effects-vec
-                                 (sort-by (comp - count) sorted-paths))
-            ;; Insert the new group at the position where first item was
-            ;; Need to adjust insert position if we removed items before it
-            removed-before (count (filter #(< (first %) insert-at) sorted-paths))
-            adjusted-insert (- insert-at removed-before)
-            new-effects (vec (concat (subvec after-remove 0 adjusted-insert)
-                                     [new-group]
-                                     (subvec after-remove adjusted-insert)))
+            insert-at-top-level (first first-path)
+            
+            ;; PHASE 2: Remove all selected items by ID (avoids index shifting)
+            after-remove (remove-items-by-ids effects-vec ids-to-remove)
+            
+            ;; Calculate insert position:
+            ;; We need to count how many top-level items before insert-at-top-level were removed
+            items-removed-before-insert (count
+                                          (filter
+                                            (fn [path]
+                                              (and (= 1 (count path))  ;; Only count top-level items
+                                                   (< (first path) insert-at-top-level)))
+                                            sorted-paths))
+            adjusted-insert (- insert-at-top-level items-removed-before-insert)
+            
+            ;; Create the new group with extracted items
+            new-group (make-group group-name selected-items)
+            
+            ;; PHASE 3: Insert new group at adjusted position
+            new-effects (insert-items-at-index after-remove adjusted-insert [new-group])
+            
             ;; Select the newly created group
             new-group-path [adjusted-insert]]
         {:state (-> state

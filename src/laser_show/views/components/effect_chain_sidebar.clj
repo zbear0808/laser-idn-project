@@ -14,6 +14,8 @@
    - Dragging an unselected item auto-selects and moves just that item
    - Items maintain their relative order when moved
    
+   Styling is defined in laser-show.css.effect-chain-sidebar.
+   
    Extracted from effect-chain-editor for maintainability."
   (:require [cljfx.api :as fx]
             [laser-show.animation.effects :as effects]
@@ -21,19 +23,13 @@
   (:import [javafx.scene.input TransferMode ClipboardContent]))
 
 
-;; Constants
+;; Helper Functions
 
 
-(def group-colors
-  "Colors for different group nesting depths."
-  ["#4A7B9D"   ;; Level 0 - Blue
-   "#6B5B8C"   ;; Level 1 - Purple
-   "#5B8C6B"   ;; Level 2 - Green
-   "#8C7B5B"]) ;; Level 3 - Brown
-
-(def depth-indent
-  "Indentation in pixels per nesting level."
-  16)
+(defn- depth-class
+  "Returns the depth capped at 3 (max nesting level for CSS classes)."
+  [depth]
+  (min depth 3))
 
 
 ;; Effect Registry Access
@@ -169,6 +165,49 @@
         (.consume event)))))
 
 
+;; Style Class Builders
+
+
+(defn- group-header-style-classes
+  "Build style class vector for group header based on state."
+  [{:keys [depth selected? dragging? drop-before? drop-into? effectively-disabled?]}]
+  (cond-> ["group-header"
+           (str "group-depth-" (depth-class depth))
+           (str "group-indent-" (depth-class depth))]
+    selected? (conj "group-header-selected")
+    drop-into? (conj "group-header-drop-into")
+    drop-before? (conj "group-header-drop-before")
+    dragging? (conj "group-header-dragging")
+    effectively-disabled? (conj "group-header-disabled")))
+
+(defn- group-name-style-classes
+  "Build style class vector for group name label based on state."
+  [{:keys [depth selected? effectively-disabled?]}]
+  (cond-> ["group-name-label"]
+    (and (not selected?) (not effectively-disabled?))
+    (conj (str "group-name-depth-" (depth-class depth)))
+    
+    selected? (conj "group-name-selected")
+    effectively-disabled? (conj "group-name-disabled")))
+
+(defn- chain-item-style-classes
+  "Build style class vector for chain item based on state."
+  [{:keys [depth selected? dragging? drop-target? effectively-disabled?]}]
+  (cond-> ["chain-item"
+           (str "item-indent-" (depth-class depth))]
+    selected? (conj "chain-item-selected")
+    drop-target? (conj "chain-item-drop-target")
+    dragging? (conj "chain-item-dragging")
+    effectively-disabled? (conj "chain-item-disabled")))
+
+(defn- chain-item-name-style-classes
+  "Build style class vector for chain item name label based on state."
+  [{:keys [selected? effectively-disabled?]}]
+  (cond-> ["chain-item-name"]
+    selected? (conj "chain-item-name-selected")
+    effectively-disabled? (conj "chain-item-name-disabled")))
+
+
 ;; Group Header Component
 
 
@@ -190,12 +229,23 @@
   (let [enabled? (:enabled? group true)
         effectively-disabled? (or (not enabled?) parent-disabled?)
         collapsed? (:collapsed? group false)
-        item-count (count (:items group []))
         effect-count (effects/count-effects-recursive (:items group []))
-        border-color (get group-colors (min depth (dec (count group-colors))))
         ;; Visual feedback: "before" = top border only, "into" = full border
         drop-before? (and drop-target? (= drop-position :before))
-        drop-into? (and drop-target? (= drop-position :into))]
+        drop-into? (and drop-target? (= drop-position :into))
+        
+        ;; Build style classes
+        header-classes (group-header-style-classes
+                        {:depth depth
+                         :selected? selected?
+                         :dragging? dragging?
+                         :drop-before? drop-before?
+                         :drop-into? drop-into?
+                         :effectively-disabled? effectively-disabled?})
+        name-classes (group-name-style-classes
+                      {:depth depth
+                       :selected? selected?
+                       :effectively-disabled? effectively-disabled?})]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
                    (let [dispatch! events/dispatch!
@@ -228,28 +278,11 @@
                                              :shift? shift?})
                                  (.consume event)))))))))
      :desc {:fx/type :h-box
-            :spacing 6
-            :alignment :center-left
-            :style (str "-fx-background-color: " (cond
-                                                    drop-into? "#5A8FCF"
-                                                    selected? "#4A6FA5"
-                                                    :else "#333333") ";"
-                        "-fx-padding: 6 8 6 " (+ 8 (* depth depth-indent)) ";"
-                        "-fx-background-radius: 4;"
-                        "-fx-border-color: " border-color ";"
-                        "-fx-border-width: 0 0 0 3;"
-                        "-fx-border-radius: 4;"
-                        ;; Different visual feedback for before vs into
-                        (cond
-                          drop-before? "-fx-border-color: #7AB8FF; -fx-border-width: 3 0 0 3;"
-                          drop-into? "-fx-border-color: #7AB8FF; -fx-border-width: 2;"
-                          :else nil)
-                        (when dragging? "-fx-opacity: 0.5;")
-                        (when effectively-disabled? "-fx-opacity: 0.6;"))
+            :style-class header-classes
             :children [;; Collapse/Expand chevron
                        {:fx/type :button
                         :text (if collapsed? "▶" "▼")
-                        :style "-fx-background-color: transparent; -fx-text-fill: #808080; -fx-font-size: 10; -fx-padding: 0 2; -fx-min-width: 16;"
+                        :style-class "group-collapse-btn"
                         :on-action {:event/type :effects/toggle-group-collapse
                                     :col col :row row
                                     :path path}}
@@ -270,7 +303,7 @@
                                         (.selectAll node))
                           :desc {:fx/type :text-field
                                  :text (or (:name group) "Group")
-                                 :style "-fx-background-color: #252525; -fx-text-fill: white; -fx-font-size: 12; -fx-font-weight: bold; -fx-padding: 0 4;"
+                                 :style-class "group-name-input"
                                  :on-action (fn [^javafx.event.ActionEvent e]
                                               (let [text-field (.getSource e)
                                                     new-name (.getText text-field)]
@@ -289,26 +322,19 @@
                          ;; Label for display (click handled by parent h-box)
                          {:fx/type :label
                           :text (or (:name group) "Group")
-                          :style (str "-fx-text-fill: "
-                                     (cond
-                                       effectively-disabled? "#808080"
-                                       selected? "white"
-                                       :else border-color) ";"
-                                     "-fx-font-size: 12;"
-                                     "-fx-font-weight: bold;"
-                                     "-fx-cursor: hand;")})
+                          :style-class name-classes})
                        
                        ;; Item count badge
                        {:fx/type :label
                         :text (str "(" effect-count ")")
-                        :style "-fx-text-fill: #606060; -fx-font-size: 10;"}
+                        :style-class "group-count-badge"}
                        
                        {:fx/type :region :h-box/hgrow :always}
                        
                        ;; Ungroup button
                        {:fx/type :button
                         :text "⊗"
-                        :style "-fx-background-color: #505050; -fx-text-fill: #A0A0A0; -fx-padding: 1 3; -fx-font-size: 8;"
+                        :style-class "group-ungroup-btn"
                         :on-action {:event/type :effects/ungroup
                                     :col col :row row
                                     :path path}}]}}))
@@ -334,7 +360,18 @@
    - :parent-disabled? - Whether any parent group is disabled"
   [{:keys [col row path effect effect-def depth selected? dragging? drop-target? parent-disabled?]}]
   (let [enabled? (:enabled? effect true)
-        effectively-disabled? (or (not enabled?) parent-disabled?)]
+        effectively-disabled? (or (not enabled?) parent-disabled?)
+        
+        ;; Build style classes
+        item-classes (chain-item-style-classes
+                      {:depth depth
+                       :selected? selected?
+                       :dragging? dragging?
+                       :drop-target? drop-target?
+                       :effectively-disabled? effectively-disabled?})
+        name-classes (chain-item-name-style-classes
+                      {:selected? selected?
+                       :effectively-disabled? effectively-disabled?})]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
                    (let [dispatch! events/dispatch!
@@ -343,17 +380,7 @@
                      (setup-drag-target! node target-id path false col row dispatch!)
                      (setup-click-handler! node path col row)))
      :desc {:fx/type :h-box
-            :spacing 6
-            :alignment :center-left
-            :style (str "-fx-background-color: " (cond
-                                                    drop-target? "#5A8FCF"
-                                                    selected? "#4A6FA5"
-                                                    :else "#3D3D3D") ";"
-                        "-fx-padding: 6 8 6 " (+ 8 (* depth depth-indent)) ";"
-                        "-fx-background-radius: 4;"
-                        (when drop-target? "-fx-border-color: #7AB8FF; -fx-border-width: 2 0 0 0;")
-                        (when dragging? "-fx-opacity: 0.5;")
-                        (when effectively-disabled? "-fx-opacity: 0.6;"))
+            :style-class item-classes
             :children [;; Enable/disable checkbox (does NOT trigger selection)
                        {:fx/type :check-box
                         :selected enabled?
@@ -364,12 +391,7 @@
                        ;; Effect name
                        {:fx/type :label
                         :text (or (:name effect-def) "Unknown")
-                        :style (str "-fx-text-fill: "
-                                   (cond
-                                     effectively-disabled? "#808080"
-                                     selected? "white"
-                                     :else "#E0E0E0") ";"
-                                   "-fx-font-size: 12;")}]}}))
+                        :style-class name-classes}]}}))
 
 
 ;; Recursive Chain Item Renderer
@@ -454,13 +476,13 @@
    :spacing 4
    :children [{:fx/type :button
                :text "🗁 New"
-               :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 9; -fx-padding: 2 6;"
+               :style-class "chain-toolbar-btn"
                :on-action {:event/type :effects/create-empty-group
                            :col col :row row}}
               {:fx/type :button
                :text "☐ Group"
                :disable (or (zero? selection-count) (not can-create-group?))
-               :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 9; -fx-padding: 2 6;"
+               :style-class "chain-toolbar-btn"
                :on-action {:event/type :effects/group-selected
                            :col col :row row}}]})
 
@@ -495,24 +517,21 @@
         chain-depth (effects/nesting-depth effect-chain)
         can-create-group? (< chain-depth effects/max-nesting-depth)]
     {:fx/type :v-box
-     :spacing 8
-     :pref-width 200
-     :min-width 200
-     :style "-fx-background-color: #252525; -fx-padding: 8;"
+     :style-class "chain-sidebar"
      :children [{:fx/type :h-box
                  :alignment :center-left
                  :children (filterv some?
                              [{:fx/type :label
                                :text "CHAIN"
-                               :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                               :style-class "chain-header-label"}
                               {:fx/type :region :h-box/hgrow :always}
                               (when (pos? selection-count)
                                 {:fx/type :label
                                  :text (str selection-count " selected")
-                                 :style "-fx-text-fill: #4A6FA5; -fx-font-size: 9;"})])}
+                                 :style-class "chain-selection-count"})])}
                 {:fx/type :label
-                 :text "Ctrl+Click multi-select • Drag to reorder"
-                 :style "-fx-text-fill: #505050; -fx-font-size: 8; -fx-font-style: italic;"}
+                 :text "Ctrl+Click multi-select • Drag to reorder • Ctrl+G group"
+                 :style-class "chain-hint-text"}
                 
                 ;; Group toolbar
                 {:fx/type group-toolbar
@@ -526,29 +545,29 @@
                  :children [{:fx/type :button
                              :text "Copy"
                              :disable (zero? selection-count)
-                             :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 9; -fx-padding: 2 6;"
+                             :style-class "chain-toolbar-btn"
                              :on-action {:event/type :effects/copy-selected
                                          :col col :row row}}
                             {:fx/type :button
                              :text "Paste"
                              :disable (not can-paste?)
-                             :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 9; -fx-padding: 2 6;"
+                             :style-class "chain-toolbar-btn"
                              :on-action {:event/type :effects/paste-into-chain
                                          :col col :row row}}
                             {:fx/type :button
                              :text "Del"
                              :disable (zero? selection-count)
-                             :style "-fx-background-color: #803030; -fx-text-fill: white; -fx-font-size: 9; -fx-padding: 2 6;"
+                             :style-class "chain-toolbar-btn-danger"
                              :on-action {:event/type :effects/delete-selected
                                          :col col :row row}}]}
                 (if (empty? effect-chain)
                   {:fx/type :label
                    :text "No effects\nAdd from bank →"
-                   :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"}
+                   :style-class "chain-empty-text"}
                   {:fx/type :scroll-pane
                    :fit-to-width true
                    :v-box/vgrow :always
-                   :style "-fx-background-color: transparent; -fx-background: #252525;"
+                   :style-class "chain-scroll-pane"
                    :content {:fx/type :v-box
                              :spacing 4
                              :children (vec

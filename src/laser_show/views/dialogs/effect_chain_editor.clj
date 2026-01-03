@@ -431,6 +431,12 @@
                                    :col col :row row})
                 (.consume event))
             
+            ;; Ctrl+G - Group selected effects
+            (and ctrl? (= code KeyCode/G))
+            (do (events/dispatch! {:event/type :effects/group-selected
+                                   :col col :row row})
+                (.consume event))
+            
             ;; Delete or Backspace - Delete selected
             (or (= code KeyCode/DELETE) (= code KeyCode/BACK_SPACE))
             (do (events/dispatch! {:event/type :effects/delete-selected
