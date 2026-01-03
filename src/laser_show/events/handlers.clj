@@ -205,7 +205,8 @@
     {:state (assoc-in state [:effects :cells [col row] :active] (not current-active))}))
 
 (defn- handle-effects-add-effect
-  "Add an effect to a cell's chain."
+  "Add an effect to a cell's chain.
+   Automatically selects the newly added effect so it can be edited immediately."
   [{:keys [col row effect state]}]
   (let [ensure-cell (fn [s]
                       (if (get-in s [:effects :cells [col row]])
@@ -216,10 +217,20 @@
                              (not (contains? effect :enabled?))
                              (assoc :enabled? true)
                              (not (contains? effect :id))
-                             (assoc :id (random-uuid)))]
-    {:state (-> state
-                ensure-cell
+                             (assoc :id (random-uuid)))
+        ;; Calculate the index where the new effect will be inserted (at the end)
+        state-with-cell (ensure-cell state)
+        current-effects (get-in state-with-cell [:effects :cells [col row] :effects] [])
+        new-effect-idx (count current-effects)
+        new-effect-path [new-effect-idx]]
+    {:state (-> state-with-cell
                 (update-in [:effects :cells [col row] :effects] conj effect-with-fields)
+                ;; Auto-select the newly added effect using path-based selection
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{new-effect-path})
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :last-selected-path] new-effect-path)
+                ;; Also update legacy index-based selection for compatibility
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{new-effect-idx})
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :last-selected-idx] new-effect-idx)
                 mark-dirty)}))
 
 (defn- handle-effects-set-effect-enabled
