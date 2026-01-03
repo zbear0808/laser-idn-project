@@ -63,8 +63,8 @@
        {:-fx-background-color bg-dark
         :-fx-padding 8
         :-fx-spacing 8
-        :-fx-pref-width 200
-        :-fx-min-width 200}
+        :-fx-min-width 180
+        :-fx-pref-width 220}
        
        
        ;; ============================================

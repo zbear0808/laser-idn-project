@@ -95,12 +95,12 @@
     :color {:fx/type effect-bank-tab-content :col col :row row :category :color}
     :shape {:fx/type effect-bank-tab-content :col col :row row :category :shape}
     :intensity {:fx/type effect-bank-tab-content :col col :row row :category :intensity}
-    {:fx/type effect-bank-tab-content :col col :row row :category :color}))
+    {:fx/type effect-bank-tab-content :col col :row row :category :shape}))
 
 (defn- effect-bank-tabs
   "Tabbed effect bank using shared styled-tab-bar - Color, Shape, Intensity."
   [{:keys [col row active-bank-tab]}]
-  (let [active-tab (or active-bank-tab :color)]
+  (let [active-tab (or active-bank-tab :shape)]
     {:fx/type :v-box
      :pref-height 150
      :children [{:fx/type tabs/styled-tab-bar
@@ -496,6 +496,7 @@
                         :v-box/vgrow :always
                         :children [;; Left sidebar - chain list with drag-and-drop
                                    {:fx/type sidebar/chain-list-sidebar
+                                      :h-box/hgrow :always
                                       :col col :row row
                                       :effect-chain effect-chain
                                       :selected-effect-indices selected-indices

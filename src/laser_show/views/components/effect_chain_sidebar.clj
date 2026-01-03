@@ -566,6 +566,8 @@
                    :style-class "chain-empty-text"}
                   {:fx/type :scroll-pane
                    :fit-to-width true
+                   :fit-to-height false
+                   :hbar-policy :as-needed
                    :v-box/vgrow :always
                    :style-class "chain-scroll-pane"
                    :content {:fx/type :v-box
