@@ -44,11 +44,14 @@
 
 
 (defn cell-label
-  "Display text for a cell."
-  [{:keys [preset-id]}]
-  (if preset-id
-    (-> preset-id name (str/replace "-" " "))
-    ""))
+  "Display text for a cell.
+   Shows first preset name, or preset count if multiple."
+  [{:keys [first-preset-id preset-count]}]
+  (cond
+    (nil? first-preset-id) ""
+    (= preset-count 1) (-> first-preset-id name (str/replace "-" " "))
+    :else (str (-> first-preset-id name (str/replace "-" " "))
+               " +" (dec preset-count))))
 
 
 ;; Style Class Helpers
@@ -75,7 +78,8 @@
    
    Behavior:
    - Left-click: Trigger the cell (if has content) or select (if empty)
-   - Right-click: Select cell
+   - Right-click: Open cue chain editor
+   - Double-click: Open cue chain editor
    - Drag from cell: Start dragging cell content
    - Drop on cell: Move cell content
    
@@ -86,7 +90,7 @@
    Note: Primary click handler uses map-based events with :fx/event for button detection.
    Drag handlers still use functions as they require imperative JavaFX API calls."
   [{:keys [fx/context col row]}]
-  (let [{:keys [preset-id active? selected? has-content?] :as display-data}
+  (let [{:keys [first-preset-id preset-count active? selected? has-content?] :as display-data}
         (fx/sub-ctx context subs/cell-display-data col row)
         bg-color (cell-background-color display-data)
         label-text (cell-label display-data)]
@@ -98,12 +102,25 @@
      ;; Background color is dynamic - keep inline
      :style (str "-fx-background-color: " bg-color ";")
      
-     ;; Mouse click handler - use map-based event
-     ;; The event handler will receive :fx/event with the MouseEvent
-     :on-mouse-clicked {:event/type :grid/cell-clicked
-                        :col col
-                        :row row
-                        :has-content? has-content?}
+     ;; Mouse click handler - handle left/right click and double-click
+     :on-mouse-clicked (fn [^MouseEvent e]
+                         (let [button (.getButton e)
+                               click-count (.getClickCount e)]
+                           (cond
+                             ;; Right-click or double-click: open cue chain editor
+                             (or (= button MouseButton/SECONDARY)
+                                 (>= click-count 2))
+                             (do
+                               (events/dispatch! {:event/type :grid/select-cell :col col :row row})
+                               (events/dispatch! {:event/type :cue-chain/open-editor
+                                                  :col col :row row}))
+                             
+                             ;; Single left-click: trigger or select
+                             :else
+                             (events/dispatch! {:event/type :grid/cell-clicked
+                                                :col col
+                                                :row row
+                                                :has-content? has-content?}))))
      
      ;; Drag detection - start drag when content exists
      :on-drag-detected (fn [^MouseEvent e]

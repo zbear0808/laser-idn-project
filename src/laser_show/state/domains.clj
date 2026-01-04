@@ -60,25 +60,89 @@
                :doc "Queue of pending cues"}})
 
 (defstate grid
-  "Cue grid state - the main trigger interface."
-  {:cells {:default {[0 0] {:preset-id :circle}
-                     [1 0] {:preset-id :square}
-                     [2 0] {:preset-id :triangle}
-                     [3 0] {:preset-id :star}
-                     [4 0] {:preset-id :spiral}
-                     [5 0] {:preset-id :wave}
-                     [6 0] {:preset-id :beam-fan}
-                     [7 0] {:preset-id :rainbow-circle}}
-           :doc "Map of [col row] -> {:preset-id keyword}"}
+  "Cue grid state - the main trigger interface.
+   
+   Each cell contains a cue-chain with items (presets and groups), each item
+   can have its own parameters and effect chain:
+   {:cue-chain {:items [{:type :preset
+                          :id (uuid)
+                          :preset-id :circle
+                          :params {:radius 0.5 :color [255 255 255]}
+                          :effects []
+                          :enabled? true}]}
+    :active true}"
+  {:cells {:default {;; Row 0: Basic shapes
+                     [0 0] {:cue-chain {:items [{:type :preset
+                                                 :id #uuid "00000000-0000-0000-0000-000000000001"
+                                                 :preset-id :circle
+                                                 :params {}
+                                                 :effects []
+                                                 :enabled? true}]}}
+                     [1 0] {:cue-chain {:items [{:type :preset
+                                                 :id #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :preset-id :square
+                                                 :params {}
+                                                 :effects []
+                                                 :enabled? true}]}}
+                     [2 0] {:cue-chain {:items [{:type :preset
+                                                 :id #uuid "00000000-0000-0000-0000-000000000003"
+                                                 :preset-id :triangle
+                                                 :params {}
+                                                 :effects []
+                                                 :enabled? true}]}}
+                     [3 0] {:cue-chain {:items [{:type :preset
+                                                 :id #uuid "00000000-0000-0000-0000-000000000004"
+                                                 :preset-id :star
+                                                 :params {}
+                                                 :effects []
+                                                 :enabled? true}]}}
+                     [4 0] {:cue-chain {:items [{:type :preset
+                                                 :id #uuid "00000000-0000-0000-0000-000000000005"
+                                                 :preset-id :spiral
+                                                 :params {}
+                                                 :effects []
+                                                 :enabled? true}]}}
+                     [5 0] {:cue-chain {:items [{:type :preset
+                                                 :id #uuid "00000000-0000-0000-0000-000000000006"
+                                                 :preset-id :wave
+                                                 :params {}
+                                                 :effects []
+                                                 :enabled? true}]}}
+                     [6 0] {:cue-chain {:items [{:type :preset
+                                                 :id #uuid "00000000-0000-0000-0000-000000000007"
+                                                 :preset-id :beam-fan
+                                                 :params {}
+                                                 :effects []
+                                                 :enabled? true}]}}
+                     [7 0] {:cue-chain {:items [{:type :preset
+                                                 :id #uuid "00000000-0000-0000-0000-000000000008"
+                                                 :preset-id :rainbow-circle
+                                                 :params {}
+                                                 :effects []
+                                                 :enabled? true}]}}}
+           :doc "Map of [col row] -> {:cue-chain {:items [...]} :active bool}"}
    :selected-cell {:default nil
                    :doc "[col row] of selected cell for editing"}
    :size {:default [default-grid-cols default-grid-rows]
           :doc "[cols rows] grid dimensions"}})
 
-(defstate effects
-  "Effects grid state - chains of effects per cell."
-  {:cells {:default {}
-           :doc "Map of [col row] -> {:effects [...] :active true}"}})
+(defstate cue-chain-editor
+  "State for the cue chain editor dialog.
+   Tracks selection, clipboard, and editing state."
+  {:cell {:default nil
+          :doc "[col row] of cell being edited, nil if editor closed"}
+   :selected-paths {:default #{}
+                    :doc "Set of paths to selected items (presets/groups)"}
+   :last-selected-path {:default nil
+                        :doc "Last clicked path for shift+click range selection"}
+   :clipboard {:default nil
+               :doc "Copied items: {:items [...] :copied-at timestamp}"}
+   :editing-group-name {:default nil
+                        :doc "Path to group currently being renamed, nil if not editing"}
+   :active-preset-tab {:default :geometric
+                       :doc "Currently active tab in preset bank"}
+   :selected-effect-path {:default nil
+                          :doc "Path to selected effect in current preset's effect chain"}})
 
 (defstate ui
   "UI interaction state including window, preview, and component references."
@@ -96,7 +160,7 @@
           :doc "current drag operation state"}
    :dialogs {:default {:zone-editor {:open? false :zone-id nil}
                        :projector-config {:open? false}
-                       :effect-editor {:open? false :cell nil}
+                       :cue-chain-editor {:open? false :cell nil}
                        :settings {:open? false}}
              :doc "dialog visibility and data states"}
    :preview {:default {:frame nil

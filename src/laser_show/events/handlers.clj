@@ -18,8 +18,9 @@
    => {:state new-state}"
   (:require
    [laser-show.common.util :as u]
-   [laser-show.animation.effects :as effects])
-  (:import [javafx.scene.input MouseButton]))
+   [laser-show.animation.effects :as effects]
+   [laser-show.animation.cue-chains :as cue-chains]
+   [laser-show.animation.chains :as chains]))
 
 
 ;; Helper Functions
@@ -150,26 +151,19 @@
 
 
 (defn- handle-grid-cell-clicked
-  "Handle grid cell click - dispatches to trigger or select based on mouse button.
-   Uses :fx/event to check which mouse button was clicked."
-  [{:keys [col row has-content? state fx/event]}]
-  (let [button (.getButton event)]
-    (cond
-      ;; Right click - select (for context menu later)
-      (= button MouseButton/SECONDARY)
-      {:state (assoc-in state [:grid :selected-cell] [col row])}
-      
-      ;; Left click on cell with content - trigger
-      has-content?
-      (let [now (current-time-ms {:time (System/currentTimeMillis)})]
-        {:state (-> state
-                    (assoc-in [:playback :active-cell] [col row])
-                    (assoc-in [:playback :playing?] true)
-                    (assoc-in [:playback :trigger-time] now))})
-      
-      ;; Left click on empty - select
-      :else
-      {:state (assoc-in state [:grid :selected-cell] [col row])})))
+  "Handle grid cell click - dispatches to trigger or select.
+   Note: Button detection is handled in grid_cell.clj before dispatching.
+   This handler receives only single left-clicks."
+  [{:keys [col row has-content? state]}]
+  (if has-content?
+    ;; Left click on cell with content - trigger
+    (let [now (current-time-ms {:time (System/currentTimeMillis)})]
+      {:state (-> state
+                  (assoc-in [:playback :active-cell] [col row])
+                  (assoc-in [:playback :playing?] true)
+                  (assoc-in [:playback :trigger-time] now))})
+    ;; Left click on empty - select
+    {:state (assoc-in state [:grid :selected-cell] [col row])}))
 
 (defn- handle-grid-trigger-cell
   "Trigger a cell to start playing its preset."
@@ -1838,6 +1832,452 @@
     {:state (assoc-in state (conj ui-path :ui-modes effect-path) mode)}))
 
 
+;; Cue Chain Events
+;; These handlers support the cue chain editor for building complex cues
+;; by combining multiple presets with per-preset effect chains.
+
+
+(defn- cue-chain-path
+  "Get the path to a grid cell's cue chain in state."
+  [col row]
+  [:grid :cells [col row] :cue-chain :items])
+
+(defn- cue-chain-ui-path
+  "Get the path to cue chain editor UI state."
+  []
+  [:cue-chain-editor])
+
+(defn- handle-cue-chain-open-editor
+  "Open the cue chain editor for a specific cell.
+   Event keys:
+   - :col, :row - Grid cell coordinates"
+  [{:keys [col row state]}]
+  {:state (-> state
+              (assoc-in [:cue-chain-editor :cell] [col row])
+              (assoc-in [:cue-chain-editor :selected-paths] #{})
+              (assoc-in [:cue-chain-editor :clipboard] nil)
+              (assoc-in [:cue-chain-editor :active-preset-tab] :geometric)
+              (assoc-in [:ui :dialogs :cue-chain-editor :open?] true)
+              (assoc-in [:ui :dialogs :cue-chain-editor :data] {:col col :row row}))})
+
+(defn- handle-cue-chain-close-editor
+  "Close the cue chain editor."
+  [{:keys [state]}]
+  {:state (-> state
+              (assoc-in [:ui :dialogs :cue-chain-editor :open?] false)
+              (assoc-in [:cue-chain-editor :cell] nil))})
+
+(defn- handle-cue-chain-add-preset
+  "Add a preset to the cue chain.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :preset-id - ID of the preset to add (e.g., :circle, :wave)"
+  [{:keys [col row preset-id state]}]
+  (let [ensure-cell (fn [s]
+                      (if (get-in s [:grid :cells [col row] :cue-chain])
+                        s
+                        (assoc-in s [:grid :cells [col row]] {:cue-chain {:items []}})))
+        new-preset (cue-chains/create-preset-instance preset-id {})
+        state-with-cell (ensure-cell state)
+        current-items (get-in state-with-cell (cue-chain-path col row) [])
+        new-idx (count current-items)
+        new-path [new-idx]]
+    {:state (-> state-with-cell
+                (update-in (cue-chain-path col row) conj new-preset)
+                ;; Auto-select the newly added preset
+                (assoc-in [:cue-chain-editor :selected-paths] #{new-path})
+                (assoc-in [:cue-chain-editor :last-selected-path] new-path)
+                mark-dirty)}))
+
+(defn- handle-cue-chain-remove-items
+  "Remove selected items from the cue chain.
+   Event keys:
+   - :col, :row - Grid cell coordinates"
+  [{:keys [col row state]}]
+  (let [selected-paths (get-in state [:cue-chain-editor :selected-paths] #{})
+        items-vec (get-in state (cue-chain-path col row) [])]
+    (if (seq selected-paths)
+      (let [root-paths (filter-to-root-paths selected-paths)
+            sorted-paths (sort-by (comp - count) root-paths)
+            new-items (reduce remove-at-path items-vec sorted-paths)]
+        {:state (-> state
+                    (assoc-in (cue-chain-path col row) new-items)
+                    (assoc-in [:cue-chain-editor :selected-paths] #{})
+                    mark-dirty)})
+      {:state state})))
+
+(defn- handle-cue-chain-move-items
+  "Move items to a new position via drag-and-drop.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :target-id - ID of the target item
+   - :drop-position - :before | :into"
+  [{:keys [col row target-id drop-position state]}]
+  (let [items-vec (get-in state (cue-chain-path col row) [])
+        dragging-paths (get-in state [:cue-chain-editor :dragging-paths] #{})
+        root-paths (filter-to-root-paths dragging-paths)
+        all-paths (vec (chains/paths-in-chain items-vec))
+        sorted-paths (sort-by #(.indexOf all-paths %) root-paths)
+        target-path (chains/find-path-by-id items-vec target-id)
+        target-in-drag? (or (contains? root-paths target-path)
+                           (some #(path-is-ancestor? % target-path) root-paths))
+        items-to-move (mapv #(get-in items-vec %) sorted-paths)]
+    (if (or (empty? items-to-move) target-in-drag?)
+      {:state (assoc-in state [:cue-chain-editor :dragging-paths] nil)}
+      (let [after-remove (reduce remove-at-path items-vec
+                                 (sort-by (comp - count) sorted-paths))
+            new-target-path (chains/find-path-by-id after-remove target-id)
+            target-found? (some? new-target-path)
+            final-to-path (or new-target-path [(count after-remove)])
+            final-into-group? (and target-found? (= drop-position :into))
+            after-insert (insert-items-at after-remove final-to-path items-to-move final-into-group?)]
+        {:state (-> state
+                    (assoc-in (cue-chain-path col row) after-insert)
+                    (assoc-in [:cue-chain-editor :dragging-paths] nil)
+                    (assoc-in [:cue-chain-editor :selected-paths] #{})
+                    mark-dirty)}))))
+
+(defn- handle-cue-chain-select-item
+  "Select an item in the cue chain.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :path - Path to the item
+   - :ctrl? - Toggle selection
+   - :shift? - Range select"
+  [{:keys [col row path ctrl? shift? state]}]
+  (let [current-paths (get-in state [:cue-chain-editor :selected-paths] #{})
+        last-selected (get-in state [:cue-chain-editor :last-selected-path])
+        items-vec (get-in state (cue-chain-path col row) [])
+        new-paths (cond
+                    ctrl?
+                    (if (contains? current-paths path)
+                      (disj current-paths path)
+                      (conj current-paths path))
+                    
+                    shift?
+                    (if last-selected
+                      (let [all-paths (vec (chains/paths-in-chain items-vec))
+                            anchor-idx (.indexOf all-paths last-selected)
+                            target-idx (.indexOf all-paths path)]
+                        (if (and (>= anchor-idx 0) (>= target-idx 0))
+                          (let [start-idx (min anchor-idx target-idx)
+                                end-idx (max anchor-idx target-idx)]
+                            (into #{} (subvec all-paths start-idx (inc end-idx))))
+                          #{path}))
+                      #{path})
+                    
+                    :else
+                    #{path})
+        update-anchor? (not shift?)]
+    {:state (-> state
+                (assoc-in [:cue-chain-editor :selected-paths] new-paths)
+                (cond-> update-anchor?
+                  (assoc-in [:cue-chain-editor :last-selected-path] path)))}))
+
+(defn- handle-cue-chain-select-all
+  "Select all items in the cue chain.
+   Event keys:
+   - :col, :row - Grid cell coordinates"
+  [{:keys [col row state]}]
+  (let [items-vec (get-in state (cue-chain-path col row) [])
+        all-paths (into #{} (chains/paths-in-chain items-vec))]
+    {:state (assoc-in state [:cue-chain-editor :selected-paths] all-paths)}))
+
+(defn- handle-cue-chain-clear-selection
+  "Clear item selection in the cue chain editor."
+  [{:keys [state]}]
+  {:state (-> state
+              (assoc-in [:cue-chain-editor :selected-paths] #{})
+              (assoc-in [:cue-chain-editor :last-selected-path] nil))})
+
+(defn- handle-cue-chain-start-drag
+  "Start a multi-drag operation.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :initiating-path - Path of the item being dragged"
+  [{:keys [col row initiating-path state]}]
+  (let [selected-paths (get-in state [:cue-chain-editor :selected-paths] #{})
+        dragging-paths (if (contains? selected-paths initiating-path)
+                         selected-paths
+                         #{initiating-path})
+        new-selected (if (contains? selected-paths initiating-path)
+                       selected-paths
+                       #{initiating-path})]
+    {:state (-> state
+                (assoc-in [:cue-chain-editor :dragging-paths] dragging-paths)
+                (assoc-in [:cue-chain-editor :selected-paths] new-selected))}))
+
+(defn- handle-cue-chain-copy-selected
+  "Copy selected items to clipboard.
+   Event keys:
+   - :col, :row - Grid cell coordinates"
+  [{:keys [col row state]}]
+  (let [selected-paths (get-in state [:cue-chain-editor :selected-paths] #{})
+        items-vec (get-in state (cue-chain-path col row) [])
+        valid-items (when (seq selected-paths)
+                      (vec (keep #(get-in items-vec %) selected-paths)))]
+    (if (seq valid-items)
+      {:state (assoc-in state [:cue-chain-editor :clipboard] valid-items)}
+      {:state state})))
+
+(defn- handle-cue-chain-paste
+  "Paste items from clipboard.
+   Event keys:
+   - :col, :row - Grid cell coordinates"
+  [{:keys [col row state]}]
+  (let [clipboard (get-in state [:cue-chain-editor :clipboard])
+        selected-paths (get-in state [:cue-chain-editor :selected-paths] #{})
+        items-vec (get-in state (cue-chain-path col row) [])]
+    (if (seq clipboard)
+      (let [;; Regenerate IDs on pasted items
+            items-with-new-ids (mapv regenerate-ids clipboard)
+            ;; Calculate insert position
+            insert-pos (if (seq selected-paths)
+                         (let [top-level-indices (map first selected-paths)]
+                           (inc (apply max top-level-indices)))
+                         (count items-vec))
+            safe-pos (min insert-pos (count items-vec))
+            new-items (vec (concat (subvec items-vec 0 safe-pos)
+                                   items-with-new-ids
+                                   (subvec items-vec safe-pos)))
+            ;; Select pasted items
+            new-paths (into #{} (map (fn [i] [(+ safe-pos i)]) (range (count items-with-new-ids))))]
+        {:state (-> state
+                    (assoc-in (cue-chain-path col row) new-items)
+                    (assoc-in [:cue-chain-editor :selected-paths] new-paths)
+                    mark-dirty)})
+      {:state state})))
+
+(defn- handle-cue-chain-group-selected
+  "Group selected items into a new group.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :name (optional) - Group name"
+  [{:keys [col row name state]}]
+  (let [group-name (or name "New Group")
+        selected-paths (get-in state [:cue-chain-editor :selected-paths] #{})
+        items-vec (get-in state (cue-chain-path col row) [])]
+    (if (seq selected-paths)
+      (let [root-paths (filter-to-root-paths selected-paths)
+            all-paths (vec (chains/paths-in-chain items-vec))
+            sorted-paths (sort-by #(.indexOf all-paths %) root-paths)
+            selected-items (mapv #(get-in items-vec (vec %)) sorted-paths)
+            ids-to-remove (into #{} (map :id selected-items))
+            first-path (first sorted-paths)
+            insert-at-top-level (first first-path)
+            after-remove (remove-items-by-ids items-vec ids-to-remove)
+            items-removed-before-insert (count
+                                          (filter
+                                            (fn [path]
+                                              (and (= 1 (count path))
+                                                   (< (first path) insert-at-top-level)))
+                                            sorted-paths))
+            adjusted-insert (- insert-at-top-level items-removed-before-insert)
+            new-group (make-group group-name selected-items)
+            new-items (insert-items-at-index after-remove adjusted-insert [new-group])
+            new-group-path [adjusted-insert]]
+        {:state (-> state
+                    (assoc-in (cue-chain-path col row) new-items)
+                    (assoc-in [:cue-chain-editor :selected-paths] #{new-group-path})
+                    mark-dirty)})
+      {:state state})))
+
+(defn- handle-cue-chain-ungroup
+  "Ungroup a group, moving contents to parent level.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :path - Path to the group"
+  [{:keys [col row path state]}]
+  (let [items-vec (get-in state (cue-chain-path col row) [])
+        item (get-in items-vec path)]
+    (if (chains/group? item)
+      (let [group-items (:items item [])
+            is-top-level? (= 1 (count path))
+            group-idx (if is-top-level? (first path) (last path))
+            parent-path (if is-top-level? [] (vec (butlast (butlast path))))
+            parent-vec (if is-top-level? items-vec (get-in items-vec (conj parent-path :items) []))
+            new-parent (vec (concat (subvec parent-vec 0 group-idx)
+                                    group-items
+                                    (subvec parent-vec (inc group-idx))))
+            new-items (if is-top-level?
+                        new-parent
+                        (assoc-in items-vec (conj parent-path :items) new-parent))]
+        {:state (-> state
+                    (assoc-in (cue-chain-path col row) new-items)
+                    (assoc-in [:cue-chain-editor :selected-paths] #{})
+                    mark-dirty)})
+      {:state state})))
+
+(defn- handle-cue-chain-toggle-collapse
+  "Toggle a group's collapsed state.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :path - Path to the group"
+  [{:keys [col row path state]}]
+  (let [items-vec (get-in state (cue-chain-path col row) [])
+        item (get-in items-vec path)]
+    (if (chains/group? item)
+      {:state (update-in state (cue-chain-path col row)
+                         (fn [items]
+                           (update-in items (conj path :collapsed?) not)))}
+      {:state state})))
+
+(defn- handle-cue-chain-set-item-enabled
+  "Set enabled state of an item.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :path - Path to the item
+   - :enabled? - New enabled state (from :fx/event for checkbox)"
+  [{:keys [col row path state] :as event}]
+  (let [enabled? (if (contains? event :fx/event)
+                   (:fx/event event)
+                   (:enabled? event))
+        path-vec (vec path)]
+    {:state (-> state
+                (assoc-in (into (cue-chain-path col row) (conj path-vec :enabled?)) enabled?)
+                mark-dirty)}))
+
+(defn- handle-cue-chain-update-preset-param
+  "Update a parameter in a preset.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :preset-path - Path to the preset
+   - :param-key - Parameter key
+   - :value or :fx/event - New value"
+  [{:keys [col row preset-path param-key state] :as event}]
+  (let [value (or (:fx/event event) (:value event))
+        items-vec (vec (get-in state (cue-chain-path col row) []))
+        updated-items (assoc-in items-vec (conj (vec preset-path) :params param-key) value)]
+    {:state (assoc-in state (cue-chain-path col row) updated-items)}))
+
+(defn- handle-cue-chain-update-preset-color
+  "Update a color parameter in a preset.
+   Extracts color from ActionEvent's source ColorPicker.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :preset-path - Path to the preset
+   - :param-key - Parameter key
+   - :fx/event - ActionEvent from color picker"
+  [{:keys [col row preset-path param-key state] :as event}]
+  (let [action-event (:fx/event event)
+        color-picker (.getSource action-event)
+        color (.getValue color-picker)
+        rgb-value [(int (* 255 (.getRed color)))
+                   (int (* 255 (.getGreen color)))
+                   (int (* 255 (.getBlue color)))]
+        items-vec (vec (get-in state (cue-chain-path col row) []))
+        updated-items (assoc-in items-vec (conj (vec preset-path) :params param-key) rgb-value)]
+    {:state (assoc-in state (cue-chain-path col row) updated-items)}))
+
+(defn- handle-cue-chain-add-preset-effect
+  "Add an effect to a preset's effect chain.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :preset-path - Path to the preset
+   - :effect - Effect to add (e.g., {:effect-id :scale :params {...}})"
+  [{:keys [col row preset-path effect state]}]
+  (let [effect-with-fields (cond-> effect
+                             (not (contains? effect :enabled?))
+                             (assoc :enabled? true)
+                             (not (contains? effect :id))
+                             (assoc :id (random-uuid)))
+        items-vec (vec (get-in state (cue-chain-path col row) []))
+        preset (get-in items-vec preset-path)]
+    (if preset
+      (let [updated-items (update-in items-vec (conj (vec preset-path) :effects)
+                                     (fn [effs] (conj (or effs []) effect-with-fields)))]
+        {:state (-> state
+                    (assoc-in (cue-chain-path col row) updated-items)
+                    mark-dirty)})
+      {:state state})))
+
+(defn- handle-cue-chain-remove-preset-effect
+  "Remove an effect from a preset's effect chain.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :preset-path - Path to the preset
+   - :effect-idx - Index of the effect to remove"
+  [{:keys [col row preset-path effect-idx state]}]
+  (let [items-vec (vec (get-in state (cue-chain-path col row) []))
+        preset (get-in items-vec preset-path)]
+    (if preset
+      (let [effects-vec (get preset :effects [])
+            new-effects (vec (concat (subvec effects-vec 0 effect-idx)
+                                     (subvec effects-vec (inc effect-idx))))
+            updated-items (assoc-in items-vec (conj (vec preset-path) :effects) new-effects)]
+        {:state (-> state
+                    (assoc-in (cue-chain-path col row) updated-items)
+                    mark-dirty)})
+      {:state state})))
+
+(defn- handle-cue-chain-update-effect-param
+  "Update a parameter in a preset's effect.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :preset-path - Path to the preset
+   - :effect-idx - Index of the effect
+   - :param-key - Parameter key
+   - :value or :fx/event - New value"
+  [{:keys [col row preset-path effect-idx param-key state] :as event}]
+  (let [value (or (:fx/event event) (:value event))
+        items-vec (vec (get-in state (cue-chain-path col row) []))
+        effect-path (conj (vec preset-path) :effects effect-idx :params param-key)
+        updated-items (assoc-in items-vec effect-path value)]
+    {:state (assoc-in state (cue-chain-path col row) updated-items)}))
+
+(defn- handle-cue-chain-set-preset-tab
+  "Set the active preset bank tab.
+   Event keys:
+   - :tab-id - Tab ID (e.g., :geometric, :wave, :beam, :abstract)"
+  [{:keys [tab-id state]}]
+  {:state (assoc-in state [:cue-chain-editor :active-preset-tab] tab-id)})
+
+(defn- handle-cue-chain-start-rename
+  "Start renaming a group.
+   Event keys:
+   - :path - Path to the group"
+  [{:keys [path state]}]
+  {:state (assoc-in state [:cue-chain-editor :renaming-path] path)})
+
+(defn- handle-cue-chain-rename-group
+  "Rename a group.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :path - Path to the group
+   - :name - New name"
+  [{:keys [col row path name state]}]
+  (let [items-vec (get-in state (cue-chain-path col row) [])
+        item (get-in items-vec path)]
+    (if (chains/group? item)
+      {:state (-> state
+                  (assoc-in (into (cue-chain-path col row) (conj path :name)) name)
+                  (assoc-in [:cue-chain-editor :renaming-path] nil)
+                  mark-dirty)}
+      {:state state})))
+
+(defn- handle-cue-chain-cancel-rename
+  "Cancel renaming a group."
+  [{:keys [state]}]
+  {:state (assoc-in state [:cue-chain-editor :renaming-path] nil)})
+
+(defn- handle-cue-chain-create-group
+  "Create a new empty group.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :name (optional) - Group name"
+  [{:keys [col row name state]}]
+  (let [group-name (or name "New Group")
+        ensure-cell (fn [s]
+                      (if (get-in s [:grid :cells [col row] :cue-chain])
+                        s
+                        (assoc-in s [:grid :cells [col row]] {:cue-chain {:items []}})))
+        new-group (make-group group-name [])]
+    {:state (-> state
+                ensure-cell
+                (update-in (cue-chain-path col row) conj new-group)
+                mark-dirty)}))
+
+
 ;; File Menu Events
 
 
@@ -2151,6 +2591,49 @@
     :projectors/cancel-rename-effect-group (handle-projectors-cancel-rename-effect-group event)
     :projectors/set-effect-enabled (handle-projectors-set-effect-enabled-at-path event)
     :projectors/add-calibration-effect (handle-projectors-add-calibration-effect event)
+    
+    ;; Cue chain events
+    :cue-chain/open-editor (handle-cue-chain-open-editor event)
+    :cue-chain/close-editor (handle-cue-chain-close-editor event)
+    :cue-chain/add-preset (handle-cue-chain-add-preset event)
+    :cue-chain/remove-items (handle-cue-chain-remove-items event)
+    :cue-chain/move-items (handle-cue-chain-move-items event)
+    :cue-chain/select-item (handle-cue-chain-select-item event)
+    :cue-chain/select-item-at-path (handle-cue-chain-select-item event)
+    :cue-chain/select-all (handle-cue-chain-select-all event)
+    :cue-chain/clear-selection (handle-cue-chain-clear-selection event)
+    :cue-chain/start-drag (handle-cue-chain-start-drag event)
+    :cue-chain/copy-selected (handle-cue-chain-copy-selected event)
+    :cue-chain/paste (handle-cue-chain-paste event)
+    :cue-chain/group-selected (handle-cue-chain-group-selected event)
+    :cue-chain/ungroup (handle-cue-chain-ungroup event)
+    :cue-chain/toggle-collapse (handle-cue-chain-toggle-collapse event)
+    :cue-chain/set-item-enabled (handle-cue-chain-set-item-enabled event)
+    :cue-chain/update-preset-param (handle-cue-chain-update-preset-param event)
+    :cue-chain/add-preset-effect (handle-cue-chain-add-preset-effect event)
+    :cue-chain/remove-preset-effect (handle-cue-chain-remove-preset-effect event)
+    :cue-chain/update-effect-param (handle-cue-chain-update-effect-param event)
+    :cue-chain/set-preset-tab (handle-cue-chain-set-preset-tab event)
+    :cue-chain/start-rename (handle-cue-chain-start-rename event)
+    :cue-chain/start-rename-group (handle-cue-chain-start-rename event)
+    :cue-chain/rename-group (handle-cue-chain-rename-group event)
+    :cue-chain/cancel-rename (handle-cue-chain-cancel-rename event)
+    :cue-chain/cancel-rename-group (handle-cue-chain-cancel-rename event)
+    :cue-chain/create-group (handle-cue-chain-create-group event)
+    :cue-chain/create-empty-group (handle-cue-chain-create-group event)
+    :cue-chain/toggle-group-collapse (handle-cue-chain-toggle-collapse event)
+    :cue-chain/delete-selected (handle-cue-chain-remove-items event)
+    :cue-chain/paste-items (handle-cue-chain-paste event)
+    :cue-chain/start-multi-drag (handle-cue-chain-start-drag event)
+    :cue-chain/add-effect-to-preset (handle-cue-chain-add-preset-effect event)
+    :cue-chain/remove-effect (handle-cue-chain-remove-preset-effect event)
+    :cue-chain/clear-drag-state {:state (assoc-in (:state event) [:cue-chain-editor :dragging-paths] nil)}
+    :cue-chain/update-drop-position {:state (:state event)}  ;; UI feedback only
+    :cue-chain/set-drop-target {:state (:state event)}  ;; UI feedback only
+    :cue-chain/select-effect {:state (:state event)}  ;; TODO: Implement effect selection
+    :cue-chain/set-effect-enabled (handle-cue-chain-set-item-enabled event)
+    :cue-chain/update-preset-color (handle-cue-chain-update-preset-color event)
+    :cue-chain/update-preset-param-from-text (handle-cue-chain-update-preset-param event)
     
     ;; File menu events
     :file/new-project (handle-file-new-project event)

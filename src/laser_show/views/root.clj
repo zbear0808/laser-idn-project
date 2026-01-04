@@ -23,6 +23,7 @@
    [laser-show.views.components.preview :as preview]
    [laser-show.views.components.tabs :as tabs]
    [laser-show.views.dialogs.effect-chain-editor :as effect-chain-editor]
+   [laser-show.views.dialogs.cue-chain-editor :as cue-chain-editor]
    [laser-show.views.dialogs.add-projector-manual :as add-projector-dialog]
    [laser-show.views.status-bar :as status-bar]
    [laser-show.views.tabs.effects :as effects-tab]
@@ -153,6 +154,7 @@
         window-config (fx/sub-ctx context subs/window-config)
         stylesheets (fx/sub-ctx context subs/stylesheet-urls)
         effect-editor-open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)
+        cue-editor-open? (fx/sub-ctx context subs/dialog-open? :cue-chain-editor)
         add-projector-open? (fx/sub-ctx context subs/dialog-open? :add-projector-manual)]
     {:fx/type fx/ext-set-env
      :env {::theme theme}
@@ -175,6 +177,9 @@
                      ;; Effect chain editor dialog
                      (when effect-editor-open?
                        {:fx/type effect-chain-editor/effect-chain-editor-dialog})
+                     ;; Cue chain editor dialog
+                     (when cue-editor-open?
+                       {:fx/type cue-chain-editor/cue-chain-editor-dialog})
                      ;; Add projector manually dialog
                      (when add-projector-open?
                        {:fx/type add-projector-dialog/add-projector-manual-dialog})])}}))

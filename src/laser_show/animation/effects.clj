@@ -30,6 +30,7 @@
   (:require [laser-show.animation.time :as time]
             [laser-show.animation.modulation :as mod]
             [laser-show.animation.types :as t]
+            [laser-show.animation.chains :as chains]
             [laser-show.common.util :as u]))
 
 
@@ -124,13 +125,14 @@
 
 
 ;; Effect Instance & Groups
+;;
+;; Re-export generic chain functions from chains.clj for backwards compatibility.
+;; Effect-specific logic remains here.
 
 
-(defn group?
-  "Check if an item is a group (contains nested effects).
-   Groups have {:type :group :items [...]}."
-  [item]
-  (= :group (:type item)))
+(def group?
+  "Check if an item is a group. Delegates to chains/group?."
+  chains/group?)
 
 (defn effect?
   "Check if an item is an effect (not a group).
@@ -139,131 +141,50 @@
   (or (nil? (:type item))
       (= :effect (:type item))))
 
-(defn effect-instance-enabled?
-  "Check if an effect instance is enabled.
-   Returns true if :enabled? is true or missing (for backward compatibility)."
-  [instance]
-  (:enabled? instance true))
+(def effect-instance-enabled?
+  "Check if an effect instance is enabled. Delegates to chains/item-enabled?."
+  chains/item-enabled?)
 
 
-;; Group Utilities
+;; Group Utilities - Re-exports from chains.clj
 
 
 (def max-nesting-depth
-  "Maximum allowed nesting depth for groups (0 = flat, 3 = up to 3 levels)."
-  3)
+  "Maximum allowed nesting depth for groups."
+  chains/max-nesting-depth)
 
-(defn flatten-chain
+(def flatten-chain
   "Flatten a nested effect chain into a sequence of effects for processing.
-   Respects enabled? flags at both effect and group level.
-   Groups with enabled?=false have all their effects skipped.
-   
-   This is used at processing time to get the linear list of effects to apply."
-  [items]
-  (mapcat
-    (fn [item]
-      (cond
-        ;; Disabled item - skip entirely
-        (not (:enabled? item true))
-        []
-        
-        ;; Group - recursively flatten if enabled
-        (group? item)
-        (flatten-chain (:items item []))
-        
-        ;; Effect - include it
-        :else
-        [item]))
-    items))
+   Delegates to chains/flatten-chain."
+  chains/flatten-chain)
 
-(defn nesting-depth
-  "Calculate the maximum nesting depth of a chain.
-   Returns 0 for flat chains, 1 for one level of groups, etc."
-  [items]
-  (if (empty? items)
-    0
-    (apply max
-      (map (fn [item]
-             (if (group? item)
-               (inc (nesting-depth (:items item [])))
-               0))
-           items))))
+(def nesting-depth
+  "Calculate the maximum nesting depth of a chain. Delegates to chains/nesting-depth."
+  chains/nesting-depth)
 
-(defn can-add-group-at-path?
-  "Check if a new group can be added at the given path without exceeding max depth.
-   Path is a vector like [1 :items 0] where :items segments indicate group nesting."
-  [_chain path]
-  (let [current-depth (count (filter #(= :items %) path))]
-    (< current-depth max-nesting-depth)))
+(def can-add-group-at-path?
+  "Check if a new group can be added at the given path. Delegates to chains/can-add-group-at-path?."
+  chains/can-add-group-at-path?)
 
-(defn paths-in-chain
-  "Generate all paths in a chain for iteration or select-all operations.
-   Returns a sequence of paths like [[0] [1] [1 :items 0] [1 :items 1] [2]]."
-  ([items] (paths-in-chain items []))
-  ([items prefix]
-   (mapcat
-     (fn [idx item]
-       (let [path (conj prefix idx)]
-         (if (group? item)
-           (cons path (paths-in-chain (:items item []) (conj path :items)))
-           [path])))
-     (range)
-     items)))
+(def paths-in-chain
+  "Generate all paths in a chain. Delegates to chains/paths-in-chain."
+  chains/paths-in-chain)
 
-(defn get-item-at-path
-  "Get an item from a chain at the given path.
-   Path is a vector like [1 :items 0]."
-  [items path]
-  (get-in items path))
+(def get-item-at-path
+  "Get an item from a chain at the given path. Delegates to chains/get-item-at-path."
+  chains/get-item-at-path)
 
-(defn count-effects-recursive
-  "Count total effects in a chain, including those inside groups."
-  [items]
-  (reduce
-    (fn [acc item]
-      (if (group? item)
-        (+ acc (count-effects-recursive (:items item [])))
-        (inc acc)))
-    0
-    items))
+(def count-effects-recursive
+  "Count total effects in a chain. Delegates to chains/count-items-recursive."
+  chains/count-items-recursive)
 
-(defn find-path-by-id
-  "Find the path to an item with the given ID in a chain.
-   Returns nil if not found.
-   
-   Parameters:
-   - items: Vector of effects/groups (the chain)
-   - id: UUID or other ID to find
-   
-   Returns: Path vector like [1 :items 0] or nil if not found"
-  ([items id] (find-path-by-id items id []))
-  ([items id prefix]
-   (reduce
-     (fn [_ idx]
-       (let [item (nth items idx)
-             path (conj prefix idx)]
-         (cond
-           ;; Found it!
-           (= id (:id item))
-           (reduced path)
-           
-           ;; It's a group - search recursively
-           (group? item)
-           (if-let [found (find-path-by-id (:items item []) id (conj path :items))]
-             (reduced found)
-             nil)
-           
-           ;; Not this item
-           :else nil)))
-     nil
-     (range (count items)))))
+(def find-path-by-id
+  "Find the path to an item with the given ID. Delegates to chains/find-path-by-id."
+  chains/find-path-by-id)
 
-(defn ensure-item-id
-  "Ensure an effect or group has an :id field. Returns item with ID."
-  [item]
-  (if (:id item)
-    item
-    (assoc item :id (random-uuid))))
+(def ensure-item-id
+  "Ensure an effect or group has an :id field. Delegates to chains/ensure-item-id."
+  chains/ensure-item-id)
 
 
 ;; Point Normalization Transducers

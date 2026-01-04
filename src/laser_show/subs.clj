@@ -137,21 +137,34 @@
    
    Returns map with:
    - :col, :row - position
-   - :preset-id - preset keyword or nil
+   - :cue-chain - the full cue chain data
+   - :preset-count - number of presets in the cue chain
+   - :first-preset-id - id of first preset (for display)
    - :active? - is this cell playing?
    - :selected? - is this cell selected?
-   - :has-content? - does cell have a preset?"
+   - :has-content? - does cell have any presets?"
   [context col row]
   (let [cells (fx/sub-ctx context grid-cells)
         active (fx/sub-ctx context active-cell)
         selected (fx/sub-ctx context selected-cell)
-        cell-data (get cells [col row])]
+        cell-data (get cells [col row])
+        cue-chain (or (:cue-chain cell-data) {:items []})
+        items (:items cue-chain [])
+        ;; Flatten to get all presets (excluding groups)
+        flat-items (filter #(= :preset (:type %))
+                          (tree-seq #(= :group (:type %))
+                                   #(:items % [])
+                                   {:type :group :items items}))
+        first-preset (first flat-items)
+        preset-count (count flat-items)]
     {:col col
      :row row
-     :preset-id (:preset-id cell-data)
+     :cue-chain cue-chain
+     :preset-count preset-count
+     :first-preset-id (:preset-id first-preset)
      :active? (= [col row] active)
      :selected? (= [col row] selected)
-     :has-content? (boolean (:preset-id cell-data))}))
+     :has-content? (pos? preset-count)}))
 
 (defn active-cell-preset
   "Get the preset ID of the currently active cell.
