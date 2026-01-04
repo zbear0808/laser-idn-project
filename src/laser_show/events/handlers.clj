@@ -101,6 +101,9 @@
 ;; Forward declarations for helper functions used in delete-selected
 (declare path-is-ancestor? filter-to-root-paths)
 
+;; Forward declaration for projector path-based selection
+(declare handle-projectors-select-effect-at-path)
+
 
 ;; Two-Phase Operation Helpers
 ;; These avoid index-shifting bugs by collecting items first, then operating
@@ -459,9 +462,13 @@
   "Copy selected effects to clipboard.
    Supports both path-based selection (for groups) and legacy index-based selection."
   [{:keys [col row state]}]
+  (println "[DEBUG] handle-effects-copy-selected called: col=" col "row=" row)
   (let [selected-paths (get-in state [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
         selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
         effects-vec (get-in state [:effects :cells [col row] :effects] [])
+        _ (println "[DEBUG]   selected-paths=" selected-paths)
+        _ (println "[DEBUG]   selected-indices=" selected-indices)
+        _ (println "[DEBUG]   effects-vec count=" (count effects-vec))
         ;; Path-based selection takes precedence
         valid-effects (cond
                         ;; Path-based selection - get items at each path
@@ -475,11 +482,13 @@
                             (selected-indices idx))
                           effects-vec)
                         
-                        :else [])]
-    
-    (cond-> {:state state}
-      (seq valid-effects)
-      (assoc :clipboard/copy-effects valid-effects))))
+                        :else [])
+        _ (println "[DEBUG]   valid-effects count=" (count valid-effects))
+        result (cond-> {:state state}
+                 (seq valid-effects)
+                 (assoc :clipboard/copy-effects valid-effects))
+        _ (println "[DEBUG]   returning clipboard/copy-effects?" (contains? result :clipboard/copy-effects))]
+    result))
 
 (defn- handle-effects-paste-into-chain
   "Paste effects from clipboard into current chain.
@@ -854,7 +863,10 @@
    - :shift? - If true, range select based on visual order (anchor stays fixed)
    - :ctrl? - If true, toggle selection"
   [{:keys [path col row shift? ctrl? state]}]
+  (println "[DEBUG] handle-effects-select-item-at-path called:"
+           "path=" path "col=" col "row=" row "ctrl?=" ctrl? "shift?=" shift?)
   (let [current-paths (get-in state [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
+        _ (println "[DEBUG]   current-paths=" current-paths)
         last-selected (get-in state [:ui :dialogs :effect-chain-editor :data :last-selected-path])
         new-paths (cond
                     ctrl?
@@ -882,7 +894,8 @@
                     #{path})
         ;; Only update anchor on regular click or ctrl+click, NOT on shift+click
         ;; This allows consecutive shift+clicks to extend from the original anchor
-        update-anchor? (not shift?)]
+        update-anchor? (not shift?)
+        _ (println "[DEBUG]   new-paths=" new-paths)]
     {:state (-> state
                 (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] new-paths)
                 (cond-> update-anchor?
@@ -1237,10 +1250,21 @@
   {:state (assoc-in state [:projectors :scanning?] false)})
 
 (defn- handle-projectors-add-device
-  "Add a discovered device as a configured projector."
+  "Add a discovered device as a configured projector.
+   If device has services, adds the default service (or first one).
+   For multi-output devices, use :projectors/add-service instead."
   [{:keys [device state]}]
   (let [host (:address device)
-        name (or (:host-name device) host)
+        services (:services device [])
+        ;; Use default service if available, otherwise first, otherwise nil
+        default-service (or (first (filter #(get-in % [:flags :default-service]) services))
+                            (first services))
+        service-id (if default-service (:service-id default-service) 0)
+        service-name (when default-service (:name default-service))
+        base-name (or (:host-name device) host)
+        name (if service-name
+               (str base-name " - " service-name)
+               base-name)
         projector-id (keyword (str "projector-" (System/currentTimeMillis)))
         ;; Default effect chain with color calibration and corner pin
         default-effects [{:effect-id :rgb-calibration
@@ -1257,6 +1281,48 @@
         projector-config {:name name
                           :host host
                           :port (:port device 7255)
+                          :service-id service-id
+                          :service-name service-name
+                          :unit-id (:unit-id device)
+                          :enabled? true
+                          :effects default-effects
+                          :output-config {:color-bit-depth 8
+                                          :xy-bit-depth 16}
+                          :status {:connected? false}}]
+    {:state (-> state
+                (assoc-in [:projectors :items projector-id] projector-config)
+                (assoc-in [:projectors :active-projector] projector-id)
+                mark-dirty)}))
+
+(defn- handle-projectors-add-service
+  "Add a specific service/output from a discovered device as a projector.
+   Used when a device has multiple outputs and user wants to add a specific one."
+  [{:keys [device service state]}]
+  (let [host (:address device)
+        service-id (:service-id service)
+        service-name (:name service)
+        base-name (or (:host-name device) host)
+        name (if service-name
+               (str base-name " - " service-name)
+               (str base-name " - Output " service-id))
+        projector-id (keyword (str "projector-" (System/currentTimeMillis) "-" service-id))
+        ;; Default effect chain with color calibration and corner pin
+        default-effects [{:effect-id :rgb-calibration
+                          :id (random-uuid)
+                          :enabled? true
+                          :params {:r-gain 1.0 :g-gain 1.0 :b-gain 1.0}}
+                         {:effect-id :corner-pin
+                          :id (random-uuid)
+                          :enabled? true
+                          :params {:tl-x -1.0 :tl-y 1.0
+                                   :tr-x 1.0 :tr-y 1.0
+                                   :bl-x -1.0 :bl-y -1.0
+                                   :br-x 1.0 :br-y -1.0}}]
+        projector-config {:name name
+                          :host host
+                          :port (:port device 7255)
+                          :service-id service-id
+                          :service-name service-name
                           :unit-id (:unit-id device)
                           :enabled? true
                           :effects default-effects
@@ -1386,15 +1452,31 @@
   [{:keys [address state]}]
   {:state (assoc-in state [:projectors :broadcast-address] address)})
 
+(defn- handle-projectors-toggle-device-expand
+  "Toggle the expanded state of a device in the discovery panel.
+   Used to show/hide the service list for multi-output devices."
+  [{:keys [address state]}]
+  (let [current-expanded (get-in state [:projectors :expanded-devices] #{})]
+    {:state (assoc-in state [:projectors :expanded-devices]
+                      (if (contains? current-expanded address)
+                        (disj current-expanded address)
+                        (conj current-expanded address)))}))
+
 (defn- handle-projectors-update-connection-status
   "Update a projector's connection status (called by streaming service)."
   [{:keys [projector-id status state]}]
   {:state (update-in state [:projectors :items projector-id :status] merge status)})
 
 (defn- handle-projectors-select-effect
-  "Select an effect in the projector's chain for editing."
-  [{:keys [projector-id effect-idx state]}]
-  {:state (assoc-in state [:projectors :selected-effect-idx] effect-idx)})
+  "Select an effect in the projector's chain for editing.
+   Supports both legacy index-based selection (:effect-idx) and
+   new path-based selection (:path with :ctrl? and :shift? modifiers)."
+  [{:keys [projector-id effect-idx path ctrl? shift? state] :as event}]
+  (if path
+    ;; New path-based selection (from shared sidebar)
+    (handle-projectors-select-effect-at-path event)
+    ;; Legacy index-based selection
+    {:state (assoc-in state [:projectors :selected-effect-idx] effect-idx)}))
 
 (defn- handle-projectors-update-corner-pin
   "Update corner pin parameters from spatial drag.
@@ -1422,6 +1504,338 @@
                      :tr-x 1.0 :tr-y 1.0
                      :bl-x -1.0 :bl-y -1.0
                      :br-x 1.0 :br-y -1.0})})
+
+
+;; Projector Effect Chain Events (Path-Based Selection)
+;; These handlers support the shared effect-chain-sidebar component
+;; and use path-based selection similar to the grid cell effects handlers.
+
+
+(defn- projector-effects-path
+  "Get the path to a projector's effects in state."
+  [projector-id]
+  [:projectors :items projector-id :effects])
+
+(defn- projector-ui-state-path
+  "Get the path to projector effect chain UI state.
+   
+   UI state is stored in :ui domain (not :projectors) to avoid
+   subscription cascade - changes to drag state won't invalidate
+   all projector-related subscriptions."
+  [projector-id]
+  [:ui :projector-effect-ui-state projector-id])
+
+(defn- handle-projectors-select-effect-at-path
+  "Select an effect at a path using path-based selection (supports nested structures).
+   Handles Ctrl+click (toggle) and Shift+click (range select)."
+  [{:keys [projector-id path ctrl? shift? state]}]
+  (let [ui-path (projector-ui-state-path projector-id)
+        current-paths (get-in state (conj ui-path :selected-paths) #{})
+        last-selected (get-in state (conj ui-path :last-selected-path))
+        effects-vec (get-in state (projector-effects-path projector-id) [])
+        new-paths (cond
+                    ctrl?
+                    (if (contains? current-paths path)
+                      (disj current-paths path)
+                      (conj current-paths path))
+                    
+                    shift?
+                    (if last-selected
+                      (let [all-paths (vec (effects/paths-in-chain effects-vec))
+                            anchor-idx (.indexOf all-paths last-selected)
+                            target-idx (.indexOf all-paths path)]
+                        (if (and (>= anchor-idx 0) (>= target-idx 0))
+                          (let [start-idx (min anchor-idx target-idx)
+                                end-idx (max anchor-idx target-idx)]
+                            (into #{} (subvec all-paths start-idx (inc end-idx))))
+                          #{path}))
+                      #{path})
+                    
+                    :else
+                    #{path})
+        update-anchor? (not shift?)]
+    {:state (-> state
+                (assoc-in (conj ui-path :selected-paths) new-paths)
+                (cond-> update-anchor?
+                  (assoc-in (conj ui-path :last-selected-path) path)))}))
+
+(defn- handle-projectors-select-all-effects
+  "Select all effects in a projector's chain."
+  [{:keys [projector-id state]}]
+  (let [effects-vec (get-in state (projector-effects-path projector-id) [])
+        all-paths (into #{} (effects/paths-in-chain effects-vec))
+        ui-path (projector-ui-state-path projector-id)]
+    {:state (assoc-in state (conj ui-path :selected-paths) all-paths)}))
+
+(defn- handle-projectors-clear-effect-selection
+  "Clear effect selection for a projector."
+  [{:keys [projector-id state]}]
+  (let [ui-path (projector-ui-state-path projector-id)]
+    {:state (-> state
+                (assoc-in (conj ui-path :selected-paths) #{})
+                (assoc-in (conj ui-path :last-selected-path) nil))}))
+
+(defn- handle-projectors-copy-effects
+  "Copy selected effects to clipboard."
+  [{:keys [projector-id state]}]
+  (let [ui-path (projector-ui-state-path projector-id)
+        selected-paths (get-in state (conj ui-path :selected-paths) #{})
+        effects-vec (get-in state (projector-effects-path projector-id) [])
+        valid-effects (when (seq selected-paths)
+                        (vec (keep #(get-in effects-vec %) selected-paths)))]
+    (cond-> {:state state}
+      (seq valid-effects)
+      (assoc :clipboard/copy-effects valid-effects))))
+
+(defn- handle-projectors-paste-effects
+  "Paste effects from clipboard into projector chain."
+  [{:keys [projector-id state]}]
+  (let [ui-path (projector-ui-state-path projector-id)
+        selected-paths (get-in state (conj ui-path :selected-paths) #{})
+        effects-vec (get-in state (projector-effects-path projector-id) [])
+        insert-pos (if (seq selected-paths)
+                     (let [top-level-indices (map first selected-paths)]
+                       (inc (apply max top-level-indices)))
+                     (count effects-vec))]
+    {:state state
+     :clipboard/paste-projector-effects {:projector-id projector-id
+                                         :insert-pos insert-pos}}))
+
+(defn- handle-projectors-insert-pasted-effects
+  "Actually insert pasted effects into projector chain (called by effect handler)."
+  [{:keys [projector-id insert-pos effects state]}]
+  (let [effects-with-new-ids (mapv regenerate-ids effects)
+        current-effects (vec (get-in state (projector-effects-path projector-id) []))
+        safe-pos (min insert-pos (count current-effects))
+        new-effects (vec (concat (subvec current-effects 0 safe-pos)
+                                 effects-with-new-ids
+                                 (subvec current-effects safe-pos)))
+        ui-path (projector-ui-state-path projector-id)
+        new-paths (into #{} (map (fn [i] [(+ safe-pos i)]) (range (count effects-with-new-ids))))]
+    {:state (-> state
+                (assoc-in (projector-effects-path projector-id) new-effects)
+                (assoc-in (conj ui-path :selected-paths) new-paths)
+                mark-dirty)}))
+
+(defn- handle-projectors-delete-effects
+  "Delete selected effects from projector chain."
+  [{:keys [projector-id state]}]
+  (let [ui-path (projector-ui-state-path projector-id)
+        selected-paths (get-in state (conj ui-path :selected-paths) #{})
+        effects-vec (get-in state (projector-effects-path projector-id) [])]
+    (if (seq selected-paths)
+      (let [root-paths (filter-to-root-paths selected-paths)
+            sorted-paths (sort-by (comp - count) root-paths)
+            new-effects (reduce remove-at-path effects-vec sorted-paths)]
+        {:state (-> state
+                    (assoc-in (projector-effects-path projector-id) new-effects)
+                    (assoc-in (conj ui-path :selected-paths) #{})
+                    mark-dirty)})
+      {:state state})))
+
+(defn- handle-projectors-start-effect-drag
+  "Start a multi-drag operation for projector effects."
+  [{:keys [projector-id initiating-path state]}]
+  (let [ui-path (projector-ui-state-path projector-id)
+        selected-paths (get-in state (conj ui-path :selected-paths) #{})
+        dragging-paths (if (contains? selected-paths initiating-path)
+                         selected-paths
+                         #{initiating-path})
+        new-selected (if (contains? selected-paths initiating-path)
+                       selected-paths
+                       #{initiating-path})]
+    {:state (-> state
+                (assoc-in (conj ui-path :dragging-paths) dragging-paths)
+                (assoc-in (conj ui-path :selected-paths) new-selected))}))
+
+(defn- handle-projectors-move-effects
+  "Move multiple effects to a new position in projector chain."
+  [{:keys [projector-id target-id drop-position state]}]
+  (let [ui-path (projector-ui-state-path projector-id)
+        effects-vec (get-in state (projector-effects-path projector-id) [])
+        dragging-paths (get-in state (conj ui-path :dragging-paths) #{})
+        root-paths (filter-to-root-paths dragging-paths)
+        all-paths (vec (effects/paths-in-chain effects-vec))
+        sorted-paths (sort-by #(.indexOf all-paths %) root-paths)
+        target-path (effects/find-path-by-id effects-vec target-id)
+        target-in-drag? (or (contains? root-paths target-path)
+                           (some #(path-is-ancestor? % target-path) root-paths))
+        items-to-move (mapv #(get-in effects-vec %) sorted-paths)]
+    (if (or (empty? items-to-move) target-in-drag?)
+      {:state (assoc-in state (conj ui-path :dragging-paths) nil)}
+      (let [after-remove (reduce remove-at-path effects-vec
+                                 (sort-by (comp - count) sorted-paths))
+            new-target-path (effects/find-path-by-id after-remove target-id)
+            target-found? (some? new-target-path)
+            final-to-path (or new-target-path [(count after-remove)])
+            final-into-group? (and target-found? (= drop-position :into))
+            after-insert (insert-items-at after-remove final-to-path items-to-move final-into-group?)]
+        {:state (-> state
+                    (assoc-in (projector-effects-path projector-id) after-insert)
+                    (assoc-in (conj ui-path :dragging-paths) nil)
+                    (assoc-in (conj ui-path :selected-paths) #{})
+                    mark-dirty)}))))
+
+(defn- handle-projectors-update-effect-ui-state
+  "Update projector effect UI state (for drag-and-drop feedback)."
+  [{:keys [projector-id updates state]}]
+  (let [ui-path (projector-ui-state-path projector-id)]
+    {:state (update-in state ui-path merge updates)}))
+
+(defn- handle-projectors-group-effects
+  "Group selected effects in projector chain."
+  [{:keys [projector-id name state]}]
+  (let [group-name (or name "New Group")
+        ui-path (projector-ui-state-path projector-id)
+        selected-paths (get-in state (conj ui-path :selected-paths) #{})
+        effects-vec (get-in state (projector-effects-path projector-id) [])]
+    (if (seq selected-paths)
+      (let [root-paths (filter-to-root-paths selected-paths)
+            all-paths (vec (effects/paths-in-chain effects-vec))
+            sorted-paths (sort-by #(.indexOf all-paths %) root-paths)
+            selected-items (mapv #(get-in effects-vec (vec %)) sorted-paths)
+            ids-to-remove (into #{} (map :id selected-items))
+            first-path (first sorted-paths)
+            insert-at-top-level (first first-path)
+            after-remove (remove-items-by-ids effects-vec ids-to-remove)
+            items-removed-before-insert (count
+                                          (filter
+                                            (fn [path]
+                                              (and (= 1 (count path))
+                                                   (< (first path) insert-at-top-level)))
+                                            sorted-paths))
+            adjusted-insert (- insert-at-top-level items-removed-before-insert)
+            new-group (make-group group-name selected-items)
+            new-effects (insert-items-at-index after-remove adjusted-insert [new-group])
+            new-group-path [adjusted-insert]]
+        {:state (-> state
+                    (assoc-in (projector-effects-path projector-id) new-effects)
+                    (assoc-in (conj ui-path :selected-paths) #{new-group-path})
+                    mark-dirty)})
+      {:state state})))
+
+(defn- handle-projectors-ungroup-effects
+  "Ungroup a group in projector chain."
+  [{:keys [projector-id path state]}]
+  (let [effects-vec (get-in state (projector-effects-path projector-id) [])
+        item (get-in effects-vec path)
+        ui-path (projector-ui-state-path projector-id)]
+    (if (effects/group? item)
+      (let [group-items (:items item [])
+            is-top-level? (= 1 (count path))
+            group-idx (if is-top-level? (first path) (last path))
+            parent-path (if is-top-level? [] (vec (butlast (butlast path))))
+            parent-vec (if is-top-level? effects-vec (get-in effects-vec (conj parent-path :items) []))
+            new-parent (vec (concat (subvec parent-vec 0 group-idx)
+                                    group-items
+                                    (subvec parent-vec (inc group-idx))))
+            new-effects (if is-top-level?
+                          new-parent
+                          (assoc-in effects-vec (conj parent-path :items) new-parent))]
+        {:state (-> state
+                    (assoc-in (projector-effects-path projector-id) new-effects)
+                    (assoc-in (conj ui-path :selected-paths) #{})
+                    mark-dirty)})
+      {:state state})))
+
+(defn- handle-projectors-create-effect-group
+  "Create empty group in projector chain."
+  [{:keys [projector-id state]}]
+  (let [new-group (make-group "New Group" [])]
+    {:state (-> state
+                (update-in (projector-effects-path projector-id) conj new-group)
+                mark-dirty)}))
+
+(defn- handle-projectors-toggle-effect-group-collapse
+  "Toggle collapse state of a group in projector chain."
+  [{:keys [projector-id path state]}]
+  (let [effects-vec (get-in state (projector-effects-path projector-id) [])
+        item (get-in effects-vec path)]
+    (if (effects/group? item)
+      {:state (update-in state (projector-effects-path projector-id)
+                         (fn [effects]
+                           (update-in effects (conj path :collapsed?) not)))}
+      {:state state})))
+
+(defn- handle-projectors-start-rename-effect-group
+  "Start renaming a group in projector chain."
+  [{:keys [projector-id path state]}]
+  (let [ui-path (projector-ui-state-path projector-id)]
+    {:state (assoc-in state (conj ui-path :renaming-path) path)}))
+
+(defn- handle-projectors-rename-effect-group
+  "Rename a group in projector chain."
+  [{:keys [projector-id path name state]}]
+  (let [effects-vec (get-in state (projector-effects-path projector-id) [])
+        item (get-in effects-vec path)
+        ui-path (projector-ui-state-path projector-id)]
+    (if (effects/group? item)
+      {:state (-> state
+                  (assoc-in (into (projector-effects-path projector-id) (conj path :name)) name)
+                  (assoc-in (conj ui-path :renaming-path) nil)
+                  mark-dirty)}
+      {:state state})))
+
+(defn- handle-projectors-cancel-rename-effect-group
+  "Cancel renaming a group in projector chain."
+  [{:keys [projector-id state]}]
+  (let [ui-path (projector-ui-state-path projector-id)]
+    {:state (assoc-in state (conj ui-path :renaming-path) nil)}))
+
+(defn- handle-projectors-set-effect-enabled-at-path
+  "Set enabled state of an effect at a path in projector chain."
+  [{:keys [projector-id path enabled? state] :as event}]
+  (let [enabled-val (if (contains? event :fx/event) (:fx/event event) enabled?)
+        path-vec (vec path)]
+    {:state (-> state
+                (assoc-in (into (projector-effects-path projector-id) (conj path-vec :enabled?)) enabled-val)
+                mark-dirty)}))
+
+(defn- handle-projectors-add-calibration-effect
+  "Add a calibration effect to projector chain."
+  [{:keys [projector-id effect state]}]
+  (let [effect-with-fields (cond-> effect
+                             (not (contains? effect :enabled?))
+                             (assoc :enabled? true)
+                             (not (contains? effect :id))
+                             (assoc :id (random-uuid)))
+        current-effects (get-in state (projector-effects-path projector-id) [])
+        new-effect-idx (count current-effects)
+        new-effect-path [new-effect-idx]
+        ui-path (projector-ui-state-path projector-id)]
+    {:state (-> state
+                (update-in (projector-effects-path projector-id) conj effect-with-fields)
+                (assoc-in (conj ui-path :selected-paths) #{new-effect-path})
+                (assoc-in (conj ui-path :last-selected-path) new-effect-path)
+                mark-dirty)}))
+
+(defn- handle-projectors-update-effect-param-at-path
+  "Update a parameter in a projector effect using path-based addressing."
+  [{:keys [projector-id effect-path param-key state] :as event}]
+  (let [value (or (:fx/event event) (:value event))
+        effects-vec (vec (get-in state (projector-effects-path projector-id) []))
+        updated-effects (assoc-in effects-vec (conj (vec effect-path) :params param-key) value)]
+    {:state (assoc-in state (projector-effects-path projector-id) updated-effects)}))
+
+(defn- handle-projectors-update-effect-param-from-text
+  "Update a projector effect parameter from text input."
+  [{:keys [projector-id effect-path param-key min max state] :as event}]
+  (let [action-event (:fx/event event)
+        text-field (.getSource action-event)
+        text (.getText text-field)
+        parsed (try (Double/parseDouble text) (catch Exception _ nil))]
+    (if parsed
+      (let [clamped (-> parsed (clojure.core/max min) (clojure.core/min max))
+            effects-vec (vec (get-in state (projector-effects-path projector-id) []))
+            updated-effects (assoc-in effects-vec (conj (vec effect-path) :params param-key) clamped)]
+        {:state (assoc-in state (projector-effects-path projector-id) updated-effects)})
+      {:state state})))
+
+(defn- handle-projectors-set-effect-ui-mode
+  "Set UI mode for a projector effect's parameters."
+  [{:keys [projector-id effect-path mode state]}]
+  (let [ui-path (projector-ui-state-path projector-id)]
+    {:state (assoc-in state (conj ui-path :ui-modes effect-path) mode)}))
 
 
 ;; File Menu Events
@@ -1700,6 +2114,7 @@
     :projectors/scan-complete (handle-projectors-scan-complete event)
     :projectors/scan-failed (handle-projectors-scan-failed event)
     :projectors/add-device (handle-projectors-add-device event)
+    :projectors/add-service (handle-projectors-add-service event)
     :projectors/add-manual (handle-projectors-add-manual event)
     :projectors/select-projector (handle-projectors-select-projector event)
     :projectors/remove-projector (handle-projectors-remove-projector event)
@@ -1711,10 +2126,31 @@
     :projectors/reorder-effects (handle-projectors-reorder-effects event)
     :projectors/set-test-pattern (handle-projectors-set-test-pattern event)
     :projectors/set-broadcast-address (handle-projectors-set-broadcast-address event)
+    :projectors/toggle-device-expand (handle-projectors-toggle-device-expand event)
     :projectors/update-connection-status (handle-projectors-update-connection-status event)
     :projectors/select-effect (handle-projectors-select-effect event)
     :projectors/update-corner-pin (handle-projectors-update-corner-pin event)
     :projectors/reset-corner-pin (handle-projectors-reset-corner-pin event)
+    
+    ;; Projector effect chain events (path-based selection for shared sidebar)
+    :projectors/select-all-effects (handle-projectors-select-all-effects event)
+    :projectors/clear-effect-selection (handle-projectors-clear-effect-selection event)
+    :projectors/copy-effects (handle-projectors-copy-effects event)
+    :projectors/paste-effects (handle-projectors-paste-effects event)
+    :projectors/insert-pasted-effects (handle-projectors-insert-pasted-effects event)
+    :projectors/delete-effects (handle-projectors-delete-effects event)
+    :projectors/start-effect-drag (handle-projectors-start-effect-drag event)
+    :projectors/move-effects (handle-projectors-move-effects event)
+    :projectors/update-effect-ui-state (handle-projectors-update-effect-ui-state event)
+    :projectors/group-effects (handle-projectors-group-effects event)
+    :projectors/ungroup-effects (handle-projectors-ungroup-effects event)
+    :projectors/create-effect-group (handle-projectors-create-effect-group event)
+    :projectors/toggle-effect-group-collapse (handle-projectors-toggle-effect-group-collapse event)
+    :projectors/start-rename-effect-group (handle-projectors-start-rename-effect-group event)
+    :projectors/rename-effect-group (handle-projectors-rename-effect-group event)
+    :projectors/cancel-rename-effect-group (handle-projectors-cancel-rename-effect-group event)
+    :projectors/set-effect-enabled (handle-projectors-set-effect-enabled-at-path event)
+    :projectors/add-calibration-effect (handle-projectors-add-calibration-effect event)
     
     ;; File menu events
     :file/new-project (handle-file-new-project event)
@@ -1742,5 +2178,6 @@
     
     ;; Unknown event
     (do
-      (println "Unknown event type:" type)
+      (println "=== UNKNOWN EVENT TYPE ===" type)
+      (println "  Full event:" (dissoc event :state))  ;; Don't print full state
       {})))

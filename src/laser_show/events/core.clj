@@ -164,13 +164,16 @@
 
 (defn- effect-projectors-scan
   "Effect that scans the network for IDN devices using IDN-Hello protocol.
-   Uses broadcast UDP to discover devices, then dispatches results."
+   Uses broadcast UDP to discover devices, then queries each device for
+   available services/outputs via Service Map Request.
+   
+   Each device may have multiple laser output services (multi-head DACs)."
   [{:keys [broadcast-address]} dispatch]
   (future
     (try
       (println (format "Scanning network for IDN devices (broadcast: %s)..." broadcast-address))
-      ;; Use actual IDN-Hello discovery protocol
-      (let [discovered (idn-hello/discover-devices broadcast-address 3000)
+      ;; Use service-aware discovery to enumerate outputs per device
+      (let [discovered (idn-hello/discover-devices-with-services broadcast-address 3000 1000)
             ;; Transform discovered devices to the format expected by UI
             devices (mapv (fn [device]
                             {:address (:address device)
@@ -181,9 +184,16 @@
                              :unit-id (:unit-id device)
                              :port (or (:port device) 7255)
                              :status (:status device)
-                             :protocol-version (:protocol-version device)})
+                             :protocol-version (:protocol-version device)
+                             ;; Include discovered services (laser outputs)
+                             :services (vec (:services device))
+                             :relays (vec (:relays device))})
                           discovered)]
         (println (format "Found %d IDN device(s)" (count devices)))
+        (doseq [device devices]
+          (println (format "  Device %s: %d service(s)"
+                          (:address device)
+                          (count (:services device)))))
         (dispatch {:event/type :projectors/scan-complete
                    :devices devices}))
       (catch Exception e

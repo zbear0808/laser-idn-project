@@ -102,17 +102,26 @@
 
 
 (defn main-content
-  "Main content area with tab content and preview panel."
+  "Main content area with tab content and optional preview panel.
+   Preview is hidden when on the projectors tab."
   [{:keys [fx/context]}]
-  {:fx/type :split-pane
-   :style "-fx-background-color: #1E1E1E;"
-   :divider-positions [0.65]
-   :items [{:fx/type :border-pane
-            :style "-fx-background-color: #1E1E1E;"
-            :center {:fx/type tab-content}}
-           {:fx/type :border-pane
-            :style "-fx-background-color: #2D2D2D;"
-            :center {:fx/type preview/preview-panel}}]})
+  (let [active-tab (fx/sub-ctx context subs/active-tab)
+        show-preview? (not= active-tab :projectors)]
+    (if show-preview?
+      ;; Show split pane with preview for non-projector tabs
+      {:fx/type :split-pane
+       :style "-fx-background-color: #1E1E1E;"
+       :divider-positions [0.65]
+       :items [{:fx/type :border-pane
+                :style "-fx-background-color: #1E1E1E;"
+                :center {:fx/type tab-content}}
+               {:fx/type :border-pane
+                :style "-fx-background-color: #2D2D2D;"
+                :center {:fx/type preview/preview-panel}}]}
+      ;; Just show tab content without preview for projectors tab
+      {:fx/type :border-pane
+       :style "-fx-background-color: #1E1E1E;"
+       :center {:fx/type tab-content}})))
 
 
 ;; Main Layout

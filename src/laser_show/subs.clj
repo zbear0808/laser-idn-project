@@ -350,6 +350,24 @@
   (let [items (:items (fx/sub-ctx context projectors-data) {})]
     (into #{} (map :host (vals items)))))
 
+(defn configured-projector-services
+  "Get set of [host service-id] pairs for already-configured projectors.
+   Allows checking if a specific service/output is already configured.
+   Depends on: projectors-data"
+  [context]
+  (let [items (:items (fx/sub-ctx context projectors-data) {})]
+    (into #{}
+          (map (fn [proj]
+                 [(:host proj) (or (:service-id proj) 0)])
+               (vals items)))))
+
+(defn expanded-discovered-devices
+  "Get set of device addresses that are expanded in the discovery panel.
+   Used for showing/hiding service lists on multi-output devices.
+   Depends on: projectors-data"
+  [context]
+  (:expanded-devices (fx/sub-ctx context projectors-data) #{}))
+
 (defn test-pattern-mode
   "Get the current test pattern mode (:grid, :corners, or nil).
    Depends on: projectors-data"
@@ -367,6 +385,46 @@
    Depends on: projectors-data"
   [context]
   (:selected-effect-idx (fx/sub-ctx context projectors-data)))
+
+(defn projector-effect-ui-state
+  "Get the effect chain UI state for a specific projector.
+   Used by the shared effect-chain-sidebar component.
+   
+   Depends on: ui domain (NOT projectors-data, to avoid subscription cascade)
+   
+   UI state is stored separately from projector config to prevent
+   drag-and-drop updates from invalidating all projector-related subscriptions.
+   
+   Returns map with:
+   - :selected-paths - set of selected item paths
+   - :last-selected-path - anchor for shift+click range select
+   - :dragging-paths - paths being dragged (during drag-and-drop)
+   - :drop-target-path - current drop target (for visual feedback)
+   - :drop-position - :before or :into
+   - :renaming-path - path of group being renamed"
+  [context projector-id]
+  (get-in (fx/sub-val context :ui)
+          [:projector-effect-ui-state projector-id]
+          {:selected-paths #{}
+           :last-selected-path nil
+           :dragging-paths nil
+           :drop-target-path nil
+           :drop-position nil
+           :renaming-path nil}))
+
+(defn projector-selected-effect-paths
+  "Get the set of selected effect paths for a projector.
+   Depends on: projector-effect-ui-state"
+  [context projector-id]
+  (:selected-paths (fx/sub-ctx context projector-effect-ui-state projector-id) #{}))
+
+(defn projector-effect-chain
+  "Get the effects chain for a specific projector.
+   Depends on: projectors-data"
+  [context projector-id]
+  (get-in (fx/sub-ctx context projectors-data)
+          [:items projector-id :effects]
+          []))
 
 
 ;; Stylesheet Subscriptions (CSS Hot-Reload)

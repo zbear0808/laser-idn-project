@@ -605,7 +605,7 @@
     {:fx/type :stage
      :showing open?
      :title window-title
-     :modality :application-modal
+     :modality :none
      :on-close-request {:event/type :ui/close-dialog :dialog-id :effect-chain-editor}
      :scene {:fx/type effect-chain-editor-scene
              :col col

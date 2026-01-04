@@ -8,8 +8,10 @@
    - Enable/disable individual projectors"
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
-            [laser-show.animation.effects :as effects]
-            [laser-show.views.components.spatial-canvas :as spatial-canvas]))
+            [laser-show.state.clipboard :as clipboard]
+            [laser-show.views.components.spatial-canvas :as spatial-canvas]
+            [laser-show.views.components.effect-chain-sidebar :as sidebar]
+            [laser-show.views.components.effect-chain-events :as chain-events]))
 
 
 ;; Status Indicators
@@ -34,46 +36,122 @@
 ;; Device Discovery Panel
 
 
-(defn- discovered-device-item
-  "Single discovered device in the list."
-  [{:keys [device configured?]}]
-  (let [{:keys [address host-name status]} device
-        device-status (cond
-                        (:offline status) :offline
-                        (:occupied status) :occupied
-                        :else :online)]
+(defn- service-entry-item
+  "Single service/output entry within a device.
+   Shows service name and add button for multi-output devices."
+  [{:keys [device service configured?]}]
+  (let [{:keys [service-id name]} service
+        service-display-name (or name (str "Output " service-id))]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
-     :padding 8
-     :style (str "-fx-background-color: #3D3D3D; -fx-background-radius: 4;"
-                 (when configured? " -fx-opacity: 0.6;"))
-     :children [{:fx/type status-indicator
-                 :status device-status}
-                {:fx/type :v-box
-                 :children [{:fx/type :label
-                             :text (or host-name address)
-                             :style "-fx-text-fill: white; -fx-font-weight: bold;"}
-                            {:fx/type :label
-                             :text address
-                             :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]}
+     :padding {:left 24 :right 8 :top 4 :bottom 4}
+     :style "-fx-background-color: #353535; -fx-background-radius: 2;"
+     :children [{:fx/type :label
+                 :text (str "• " service-display-name)
+                 :style (str "-fx-text-fill: " (if configured? "#606060" "#B0B0B0") "; -fx-font-size: 11;")}
                 {:fx/type :region :h-box/hgrow :always}
                 {:fx/type :button
-                 :text (if configured? "Added" "Add →")
+                 :text (if configured? "Added" "Add")
                  :disable configured?
-                 :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-size: 11; -fx-padding: 4 12;"
-                 :on-action {:event/type :projectors/add-device
-                             :device device}}]}))
+                 :style (str "-fx-background-color: " (if configured? "#404040" "#4A6FA5")
+                            "; -fx-text-fill: " (if configured? "#606060" "white")
+                            "; -fx-font-size: 10; -fx-padding: 2 8;")
+                 :on-action {:event/type :projectors/add-service
+                             :device device
+                             :service service}}]}))
+
+(defn- discovered-device-item
+  "Single discovered device in the list.
+   For devices with multiple services, shows expandable service list.
+   For single-service devices, shows inline add button."
+  [{:keys [device configured-services expanded? on-toggle-expand]}]
+  (let [{:keys [address host-name status services]} device
+        service-count (count services)
+        has-multiple-services? (> service-count 1)
+        ;; For single-service devices, check if that service is configured
+        single-service-configured? (and (= service-count 1)
+                                        (contains? configured-services
+                                                   [address (:service-id (first services))]))
+        ;; For no-service devices (service-id 0), check if configured
+        no-service-configured? (and (zero? service-count)
+                                    (contains? configured-services [address 0]))
+        device-status (cond
+                        (:offline status) :offline
+                        (:occupied status) :occupied
+                        :else :online)
+        ;; Build address info children (filter out nil)
+        address-info-children (filterv some?
+                                       [{:fx/type :label
+                                         :text address
+                                         :style "-fx-text-fill: #808080; -fx-font-size: 10;"}
+                                        (when (pos? service-count)
+                                          {:fx/type :label
+                                           :text (str "(" service-count " output" (when (> service-count 1) "s") ")")
+                                           :style "-fx-text-fill: #606060; -fx-font-size: 10;"})])
+        ;; Build header children (filter out nil)
+        header-children (filterv some?
+                                 (concat
+                                   ;; Expand button for multi-service devices
+                                   (when has-multiple-services?
+                                     [{:fx/type :button
+                                       :text (if expanded? "▼" "▶")
+                                       :style "-fx-background-color: transparent; -fx-text-fill: #808080; -fx-font-size: 10; -fx-padding: 2 4; -fx-min-width: 20;"
+                                       :on-action on-toggle-expand}])
+                                   ;; Status indicator and device info
+                                   [{:fx/type status-indicator
+                                     :status device-status}
+                                    {:fx/type :v-box
+                                     :children [{:fx/type :label
+                                                 :text (or host-name address)
+                                                 :style "-fx-text-fill: white; -fx-font-weight: bold;"}
+                                                {:fx/type :h-box
+                                                 :spacing 8
+                                                 :children address-info-children}]}
+                                    {:fx/type :region :h-box/hgrow :always}]
+                                   ;; For single-service or no-service devices, show add button directly
+                                   (when (not has-multiple-services?)
+                                     [{:fx/type :button
+                                       :text (cond
+                                               single-service-configured? "Added"
+                                               no-service-configured? "Added"
+                                               :else "Add →")
+                                       :disable (or single-service-configured? no-service-configured?)
+                                       :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-size: 11; -fx-padding: 4 12;"
+                                       :on-action {:event/type :projectors/add-device
+                                                   :device device}}])))]
+    {:fx/type :v-box
+     :spacing 2
+     :children
+     (vec
+       (concat
+         ;; Device header row
+         [{:fx/type :h-box
+           :spacing 8
+           :alignment :center-left
+           :padding 8
+           :style "-fx-background-color: #3D3D3D; -fx-background-radius: 4;"
+           :children header-children}]
+         ;; Expanded services list for multi-service devices
+         (when (and has-multiple-services? expanded?)
+           (for [service services]
+             {:fx/type service-entry-item
+              :fx/key (str address "-" (:service-id service))
+              :device device
+              :service service
+              :configured? (contains? configured-services [address (:service-id service)])}))))}))
 
 (defn- device-discovery-panel
-  "Panel for scanning network and listing discovered devices."
+  "Panel for scanning network and listing discovered devices.
+   Shows expandable entries for multi-output devices with service list."
   [{:keys [fx/context]}]
   (let [discovered (fx/sub-ctx context subs/discovered-devices)
         scanning? (fx/sub-ctx context subs/projector-scanning?)
-        configured-hosts (fx/sub-ctx context subs/configured-projector-hosts)]
+        configured-services (fx/sub-ctx context subs/configured-projector-services)
+        expanded-devices (fx/sub-ctx context subs/expanded-discovered-devices)]
     {:fx/type :v-box
      :spacing 8
-     :pref-width 280
+     :pref-width 300
      :children [{:fx/type :label
                  :text "DISCOVER DEVICES"
                  :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
@@ -98,10 +176,14 @@
                            :padding 4
                            :children (if (seq discovered)
                                        (vec (for [device discovered]
-                                              {:fx/type discovered-device-item
-                                               :fx/key (:address device)
-                                               :device device
-                                               :configured? (contains? configured-hosts (:address device))}))
+                                              (let [address (:address device)]
+                                                {:fx/type discovered-device-item
+                                                 :fx/key address
+                                                 :device device
+                                                 :configured-services configured-services
+                                                 :expanded? (contains? expanded-devices address)
+                                                 :on-toggle-expand {:event/type :projectors/toggle-device-expand
+                                                                    :address address}})))
                                        [{:fx/type :label
                                          :text (if scanning?
                                                  "Searching for devices..."
@@ -113,10 +195,15 @@
 
 
 (defn- projector-list-item
-  "Single configured projector in the list."
+  "Single configured projector in the list.
+   Shows service ID when configured for a specific output."
   [{:keys [projector selected?]}]
-  (let [{:keys [id name host enabled? status]} projector
-        connected? (:connected? status)]
+  (let [{:keys [id name host service-id service-name enabled? status]} projector
+        connected? (:connected? status)
+        ;; Display host:service or just host
+        host-display (if (and service-id (pos? service-id))
+                       (str host " #" service-id)
+                       host)]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
@@ -135,7 +222,7 @@
                              :text name
                              :style "-fx-text-fill: white; -fx-font-weight: bold;"}
                             {:fx/type :label
-                             :text host
+                             :text host-display
                              :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]}
                 {:fx/type :region :h-box/hgrow :always}
                 {:fx/type :button
@@ -177,77 +264,65 @@
 
 
 (defn- projector-basic-settings
-  "Basic projector settings (name, host, port)."
+  "Basic projector settings (name, host, port, service info)."
   [{:keys [projector]}]
-  (let [{:keys [id name host port]} projector]
+  (let [{:keys [id name host port service-id service-name]} projector]
     {:fx/type :v-box
      :spacing 8
-     :children [{:fx/type :h-box
-                 :spacing 8
-                 :alignment :center-left
-                 :children [{:fx/type :label
-                             :text "Name:"
-                             :pref-width 50
-                             :style "-fx-text-fill: #B0B0B0;"}
-                            {:fx/type :text-field
-                             :text (or name "")
-                             :pref-width 200
-                             :style "-fx-background-color: #404040; -fx-text-fill: white;"
-                             :on-text-changed {:event/type :projectors/update-settings
-                                               :projector-id id
-                                               :updates {:name :fx/event}}}]}
-                {:fx/type :h-box
-                 :spacing 8
-                 :alignment :center-left
-                 :children [{:fx/type :label
-                             :text "Host:"
-                             :pref-width 50
-                             :style "-fx-text-fill: #B0B0B0;"}
-                            {:fx/type :text-field
-                             :text (or host "")
-                             :pref-width 150
-                             :style "-fx-background-color: #404040; -fx-text-fill: white;"
-                             :on-text-changed {:event/type :projectors/update-settings
-                                               :projector-id id
-                                               :updates {:host :fx/event}}}
-                            {:fx/type :label
-                             :text "Port:"
-                             :style "-fx-text-fill: #B0B0B0;"}
-                            {:fx/type :text-field
-                             :text (str (or port 7255))
-                             :pref-width 60
-                             :style "-fx-background-color: #404040; -fx-text-fill: white;"}]}]}))
+     :children (vec
+                 (concat
+                   ;; Name field
+                   [{:fx/type :h-box
+                     :spacing 8
+                     :alignment :center-left
+                     :children [{:fx/type :label
+                                 :text "Name:"
+                                 :pref-width 50
+                                 :style "-fx-text-fill: #B0B0B0;"}
+                                {:fx/type :text-field
+                                 :text (or name "")
+                                 :pref-width 200
+                                 :style "-fx-background-color: #404040; -fx-text-fill: white;"
+                                 :on-text-changed {:event/type :projectors/update-settings
+                                                   :projector-id id
+                                                   :updates {:name :fx/event}}}]}
+                    ;; Host and port
+                    {:fx/type :h-box
+                     :spacing 8
+                     :alignment :center-left
+                     :children [{:fx/type :label
+                                 :text "Host:"
+                                 :pref-width 50
+                                 :style "-fx-text-fill: #B0B0B0;"}
+                                {:fx/type :text-field
+                                 :text (or host "")
+                                 :pref-width 150
+                                 :style "-fx-background-color: #404040; -fx-text-fill: white;"
+                                 :on-text-changed {:event/type :projectors/update-settings
+                                                   :projector-id id
+                                                   :updates {:host :fx/event}}}
+                                {:fx/type :label
+                                 :text "Port:"
+                                 :style "-fx-text-fill: #B0B0B0;"}
+                                {:fx/type :text-field
+                                 :text (str (or port 7255))
+                                 :pref-width 60
+                                 :style "-fx-background-color: #404040; -fx-text-fill: white;"}]}]
+                   ;; Service info (if multi-output device)
+                   (when (and service-id (pos? service-id))
+                     [{:fx/type :h-box
+                       :spacing 8
+                       :alignment :center-left
+                       :children [{:fx/type :label
+                                   :text "Output:"
+                                   :pref-width 50
+                                   :style "-fx-text-fill: #B0B0B0;"}
+                                  {:fx/type :label
+                                   :text (str "Service #" service-id
+                                             (when service-name (str " - " service-name)))
+                                   :style "-fx-text-fill: #4A6FA5; -fx-font-size: 11;"}]}])))}))
 
-(defn- effect-item-row
-  "Single effect in the projector's chain."
-  [{:keys [projector-id effect-idx effect selected? on-select]}]
-  (let [effect-def (effects/get-effect (:effect-id effect))
-        effect-name (or (:name effect-def) (name (:effect-id effect)))]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :padding {:left 8 :right 8 :top 4 :bottom 4}
-     :style (str "-fx-background-color: " (if selected? "#4A6FA5" "#3D3D3D") "; -fx-background-radius: 4; -fx-cursor: hand;")
-     :on-mouse-clicked (merge {:event/type :projectors/select-effect
-                               :projector-id projector-id
-                               :effect-idx effect-idx}
-                              on-select)
-     :children [{:fx/type :check-box
-                 :selected (:enabled? effect true)
-                 :on-selected-changed {:event/type :projectors/update-effect-param
-                                       :projector-id projector-id
-                                       :effect-idx effect-idx
-                                       :param-key :enabled?}}
-                {:fx/type :label
-                 :text effect-name
-                 :style "-fx-text-fill: white;"}
-                {:fx/type :region :h-box/hgrow :always}
-                {:fx/type :button
-                 :text "✕"
-                 :style "-fx-background-color: transparent; -fx-text-fill: #808080; -fx-font-size: 12;"
-                 :on-action {:event/type :projectors/remove-effect
-                             :projector-id projector-id
-                             :effect-idx effect-idx}}]}))
+;; Note: effect-item-row removed - now using shared sidebar/chain-list-sidebar component
 
 
 ;; Effect Parameter Editors
@@ -499,68 +574,64 @@
                    :text "No visual editor available for this effect"
                    :style "-fx-text-fill: #808080; -fx-font-style: italic;"})]}))
 
-(defn- projector-effects-list
-  "List of effects in the projector's chain with optional effect selection."
-  [{:keys [projector selected-effect-idx on-effect-select]}]
-  (let [{:keys [id effects]} projector]
-    {:fx/type :v-box
-     :spacing 4
-     :children [{:fx/type :h-box
-                 :alignment :center-left
-                 :children [{:fx/type :label
-                             :text "EFFECTS CHAIN"
-                             :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
-                            {:fx/type :region :h-box/hgrow :always}
-                            {:fx/type :menu-button
-                             :text "+ Add"
-                             :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10;"
-                             :items [{:fx/type :menu-item
-                                      :text "RGB Calibration"
-                                      :on-action {:event/type :projectors/add-effect
-                                                  :projector-id id
-                                                  :effect {:effect-id :rgb-calibration
-                                                           :params {:r-gain 1.0 :g-gain 1.0 :b-gain 1.0}}}}
-                                     {:fx/type :menu-item
-                                      :text "Gamma Correction"
-                                      :on-action {:event/type :projectors/add-effect
-                                                  :projector-id id
-                                                  :effect {:effect-id :gamma-correction
-                                                           :params {:r-gamma 2.2 :g-gamma 2.2 :b-gamma 2.2}}}}
-                                     {:fx/type :menu-item
-                                      :text "Corner Pin"
-                                      :on-action {:event/type :projectors/add-effect
-                                                  :projector-id id
-                                                  :effect {:effect-id :corner-pin
-                                                           :params {:tl-x -1.0 :tl-y 1.0
-                                                                    :tr-x 1.0 :tr-y 1.0
-                                                                    :bl-x -1.0 :bl-y -1.0
-                                                                    :br-x 1.0 :br-y -1.0}}}}
-                                     {:fx/type :menu-item
-                                      :text "Axis Flip"
-                                      :on-action {:event/type :projectors/add-effect
-                                                  :projector-id id
-                                                  :effect {:effect-id :axis-flip
-                                                           :params {:flip-x false :flip-y false}}}}
-                                     {:fx/type :menu-item
-                                      :text "Rotation Offset"
-                                      :on-action {:event/type :projectors/add-effect
-                                                  :projector-id id
-                                                  :effect {:effect-id :rotation-offset
-                                                           :params {:angle 0.0}}}}]}]}
-                {:fx/type :v-box
-                 :spacing 2
-                 :children (if (seq effects)
-                             (vec (for [[idx effect] (map-indexed vector effects)]
-                                    {:fx/type effect-item-row
-                                     :fx/key idx
-                                     :projector-id id
-                                     :effect-idx idx
-                                     :effect effect
-                                     :selected? (= idx selected-effect-idx)
-                                     :on-select on-effect-select}))
-                             [{:fx/type :label
-                               :text "No effects. Add calibration effects above."
-                               :style "-fx-text-fill: #606060; -fx-font-size: 10; -fx-font-style: italic; -fx-padding: 8;"}])}]}))
+(defn- projector-effects-sidebar
+  "Effect chain sidebar using shared component with full multi-select support.
+   Props:
+   - :projector - The projector config map
+   - :ui-state - UI state from subs/projector-effect-ui-state
+   - :can-paste? - Whether clipboard has pasteable effects"
+  [{:keys [projector ui-state can-paste?]}]
+  (let [{:keys [id effects]} projector
+        dispatcher (chain-events/create-projector-dispatcher id)]
+    {:fx/type sidebar/chain-list-sidebar
+     :event-dispatcher dispatcher
+     :effect-chain (or effects [])
+     :selected-paths (:selected-paths ui-state #{})
+     :dragging-paths (:dragging-paths ui-state)
+     :drop-target-path (:drop-target-path ui-state)
+     :drop-position (:drop-position ui-state)
+     :renaming-path (:renaming-path ui-state)
+     :can-paste? can-paste?}))
+
+(defn- projector-add-effect-menu
+  "Menu button for adding calibration effects to a projector."
+  [{:keys [projector-id]}]
+  {:fx/type :menu-button
+   :text "+ Add Effect"
+   :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10;"
+   :items [{:fx/type :menu-item
+            :text "RGB Calibration"
+            :on-action {:event/type :projectors/add-calibration-effect
+                        :projector-id projector-id
+                        :effect {:effect-id :rgb-calibration
+                                 :params {:r-gain 1.0 :g-gain 1.0 :b-gain 1.0}}}}
+           {:fx/type :menu-item
+            :text "Gamma Correction"
+            :on-action {:event/type :projectors/add-calibration-effect
+                        :projector-id projector-id
+                        :effect {:effect-id :gamma-correction
+                                 :params {:r-gamma 2.2 :g-gamma 2.2 :b-gamma 2.2}}}}
+           {:fx/type :menu-item
+            :text "Corner Pin"
+            :on-action {:event/type :projectors/add-calibration-effect
+                        :projector-id projector-id
+                        :effect {:effect-id :corner-pin
+                                 :params {:tl-x -1.0 :tl-y 1.0
+                                          :tr-x 1.0 :tr-y 1.0
+                                          :bl-x -1.0 :bl-y -1.0
+                                          :br-x 1.0 :br-y -1.0}}}}
+           {:fx/type :menu-item
+            :text "Axis Flip"
+            :on-action {:event/type :projectors/add-calibration-effect
+                        :projector-id projector-id
+                        :effect {:effect-id :axis-flip
+                                 :params {:flip-x false :flip-y false}}}}
+           {:fx/type :menu-item
+            :text "Rotation Offset"
+            :on-action {:event/type :projectors/add-calibration-effect
+                        :projector-id projector-id
+                        :effect {:effect-id :rotation-offset
+                                 :params {:angle 0.0}}}}]})
 
 (defn- test-pattern-controls
   "Buttons to activate test patterns for calibration."
@@ -598,45 +669,92 @@
                              :pattern nil}}]}))
 
 (defn- projector-config-panel
-  "Configuration panel for the selected projector."
+  "Configuration panel for the selected projector.
+   Uses the shared effect chain sidebar with full multi-select, copy/paste,
+   grouping, and keyboard shortcut support."
   [{:keys [fx/context]}]
   (let [projector (fx/sub-ctx context subs/active-projector)
-        selected-effect-idx (fx/sub-ctx context subs/selected-projector-effect-idx)
+        projector-id (:id projector)
+        ;; Get UI state for the effect chain (selection, drag state, etc.)
+        ui-state (when projector-id
+                   (fx/sub-ctx context subs/projector-effect-ui-state projector-id))
+        selected-paths (:selected-paths ui-state #{})
+        ;; Get selected effect for parameter editor (first selected if single select)
+        selected-effect-path (when (= 1 (count selected-paths))
+                               (first selected-paths))
+        selected-effect-idx (when selected-effect-path
+                              (first selected-effect-path))
         selected-effect (when (and projector selected-effect-idx)
-                          (get-in projector [:effects selected-effect-idx]))]
-    {:fx/type :v-box
-     :children [{:fx/type :scroll-pane
-                 :v-box/vgrow :always
-                 :fit-to-width true
-                 :fit-to-height true
-                 :style "-fx-background-color: #2D2D2D; -fx-background: #2D2D2D;"
-                 :content {:fx/type :v-box
-                           :spacing 16
-                           :padding 16
-                           :style "-fx-background-color: #2D2D2D; -fx-background-radius: 4;"
-                           :children (if projector
-                                       (vec
-                                         (concat
-                                           [{:fx/type :label
-                                             :text (str "CONFIGURE: " (:name projector))
-                                             :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
-                                            {:fx/type projector-basic-settings
-                                             :projector projector}
-                                            {:fx/type :separator}
-                                            {:fx/type projector-effects-list
-                                             :projector projector
-                                             :selected-effect-idx selected-effect-idx}]
-                                           (when selected-effect
-                                             [{:fx/type :separator}
-                                              {:fx/type effect-parameter-editor
-                                               :projector-id (:id projector)
-                                               :effect-idx selected-effect-idx
-                                               :effect selected-effect}])
-                                           [{:fx/type :separator}
-                                            {:fx/type test-pattern-controls}]))
-                                       [{:fx/type :label
+                          (get-in projector [:effects selected-effect-idx]))
+        can-paste? (clipboard/can-paste-effects?)]
+    (if projector
+      ;; Wrap in lifecycle to setup keyboard handlers
+      {:fx/type fx/ext-on-instance-lifecycle
+       :on-created (fn [node]
+                     (let [dispatcher (chain-events/create-projector-dispatcher projector-id)]
+                       ;; Setup keyboard handlers for Ctrl+C, Ctrl+V, Ctrl+A, Ctrl+G, Delete, etc.
+                       (chain-events/setup-keyboard-handlers! node dispatcher)
+                       ;; Make focusable to receive key events
+                       (.setFocusTraversable node true)))
+       :desc {:fx/type :v-box
+              :children [{:fx/type :scroll-pane
+                          :v-box/vgrow :always
+                          :fit-to-width true
+                          :fit-to-height true
+                          :style "-fx-background-color: #2D2D2D; -fx-background: #2D2D2D;"
+                          :content {:fx/type :h-box
+                                    :spacing 16
+                                    :padding 16
+                                    :style "-fx-background-color: #2D2D2D;"
+                                    :children [;; Left: Effect chain sidebar
+                                               {:fx/type :v-box
+                                                :spacing 8
+                                                :pref-width 250
+                                                :children [{:fx/type :label
+                                                            :text (str "CONFIGURE: " (:name projector))
+                                                            :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
+                                                           {:fx/type projector-basic-settings
+                                                            :projector projector}
+                                                           {:fx/type :separator}
+                                                           {:fx/type :h-box
+                                                            :alignment :center-left
+                                                            :children [{:fx/type :label
+                                                                        :text "CALIBRATION EFFECTS"
+                                                                        :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                                                                       {:fx/type :region :h-box/hgrow :always}
+                                                                       {:fx/type projector-add-effect-menu
+                                                                        :projector-id projector-id}]}
+                                                           {:fx/type projector-effects-sidebar
+                                                            :projector projector
+                                                            :ui-state ui-state
+                                                            :can-paste? can-paste?}]}
+                                               ;; Right: Parameter editor + test patterns
+                                               {:fx/type :v-box
+                                                :spacing 16
+                                                :h-box/hgrow :always
+                                                :children (vec
+                                                            (concat
+                                                              (when selected-effect
+                                                                [{:fx/type effect-parameter-editor
+                                                                  :projector-id projector-id
+                                                                  :effect-idx selected-effect-idx
+                                                                  :effect selected-effect}])
+                                                              [{:fx/type :region :v-box/vgrow :always}
+                                                               {:fx/type test-pattern-controls}]))}]}}]}}
+      ;; No projector selected
+      {:fx/type :v-box
+       :children [{:fx/type :scroll-pane
+                   :v-box/vgrow :always
+                   :fit-to-width true
+                   :fit-to-height true
+                   :style "-fx-background-color: #2D2D2D; -fx-background: #2D2D2D;"
+                   :content {:fx/type :v-box
+                             :spacing 16
+                             :padding 16
+                             :style "-fx-background-color: #2D2D2D; -fx-background-radius: 4;"
+                             :children [{:fx/type :label
                                          :text "Select a projector to configure"
-                                         :style "-fx-text-fill: #606060; -fx-font-style: italic;"}])}}]}))
+                                         :style "-fx-text-fill: #606060; -fx-font-style: italic;"}]}}]})))
 
 
 ;; Main Tab

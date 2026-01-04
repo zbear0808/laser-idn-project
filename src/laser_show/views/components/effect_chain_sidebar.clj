@@ -16,10 +16,16 @@
    
    Styling is defined in laser-show.css.effect-chain-sidebar.
    
+   The component accepts an optional :event-dispatcher prop that implements
+   the IEffectChainEventDispatcher protocol. When provided, all events are
+   routed through the dispatcher, allowing reuse for both grid cell effects
+   and projector calibration effects.
+   
    Extracted from effect-chain-editor for maintainability."
   (:require [cljfx.api :as fx]
             [laser-show.animation.effects :as effects]
-            [laser-show.events.core :as events])
+            [laser-show.events.core :as events]
+            [laser-show.views.components.effect-chain-events :as chain-events])
   (:import [javafx.scene.input TransferMode ClipboardContent]))
 
 
@@ -44,13 +50,38 @@
 ;; Drag-and-Drop Handlers
 
 
+(defn- setup-drag-source-with-dispatcher!
+  "Setup drag source handlers on a node using an event dispatcher.
+   Supports multi-select drag: if the dragged item is part of a selection,
+   all selected items will be moved together. Otherwise, just the dragged item moves."
+  [^javafx.scene.Node node path dispatcher]
+  (.setOnDragDetected
+    node
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (let [dragboard (.startDragAndDrop node (into-array TransferMode [TransferMode/MOVE]))
+              content (ClipboardContent.)]
+          (.putString content (pr-str path))
+          (.setContent dragboard content)
+          (chain-events/start-multi-drag dispatcher path)
+          (.consume event)))))
+  (.setOnDragDone
+    node
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (chain-events/update-drag-state dispatcher {:dragging-paths nil
+                                                     :drop-target-path nil})
+        (.consume event)))))
+
 (defn- setup-drag-source!
   "Setup drag source handlers on a node for reordering effects.
    Supports multi-select drag: if the dragged item is part of a selection,
    all selected items will be moved together. Otherwise, just the dragged item moves.
    
    The actual determination of which paths to drag is done by the :effects/start-multi-drag
-   event handler, which has access to the current selection state."
+   event handler, which has access to the current selection state.
+   
+   DEPRECATED: Use setup-drag-source-with-dispatcher! with an event dispatcher instead."
   [^javafx.scene.Node node path col row dispatch!]
   (.setOnDragDetected
     node
@@ -76,6 +107,57 @@
                               :drop-target-path nil}})
         (.consume event)))))
 
+(defn- setup-drag-target-with-dispatcher!
+  "Setup drag target handlers on a node using an event dispatcher.
+   Supports multi-select drag and ID-based targeting for robust drop handling.
+   
+   For groups, detects drop position based on mouse Y:
+   - Upper 25%: drop BEFORE the group
+   - Lower 75%: drop INTO the group
+   
+   For effects, always drops BEFORE (insert at position)."
+  [^javafx.scene.Node node target-id path is-group? dispatcher]
+  (let [drop-position-atom (atom :before)]
+    (.setOnDragOver
+      node
+      (reify javafx.event.EventHandler
+        (handle [_ event]
+          (when (and (.getDragboard event)
+                     (.hasString (.getDragboard event)))
+            (.acceptTransferModes event (into-array TransferMode [TransferMode/MOVE]))
+            (when is-group?
+              (let [bounds (.getBoundsInLocal node)
+                    y (.getY event)
+                    height (.getHeight bounds)
+                    new-pos (if (< y (* height 0.25)) :before :into)]
+                (when (not= @drop-position-atom new-pos)
+                  (reset! drop-position-atom new-pos)
+                  (chain-events/update-drag-state dispatcher {:drop-position new-pos})))))
+          (.consume event))))
+    (.setOnDragEntered
+      node
+      (reify javafx.event.EventHandler
+        (handle [_ event]
+          (when (.hasString (.getDragboard event))
+            (reset! drop-position-atom (if is-group? :into :before))
+            (chain-events/update-drag-state dispatcher {:drop-target-path path
+                                                         :drop-target-id target-id
+                                                         :drop-position (if is-group? :into :before)}))
+          (.consume event))))
+    (.setOnDragExited
+      node
+      (reify javafx.event.EventHandler
+        (handle [_ event]
+          (.consume event))))
+    (.setOnDragDropped
+      node
+      (reify javafx.event.EventHandler
+        (handle [_ event]
+          (let [drop-pos @drop-position-atom]
+            (chain-events/move-items dispatcher target-id drop-pos)
+            (.setDropCompleted event true)
+            (.consume event)))))))
+
 (defn- setup-drag-target!
   "Setup drag target handlers on a node for accepting dropped items.
    Supports multi-select drag: dispatches :effects/move-items which moves all
@@ -87,7 +169,9 @@
    - Upper 25%: drop BEFORE the group
    - Lower 75%: drop INTO the group
    
-   For effects, always drops BEFORE (insert at position)."
+   For effects, always drops BEFORE (insert at position).
+   
+   DEPRECATED: Use setup-drag-target-with-dispatcher! with an event dispatcher instead."
   [^javafx.scene.Node node target-id path is-group? col row dispatch!]
   (let [drop-position-atom (atom :before)]
     (.setOnDragOver
@@ -143,12 +227,30 @@
 ;; Selection Handlers
 
 
+(defn- setup-click-handler-with-dispatcher!
+  "Setup click handler on a node using an event dispatcher.
+   Supports multi-select behavior:
+   - Click: Select single
+   - Ctrl+Click: Toggle selection
+   - Shift+Click: Range select (based on visual order)"
+  [^javafx.scene.Node node path dispatcher]
+  (.setOnMouseClicked
+    node
+    (reify javafx.event.EventHandler
+      (handle [_ event]
+        (let [ctrl? (.isControlDown event)
+              shift? (.isShiftDown event)]
+          (chain-events/select-item-at-path dispatcher path ctrl? shift?))
+        (.consume event)))))
+
 (defn- setup-click-handler!
   "Setup click handler on a node for multi-select behavior.
    Now uses path-based selection for nested items.
    - Click: Select single
    - Ctrl+Click: Toggle selection
-   - Shift+Click: Range select (based on visual order)"
+   - Shift+Click: Range select (based on visual order)
+   
+   DEPRECATED: Use setup-click-handler-with-dispatcher! with an event dispatcher instead."
   [^javafx.scene.Node node path col row]
   (.setOnMouseClicked
     node
@@ -215,7 +317,8 @@
   "Header for a group showing collapse toggle, name, and item count.
    
    Props:
-   - :col, :row - Grid cell coordinates
+   - :col, :row - Grid cell coordinates (legacy, optional if dispatcher provided)
+   - :event-dispatcher - Optional IEffectChainEventDispatcher implementation
    - :path - Path to this group
    - :group - Group data map
    - :depth - Nesting depth (0 = top level)
@@ -225,7 +328,7 @@
    - :drop-position - Current drop position (:before or :into) when drop-target?
    - :renaming? - Whether this group is currently being renamed
    - :parent-disabled? - Whether any parent group is disabled"
-  [{:keys [col row path group depth selected? dragging? drop-target? drop-position renaming? parent-disabled?]}]
+  [{:keys [col row event-dispatcher path group depth selected? dragging? drop-target? drop-position renaming? parent-disabled?]}]
   (let [enabled? (:enabled? group true)
         effectively-disabled? (or (not enabled?) parent-disabled?)
         collapsed? (:collapsed? group false)
@@ -248,51 +351,75 @@
                        :effectively-disabled? effectively-disabled?})]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
-                   (let [dispatch! events/dispatch!
-                         target-id (:id group)]
-                     (setup-drag-source! node path col row dispatch!)
-                     (setup-drag-target! node target-id path true col row dispatch!)
-                     ;; Add double-click-to-rename on the whole row
-                     (.setOnMouseClicked node
-                       (reify javafx.event.EventHandler
-                         (handle [_ event]
-                           (let [click-count (.getClickCount event)
-                                 ctrl? (.isControlDown event)
-                                 shift? (.isShiftDown event)]
-                             (cond
-                               ;; Double-click anywhere on group row - start rename
-                               (= click-count 2)
-                               (do
-                                 (dispatch! {:event/type :effects/start-rename-group
-                                             :path path})
-                                 (.consume event))
-                               
-                               ;; Single-click - select (unless on checkbox/buttons)
-                               :else
-                               (do
-                                 (dispatch! {:event/type :effects/select-item-at-path
-                                             :path path
-                                             :col col
-                                             :row row
-                                             :ctrl? ctrl?
-                                             :shift? shift?})
-                                 (.consume event)))))))))
+                   (let [target-id (:id group)]
+                     ;; Use dispatcher if provided, otherwise fall back to legacy dispatch
+                     (if event-dispatcher
+                       (do
+                         (setup-drag-source-with-dispatcher! node path event-dispatcher)
+                         (setup-drag-target-with-dispatcher! node target-id path true event-dispatcher)
+                         ;; Add double-click-to-rename and single-click selection
+                         (.setOnMouseClicked node
+                           (reify javafx.event.EventHandler
+                             (handle [_ event]
+                               (let [click-count (.getClickCount event)
+                                     ctrl? (.isControlDown event)
+                                     shift? (.isShiftDown event)]
+                                 (cond
+                                   ;; Double-click - start rename
+                                   (= click-count 2)
+                                   (do
+                                     (chain-events/start-rename-group event-dispatcher path)
+                                     (.consume event))
+                                   ;; Single-click - select
+                                   :else
+                                   (do
+                                     (chain-events/select-item-at-path event-dispatcher path ctrl? shift?)
+                                     (.consume event))))))))
+                       ;; Legacy dispatch
+                       (let [dispatch! events/dispatch!]
+                         (setup-drag-source! node path col row dispatch!)
+                         (setup-drag-target! node target-id path true col row dispatch!)
+                         (.setOnMouseClicked node
+                           (reify javafx.event.EventHandler
+                             (handle [_ event]
+                               (let [click-count (.getClickCount event)
+                                     ctrl? (.isControlDown event)
+                                     shift? (.isShiftDown event)]
+                                 (cond
+                                   (= click-count 2)
+                                   (do
+                                     (dispatch! {:event/type :effects/start-rename-group
+                                                 :path path})
+                                     (.consume event))
+                                   :else
+                                   (do
+                                     (dispatch! {:event/type :effects/select-item-at-path
+                                                 :path path
+                                                 :col col
+                                                 :row row
+                                                 :ctrl? ctrl?
+                                                 :shift? shift?})
+                                     (.consume event)))))))))))
      :desc {:fx/type :h-box
             :style-class header-classes
             :children [;; Collapse/Expand chevron
                        {:fx/type :button
                         :text (if collapsed? "▶" "▼")
                         :style-class "group-collapse-btn"
-                        :on-action {:event/type :effects/toggle-group-collapse
-                                    :col col :row row
-                                    :path path}}
+                        :on-action (if event-dispatcher
+                                     (fn [_] (chain-events/toggle-group-collapse event-dispatcher path))
+                                     {:event/type :effects/toggle-group-collapse
+                                      :col col :row row
+                                      :path path})}
                        
                        ;; Enable/disable checkbox
                        {:fx/type :check-box
                         :selected enabled?
-                        :on-selected-changed {:event/type :effects/set-item-enabled-at-path
-                                              :col col :row row
-                                              :path path}}
+                        :on-selected-changed (if event-dispatcher
+                                               (fn [enabled?] (chain-events/set-item-enabled event-dispatcher path enabled?))
+                                               {:event/type :effects/set-item-enabled-at-path
+                                                :col col :row row
+                                                :path path})}
                        
                        ;; Group name (clickable for selection, double-clickable for rename)
                        (if renaming?
@@ -307,18 +434,24 @@
                                  :on-action (fn [^javafx.event.ActionEvent e]
                                               (let [text-field (.getSource e)
                                                     new-name (.getText text-field)]
-                                                (events/dispatch! {:event/type :effects/rename-group
-                                                                   :col col :row row
-                                                                   :path path
-                                                                   :name new-name})))
+                                                (if event-dispatcher
+                                                  (chain-events/rename-group event-dispatcher path new-name)
+                                                  (events/dispatch! {:event/type :effects/rename-group
+                                                                     :col col :row row
+                                                                     :path path
+                                                                     :name new-name}))))
                                  :on-key-pressed (fn [^javafx.scene.input.KeyEvent e]
                                                    (case (.getCode e)
                                                      javafx.scene.input.KeyCode/ESCAPE
-                                                     (events/dispatch! {:event/type :effects/cancel-rename-group})
+                                                     (if event-dispatcher
+                                                       (chain-events/cancel-rename-group event-dispatcher)
+                                                       (events/dispatch! {:event/type :effects/cancel-rename-group}))
                                                      nil))
                                  :on-focused-changed (fn [focused?]
                                                        (when-not focused?
-                                                         (events/dispatch! {:event/type :effects/cancel-rename-group})))}}
+                                                         (if event-dispatcher
+                                                           (chain-events/cancel-rename-group event-dispatcher)
+                                                           (events/dispatch! {:event/type :effects/cancel-rename-group}))))}}
                          ;; Label for display (click handled by parent h-box)
                          {:fx/type :label
                           :text (or (:name group) "Group")
@@ -335,9 +468,11 @@
                        {:fx/type :button
                         :text "⊗"
                         :style-class "group-ungroup-btn"
-                        :on-action {:event/type :effects/ungroup
-                                    :col col :row row
-                                    :path path}}]}}))
+                        :on-action (if event-dispatcher
+                                     (fn [_] (chain-events/ungroup event-dispatcher path))
+                                     {:event/type :effects/ungroup
+                                      :col col :row row
+                                      :path path})}]}}))
 
 
 ;; Chain Item Card Component (for effects)
@@ -349,7 +484,8 @@
    Supports multi-select with Click/Ctrl+Click/Shift+Click on the name label.
    
    Props:
-   - :col, :row - Grid cell coordinates
+   - :col, :row - Grid cell coordinates (legacy, optional if dispatcher provided)
+   - :event-dispatcher - Optional IEffectChainEventDispatcher implementation
    - :path - Path to this effect (e.g., [0] or [1 :items 2])
    - :effect - Effect instance data
    - :effect-def - Effect definition from registry
@@ -358,7 +494,7 @@
    - :dragging? - Whether this item is being dragged (part of dragging-paths)
    - :drop-target? - Whether this is the current drop target
    - :parent-disabled? - Whether any parent group is disabled"
-  [{:keys [col row path effect effect-def depth selected? dragging? drop-target? parent-disabled?]}]
+  [{:keys [col row event-dispatcher path effect effect-def depth selected? dragging? drop-target? parent-disabled?]}]
   (let [enabled? (:enabled? effect true)
         effectively-disabled? (or (not enabled?) parent-disabled?)
         
@@ -374,19 +510,28 @@
                        :effectively-disabled? effectively-disabled?})]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
-                   (let [dispatch! events/dispatch!
-                         target-id (:id effect)]
-                     (setup-drag-source! node path col row dispatch!)
-                     (setup-drag-target! node target-id path false col row dispatch!)
-                     (setup-click-handler! node path col row)))
+                   (let [target-id (:id effect)]
+                     ;; Use dispatcher if provided, otherwise fall back to legacy dispatch
+                     (if event-dispatcher
+                       (do
+                         (setup-drag-source-with-dispatcher! node path event-dispatcher)
+                         (setup-drag-target-with-dispatcher! node target-id path false event-dispatcher)
+                         (setup-click-handler-with-dispatcher! node path event-dispatcher))
+                       ;; Legacy dispatch
+                       (let [dispatch! events/dispatch!]
+                         (setup-drag-source! node path col row dispatch!)
+                         (setup-drag-target! node target-id path false col row dispatch!)
+                         (setup-click-handler! node path col row)))))
      :desc {:fx/type :h-box
             :style-class item-classes
             :children [;; Enable/disable checkbox (does NOT trigger selection)
                        {:fx/type :check-box
                         :selected enabled?
-                        :on-selected-changed {:event/type :effects/set-item-enabled-at-path
-                                              :col col :row row
-                                              :path path}}
+                        :on-selected-changed (if event-dispatcher
+                                               (fn [enabled?] (chain-events/set-item-enabled event-dispatcher path enabled?))
+                                               {:event/type :effects/set-item-enabled-at-path
+                                                :col col :row row
+                                                :path path})}
                        
                        ;; Effect name
                        {:fx/type :label
@@ -401,7 +546,8 @@
   "Recursively render a chain item (effect or group).
    
    Props:
-   - :col, :row - Grid cell coordinates
+   - :col, :row - Grid cell coordinates (legacy, optional if dispatcher provided)
+   - :event-dispatcher - Optional IEffectChainEventDispatcher implementation
    - :item - The item to render (effect or group)
    - :path - Path to this item
    - :depth - Nesting depth (0 = top level)
@@ -411,7 +557,7 @@
    - :drop-position - Current drop position (:before or :into)
    - :renaming-path - Path of group being renamed (or nil)
    - :parent-disabled? - Whether any parent group is disabled"
-  [{:keys [col row item path depth selected-paths dragging-paths drop-target-path drop-position renaming-path parent-disabled?]}]
+  [{:keys [col row event-dispatcher item path depth selected-paths dragging-paths drop-target-path drop-position renaming-path parent-disabled?]}]
   (if (effects/group? item)
     ;; Render group with header and children
     (let [collapsed? (:collapsed? item false)
@@ -423,6 +569,7 @@
        :children (into
                   [{:fx/type group-header
                     :col col :row row
+                    :event-dispatcher event-dispatcher
                     :path path
                     :group item
                     :depth depth
@@ -438,6 +585,7 @@
                         {:fx/type render-chain-item
                          :fx/key (conj path :items idx)
                          :col col :row row
+                         :event-dispatcher event-dispatcher
                          :item child
                          :path (vec (concat path [:items idx]))
                          :depth (inc depth)
@@ -451,6 +599,7 @@
     ;; Render effect
     {:fx/type chain-item-card
      :col col :row row
+     :event-dispatcher event-dispatcher
      :path path
      :effect item
      :effect-def (effect-by-id (:effect-id item))
@@ -468,23 +617,28 @@
   "Toolbar with group-related buttons.
    
    Props:
-   - :col, :row - Grid cell coordinates
+   - :col, :row - Grid cell coordinates (legacy, optional if dispatcher provided)
+   - :event-dispatcher - Optional IEffectChainEventDispatcher implementation
    - :selection-count - Number of selected items
    - :can-create-group? - Whether a new group can be created at current depth"
-  [{:keys [col row selection-count can-create-group?]}]
+  [{:keys [col row event-dispatcher selection-count can-create-group?]}]
   {:fx/type :h-box
    :spacing 4
    :children [{:fx/type :button
                :text "🗁 New"
                :style-class "chain-toolbar-btn"
-               :on-action {:event/type :effects/create-empty-group
-                           :col col :row row}}
+               :on-action (if event-dispatcher
+                            (fn [_] (chain-events/create-empty-group event-dispatcher))
+                            {:event/type :effects/create-empty-group
+                             :col col :row row})}
               {:fx/type :button
                :text "☐ Group"
                :disable (or (zero? selection-count) (not can-create-group?))
                :style-class "chain-toolbar-btn"
-               :on-action {:event/type :effects/group-selected
-                           :col col :row row}}]})
+               :on-action (if event-dispatcher
+                            (fn [_] (chain-events/group-selected event-dispatcher))
+                            {:event/type :effects/group-selected
+                             :col col :row row})}]})
 
 
 ;; Main Sidebar Component
@@ -498,7 +652,8 @@
    items move together. Items maintain their relative order.
    
    Props:
-   - :col, :row - Grid cell coordinates
+   - :col, :row - Grid cell coordinates (legacy, optional if dispatcher provided)
+   - :event-dispatcher - Optional IEffectChainEventDispatcher implementation
    - :effect-chain - Vector of effect/group instances
    - :selected-effect-indices - Set of selected indices (legacy, for flat selection)
    - :selected-paths - Set of selected paths (for nested selection)
@@ -507,7 +662,7 @@
    - :drop-position - Current drop position (:before or :into)
    - :renaming-path - Path of group being renamed (or nil)
    - :can-paste? - Whether clipboard has pasteable effects"
-  [{:keys [col row effect-chain selected-effect-indices selected-paths
+  [{:keys [col row event-dispatcher effect-chain selected-effect-indices selected-paths
            dragging-paths drop-target-path drop-position renaming-path can-paste?]}]
   (let [;; Support both legacy index selection and new path selection
         selected-paths-set (or selected-paths
@@ -536,6 +691,7 @@
                 ;; Group toolbar
                 {:fx/type group-toolbar
                  :col col :row row
+                 :event-dispatcher event-dispatcher
                  :selection-count selection-count
                  :can-create-group? can-create-group?}
                 
@@ -546,20 +702,26 @@
                              :text "Copy"
                              :disable (zero? selection-count)
                              :style-class "chain-toolbar-btn"
-                             :on-action {:event/type :effects/copy-selected
-                                         :col col :row row}}
+                             :on-action (if event-dispatcher
+                                          (fn [_] (chain-events/copy-selected event-dispatcher))
+                                          {:event/type :effects/copy-selected
+                                           :col col :row row})}
                             {:fx/type :button
                              :text "Paste"
                              :disable (not can-paste?)
                              :style-class "chain-toolbar-btn"
-                             :on-action {:event/type :effects/paste-into-chain
-                                         :col col :row row}}
+                             :on-action (if event-dispatcher
+                                          (fn [_] (chain-events/paste-into-chain event-dispatcher))
+                                          {:event/type :effects/paste-into-chain
+                                           :col col :row row})}
                             {:fx/type :button
                              :text "Del"
                              :disable (zero? selection-count)
                              :style-class "chain-toolbar-btn-danger"
-                             :on-action {:event/type :effects/delete-selected
-                                         :col col :row row}}]}
+                             :on-action (if event-dispatcher
+                                          (fn [_] (chain-events/delete-selected event-dispatcher))
+                                          {:event/type :effects/delete-selected
+                                           :col col :row row})}]}
                 (if (empty? effect-chain)
                   {:fx/type :label
                    :text "No effects\nAdd from bank →"
@@ -578,6 +740,7 @@
                                             {:fx/type render-chain-item
                                              :fx/key [idx]
                                              :col col :row row
+                                             :event-dispatcher event-dispatcher
                                              :item item
                                              :path [idx]
                                              :depth 0

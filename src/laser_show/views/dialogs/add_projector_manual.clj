@@ -99,7 +99,7 @@
     {:fx/type :stage
      :showing open?
      :title "Add Projector"
-     :modality :application-modal
+     :modality :none
      :on-close-request {:event/type :ui/close-dialog :dialog-id :add-projector-manual}
      :scene {:fx/type :scene
              :stylesheets stylesheets
