@@ -17,7 +17,8 @@
    3. Read in backend: (queries/bpm), (queries/projector id)
    4. Read in UI: (fx/sub-ctx context subs/bpm)"
   (:require [cljfx.api :as fx]
-            [clojure.core.cache :as cache]))
+            [clojure.core.cache :as cache]
+            [clojure.tools.logging :as log]))
 
 
 ;; Section 1: Core State Atom & Cache
@@ -170,7 +171,7 @@
    Call this once at application startup before mounting the renderer."
   [initial-state]
   (reset! *context (fx/create-context initial-state cache-factory))
-  (println "State initialized with" (count initial-state) "top-level keys"))
+  (log/info "State initialized with" (count initial-state) "top-level keys"))
 
 
 ;; Section 5: Domain Registration (used by defstate macro)

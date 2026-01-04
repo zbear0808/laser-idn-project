@@ -1,18 +1,21 @@
-(ns laser-show.css.effect-chain-sidebar
-  "CSS styles for the effect chain sidebar component.
+(ns laser-show.css.hierarchical-list
+  "CSS styles for the hierarchical list component.
    
    Provides CSS classes for:
    - Sidebar container
    - Group headers with depth colors and state variants
-   - Chain items with state variants
+   - List items with state variants
    - Toolbar buttons
    - Indentation classes for nested items
+   
+   This consolidates styles that were previously in effect-chain-sidebar.clj
+   into a single reusable stylesheet for all hierarchical list components.
    
    State variants use compound selectors (e.g., .chain-item.chain-item-selected)
    for proper specificity when multiple classes are applied.
    
    Usage:
-   Include (::css/url effect-chain-sidebar) in your scene's :stylesheets vector."
+   Include (::css/url hierarchical-list) in your scene's :stylesheets vector."
   (:require [cljfx.css :as css]
             [laser-show.css.theme :as theme]))
 
@@ -27,9 +30,9 @@
    :depth-3 "#8C7B5B"}) ;; Brown
 
 
-(def effect-chain-sidebar
-  "Effect chain sidebar styles."
-  (css/register ::effect-chain-sidebar
+(def hierarchical-list
+  "Hierarchical list styles."
+  (css/register ::hierarchical-list
     (let [{bg-dark      ::theme/bg-dark
            bg-medium    ::theme/bg-medium
            bg-light     ::theme/bg-light
@@ -131,17 +134,24 @@
         ".group-header-selected"
         {:-fx-background-color selected-bg}
         
+        ;; Drop-into indicator - enhanced with glow for dropping into group
         ".group-header-drop-into"
         {:-fx-background-color drop-into-bg
          :-fx-border-color drop-border
-         :-fx-border-width "2px"}
+         :-fx-border-width "2px"
+         :-fx-effect "dropshadow(three-pass-box, rgba(122, 184, 255, 0.6), 12, 0, 0, 0)"}
         
+        ;; Drop-before indicator - enhanced with glow
         ".group-header-drop-before"
         {:-fx-border-color drop-border
-         :-fx-border-width ["3px" "0px" "0px" "3px"]}
+         :-fx-border-width ["3px" "0px" "0px" "3px"]
+         :-fx-background-color "#3A3A5A"
+         :-fx-effect "dropshadow(three-pass-box, rgba(122, 184, 255, 0.5), 8, 0, 0, -3)"}
         
+        ;; Dragging group - looks "lifted"
         ".group-header-dragging"
-        {:-fx-opacity 0.5}
+        {:-fx-opacity 0.5
+         :-fx-effect "dropshadow(three-pass-box, rgba(0, 0, 0, 0.4), 6, 0, 2, 2)"}
         
         ".group-header-disabled"
         {:-fx-opacity 0.6}}
@@ -239,29 +249,47 @@
        
        
        ;; ============================================
-       ;; Chain Item Card - Base with compound state selectors
+       ;; Chain Item Card - Base
        ;; ============================================
        
        ".chain-item"
        {:-fx-spacing 6
         :-fx-alignment "CENTER_LEFT"
         :-fx-background-color bg-light
-        :-fx-background-radius 4
-        
-        ;; State variants as compound selectors (.chain-item.chain-item-selected)
-        ".chain-item-selected"
-        {:-fx-background-color selected-bg}
-        
-        ".chain-item-drop-target"
-        {:-fx-background-color drop-into-bg
-         :-fx-border-color drop-border
-         :-fx-border-width ["2px" "0px" "0px" "0px"]}
-        
-        ".chain-item-dragging"
-        {:-fx-opacity 0.5}
-        
-        ".chain-item-disabled"
-        {:-fx-opacity 0.6}}
+        :-fx-background-radius 4}
+       
+       ;; ============================================
+       ;; Chain Item State Variants (compound selectors)
+       ;; ============================================
+       
+       ".chain-item.chain-item-selected"
+       {:-fx-background-color selected-bg}
+       
+       ;; Drop indicator when hovering over top half - place before
+       ;; Enhanced with glow effect and background highlight for better visibility
+       ".chain-item.chain-item-drop-before"
+       {:-fx-border-color drop-border
+        :-fx-border-width ["3px" "0px" "0px" "0px"]
+        :-fx-border-radius 4
+        :-fx-background-color "#3A3A5A"
+        :-fx-effect "dropshadow(three-pass-box, rgba(122, 184, 255, 0.5), 8, 0, 0, -3)"}
+       
+       ;; Drop indicator when hovering over bottom half - place after
+       ;; Enhanced with glow effect and background highlight for better visibility
+       ".chain-item.chain-item-drop-after"
+       {:-fx-border-color drop-border
+        :-fx-border-width ["0px" "0px" "3px" "0px"]
+        :-fx-border-radius 4
+        :-fx-background-color "#3A3A5A"
+        :-fx-effect "dropshadow(three-pass-box, rgba(122, 184, 255, 0.5), 8, 0, 0, 3)"}
+       
+       ;; Dragging item - looks "lifted" from the list
+       ".chain-item.chain-item-dragging"
+       {:-fx-opacity 0.5
+        :-fx-effect "dropshadow(three-pass-box, rgba(0, 0, 0, 0.4), 6, 0, 2, 2)"}
+       
+       ".chain-item.chain-item-disabled"
+       {:-fx-opacity 0.6}
        
        
        ;; ============================================
@@ -295,6 +323,30 @@
         
         ".chain-item-name-disabled"
         {:-fx-text-fill text-muted}}
+       
+       
+       ;; ============================================
+       ;; Drop Indicator Line
+       ;; Visual horizontal line showing where item will be inserted
+       ;; ============================================
+       
+       ".drop-indicator-line"
+       {:-fx-padding ["0px" "4px"]
+        :-fx-min-height 4
+        :-fx-max-height 4
+        :-fx-pref-height 4
+        :-fx-alignment "CENTER_LEFT"}
+       
+       ".drop-indicator-arrow"
+       {:-fx-text-fill drop-border
+        :-fx-font-size 10
+        :-fx-font-weight "bold"}
+       
+       ".drop-indicator-bar"
+       {:-fx-background-color drop-border
+        :-fx-pref-height 2
+        :-fx-min-height 2
+        :-fx-background-radius 1}
        
        
        ;; ============================================

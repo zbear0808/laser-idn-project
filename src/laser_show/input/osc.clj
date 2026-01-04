@@ -1,7 +1,8 @@
 (ns laser-show.input.osc
   "OSC input handler using overtone/osc-clj.
    Converts OSC messages to standardized input events."
-  (:require [overtone.osc :as o]
+  (:require [clojure.tools.logging :as log]
+            [overtone.osc :as o]
             [laser-show.input.events :as events]
             [laser-show.input.router :as router]))
 
@@ -146,10 +147,10 @@
        (o/osc-handle server "/*" (create-catch-all-handler))
        
        (swap! osc-state assoc :server server :port port)
-       (println "OSC server started on port" port)
+       (log/info "OSC server started on port" port)
        server)
      (catch Exception e
-       (println "Error starting OSC server:" (.getMessage e))
+       (log/error "Error starting OSC server:" (.getMessage e))
        nil))))
 
 (defn stop-server!
@@ -160,7 +161,7 @@
       (o/osc-close server)
       (catch Exception _))
     (swap! osc-state assoc :server nil)
-    (println "OSC server stopped")))
+    (log/info "OSC server stopped")))
 
 (defn server-running?
   "Returns true if OSC server is running."

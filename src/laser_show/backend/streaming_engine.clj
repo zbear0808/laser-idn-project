@@ -8,7 +8,8 @@
    - 8-bit or 16-bit position (XY)
    
    Default is standard ISP-DB25 format (8-bit color, 16-bit XY)."
-  (:require [laser-show.idn.stream :as idn-stream]
+  (:require [clojure.tools.logging :as log]
+            [laser-show.idn.stream :as idn-stream]
             [laser-show.idn.output-config :as output-config]
             [laser-show.animation.types :as t]
             [laser-show.idn.hello :as hello])
@@ -18,9 +19,9 @@
 ;; Constants
 
 
-;; Default streaming FPS - 30 FPS provides smooth animation while being
+;; Default streaming FPS - 60 FPS provides smooth animation while being
 ;; achievable on most networks and hardware
-(def ^:const DEFAULT_FPS 30)
+(def ^:const DEFAULT_FPS 60)
 
 ;; IDN-Hello standard port per ILDA specification
 (def ^:const DEFAULT_PORT 7255)
@@ -131,9 +132,9 @@
                 log-callback running? socket stats output-config]} engine
         frame-interval-ms (/ 1000.0 fps)]
     
-    (println (format "Streaming loop started: %s:%d @ %d FPS (%s)"
-                     target-host target-port fps
-                     (output-config/config-name output-config)))
+    (log/info (format "Streaming loop started: %s:%d @ %d FPS (%s)"
+                      target-host target-port fps
+                      (output-config/config-name output-config)))
     
     (reset! (:last-config-time-ms engine) 0)
     
@@ -157,7 +158,7 @@
                      :actual-fps actual-fps)))
           
           (catch Exception e
-            (println "Streaming error:" (.getMessage e))))
+            (log/error "Streaming error:" (.getMessage e))))
         
         (let [elapsed (- (System/currentTimeMillis) loop-start)
               sleep-time (- frame-interval-ms elapsed)]
@@ -190,10 +191,10 @@
       (reset! (:thread engine) thread)
       (.start thread))
     
-    (println (format "Streaming engine started: %s:%d (%s)"
-                     (:target-host engine)
-                     (:target-port engine)
-                     (output-config/config-name (:output-config engine))))
+    (log/info (format "Streaming engine started: %s:%d (%s)"
+                      (:target-host engine)
+                      (:target-port engine)
+                      (output-config/config-name (:output-config engine))))
     engine))
 
 (defn stop!
@@ -213,14 +214,14 @@
               hello-packet (hello/wrap-channel-message close-packet)]
           (hello/send-packet socket hello-packet (:target-host engine) (:target-port engine) nil))
         (catch Exception e
-          (println "Error sending close packet:" (.getMessage e))))
+          (log/error "Error sending close packet:" (.getMessage e))))
       
       (.close socket))
     
     (reset! (:socket engine) nil)
     (reset! (:thread engine) nil)
     
-    (println "Streaming engine stopped")
+    (log/info "Streaming engine stopped")
     engine))
 
 (defn running?

@@ -8,7 +8,8 @@
    
    The state.core namespace is agnostic about persistence - it just holds state.
    This namespace decides what gets saved and loaded."
-  (:require [laser-show.state.core :as state]
+  (:require [clojure.tools.logging :as log]
+            [laser-show.state.core :as state]
             [laser-show.state.serialization :as ser]))
 
 
@@ -172,7 +173,7 @@
                               (assoc-in [:project :last-saved] (System/currentTimeMillis))))
       true)
     (catch Exception e
-      (println "Error saving project:" (.getMessage e))
+      (log/error "Error saving project:" (.getMessage e))
       false)))
 
 (defn load-project!
@@ -208,10 +209,10 @@
                                   (assoc-in [:project :last-saved] (System/currentTimeMillis))))
           true)
         (do
-          (println "Project folder does not exist:" project-folder)
+          (log/warn "Project folder does not exist:" project-folder)
           false)))
     (catch Exception e
-      (println "Error loading project:" (.getMessage e))
+      (log/error "Error loading project:" (.getMessage e))
       false)))
 
 (defn new-project!
@@ -232,7 +233,7 @@
                                 domains)))
     true
     (catch Exception e
-      (println "Error creating new project:" (.getMessage e))
+      (log/error "Error creating new project:" (.getMessage e))
       false)))
 
 (defn folder-has-project-files?

@@ -13,7 +13,8 @@
    - laser-show.state.persistent"
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.pprint :as pprint]))
+            [clojure.pprint :as pprint]
+            [clojure.tools.logging :as log]))
 
 
 ;; Core Serialization Functions
@@ -62,8 +63,8 @@
           (on-error e)
           (do
             (when-not silent?
-              (println "[serialization/deserialize] Deserialization error:" (.getMessage e))
-              (println "[serialization/deserialize] Input string (first 100 chars):" (subs (str edn-str) 0 (min 100 (count (str edn-str))))))
+              (log/error "Deserialization error:" (.getMessage e))
+              (log/debug "Input string (first 100 chars):" (subs (str edn-str) 0 (min 100 (count (str edn-str))))))
             nil))))))
 
 
@@ -97,7 +98,7 @@
           (if on-invalid
             (on-invalid data)
             (do
-              (println "Schema validation failed for data:" data)
+              (log/warn "Schema validation failed for data:" data)
               nil))))
       data)))
 
@@ -160,7 +161,7 @@
       (if on-error
         (on-error e)
         (do
-          (println "Error saving to file" filepath ":" (.getMessage e))
+          (log/error "Error saving to file" filepath ":" (.getMessage e))
           false)))))
 
 (defn load-from-file
@@ -192,7 +193,7 @@
           (if on-error
             (on-error e)
             (do
-              (println "Error loading file" filepath ":" (.getMessage e))
+              (log/error "Error loading file" filepath ":" (.getMessage e))
               (or default if-not-found)))))
       if-not-found)))
 

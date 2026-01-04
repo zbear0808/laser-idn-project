@@ -15,22 +15,18 @@
 (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.animation.effects :as effects]
+            [laser-show.animation.chains :as chains]
             [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.css.core :as css]
             [laser-show.views.components.tabs :as tabs]
             [laser-show.views.components.custom-param-renderers :as custom-renderers]
-            [laser-show.views.components.effect-chain-sidebar :as sidebar])
+            [laser-show.views.components.hierarchical-list :as hierarchical-list])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
 
 ;; Effect Registry Access
 
-
-(defn- effect-by-id
-  "Get an effect definition by its ID from the registry."
-  [effect-id]
-  (effects/get-effect effect-id))
 
 (defn- effects-by-category
   "Get effects filtered by category (excludes :calibration)."
@@ -331,7 +327,7 @@
                           
                           :else nil)
         effect-def (when selected-effect
-                     (effect-by-id (:effect-id selected-effect)))
+                     (effects/get-effect (:effect-id selected-effect)))
         current-params (:params selected-effect {})
         params-map (params-vector->map (:parameters effect-def []))
         ;; For UI mode lookup, use path if available (stringified for map key)
@@ -382,73 +378,6 @@
                    :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"})]}))
 
 
-;; Keyboard Handler Setup
-
-
-(defn- setup-keyboard-handler!
-  "Setup keyboard handler on root node for shortcuts.
-   Uses addEventFilter for Ctrl+C/V to intercept before system clipboard handling.
-   Uses setOnKeyPressed for other shortcuts (Ctrl+A, Delete, Escape).
-   
-   - Ctrl+C: Copy selected effects
-   - Ctrl+V: Paste effects
-   - Ctrl+A: Select all effects
-   - Delete/Backspace: Delete selected effects"
-  [^javafx.scene.Node node col row]
-  ;; Use event filter for Ctrl+C and Ctrl+V - these are intercepted by the system
-  ;; at Scene level, so we need to catch them during capture phase
-  (.addEventFilter
-    node
-    KeyEvent/KEY_PRESSED
-    (reify javafx.event.EventHandler
-      (handle [_ event]
-        (let [code (.getCode event)
-              ctrl? (.isControlDown event)]
-          (cond
-            ;; Ctrl+C - Copy (must use filter to intercept system clipboard)
-            (and ctrl? (= code KeyCode/C))
-            (do (events/dispatch! {:event/type :effects/copy-selected
-                                   :col col :row row})
-                (.consume event))
-            
-            ;; Ctrl+V - Paste (must use filter to intercept system clipboard)
-            (and ctrl? (= code KeyCode/V))
-            (do (events/dispatch! {:event/type :effects/paste-into-chain
-                                   :col col :row row})
-                (.consume event)))))))
-  
-  ;; Use regular key handler for other shortcuts that don't conflict
-  (.setOnKeyPressed
-    node
-    (reify javafx.event.EventHandler
-      (handle [_ event]
-        (let [code (.getCode event)
-              ctrl? (.isControlDown event)]
-          (cond
-            ;; Ctrl+A - Select all
-            (and ctrl? (= code KeyCode/A))
-            (do (events/dispatch! {:event/type :effects/select-all
-                                   :col col :row row})
-                (.consume event))
-            
-            ;; Ctrl+G - Group selected effects
-            (and ctrl? (= code KeyCode/G))
-            (do (events/dispatch! {:event/type :effects/group-selected
-                                   :col col :row row})
-                (.consume event))
-            
-            ;; Delete or Backspace - Delete selected
-            (or (= code KeyCode/DELETE) (= code KeyCode/BACK_SPACE))
-            (do (events/dispatch! {:event/type :effects/delete-selected
-                                   :col col :row row})
-                (.consume event))
-            
-            ;; Escape - Clear selection
-            (= code KeyCode/ESCAPE)
-            (do (events/dispatch! {:event/type :effects/clear-selection})
-                (.consume event))))))))
-
-
 ;; Main Dialog Content
 
 
@@ -456,92 +385,83 @@
   "Main content of the effect chain editor dialog."
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
-        {:keys [col row selected-effect-indices selected-paths
-                dragging-effect-idx dragging-path dragging-paths
-                drop-target-idx drop-target-path drop-position
-                renaming-path
-                active-bank-tab]} dialog-data
-        ;; Support both legacy index selection and new path selection
-        selected-indices (or selected-effect-indices #{})
-        selected-paths-set (or selected-paths
-                               (when (seq selected-indices)
-                                 (into #{} (map vector selected-indices))))
+        {:keys [col row selected-ids active-bank-tab]} dialog-data
         effects-state (fx/sub-val context :effects)
         cell-data (get-in effects-state [:cells [col row]])
         effect-chain (:effects cell-data [])
         active? (:active cell-data false)
-        can-paste? (clipboard/can-paste-effects?)
-        ;; For parameter editor, use first selected if single select
-        ;; Path-based selection takes precedence over index-based
-        first-selected-path (when (= 1 (count selected-paths-set))
-                              (first selected-paths-set))
-        ;; Legacy index support - only if no paths and exactly one index selected
-        first-selected-idx (when (and (nil? first-selected-path)
-                                      (= 1 (count selected-indices)))
-                             (first selected-indices))]
-    {:fx/type fx/ext-on-instance-lifecycle
-     :on-created (fn [node]
-                   (setup-keyboard-handler! node col row)
-                   ;; Make node focusable to receive key events
-                   (.setFocusTraversable node true)
-                   (.requestFocus node))
-     :desc {:fx/type :v-box
-             :spacing 0
-             :style "-fx-background-color: #2D2D2D;"
-             :pref-width 600
-             :pref-height 550
-             :children [;; Main content area
-                       {:fx/type :h-box
-                        :spacing 0
-                        :v-box/vgrow :always
-                        :children [;; Left sidebar - chain list with drag-and-drop
-                                   {:fx/type sidebar/chain-list-sidebar
-                                      :h-box/hgrow :always
-                                      :col col :row row
-                                      :effect-chain effect-chain
-                                      :selected-effect-indices selected-indices
-                                      :selected-paths selected-paths-set
-                                      :dragging-paths dragging-paths
-                                      :drop-target-path drop-target-path
-                                      :drop-position drop-position
-                                      :renaming-path renaming-path
-                                      :can-paste? can-paste?}
+        clipboard-items (clipboard/get-effects-to-paste)
+        ;; For parameter editor - use first selected ID if single select
+        first-selected-id (when (= 1 (count selected-ids))
+                            (first selected-ids))
+        first-selected-path (when first-selected-id
+                              (chains/find-path-by-id effect-chain first-selected-id))]
+    {:fx/type :v-box
+     :spacing 0
+     :style "-fx-background-color: #2D2D2D;"
+     :pref-width 600
+     :pref-height 550
+     :children [;; Main content area
+               {:fx/type :h-box
+                :spacing 0
+                :v-box/vgrow :always
+                :children [;; Left sidebar - chain list with drag-and-drop
+                           ;; Using hierarchical-list-editor with built-in keyboard handling
+                           {:fx/type hierarchical-list/hierarchical-list-editor
+                            :h-box/hgrow :always
+                            :items effect-chain
+                            :component-id [:effect-chain col row]
+                            :item-id-key :effect-id
+                            :item-registry-fn effects/get-effect
+                            :item-name-key :name
+                            :fallback-label "Unknown Effect"
+                            :on-change-event :effects/set-chain
+                            :on-change-params {:col col :row row}
+                            :on-selection-event :ui/update-dialog-data
+                            :on-selection-params {:dialog-id :effect-chain-editor
+                                                  :updates {}}
+                            :selection-key :selected-ids
+                            :on-copy-fn (fn [items]
+                                          (clipboard/copy-effect-chain! {:effects items}))
+                            :clipboard-items clipboard-items
+                            :header-label "CHAIN"
+                            :empty-text "No effects\nAdd from bank →"}
                                    
-                                   ;; Right section
-                                   {:fx/type :v-box
-                                    :spacing 0
-                                    :h-box/hgrow :always
-                                    :children [;; Effect bank tabs (top)
-                                               {:fx/type effect-bank-tabs
-                                                :col col :row row
-                                                :active-bank-tab active-bank-tab}
-                                               
-                                               ;; Parameter editor (bottom) - shows first selected
-                                               {:fx/type parameter-editor
-                                                :col col :row row
-                                                :selected-effect-idx first-selected-idx
-                                                :selected-effect-path first-selected-path
-                                                :effect-chain effect-chain
-                                                :dialog-data dialog-data}]}]}
-                       
-                       ;; Footer with Active checkbox and close button
-                       {:fx/type :h-box
-                        :alignment :center-left
-                        :spacing 8
-                        :padding 12
-                        :style "-fx-background-color: #252525;"
-                        :children [{:fx/type :check-box
-                                    :text "Active"
-                                    :selected active?
-                                    :style "-fx-text-fill: white;"
-                                    :on-selected-changed {:event/type :effects/toggle-cell
-                                                          :col col :row row}}
-                                   {:fx/type :region :h-box/hgrow :always}
-                                   {:fx/type :button
-                                    :text "Close"
-                                    :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-padding: 6 20;"
-                                    :on-action {:event/type :ui/close-dialog
-                                                :dialog-id :effect-chain-editor}}]}]}}))
+                           ;; Right section
+                           {:fx/type :v-box
+                            :spacing 0
+                            :h-box/hgrow :always
+                            :children [;; Effect bank tabs (top)
+                                       {:fx/type effect-bank-tabs
+                                        :col col :row row
+                                        :active-bank-tab active-bank-tab}
+                                       
+                                       ;; Parameter editor (bottom) - shows first selected
+                                       {:fx/type parameter-editor
+                                        :col col :row row
+                                        :selected-effect-idx nil
+                                        :selected-effect-path first-selected-path
+                                        :effect-chain effect-chain
+                                        :dialog-data dialog-data}]}]}
+               
+               ;; Footer with Active checkbox and close button
+               {:fx/type :h-box
+                :alignment :center-left
+                :spacing 8
+                :padding 12
+                :style "-fx-background-color: #252525;"
+                :children [{:fx/type :check-box
+                            :text "Active"
+                            :selected active?
+                            :style "-fx-text-fill: white;"
+                            :on-selected-changed {:event/type :effects/toggle-cell
+                                                  :col col :row row}}
+                           {:fx/type :region :h-box/hgrow :always}
+                           {:fx/type :button
+                            :text "Close"
+                            :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-padding: 6 20;"
+                            :on-action {:event/type :ui/close-dialog
+                                        :dialog-id :effect-chain-editor}}]}]}))
 
 
 ;; Scene-level Event Filter Setup

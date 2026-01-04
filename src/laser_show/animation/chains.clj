@@ -13,7 +13,8 @@
    - Items are identified by UUID in their :id field
    - Paths are vectors like [0], [1 :items 0], [1 :items 2 :items 0]
    - Items can be enabled/disabled via :enabled? field (default: true)
-   - Flattening respects enabled? at all levels")
+   - Flattening respects enabled? at all levels"
+  (:require [clojure.tools.logging :as log]))
 
 
 ;; Type Predicates
@@ -159,6 +160,72 @@
      nil
      (range (count items)))))
 
+(defn- collect-path-item-pairs
+  "Internal helper - returns seq of [path item] pairs by walking a chain."
+  ([items] (collect-path-item-pairs items []))
+  ([items prefix]
+   (mapcat
+     (fn [[idx item]]
+       (let [path (conj prefix idx)]
+         (if (group? item)
+           (cons [path item]
+                 (collect-path-item-pairs (:items item []) (conj path :items)))
+           [[path item]])))
+     (map-indexed vector items))))
+
+(defn find-paths-by-ids
+  "Find paths for multiple IDs in a chain. Returns map of {id -> path}.
+   IDs not found in chain will not be in result map.
+   
+   Parameters:
+   - items: Vector of items (the chain)
+   - ids: Collection of IDs to find
+   
+   Returns: Map of {id -> path}"
+  [items ids]
+  (let [id-set (set ids)]
+    (reduce
+      (fn [result [path item]]
+        (if (contains? id-set (:id item))
+          (assoc result (:id item) path)
+          result))
+      {}
+      (collect-path-item-pairs items))))
+
+(defn collect-all-ids-set
+ "Collect all item IDs in a chain as a set, recursively including groups.
+  
+  Parameters:
+  - items: Vector of items (the chain)
+  
+  Returns: Set of UUIDs"
+ [items]
+ (reduce
+   (fn [ids item]
+     (let [with-current (if (:id item) (conj ids (:id item)) ids)]
+       (if (group? item)
+         (into with-current (collect-all-ids-set (:items item [])))
+         with-current)))
+   #{}
+   items))
+
+(defn collect-all-ids
+ "Collect all item IDs in a chain in document order, recursively including groups.
+  
+  Parameters:
+  - items: Vector of items (the chain)
+  
+  Returns: Vector of UUIDs in document order (for indexOf operations)"
+ ([items] (collect-all-ids items []))
+ ([items acc]
+  (reduce
+    (fn [acc item]
+      (let [with-current (if (:id item) (conj acc (:id item)) acc)]
+        (if (group? item)
+          (collect-all-ids (:items item []) with-current)
+          with-current)))
+    acc
+    items)))
 
 ;; Counting
 
@@ -349,3 +416,210 @@
       (let [start (min idx1 idx2)
             end (max idx1 idx2)]
         (subvec all-paths start (inc end))))))
+
+(defn select-range-by-ids
+ "Select range between two IDs in document order.
+  Returns set of all IDs between from-id and to-id (inclusive).
+  
+  Parameters:
+  - items: Vector of items (the chain)
+  - from-id: Starting ID
+  - to-id: Ending ID
+  
+  Returns: Set of IDs in range"
+ [items from-id to-id]
+ (let [from-path (find-path-by-id items from-id)
+       to-path (find-path-by-id items to-id)]
+   (if (and from-path to-path)
+     (let [path-range (select-range items from-path to-path)]
+       (set (keep #(:id (get-item-at-path items %)) path-range)))
+     ;; Fallback if IDs not found
+     #{from-id to-id})))
+
+
+;; Deep Copy Operations
+
+
+(defn deep-copy-item
+  "Deep copy an item, generating new UUIDs for it and all nested children.
+   This is essential for paste operations to avoid ID collisions.
+   
+   Parameters:
+   - item: Item to copy (effect, preset, or group)
+   
+   Returns: New item with fresh UUIDs at all levels"
+  [item]
+  (let [with-new-id (assoc item :id (random-uuid))]
+    (if (group? with-new-id)
+      (update with-new-id :items #(mapv deep-copy-item %))
+      with-new-id)))
+
+(defn deep-copy-items
+  "Deep copy multiple items, generating new UUIDs for all items and nested children.
+   
+   Parameters:
+   - items: Vector of items to copy
+   
+   Returns: Vector of copied items with fresh UUIDs"
+  [items]
+  (mapv deep-copy-item items))
+
+
+;; Safe Multi-Item Operations
+
+
+(defn- compare-paths
+  "Compare two paths for sorting. Returns negative if a < b, positive if a > b, 0 if equal.
+   Sorts by depth first (deeper paths first), then by index within same depth (higher indices first)."
+  [a b]
+  (let [depth-cmp (compare (count b) (count a))]
+    (if (zero? depth-cmp)
+      ;; Same depth - compare indices from end to start (reverse order for deletion)
+      (let [a-indices (filter number? a)
+            b-indices (filter number? b)]
+        (compare (vec (reverse b-indices)) (vec (reverse a-indices))))
+      depth-cmp)))
+
+(defn delete-paths-safely
+  "Delete multiple items by path, handling index shifts correctly.
+   
+   Items are removed deepest-first and highest-index-first to prevent path invalidation.
+   
+   Parameters:
+   - items: Vector of items (the chain)
+   - paths: Collection of paths to delete
+   
+   Returns: Updated chain with items removed"
+  [items paths]
+  (let [sorted-paths (sort compare-paths paths)]
+    (reduce remove-at-path items sorted-paths)))
+
+(defn- compare-paths-document-order
+  "Compare two paths for document order (visual order in the UI).
+   Returns negative if a comes before b, positive if a comes after b, 0 if equal.
+   
+   Document order is depth-first traversal order, comparing indices at each level."
+  [a b]
+  (let [;; Compare element by element
+        max-len (max (count a) (count b))]
+    (loop [i 0]
+      (if (>= i max-len)
+        0  ;; Paths are equal up to this point
+        (let [a-elem (get a i)
+              b-elem (get b i)]
+          (cond
+            ;; a is shorter - a comes first
+            (nil? a-elem) -1
+            ;; b is shorter - b comes first
+            (nil? b-elem) 1
+            ;; Both are :items keywords - continue
+            (and (= :items a-elem) (= :items b-elem)) (recur (inc i))
+            ;; Compare numeric indices
+            (and (number? a-elem) (number? b-elem))
+            (let [cmp (compare a-elem b-elem)]
+              (if (zero? cmp)
+                (recur (inc i))
+                cmp))
+            ;; :items vs number - :items indicates nested, so compare parent indices first
+            :else (recur (inc i))))))))
+
+(defn- describe-item
+  "Get a brief description of an item for logging."
+  [item]
+  (cond
+    (nil? item) "nil"
+    (group? item) (str "Group(" (:name item "unnamed") ", id=" (subs (str (:id item)) 0 8) "...)")
+    :else (str "Item(" (:effect-id item (:preset-id item :unknown)) ", id=" (subs (str (:id item)) 0 8) "...)")))
+
+(defn- log-chain-state
+  "Log the current state of a chain with paths."
+  [label items]
+  (log/debug (str "\n=== " label " ==="))
+  (doseq [[idx item] (map-indexed vector items)]
+    (log/debug (str "  [" idx "] " (describe-item item)))
+    (when (group? item)
+      (doseq [[child-idx child] (map-indexed vector (:items item []))]
+        (log/debug (str "    [" idx " :items " child-idx "] " (describe-item child)))))))
+
+(defn move-items-to-target
+  "Move multiple items to a target location safely.
+   
+   Algorithm:
+   1. Sort source paths by document order (visual order) to preserve relative ordering
+   2. Collect items in document order
+   3. Sort paths by depth (deepest first) for safe removal
+   4. Remove items from sources
+   5. Find target location in updated chain
+   6. Insert items at destination in document order
+   
+   Parameters:
+   - items: Vector of items (the chain)
+   - from-paths: Collection of paths to move
+   - target-id: UUID of target item
+   - drop-position: :before or :into
+   
+   Returns: Updated chain with items moved"
+  [items from-paths target-id drop-position]
+  (log/debug "\n========== DRAG-AND-DROP DEBUG ==========")
+  (log/debug "Target ID:" (subs (str target-id) 0 8) "...")
+  (log/debug "Drop position:" drop-position)
+  (log/debug "Source paths (raw):" (vec from-paths))
+  (log-chain-state "BEFORE MOVE" items)
+  
+  (let [;; Sort paths by document order first to preserve visual ordering
+        document-ordered-paths (sort compare-paths-document-order from-paths)
+        _ (log/debug "Source paths (document order):" (vec document-ordered-paths))
+        
+        ;; Get items in document order (before any modifications)
+        items-to-move (mapv #(get-item-at-path items %) document-ordered-paths)
+        _ (log/debug "Items to move:" (mapv describe-item items-to-move))
+        
+        ;; Sort paths for safe removal (deepest and highest index first)
+        removal-ordered-paths (sort compare-paths from-paths)
+        _ (log/debug "Removal order:" (vec removal-ordered-paths))
+        
+        ;; Remove all items (deepest/highest first to avoid index shifting)
+        after-remove (reduce remove-at-path items removal-ordered-paths)
+        _ (log-chain-state "AFTER REMOVE" after-remove)
+        
+        ;; Find target location in updated chain
+        target-path (find-path-by-id after-remove target-id)
+        _ (log/debug "Target path after removal:" target-path)]
+    
+    (if target-path
+      ;; Insert at appropriate location
+      (let [insert-path (case drop-position
+                          :before target-path
+                          :after (if (= 1 (count target-path))
+                                   ;; Top-level item - insert after by incrementing index
+                                   [(inc (first target-path))]
+                                   ;; Nested item - insert after by incrementing last index
+                                   (update target-path (dec (count target-path)) inc))
+                          :into (let [target-item (get-item-at-path after-remove target-path)]
+                                  (if (group? target-item)
+                                    (conj target-path :items (count (:items target-item [])))
+                                    target-path))
+                          target-path)
+            _ (log/debug "Insert path:" insert-path)
+            
+            ;; Insert all items at destination (in document order)
+            result (reduce-kv
+                     (fn [chain idx item]
+                       (let [path-with-offset (if (= 1 (count insert-path))
+                                                [(+ (first insert-path) idx)]
+                                                ;; For nested paths, adjust the last index
+                                                (update insert-path (dec (count insert-path)) + idx))]
+                         (log/debug (str "  Inserting item " idx " at path: " path-with-offset))
+                         (insert-at-path chain path-with-offset item)))
+                     after-remove
+                     (vec items-to-move))]
+        (log-chain-state "AFTER INSERT (RESULT)" result)
+        (log/debug "==========================================\n")
+        result)
+      ;; Target not found - append to end
+      (do
+        (log/warn "Target not found, appending to end")
+        (let [result (into after-remove items-to-move)]
+          (log-chain-state "AFTER APPEND (RESULT)" result)
+          (log/debug "==========================================\n")
+          result)))))

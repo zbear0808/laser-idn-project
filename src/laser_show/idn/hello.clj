@@ -1,7 +1,8 @@
 (ns laser-show.idn.hello
   "IDN-Hello Protocol Implementation for Clojure
    Based on ILDA Digital Network Hello Protocol Specification (Draft 2022-03-27)"
-  (:require [clojure.string :as str])
+  (:require [clojure.string :as str]
+            [clojure.tools.logging :as log])
   (:import [java.net DatagramSocket DatagramPacket InetAddress]
            [java.nio ByteBuffer ByteOrder]))
 
@@ -94,7 +95,7 @@
         :address (.getAddress packet)
         :port (.getPort packet)}
        (catch java.net.SocketTimeoutException e
-         (println "Receive timeout")
+         (log/debug "Receive timeout")
          nil)))))
 
 
@@ -496,7 +497,7 @@
    (let [socket (create-udp-socket)
          start-time (System/nanoTime)]
      (try
-       (println (format "\n=== Pinging %s ===" host))
+       (log/info (format "Pinging %s..." host))
        (send-ping socket host 100 0 payload)
        
        (if-let [response (receive-packet socket 1024 5000)]
@@ -504,18 +505,18 @@
                header (parse-packet-header (:data response))]
            (if (= (:command header) CMD_PING_RESPONSE)
              (do
-               (println (format "Ping response received in %.2f ms" rtt-ms))
-               (println (format "Sequence: %d, Client group: %d"
-                              (:sequence header)
-                              (:client-group header)))
+               (log/info (format "Ping response received in %.2f ms" rtt-ms))
+               (log/debug (format "Sequence: %d, Client group: %d"
+                                 (:sequence header)
+                                 (:client-group header)))
                (when (:payload header)
-                 (println (format "Payload: %s" (bytes-to-hex (:payload header)))))
+                 (log/debug (format "Payload: %s" (bytes-to-hex (:payload header)))))
                {:success true :rtt-ms rtt-ms :response header})
              (do
-               (println "Unexpected response command:" (:command header))
+               (log/warn "Unexpected response command:" (:command header))
                {:success false})))
          (do
-           (println "No response received (timeout)")
+           (log/debug "No response received (timeout)")
            {:success false}))
        (finally
          (.close socket))))))
@@ -608,22 +609,22 @@
    (let [socket (create-udp-socket)]
      (.setBroadcast socket true)
      (try
-       (println "\n=== Scanning for IDN-Hello devices ===")
+       (log/info "Scanning for IDN-Hello devices...")
        (send-scan-request socket broadcast-address 1)
        
        (loop [devices []]
          (if-let [response (receive-packet socket 1024 1000)]
            (do
-             (println (format "\nReceived response from %s:%d"
-                            (.getHostAddress (:address response))
-                            (:port response)))
+             (log/debug (format "Received response from %s:%d"
+                               (.getHostAddress (:address response))
+                               (:port response)))
              (let [header (parse-packet-header (:data response))]
                (if (= (:command header) CMD_SCAN_RESPONSE)
                  (let [device-info (parse-scan-response (:data response))
                        full-info (assoc device-info
                                         :address (.getHostAddress (:address response))
                                         :port (:port response))]
-                   (println "Device info:" device-info)
+                   (log/debug "Device info:" device-info)
                    (recur (conj devices full-info)))
                  (recur devices))))
            devices))
@@ -656,7 +657,7 @@
      (doseq [device devices]
        (let [dac-id (id-fn device)]
          (register-dac! dac-id device)
-         (println (format "Registered DAC: %s -> %s" dac-id (:address device)))))
+         (log/info (format "Registered DAC: %s -> %s" dac-id (:address device)))))
      (vec (list-dacs)))))
 
 (defn get-available-dacs
@@ -697,36 +698,36 @@
   ([host timeout-ms]
    (let [socket (create-udp-socket)]
      (try
-       (println (format "[DEBUG] Sending Service Map Request to %s" host))
+       (log/debug (format "Sending Service Map Request to %s" host))
        (send-service-map-request socket host 1)
        (if-let [response (receive-packet socket 1024 timeout-ms)]
          (do
-           (println (format "[DEBUG] Received response from %s:%d, length=%d bytes"
-                           (.getHostAddress (:address response))
-                           (:port response)
-                           (:length response)))
-           (println (format "[DEBUG] Raw data: %s" (bytes-to-hex (:data response))))
+           (log/debug (format "Received response from %s:%d, length=%d bytes"
+                             (.getHostAddress (:address response))
+                             (:port response)
+                             (:length response)))
+           (log/debug (format "Raw data: %s" (bytes-to-hex (:data response))))
            (let [header (parse-packet-header (:data response))
                  cmd-byte (bit-and (:command header) 0xFF)]
-             (println (format "[DEBUG] Header: command=0x%02X, client-group=%d, sequence=%d"
-                             cmd-byte
-                             (:client-group header)
-                             (:sequence header)))
+             (log/debug (format "Header: command=0x%02X, client-group=%d, sequence=%d"
+                               cmd-byte
+                               (:client-group header)
+                               (:sequence header)))
              (if (= cmd-byte CMD_SERVICE_MAP_RESPONSE)
                (let [parsed (parse-service-map-response (:data response))]
-                 (println (format "[DEBUG] Parsed service map: struct-size=%d, entry-size=%d, relay-count=%d, service-count=%d"
-                                 (:struct-size parsed)
-                                 (:entry-size parsed)
-                                 (:relay-count parsed)
-                                 (:service-count parsed)))
-                 (println (format "[DEBUG] Services: %s" (pr-str (:services parsed))))
+                 (log/debug (format "Parsed service map: struct-size=%d, entry-size=%d, relay-count=%d, service-count=%d"
+                                   (:struct-size parsed)
+                                   (:entry-size parsed)
+                                   (:relay-count parsed)
+                                   (:service-count parsed)))
+                 (log/debug (format "Services: %s" (pr-str (:services parsed))))
                  parsed)
                (do
-                 (println (format "[DEBUG] Unexpected command: expected 0x%02X (SERVICE_MAP_RESPONSE), got 0x%02X"
-                                 CMD_SERVICE_MAP_RESPONSE cmd-byte))
+                 (log/warn (format "Unexpected command: expected 0x%02X (SERVICE_MAP_RESPONSE), got 0x%02X"
+                                  CMD_SERVICE_MAP_RESPONSE cmd-byte))
                  nil))))
          (do
-           (println "[DEBUG] No response received (timeout)")
+           (log/debug "No response received (timeout)")
            nil))
        (finally
          (.close socket))))))
@@ -809,13 +810,13 @@
                                      :service-name (:name service)
                                      :service-type (:service-type service)
                                      :display-name service-name))
-               (println (format "Registered: %s -> %s (service %d)"
-                               dac-id (:address device) (:service-id service)))))
+               (log/info (format "Registered: %s -> %s (service %d)"
+                                dac-id (:address device) (:service-id service)))))
            ;; No services found, register device as-is (service-id 0 = default)
            (let [dac-id (keyword (str/lower-case (str/replace host-name #"[\s\.]+" "-")))]
              (register-dac! dac-id (assoc device :service-id 0 :display-name host-name))
-             (println (format "Registered: %s -> %s (default service)"
-                             dac-id (:address device)))))))
+             (log/info (format "Registered: %s -> %s (default service)"
+                              dac-id (:address device)))))))
      (vec (list-dacs)))))
 
 
@@ -823,7 +824,8 @@
 
 
 (defn -main
-  "Example usage of the IDN-Hello protocol implementation"
+  "Example usage of the IDN-Hello protocol implementation.
+   Note: Uses println for user-facing output since this is a CLI tool."
   [& args]
   (println "IDN-Hello Protocol - Clojure Implementation")
   (println "===========================================\n")

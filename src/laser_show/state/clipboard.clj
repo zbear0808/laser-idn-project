@@ -6,6 +6,7 @@
    NOTE: Clipboard state is stored in state.core at [:ui :clipboard]
    to maintain a single source of truth for all application state."
   (:require [clojure.string :as str]
+            [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
             [laser-show.state.queries :as queries]
             [laser-show.state.serialization :as ser]
@@ -59,7 +60,7 @@
       (.setContent clipboard content)
       true)
     (catch Exception e
-      (println "Failed to copy to system clipboard:" (.getMessage e))
+      (log/warn "Failed to copy to system clipboard:" (.getMessage e))
       false)))
 
 (defn- read-from-system-clipboard

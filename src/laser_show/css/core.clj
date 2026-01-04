@@ -19,8 +19,8 @@
             [laser-show.css.dialogs :as dialogs]
             [laser-show.css.layout :as layout]
             [laser-show.css.title-bar :as title-bar]
-            [laser-show.css.effect-chain-sidebar :as effect-chain-sidebar]
-            [laser-show.css.cue-chain-editor :as cue-chain-editor]))
+            [laser-show.css.cue-chain-editor :as cue-chain-editor]
+            [laser-show.css.hierarchical-list :as hierarchical-list]))
 
 
 
@@ -40,13 +40,13 @@
    (::css/url dialogs/dialogs)
    (::css/url layout/layout)
    (::css/url title-bar/menu-theme)
-   (::css/url effect-chain-sidebar/effect-chain-sidebar)
-   (::css/url cue-chain-editor/cue-chain-editor)])
+   (::css/url cue-chain-editor/cue-chain-editor)
+   (::css/url hierarchical-list/hierarchical-list)])
 
 (defn dialog-stylesheet-urls
   "Returns stylesheet URLs appropriate for dialogs.
    Includes theme, buttons, forms, grid-cells, layout, dialogs, menus,
-   effect-chain-sidebar, and cue-chain-editor.
+   cue-chain-editor, and hierarchical-list.
    
    Example:
    {:fx/type :scene
@@ -60,8 +60,8 @@
    (::css/url layout/layout)
    (::css/url dialogs/dialogs)
    (::css/url title-bar/menu-theme)
-   (::css/url effect-chain-sidebar/effect-chain-sidebar)
-   (::css/url cue-chain-editor/cue-chain-editor)])
+   (::css/url cue-chain-editor/cue-chain-editor)
+   (::css/url hierarchical-list/hierarchical-list)])
 
 
 ;; Theme color access helpers

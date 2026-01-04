@@ -6,7 +6,8 @@
    Converts LaserFrame objects (with normalized point values) to binary IDN 
    packet format for transmission. Supports configurable bit depths for both
    color (8/16-bit) and position (8/16-bit)."
-  (:require [laser-show.animation.types :as t]
+  (:require [clojure.tools.logging :as log]
+            [laser-show.animation.types :as t]
             [laser-show.idn.output-config :as output-config])
   (:import [java.nio ByteBuffer ByteOrder]))
 
@@ -77,8 +78,8 @@
 ;; Per spec Section 2.2: Service ID 0x00 = connect to default service
 (def ^:const DEFAULT_SERVICE_ID 0)
 
-;; Maximum points per packet - conservative value to avoid UDP fragmentation
-(def ^:const MAX_POINTS_PER_PACKET 150)
+;; Maximum points per packet - approx limit of spec. 65 Kbytes packet size for 16 bit color/XY
+(def ^:const MAX_POINTS_PER_PACKET 9000)
 
 
 ;; Tag Configurations for Different Bit Depths
@@ -158,14 +159,12 @@
 ;; Packet Size Calculations
 
 
-(defn channel-message-header-size
+(def channel-message-header-size
   "Size of channel message header (without configuration)"
-  []
   8)
 
-(defn channel-config-header-size
+(def channel-config-header-size
   "Size of channel configuration header"
-  []
   4)
 
 (defn service-config-size
@@ -173,19 +172,18 @@
   [tags]
   (* 2 (count tags)))
 
-(defn frame-chunk-header-size
+(def frame-chunk-header-size
   "Size of frame samples data chunk header"
-  []
   4)
 
 (defn packet-size-with-config
   "Calculate total IDN message size with channel configuration"
   [point-count tags output-config]
   (let [bytes-per-pt (output-config/bytes-per-sample output-config)]
-    (+ (channel-message-header-size)
-       (channel-config-header-size)
+    (+ channel-message-header-size
+       channel-config-header-size
        (service-config-size tags)
-       (frame-chunk-header-size)
+       frame-chunk-header-size
        (* bytes-per-pt point-count))))
 
 (defn packet-size-without-config
@@ -330,7 +328,8 @@
         cfl-flags (bit-or CFL_ROUTING (if close? CFL_CLOSE 0))
         chunk-flags (if single-scan? 0x01 0x00)
         buf (ByteBuffer/allocate total-size)]
-
+    (when (> point-count MAX_POINTS_PER_PACKET)
+      (log/warn "Frame point count exceeds maximum per packet. Truncating from" point-count "to" MAX_POINTS_PER_PACKET "points."))
     (.order buf ByteOrder/BIG_ENDIAN)
 
     (write-channel-message-header! buf total-size channel-id
@@ -493,10 +492,3 @@
   "Calculate frame duration in microseconds for given FPS"
   [fps]
   (long (/ 1000000 fps)))
-
-
-;; Legacy compatibility - bytes-per-sample for default config
-(def bytes-per-sample
-  "Bytes per sample for default configuration (8-bit color, 16-bit XY): 
-   X(2) + Y(2) + R(1) + G(1) + B(1) = 7"
-  7)

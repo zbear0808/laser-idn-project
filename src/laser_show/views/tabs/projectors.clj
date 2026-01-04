@@ -8,10 +8,11 @@
    - Enable/disable individual projectors"
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
+            [laser-show.animation.chains :as chains]
+            [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.views.components.spatial-canvas :as spatial-canvas]
-            [laser-show.views.components.effect-chain-sidebar :as sidebar]
-            [laser-show.views.components.effect-chain-events :as chain-events]))
+            [laser-show.views.components.hierarchical-list :as hierarchical-list]))
 
 
 ;; Status Indicators
@@ -322,7 +323,17 @@
                                              (when service-name (str " - " service-name)))
                                    :style "-fx-text-fill: #4A6FA5; -fx-font-size: 11;"}]}])))}))
 
-;; Note: effect-item-row removed - now using shared sidebar/chain-list-sidebar component
+
+;; Calibration effect label map for hierarchical list
+
+
+(def ^:private calibration-effect-labels
+  "Map of calibration effect IDs to display labels."
+  {:corner-pin "Corner Pin"
+   :rgb-calibration "RGB Calibration"
+   :gamma-correction "Gamma Correction"
+   :axis-flip "Axis Flip"
+   :rotation-offset "Rotation Offset"})
 
 
 ;; Effect Parameter Editors
@@ -575,23 +586,30 @@
                    :style "-fx-text-fill: #808080; -fx-font-style: italic;"})]}))
 
 (defn- projector-effects-sidebar
-  "Effect chain sidebar using shared component with full multi-select support.
+  "Effect chain sidebar using hierarchical-list-editor with built-in keyboard handling.
    Props:
    - :projector - The projector config map
-   - :ui-state - UI state from subs/projector-effect-ui-state
-   - :can-paste? - Whether clipboard has pasteable effects"
-  [{:keys [projector ui-state can-paste?]}]
-  (let [{:keys [id effects]} projector
-        dispatcher (chain-events/create-projector-dispatcher id)]
-    {:fx/type sidebar/chain-list-sidebar
-     :event-dispatcher dispatcher
-     :effect-chain (or effects [])
-     :selected-paths (:selected-paths ui-state #{})
-     :dragging-paths (:dragging-paths ui-state)
-     :drop-target-path (:drop-target-path ui-state)
-     :drop-position (:drop-position ui-state)
-     :renaming-path (:renaming-path ui-state)
-     :can-paste? can-paste?}))
+   - :selected-ids - Set of selected item IDs
+   - :clipboard-items - Items available for pasting"
+  [{:keys [projector selected-ids clipboard-items]}]
+  (let [{:keys [id effects]} projector]
+    {:fx/type hierarchical-list/hierarchical-list-editor
+     :items (or effects [])
+     :component-id [:projector-effects id]
+     :item-id-key :effect-id
+     :label-map calibration-effect-labels
+     :fallback-label "Unknown Effect"
+     :on-change-event :projectors/set-effects
+     :on-change-params {:projector-id id}
+     :items-key :effects
+     :on-selection-event :projectors/update-effect-selection
+     :on-selection-params {:projector-id id}
+     :selection-key :selected-ids
+     :on-copy-fn (fn [items]
+                   (clipboard/copy-effect-chain! {:effects items}))
+     :clipboard-items clipboard-items
+     :header-label "EFFECTS"
+     :empty-text "No calibration effects\nAdd from menu above"}))
 
 (defn- projector-add-effect-menu
   "Menu button for adding calibration effects to a projector."
@@ -670,77 +688,71 @@
 
 (defn- projector-config-panel
   "Configuration panel for the selected projector.
-   Uses the shared effect chain sidebar with full multi-select, copy/paste,
-   grouping, and keyboard shortcut support."
+   Uses the self-contained effect chain sidebar with callbacks."
   [{:keys [fx/context]}]
   (let [projector (fx/sub-ctx context subs/active-projector)
         projector-id (:id projector)
-        ;; Get UI state for the effect chain (selection, drag state, etc.)
+        ;; Get UI state for the effect chain (selection)
         ui-state (when projector-id
                    (fx/sub-ctx context subs/projector-effect-ui-state projector-id))
-        selected-paths (:selected-paths ui-state #{})
+        selected-ids (:selected-ids ui-state #{})
+        effects (or (:effects projector) [])
         ;; Get selected effect for parameter editor (first selected if single select)
-        selected-effect-path (when (= 1 (count selected-paths))
-                               (first selected-paths))
+        first-selected-id (when (= 1 (count selected-ids))
+                            (first selected-ids))
+        selected-effect-path (when first-selected-id
+                               (chains/find-path-by-id effects first-selected-id))
         selected-effect-idx (when selected-effect-path
                               (first selected-effect-path))
-        selected-effect (when (and projector selected-effect-idx)
-                          (get-in projector [:effects selected-effect-idx]))
-        can-paste? (clipboard/can-paste-effects?)]
+        selected-effect (when selected-effect-path
+                          (chains/get-item-at-path effects selected-effect-path))
+        clipboard-items (clipboard/get-effects-to-paste)]
     (if projector
-      ;; Wrap in lifecycle to setup keyboard handlers
-      {:fx/type fx/ext-on-instance-lifecycle
-       :on-created (fn [node]
-                     (let [dispatcher (chain-events/create-projector-dispatcher projector-id)]
-                       ;; Setup keyboard handlers for Ctrl+C, Ctrl+V, Ctrl+A, Ctrl+G, Delete, etc.
-                       (chain-events/setup-keyboard-handlers! node dispatcher)
-                       ;; Make focusable to receive key events
-                       (.setFocusTraversable node true)))
-       :desc {:fx/type :v-box
-              :children [{:fx/type :scroll-pane
-                          :v-box/vgrow :always
-                          :fit-to-width true
-                          :fit-to-height true
-                          :style "-fx-background-color: #2D2D2D; -fx-background: #2D2D2D;"
-                          :content {:fx/type :h-box
-                                    :spacing 16
-                                    :padding 16
-                                    :style "-fx-background-color: #2D2D2D;"
-                                    :children [;; Left: Effect chain sidebar
-                                               {:fx/type :v-box
-                                                :spacing 8
-                                                :pref-width 250
-                                                :children [{:fx/type :label
-                                                            :text (str "CONFIGURE: " (:name projector))
-                                                            :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
-                                                           {:fx/type projector-basic-settings
-                                                            :projector projector}
-                                                           {:fx/type :separator}
-                                                           {:fx/type :h-box
-                                                            :alignment :center-left
-                                                            :children [{:fx/type :label
-                                                                        :text "CALIBRATION EFFECTS"
-                                                                        :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
-                                                                       {:fx/type :region :h-box/hgrow :always}
-                                                                       {:fx/type projector-add-effect-menu
-                                                                        :projector-id projector-id}]}
-                                                           {:fx/type projector-effects-sidebar
-                                                            :projector projector
-                                                            :ui-state ui-state
-                                                            :can-paste? can-paste?}]}
-                                               ;; Right: Parameter editor + test patterns
-                                               {:fx/type :v-box
-                                                :spacing 16
-                                                :h-box/hgrow :always
-                                                :children (vec
-                                                            (concat
-                                                              (when selected-effect
-                                                                [{:fx/type effect-parameter-editor
-                                                                  :projector-id projector-id
-                                                                  :effect-idx selected-effect-idx
-                                                                  :effect selected-effect}])
-                                                              [{:fx/type :region :v-box/vgrow :always}
-                                                               {:fx/type test-pattern-controls}]))}]}}]}}
+      {:fx/type :v-box
+       :children [{:fx/type :scroll-pane
+                   :v-box/vgrow :always
+                   :fit-to-width true
+                   :fit-to-height true
+                   :style "-fx-background-color: #2D2D2D; -fx-background: #2D2D2D;"
+                   :content {:fx/type :h-box
+                             :spacing 16
+                             :padding 16
+                             :style "-fx-background-color: #2D2D2D;"
+                             :children [;; Left: Effect chain sidebar
+                                        {:fx/type :v-box
+                                         :spacing 8
+                                         :pref-width 250
+                                         :children [{:fx/type :label
+                                                     :text (str "CONFIGURE: " (:name projector))
+                                                     :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
+                                                    {:fx/type projector-basic-settings
+                                                     :projector projector}
+                                                    {:fx/type :separator}
+                                                    {:fx/type :h-box
+                                                     :alignment :center-left
+                                                     :children [{:fx/type :label
+                                                                 :text "CALIBRATION EFFECTS"
+                                                                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                                                                {:fx/type :region :h-box/hgrow :always}
+                                                                {:fx/type projector-add-effect-menu
+                                                                 :projector-id projector-id}]}
+                                                    {:fx/type projector-effects-sidebar
+                                                     :projector projector
+                                                     :selected-ids selected-ids
+                                                     :clipboard-items clipboard-items}]}
+                                        ;; Right: Parameter editor + test patterns
+                                        {:fx/type :v-box
+                                         :spacing 16
+                                         :h-box/hgrow :always
+                                         :children (vec
+                                                     (concat
+                                                       (when selected-effect
+                                                         [{:fx/type effect-parameter-editor
+                                                           :projector-id projector-id
+                                                           :effect-idx selected-effect-idx
+                                                           :effect selected-effect}])
+                                                       [{:fx/type :region :v-box/vgrow :always}
+                                                        {:fx/type test-pattern-controls}]))}]}}]}
       ;; No projector selected
       {:fx/type :v-box
        :children [{:fx/type :scroll-pane

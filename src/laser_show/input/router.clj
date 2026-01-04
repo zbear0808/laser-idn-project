@@ -1,7 +1,8 @@
 (ns laser-show.input.router
   "Event router for dispatching input events to registered handlers.
    Supports pattern-based subscriptions and multiple handlers per event type."
-  (:require [laser-show.input.events :as events]))
+  (:require [clojure.tools.logging :as log]
+            [laser-show.input.events :as events]))
 
 
 ;; Router State
@@ -84,7 +85,7 @@
       (try
         (handler-fn event)
         (catch Exception e
-          (println "Error in global handler:" (.getMessage e)))))
+          (log/error "Error in global handler:" (.getMessage e)))))
     
     ;; Call pattern-matched handlers
     (doseq [[_id {:keys [pattern handler]}] (:handlers @!router-state)]
@@ -92,7 +93,7 @@
         (try
           (handler event)
           (catch Exception e
-            (println "Error in handler:" (.getMessage e)))))))
+            (log/error "Error in handler:" (.getMessage e)))))))
   event)
 
 (defn dispatch-many!

@@ -17,6 +17,7 @@
    (handle-event {:event/type :grid/trigger-cell :col 0 :row 0 :state current-state})
    => {:state new-state}"
   (:require
+   [clojure.tools.logging :as log]
    [laser-show.common.util :as u]
    [laser-show.animation.effects :as effects]
    [laser-show.animation.cue-chains :as cue-chains]
@@ -456,13 +457,13 @@
   "Copy selected effects to clipboard.
    Supports both path-based selection (for groups) and legacy index-based selection."
   [{:keys [col row state]}]
-  (println "[DEBUG] handle-effects-copy-selected called: col=" col "row=" row)
+  (log/debug "handle-effects-copy-selected called: col=" col "row=" row)
   (let [selected-paths (get-in state [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
         selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
         effects-vec (get-in state [:effects :cells [col row] :effects] [])
-        _ (println "[DEBUG]   selected-paths=" selected-paths)
-        _ (println "[DEBUG]   selected-indices=" selected-indices)
-        _ (println "[DEBUG]   effects-vec count=" (count effects-vec))
+        _ (log/debug "  selected-paths=" selected-paths)
+        _ (log/debug "  selected-indices=" selected-indices)
+        _ (log/debug "  effects-vec count=" (count effects-vec))
         ;; Path-based selection takes precedence
         valid-effects (cond
                         ;; Path-based selection - get items at each path
@@ -477,11 +478,11 @@
                           effects-vec)
                         
                         :else [])
-        _ (println "[DEBUG]   valid-effects count=" (count valid-effects))
+        _ (log/debug "  valid-effects count=" (count valid-effects))
         result (cond-> {:state state}
                  (seq valid-effects)
                  (assoc :clipboard/copy-effects valid-effects))
-        _ (println "[DEBUG]   returning clipboard/copy-effects?" (contains? result :clipboard/copy-effects))]
+        _ (log/debug "  returning clipboard/copy-effects?" (contains? result :clipboard/copy-effects))]
     result))
 
 (defn- handle-effects-paste-into-chain
@@ -857,10 +858,10 @@
    - :shift? - If true, range select based on visual order (anchor stays fixed)
    - :ctrl? - If true, toggle selection"
   [{:keys [path col row shift? ctrl? state]}]
-  (println "[DEBUG] handle-effects-select-item-at-path called:"
-           "path=" path "col=" col "row=" row "ctrl?=" ctrl? "shift?=" shift?)
+  (log/debug "handle-effects-select-item-at-path called:"
+             "path=" path "col=" col "row=" row "ctrl?=" ctrl? "shift?=" shift?)
   (let [current-paths (get-in state [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
-        _ (println "[DEBUG]   current-paths=" current-paths)
+        _ (log/debug "  current-paths=" current-paths)
         last-selected (get-in state [:ui :dialogs :effect-chain-editor :data :last-selected-path])
         new-paths (cond
                     ctrl?
@@ -889,7 +890,7 @@
         ;; Only update anchor on regular click or ctrl+click, NOT on shift+click
         ;; This allows consecutive shift+clicks to extend from the original anchor
         update-anchor? (not shift?)
-        _ (println "[DEBUG]   new-paths=" new-paths)]
+        _ (log/debug "  new-paths=" new-paths)]
     {:state (-> state
                 (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] new-paths)
                 (cond-> update-anchor?
@@ -911,6 +912,149 @@
                     (assoc-in [:effects :cells [col row] :effects] new-effects)
                     (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
                     mark-dirty)})
+      {:state state})))
+
+
+;; ID-Based Selection and Manipulation Events
+;; These handlers resolve stable item IDs to ephemeral paths at handling time,
+;; fixing the stale closure problem where drag-and-drop handlers captured
+;; outdated paths from node creation time.
+
+
+(defn- handle-effects-select-item-by-id
+  "Select an item by its ID (ID-based selection for stable references).
+   Stores selected IDs in UI state for stable selection across reorders.
+   Event keys:
+   - :item-id - UUID of the item to select
+   - :col, :row - Grid cell coordinates
+   - :ctrl? - Toggle selection
+   - :shift? - Range select"
+  [{:keys [item-id col row ctrl? shift? state]}]
+  (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
+        current-ids (get-in state [:ui :dialogs :effect-chain-editor :data :selected-ids] #{})
+        last-selected-id (get-in state [:ui :dialogs :effect-chain-editor :data :last-selected-id])
+        new-ids (cond
+                  ctrl?
+                  ;; Toggle selection
+                  (if (contains? current-ids item-id)
+                    (disj current-ids item-id)
+                    (conj current-ids item-id))
+                  
+                  shift?
+                  ;; Range select - need to find items between last-selected and clicked
+                  (if last-selected-id
+                    (let [all-ids (chains/collect-all-ids effects-vec)
+                          anchor-idx (.indexOf all-ids last-selected-id)
+                          target-idx (.indexOf all-ids item-id)]
+                      (if (and (>= anchor-idx 0) (>= target-idx 0))
+                        (let [start-idx (min anchor-idx target-idx)
+                              end-idx (max anchor-idx target-idx)]
+                          (into #{} (subvec all-ids start-idx (inc end-idx))))
+                        ;; Fallback if IDs not found
+                        #{item-id}))
+                    #{item-id})
+                  
+                  :else
+                  ;; Simple selection - replace
+                  #{item-id})
+        ;; Update anchor only on regular click or ctrl+click, NOT on shift+click
+        update-anchor? (not shift?)]
+    {:state (-> state
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-ids] new-ids)
+                (cond-> update-anchor?
+                  (assoc-in [:ui :dialogs :effect-chain-editor :data :last-selected-id] item-id)))}))
+
+(defn- handle-effects-start-drag-by-id
+  "Start a drag operation by item ID.
+   Resolves to selected IDs for multi-drag.
+   Event keys:
+   - :initiating-id - UUID of the item being dragged
+   - :col, :row - Grid cell coordinates"
+  [{:keys [initiating-id col row state]}]
+  (let [selected-ids (get-in state [:ui :dialogs :effect-chain-editor :data :selected-ids] #{})
+        ;; If dragging a selected item, drag all selected items
+        ;; Otherwise, select just this item and drag it
+        dragging-ids (if (contains? selected-ids initiating-id)
+                       selected-ids
+                       #{initiating-id})
+        ;; If dragging unselected item, update selection to just that item
+        new-selected-ids (if (contains? selected-ids initiating-id)
+                           selected-ids
+                           #{initiating-id})]
+    {:state (-> state
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-ids] dragging-ids)
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-ids] new-selected-ids))}))
+
+(defn- handle-effects-update-drag-ui-state
+  "Update drag/drop UI state (for visual feedback).
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :updates - Map of state updates (e.g., {:drop-target-id uuid, :drop-position :before})"
+  [{:keys [col row updates state]}]
+  {:state (update-in state [:ui :dialogs :effect-chain-editor :data] merge updates)})
+
+(defn- handle-effects-toggle-collapse-by-id
+  "Toggle a group's collapsed state by ID.
+   Event keys:
+   - :item-id - UUID of the group
+   - :col, :row - Grid cell coordinates"
+  [{:keys [item-id col row state]}]
+  (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
+        path (chains/find-path-by-id effects-vec item-id)]
+    (if path
+      (handle-effects-toggle-group-collapse {:col col :row row :path path :state state})
+      {:state state})))
+
+(defn- handle-effects-ungroup-by-id
+  "Ungroup a group by ID.
+   Event keys:
+   - :item-id - UUID of the group
+   - :col, :row - Grid cell coordinates"
+  [{:keys [item-id col row state]}]
+  (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
+        path (chains/find-path-by-id effects-vec item-id)]
+    (if path
+      (handle-effects-ungroup {:col col :row row :path path :state state})
+      {:state state})))
+
+(defn- handle-effects-start-rename-by-id
+  "Start renaming an item by ID.
+   Event keys:
+   - :item-id - UUID of the item
+   - :col, :row - Grid cell coordinates"
+  [{:keys [item-id col row state]}]
+  {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :renaming-id] item-id)})
+
+(defn- handle-effects-rename-item-by-id
+  "Rename an item by ID.
+   Event keys:
+   - :item-id - UUID of the item
+   - :col, :row - Grid cell coordinates
+   - :new-name - New name for the item"
+  [{:keys [item-id col row new-name state]}]
+  (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
+        path (chains/find-path-by-id effects-vec item-id)
+        item (when path (get-in effects-vec path))]
+    (if (and path (effects/group? item))
+      {:state (-> state
+                  (assoc-in (into [:effects :cells [col row] :effects] (conj path :name)) new-name)
+                  (assoc-in [:ui :dialogs :effect-chain-editor :data :renaming-id] nil)
+                  mark-dirty)}
+      {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :renaming-id] nil)})))
+
+(defn- handle-effects-set-enabled-by-id
+  "Set enabled state of an item by ID.
+   Event keys:
+   - :item-id - UUID of the item
+   - :col, :row - Grid cell coordinates
+   - :enabled? - New enabled state"
+  [{:keys [item-id col row enabled? state]}]
+  (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
+        path (chains/find-path-by-id effects-vec item-id)]
+    (if path
+      {:state (-> state
+                  (assoc-in (into [:effects :cells [col row] :effects] (conj path :enabled?)) enabled?)
+                  mark-dirty)}
       {:state state})))
 
 
@@ -989,8 +1133,9 @@
                 (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] new-selected))}))
 
 (defn- handle-effects-move-items
-  "Move multiple items to a new position.
+  "Move multiple items to a new position using ID-based approach.
    Items are moved in their visual order to maintain relative ordering.
+   Uses the centralized chains/move-items-to-target for correct ordering.
    
    Event keys:
    - :col, :row - Grid cell coordinates
@@ -998,49 +1143,39 @@
    - :drop-position - :before | :into (only :into for groups)"
   [{:keys [col row target-id drop-position state]}]
   (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
-        dragging-paths (get-in state [:ui :dialogs :effect-chain-editor :data :dragging-paths] #{})
+        ;; Support both ID-based and legacy path-based dragging
+        dragging-ids (get-in state [:ui :dialogs :effect-chain-editor :data :dragging-ids] #{})
+        dragging-paths-legacy (get-in state [:ui :dialogs :effect-chain-editor :data :dragging-paths] #{})
         
-        ;; 1. Filter to root-level paths only (groups include their children)
+        ;; Convert IDs to paths if using ID-based approach
+        ;; find-paths-by-ids returns a map of {id -> path}, so extract just the values (paths)
+        dragging-paths (if (seq dragging-ids)
+                         (set (vals (chains/find-paths-by-ids effects-vec dragging-ids)))
+                         dragging-paths-legacy)
+        
+        ;; Filter to root-level paths only (groups include their children)
         root-paths (filter-to-root-paths dragging-paths)
         
-        ;; 2. Sort by visual order to maintain relative ordering
-        all-paths (vec (effects/paths-in-chain effects-vec))
-        sorted-paths (sort-by #(.indexOf all-paths %) root-paths)
-        
-        ;; 3. Check if target is in dragging paths or descendant (prevent self-drop)
-        target-path (effects/find-path-by-id effects-vec target-id)
+        ;; Check if target is in dragging paths or descendant (prevent self-drop)
+        target-path (chains/find-path-by-id effects-vec target-id)
         target-in-drag? (or (contains? root-paths target-path)
-                           (some #(path-is-ancestor? % target-path) root-paths))
-        
-        ;; 4. Extract items in order
-        items-to-move (mapv #(get-in effects-vec %) sorted-paths)]
+                           (some #(path-is-ancestor? % target-path) root-paths))]
     
-    (if (or (empty? items-to-move) target-in-drag?)
+    (if (or (empty? root-paths) target-in-drag?)
       ;; Invalid move - clear dragging state and return
-      {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :dragging-paths] nil)}
+      {:state (-> state
+                  (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-ids] nil)
+                  (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-paths] nil))}
       
-      (let [;; 5. Remove from deepest first to avoid index shifting
-            after-remove (reduce remove-at-path effects-vec
-                                 (sort-by (comp - count) sorted-paths))
-            
-            ;; 6. Find target in modified chain and insert
-            new-target-path (effects/find-path-by-id after-remove target-id)
-            
-            ;; Only use into-group? if target was actually found
-            ;; If target wasn't found, we append to end and DON'T try to insert into a non-existent group
-            target-found? (some? new-target-path)
-            final-to-path (or new-target-path [(count after-remove)])
-            final-into-group? (and target-found? (= drop-position :into))
-            
-            ;; 7. Insert items at target
-            after-insert (insert-items-at after-remove final-to-path items-to-move final-into-group?)]
-        
+      ;; Use centralized move-items-to-target for correct ordering
+      (let [new-effects (chains/move-items-to-target effects-vec root-paths target-id drop-position)]
         {:state (-> state
-                    (assoc-in [:effects :cells [col row] :effects] after-insert)
+                    (assoc-in [:effects :cells [col row] :effects] new-effects)
                     ;; Clear dragging state
+                    (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-ids] nil)
                     (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-paths] nil)
-                    ;; Update selection to new paths (items moved together stay selected)
-                    ;; For now, clear selection - could compute new paths if needed
+                    ;; Clear selection - could compute new paths if needed
+                    (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-ids] #{})
                     (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
                     mark-dirty)}))))
 
@@ -1240,7 +1375,7 @@
 (defn- handle-projectors-scan-failed
   "Handle scan failure."
   [{:keys [error state]}]
-  (println "Network scan failed:" error)
+  (log/warn "Network scan failed:" error)
   {:state (assoc-in state [:projectors :scanning?] false)})
 
 (defn- handle-projectors-add-device
@@ -1643,29 +1778,22 @@
                 (assoc-in (conj ui-path :selected-paths) new-selected))}))
 
 (defn- handle-projectors-move-effects
-  "Move multiple effects to a new position in projector chain."
+  "Move multiple effects to a new position in projector chain.
+   Uses the centralized chains/move-items-to-target for correct ordering."
   [{:keys [projector-id target-id drop-position state]}]
   (let [ui-path (projector-ui-state-path projector-id)
         effects-vec (get-in state (projector-effects-path projector-id) [])
         dragging-paths (get-in state (conj ui-path :dragging-paths) #{})
         root-paths (filter-to-root-paths dragging-paths)
-        all-paths (vec (effects/paths-in-chain effects-vec))
-        sorted-paths (sort-by #(.indexOf all-paths %) root-paths)
-        target-path (effects/find-path-by-id effects-vec target-id)
+        target-path (chains/find-path-by-id effects-vec target-id)
         target-in-drag? (or (contains? root-paths target-path)
-                           (some #(path-is-ancestor? % target-path) root-paths))
-        items-to-move (mapv #(get-in effects-vec %) sorted-paths)]
-    (if (or (empty? items-to-move) target-in-drag?)
+                           (some #(path-is-ancestor? % target-path) root-paths))]
+    (if (or (empty? root-paths) target-in-drag?)
       {:state (assoc-in state (conj ui-path :dragging-paths) nil)}
-      (let [after-remove (reduce remove-at-path effects-vec
-                                 (sort-by (comp - count) sorted-paths))
-            new-target-path (effects/find-path-by-id after-remove target-id)
-            target-found? (some? new-target-path)
-            final-to-path (or new-target-path [(count after-remove)])
-            final-into-group? (and target-found? (= drop-position :into))
-            after-insert (insert-items-at after-remove final-to-path items-to-move final-into-group?)]
+      ;; Use centralized move-items-to-target for correct ordering
+      (let [new-effects (chains/move-items-to-target effects-vec root-paths target-id drop-position)]
         {:state (-> state
-                    (assoc-in (projector-effects-path projector-id) after-insert)
+                    (assoc-in (projector-effects-path projector-id) new-effects)
                     (assoc-in (conj ui-path :dragging-paths) nil)
                     (assoc-in (conj ui-path :selected-paths) #{})
                     mark-dirty)}))))
@@ -1908,6 +2036,7 @@
 
 (defn- handle-cue-chain-move-items
   "Move items to a new position via drag-and-drop.
+   Uses the centralized chains/move-items-to-target for correct ordering.
    Event keys:
    - :col, :row - Grid cell coordinates
    - :target-id - ID of the target item
@@ -1916,23 +2045,15 @@
   (let [items-vec (get-in state (cue-chain-path col row) [])
         dragging-paths (get-in state [:cue-chain-editor :dragging-paths] #{})
         root-paths (filter-to-root-paths dragging-paths)
-        all-paths (vec (chains/paths-in-chain items-vec))
-        sorted-paths (sort-by #(.indexOf all-paths %) root-paths)
         target-path (chains/find-path-by-id items-vec target-id)
         target-in-drag? (or (contains? root-paths target-path)
-                           (some #(path-is-ancestor? % target-path) root-paths))
-        items-to-move (mapv #(get-in items-vec %) sorted-paths)]
-    (if (or (empty? items-to-move) target-in-drag?)
+                           (some #(path-is-ancestor? % target-path) root-paths))]
+    (if (or (empty? root-paths) target-in-drag?)
       {:state (assoc-in state [:cue-chain-editor :dragging-paths] nil)}
-      (let [after-remove (reduce remove-at-path items-vec
-                                 (sort-by (comp - count) sorted-paths))
-            new-target-path (chains/find-path-by-id after-remove target-id)
-            target-found? (some? new-target-path)
-            final-to-path (or new-target-path [(count after-remove)])
-            final-into-group? (and target-found? (= drop-position :into))
-            after-insert (insert-items-at after-remove final-to-path items-to-move final-into-group?)]
+      ;; Use centralized move-items-to-target for correct ordering
+      (let [new-items (chains/move-items-to-target items-vec root-paths target-id drop-position)]
         {:state (-> state
-                    (assoc-in (cue-chain-path col row) after-insert)
+                    (assoc-in (cue-chain-path col row) new-items)
                     (assoc-in [:cue-chain-editor :dragging-paths] nil)
                     (assoc-in [:cue-chain-editor :selected-paths] #{})
                     mark-dirty)}))))
@@ -2260,6 +2381,125 @@
   [{:keys [state]}]
   {:state (assoc-in state [:cue-chain-editor :renaming-path] nil)})
 
+
+;; Cue Chain ID-Based Selection and Manipulation Events
+;; These handlers resolve stable item IDs to ephemeral paths at handling time,
+;; fixing the stale closure problem where drag-and-drop handlers captured
+;; outdated paths from node creation time.
+
+
+(defn- handle-cue-chain-select-item-by-id
+  "Select an item by its ID (ID-based selection for stable references).
+   Resolves the ID to a path at handling time.
+   Event keys:
+   - :item-id - UUID of the item to select
+   - :col, :row - Grid cell coordinates
+   - :ctrl? - Toggle selection
+   - :shift? - Range select"
+  [{:keys [item-id col row ctrl? shift? state]}]
+  (let [items-vec (get-in state (cue-chain-path col row) [])
+        ;; Resolve ID to path at handling time (fresh lookup)
+        path (chains/find-path-by-id items-vec item-id)]
+    (if path
+      ;; Delegate to existing path-based handler
+      (handle-cue-chain-select-item {:path path :col col :row row :ctrl? ctrl? :shift? shift? :state state})
+      ;; Item not found - no-op
+      {:state state})))
+
+(defn- handle-cue-chain-start-drag-by-id
+  "Start a drag operation by item ID.
+   Resolves to selected IDs for multi-drag.
+   Event keys:
+   - :initiating-id - UUID of the item being dragged
+   - :col, :row - Grid cell coordinates"
+  [{:keys [initiating-id col row state]}]
+  (let [selected-ids (get-in state [:cue-chain-editor :selected-ids] #{})
+        ;; If dragging a selected item, drag all selected items
+        ;; Otherwise, select just this item and drag it
+        dragging-ids (if (contains? selected-ids initiating-id)
+                       selected-ids
+                       #{initiating-id})
+        ;; If dragging unselected item, update selection to just that item
+        new-selected-ids (if (contains? selected-ids initiating-id)
+                           selected-ids
+                           #{initiating-id})]
+    {:state (-> state
+                (assoc-in [:cue-chain-editor :dragging-ids] dragging-ids)
+                (assoc-in [:cue-chain-editor :selected-ids] new-selected-ids))}))
+
+(defn- handle-cue-chain-update-drag-ui-state
+  "Update drag/drop UI state (for visual feedback).
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :updates - Map of state updates (e.g., {:drop-target-id uuid, :drop-position :before})"
+  [{:keys [col row updates state]}]
+  {:state (update-in state [:cue-chain-editor] merge updates)})
+
+(defn- handle-cue-chain-toggle-collapse-by-id
+  "Toggle a group's collapsed state by ID.
+   Event keys:
+   - :item-id - UUID of the group
+   - :col, :row - Grid cell coordinates"
+  [{:keys [item-id col row state]}]
+  (let [items-vec (get-in state (cue-chain-path col row) [])
+        path (chains/find-path-by-id items-vec item-id)]
+    (if path
+      (handle-cue-chain-toggle-collapse {:col col :row row :path path :state state})
+      {:state state})))
+
+(defn- handle-cue-chain-ungroup-by-id
+  "Ungroup a group by ID.
+   Event keys:
+   - :item-id - UUID of the group
+   - :col, :row - Grid cell coordinates"
+  [{:keys [item-id col row state]}]
+  (let [items-vec (get-in state (cue-chain-path col row) [])
+        path (chains/find-path-by-id items-vec item-id)]
+    (if path
+      (handle-cue-chain-ungroup {:col col :row row :path path :state state})
+      {:state state})))
+
+(defn- handle-cue-chain-start-rename-by-id
+  "Start renaming an item by ID.
+   Event keys:
+   - :item-id - UUID of the item
+   - :col, :row - Grid cell coordinates"
+  [{:keys [item-id col row state]}]
+  {:state (assoc-in state [:cue-chain-editor :renaming-id] item-id)})
+
+(defn- handle-cue-chain-rename-item-by-id
+  "Rename an item by ID.
+   Event keys:
+   - :item-id - UUID of the item
+   - :col, :row - Grid cell coordinates
+   - :new-name - New name for the item"
+  [{:keys [item-id col row new-name state]}]
+  (let [items-vec (get-in state (cue-chain-path col row) [])
+        path (chains/find-path-by-id items-vec item-id)
+        item (when path (get-in items-vec path))]
+    (if (and path (chains/group? item))
+      {:state (-> state
+                  (assoc-in (into (cue-chain-path col row) (conj path :name)) new-name)
+                  (assoc-in [:cue-chain-editor :renaming-id] nil)
+                  mark-dirty)}
+      {:state (assoc-in state [:cue-chain-editor :renaming-id] nil)})))
+
+(defn- handle-cue-chain-set-enabled-by-id
+  "Set enabled state of an item by ID.
+   Event keys:
+   - :item-id - UUID of the item
+   - :col, :row - Grid cell coordinates
+   - :enabled? - New enabled state"
+  [{:keys [item-id col row enabled? state]}]
+  (let [items-vec (get-in state (cue-chain-path col row) [])
+        path (chains/find-path-by-id items-vec item-id)]
+    (if path
+      {:state (-> state
+                  (assoc-in (into (cue-chain-path col row) (conj path :enabled?)) enabled?)
+                  mark-dirty)}
+      {:state state})))
+
+
 (defn- handle-cue-chain-create-group
   "Create a new empty group.
    Event keys:
@@ -2278,13 +2518,98 @@
                 mark-dirty)}))
 
 
+;; NEW Simplified Handlers for Hierarchical List Refactor
+;; These handlers support the callback-based hierarchical-list component
+;; which manages its own internal state and just calls these to persist changes.
+
+
+(defn- handle-effects-set-chain
+  "Set the entire effect chain for a cell (simple persistence callback).
+   Called by hierarchical-list component's :on-items-changed callback.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :items - New items vector"
+  [{:keys [col row items state]}]
+  (let [ensure-cell (fn [s]
+                      (if (get-in s [:effects :cells [col row]])
+                        s
+                        (assoc-in s [:effects :cells [col row]] {:effects [] :active true})))]
+    {:state (-> state
+                ensure-cell
+                (assoc-in [:effects :cells [col row] :effects] items)
+                mark-dirty)}))
+
+(defn- handle-effects-update-selection
+  "Update the selection state for the effect chain editor.
+   Called by hierarchical-list component's :on-selection-changed callback.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :selected-ids - Set of selected item IDs"
+  [{:keys [col row selected-ids state]}]
+  {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :selected-ids] selected-ids)})
+
+(defn- handle-cue-chain-set-items
+  "Set the entire cue chain items for a cell (simple persistence callback).
+   Called by hierarchical-list component's :on-items-changed callback.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :items - New items vector"
+  [{:keys [col row items state]}]
+  (let [ensure-cell (fn [s]
+                      (if (get-in s [:grid :cells [col row] :cue-chain])
+                        s
+                        (assoc-in s [:grid :cells [col row]] {:cue-chain {:items []}})))]
+    {:state (-> state
+                ensure-cell
+                (assoc-in (cue-chain-path col row) items)
+                mark-dirty)}))
+
+(defn- handle-cue-chain-set-clipboard
+  "Set the cue chain clipboard.
+   Called by hierarchical-list component's :on-copy callback.
+   Event keys:
+   - :items - Items to copy to clipboard"
+  [{:keys [items state]}]
+  {:state (assoc-in state [:cue-chain-editor :clipboard] items)})
+
+(defn- handle-cue-chain-update-selection
+  "Update the selection state for the cue chain editor.
+   Called by hierarchical-list component's :on-selection-changed callback.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :selected-ids - Set of selected item IDs"
+  [{:keys [col row selected-ids state]}]
+  {:state (assoc-in state [:cue-chain-editor :selected-ids] selected-ids)})
+
+(defn- handle-projectors-set-effects
+  "Set the entire effects chain for a projector (simple persistence callback).
+   Called by hierarchical-list component's :on-items-changed callback.
+   Event keys:
+   - :projector-id - ID of the projector
+   - :effects - New effects vector"
+  [{:keys [projector-id effects state]}]
+  {:state (-> state
+              (assoc-in (projector-effects-path projector-id) effects)
+              mark-dirty)})
+
+(defn- handle-projectors-update-effect-selection
+  "Update the selection state for projector effects.
+   Called by hierarchical-list component's :on-selection-changed callback.
+   Event keys:
+   - :projector-id - ID of the projector
+   - :selected-ids - Set of selected item IDs"
+  [{:keys [projector-id selected-ids state]}]
+  (let [ui-path (projector-ui-state-path projector-id)]
+    {:state (assoc-in state (conj ui-path :selected-ids) selected-ids)}))
+
+
 ;; File Menu Events
 
 
 (defn- handle-file-new-project
   "Create a new project (TODO: Implement confirmation dialog if dirty)."
   [{:keys [state]}]
-  (println "File > New Project")
+  (log/debug "File > New Project")
   ;; TODO: Show confirmation dialog if project is dirty
   ;; For now, just log
   {:state state})
@@ -2292,7 +2617,7 @@
 (defn- handle-file-open
   "Open a project from disk (TODO: Implement file dialog)."
   [{:keys [state]}]
-  (println "File > Open")
+  (log/debug "File > Open")
   ;; TODO: Show file chooser dialog
   ;; :file/open-dialog effect to be implemented
   {:state state})
@@ -2300,7 +2625,7 @@
 (defn- handle-file-save
   "Save the current project (TODO: Implement save logic)."
   [{:keys [state]}]
-  (println "File > Save")
+  (log/debug "File > Save")
   ;; TODO: Implement actual save to disk
   ;; For now, just mark as clean
   {:state (-> state
@@ -2310,21 +2635,21 @@
 (defn- handle-file-save-as
   "Save the project to a new location (TODO: Implement file dialog)."
   [{:keys [state]}]
-  (println "File > Save As")
+  (log/debug "File > Save As")
   ;; TODO: Show file chooser dialog and save
   {:state state})
 
 (defn- handle-file-export
   "Export project data (TODO: Implement export dialog)."
   [{:keys [state]}]
-  (println "File > Export")
+  (log/debug "File > Export")
   ;; TODO: Show export options dialog
   {:state state})
 
 (defn- handle-file-exit
   "Exit the application."
   [{:keys [state]}]
-  (println "File > Exit")
+  (log/debug "File > Exit")
   ;; TODO: Show confirmation dialog if project is dirty
   ;; For now, just exit
   {:system/exit true})
@@ -2336,14 +2661,14 @@
 (defn- handle-edit-undo
   "Undo the last action (TODO: Implement undo stack)."
   [{:keys [state]}]
-  (println "Edit > Undo")
+  (log/debug "Edit > Undo")
   ;; TODO: Implement undo/redo system
   {:state state})
 
 (defn- handle-edit-redo
   "Redo the last undone action (TODO: Implement redo stack)."
   [{:keys [state]}]
-  (println "Edit > Redo")
+  (log/debug "Edit > Redo")
   ;; TODO: Implement undo/redo system
   {:state state})
 
@@ -2362,7 +2687,7 @@
           :effects (handle-effects-copy-cell {:col col :row row :state state})
           {:state state}))
       (do
-        (println "Edit > Copy: No cell selected")
+        (log/debug "Edit > Copy: No cell selected")
         {:state state}))))
 
 (defn- handle-edit-paste
@@ -2380,7 +2705,7 @@
           :effects (handle-effects-paste-cell {:col col :row row :state state})
           {:state state}))
       (do
-        (println "Edit > Paste: No cell selected")
+        (log/debug "Edit > Paste: No cell selected")
         {:state state}))))
 
 (defn- handle-edit-clear-cell
@@ -2398,7 +2723,7 @@
           :effects (handle-effects-clear-cell {:col col :row row :state state})
           {:state state}))
       (do
-        (println "Edit > Clear Cell: No cell selected")
+        (log/debug "Edit > Clear Cell: No cell selected")
         {:state state}))))
 
 
@@ -2408,14 +2733,14 @@
 (defn- handle-view-toggle-preview
   "Toggle preview panel visibility (TODO: Implement preview toggle)."
   [{:keys [state]}]
-  (println "View > Toggle Preview")
+  (log/debug "View > Toggle Preview")
   ;; TODO: Implement preview panel show/hide
   {:state (update-in state [:ui :preview-visible?] not)})
 
 (defn- handle-view-fullscreen
   "Toggle fullscreen mode (TODO: Implement fullscreen)."
   [{:keys [state]}]
-  (println "View > Fullscreen")
+  (log/debug "View > Fullscreen")
   ;; TODO: Implement fullscreen toggle via JavaFX stage
   {:state (update-in state [:ui :fullscreen?] not)})
 
@@ -2426,7 +2751,7 @@
 (defn- handle-help-documentation
   "Open documentation in browser."
   [{:keys [state]}]
-  (println "Help > Documentation")
+  (log/debug "Help > Documentation")
   ;; TODO: Open URL in system browser
   {:state state
    :system/open-url "https://github.com/your-repo/docs"})
@@ -2434,13 +2759,13 @@
 (defn- handle-help-about
   "Show About dialog."
   [{:keys [state]}]
-  (println "Help > About")
+  (log/debug "Help > About")
   {:state (assoc-in state [:ui :dialogs :about :open?] true)})
 
 (defn- handle-help-check-updates
   "Check for application updates."
   [{:keys [state]}]
-  (println "Help > Check for Updates")
+  (log/debug "Help > Check for Updates")
   ;; TODO: Implement update check
   {:state state})
 
@@ -2509,11 +2834,23 @@
     :effects/set-item-enabled-at-path (handle-effects-set-item-enabled-at-path event)
     :effects/move-item (handle-effects-move-item event)
     :effects/select-item-at-path (handle-effects-select-item-at-path event)
+    :effects/select-item-by-id (handle-effects-select-item-by-id event)
+    :effects/start-drag-by-id (handle-effects-start-drag-by-id event)
+    :effects/update-drag-ui-state (handle-effects-update-drag-ui-state event)
+    :effects/toggle-collapse-by-id (handle-effects-toggle-collapse-by-id event)
+    :effects/ungroup-by-id (handle-effects-ungroup-by-id event)
+    :effects/start-rename-by-id (handle-effects-start-rename-by-id event)
+    :effects/rename-item-by-id (handle-effects-rename-item-by-id event)
+    :effects/set-enabled-by-id (handle-effects-set-enabled-by-id event)
     :effects/delete-at-paths (handle-effects-delete-at-paths event)
     
     ;; Multi-select drag-and-drop events
     :effects/start-multi-drag (handle-effects-start-multi-drag event)
     :effects/move-items (handle-effects-move-items event)
+    
+    ;; NEW: Simplified effect chain handlers (hierarchical-list refactor)
+    :effects/set-chain (handle-effects-set-chain event)
+    :effects/update-selection (handle-effects-update-selection event)
     
     ;; Timing events
     :timing/set-bpm (handle-timing-set-bpm event)
@@ -2592,6 +2929,10 @@
     :projectors/set-effect-enabled (handle-projectors-set-effect-enabled-at-path event)
     :projectors/add-calibration-effect (handle-projectors-add-calibration-effect event)
     
+    ;; NEW: Simplified projector handlers (hierarchical-list refactor)
+    :projectors/set-effects (handle-projectors-set-effects event)
+    :projectors/update-effect-selection (handle-projectors-update-effect-selection event)
+    
     ;; Cue chain events
     :cue-chain/open-editor (handle-cue-chain-open-editor event)
     :cue-chain/close-editor (handle-cue-chain-close-editor event)
@@ -2600,6 +2941,14 @@
     :cue-chain/move-items (handle-cue-chain-move-items event)
     :cue-chain/select-item (handle-cue-chain-select-item event)
     :cue-chain/select-item-at-path (handle-cue-chain-select-item event)
+    :cue-chain/select-item-by-id (handle-cue-chain-select-item-by-id event)
+    :cue-chain/start-drag-by-id (handle-cue-chain-start-drag-by-id event)
+    :cue-chain/update-drag-ui-state (handle-cue-chain-update-drag-ui-state event)
+    :cue-chain/toggle-collapse-by-id (handle-cue-chain-toggle-collapse-by-id event)
+    :cue-chain/ungroup-by-id (handle-cue-chain-ungroup-by-id event)
+    :cue-chain/start-rename-by-id (handle-cue-chain-start-rename-by-id event)
+    :cue-chain/rename-item-by-id (handle-cue-chain-rename-item-by-id event)
+    :cue-chain/set-enabled-by-id (handle-cue-chain-set-enabled-by-id event)
     :cue-chain/select-all (handle-cue-chain-select-all event)
     :cue-chain/clear-selection (handle-cue-chain-clear-selection event)
     :cue-chain/start-drag (handle-cue-chain-start-drag event)
@@ -2635,6 +2984,11 @@
     :cue-chain/update-preset-color (handle-cue-chain-update-preset-color event)
     :cue-chain/update-preset-param-from-text (handle-cue-chain-update-preset-param event)
     
+    ;; NEW: Simplified cue chain handlers (hierarchical-list refactor)
+    :cue-chain/set-items (handle-cue-chain-set-items event)
+    :cue-chain/set-clipboard (handle-cue-chain-set-clipboard event)
+    :cue-chain/update-selection (handle-cue-chain-update-selection event)
+    
     ;; File menu events
     :file/new-project (handle-file-new-project event)
     :file/open (handle-file-open event)
@@ -2661,6 +3015,6 @@
     
     ;; Unknown event
     (do
-      (println "=== UNKNOWN EVENT TYPE ===" type)
-      (println "  Full event:" (dissoc event :state))  ;; Don't print full state
+      (log/warn "Unknown event type:" type)
+      (log/debug "  Full event:" (dissoc event :state))
       {})))

@@ -5,7 +5,8 @@
    in a rolling window of the last 1000 frames. Provides statistics like
    average, min, max, and p95 timings.
    
-   Overhead is negligible so profiler can be always-on.")
+   Overhead is negligible so profiler can be always-on."
+  (:require [clojure.tools.logging :as log]))
 
 (defonce ^:private !samples
   (atom []))
@@ -189,7 +190,10 @@
 (defn print-stats
   "Print formatted statistics to stdout.
    Parameters:
-   - recent-n: (optional) If provided, also prints stats for N recent samples"
+   - recent-n: (optional) If provided, also prints stats for N recent samples
+   
+   Note: This function intentionally uses println for user-facing output,
+   not logging, as it's meant to be called from REPL for diagnostics."
   ([]
    (if-let [stats (get-stats)]
      (println (format-stats stats))

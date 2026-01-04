@@ -17,10 +17,9 @@
             [laser-show.animation.chains :as chains]
             [laser-show.events.core :as events]
             [laser-show.css.core :as css]
-            [laser-show.views.components.cue-chain-sidebar :as sidebar]
+            [laser-show.views.components.hierarchical-list :as hierarchical-list]
             [laser-show.views.components.preset-bank :as preset-bank]
             [laser-show.views.components.preset-param-editor :as param-editor]
-            [laser-show.views.components.effect-chain-sidebar :as effect-sidebar]
             [laser-show.views.components.tabs :as tabs])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
@@ -162,70 +161,6 @@
                      :selected-effect-path selected-effect-path})])}))
 
 
-;; Keyboard Handler Setup
-
-
-(defn- setup-keyboard-handler!
-  "Setup keyboard handler on root node for shortcuts.
-   
-   - Ctrl+C: Copy selected items
-   - Ctrl+V: Paste items
-   - Ctrl+A: Select all items
-   - Ctrl+G: Group selected items
-   - Delete/Backspace: Delete selected items
-   - Escape: Clear selection"
-  [^javafx.scene.Node node col row]
-  (.addEventFilter
-    node
-    KeyEvent/KEY_PRESSED
-    (reify javafx.event.EventHandler
-      (handle [_ event]
-        (let [code (.getCode event)
-              ctrl? (.isControlDown event)]
-          (cond
-            ;; Ctrl+C - Copy
-            (and ctrl? (= code KeyCode/C))
-            (do (events/dispatch! {:event/type :cue-chain/copy-selected
-                                   :col col :row row})
-                (.consume event))
-            
-            ;; Ctrl+V - Paste
-            (and ctrl? (= code KeyCode/V))
-            (do (events/dispatch! {:event/type :cue-chain/paste-items
-                                   :col col :row row})
-                (.consume event)))))))
-  
-  (.setOnKeyPressed
-    node
-    (reify javafx.event.EventHandler
-      (handle [_ event]
-        (let [code (.getCode event)
-              ctrl? (.isControlDown event)]
-          (cond
-            ;; Ctrl+A - Select all
-            (and ctrl? (= code KeyCode/A))
-            (do (events/dispatch! {:event/type :cue-chain/select-all
-                                   :col col :row row})
-                (.consume event))
-            
-            ;; Ctrl+G - Group selected
-            (and ctrl? (= code KeyCode/G))
-            (do (events/dispatch! {:event/type :cue-chain/group-selected
-                                   :col col :row row})
-                (.consume event))
-            
-            ;; Delete or Backspace - Delete selected
-            (or (= code KeyCode/DELETE) (= code KeyCode/BACK_SPACE))
-            (do (events/dispatch! {:event/type :cue-chain/delete-selected
-                                   :col col :row row})
-                (.consume event))
-            
-            ;; Escape - Clear selection
-            (= code KeyCode/ESCAPE)
-            (do (events/dispatch! {:event/type :cue-chain/clear-selection})
-                (.consume event))))))))
-
-
 ;; Main Dialog Content
 
 
@@ -234,8 +169,8 @@
   [{:keys [fx/context]}]
   (let [;; Get cue-chain-editor state
         editor-state (fx/sub-val context :cue-chain-editor)
-        {:keys [cell selected-paths last-selected-path active-preset-tab
-                selected-effect-path]} editor-state
+        {:keys [cell selected-ids last-selected-id active-preset-tab
+                selected-effect-path clipboard]} editor-state
         [col row] cell
         
         ;; Get grid cell data
@@ -243,44 +178,47 @@
         cell-data (get-in grid-state [:cells [col row]])
         cue-chain (or (:cue-chain cell-data) {:items []})
         
-        ;; Selection state
-        selected-paths-set (or selected-paths #{})
-        
-        ;; For parameter editor - need single selection
-        first-selected-path (when (= 1 (count selected-paths-set))
-                              (first selected-paths-set))
+        ;; For parameter editor - resolve first selected ID to path
+        first-selected-id (when (= 1 (count selected-ids))
+                            (first selected-ids))
+        first-selected-path (when first-selected-id
+                              (chains/find-path-by-id (:items cue-chain) first-selected-id))
         
         ;; Clipboard check
-        clipboard (:clipboard editor-state)
-        can-paste? (boolean (seq (:items clipboard)))]
-    {:fx/type fx/ext-on-instance-lifecycle
-     :on-created (fn [node]
-                   (setup-keyboard-handler! node col row)
-                   (.setFocusTraversable node true)
-                   (.requestFocus node))
-     :desc {:fx/type :v-box
-            :spacing 0
-            :style "-fx-background-color: #2D2D2D;"
-            :pref-width 700
-            :pref-height 600
-            :children [;; Main content area
-                       {:fx/type :h-box
-                        :spacing 0
-                        :v-box/vgrow :always
-                        :children [;; Left sidebar - cue chain list (wrapped in v-box for width control)
-                                   {:fx/type :v-box
-                                    :pref-width 260
-                                    :max-width 260
-                                    :children [{:fx/type sidebar/cue-chain-sidebar
-                                                :v-box/vgrow :always
-                                                :col col :row row
-                                                :cue-chain cue-chain
-                                                :selected-paths selected-paths-set
-                                                :dragging-paths nil  ;; TODO: Add drag state
-                                                :drop-target-path nil
-                                                :drop-position nil
-                                                :renaming-path nil
-                                                :can-paste? can-paste?}]}
+        clipboard-items (:items clipboard)]
+   {:fx/type :v-box
+    :spacing 0
+    :style "-fx-background-color: #2D2D2D;"
+    :pref-width 700
+    :pref-height 600
+    :children [;; Main content area
+              {:fx/type :h-box
+               :spacing 0
+               :v-box/vgrow :always
+               :children [;; Left sidebar - cue chain list (wrapped in v-box for width control)
+                          ;; Using hierarchical-list-editor with built-in keyboard handling
+                          {:fx/type :v-box
+                           :pref-width 260
+                           :max-width 260
+                           :children [{:fx/type hierarchical-list/hierarchical-list-editor
+                                       :v-box/vgrow :always
+                                       :items (:items cue-chain)
+                                       :component-id [:cue-chain col row]
+                                       :item-id-key :preset-id
+                                       :item-registry-fn presets/get-preset
+                                       :item-name-key :name
+                                       :fallback-label "Unknown Preset"
+                                       :on-change-event :cue-chain/set-items
+                                       :on-change-params {:col col :row row}
+                                       :on-selection-event :cue-chain/update-selection
+                                       :on-selection-params {:col col :row row}
+                                       :selection-key :selected-ids
+                                       :on-copy-fn (fn [items]
+                                                     (events/dispatch! {:event/type :cue-chain/set-clipboard
+                                                                        :items items}))
+                                       :clipboard-items clipboard-items
+                                       :header-label "CUE CHAIN"
+                                       :empty-text "No presets\nAdd from bank →"}]}
                                    
                                    ;; Right section (wrapped in v-box for h-box/hgrow)
                                    {:fx/type :v-box
@@ -291,19 +229,19 @@
                                                 :active-preset-tab active-preset-tab
                                                 :selected-preset-path first-selected-path
                                                 :cue-chain cue-chain
-                                                :selected-effect-path selected-effect-path}]}]}
-                       
-                       ;; Footer with close button
-                       {:fx/type :h-box
-                        :alignment :center-right
-                        :spacing 8
-                        :padding 12
-                        :style "-fx-background-color: #252525;"
-                        :children [{:fx/type :button
-                                    :text "Close"
-                                    :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-padding: 6 20;"
-                                    :on-action {:event/type :ui/close-dialog
-                                                :dialog-id :cue-chain-editor}}]}]}}))
+                                            :selected-effect-path selected-effect-path}]}]}
+               
+               ;; Footer with close button
+               {:fx/type :h-box
+                :alignment :center-right
+                :spacing 8
+                :padding 12
+                :style "-fx-background-color: #252525;"
+                :children [{:fx/type :button
+                            :text "Close"
+                            :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-padding: 6 20;"
+                            :on-action {:event/type :ui/close-dialog
+                                        :dialog-id :cue-chain-editor}}]}]}))
 
 
 ;; Scene-level Event Filter

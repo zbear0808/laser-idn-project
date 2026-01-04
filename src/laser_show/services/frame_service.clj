@@ -11,7 +11,8 @@
    - Cue chains are sequential lists of presets
    - Each preset can have its own parameters and effect chain
    - Presets render one after another in time"
-  (:require [laser-show.state.core :as state]
+  (:require [clojure.tools.logging :as log]
+            [laser-show.state.core :as state]
             [laser-show.animation.presets :as presets]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
@@ -88,6 +89,15 @@
           {:effects active-effects})))))
 
 ;; Cue Chain Rendering
+;;
+;; Cue chains render ALL enabled presets simultaneously, not sequentially.
+;; This is achieved by:
+;; 1. Rendering each preset to get its point sequence
+;; 2. Concatenating all point sequences with blanking points between them
+;; 3. The galvo will draw all shapes rapidly, creating persistence of vision
+;;
+;; For IDN output, the combined points are sent as a single frame.
+;; For preview, we display all shapes at once.
 
 (defn- flatten-enabled-presets
   "Flatten a cue chain to a list of enabled preset instances.
@@ -107,26 +117,6 @@
     []
     items))
 
-(defn- calculate-active-preset
-  "Calculate which preset should be active based on elapsed time.
-   Uses equal time division: each preset gets (total-time / preset-count) ms.
-   
-   Returns {:preset preset-instance :preset-elapsed ms-within-preset} or nil."
-  [presets elapsed-ms]
-  (when (seq presets)
-    (let [preset-count (count presets)
-          ;; Default duration: 2 beats per preset at 120 BPM = 1000ms
-          ;; TODO: Add configurable duration per preset
-          preset-duration-ms 1000
-          total-duration (* preset-count preset-duration-ms)
-          ;; Loop through presets
-          loop-elapsed (mod elapsed-ms total-duration)
-          preset-idx (int (/ loop-elapsed preset-duration-ms))
-          preset-elapsed (mod loop-elapsed preset-duration-ms)]
-      {:preset (nth presets preset-idx)
-       :preset-elapsed preset-elapsed
-       :preset-index preset-idx})))
-
 (defn- render-preset-instance
   "Render a single preset instance with its parameters.
    Creates an animation from the preset-id and applies preset-specific params."
@@ -145,21 +135,74 @@
       (try
         (effects/apply-effect-chain frame {:effects preset-effects} elapsed-ms bpm trigger-time)
         (catch Exception e
-          (println "[ERROR apply-preset-effects] Effect chain failed:" (.getMessage e))
+          (log/error "apply-preset-effects: Effect chain failed:" (.getMessage e))
           frame))
       frame)))
 
+(defn- create-blanking-jump
+  "Create blanking points to safely jump from one position to another.
+   Returns a vector of blanking points that:
+   1. Turn off laser at current position (if provided)
+   2. Move to new position with laser off
+   
+   This prevents visible lines when galvos travel between shapes."
+  [from-point to-point]
+  (let [;; Create blanking point at destination
+        blank-at-dest (when to-point
+                        (t/->LaserPoint (:x to-point) (:y to-point) 0.0 0.0 0.0))]
+    (filterv some? [blank-at-dest])))
+
+(defn- render-all-presets-combined
+  "Render all enabled presets and combine into a single frame.
+   
+   Each preset is rendered and has its effects applied, then all point
+   sequences are concatenated with blanking points between them.
+   
+   This allows all shapes to appear simultaneously via persistence of vision
+   when the galvo rapidly draws all points in sequence."
+  [presets elapsed-ms bpm trigger-time]
+  (when (seq presets)
+    (let [;; Render each preset and apply its effects
+          rendered-frames (for [preset presets
+                               :let [frame (render-preset-instance preset elapsed-ms)]
+                               :when frame
+                               :let [with-effects (apply-preset-effects frame preset elapsed-ms bpm trigger-time)]
+                               :when with-effects]
+                           with-effects)
+          
+          ;; Combine all points with blanking jumps between sequences
+          combined-points (reduce
+                            (fn [acc frame]
+                              (let [points (:points frame)]
+                                (if (empty? points)
+                                  acc
+                                  (if (empty? acc)
+                                    ;; First frame - just add points
+                                    (vec points)
+                                    ;; Subsequent frames - add blanking jump then points
+                                    (let [last-point (peek acc)
+                                          first-new-point (first points)
+                                          blanking (create-blanking-jump last-point first-new-point)]
+                                      (-> acc
+                                          (into blanking)
+                                          (into points)))))))
+                            []
+                            rendered-frames)]
+      ;; Return combined frame
+      (when (seq combined-points)
+        (t/->LaserFrame combined-points elapsed-ms {:preset-count (count presets)})))))
+
 (defn- generate-frame-from-cue-chain
   "Generate a frame from a cue chain.
-   Handles sequential preset rendering with per-preset effects."
+   
+   Renders ALL enabled presets simultaneously by combining their point
+   sequences with blanking points between them. This creates the effect
+   of all shapes being displayed at once via persistence of vision."
   [cue-chain elapsed-ms bpm trigger-time]
   (let [items (:items cue-chain [])
         enabled-presets (flatten-enabled-presets items)]
     (when (seq enabled-presets)
-      (when-let [{:keys [preset preset-elapsed]} (calculate-active-preset enabled-presets elapsed-ms)]
-        (when-let [base-frame (render-preset-instance preset preset-elapsed)]
-          ;; Apply per-preset effects
-          (apply-preset-effects base-frame preset elapsed-ms bpm trigger-time))))))
+      (render-all-presets-combined enabled-presets elapsed-ms bpm trigger-time))))
 
 (defn generate-current-frame
   "Generate the current animation frame based on state.
@@ -197,8 +240,8 @@
                               (try
                                 (effects/apply-effect-chain base-frame effect-chain elapsed bpm trigger-time)
                                 (catch Exception e
-                                  (println "[ERROR generate-current-frame] Effect chain failed:" (.getMessage e))
-                                  (println "  effect-chain:" effect-chain)
+                                  (log/error "generate-current-frame: Effect chain failed:" (.getMessage e))
+                                  (log/debug "  effect-chain:" effect-chain)
                                   base-frame))
                               base-frame)
                 effects-end (timing/nanotime)]
@@ -290,7 +333,7 @@
   (when-let [timer @preview-timer]
     (.cancel timer)
     (reset! preview-timer nil)
-    (println "Preview updates stopped")))
+    (log/info "Preview updates stopped")))
 
 (defn start-preview-updates!
   "Start periodic preview frame updates.
@@ -307,9 +350,8 @@
                                (try
                                  (update-preview-frame!)
                                  (catch Exception e
-                                   (println "Preview update error:" (.getMessage e))))))
+                                   (log/error "Preview update error:" (.getMessage e))))))
                            0
                            interval-ms)
      (reset! preview-timer timer)
-     (println "Preview updates started at" fps "FPS"))))
-
+     (log/info "Preview updates started at" fps "FPS"))))

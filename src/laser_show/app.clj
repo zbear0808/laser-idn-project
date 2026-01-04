@@ -12,6 +12,7 @@
    (-main)   - Main entry point"
   (:require [cljfx.api :as fx]
             [cljfx.css :as css]
+            [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.events.core :as events]
@@ -46,7 +47,7 @@
    when a var watch detects a change, updating state triggers a re-render."
   []
   (state/assoc-in-state! [:styles :menu-theme] (::css/url menus/menu-theme))
-  (println "✨ CSS styles initialized"))
+  (log/debug "CSS styles initialized"))
 
 
 ;; Application Lifecycle
@@ -58,7 +59,7 @@
    Initializes state, creates renderer, and mounts the UI.
    Returns the app instance."
   []
-  (println "Starting Laser Show application...")
+  (log/info "Starting Laser Show application...")
   
   (let [initial-state (domains/build-initial-state)]
     (state/init-state! initial-state))
@@ -71,7 +72,7 @@
     (reset! *renderer renderer)
     (fx/mount-renderer (state/get-context-atom) renderer))
   
-  (println "Laser Show application started.")
+  (log/info "Laser Show application started.")
   @*renderer)
 
 
@@ -84,10 +85,8 @@
    
    Starts the GUI application."
   [& _args]
-  (println "╔══════════════════════════════════════╗")
-  (println "║       Laser Show Application         ║")
-  (println "╚══════════════════════════════════════╝")
+  (log/info "╔══════════════════════════════════════╗")
+  (log/info "║       Laser Show Application         ║")
+  (log/info "╚══════════════════════════════════════╝")
 
   (start!))
-
-

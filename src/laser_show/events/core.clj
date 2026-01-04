@@ -20,6 +20,7 @@
    - State updates preserve cljfx context memoization"
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
+            [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.events.handlers :as handlers]
@@ -86,7 +87,7 @@
   [{:keys [host port]} dispatch]
   (future
     (try
-      (println (format "Starting IDN streaming to %s:%d..." host (or port 7255)))
+      (log/info (format "Starting IDN streaming to %s:%d..." host (or port 7255)))
       
       ;; Create frame provider - this returns the same frames as preview
       (let [frame-provider (frame-service/create-frame-provider)
@@ -99,26 +100,26 @@
         ;; Start the engine
         (streaming-engine/start! engine)
         
-        (println "IDN streaming started successfully")
+        (log/info "IDN streaming started successfully")
         (dispatch {:event/type :idn/connected 
                    :engine engine
                    :target host}))
       (catch Exception e
-        (println "IDN streaming failed:" (.getMessage e))
+        (log/error "IDN streaming failed:" (.getMessage e))
         (dispatch {:event/type :idn/connection-failed
                    :error (.getMessage e)})))))
 
 (defn- effect-idn-stop-streaming
   "Effect that stops IDN streaming gracefully."
   [_ _dispatch]
-  (println "Stopping IDN streaming...")
+  (log/info "Stopping IDN streaming...")
   (when-let [engine (get-in (state/get-state) [:backend :idn :streaming-engine])]
     (when (and engine (not= engine :placeholder-engine))
       (try
         (streaming-engine/stop! engine)
-        (println "IDN streaming stopped")
+        (log/info "IDN streaming stopped")
         (catch Exception e
-          (println "Error stopping IDN streaming:" (.getMessage e)))))))
+          (log/error "Error stopping IDN streaming:" (.getMessage e)))))))
 
 (defn- effect-save-project
   "Effect that saves the project to disk."
@@ -129,7 +130,7 @@
       ;; Save logic here
       (dispatch {:event/type :project/mark-clean})
       (catch Exception e
-        (println "Failed to save project:" (.getMessage e))))))
+        (log/error "Failed to save project:" (.getMessage e))))))
 
 (defn- effect-load-project
   "Effect that loads a project from disk."
@@ -140,7 +141,7 @@
       ;; Load logic here
       (dispatch {:event/type :project/set-folder :folder folder})
       (catch Exception e
-        (println "Failed to load project:" (.getMessage e))))))
+        (log/error "Failed to load project:" (.getMessage e))))))
 
 ;; Clipboard Effects (for effect chain editor)
 
@@ -171,7 +172,7 @@
   [{:keys [broadcast-address]} dispatch]
   (future
     (try
-      (println (format "Scanning network for IDN devices (broadcast: %s)..." broadcast-address))
+      (log/info (format "Scanning network for IDN devices (broadcast: %s)..." broadcast-address))
       ;; Use service-aware discovery to enumerate outputs per device
       (let [discovered (idn-hello/discover-devices-with-services broadcast-address 3000 1000)
             ;; Transform discovered devices to the format expected by UI
@@ -189,16 +190,16 @@
                              :services (vec (:services device))
                              :relays (vec (:relays device))})
                           discovered)]
-        (println (format "Found %d IDN device(s)" (count devices)))
+        (log/info (format "Found %d IDN device(s)" (count devices)))
         (doseq [device devices]
-          (println (format "  Device %s: %d service(s)"
-                          (:address device)
-                          (count (:services device)))))
+          (log/debug (format "  Device %s: %d service(s)"
+                            (:address device)
+                            (count (:services device)))))
         (dispatch {:event/type :projectors/scan-complete
                    :devices devices}))
       (catch Exception e
-        (println "Network scan failed:" (.getMessage e))
-        (.printStackTrace e)
+        (log/error "Network scan failed:" (.getMessage e))
+        (log/debug e "Network scan stack trace")
         (dispatch {:event/type :projectors/scan-failed
                    :error (.getMessage e)})))))
 
@@ -282,4 +283,3 @@
       (dispatch! event-to-dispatch))
     
     effects))
-

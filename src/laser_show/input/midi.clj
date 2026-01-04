@@ -1,7 +1,8 @@
 (ns laser-show.input.midi
   "MIDI input handler using overtone/midi-clj.
    Converts MIDI messages to standardized input events."
-  (:require [overtone.midi :as m]
+  (:require [clojure.tools.logging :as log]
+            [overtone.midi :as m]
             [laser-show.input.events :as events]
             [laser-show.input.router :as router]))
 
@@ -27,7 +28,7 @@
   (try
     (m/midi-sources)
     (catch Exception e
-      (println "Error listing MIDI devices:" (.getMessage e))
+      (log/error "Error listing MIDI devices:" (.getMessage e))
       [])))
 
 (defn list-device-names
@@ -116,13 +117,13 @@
                  (-> state
                      (assoc-in [:devices (:name device)] receiver)
                      (assoc-in [:handlers (:name device)] handler))))
-        (println "Connected to MIDI device:" (:name device))
+        (log/info "Connected to MIDI device:" (:name device))
         device)
       (do
-        (println "MIDI device not found:" device-name)
+        (log/warn "MIDI device not found:" device-name)
         nil))
     (catch Exception e
-      (println "Error connecting to MIDI device:" (.getMessage e))
+      (log/error "Error connecting to MIDI device:" (.getMessage e))
       nil)))
 
 (defn disconnect-device!
@@ -136,7 +137,7 @@
              (-> state
                  (update :devices dissoc device-name)
                  (update :handlers dissoc device-name))))
-    (println "Disconnected from MIDI device:" device-name)))
+    (log/info "Disconnected from MIDI device:" device-name)))
 
 (defn disconnect-all!
   "Disconnects from all MIDI devices."
@@ -227,10 +228,10 @@
   []
   (if-let [devices (seq (list-devices))]
     (do
-      (println "Found MIDI devices:" (map :name devices))
+      (log/info "Found MIDI devices:" (map :name devices))
       (connect-device! (:name (first devices))))
     (do
-      (println "No MIDI input devices found")
+      (log/info "No MIDI input devices found")
       nil)))
 
 

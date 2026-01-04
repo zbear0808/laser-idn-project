@@ -27,7 +27,8 @@
     :idx int (point index)
     :count int (total points)
     :raw map (original LaserPoint for pass-through)}"
-  (:require [laser-show.animation.time :as time]
+  (:require [clojure.tools.logging :as log]
+            [laser-show.animation.time :as time]
             [laser-show.animation.modulation :as mod]
             [laser-show.animation.types :as t]
             [laser-show.animation.chains :as chains]
@@ -271,8 +272,8 @@
           (try
             (xf-fn time-ms bpm merged-params frame-ctx)
             (catch Exception e
-              (println "[ERROR make-effect-transducer]" effect-id "failed:" (.getMessage e))
-              (println "  params:" merged-params)
+              (log/error "make-effect-transducer:" effect-id "failed:" (.getMessage e))
+              (log/debug "  params:" merged-params)
               ;; Return identity transducer on error
               (map identity))))))))
 

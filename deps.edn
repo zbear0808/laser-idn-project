@@ -16,7 +16,10 @@
         overtone/osc-clj {:mvn/version "0.9.0"}
         
         ;; Required for cljfx contexts (memoized subscriptions)
-        org.clojure/core.cache {:mvn/version "1.1.234"}}
+        org.clojure/core.cache {:mvn/version "1.1.234"}
+        
+        org.clojure/tools.logging {:mvn/version "1.3.0"}
+        org.slf4j/slf4j-simple {:mvn/version "2.0.17"}}
  
  :aliases
  {:laser-show
@@ -31,17 +34,19 @@
   :repl
   {:jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"
-              "--enable-native-access=ALL-UNNAMED"]
+              "--enable-native-access=ALL-UNNAMED"
+              "-Dorg.slf4j.simpleLogger.defaultLogLevel=debug"]
    :extra-deps {nrepl/nrepl {:mvn/version "1.3.1"}
                 cider/cider-nrepl {:mvn/version "0.57.0"}}
-   :main-opts ["-m" "nrepl.cmdline" 
+   :main-opts ["-m" "nrepl.cmdline"
                "--middleware" "[cider.nrepl/cider-middleware]"]}
   
   :dev
   {:extra-paths ["dev"]
    :jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"
-              "--enable-native-access=ALL-UNNAMED"]
+              "--enable-native-access=ALL-UNNAMED"
+              "-Dorg.slf4j.simpleLogger.defaultLogLevel=debug"]
    :extra-deps {nrepl/nrepl {:mvn/version "1.3.1"}
                 cider/cider-nrepl {:mvn/version "0.57.0"}
                 org.clojure/tools.namespace {:mvn/version "1.5.0"}
