@@ -233,60 +233,84 @@
    - :effect-def - Effect definition with :ui-hints
    - :current-params - Current parameter values
    - :ui-mode - Current UI mode (:visual or :numeric)
-   - :params-map - Parameter specifications map"
-  [{:keys [col row effect-idx effect-path effect-def current-params ui-mode params-map]}]
+   - :params-map - Parameter specifications map
+   - :dialog-data - Dialog state data (for curve editor channel tab tracking)"
+  [{:keys [col row effect-idx effect-path effect-def current-params ui-mode params-map dialog-data]}]
   (let [ui-hints (:ui-hints effect-def)
+        renderer-type (:renderer ui-hints)
         actual-mode (or ui-mode (:default-mode ui-hints :visual))]
-    {:fx/type :v-box
-     :spacing 8
-     :children [;; Mode toggle buttons
-                {:fx/type :h-box
-                 :spacing 6
-                 :alignment :center-left
-                 :padding {:bottom 8}
-                 :children [{:fx/type :label
-                            :text "Edit Mode:"
-                            :style "-fx-text-fill: #808080; -fx-font-size: 10;"}
-                           {:fx/type :button
-                            :text "👁 Visual"
-                            :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
-                                       (if (= actual-mode :visual)
-                                         "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
-                                         "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
-                            :on-action {:event/type :effects/set-param-ui-mode
-                                       :effect-idx effect-idx
-                                       :effect-path effect-path
-                                       :mode :visual}}
-                           {:fx/type :button
-                            :text "🔢 Numeric"
-                            :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
-                                       (if (= actual-mode :numeric)
-                                         "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
-                                         "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
-                            :on-action {:event/type :effects/set-param-ui-mode
-                                       :effect-idx effect-idx
-                                       :effect-path effect-path
-                                       :mode :numeric}}]}
-                
-                ;; Render based on mode
-                (if (= actual-mode :visual)
-                  ;; Custom visual renderer
-                  (case (:renderer ui-hints)
-                    :spatial-2d {:fx/type custom-renderers/translate-visual-editor
-                                :col col :row row
-                                :effect-idx effect-idx
-                                :effect-path effect-path
-                                :current-params current-params
-                                :param-specs (:parameters effect-def)}
+    ;; RGB Curves is visual-only, no mode toggle
+    (if (= renderer-type :rgb-curves)
+      {:fx/type custom-renderers/rgb-curves-visual-editor
+       :col col :row row
+       :effect-path effect-path
+       :current-params current-params
+       :dialog-data dialog-data}
+      
+      ;; Other custom renderers have mode toggle
+      {:fx/type :v-box
+       :spacing 8
+       :children [;; Mode toggle buttons
+                  {:fx/type :h-box
+                   :spacing 6
+                   :alignment :center-left
+                   :padding {:bottom 8}
+                   :children [{:fx/type :label
+                              :text "Edit Mode:"
+                              :style "-fx-text-fill: #808080; -fx-font-size: 10;"}
+                             {:fx/type :button
+                              :text "👁 Visual"
+                              :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
+                                         (if (= actual-mode :visual)
+                                           "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
+                                           "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
+                              :on-action {:event/type :effects/set-param-ui-mode
+                                         :effect-idx effect-idx
+                                         :effect-path effect-path
+                                         :mode :visual}}
+                             {:fx/type :button
+                              :text "🔢 Numeric"
+                              :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
+                                         (if (= actual-mode :numeric)
+                                           "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
+                                           "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
+                              :on-action {:event/type :effects/set-param-ui-mode
+                                         :effect-idx effect-idx
+                                         :effect-path effect-path
+                                         :mode :numeric}}]}
+                  
+                  ;; Render based on mode
+                  (if (= actual-mode :visual)
+                    ;; Custom visual renderer
+                    (case renderer-type
+                      :spatial-2d {:fx/type custom-renderers/translate-visual-editor
+                                  :col col :row row
+                                  :effect-idx effect-idx
+                                  :effect-path effect-path
+                                  :current-params current-params
+                                  :param-specs (:parameters effect-def)}
+                      
+                      :corner-pin-2d {:fx/type custom-renderers/corner-pin-visual-editor
+                                     :col col :row row
+                                     :effect-idx effect-idx
+                                     :effect-path effect-path
+                                     :current-params current-params
+                                     :param-specs (:parameters effect-def)}
+                      
+                      ;; Fallback to standard params
+                      {:fx/type :v-box
+                       :spacing 6
+                       :children (vec
+                                  (for [[param-key param-spec] params-map]
+                                    {:fx/type param-control
+                                     :col col :row row
+                                     :effect-idx effect-idx
+                                     :effect-path effect-path
+                                     :param-key param-key
+                                     :param-spec param-spec
+                                     :current-value (get current-params param-key)}))})
                     
-                    :corner-pin-2d {:fx/type custom-renderers/corner-pin-visual-editor
-                                   :col col :row row
-                                   :effect-idx effect-idx
-                                   :effect-path effect-path
-                                   :current-params current-params
-                                   :param-specs (:parameters effect-def)}
-                    
-                    ;; Fallback to standard params
+                    ;; Numeric mode - standard sliders
                     {:fx/type :v-box
                      :spacing 6
                      :children (vec
@@ -297,20 +321,7 @@
                                    :effect-path effect-path
                                    :param-key param-key
                                    :param-spec param-spec
-                                   :current-value (get current-params param-key)}))})
-                  
-                  ;; Numeric mode - standard sliders
-                  {:fx/type :v-box
-                   :spacing 6
-                   :children (vec
-                              (for [[param-key param-spec] params-map]
-                                {:fx/type param-control
-                                 :col col :row row
-                                 :effect-idx effect-idx
-                                 :effect-path effect-path
-                                 :param-key param-key
-                                 :param-spec param-spec
-                                 :current-value (get current-params param-key)}))})]}))
+                                   :current-value (get current-params param-key)}))})]})))
 
 (defn- parameter-editor
   "Parameter editor for the selected effect.
@@ -354,7 +365,8 @@
                               :effect-def effect-def
                               :current-params current-params
                               :ui-mode ui-mode
-                              :params-map params-map}}
+                              :params-map params-map
+                              :dialog-data dialog-data}}
                     
                     ;; Standard parameters - use existing controls
                     {:fx/type :scroll-pane

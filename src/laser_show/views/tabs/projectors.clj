@@ -9,6 +9,7 @@
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.animation.chains :as chains]
+            [laser-show.animation.effects :as effects]
             [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.views.components.custom-param-renderers :as custom-renderers]
@@ -342,16 +343,20 @@
                                    :style "-fx-text-fill: #4A6FA5; -fx-font-size: 11;"}]}])))}))
 
 
-;; Calibration effect label map for hierarchical list
+;; Calibration effect helpers
 
 
-(def ^:private calibration-effect-labels
-  "Map of calibration effect IDs to display labels."
-  {:corner-pin "Corner Pin"
-   :rgb-calibration "RGB Calibration"
-   :gamma-correction "Gamma Correction"
-   :axis-flip "Axis Flip"
-   :rotation-offset "Rotation Offset"})
+(defn- get-calibration-effects
+  "Get all registered calibration effects from the effect registry."
+  []
+  (effects/list-effects-by-category :calibration))
+
+(defn- calibration-effect-labels
+  "Dynamically build map of calibration effect IDs to display labels."
+  []
+  (into {} (map (fn [effect]
+                  [(:id effect) (:name effect)])
+                (get-calibration-effects))))
 
 
 ;; Effect Parameter Editors
@@ -496,44 +501,69 @@
    :label "Angle (°)"})
 
 (defn- effect-parameter-editor
-  "Renders the appropriate editor for a selected effect."
+  "Renders the appropriate editor for a selected effect.
+   Checks for custom ui-hints renderer, falls back to built-in editors."
   [{:keys [projector-id effect-idx effect]}]
-  (let [{:keys [effect-id params]} effect]
+  (let [{:keys [effect-id params]} effect
+        effect-def (effects/get-effect effect-id)
+        effect-name (or (:name effect-def) (name effect-id))]
     {:fx/type :v-box
      :spacing 8
      :padding 8
      :style "-fx-background-color: #353535; -fx-background-radius: 4;"
      :children [{:fx/type :label
-                 :text (str "Edit: " (name effect-id))
+                 :text (str "Edit: " effect-name)
                  :style "-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 11;"}
-                (case effect-id
-                  :corner-pin {:fx/type custom-renderers/corner-pin-visual-editor
-                               :params params
-                               :event-template {:event/type :projectors/update-corner-pin
-                                                :projector-id projector-id
-                                                :effect-idx effect-idx}
-                               :reset-event {:event/type :projectors/reset-corner-pin
-                                             :projector-id projector-id
-                                             :effect-idx effect-idx}
-                               :fx-key [:projector projector-id effect-idx]
-                               :hint-text "Drag corners to adjust output geometry"}
-                  :rgb-calibration {:fx/type rgb-calibration-editor
+                (cond
+                  ;; Check for custom renderer in ui-hints
+                  (= :rgb-curves (get-in effect-def [:ui-hints :renderer]))
+                  {:fx/type custom-renderers/rgb-curves-visual-editor
+                   :col nil  ;; Not used for projector effects
+                   :row nil
+                   :effect-path [effect-idx]
+                   :current-params params
+                   :dialog-data {}  ;; Projector effects don't use dialog data
+                   :projector-id projector-id}
+                  
+                  ;; Built-in editors for specific effect types
+                  (= effect-id :corner-pin)
+                  {:fx/type custom-renderers/corner-pin-visual-editor
+                   :params params
+                   :event-template {:event/type :projectors/update-corner-pin
                                     :projector-id projector-id
-                                    :effect-idx effect-idx
-                                    :params params}
-                  :gamma-correction {:fx/type gamma-correction-editor
-                                     :projector-id projector-id
-                                     :effect-idx effect-idx
-                                     :params params}
-                  :axis-flip {:fx/type axis-flip-editor
-                              :projector-id projector-id
-                              :effect-idx effect-idx
-                              :params params}
-                  :rotation-offset {:fx/type rotation-offset-editor
-                                    :projector-id projector-id
-                                    :effect-idx effect-idx
-                                    :params params}
+                                    :effect-idx effect-idx}
+                   :reset-event {:event/type :projectors/reset-corner-pin
+                                 :projector-id projector-id
+                                 :effect-idx effect-idx}
+                   :fx-key [:projector projector-id effect-idx]
+                   :hint-text "Drag corners to adjust output geometry"}
+                  
+                  (= effect-id :rgb-calibration)
+                  {:fx/type rgb-calibration-editor
+                   :projector-id projector-id
+                   :effect-idx effect-idx
+                   :params params}
+                  
+                  (= effect-id :gamma-correction)
+                  {:fx/type gamma-correction-editor
+                   :projector-id projector-id
+                   :effect-idx effect-idx
+                   :params params}
+                  
+                  (= effect-id :axis-flip)
+                  {:fx/type axis-flip-editor
+                   :projector-id projector-id
+                   :effect-idx effect-idx
+                   :params params}
+                  
+                  (= effect-id :rotation-offset)
+                  {:fx/type rotation-offset-editor
+                   :projector-id projector-id
+                   :effect-idx effect-idx
+                   :params params}
+                  
                   ;; Default: show message for unsupported effects
+                  :else
                   {:fx/type :label
                    :text "No visual editor available for this effect"
                    :style "-fx-text-fill: #808080; -fx-font-style: italic;"})]}))
@@ -550,7 +580,7 @@
      :items (or effects [])
      :component-id [:projector-effects id]
      :item-id-key :effect-id
-     :label-map calibration-effect-labels
+     :label-map (calibration-effect-labels)  ;; Now a function call
      :fallback-label "Unknown Effect"
      :on-change-event :projectors/set-effects
      :on-change-params {:projector-id id}
@@ -565,44 +595,24 @@
      :empty-text "No calibration effects\nAdd from menu above"}))
 
 (defn- projector-add-effect-menu
-  "Menu button for adding calibration effects to a projector."
+  "Menu button for adding calibration effects to a projector.
+   Dynamically builds menu from registered calibration effects."
   [{:keys [projector-id]}]
-  {:fx/type :menu-button
-   :text "+ Add Effect"
-   :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10;"
-   :items [{:fx/type :menu-item
-            :text "RGB Calibration"
-            :on-action {:event/type :projectors/add-calibration-effect
-                        :projector-id projector-id
-                        :effect {:effect-id :rgb-calibration
-                                 :params {:r-gain 1.0 :g-gain 1.0 :b-gain 1.0}}}}
-           {:fx/type :menu-item
-            :text "Gamma Correction"
-            :on-action {:event/type :projectors/add-calibration-effect
-                        :projector-id projector-id
-                        :effect {:effect-id :gamma-correction
-                                 :params {:r-gamma 2.2 :g-gamma 2.2 :b-gamma 2.2}}}}
-           {:fx/type :menu-item
-            :text "Corner Pin"
-            :on-action {:event/type :projectors/add-calibration-effect
-                        :projector-id projector-id
-                        :effect {:effect-id :corner-pin
-                                 :params {:tl-x -1.0 :tl-y 1.0
-                                          :tr-x 1.0 :tr-y 1.0
-                                          :bl-x -1.0 :bl-y -1.0
-                                          :br-x 1.0 :br-y -1.0}}}}
-           {:fx/type :menu-item
-            :text "Axis Flip"
-            :on-action {:event/type :projectors/add-calibration-effect
-                        :projector-id projector-id
-                        :effect {:effect-id :axis-flip
-                                 :params {:flip-x false :flip-y false}}}}
-           {:fx/type :menu-item
-            :text "Rotation Offset"
-            :on-action {:event/type :projectors/add-calibration-effect
-                        :projector-id projector-id
-                        :effect {:effect-id :rotation-offset
-                                 :params {:angle 0.0}}}}]})
+  (let [calibration-effects (get-calibration-effects)
+        menu-items (vec (for [effect-def calibration-effects]
+                          (let [effect-id (:id effect-def)
+                                effect-name (:name effect-def)
+                                default-params (effects/get-default-params effect-id)]
+                            {:fx/type :menu-item
+                             :text effect-name
+                             :on-action {:event/type :projectors/add-calibration-effect
+                                         :projector-id projector-id
+                                         :effect {:effect-id effect-id
+                                                  :params default-params}}})))]
+    {:fx/type :menu-button
+     :text "+ Add Effect"
+     :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10;"
+     :items menu-items}))
 
 (defn- test-pattern-controls
   "Buttons to activate test patterns for calibration."

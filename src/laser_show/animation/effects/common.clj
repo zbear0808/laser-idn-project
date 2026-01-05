@@ -28,21 +28,6 @@
   (int (u/clamp (int v) 0 255)))
 
 
-;; Coordinate Utilities
-
-
-(defn normalize-coord
-  "Convert a 16-bit signed coordinate (-32768 to 32767) to normalized [-1.0, 1.0] range."
-  [coord]
-  (/ (double coord) 32767.0))
-
-(defn denormalize-coord
-  "Convert a normalized [-1.0, 1.0] coordinate to 16-bit signed range."
-  [coord]
-  (short (Math/round (* (u/clamp (double coord) -1.0 1.0) 32767.0))))
-
-
-;; Blanked Point Detection
 
 
 (defn blanked?

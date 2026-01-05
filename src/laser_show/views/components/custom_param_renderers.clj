@@ -4,12 +4,15 @@
    Provides visual editors for effects like:
    - Translate: 2D point dragging for X/Y position
    - Corner Pin: 4-corner quadrilateral manipulation
+   - RGB Curves: Photoshop-style curve editor for color channel adjustment
    
    These components support both:
    1. Legacy props (:col, :row, :effect-idx, :effect-path) for effect chain editor
    2. Event template pattern (:event-template) for generic reuse (e.g., projectors)"
   (:require
-            [laser-show.views.components.spatial-canvas :as spatial-canvas]))
+            [laser-show.views.components.spatial-canvas :as spatial-canvas]
+            [laser-show.views.components.curve-canvas :as curve-canvas]
+            [laser-show.views.components.tabs :as tabs]))
 
 
 ;; Translate Effect Visual Editor
@@ -194,11 +197,143 @@
                                          {:fx/type :label
                                           :text (format "BR: (%.2f, %.2f)" br-x br-y)
                                           :style "-fx-text-fill: #FFC107; -fx-font-size: 10; -fx-font-family: 'Consolas', monospace;"}]}]}]
-                  
-                  ;; Optional reset button when reset-event is provided
-                  (when reset-event
-                    [{:fx/type :button
-                      :text "Reset to Defaults"
-                      :style "-fx-background-color: #505050; -fx-text-fill: #B0B0B0; -fx-font-size: 10; -fx-padding: 4 12;"
-                      :on-action reset-event}])))}))
+                 
+                 ;; Optional reset button when reset-event is provided
+                 (when reset-event
+                   [{:fx/type :button
+                     :text "Reset to Defaults"
+                     :style "-fx-background-color: #505050; -fx-text-fill: #B0B0B0; -fx-font-size: 10; -fx-padding: 4 12;"
+                     :on-action reset-event}])))}))
+
+
+;; RGB Curves Visual Editor
+
+
+(def ^:private curve-tab-definitions
+ "Tab definitions for the R/G/B channel tabs."
+ [{:id :r :label "Red"}
+  {:id :g :label "Green"}
+  {:id :b :label "Blue"}])
+
+(defn- curve-channel-color
+ "Get the color for a curve channel."
+ [channel]
+ (case channel
+   :r "#FF5555"
+   :g "#55FF55"
+   :b "#5555FF"
+   "#FFFFFF"))
+
+(defn- curve-editor-for-channel
+ "Single curve editor for one color channel.
+  
+  Props:
+  - :col, :row - Grid cell coordinates (for grid effects)
+  - :projector-id - Projector ID (for projector effects, alternative to col/row)
+  - :effect-path - Path to effect
+  - :channel - Channel keyword (:r, :g, or :b)
+  - :current-points - Control points for this channel"
+ [{:keys [col row projector-id effect-path channel current-points]}]
+ (let [color (curve-channel-color channel)
+       points (or current-points [[0 0] [255 255]])
+       ;; Use projector event types if projector-id is provided, otherwise grid effect events
+       use-projector? (some? projector-id)
+       add-event (if use-projector?
+                   {:event/type :projectors/add-curve-point
+                    :projector-id projector-id
+                    :effect-path effect-path
+                    :channel channel}
+                   {:event/type :effects/add-curve-point
+                    :col col :row row
+                    :effect-path effect-path
+                    :channel channel})
+       update-event (if use-projector?
+                      {:event/type :projectors/update-curve-point
+                       :projector-id projector-id
+                       :effect-path effect-path
+                       :channel channel}
+                      {:event/type :effects/update-curve-point
+                       :col col :row row
+                       :effect-path effect-path
+                       :channel channel})
+       remove-event (if use-projector?
+                      {:event/type :projectors/remove-curve-point
+                       :projector-id projector-id
+                       :effect-path effect-path
+                       :channel channel}
+                      {:event/type :effects/remove-curve-point
+                       :col col :row row
+                       :effect-path effect-path
+                       :channel channel})
+       canvas-key (if use-projector?
+                    [:projector projector-id effect-path channel]
+                    [col row effect-path channel])]
+   {:fx/type :v-box
+    :spacing 8
+    :padding 8
+    :children [{:fx/type curve-canvas/curve-canvas
+                :fx/key canvas-key
+                :width 280
+                :height 280
+                :color color
+                :control-points points
+                :on-add-point add-event
+                :on-update-point update-event
+                :on-remove-point remove-event}
+               {:fx/type :label
+                :text "Click to add point • Drag to move • Right-click to delete"
+                :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-style: italic;"}]}))
+
+(defn rgb-curves-visual-editor
+ "Visual editor for RGB curves effect with tabbed R/G/B interface.
+  
+  Supports two usage patterns:
+  
+  1. Grid effect mode:
+     - :col, :row - Grid cell coordinates
+     - :effect-path - Path to effect (supports nested)
+     - :current-params - Current parameter values
+     - :dialog-data - Dialog state containing UI modes and active channel
+  
+  2. Projector effect mode:
+     - :projector-id - Projector ID
+     - :effect-path - Path to effect
+     - :current-params - Current parameter values
+     - :dialog-data - (optional) UI state, defaults to empty"
+ [{:keys [col row projector-id effect-path current-params dialog-data]}]
+ (let [;; Determine mode
+       use-projector? (some? projector-id)
+       ;; Get active channel from dialog state
+       active-channel (get-in dialog-data [:ui-modes effect-path :active-curve-channel] :r)
+       ;; Get control points for each channel
+       r-points (get current-params :r-curve-points [[0 0] [255 255]])
+       g-points (get current-params :g-curve-points [[0 0] [255 255]])
+       b-points (get current-params :b-curve-points [[0 0] [255 255]])
+       ;; Get points for active channel
+       active-points (case active-channel
+                      :r r-points
+                      :g g-points
+                      :b b-points
+                      r-points)
+       ;; Build tab change event based on mode
+       tab-change-event (if use-projector?
+                          {:event/type :projectors/set-active-curve-channel
+                           :projector-id projector-id
+                           :effect-path effect-path}
+                          {:event/type :effects/set-active-curve-channel
+                           :col col :row row
+                           :effect-path effect-path})]
+   {:fx/type :v-box
+    :spacing 0
+    :style "-fx-background-color: #2A2A2A; -fx-background-radius: 4;"
+    :children [{:fx/type tabs/styled-tab-bar
+                :tabs curve-tab-definitions
+                :active-tab active-channel
+                :on-tab-change tab-change-event}
+               {:fx/type curve-editor-for-channel
+                :col col :row row
+                :projector-id projector-id
+                :effect-path effect-path
+                :channel active-channel
+                :current-points active-points}]}))
 

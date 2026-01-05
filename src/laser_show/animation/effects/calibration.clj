@@ -3,88 +3,50 @@
    These are static effects applied at the projector level to compensate
    for hardware differences between laser projectors."
   (:require [laser-show.animation.effects :as effects]
-            [laser-show.animation.effects.common :as common]))
+            [laser-show.animation.effects.common :as common]
+            [laser-show.animation.effects.curves :as curves]))
 
 
 
-;; RGB Balance Calibration
+;; RGB Curves Calibration (replaces simple RGB gain)
 
 
-(defn- rgb-calibration-xf [time-ms bpm params _ctx]
+(defn- rgb-curves-xf [time-ms bpm params _ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm)
-        r-gain (:r-gain resolved)
-        g-gain (:g-gain resolved)
-        b-gain (:b-gain resolved)]
+        ;; Get control points with defaults
+        r-points (or (:r-curve-points resolved) [[0 0] [255 255]])
+        g-points (or (:g-curve-points resolved) [[0 0] [255 255]])
+        b-points (or (:b-curve-points resolved) [[0 0] [255 255]])
+        ;; Generate LUTs
+        r-lut (curves/generate-curve-lut r-points)
+        g-lut (curves/generate-curve-lut g-points)
+        b-lut (curves/generate-curve-lut b-points)]
     (map (fn [{:keys [r g b] :as pt}]
            (assoc pt
-             :r (int (common/clamp-byte (* r r-gain)))
-             :g (int (common/clamp-byte (* g g-gain)))
-             :b (int (common/clamp-byte (* b b-gain))))))))
+             :r (int (common/clamp-byte (nth r-lut (min 255 (max 0 r)))))
+             :g (int (common/clamp-byte (nth g-lut (min 255 (max 0 g)))))
+             :b (int (common/clamp-byte (nth b-lut (min 255 (max 0 b))))))))))
 
 (effects/register-effect!
- {:id :rgb-calibration
-  :name "RGB Calibration"
+ {:id :rgb-curves
+  :name "RGB Curves"
   :category :calibration
   :timing :static
-  :parameters [{:key :r-gain
-                :label "Red Gain"
-                :type :float
-                :default 1.0
-                :min 0.0
-                :max 2.0}
-               {:key :g-gain
-                :label "Green Gain"
-                :type :float
-                :default 1.0
-                :min 0.0
-                :max 2.0}
-               {:key :b-gain
-                :label "Blue Gain"
-                :type :float
-                :default 1.0
-                :min 0.0
-                :max 2.0}]
-  :apply-transducer rgb-calibration-xf})
-
-
-;; Per-Channel Gamma Correction
-
-
-(defn- gamma-correction-xf [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
-        r-inv (/ 1.0 (:r-gamma resolved))
-        g-inv (/ 1.0 (:g-gamma resolved))
-        b-inv (/ 1.0 (:b-gamma resolved))]
-    (map (fn [{:keys [r g b] :as pt}]
-           (assoc pt
-             :r (int (common/clamp-byte (* 255.0 (Math/pow (/ r 255.0) r-inv))))
-             :g (int (common/clamp-byte (* 255.0 (Math/pow (/ g 255.0) g-inv))))
-             :b (int (common/clamp-byte (* 255.0 (Math/pow (/ b 255.0) b-inv)))))))))
-
-(effects/register-effect!
- {:id :gamma-correction
-  :name "Gamma Correction"
-  :category :calibration
-  :timing :static
-  :parameters [{:key :r-gamma
-                :label "Red Gamma"
-                :type :float
-                :default 2.2
-                :min 0.5
-                :max 4.0}
-               {:key :g-gamma
-                :label "Green Gamma"
-                :type :float
-                :default 2.2
-                :min 0.5
-                :max 4.0}
-               {:key :b-gamma
-                :label "Blue Gamma"
-                :type :float
-                :default 2.2
-                :min 0.5
-                :max 4.0}]
-  :apply-transducer gamma-correction-xf})
+  :ui-hints {:renderer :rgb-curves
+             :default-mode :visual}
+  :parameters [{:key :r-curve-points
+                :label "Red Curve"
+                :type :curve-points
+                :default [[0 0] [255 255]]}
+               {:key :g-curve-points
+                :label "Green Curve"
+                :type :curve-points
+                :default [[0 0] [255 255]]}
+               {:key :b-curve-points
+                :label "Blue Curve"
+                :type :curve-points
+                :default [[0 0] [255 255]]}]
+  :apply-transducer rgb-curves-xf})
 
 
 ;; Brightness Calibration
@@ -301,58 +263,6 @@
                 :min -2.0
                 :max 2.0}]
   :apply-transducer projector-scale-xf})
-
-
-;; Per-Channel Color Curves (simplified LUT)
-
-
-(defn- interpolate-curve
-  "Interpolate a value using a simplified curve definition.
-   curve is a vector of output values at regular input intervals."
-  [curve input]
-  (let [n (count curve)
-        scaled (* input (dec n))
-        idx (int scaled)
-        frac (- scaled idx)]
-    (if (>= idx (dec n))
-      (last curve)
-      (let [v0 (nth curve idx)
-            v1 (nth curve (inc idx))]
-        (+ v0 (* frac (- v1 v0)))))))
-
-(defn- color-curves-xf [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
-        default-curve [0 32 64 96 128 160 192 224 255]
-        r-curve (or (:r-curve resolved) default-curve)
-        g-curve (or (:g-curve resolved) default-curve)
-        b-curve (or (:b-curve resolved) default-curve)]
-    (map (fn [{:keys [r g b] :as pt}]
-           (let [r-input (/ r 255.0)
-                 g-input (/ g 255.0)
-                 b-input (/ b 255.0)]
-             (assoc pt
-               :r (int (common/clamp-byte (interpolate-curve r-curve r-input)))
-               :g (int (common/clamp-byte (interpolate-curve g-curve g-input)))
-               :b (int (common/clamp-byte (interpolate-curve b-curve b-input)))))))))
-
-(effects/register-effect!
- {:id :color-curves
-  :name "Color Curves"
-  :category :calibration
-  :timing :static
-  :parameters [{:key :r-curve
-                :label "Red Curve"
-                :type :curve
-                :default [0 32 64 96 128 160 192 224 255]}
-               {:key :g-curve
-                :label "Green Curve"
-                :type :curve
-                :default [0 32 64 96 128 160 192 224 255]}
-               {:key :b-curve
-                :label "Blue Curve"
-                :type :curve
-                :default [0 32 64 96 128 160 192 224 255]}]
-  :apply-transducer color-curves-xf})
 
 
 ;; Axis Flip (for projector mounting variations)

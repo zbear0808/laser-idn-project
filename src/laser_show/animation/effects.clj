@@ -338,30 +338,6 @@
        (assoc frame :points (into [] full-xf points))))))
 
 
-;; Single Effect Application (convenience)
-
-
-(defn apply-effect
-  "Apply a single effect to a frame.
-   
-   This is a convenience function that wraps the effect in a chain.
-   For multiple effects, use apply-effect-chain directly for better performance.
-   
-   Parameters:
-   - frame: LaserFrame to transform
-   - effect-instance: {:effect-id ... :enabled ... :params ...}
-   - time-ms: Current time in milliseconds
-   - bpm: Current BPM (from global state if not provided)
-   - trigger-time: (optional) Time when the effect was triggered
-   
-   Returns: Transformed frame"
-  ([frame effect-instance time-ms]
-   (apply-effect frame effect-instance time-ms (time/get-global-bpm) nil))
-  ([frame effect-instance time-ms bpm]
-   (apply-effect frame effect-instance time-ms bpm nil))
-  ([frame effect-instance time-ms bpm trigger-time]
-   (apply-effect-chain frame {:effects [effect-instance]} time-ms bpm trigger-time)))
-
 
 ;; Helper for Per-Point Modulation
 
