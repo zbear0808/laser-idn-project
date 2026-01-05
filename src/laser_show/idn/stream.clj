@@ -201,6 +201,22 @@
     (quot (- max-size channel-message-header-size frame-chunk-header-size)
           bytes-per-pt)))
 
+;; Maximum packet size (16-bit XY + 16-bit RGB is largest configuration)
+(def ^:const MAX_PACKET_SIZE
+  "Maximum IDN packet size for buffer pre-allocation.
+   Calculated for worst case: 16-bit XY + 16-bit RGB with max points."
+  (packet-size-with-config MAX_POINTS_PER_PACKET 
+                          tags-16bit-xy-16bit-color 
+                          {:xy-bit-depth 16 :color-bit-depth 16}))
+
+(defn create-packet-buffer
+  "Create a pre-allocated ByteBuffer for packet generation.
+   Buffer is sized for maximum packet (16-bit XY + RGB, max points).
+   Each streaming engine should have its own buffer."
+  []
+  (doto (ByteBuffer/allocate MAX_PACKET_SIZE)
+    (.order ByteOrder/BIG_ENDIAN)))
+
 
 ;; Binary Writing Helpers
 
@@ -301,6 +317,7 @@
    Use this when opening a channel or when configuration needs to be sent.
    
    Parameters:
+   - buf: Pre-allocated ByteBuffer to write packet into (will be cleared)
    - frame: LaserFrame record with :points vector (normalized values)
    - channel-id: IDN channel ID (0-63)
    - timestamp-us: Timestamp in microseconds
@@ -313,41 +330,44 @@
      - :single-scan? - Draw frame only once (default false)
    
    Returns: byte array ready to send"
-  [frame channel-id timestamp-us duration-us & {:keys [service-id service-mode output-config close? single-scan?]
-                                                :or {service-id DEFAULT_SERVICE_ID
-                                                     service-mode SERVICE_MODE_GRAPHIC_DISCRETE
-                                                     output-config output-config/default-config
-                                                     close? false
-                                                     single-scan? false}}]
+  [^ByteBuffer buf frame channel-id timestamp-us duration-us & {:keys [service-id service-mode output-config close? single-scan?]
+                                                                :or {service-id DEFAULT_SERVICE_ID
+                                                                     service-mode SERVICE_MODE_GRAPHIC_DISCRETE
+                                                                     output-config output-config/default-config
+                                                                     close? false
+                                                                     single-scan? false}}]
   (let [points (take MAX_POINTS_PER_PACKET (:points frame))
         point-count (count points)
         tags (get-tags-for-config output-config)
-        ;; Calculate SCWC with proper 32-bit alignment
         [scwc padded-tags] (calculate-scwc tags)
         total-size (packet-size-with-config point-count padded-tags output-config)
         cfl-flags (bit-or CFL_ROUTING (if close? CFL_CLOSE 0))
-        chunk-flags (if single-scan? 0x01 0x00)
-        buf (ByteBuffer/allocate total-size)]
+        chunk-flags (if single-scan? 0x01 0x00)]
     (when (> point-count MAX_POINTS_PER_PACKET)
       (log/warn "Frame point count exceeds maximum per packet. Truncating from" point-count "to" MAX_POINTS_PER_PACKET "points."))
-    (.order buf ByteOrder/BIG_ENDIAN)
+    
+    (.clear buf)
 
     (write-channel-message-header! buf total-size channel-id
                                    CHUNK_TYPE_FRAME_SAMPLES timestamp-us true)
     (write-channel-config-header! buf scwc cfl-flags service-id service-mode)
-    (write-service-config-tags! buf padded-tags)  ; Use padded tags
+    (write-service-config-tags! buf padded-tags)
     (write-frame-chunk-header! buf chunk-flags duration-us)
 
     (doseq [point points]
       (write-point! buf point output-config))
 
-    (.array buf)))
+    (let [result (byte-array total-size)]
+      (.position buf 0)
+      (.get buf result 0 total-size)
+      result)))
 
 (defn frame->packet
   "Convert a LaserFrame to an IDN packet without channel configuration.
    Use this for subsequent frames after channel is already configured.
    
    Parameters:
+   - buf: Pre-allocated ByteBuffer to write packet into (will be cleared)
    - frame: LaserFrame record with :points vector (normalized values)
    - channel-id: IDN channel ID (0-63)
    - timestamp-us: Timestamp in microseconds
@@ -357,16 +377,15 @@
      - :single-scan? - Draw frame only once (default false)
    
    Returns: byte array ready to send"
-  [frame channel-id timestamp-us duration-us & {:keys [output-config single-scan?]
-                                                :or {output-config output-config/default-config
-                                                     single-scan? false}}]
+  [^ByteBuffer buf frame channel-id timestamp-us duration-us & {:keys [output-config single-scan?]
+                                                                :or {output-config output-config/default-config
+                                                                     single-scan? false}}]
   (let [points (take MAX_POINTS_PER_PACKET (:points frame))
         point-count (count points)
         total-size (packet-size-without-config point-count output-config)
-        chunk-flags (if single-scan? 0x01 0x00)
-        buf (ByteBuffer/allocate total-size)]
+        chunk-flags (if single-scan? 0x01 0x00)]
 
-    (.order buf ByteOrder/BIG_ENDIAN)
+    (.clear buf)
 
     (write-channel-message-header! buf total-size channel-id
                                    CHUNK_TYPE_FRAME_SAMPLES timestamp-us false)
@@ -375,15 +394,18 @@
     (doseq [point points]
       (write-point! buf point output-config))
 
-    (.array buf)))
+    (let [result (byte-array total-size)]
+      (.position buf 0)
+      (.get buf result 0 total-size)
+      result)))
 
 (defn empty-frame-packet
   "Create a packet for an empty frame (no points).
    Per spec Section 6.2: empty sample array voids the frame buffer."
-  ([channel-id timestamp-us]
-   (empty-frame-packet channel-id timestamp-us output-config/default-config))
-  ([channel-id timestamp-us output-config]
-   (frame->packet (t/empty-frame) channel-id timestamp-us 0
+  ([buf channel-id timestamp-us]
+   (empty-frame-packet buf channel-id timestamp-us output-config/default-config))
+  ([buf channel-id timestamp-us output-config]
+   (frame->packet buf (t/empty-frame) channel-id timestamp-us 0
                   :output-config output-config)))
 
 (defn close-channel-packet

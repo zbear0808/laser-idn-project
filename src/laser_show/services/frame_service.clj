@@ -92,30 +92,15 @@
 ;;
 ;; Cue chains render ALL enabled presets simultaneously, not sequentially.
 ;; This is achieved by:
-;; 1. Rendering each preset to get its point sequence
-;; 2. Concatenating all point sequences with blanking points between them
-;; 3. The galvo will draw all shapes rapidly, creating persistence of vision
+;; 1. Rendering each preset/group recursively
+;; 2. Applying effects at each level (preset effects, then group effects)
+;; 3. Concatenating all point sequences with blanking points between them
+;; 4. The galvo will draw all shapes rapidly, creating persistence of vision
+;;
+;; Effect Pipeline: Preset Effects → Group Effects → Concatenate → Grid Effects
 ;;
 ;; For IDN output, the combined points are sent as a single frame.
 ;; For preview, we display all shapes at once.
-
-(defn- flatten-enabled-presets
-  "Flatten a cue chain to a list of enabled preset instances.
-   Respects both preset and group enabled states."
-  [items]
-  (reduce
-    (fn [acc item]
-      (if (chains/group? item)
-        ;; Group: recurse if enabled
-        (if (:enabled? item true)
-          (into acc (flatten-enabled-presets (:items item [])))
-          acc)
-        ;; Preset: add if enabled
-        (if (:enabled? item true)
-          (conj acc item)
-          acc)))
-    []
-    items))
 
 (defn- render-preset-instance
   "Render a single preset instance with its parameters.
@@ -127,51 +112,40 @@
                       (presets/create-animation-from-preset preset-id))]
       (t/get-frame anim elapsed-ms))))
 
-(defn- apply-preset-effects
-  "Apply a preset instance's effect chain to a frame."
-  [frame preset-instance elapsed-ms bpm trigger-time]
-  (let [preset-effects (:effects preset-instance [])]
-    (if (seq preset-effects)
+(defn- apply-item-effects
+  "Apply an item's (preset or group) effect chain to a frame."
+  [frame item elapsed-ms bpm trigger-time]
+  (let [item-effects (:effects item [])]
+    (if (seq item-effects)
       (try
-        (effects/apply-effect-chain frame {:effects preset-effects} elapsed-ms bpm trigger-time)
+        (effects/apply-effect-chain frame {:effects item-effects} elapsed-ms bpm trigger-time)
         (catch Exception e
-          (log/error "apply-preset-effects: Effect chain failed:" (.getMessage e))
+          (log/error "apply-item-effects: Effect chain failed for" (:type item) ":" (.getMessage e))
           frame))
       frame)))
 
 (defn- create-blanking-jump
   "Create blanking points to safely jump from one position to another.
    Returns a vector of blanking points that:
-   1. Turn off laser at current position (if provided)
-   2. Move to new position with laser off
+   1. Turn off laser at current position (source)
+   2. Move to new position with laser off (destination)
    
    This prevents visible lines when galvos travel between shapes."
   [from-point to-point]
-  (let [;; Create blanking point at destination
+  (let [;; First: blanking point at source (turn off laser at current position)
+        blank-at-source (when from-point
+                          (t/->LaserPoint (:x from-point) (:y from-point) 0.0 0.0 0.0))
+        ;; Second: blanking point at destination (move to new position with laser off)
         blank-at-dest (when to-point
                         (t/->LaserPoint (:x to-point) (:y to-point) 0.0 0.0 0.0))]
-    (filterv some? [blank-at-dest])))
+    (filterv some? [blank-at-source blank-at-dest])))
 
-(defn- render-all-presets-combined
-  "Render all enabled presets and combine into a single frame.
-   
-   Each preset is rendered and has its effects applied, then all point
-   sequences are concatenated with blanking points between them.
-   
-   This allows all shapes to appear simultaneously via persistence of vision
-   when the galvo rapidly draws all points in sequence."
-  [presets elapsed-ms bpm trigger-time]
-  (when (seq presets)
-    (let [;; Render each preset and apply its effects
-          rendered-frames (for [preset presets
-                               :let [frame (render-preset-instance preset elapsed-ms)]
-                               :when frame
-                               :let [with-effects (apply-preset-effects frame preset elapsed-ms bpm trigger-time)]
-                               :when with-effects]
-                           with-effects)
-          
-          ;; Combine all points with blanking jumps between sequences
-          combined-points (reduce
+(defn- concatenate-frames
+  "Concatenate multiple frames with blanking points between them.
+   Returns a new LaserFrame with all points combined."
+  [frames elapsed-ms]
+  (when (seq frames)
+    (let [combined-points (reduce
                             (fn [acc frame]
                               (let [points (:points frame)]
                                 (if (empty? points)
@@ -187,22 +161,49 @@
                                           (into blanking)
                                           (into points)))))))
                             []
-                            rendered-frames)]
-      ;; Return combined frame
+                            frames)]
       (when (seq combined-points)
-        (t/->LaserFrame combined-points elapsed-ms {:preset-count (count presets)})))))
+        (t/->LaserFrame combined-points elapsed-ms {})))))
+
+(defn- render-item-with-effects
+  "Recursively render a cue chain item (preset or group) applying effects at each level.
+   
+   Effect Pipeline:
+   - For presets: render → apply preset effects
+   - For groups: render children → concatenate → apply group effects
+   
+   Returns a LaserFrame or nil if disabled/empty."
+  [item elapsed-ms bpm trigger-time]
+  (when (:enabled? item true)
+    (cond
+      ;; Preset: render and apply its effects
+      (= :preset (:type item))
+      (when-let [frame (render-preset-instance item elapsed-ms)]
+        (apply-item-effects frame item elapsed-ms bpm trigger-time))
+      
+      ;; Group: render children, concatenate, then apply group effects
+      (chains/group? item)
+      (let [child-frames (keep #(render-item-with-effects % elapsed-ms bpm trigger-time)
+                               (:items item []))
+            concatenated (concatenate-frames child-frames elapsed-ms)]
+        (when concatenated
+          (apply-item-effects concatenated item elapsed-ms bpm trigger-time)))
+      
+      :else nil)))
 
 (defn- generate-frame-from-cue-chain
-  "Generate a frame from a cue chain.
+  "Generate a frame from a cue chain using recursive item rendering.
    
-   Renders ALL enabled presets simultaneously by combining their point
-   sequences with blanking points between them. This creates the effect
-   of all shapes being displayed at once via persistence of vision."
+   Renders ALL enabled presets/groups, applying effects at each level:
+   1. Preset-level effects on each preset
+   2. Group-level effects on concatenated group contents
+   3. Final concatenation of all top-level items
+   
+   This creates the effect of all shapes being displayed at once via persistence of vision."
   [cue-chain elapsed-ms bpm trigger-time]
   (let [items (:items cue-chain [])
-        enabled-presets (flatten-enabled-presets items)]
-    (when (seq enabled-presets)
-      (render-all-presets-combined enabled-presets elapsed-ms bpm trigger-time))))
+        rendered-frames (keep #(render-item-with-effects % elapsed-ms bpm trigger-time) items)]
+    (concatenate-frames rendered-frames elapsed-ms)))
 
 (defn generate-current-frame
   "Generate the current animation frame based on state.

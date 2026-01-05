@@ -63,6 +63,7 @@
    :fps fps
    :channel-id channel-id
    :output-config output-config
+   :packet-buffer (idn-stream/create-packet-buffer)
    :running? (atom false)
    :socket (atom nil)
    :thread (atom nil)
@@ -108,7 +109,8 @@
    Includes configuration periodically per spec requirements.
    Uses the engine's output-config for bit depth settings."
   [engine frame]
-  (let [channel-id (:channel-id engine)
+  (let [buf (:packet-buffer engine)
+        channel-id (:channel-id engine)
         timestamp-us (current-timestamp-us engine)
         duration-us (idn-stream/frame-duration-us (:fps engine))
         output-cfg (:output-config engine)
@@ -118,9 +120,9 @@
       (reset! (:last-config-time-ms engine) (System/currentTimeMillis)))
     
     (if include-config?
-      (idn-stream/frame->packet-with-config frame channel-id timestamp-us duration-us
+      (idn-stream/frame->packet-with-config buf frame channel-id timestamp-us duration-us
                                             :output-config output-cfg)
-      (idn-stream/frame->packet frame channel-id timestamp-us duration-us
+      (idn-stream/frame->packet buf frame channel-id timestamp-us duration-us
                                 :output-config output-cfg))))
 
 (defn- streaming-loop

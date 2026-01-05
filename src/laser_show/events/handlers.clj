@@ -1108,6 +1108,8 @@
                          updates updates
                          tab-id {:active-bank-tab tab-id}
                          :else {})]
+    (when tab-id
+      (log/debug "Tab clicked:" {:dialog-id dialog-id :tab-id tab-id}))
     {:state (update-in state [:ui :dialogs dialog-id :data] merge actual-updates)}))
 
 (defn- handle-ui-start-drag
@@ -2152,6 +2154,115 @@
   [{:keys [tab-id state]}]
   {:state (assoc-in state [:cue-chain-editor :active-preset-tab] tab-id)})
 
+(defn- handle-cue-chain-set-effect-tab
+  "Set the active effect bank tab.
+   Event keys:
+   - :tab-id - Tab ID (e.g., :shape, :color, :intensity)"
+  [{:keys [tab-id state]}]
+  {:state (assoc-in state [:cue-chain-editor :active-effect-tab] (or tab-id :shape))})
+
+(defn- handle-cue-chain-add-effect-to-item
+  "Add an effect to a preset or group's effect chain.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :item-path - Path to the preset/group
+   - :effect - Effect to add"
+  [{:keys [col row item-path effect state]}]
+  (let [effect-with-fields (-> effect
+                               (assoc :enabled? true)
+                               (assoc :id (random-uuid)))
+        items-path (cue-chain-path col row)
+        effect-chain-path (concat items-path item-path [:effects])]
+    {:state (-> state
+                (update-in effect-chain-path conj effect-with-fields)
+                ;; Auto-select the newly added effect
+                (assoc-in [:cue-chain-editor :selected-effect-id] (:id effect-with-fields))
+                mark-dirty)}))
+
+(defn- handle-cue-chain-remove-effect-from-item
+  "Remove an effect from a preset or group's effect chain.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :item-path - Path to the preset/group
+   - :effect-id - ID of the effect to remove"
+  [{:keys [col row item-path effect-id state]}]
+  (let [items-path (cue-chain-path col row)
+        effect-chain-path (concat items-path item-path [:effects])
+        effects (vec (get-in state effect-chain-path []))
+        new-effects (vec (remove #(= (:id %) effect-id) effects))
+        selected-effect-id (get-in state [:cue-chain-editor :selected-effect-id])]
+    {:state (-> state
+                (assoc-in effect-chain-path new-effects)
+                ;; Clear selection if we deleted the selected effect
+                (cond-> (= effect-id selected-effect-id)
+                  (assoc-in [:cue-chain-editor :selected-effect-id] nil))
+                mark-dirty)}))
+
+(defn- handle-cue-chain-update-effect-param
+  "Update a parameter in a preset/group's effect.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :item-path - Path to the preset/group
+   - :effect-path - Path to effect within the item's effect chain
+   - :param-key - Parameter key
+   - :value or :fx/event - New value"
+  [{:keys [col row item-path effect-path param-key state] :as event}]
+  (let [value (or (:fx/event event) (:value event))
+        items-path (cue-chain-path col row)
+        full-path (concat items-path item-path [:effects] effect-path [:params param-key])]
+    {:state (assoc-in state full-path value)}))
+
+(defn- handle-cue-chain-update-effect-param-from-text
+  "Update a parameter from text field input.
+   Parses the text, clamps to min/max bounds, and updates the param.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :item-path - Path to the preset/group
+   - :effect-path - Path to effect within the item's effect chain
+   - :param-key - Parameter key
+   - :min, :max - Bounds for clamping"
+  [{:keys [col row item-path effect-path param-key min max state] :as event}]
+  (let [action-event (:fx/event event)
+        text-field (.getSource action-event)
+        text (.getText text-field)
+        parsed (try (Double/parseDouble text) (catch Exception _ nil))]
+    (if parsed
+      (let [clamped (-> parsed (clojure.core/max min) (clojure.core/min max))
+            items-path (cue-chain-path col row)
+            full-path (concat items-path item-path [:effects] effect-path [:params param-key])]
+        {:state (assoc-in state full-path clamped)})
+      {:state state})))
+
+(defn- handle-cue-chain-select-item-effect
+  "Select an effect within an item for editing.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :item-path - Path to the preset/group
+   - :effect-id - ID of the effect to select"
+  [{:keys [col row item-path effect-id state]}]
+  {:state (assoc-in state [:cue-chain-editor :selected-effect-id] effect-id)})
+
+(defn- handle-cue-chain-set-item-effect-enabled
+  "Set the enabled state of an effect within an item.
+   Event keys:
+   - :col, :row - Grid cell coordinates
+   - :item-path - Path to the preset/group
+   - :effect-id - ID of the effect
+   - :enabled? or :fx/event - New enabled state"
+  [{:keys [col row item-path effect-id state] :as event}]
+  (let [enabled? (if (contains? event :fx/event)
+                   (:fx/event event)
+                   (:enabled? event))
+        items-path (cue-chain-path col row)
+        effect-chain-path (concat items-path item-path [:effects])
+        effects (vec (get-in state effect-chain-path []))
+        effect-idx (.indexOf (mapv :id effects) effect-id)]
+    (if (>= effect-idx 0)
+      {:state (-> state
+                  (assoc-in (concat effect-chain-path [effect-idx :enabled?]) enabled?)
+                  mark-dirty)}
+      {:state state})))
+
 (defn- handle-cue-chain-start-rename
   "Start renaming a group.
    Event keys:
@@ -2793,6 +2904,14 @@
     :cue-chain/set-effect-enabled (handle-cue-chain-set-item-enabled event)
     :cue-chain/update-preset-color (handle-cue-chain-update-preset-color event)
     :cue-chain/update-preset-param-from-text (handle-cue-chain-update-preset-param event)
+    
+    ;; NEW: Full effect editor for items (presets/groups)
+    :cue-chain/set-effect-tab (handle-cue-chain-set-effect-tab event)
+    :cue-chain/add-effect-to-item (handle-cue-chain-add-effect-to-item event)
+    :cue-chain/remove-effect-from-item (handle-cue-chain-remove-effect-from-item event)
+    :cue-chain/update-effect-param-from-text (handle-cue-chain-update-effect-param-from-text event)
+    :cue-chain/select-item-effect (handle-cue-chain-select-item-effect event)
+    :cue-chain/set-item-effect-enabled (handle-cue-chain-set-item-effect-enabled event)
     
     ;; NEW: Simplified cue chain handlers (hierarchical-list refactor)
     :cue-chain/set-items (handle-cue-chain-set-items event)
