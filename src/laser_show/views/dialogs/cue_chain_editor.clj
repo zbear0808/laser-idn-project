@@ -256,7 +256,7 @@
     (reify javafx.event.EventHandler
       (handle [_ event]
         (let [code (.getCode event)
-              ctrl? (.isControlDown event)]
+              ctrl? (.isShortcutDown event)]
           (cond
             ;; Ctrl+C - Copy
             (and ctrl? (= code KeyCode/C))

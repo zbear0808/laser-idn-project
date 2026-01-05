@@ -370,7 +370,7 @@
   [dispatcher]
   (fn [^javafx.scene.input.KeyEvent event]
     (let [code (.getCode event)
-          ctrl? (.isControlDown event)]
+          ctrl? (.isShortcutDown event)]
       (cond
         ;; Ctrl+C - Copy
         (and ctrl? (= code javafx.scene.input.KeyCode/C))
@@ -421,7 +421,7 @@
       (reify javafx.event.EventHandler
         (handle [_ event]
           (let [code (.getCode event)
-                ctrl? (.isControlDown event)]
+                ctrl? (.isShortcutDown event)]
             (when (and ctrl? (or (= code javafx.scene.input.KeyCode/C)
                                   (= code javafx.scene.input.KeyCode/V)))
               (handler-fn event))))))

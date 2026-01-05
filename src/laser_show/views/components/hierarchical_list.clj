@@ -662,7 +662,7 @@
                                      (reify javafx.event.EventHandler
                                        (handle [_ event]
                                          (let [click-count (.getClickCount event)
-                                               ctrl? (.isControlDown event)
+                                               ctrl? (.isShortcutDown event)
                                                shift? (.isShiftDown event)]
                                            (cond
                                              ;; Double-click - start rename
@@ -772,7 +772,7 @@
                                  (.setOnMouseClicked node
                                    (reify javafx.event.EventHandler
                                      (handle [_ event]
-                                       (let [ctrl? (.isControlDown event)
+                                       (let [ctrl? (.isShortcutDown event)
                                              shift? (.isShiftDown event)]
                                          (handle-selection! component-id items item-id ctrl? shift? props)
                                          (.consume event))))))
@@ -1026,7 +1026,7 @@
   [component-id items props]
   (fn [^javafx.scene.input.KeyEvent event]
     (let [code (.getCode event)
-          ctrl? (.isControlDown event)]
+          ctrl? (.isShortcutDown event)]
       (cond
         ;; Ctrl+C - Copy
         (and ctrl? (= code javafx.scene.input.KeyCode/C))
@@ -1094,7 +1094,7 @@
       (reify javafx.event.EventHandler
         (handle [_ event]
           (let [code (.getCode event)
-                ctrl? (.isControlDown event)]
+                ctrl? (.isShortcutDown event)]
             (when (and ctrl? (or (= code javafx.scene.input.KeyCode/C)
                                   (= code javafx.scene.input.KeyCode/V)
                                   (= code javafx.scene.input.KeyCode/X)))
@@ -1300,7 +1300,7 @@
     (reify javafx.event.EventHandler
       (handle [_ event]
         (let [code (.getCode event)
-              ctrl? (.isControlDown event)
+              ctrl? (.isShortcutDown event)
               ;; Get fresh state for this component
               state (get-state component-id)
               items (:items state)
