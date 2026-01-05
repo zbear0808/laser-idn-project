@@ -12,7 +12,14 @@
      (help :label)     - Show props for a specific type
      (help :label :text) - Show details for a specific prop
      (help-ui)         - Open interactive reference browser
-     (explain-desc desc) - Validate a cljfx description")
+     (explain-desc desc) - Validate a cljfx description
+     
+   Profiling:
+     (profile-cpu 10)  - Profile CPU for 10 seconds
+     (profile-alloc 10) - Profile allocations for 10 seconds
+     (profile-section! #(...)) - Profile a code section
+     (view-flamegraph) - Open latest flamegraph
+     (profiler-ui 8080) - Start profiler web UI")
 
 
 ;; State
@@ -162,6 +169,72 @@
     (println "⚠️  cljfx.dev not available. Start REPL with: clj -M:dev")))
 
 
+;; Profiling Support
+
+
+(defn profile-cpu
+  "Profile CPU usage for the specified duration.
+   
+   Parameters:
+   - duration-sec: How long to profile (in seconds)
+   
+   Example:
+     (profile-cpu 30)  ; Profile for 30 seconds"
+  [duration-sec]
+  (require 'laser-show.profiling.async-profiler)
+  ((resolve 'laser-show.profiling.async-profiler/profile-cpu!) duration-sec))
+
+(defn profile-alloc
+  "Profile memory allocations for the specified duration.
+   
+   Parameters:
+   - duration-sec: How long to profile (in seconds)
+   
+   Example:
+     (profile-alloc 30)  ; Profile allocations for 30 seconds"
+  [duration-sec]
+  (require 'laser-show.profiling.async-profiler)
+  ((resolve 'laser-show.profiling.async-profiler/profile-alloc!) duration-sec))
+
+(defn profile-section!
+  "Profile a specific section of code (CPU profiling).
+   
+   Parameters:
+   - f: A zero-argument function to profile
+   
+   Example:
+     (profile-section! #(dotimes [i 1000] (expensive-fn i)))"
+  [f]
+  (require 'laser-show.profiling.async-profiler)
+  ((resolve 'laser-show.profiling.async-profiler/profile-section!) f))
+
+(defn view-flamegraph
+  "Open the most recent flamegraph in the browser."
+  []
+  (require 'laser-show.profiling.async-profiler)
+  ((resolve 'laser-show.profiling.async-profiler/view-latest!)))
+
+(defn profiler-ui
+  "Start the profiler web UI for browsing all profiles.
+   
+   Parameters:
+   - port: Port number to serve on (default: 8080)
+   
+   Example:
+     (profiler-ui 8080)"
+  ([]
+   (profiler-ui 8080))
+  ([port]
+   (require 'laser-show.profiling.async-profiler)
+   ((resolve 'laser-show.profiling.async-profiler/serve-ui!) port)))
+
+(defn profiler-status
+  "Print the current profiler status."
+  []
+  (require 'laser-show.profiling.async-profiler)
+  ((resolve 'laser-show.profiling.async-profiler/print-status)))
+
+
 ;; REPL Quick Reference
 
 
@@ -181,4 +254,12 @@
   (help :label :text)               ;; Show details for :text prop
   (help-ui)                         ;; Open interactive browser
   (explain-desc {:fx/type :label :text "Hello"})  ;; Validate description
+  
+  ;; Profiling
+  (profile-cpu 30)                  ;; Profile CPU for 30 seconds
+  (profile-alloc 30)                ;; Profile allocations for 30 seconds
+  (profile-section! #(your-code))   ;; Profile specific code
+  (view-flamegraph)                 ;; Open latest flamegraph
+  (profiler-ui 8080)                ;; Start web UI
+  (profiler-status)                 ;; Check profiler status
   )

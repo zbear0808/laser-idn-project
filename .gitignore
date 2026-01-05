@@ -38,6 +38,9 @@ idn-packets.log
 *.tmp
 test-*.log
 
+# Profiling results
+/profiling-results/
+
 # Local configuration (not committed)
 /config/
 /plans
