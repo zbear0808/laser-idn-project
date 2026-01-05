@@ -11,7 +11,7 @@
             [laser-show.animation.chains :as chains]
             [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
-            [laser-show.views.components.spatial-canvas :as spatial-canvas]
+            [laser-show.views.components.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.hierarchical-list :as hierarchical-list]))
 
 
@@ -380,77 +380,6 @@
                                      :effect-idx effect-idx
                                      :param-key param-key}}]})
 
-(defn- corner-pin-visual-editor
-  "Visual editor for corner pin effect with draggable corners."
-  [{:keys [projector-id effect-idx params]}]
-  (let [tl-x (get params :tl-x -1.0)
-        tl-y (get params :tl-y 1.0)
-        tr-x (get params :tr-x 1.0)
-        tr-y (get params :tr-y 1.0)
-        bl-x (get params :bl-x -1.0)
-        bl-y (get params :bl-y -1.0)
-        br-x (get params :br-x 1.0)
-        br-y (get params :br-y -1.0)]
-    {:fx/type :v-box
-     :spacing 8
-     :children [{:fx/type :label
-                 :text "Drag corners to set safety zone"
-                 :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-style: italic;"}
-                
-                {:fx/type spatial-canvas/spatial-canvas
-                 :fx/key [projector-id effect-idx :corner-pin]
-                 :width 240
-                 :height 240
-                 :bounds {:x-min -1.5 :x-max 1.5
-                         :y-min -1.5 :y-max 1.5}
-                 :points [{:id :tl :x tl-x :y tl-y :color "#FF5722" :label "TL"}
-                          {:id :tr :x tr-x :y tr-y :color "#4CAF50" :label "TR"}
-                          {:id :bl :x bl-x :y bl-y :color "#2196F3" :label "BL"}
-                          {:id :br :x br-x :y br-y :color "#FFC107" :label "BR"}]
-                 :lines [{:from :tl :to :tr :color "#7AB8FF" :line-width 2}
-                         {:from :tr :to :br :color "#7AB8FF" :line-width 2}
-                         {:from :br :to :bl :color "#7AB8FF" :line-width 2}
-                         {:from :bl :to :tl :color "#7AB8FF" :line-width 2}]
-                 :polygon {:points [:tl :tr :br :bl] :color "#4A6FA520"}
-                 :on-point-drag {:event/type :projectors/update-corner-pin
-                                :projector-id projector-id
-                                :effect-idx effect-idx
-                                :param-map {:tl {:x :tl-x :y :tl-y}
-                                           :tr {:x :tr-x :y :tr-y}
-                                           :bl {:x :bl-x :y :bl-y}
-                                           :br {:x :br-x :y :br-y}}}
-                 :show-grid true
-                 :show-axes true
-                 :show-labels true}
-                
-                {:fx/type :v-box
-                 :spacing 2
-                 :children [{:fx/type :h-box
-                            :spacing 12
-                            :alignment :center
-                            :children [{:fx/type :label
-                                       :text (format "TL: (%.2f, %.2f)" tl-x tl-y)
-                                       :style "-fx-text-fill: #FF5722; -fx-font-size: 9; -fx-font-family: 'Consolas', monospace;"}
-                                      {:fx/type :label
-                                       :text (format "TR: (%.2f, %.2f)" tr-x tr-y)
-                                       :style "-fx-text-fill: #4CAF50; -fx-font-size: 9; -fx-font-family: 'Consolas', monospace;"}]}
-                           {:fx/type :h-box
-                            :spacing 12
-                            :alignment :center
-                            :children [{:fx/type :label
-                                       :text (format "BL: (%.2f, %.2f)" bl-x bl-y)
-                                       :style "-fx-text-fill: #2196F3; -fx-font-size: 9; -fx-font-family: 'Consolas', monospace;"}
-                                      {:fx/type :label
-                                       :text (format "BR: (%.2f, %.2f)" br-x br-y)
-                                       :style "-fx-text-fill: #FFC107; -fx-font-size: 9; -fx-font-family: 'Consolas', monospace;"}]}]}
-                
-                {:fx/type :button
-                 :text "Reset to Defaults"
-                 :style "-fx-background-color: #505050; -fx-text-fill: #B0B0B0; -fx-font-size: 10; -fx-padding: 4 12;"
-                 :on-action {:event/type :projectors/reset-corner-pin
-                             :projector-id projector-id
-                             :effect-idx effect-idx}}]}))
-
 (defn- rgb-calibration-editor
   "Editor for RGB calibration effect with gain sliders."
   [{:keys [projector-id effect-idx params]}]
@@ -560,10 +489,16 @@
                  :text (str "Edit: " (name effect-id))
                  :style "-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 11;"}
                 (case effect-id
-                  :corner-pin {:fx/type corner-pin-visual-editor
-                               :projector-id projector-id
-                               :effect-idx effect-idx
-                               :params params}
+                  :corner-pin {:fx/type custom-renderers/corner-pin-visual-editor
+                               :params params
+                               :event-template {:event/type :projectors/update-corner-pin
+                                                :projector-id projector-id
+                                                :effect-idx effect-idx}
+                               :reset-event {:event/type :projectors/reset-corner-pin
+                                             :projector-id projector-id
+                                             :effect-idx effect-idx}
+                               :fx-key [:projector projector-id effect-idx]
+                               :hint-text "Drag corners to adjust output geometry"}
                   :rgb-calibration {:fx/type rgb-calibration-editor
                                     :projector-id projector-id
                                     :effect-idx effect-idx

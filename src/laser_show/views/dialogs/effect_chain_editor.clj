@@ -417,9 +417,8 @@
                             :fallback-label "Unknown Effect"
                             :on-change-event :effects/set-chain
                             :on-change-params {:col col :row row}
-                            :on-selection-event :ui/update-dialog-data
-                            :on-selection-params {:dialog-id :effect-chain-editor
-                                                  :updates {}}
+                            :on-selection-event :effects/update-selection
+                            :on-selection-params {:col col :row row}
                             :selection-key :selected-ids
                             :on-copy-fn (fn [items]
                                           (clipboard/copy-effect-chain! {:effects items}))
