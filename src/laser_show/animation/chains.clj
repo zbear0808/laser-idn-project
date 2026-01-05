@@ -127,7 +127,7 @@
    
    Returns: Item at path, or nil if not found"
   [items path]
-  (get-in items path))
+  (get-in (vec items) (vec path)))
 
 (defn find-path-by-id
   "Find the path to an item with the given ID in a chain.
@@ -284,15 +284,17 @@
    
    Returns: Updated chain with item removed"
   [items path]
-  (if (= 1 (count path))
-    ;; Direct child - remove from vector
-    (let [idx (first path)]
-      (into (subvec items 0 idx) (subvec items (inc idx))))
-    ;; Nested - recurse into parent
-    (let [[idx & rest-path] path]
-      (if (= :items (first rest-path))
-        (update-in items [idx :items] remove-at-path (vec (rest rest-path)))
-        items))))
+  (let [items (vec items)  ;; Ensure items is a vector for subvec
+        path (vec path)]   ;; Ensure path is a vector
+    (if (= 1 (count path))
+      ;; Direct child - remove from vector
+      (let [idx (first path)]
+        (into (subvec items 0 idx) (subvec items (inc idx))))
+      ;; Nested - recurse into parent
+      (let [[idx & rest-path] path]
+        (if (= :items (first rest-path))
+          (update-in items [idx :items] remove-at-path (vec (rest rest-path)))
+          items)))))
 
 (defn insert-at-path
   "Insert an item at the given path in a chain.
@@ -305,15 +307,17 @@
    
    Returns: Updated chain with item inserted"
   [items path item]
-  (if (= 1 (count path))
-    ;; Direct child - insert into vector
-    (let [idx (first path)]
-      (into (conj (subvec items 0 idx) item) (subvec items idx)))
-    ;; Nested - recurse into parent
-    (let [[idx & rest-path] path]
-      (if (= :items (first rest-path))
-        (update-in items [idx :items] insert-at-path (vec (rest rest-path)) item)
-        items))))
+  (let [items (vec items)  ;; Ensure items is a vector for subvec
+        path (vec path)]   ;; Ensure path is a vector
+    (if (= 1 (count path))
+      ;; Direct child - insert into vector
+      (let [idx (first path)]
+        (into (conj (subvec items 0 idx) item) (subvec items idx)))
+      ;; Nested - recurse into parent
+      (let [[idx & rest-path] path]
+        (if (= :items (first rest-path))
+          (update-in items [idx :items] insert-at-path (vec (rest rest-path)) item)
+          items)))))
 
 (defn update-at-path
   "Update an item at the given path in a chain.
@@ -377,14 +381,16 @@
    
    Returns: Updated chain with group replaced by its contents"
   [items path]
-  (let [group (get-item-at-path items path)]
+  (let [items (vec items)  ;; Ensure items is a vector for subvec
+        path (vec path)    ;; Ensure path is a vector
+        group (get-item-at-path items path)]
     (if (group? group)
       (if (= 1 (count path))
         ;; Direct child
         (let [idx (first path)
               before (subvec items 0 idx)
               after (subvec items (inc idx))]
-          (into (into before (:items group [])) after))
+          (into (into before (vec (:items group []))) after))
         ;; Nested
         (let [[idx & rest-path] path]
           (if (= :items (first rest-path))

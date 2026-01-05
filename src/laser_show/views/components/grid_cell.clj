@@ -1,50 +1,50 @@
 (ns laser-show.views.components.grid-cell
-  "Grid cell component - a single cue trigger button.
+  "Grid cell components with shared behavior via generic-grid-cell.
    
-   Each cell displays:
-   - Preset name if assigned
-   - Visual state (active, selected, empty)
-   - Responds to clicks for triggering
+   This namespace provides:
+   - generic-grid-cell: Configurable base component with drag/drop
+   - grid-cell: Cue grid cell (wrapper)
+   - effects-cell: Effects grid cell (wrapper)
    
-   Supports:
-   - Drag and drop between cells
-   - Right-click context menu (copy, paste, clear)"
+   Key features:
+   - DRY: Single implementation of drag-and-drop logic
+   - CSS Best Practices: State-based styling via CSS classes
+   - Flexible: Easy to add new cell types
+   
+   Styling:
+   - All background colors via CSS classes (no inline styles)
+   - State classes: grid-cell-empty, grid-cell-content, grid-cell-active
+   - Type variants: grid-cell-effects"
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.subs :as subs]
             [laser-show.events.core :as events]
-            [laser-show.css.core :as css])
-  (:import [javafx.scene.input MouseEvent MouseButton TransferMode DragEvent ClipboardContent]))
+            [laser-show.views.components.drag-drop-cell :as drag-drop])
+  (:import [javafx.scene.input MouseEvent MouseButton]))
 
 
-;; Cell Colors (from theme, with additional cell-specific colors)
+;; Style Class Builders
 
 
-(def cell-colors
-  "Color scheme for cell states.
-   Using theme colors where applicable, custom colors for cell-specific states."
-  {:empty (css/bg-light)
-   :content "#616161"       ;; Slightly lighter for content cells
-   :active (css/accent-primary)
-   :selected (css/accent-blue)
-   :hover (css/bg-hover)
-   :effects "#7E57C2"})     ;; Purple for effects cells
-
-(defn cell-background-color
-  "Determine background color based on cell state.
-   Returns a color string - this remains dynamic/inline because it depends on cell content."
-  [{:keys [active? has-content?]}]
-  (cond
-    active? (:active cell-colors)
-    has-content? (:content cell-colors)
-    :else (:empty cell-colors)))
+(defn- build-style-classes
+  "Build style-class vector based on cell state.
+   
+   Base class 'grid-cell' is always included.
+   Cell type adds 'grid-cell-<type>' (e.g., grid-cell-effects).
+   State classes are added based on display-data."
+  [cell-type {:keys [active? has-content? selected?]}]
+  (cond-> ["grid-cell" (str "grid-cell-" (name cell-type))]
+    active? (conj "grid-cell-active")
+    selected? (conj "grid-cell-selected")
+    has-content? (conj "grid-cell-content")
+    (not has-content?) (conj "grid-cell-empty")))
 
 
-;; Cell Content
+;; Label Functions
 
 
 (defn cell-label
-  "Display text for a cell.
+  "Display text for a cue cell.
    Shows first preset name, or preset count if multiple."
   [{:keys [first-preset-id preset-count]}]
   (cond
@@ -54,23 +54,109 @@
                " +" (dec preset-count))))
 
 
-;; Style Class Helpers
+(defn effects-label
+  "Display text for an effects cell.
+   Shows effect count if any effects present."
+  [{:keys [effect-count has-effects?]}]
+  (if has-effects?
+    (str effect-count " fx")
+    ""))
 
 
-(defn cell-style-classes
-  "Build style-class vector based on cell state.
-   Structural styles are in CSS, state-specific styles added dynamically."
-  [{:keys [selected? active?]}]
-  (cond-> ["grid-cell"]
-    selected? (conj "grid-cell-selected")
-    active? (conj "grid-cell-active")))
+;; Generic Grid Cell Component
 
 
-;; Grid Cell Component
+(defn generic-grid-cell
+  "Generic grid cell with configurable behavior.
+   
+   Props:
+   - :col, :row - Cell coordinates
+   - :cell-type - :grid or :effects (used for CSS class)
+   - :display-data - Map with cell state (:active?, :has-content?, :selected?)
+   - :on-click - Event map for click handling
+   - :on-right-click - Event map for right-click (augmented with :col, :row)
+   - :drag-config - Map with :drag-type and :on-drop event
+   - :label-fn - Function (fn [display-data] -> string)
+   
+   Example:
+   {:fx/type generic-grid-cell
+    :col 0 :row 0
+    :cell-type :grid
+    :display-data {:active? true :has-content? true}
+    :on-click {:event/type :grid/cell-clicked}
+    :on-right-click {:event/type :cue-chain/open-editor}
+    :drag-config {:drag-type :grid-cell
+                  :on-drop {:event/type :grid/move-cell}}
+    :label-fn cell-label}"
+  [{:keys [col row cell-type display-data on-click on-right-click 
+           drag-config label-fn]}]
+  (let [{:keys [active? has-content?]} display-data
+        label-text (label-fn display-data)
+        style-classes (build-style-classes cell-type display-data)
+        ;; Create drag handlers with current values (re-created on each render)
+        drag-type (:drag-type drag-config)
+        on-drop (:on-drop drag-config)]
+    {:fx/type :stack-pane
+     :pref-width 80
+     :pref-height 60
+     :style-class style-classes
+     
+     ;; Mouse click handler - handle left/right click and double-click
+     :on-mouse-clicked (fn [^MouseEvent e]
+                         (let [button (.getButton e)
+                               click-count (.getClickCount e)]
+                           (cond
+                             ;; Right-click or double-click: dispatch right-click event
+                             (or (= button MouseButton/SECONDARY)
+                                 (>= click-count 2))
+                             (events/dispatch! (assoc on-right-click 
+                                                     :col col :row row))
+                             
+                             ;; Single left-click: dispatch click event
+                             :else
+                             (events/dispatch! (assoc on-click 
+                                                     :col col :row row
+                                                     :has-content? has-content?)))))
+     
+     ;; Drag handlers - use inline handlers that are re-created on each render
+     ;; This ensures has-content? and other values are always current
+     :on-drag-detected (when drag-config
+                         (drag-drop/make-drag-detected-handler
+                           {:drag-type drag-type
+                            :col col
+                            :row row
+                            :has-content? has-content?}))
+     
+     :on-drag-over (when drag-config
+                     (drag-drop/make-drag-over-handler
+                       {:drag-type drag-type}))
+     
+     :on-drag-dropped (when drag-config
+                        (drag-drop/make-drag-dropped-handler
+                          {:drag-type drag-type
+                           :col col
+                           :row row
+                           :on-drop on-drop}))
+     
+     :children [{:fx/type :v-box
+                 :alignment :center
+                 :spacing 4
+                 :children (filterv some?
+                                   [{:fx/type :label
+                                     :text label-text
+                                     :style-class "grid-cell-label"}
+                                    (when active?
+                                      {:fx/type :region
+                                       :pref-width 8
+                                       :pref-height 8
+                                       :style-class "grid-cell-active-indicator"})])}]}))
+
+
+;; Cue Grid Cell
 
 
 (defn grid-cell
-  "A single grid cell button with drag/drop and context menu support.
+  "Cue grid cell - wrapper around generic-grid-cell.
    
    Props:
    - col: Column index
@@ -78,186 +164,56 @@
    
    Behavior:
    - Left-click: Trigger the cell (if has content) or select (if empty)
-   - Right-click: Open cue chain editor
-   - Double-click: Open cue chain editor
+   - Right-click/Double-click: Open cue chain editor
    - Drag from cell: Start dragging cell content
-   - Drop on cell: Move cell content
-   
-   Styling:
-   - Structural styles (border-radius, cursor) via CSS classes
-   - Background color is inline because it's computed from cell state
-   
-   Note: Primary click handler uses map-based events with :fx/event for button detection.
-   Drag handlers still use functions as they require imperative JavaFX API calls."
+   - Drop on cell: Move cell content"
   [{:keys [fx/context col row]}]
-  (let [{:keys [first-preset-id preset-count active? selected? has-content?] :as display-data}
-        (fx/sub-ctx context subs/cell-display-data col row)
-        bg-color (cell-background-color display-data)
-        label-text (cell-label display-data)]
-    {:fx/type :stack-pane
-     :pref-width 80
-     :pref-height 60
-     ;; Use style-class for structural/state styles
-     :style-class (cell-style-classes display-data)
-     ;; Background color is dynamic - keep inline
-     :style (str "-fx-background-color: " bg-color ";")
-     
-     ;; Mouse click handler - handle left/right click and double-click
-     :on-mouse-clicked (fn [^MouseEvent e]
-                         (let [button (.getButton e)
-                               click-count (.getClickCount e)]
-                           (cond
-                             ;; Right-click or double-click: open cue chain editor
-                             (or (= button MouseButton/SECONDARY)
-                                 (>= click-count 2))
-                             (do
-                               (events/dispatch! {:event/type :grid/select-cell :col col :row row})
-                               (events/dispatch! {:event/type :cue-chain/open-editor
-                                                  :col col :row row}))
-                             
-                             ;; Single left-click: trigger or select
-                             :else
-                             (events/dispatch! {:event/type :grid/cell-clicked
-                                                :col col
-                                                :row row
-                                                :has-content? has-content?}))))
-     
-     ;; Drag detection - start drag when content exists
-     :on-drag-detected (fn [^MouseEvent e]
-                         (when has-content?
-                           (let [source (.getSource e)
-                                 db (.startDragAndDrop source (into-array TransferMode [TransferMode/MOVE]))
-                                 content (ClipboardContent.)]
-                             (.putString content (pr-str {:col col :row row :type :grid-cell}))
-                             (.setContent db content)
-                             (.consume e))))
-     
-     ;; Drag over - accept drops
-     :on-drag-over (fn [^DragEvent e]
-                     (when (and (.getDragboard e)
-                                (.hasString (.getDragboard e)))
-                       (let [data (try (read-string (.getString (.getDragboard e))) (catch Exception _ nil))]
-                         (when (= :grid-cell (:type data))
-                           (.acceptTransferModes e (into-array TransferMode [TransferMode/MOVE])))))
-                     (.consume e))
-     
-     ;; Drag dropped - complete the move
-     :on-drag-dropped (fn [^DragEvent e]
-                        (let [db (.getDragboard e)]
-                          (when (.hasString db)
-                            (let [data (try (read-string (.getString db)) (catch Exception _ nil))]
-                              (when (and data (= :grid-cell (:type data)))
-                                (let [from-col (:col data)
-                                      from-row (:row data)]
-                                  ;; Dispatch move event
-                                  (events/dispatch! {:event/type :grid/move-cell
-                                                     :from-col from-col :from-row from-row
-                                                     :to-col col :to-row row})
-                                  (.setDropCompleted e true)))))
-                          (when-not (.isDropCompleted e)
-                            (.setDropCompleted e false))
-                          (.consume e)))
-     
-     :children [{:fx/type :v-box
-                 :alignment :center
-                 :spacing 4
-                 :children (filterv some?
-                                    [{:fx/type :label
-                                      :text label-text
-                                      :style-class "grid-cell-label"}
-                                     (when active?
-                                       {:fx/type :region
-                                        :pref-width 8
-                                        :pref-height 8
-                                        :style-class "grid-cell-active-indicator"})])}]}))
+  (let [display-data (fx/sub-ctx context subs/cell-display-data col row)
+        ;; Map the subscription data to the generic component's expected format
+        adapted-data (assoc display-data :has-content? (:has-content? display-data))]
+    {:fx/type generic-grid-cell
+     :col col
+     :row row
+     :cell-type :grid
+     :display-data adapted-data
+     :on-click {:event/type :grid/cell-clicked}
+     :on-right-click {:event/type :cue-chain/open-editor}
+     :drag-config {:drag-type :grid-cell
+                   :on-drop {:event/type :grid/move-cell}}
+     :label-fn cell-label}))
 
 
-;; Effects Cell Component (for effects grid)
+;; Effects Grid Cell
 
 
 (defn effects-cell
-  "A single effects grid cell with drag/drop and context menu support.
+  "Effects grid cell - wrapper around generic-grid-cell.
    
    Props:
    - col: Column index
    - row: Row index
    
-   Styling:
-   - Structural styles via CSS classes
-   - Background color is inline because it's computed from cell state"
+   Behavior:
+   - Left-click: Toggle the effect cell
+   - Right-click: Open effect chain editor dialog
+   - Drag from cell: Start dragging effects
+   - Drop on cell: Move effects"
   [{:keys [fx/context col row]}]
-  (let [{:keys [effect-count first-effect-id active? has-effects?] :as display-data}
-        (fx/sub-ctx context subs/effect-cell-display-data col row)
-        bg-color (cond
-                   active? (:active cell-colors)
-                   has-effects? (:effects cell-colors)
-                   :else (:empty cell-colors))
-        label-text (if has-effects?
-                     (str effect-count " fx")
-                     "")]
-    {:fx/type :stack-pane
-     :pref-width 80
-     :pref-height 60
-     :style-class (cond-> ["grid-cell"]
-                    active? (conj "grid-cell-active"))
-     ;; Background color is dynamic - keep inline
-     :style (str "-fx-background-color: " bg-color ";")
-     
-     ;; Mouse click handler
-     :on-mouse-clicked (fn [^MouseEvent e]
-                         (let [button (.getButton e)]
-                           (if (= button MouseButton/SECONDARY)
-                             ;; Right-click: select cell and open editor dialog
-                             (do
-                               (events/dispatch! {:event/type :effects/select-cell :col col :row row})
-                               (events/dispatch! {:event/type :ui/open-dialog
-                                                  :dialog-id :effect-chain-editor
-                                                  :data {:col col :row row}}))
-                             ;; Left-click: toggle cell
-                             (events/dispatch! {:event/type :effects/toggle-cell :col col :row row}))))
-     
-     ;; Drag detection
-     :on-drag-detected (fn [^MouseEvent e]
-                         (when has-effects?
-                           (let [source (.getSource e)
-                                 db (.startDragAndDrop source (into-array TransferMode [TransferMode/MOVE]))
-                                 content (ClipboardContent.)]
-                             (.putString content (pr-str {:col col :row row :type :effects-cell}))
-                             (.setContent db content)
-                             (.consume e))))
-     
-     ;; Drag over
-     :on-drag-over (fn [^DragEvent e]
-                     (when (and (.getDragboard e)
-                                (.hasString (.getDragboard e)))
-                       (let [data (try (read-string (.getString (.getDragboard e))) (catch Exception _ nil))]
-                         (when (= :effects-cell (:type data))
-                           (.acceptTransferModes e (into-array TransferMode [TransferMode/MOVE])))))
-                     (.consume e))
-     
-     ;; Drag dropped
-     :on-drag-dropped (fn [^DragEvent e]
-                        (let [db (.getDragboard e)]
-                          (when (.hasString db)
-                            (let [data (try (read-string (.getString db)) (catch Exception _ nil))]
-                              (when (and data (= :effects-cell (:type data)))
-                                (events/dispatch! {:event/type :effects/move-cell
-                                                   :from-col (:col data) :from-row (:row data)
-                                                   :to-col col :to-row row})
-                                (.setDropCompleted e true))))
-                          (when-not (.isDropCompleted e)
-                            (.setDropCompleted e false))
-                          (.consume e)))
-     
-     :children [{:fx/type :v-box
-                 :alignment :center
-                 :spacing 4
-                 :children (filterv some?
-                                    [{:fx/type :label
-                                      :text label-text
-                                      :style-class "grid-cell-label"}
-                                     (when active?
-                                       {:fx/type :region
-                                        :pref-width 8
-                                        :pref-height 8
-                                        :style-class "grid-cell-active-indicator"})])}]}))
+  (let [display-data (fx/sub-ctx context subs/effect-cell-display-data col row)
+        ;; Map the subscription data - effects cells use has-effects? instead of has-content?
+        adapted-data {:active? (:active? display-data)
+                      :has-content? (:has-effects? display-data)
+                      :effect-count (:effect-count display-data)
+                      :has-effects? (:has-effects? display-data)}]
+    {:fx/type generic-grid-cell
+     :col col
+     :row row
+     :cell-type :effects
+     :display-data adapted-data
+     :on-click {:event/type :effects/toggle-cell}
+     :on-right-click {:event/type :ui/open-dialog
+                      :dialog-id :effect-chain-editor
+                      :data {:col col :row row}}
+     :drag-config {:drag-type :effects-cell
+                   :on-drop {:event/type :effects/move-cell}}
+     :label-fn effects-label}))
