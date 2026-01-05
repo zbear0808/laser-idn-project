@@ -2021,33 +2021,8 @@
    - :col, :row - Grid cell coordinates
    - :name (optional) - Group name"
   [{:keys [col row name state]}]
-  (let [group-name (or name "New Group")
-        selected-paths (get-in state [:cue-chain-editor :selected-paths] #{})
-        items-vec (get-in state (cue-chain-path col row) [])]
-    (if (seq selected-paths)
-      (let [root-paths (filter-to-root-paths selected-paths)
-            all-paths (vec (chains/paths-in-chain items-vec))
-            sorted-paths (sort-by #(.indexOf all-paths %) root-paths)
-            selected-items (mapv #(get-in items-vec (vec %)) sorted-paths)
-            ids-to-remove (into #{} (map :id selected-items))
-            first-path (first sorted-paths)
-            insert-at-top-level (first first-path)
-            after-remove (remove-items-by-ids items-vec ids-to-remove)
-            items-removed-before-insert (count
-                                          (filter
-                                            (fn [path]
-                                              (and (= 1 (count path))
-                                                   (< (first path) insert-at-top-level)))
-                                            sorted-paths))
-            adjusted-insert (- insert-at-top-level items-removed-before-insert)
-            new-group (make-group group-name selected-items)
-            new-items (insert-items-at-index after-remove adjusted-insert [new-group])
-            new-group-path [adjusted-insert]]
-        {:state (-> state
-                    (assoc-in (cue-chain-path col row) new-items)
-                    (assoc-in [:cue-chain-editor :selected-paths] #{new-group-path})
-                    mark-dirty)})
-      {:state state})))
+  (let [config (chain-handlers/cue-chain-config col row)]
+    {:state (chain-handlers/handle-group-selected state config name)}))
 
 (defn- handle-cue-chain-ungroup
   "Ungroup a group, moving contents to parent level.
@@ -2055,25 +2030,8 @@
    - :col, :row - Grid cell coordinates
    - :path - Path to the group"
   [{:keys [col row path state]}]
-  (let [items-vec (get-in state (cue-chain-path col row) [])
-        item (get-in items-vec path)]
-    (if (chains/group? item)
-      (let [group-items (:items item [])
-            is-top-level? (= 1 (count path))
-            group-idx (if is-top-level? (first path) (last path))
-            parent-path (if is-top-level? [] (vec (butlast (butlast path))))
-            parent-vec (if is-top-level? items-vec (get-in items-vec (conj parent-path :items) []))
-            new-parent (vec (concat (subvec parent-vec 0 group-idx)
-                                    group-items
-                                    (subvec parent-vec (inc group-idx))))
-            new-items (if is-top-level?
-                        new-parent
-                        (assoc-in items-vec (conj parent-path :items) new-parent))]
-        {:state (-> state
-                    (assoc-in (cue-chain-path col row) new-items)
-                    (assoc-in [:cue-chain-editor :selected-paths] #{})
-                    mark-dirty)})
-      {:state state})))
+  (let [config (chain-handlers/cue-chain-config col row)]
+    {:state (chain-handlers/handle-ungroup state config path)}))
 
 (defn- handle-cue-chain-toggle-collapse
   "Toggle a group's collapsed state.
@@ -2081,13 +2039,8 @@
    - :col, :row - Grid cell coordinates
    - :path - Path to the group"
   [{:keys [col row path state]}]
-  (let [items-vec (get-in state (cue-chain-path col row) [])
-        item (get-in items-vec path)]
-    (if (chains/group? item)
-      {:state (update-in state (cue-chain-path col row)
-                         (fn [items]
-                           (update-in items (conj path :collapsed?) not)))}
-      {:state state})))
+  (let [config (chain-handlers/cue-chain-config col row)]
+    {:state (chain-handlers/handle-toggle-collapse state config path)}))
 
 (defn- handle-cue-chain-set-item-enabled
   "Set enabled state of an item.
@@ -2202,9 +2155,11 @@
 (defn- handle-cue-chain-start-rename
   "Start renaming a group.
    Event keys:
-   - :path - Path to the group"
-  [{:keys [path state]}]
-  {:state (assoc-in state [:cue-chain-editor :renaming-path] path)})
+   - :path - Path to the group
+   - :col, :row - Grid cell coordinates"
+  [{:keys [path col row state]}]
+  (let [config (chain-handlers/cue-chain-config col row)]
+    {:state (chain-handlers/handle-start-rename state config path)}))
 
 (defn- handle-cue-chain-rename-group
   "Rename a group.
@@ -2213,19 +2168,14 @@
    - :path - Path to the group
    - :name - New name"
   [{:keys [col row path name state]}]
-  (let [items-vec (get-in state (cue-chain-path col row) [])
-        item (get-in items-vec path)]
-    (if (chains/group? item)
-      {:state (-> state
-                  (assoc-in (into (cue-chain-path col row) (conj path :name)) name)
-                  (assoc-in [:cue-chain-editor :renaming-path] nil)
-                  mark-dirty)}
-      {:state state})))
+  (let [config (chain-handlers/cue-chain-config col row)]
+    {:state (chain-handlers/handle-rename-item state config path name)}))
 
 (defn- handle-cue-chain-cancel-rename
   "Cancel renaming a group."
-  [{:keys [state]}]
-  {:state (assoc-in state [:cue-chain-editor :renaming-path] nil)})
+  [{:keys [col row state]}]
+  (let [config (chain-handlers/cue-chain-config col row)]
+    {:state (chain-handlers/handle-cancel-rename state config)}))
 
 
 ;; Cue Chain ID-Based Selection and Manipulation Events

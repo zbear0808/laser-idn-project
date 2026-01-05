@@ -12,7 +12,8 @@
             [laser-show.idn.stream :as idn-stream]
             [laser-show.idn.output-config :as output-config]
             [laser-show.animation.types :as t]
-            [laser-show.idn.hello :as hello])
+            [laser-show.idn.hello :as hello]
+            [laser-show.common.util :as u])
   (:import [java.net DatagramSocket]))
 
 
@@ -49,10 +50,9 @@
      - :port - Target UDP port (default 7255)
      - :channel-id - IDN channel ID (default 0)
      - :output-config - OutputConfig for bit depth (default 8-bit color, 16-bit XY)
-     - :log-callback - Optional function called with each packet for logging
    
    Returns an engine map that can be started with start!"
-  [target-host frame-provider & {:keys [fps port channel-id output-config log-callback]
+  [target-host frame-provider & {:keys [fps port channel-id output-config]
                                   :or {fps DEFAULT_FPS
                                        port DEFAULT_PORT
                                        channel-id DEFAULT_CHANNEL_ID
@@ -63,7 +63,6 @@
    :fps fps
    :channel-id channel-id
    :output-config output-config
-   :log-callback (atom log-callback)
    :running? (atom false)
    :socket (atom nil)
    :thread (atom nil)
@@ -129,7 +128,7 @@
    Continuously gets frames from the provider and sends them as IDN packets."
   [engine]
   (let [{:keys [target-host target-port frame-provider fps
-                log-callback running? socket stats output-config]} engine
+                running? socket stats output-config]} engine
         frame-interval-ms (/ 1000.0 fps)]
     
     (log/info (format "Streaming loop started: %s:%d @ %d FPS (%s)"
@@ -144,10 +143,9 @@
           (let [frame (frame-provider)
                 frame (or frame (t/empty-frame))
                 idn-packet (create-idn-stream-packet engine frame)
-                hello-packet (hello/wrap-channel-message idn-packet)
-                log-fn @log-callback]
+                hello-packet (hello/wrap-channel-message idn-packet)]
             
-            (hello/send-packet @socket hello-packet target-host target-port log-fn)
+            (hello/send-packet @socket hello-packet target-host target-port)
             
             (let [now (System/currentTimeMillis)
                   last-time (:last-frame-time @stats)
@@ -158,7 +156,7 @@
                      :actual-fps actual-fps)))
           
           (catch Exception e
-            (log/error "Streaming error:" (.getMessage e))))
+            (log/error "Streaming error:" (u/exception->map e))))
         
         (let [elapsed (- (System/currentTimeMillis) loop-start)
               sleep-time (- frame-interval-ms elapsed)]
@@ -212,7 +210,7 @@
         (let [timestamp-us (current-timestamp-us engine)
               close-packet (idn-stream/close-channel-packet (:channel-id engine) timestamp-us)
               hello-packet (hello/wrap-channel-message close-packet)]
-          (hello/send-packet socket hello-packet (:target-host engine) (:target-port engine) nil))
+          (hello/send-packet socket hello-packet (:target-host engine) (:target-port engine)))
         (catch Exception e
           (log/error "Error sending close packet:" (.getMessage e))))
       
@@ -233,11 +231,6 @@
   "Get current streaming statistics."
   [engine]
   @(:stats engine))
-
-(defn set-log-callback!
-  "Update the logging callback function."
-  [engine callback]
-  (reset! (:log-callback engine) callback))
 
 (defn get-output-config
   "Get the current output configuration."

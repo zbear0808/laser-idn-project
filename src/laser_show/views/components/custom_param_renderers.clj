@@ -125,7 +125,7 @@
                  :x-max (or (:max x-spec) 2.0)
                  :y-min (or (:min y-spec) -2.0)
                  :y-max (or (:max y-spec) 2.0)}))
-            {:x-min -1.5 :x-max 1.5 :y-min -1.5 :y-max 1.5})
+            {:x-min -1.0 :x-max 1.0 :y-min -1.0 :y-max 1.0})
         
         ;; Build on-point-drag event - use event-template if provided, else legacy pattern
         corner-param-map {:tl {:x :tl-x :y :tl-y}
@@ -343,4 +343,3 @@
                 :effect-path effect-path
                 :channel active-channel
                 :current-points active-points}]}))
-

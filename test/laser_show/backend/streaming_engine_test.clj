@@ -22,13 +22,3 @@
       (is (map? stats) "Stats should be a map")
       (is (contains? stats :frames-sent) "Stats should include frames-sent")
       (is (zero? (:frames-sent stats)) "Initial frames-sent should be zero"))))
-
-(deftest log-callback-behavior-test
-  (testing "Log callback can be set and functions properly"
-    (let [frame-provider (fn [] (t/empty-frame))
-          engine (se/create-engine "192.168.1.100" frame-provider)
-          log-calls (atom [])
-          callback (fn [data] (swap! log-calls conj data))]
-      (se/set-log-callback! engine callback)
-      ;; Test behavior, not internal structure - callback should be set
-      (is (fn? (se/set-log-callback! engine callback))))))

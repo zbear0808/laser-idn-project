@@ -190,15 +190,15 @@
   "Calculate total IDN message size without channel configuration"
   [point-count output-config]
   (let [bytes-per-pt (output-config/bytes-per-sample output-config)]
-    (+ (channel-message-header-size)
-       (frame-chunk-header-size)
+    (+ channel-message-header-size
+       frame-chunk-header-size
        (* bytes-per-pt point-count))))
 
 (defn max-points-for-size
   "Calculate maximum points that fit in given packet size (without config)"
   [max-size output-config]
   (let [bytes-per-pt (output-config/bytes-per-sample output-config)]
-    (quot (- max-size (channel-message-header-size) (frame-chunk-header-size))
+    (quot (- max-size channel-message-header-size frame-chunk-header-size)
           bytes-per-pt)))
 
 
@@ -390,7 +390,7 @@
   "Create a packet to close a channel.
    Uses Void chunk type with Close flag set."
   [channel-id timestamp-us]
-  (let [total-size (+ (channel-message-header-size) (channel-config-header-size))
+  (let [total-size (+ channel-message-header-size channel-config-header-size)
         buf (ByteBuffer/allocate total-size)]
 
     (.order buf ByteOrder/BIG_ENDIAN)

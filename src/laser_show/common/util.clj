@@ -144,3 +144,13 @@
          (map vec)
          (filter (comp some? second)))
         (partition 2 kvs)))
+
+(defn exception->map
+  "Converts an exception to a map with useful debugging information.
+   Includes the message, class, cause, and full stacktrace."
+  [^Throwable e]
+  {:message (.getMessage e)
+   :class (-> e .getClass .getName)
+   :cause (when-let [cause (.getCause e)]
+            (exception->map cause))
+   :stacktrace (mapv str (.getStackTrace e))})
