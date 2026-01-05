@@ -263,7 +263,7 @@
    (dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})"
   [event]
   ;; Manually inject co-effects and process effects
-  (let [enriched-event (assoc event 
+  (let [enriched-event (assoc event
                                :state (state/get-state)
                                :time (System/currentTimeMillis))
         effects (handlers/handle-event enriched-event)]
@@ -273,10 +273,14 @@
     
     ;; Handle clipboard effects (for keyboard shortcuts in effect chain editor)
     (when-let [effects-to-copy (:clipboard/copy-effects effects)]
-      (effect-clipboard-copy-effects effects-to-copy nil)) 
+      (effect-clipboard-copy-effects effects-to-copy nil))
     
     (when-let [paste-params (:clipboard/paste-effects effects)]
       (effect-clipboard-paste-effects paste-params dispatch!))
+    
+    ;; Handle projector scanning effect (for auto-scan on startup)
+    (when-let [scan-params (:projectors/scan effects)]
+      (effect-projectors-scan scan-params dispatch!))
     
     ;; Handle dispatch effect (for event chaining)
     (when-let [event-to-dispatch (:dispatch effects)]

@@ -39,7 +39,7 @@
 
 (defn- service-entry-item
   "Single service/output entry within a device.
-   Shows service name and add button for multi-output devices."
+   Shows service name and add button (+ icon) for multi-output devices."
   [{:keys [device service configured?]}]
   (let [{:keys [service-id name]} service
         service-display-name (or name (str "Output " service-id))]
@@ -53,18 +53,19 @@
                  :style (str "-fx-text-fill: " (if configured? "#606060" "#B0B0B0") "; -fx-font-size: 11;")}
                 {:fx/type :region :h-box/hgrow :always}
                 {:fx/type :button
-                 :text (if configured? "Added" "Add")
+                 :text (if configured? "✓" "+")
                  :disable configured?
                  :style (str "-fx-background-color: " (if configured? "#404040" "#4A6FA5")
                             "; -fx-text-fill: " (if configured? "#606060" "white")
-                            "; -fx-font-size: 10; -fx-padding: 2 8;")
+                            "; -fx-font-size: 14; -fx-font-weight: bold; -fx-padding: 2 8;"
+                            "; -fx-min-width: 28; -fx-min-height: 24;")
                  :on-action {:event/type :projectors/add-service
                              :device device
                              :service service}}]}))
 
 (defn- discovered-device-item
   "Single discovered device in the list.
-   For devices with multiple services, shows expandable service list.
+   For devices with multiple services, shows expandable service list (click anywhere to expand).
    For single-service devices, shows inline add button."
   [{:keys [device configured-services expanded? on-toggle-expand]}]
   (let [{:keys [address host-name status services]} device
@@ -77,6 +78,10 @@
         ;; For no-service devices (service-id 0), check if configured
         no-service-configured? (and (zero? service-count)
                                     (contains? configured-services [address 0]))
+        ;; For multi-service devices, check if all services are already configured
+        all-services-configured? (and has-multiple-services?
+                                      (every? #(contains? configured-services [address (:service-id %)])
+                                              services))
         device-status (cond
                         (:offline status) :offline
                         (:occupied status) :occupied
@@ -93,12 +98,11 @@
         ;; Build header children (filter out nil)
         header-children (filterv some?
                                  (concat
-                                   ;; Expand button for multi-service devices
+                                   ;; Expand indicator (visual only) for multi-service devices
                                    (when has-multiple-services?
-                                     [{:fx/type :button
+                                     [{:fx/type :label
                                        :text (if expanded? "▼" "▶")
-                                       :style "-fx-background-color: transparent; -fx-text-fill: #808080; -fx-font-size: 10; -fx-padding: 2 4; -fx-min-width: 20;"
-                                       :on-action on-toggle-expand}])
+                                       :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-padding: 2 4; -fx-min-width: 20;"}])
                                    ;; Status indicator and device info
                                    [{:fx/type status-indicator
                                      :status device-status}
@@ -110,15 +114,27 @@
                                                  :spacing 8
                                                  :children address-info-children}]}
                                     {:fx/type :region :h-box/hgrow :always}]
+                                   ;; For multi-service devices, show "Add All" button
+                                   (when has-multiple-services?
+                                     [{:fx/type :button
+                                       :text (if all-services-configured? "✓ All" "+ All")
+                                       :disable all-services-configured?
+                                       :style (str "-fx-background-color: " (if all-services-configured? "#404040" "#4CAF50")
+                                                  "; -fx-text-fill: " (if all-services-configured? "#606060" "white")
+                                                  "; -fx-font-size: 11; -fx-font-weight: bold; -fx-padding: 4 10;")
+                                       :on-action {:event/type :projectors/add-all-services
+                                                   :device device}}])
                                    ;; For single-service or no-service devices, show add button directly
                                    (when (not has-multiple-services?)
                                      [{:fx/type :button
                                        :text (cond
-                                               single-service-configured? "Added"
-                                               no-service-configured? "Added"
-                                               :else "Add →")
+                                               single-service-configured? "✓"
+                                               no-service-configured? "✓"
+                                               :else "+")
                                        :disable (or single-service-configured? no-service-configured?)
-                                       :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-font-size: 11; -fx-padding: 4 12;"
+                                       :style (str "-fx-background-color: " (if (or single-service-configured? no-service-configured?) "#404040" "#4CAF50")
+                                                  "; -fx-text-fill: " (if (or single-service-configured? no-service-configured?) "#606060" "white")
+                                                  "; -fx-font-size: 16; -fx-font-weight: bold; -fx-padding: 4 12; -fx-min-width: 32;")
                                        :on-action {:event/type :projectors/add-device
                                                    :device device}}])))]
     {:fx/type :v-box
@@ -126,12 +142,14 @@
      :children
      (vec
        (concat
-         ;; Device header row
+         ;; Device header row - clickable anywhere for multi-service devices
          [{:fx/type :h-box
            :spacing 8
            :alignment :center-left
            :padding 8
-           :style "-fx-background-color: #3D3D3D; -fx-background-radius: 4;"
+           :style (str "-fx-background-color: #3D3D3D; -fx-background-radius: 4;"
+                       (when has-multiple-services? " -fx-cursor: hand;"))
+           :on-mouse-clicked (when has-multiple-services? on-toggle-expand)
            :children header-children}]
          ;; Expanded services list for multi-service devices
          (when (and has-multiple-services? expanded?)

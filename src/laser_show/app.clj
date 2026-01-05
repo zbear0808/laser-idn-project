@@ -57,6 +57,7 @@
   "Start the laser show application.
    
    Initializes state, creates renderer, and mounts the UI.
+   Auto-scans for IDN devices on startup.
    Returns the app instance."
   []
   (log/info "Starting Laser Show application...")
@@ -71,6 +72,10 @@
   (let [renderer (create-renderer)]
     (reset! *renderer renderer)
     (fx/mount-renderer (state/get-context-atom) renderer))
+  
+  ;; Auto-scan for IDN devices on startup
+  (log/info "Starting automatic device discovery...")
+  (events/dispatch! {:event/type :projectors/scan-network})
   
   (log/info "Laser Show application started.")
   @*renderer)

@@ -1390,10 +1390,9 @@
                             (first services))
         service-id (if default-service (:service-id default-service) 0)
         service-name (when default-service (:name default-service))
-        base-name (or (:host-name device) host)
-        name (if service-name
-               (str base-name " - " service-name)
-               base-name)
+        host-name (:host-name device)
+        ;; Prefer service name, then host name, then IP address
+        name (or service-name host-name host)
         projector-id (keyword (str "projector-" (System/currentTimeMillis)))
         ;; Default effect chain with color calibration and corner pin
         default-effects [{:effect-id :rgb-calibration
@@ -1430,10 +1429,9 @@
   (let [host (:address device)
         service-id (:service-id service)
         service-name (:name service)
-        base-name (or (:host-name device) host)
-        name (if service-name
-               (str base-name " - " service-name)
-               (str base-name " - Output " service-id))
+        host-name (:host-name device)
+        ;; Prefer service name, then host name, then IP address
+        name (or service-name host-name host)
         projector-id (keyword (str "projector-" (System/currentTimeMillis) "-" service-id))
         ;; Default effect chain with color calibration and corner pin
         default-effects [{:effect-id :rgb-calibration
@@ -1461,6 +1459,52 @@
     {:state (-> state
                 (assoc-in [:projectors :items projector-id] projector-config)
                 (assoc-in [:projectors :active-projector] projector-id)
+                mark-dirty)}))
+
+(defn- handle-projectors-add-all-services
+  "Add all services from a discovered device as configured projectors."
+  [{:keys [device state]}]
+  (let [host (:address device)
+        services (:services device [])
+        host-name (:host-name device)
+        now (System/currentTimeMillis)
+        ;; Create projector configs for each service
+        new-projectors (reduce
+                        (fn [acc [idx service]]
+                          (let [service-id (:service-id service)
+                                service-name (:name service)
+                                ;; Prefer service name, then host name, then IP address
+                                name (or service-name host-name host)
+                                projector-id (keyword (str "projector-" now "-" service-id "-" idx))
+                                default-effects [{:effect-id :rgb-calibration
+                                                  :id (random-uuid)
+                                                  :enabled? true
+                                                  :params {:r-gain 1.0 :g-gain 1.0 :b-gain 1.0}}
+                                                 {:effect-id :corner-pin
+                                                  :id (random-uuid)
+                                                  :enabled? true
+                                                  :params {:tl-x -1.0 :tl-y 1.0
+                                                           :tr-x 1.0 :tr-y 1.0
+                                                           :bl-x -1.0 :bl-y -1.0
+                                                           :br-x 1.0 :br-y -1.0}}]
+                                projector-config {:name name
+                                                  :host host
+                                                  :port (:port device 7255)
+                                                  :service-id service-id
+                                                  :service-name service-name
+                                                  :unit-id (:unit-id device)
+                                                  :enabled? true
+                                                  :effects default-effects
+                                                  :output-config {:color-bit-depth 8
+                                                                  :xy-bit-depth 16}
+                                                  :status {:connected? false}}]
+                            (assoc acc projector-id projector-config)))
+                        {}
+                        (map-indexed vector services))
+        first-projector-id (first (keys new-projectors))]
+    {:state (-> state
+                (update-in [:projectors :items] merge new-projectors)
+                (assoc-in [:projectors :active-projector] first-projector-id)
                 mark-dirty)}))
 
 (defn- handle-projectors-add-manual
@@ -2892,6 +2936,7 @@
     :projectors/scan-failed (handle-projectors-scan-failed event)
     :projectors/add-device (handle-projectors-add-device event)
     :projectors/add-service (handle-projectors-add-service event)
+    :projectors/add-all-services (handle-projectors-add-all-services event)
     :projectors/add-manual (handle-projectors-add-manual event)
     :projectors/select-projector (handle-projectors-select-projector event)
     :projectors/remove-projector (handle-projectors-remove-projector event)
