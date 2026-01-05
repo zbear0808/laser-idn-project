@@ -5,7 +5,14 @@
      (start)           - Start the app
      (stop)            - Stop the app
      (watch-styles!)   - Enable CSS hot-reload (eval style def to update UI)
-     (unwatch-styles!) - Disable CSS hot-reload")
+     (unwatch-styles!) - Disable CSS hot-reload
+     
+   Dev Tools (requires :dev alias):
+     (help)            - List all cljfx types
+     (help :label)     - Show props for a specific type
+     (help :label :text) - Show details for a specific prop
+     (help-ui)         - Open interactive reference browser
+     (explain-desc desc) - Validate a cljfx description")
 
 
 ;; State
@@ -99,6 +106,62 @@
   (println "👁️  Stopped watching styles"))
 
 
+;; cljfx Dev Tools
+;; These functions provide convenient access to cljfx.dev utilities
+;; They require the :dev alias to be active
+
+
+(defn help
+  "Look up cljfx types and props documentation.
+   
+   Usage:
+     (help)            - List all available types
+     (help :label)     - Show props for a specific type
+     (help :label :text) - Show details for a specific prop
+   
+   Note: Requires the :dev alias (cljfx.dev dependency)."
+  ([]
+   (if-let [help-fn (try (requiring-resolve 'cljfx.dev/help) (catch Exception _ nil))]
+     (help-fn)
+     (println "⚠️  cljfx.dev not available. Start REPL with: clj -M:dev")))
+  ([type-kw]
+   (if-let [help-fn (try (requiring-resolve 'cljfx.dev/help) (catch Exception _ nil))]
+     (help-fn type-kw)
+     (println "⚠️  cljfx.dev not available. Start REPL with: clj -M:dev")))
+  ([type-kw prop-kw]
+   (if-let [help-fn (try (requiring-resolve 'cljfx.dev/help) (catch Exception _ nil))]
+     (help-fn type-kw prop-kw)
+     (println "⚠️  cljfx.dev not available. Start REPL with: clj -M:dev"))))
+
+(defn help-ui
+  "Open an interactive reference browser window.
+   
+   Shows a searchable UI with all cljfx types and their props.
+   Great for discovering available components and options.
+   
+   Note: Requires the :dev alias (cljfx.dev dependency)."
+  []
+  (if-let [help-ui-fn (try (requiring-resolve 'cljfx.dev/help-ui) (catch Exception _ nil))]
+    (help-ui-fn)
+    (println "⚠️  cljfx.dev not available. Start REPL with: clj -M:dev")))
+
+(defn explain-desc
+  "Validate a cljfx description and explain any errors.
+   
+   Usage:
+     (explain-desc {:fx/type :label :text 123})
+     ;; => Shows error: 123 is not a string
+     
+     (explain-desc {:fx/type :label :text \"Hello\"})
+     ;; => Success!
+   
+   Note: Requires the :dev alias (cljfx.dev dependency)."
+  [desc]
+  (if-let [explain-fn (try (requiring-resolve 'cljfx.dev/explain-desc) (catch Exception _ nil))]
+    (explain-fn desc)
+    (println "⚠️  cljfx.dev not available. Start REPL with: clj -M:dev")))
+
+
 ;; REPL Quick Reference
 
 
@@ -111,4 +174,11 @@
   (watch-styles!)    ;; Enable style watching
   (unwatch-styles!)  ;; Disable style watching
   ;; Then edit css/menus.clj and eval (def menu-theme ...) to see instant updates!
+  
+  ;; cljfx Dev Tools (requires :dev alias)
+  (help)                            ;; List all cljfx types
+  (help :label)                     ;; Show props for :label
+  (help :label :text)               ;; Show details for :text prop
+  (help-ui)                         ;; Open interactive browser
+  (explain-desc {:fx/type :label :text "Hello"})  ;; Validate description
   )

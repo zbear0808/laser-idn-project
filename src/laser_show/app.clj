@@ -5,6 +5,7 @@
    - Initializes the state system
    - Creates the cljfx application using fx/create-app
    - Provides start/stop functions for the app lifecycle
+   - Integrates cljfx dev tools in development mode
    
    Usage:
    (start!)  - Start the application
@@ -18,10 +19,43 @@
             [laser-show.events.core :as events]
             [laser-show.views.root :as root]
             [laser-show.services.frame-service :as frame-service]
-            [laser-show.css.title-bar :as menus])
+            [laser-show.css.title-bar :as menus]
+            [laser-show.dev-config :as dev-config])
   (:gen-class))
 
 (defonce ^{:private true :doc "The cljfx renderer instance."} *renderer (atom nil))
+
+(defn- error-handler
+  "Error handler for cljfx renderer.
+   
+   Logs errors and prints stack trace. In dev mode, cljfx.dev provides
+   enhanced error messages with component stacks."
+  [^Throwable ex]
+  (log/error ex "Error in cljfx renderer:")
+  (.printStackTrace ex *err*))
+
+(defn- get-type->lifecycle
+  "Returns the type->lifecycle function based on dev mode.
+   
+   In dev mode: Uses cljfx.dev/type->lifecycle for validation and better errors
+                on keyword types only. Function components use standard context-aware
+                lifecycle to ensure proper context propagation.
+   In prod mode: Uses standard cljfx lifecycle lookup"
+  []
+  (if (dev-config/dev-mode?)
+    ;; Dev mode: Use dev validation for keywords, standard lifecycle for functions
+    (let [dev-lifecycle @(requiring-resolve 'cljfx.dev/type->lifecycle)]
+      (log/info "🔧 Dev mode enabled - cljfx dev tools active (Press F12 for inspector)")
+      (fn [type]
+        (if (keyword? type)
+          ;; Use dev validation for keyword types (JavaFX components)
+          (dev-lifecycle type)
+          ;; Use standard context-aware lifecycle for function components
+          ;; This ensures fx/context is properly passed through
+          (fx/fn->lifecycle-with-context type))))
+    ;; Prod mode: Use standard lifecycle
+    #(or (fx/keyword->lifecycle %)
+         (fx/fn->lifecycle-with-context %))))
 
 (defn- create-renderer
   "Create the cljfx renderer with proper middleware."
@@ -32,11 +66,9 @@
                   fx/wrap-context-desc
                   ;; Map from context to root view
                   (fx/wrap-map-desc (fn [_] {:fx/type root/root-view})))
-    :opts {:fx.opt/type->lifecycle
-           #(or (fx/keyword->lifecycle %)
-                (fx/fn->lifecycle-with-context %))
-           :fx.opt/map-event-handler
-           events/event-handler}))
+    :opts {:fx.opt/type->lifecycle (get-type->lifecycle)
+           :fx.opt/map-event-handler events/event-handler}
+    :error-handler error-handler))
 
 
 (defn init-styles!
