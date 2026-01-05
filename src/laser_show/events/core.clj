@@ -96,7 +96,7 @@
                      host 
                      frame-provider
                      :port (or port 7255)
-                     :fps 30)]
+                     :fps streaming-engine/DEFAULT_FPS)]
         ;; Start the engine
         (streaming-engine/start! engine)
         

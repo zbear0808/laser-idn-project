@@ -45,7 +45,7 @@
    - target-host: IP address of the laser DAC
    - frame-provider: Function that returns the current LaserFrame to send
    - opts: Optional map with:
-     - :fps - Target frames per second (default 30)
+     - :fps - Target frames per second (default 60)
      - :port - Target UDP port (default 7255)
      - :channel-id - IDN channel ID (default 0)
      - :output-config - OutputConfig for bit depth (default 8-bit color, 16-bit XY)

@@ -21,7 +21,8 @@
    [laser-show.common.util :as u]
    [laser-show.animation.effects :as effects]
    [laser-show.animation.cue-chains :as cue-chains]
-   [laser-show.animation.chains :as chains]))
+   [laser-show.animation.chains :as chains]
+   [laser-show.events.chain-handlers :as chain-handlers]))
 
 
 ;; Helper Functions
@@ -438,76 +439,35 @@
   "Select all effects and groups in the current chain.
    Uses path-based selection to include nested items within groups."
   [{:keys [col row state]}]
-  (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
-        ;; Get all paths including nested items using the effects module helper
-        all-paths (into #{} (effects/paths-in-chain effects-vec))
-        ;; Also support legacy index-based selection for compatibility
-        effects-count (count effects-vec)
-        all-indices (into #{} (range effects-count))]
-    {:state (-> state
-                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] all-paths)
-                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] all-indices))}))
+  (let [config (chain-handlers/effects-chain-config col row)]
+    {:state (chain-handlers/handle-select-all state config)}))
 
 (defn- handle-effects-clear-selection
   "Clear all effect selection in chain editor."
-  [{:keys [state]}]
-  {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})})
+  [{:keys [col row state]}]
+  (let [config (chain-handlers/effects-chain-config col row)]
+    {:state (chain-handlers/handle-clear-selection state config)}))
 
 (defn- handle-effects-copy-selected
   "Copy selected effects to clipboard.
    Supports both path-based selection (for groups) and legacy index-based selection."
   [{:keys [col row state]}]
-  (log/debug "handle-effects-copy-selected called: col=" col "row=" row)
-  (let [selected-paths (get-in state [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
-        selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
-        effects-vec (get-in state [:effects :cells [col row] :effects] [])
-        _ (log/debug "  selected-paths=" selected-paths)
-        _ (log/debug "  selected-indices=" selected-indices)
-        _ (log/debug "  effects-vec count=" (count effects-vec))
-        ;; Path-based selection takes precedence
-        valid-effects (cond
-                        ;; Path-based selection - get items at each path
-                        (seq selected-paths)
-                        (vec (keep #(get-in effects-vec %) selected-paths))
-                        
-                        ;; Legacy index-based selection
-                        (seq selected-indices)
-                        (u/filterv-indexed
-                          (fn [idx _effect]
-                            (selected-indices idx))
-                          effects-vec)
-                        
-                        :else [])
-        _ (log/debug "  valid-effects count=" (count valid-effects))
-        result (cond-> {:state state}
-                 (seq valid-effects)
-                 (assoc :clipboard/copy-effects valid-effects))
-        _ (log/debug "  returning clipboard/copy-effects?" (contains? result :clipboard/copy-effects))]
-    result))
+  (let [config (chain-handlers/effects-chain-config col row)
+        {:keys [state items]} (chain-handlers/handle-copy-selected state config)]
+    (cond-> {:state state}
+      (seq items)
+      (assoc :clipboard/copy-effects items))))
 
 (defn- handle-effects-paste-into-chain
   "Paste effects from clipboard into current chain.
    Supports both path-based selection (for groups) and legacy index-based selection."
   [{:keys [col row state]}]
-  (let [;; Get paste position (after last selected, or at end)
+  (let [config (chain-handlers/effects-chain-config col row)
         selected-paths (get-in state [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
-        selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
-        effects-vec (get-in state [:effects :cells [col row] :effects] [])
-        ;; Calculate insert position - only support top-level insert for now
-        ;; For path-based selection, use the first element of the last path + 1
-        insert-pos (cond
-                     ;; Path-based selection - use first element of max path + 1
-                     (seq selected-paths)
+        insert-pos (if (seq selected-paths)
                      (let [top-level-indices (map first selected-paths)]
                        (inc (apply max top-level-indices)))
-                     
-                     ;; Legacy index-based selection
-                     (seq selected-indices)
-                     (inc (apply max selected-indices))
-                     
-                     ;; No selection - append at end
-                     :else
-                     (count effects-vec))]
+                     0)]
     {:state state
      :clipboard/paste-effects {:col col
                                :row row
@@ -517,23 +477,25 @@
   "Actually insert pasted effects into the chain (called by effect handler).
    Regenerates UUIDs on all pasted items to prevent duplicate IDs."
   [{:keys [col row insert-pos effects state]}]
-  (let [ensure-cell (fn [s]
+  (let [config (chain-handlers/effects-chain-config col row)
+        ;; Note: insert-pos from clipboard handler may not match new helper's calculation
+        ;; but we'll use it for backward compatibility with existing clipboard system
+        ensure-cell (fn [s]
                       (if (get-in s [:effects :cells [col row]])
                         s
                         (assoc-in s [:effects :cells [col row]] {:effects [] :active true})))
-        ;; Regenerate IDs on all pasted effects to ensure uniqueness
+        state-with-cell (ensure-cell state)
+        ;; Use generic paste helper but manually handle insert-pos for compatibility
         effects-with-new-ids (mapv regenerate-ids effects)
-        current-effects (vec (get-in state [:effects :cells [col row] :effects] []))
+        current-effects (vec (get-in state-with-cell [:effects :cells [col row] :effects] []))
         safe-pos (min insert-pos (count current-effects))
         new-effects (vec (concat (subvec current-effects 0 safe-pos)
                                  effects-with-new-ids
                                  (subvec current-effects safe-pos)))
-        ;; Select the newly pasted effects
-        new-indices (into #{} (range safe-pos (+ safe-pos (count effects-with-new-ids))))]
-    {:state (-> state
-                ensure-cell
+        new-paths (into #{} (map (fn [i] [(+ safe-pos i)]) (range (count effects-with-new-ids))))]
+    {:state (-> state-with-cell
                 (assoc-in [:effects :cells [col row] :effects] new-effects)
-                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] new-indices)
+                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] new-paths)
                 mark-dirty)}))
 
 (defn- handle-effects-delete-selected
@@ -541,38 +503,8 @@
    Supports both path-based selection (for groups) and legacy index-based selection.
    When deleting a group, all children are deleted with it (not promoted to parent)."
   [{:keys [col row state]}]
-  (let [selected-paths (get-in state [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
-        selected-indices (get-in state [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
-        effects-vec (get-in state [:effects :cells [col row] :effects] [])]
-    (cond
-      ;; Path-based selection (supports groups)
-      (seq selected-paths)
-      (let [;; Filter to root paths only - if a group is selected, don't separately delete
-            ;; its children (they'll be deleted with the group). This prevents issues where
-            ;; children get deleted first, shifting indices and causing unexpected behavior.
-            root-paths (filter-to-root-paths selected-paths)
-            ;; Sort paths by depth (deepest first) to avoid index issues
-            sorted-paths (sort-by (comp - count) root-paths)
-            ;; Remove each path
-            new-effects (reduce remove-at-path effects-vec sorted-paths)]
-        {:state (-> state
-                    (assoc-in [:effects :cells [col row] :effects] new-effects)
-                    (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
-                    (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
-                    mark-dirty)})
-      
-      ;; Legacy index-based selection
-      (seq selected-indices)
-      (let [new-effects (u/removev-indexed
-                          (fn [idx _] (contains? selected-indices idx))
-                          effects-vec)]
-        {:state (-> state
-                    (assoc-in [:effects :cells [col row] :effects] new-effects)
-                    (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
-                    mark-dirty)})
-      
-      :else
-      {:state state})))
+  (let [config (chain-handlers/effects-chain-config col row)]
+    {:state (chain-handlers/handle-delete-selected state config)}))
 
 
 ;; Custom Parameter UI Events
@@ -713,78 +645,26 @@
    - :col, :row - Grid cell coordinates
    - :name (optional) - Group name, defaults to 'New Group'"
   [{:keys [col row name state]}]
-  (let [group-name (or name "New Group")
+  (let [config (chain-handlers/effects-chain-config col row)
         ensure-cell (fn [s]
                       (if (get-in s [:effects :cells [col row]])
                         s
-                        (assoc-in s [:effects :cells [col row]] {:effects [] :active true})))
-        new-group (make-group group-name [])]
+                        (assoc-in s [:effects :cells [col row]] {:effects [] :active true})))]
     {:state (-> state
                 ensure-cell
-                (update-in [:effects :cells [col row] :effects] conj new-group)
-                mark-dirty)}))
+                (chain-handlers/handle-create-empty-group config name))}))
 
 (defn- handle-effects-group-selected
   "Group currently selected effects into a new group.
    Selected effects are removed and replaced with a group containing them.
    Works with path-based selection to support nested items.
    
-   Uses two-phase operation to avoid index-shifting bugs:
-   1. Collect selected items by ID
-   2. Remove items by ID set (no index dependencies)
-   3. Insert new group at computed position
-   
    Event keys:
    - :col, :row - Grid cell coordinates
    - :name (optional) - Group name"
   [{:keys [col row name state]}]
-  (let [group-name (or name "New Group")
-        selected-paths (get-in state [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
-        effects-vec (get-in state [:effects :cells [col row] :effects] [])]
-    (if (seq selected-paths)
-      (let [;; Filter to root paths only - if a group is selected, don't separately include its children
-            root-paths (filter-to-root-paths selected-paths)
-            ;; Sort by visual order to maintain relative ordering in the new group
-            all-paths (vec (effects/paths-in-chain effects-vec))
-            sorted-paths (sort-by #(.indexOf all-paths %) root-paths)
-            
-            ;; PHASE 1: Extract items in visual order (using paths, which are still valid)
-            selected-items (mapv #(get-in effects-vec (vec %)) sorted-paths)
-            
-            ;; Collect IDs of items to remove (for two-phase operation)
-            ids-to-remove (into #{} (map :id selected-items))
-            
-            ;; Find insertion point - the top-level index of the first selected item
-            first-path (first sorted-paths)
-            insert-at-top-level (first first-path)
-            
-            ;; PHASE 2: Remove all selected items by ID (avoids index shifting)
-            after-remove (remove-items-by-ids effects-vec ids-to-remove)
-            
-            ;; Calculate insert position:
-            ;; We need to count how many top-level items before insert-at-top-level were removed
-            items-removed-before-insert (count
-                                          (filter
-                                            (fn [path]
-                                              (and (= 1 (count path))  ;; Only count top-level items
-                                                   (< (first path) insert-at-top-level)))
-                                            sorted-paths))
-            adjusted-insert (- insert-at-top-level items-removed-before-insert)
-            
-            ;; Create the new group with extracted items
-            new-group (make-group group-name selected-items)
-            
-            ;; PHASE 3: Insert new group at adjusted position
-            new-effects (insert-items-at-index after-remove adjusted-insert [new-group])
-            
-            ;; Select the newly created group
-            new-group-path [adjusted-insert]]
-        {:state (-> state
-                    (assoc-in [:effects :cells [col row] :effects] new-effects)
-                    ;; Select the new group using path-based selection
-                    (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{new-group-path})
-                    mark-dirty)})
-      {:state state})))
+  (let [config (chain-handlers/effects-chain-config col row)]
+    {:state (chain-handlers/handle-group-selected state config name)}))
 
 (defn- handle-effects-toggle-group-collapse
   "Toggle a group's collapsed state.
@@ -792,14 +672,8 @@
    - :col, :row - Grid cell coordinates
    - :path - Path to the group (e.g., [1] or [2 :items 0])"
   [{:keys [col row path state]}]
-  (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
-        item (get-in effects-vec path)]
-    (if (effects/group? item)
-      {:state (-> state
-                  (update-in [:effects :cells [col row] :effects]
-                             (fn [effects]
-                               (update-in effects (conj path :collapsed?) not))))}
-      {:state state})))
+  (let [config (chain-handlers/effects-chain-config col row)]
+    {:state (chain-handlers/handle-toggle-collapse state config path)}))
 
 (defn- handle-effects-rename-group
   "Rename a group.
@@ -808,27 +682,25 @@
    - :path - Path to the group
    - :name - New name for the group"
   [{:keys [col row path name state]}]
-  (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
-        item (get-in effects-vec path)]
-    (if (effects/group? item)
-      {:state (-> state
-                  (assoc-in (into [:effects :cells [col row] :effects] (conj path :name)) name)
-                  (assoc-in [:ui :dialogs :effect-chain-editor :data :renaming-path] nil)
-                  mark-dirty)}
-      {:state state})))
+  (let [config (chain-handlers/effects-chain-config col row)]
+    {:state (chain-handlers/handle-rename-item state config path name)}))
 
 (defn- handle-effects-start-rename-group
   "Start renaming a group (shows inline text field).
    Event keys:
-   - :path - Path to the group"
-  [{:keys [path state]}]
-  {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :renaming-path] path)})
+   - :path - Path to the group
+   - :col, :row - Grid cell coordinates"
+  [{:keys [path col row state]}]
+  (let [config (chain-handlers/effects-chain-config col row)]
+    {:state (chain-handlers/handle-start-rename state config path)}))
 
 (defn- handle-effects-cancel-rename-group
   "Cancel renaming a group (hides inline text field).
-   Event keys: none"
-  [{:keys [state]}]
-  {:state (assoc-in state [:ui :dialogs :effect-chain-editor :data :renaming-path] nil)})
+   Event keys:
+   - :col, :row - Grid cell coordinates"
+  [{:keys [col row state]}]
+  (let [config (chain-handlers/effects-chain-config col row)]
+    {:state (chain-handlers/handle-cancel-rename state config)}))
 
 (defn- handle-effects-ungroup
   "Ungroup a group, moving its contents to the parent level.
@@ -836,35 +708,8 @@
    - :col, :row - Grid cell coordinates
    - :path - Path to the group (e.g., [1] for top-level, [2 :items 0] for nested)"
   [{:keys [col row path state]}]
-  (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
-        item (get-in effects-vec path)]
-    (if (effects/group? item)
-      (let [group-items (:items item [])
-            ;; Handle top-level vs nested groups differently
-            is-top-level? (= 1 (count path))
-            group-idx (if is-top-level?
-                        (first path)
-                        (last path))
-            parent-path (if is-top-level?
-                          []
-                          (vec (butlast (butlast path)))) ;; Remove last index and :items
-            parent-vec (if is-top-level?
-                         effects-vec
-                         (get-in effects-vec (conj parent-path :items) []))
-            ;; Remove group and insert its items at same position
-            new-parent (vec (concat (subvec parent-vec 0 group-idx)
-                                    group-items
-                                    (subvec parent-vec (inc group-idx))))
-            ;; Update the effects
-            new-effects (if is-top-level?
-                          new-parent
-                          (assoc-in effects-vec (conj parent-path :items) new-parent))]
-        {:state (-> state
-                    (assoc-in [:effects :cells [col row] :effects] new-effects)
-                    ;; Clear selection
-                    (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
-                    mark-dirty)})
-      {:state state})))
+  (let [config (chain-handlers/effects-chain-config col row)]
+    {:state (chain-handlers/handle-ungroup state config path)}))
 
 (defn- handle-effects-set-item-enabled-at-path
   "Set the enabled state of an item at a specific path.
@@ -937,43 +782,8 @@
    - :shift? - If true, range select based on visual order (anchor stays fixed)
    - :ctrl? - If true, toggle selection"
   [{:keys [path col row shift? ctrl? state]}]
-  (log/debug "handle-effects-select-item-at-path called:"
-             "path=" path "col=" col "row=" row "ctrl?=" ctrl? "shift?=" shift?)
-  (let [current-paths (get-in state [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
-        _ (log/debug "  current-paths=" current-paths)
-        last-selected (get-in state [:ui :dialogs :effect-chain-editor :data :last-selected-path])
-        new-paths (cond
-                    ctrl?
-                    (if (contains? current-paths path)
-                      (disj current-paths path)
-                      (conj current-paths path))
-                    
-                    shift?
-                    (if (and last-selected col row)
-                      ;; Range select: get all paths between anchor and clicked in visual order
-                      (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
-                            all-paths (vec (effects/paths-in-chain effects-vec))
-                            anchor-idx (.indexOf all-paths last-selected)
-                            target-idx (.indexOf all-paths path)]
-                        (if (and (>= anchor-idx 0) (>= target-idx 0))
-                          (let [start-idx (min anchor-idx target-idx)
-                                end-idx (max anchor-idx target-idx)]
-                            (into #{} (subvec all-paths start-idx (inc end-idx))))
-                          ;; Fallback if paths not found - just select clicked
-                          #{path}))
-                      ;; No anchor or col/row - just select clicked
-                      #{path})
-                    
-                    :else
-                    #{path})
-        ;; Only update anchor on regular click or ctrl+click, NOT on shift+click
-        ;; This allows consecutive shift+clicks to extend from the original anchor
-        update-anchor? (not shift?)
-        _ (log/debug "  new-paths=" new-paths)]
-    {:state (-> state
-                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] new-paths)
-                (cond-> update-anchor?
-                  (assoc-in [:ui :dialogs :effect-chain-editor :data :last-selected-path] path)))}))
+  (let [config (chain-handlers/effects-chain-config col row)]
+    {:state (chain-handlers/handle-select-item state config path ctrl? shift?)}))
 
 (defn- handle-effects-delete-at-paths
   "Delete all items at the selected paths.
@@ -1197,19 +1007,8 @@
    - :col, :row - Grid cell coordinates
    - :initiating-path - Path of the item that was dragged"
   [{:keys [col row initiating-path state]}]
-  (let [selected-paths (get-in state [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
-        ;; If dragging a selected item, drag all selected items
-        ;; Otherwise, select just this item and drag it
-        dragging-paths (if (contains? selected-paths initiating-path)
-                         selected-paths
-                         #{initiating-path})
-        ;; If dragging unselected item, update selection to just that item
-        new-selected (if (contains? selected-paths initiating-path)
-                       selected-paths
-                       #{initiating-path})]
-    {:state (-> state
-                (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-paths] dragging-paths)
-                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] new-selected))}))
+  (let [config (chain-handlers/effects-chain-config col row)]
+    {:state (chain-handlers/handle-start-drag state config initiating-path)}))
 
 (defn- handle-effects-move-items
   "Move multiple items to a new position using ID-based approach.
@@ -1221,42 +1020,8 @@
    - :target-id - ID of the target item (for finding drop location)
    - :drop-position - :before | :into (only :into for groups)"
   [{:keys [col row target-id drop-position state]}]
-  (let [effects-vec (get-in state [:effects :cells [col row] :effects] [])
-        ;; Support both ID-based and legacy path-based dragging
-        dragging-ids (get-in state [:ui :dialogs :effect-chain-editor :data :dragging-ids] #{})
-        dragging-paths-legacy (get-in state [:ui :dialogs :effect-chain-editor :data :dragging-paths] #{})
-        
-        ;; Convert IDs to paths if using ID-based approach
-        ;; find-paths-by-ids returns a map of {id -> path}, so extract just the values (paths)
-        dragging-paths (if (seq dragging-ids)
-                         (set (vals (chains/find-paths-by-ids effects-vec dragging-ids)))
-                         dragging-paths-legacy)
-        
-        ;; Filter to root-level paths only (groups include their children)
-        root-paths (filter-to-root-paths dragging-paths)
-        
-        ;; Check if target is in dragging paths or descendant (prevent self-drop)
-        target-path (chains/find-path-by-id effects-vec target-id)
-        target-in-drag? (or (contains? root-paths target-path)
-                           (some #(path-is-ancestor? % target-path) root-paths))]
-    
-    (if (or (empty? root-paths) target-in-drag?)
-      ;; Invalid move - clear dragging state and return
-      {:state (-> state
-                  (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-ids] nil)
-                  (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-paths] nil))}
-      
-      ;; Use centralized move-items-to-target for correct ordering
-      (let [new-effects (chains/move-items-to-target effects-vec root-paths target-id drop-position)]
-        {:state (-> state
-                    (assoc-in [:effects :cells [col row] :effects] new-effects)
-                    ;; Clear dragging state
-                    (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-ids] nil)
-                    (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-paths] nil)
-                    ;; Clear selection - could compute new paths if needed
-                    (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-ids] #{})
-                    (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})
-                    mark-dirty)}))))
+  (let [config (chain-handlers/effects-chain-config col row)]
+    {:state (chain-handlers/handle-move-items state config target-id drop-position)}))
 
 
 ;; Timing Events
@@ -1938,102 +1703,44 @@
 (defn- handle-projectors-group-effects
   "Group selected effects in projector chain."
   [{:keys [projector-id name state]}]
-  (let [group-name (or name "New Group")
-        ui-path (projector-ui-state-path projector-id)
-        selected-paths (get-in state (conj ui-path :selected-paths) #{})
-        effects-vec (get-in state (projector-effects-path projector-id) [])]
-    (if (seq selected-paths)
-      (let [root-paths (filter-to-root-paths selected-paths)
-            all-paths (vec (effects/paths-in-chain effects-vec))
-            sorted-paths (sort-by #(.indexOf all-paths %) root-paths)
-            selected-items (mapv #(get-in effects-vec (vec %)) sorted-paths)
-            ids-to-remove (into #{} (map :id selected-items))
-            first-path (first sorted-paths)
-            insert-at-top-level (first first-path)
-            after-remove (remove-items-by-ids effects-vec ids-to-remove)
-            items-removed-before-insert (count
-                                          (filter
-                                            (fn [path]
-                                              (and (= 1 (count path))
-                                                   (< (first path) insert-at-top-level)))
-                                            sorted-paths))
-            adjusted-insert (- insert-at-top-level items-removed-before-insert)
-            new-group (make-group group-name selected-items)
-            new-effects (insert-items-at-index after-remove adjusted-insert [new-group])
-            new-group-path [adjusted-insert]]
-        {:state (-> state
-                    (assoc-in (projector-effects-path projector-id) new-effects)
-                    (assoc-in (conj ui-path :selected-paths) #{new-group-path})
-                    mark-dirty)})
-      {:state state})))
+  (let [config (chain-handlers/projector-chain-config projector-id)]
+    {:state (chain-handlers/handle-group-selected state config name)}))
 
 (defn- handle-projectors-ungroup-effects
   "Ungroup a group in projector chain."
   [{:keys [projector-id path state]}]
-  (let [effects-vec (get-in state (projector-effects-path projector-id) [])
-        item (get-in effects-vec path)
-        ui-path (projector-ui-state-path projector-id)]
-    (if (effects/group? item)
-      (let [group-items (:items item [])
-            is-top-level? (= 1 (count path))
-            group-idx (if is-top-level? (first path) (last path))
-            parent-path (if is-top-level? [] (vec (butlast (butlast path))))
-            parent-vec (if is-top-level? effects-vec (get-in effects-vec (conj parent-path :items) []))
-            new-parent (vec (concat (subvec parent-vec 0 group-idx)
-                                    group-items
-                                    (subvec parent-vec (inc group-idx))))
-            new-effects (if is-top-level?
-                          new-parent
-                          (assoc-in effects-vec (conj parent-path :items) new-parent))]
-        {:state (-> state
-                    (assoc-in (projector-effects-path projector-id) new-effects)
-                    (assoc-in (conj ui-path :selected-paths) #{})
-                    mark-dirty)})
-      {:state state})))
+  (let [config (chain-handlers/projector-chain-config projector-id)]
+    {:state (chain-handlers/handle-ungroup state config path)}))
 
 (defn- handle-projectors-create-effect-group
   "Create empty group in projector chain."
   [{:keys [projector-id state]}]
-  (let [new-group (make-group "New Group" [])]
-    {:state (-> state
-                (update-in (projector-effects-path projector-id) conj new-group)
-                mark-dirty)}))
+  (let [config (chain-handlers/projector-chain-config projector-id)]
+    {:state (chain-handlers/handle-create-empty-group state config)}))
 
 (defn- handle-projectors-toggle-effect-group-collapse
   "Toggle collapse state of a group in projector chain."
   [{:keys [projector-id path state]}]
-  (let [effects-vec (get-in state (projector-effects-path projector-id) [])
-        item (get-in effects-vec path)]
-    (if (effects/group? item)
-      {:state (update-in state (projector-effects-path projector-id)
-                         (fn [effects]
-                           (update-in effects (conj path :collapsed?) not)))}
-      {:state state})))
+  (let [config (chain-handlers/projector-chain-config projector-id)]
+    {:state (chain-handlers/handle-toggle-collapse state config path)}))
 
 (defn- handle-projectors-start-rename-effect-group
   "Start renaming a group in projector chain."
   [{:keys [projector-id path state]}]
-  (let [ui-path (projector-ui-state-path projector-id)]
-    {:state (assoc-in state (conj ui-path :renaming-path) path)}))
+  (let [config (chain-handlers/projector-chain-config projector-id)]
+    {:state (chain-handlers/handle-start-rename state config path)}))
 
 (defn- handle-projectors-rename-effect-group
   "Rename a group in projector chain."
   [{:keys [projector-id path name state]}]
-  (let [effects-vec (get-in state (projector-effects-path projector-id) [])
-        item (get-in effects-vec path)
-        ui-path (projector-ui-state-path projector-id)]
-    (if (effects/group? item)
-      {:state (-> state
-                  (assoc-in (into (projector-effects-path projector-id) (conj path :name)) name)
-                  (assoc-in (conj ui-path :renaming-path) nil)
-                  mark-dirty)}
-      {:state state})))
+  (let [config (chain-handlers/projector-chain-config projector-id)]
+    {:state (chain-handlers/handle-rename-item state config path name)}))
 
 (defn- handle-projectors-cancel-rename-effect-group
   "Cancel renaming a group in projector chain."
   [{:keys [projector-id state]}]
-  (let [ui-path (projector-ui-state-path projector-id)]
-    {:state (assoc-in state (conj ui-path :renaming-path) nil)}))
+  (let [config (chain-handlers/projector-chain-config projector-id)]
+    {:state (chain-handlers/handle-cancel-rename state config)}))
 
 (defn- handle-projectors-set-effect-enabled-at-path
   "Set enabled state of an effect at a path in projector chain."
@@ -2238,17 +1945,8 @@
    Event keys:
    - :col, :row - Grid cell coordinates"
   [{:keys [col row state]}]
-  (let [selected-paths (get-in state [:cue-chain-editor :selected-paths] #{})
-        items-vec (get-in state (cue-chain-path col row) [])]
-    (if (seq selected-paths)
-      (let [root-paths (filter-to-root-paths selected-paths)
-            sorted-paths (sort-by (comp - count) root-paths)
-            new-items (reduce remove-at-path items-vec sorted-paths)]
-        {:state (-> state
-                    (assoc-in (cue-chain-path col row) new-items)
-                    (assoc-in [:cue-chain-editor :selected-paths] #{})
-                    mark-dirty)})
-      {:state state})))
+  (let [config (chain-handlers/cue-chain-config col row)]
+    {:state (chain-handlers/handle-delete-selected state config)}))
 
 (defn- handle-cue-chain-move-items
   "Move items to a new position via drag-and-drop.
@@ -2258,21 +1956,8 @@
    - :target-id - ID of the target item
    - :drop-position - :before | :into"
   [{:keys [col row target-id drop-position state]}]
-  (let [items-vec (get-in state (cue-chain-path col row) [])
-        dragging-paths (get-in state [:cue-chain-editor :dragging-paths] #{})
-        root-paths (filter-to-root-paths dragging-paths)
-        target-path (chains/find-path-by-id items-vec target-id)
-        target-in-drag? (or (contains? root-paths target-path)
-                           (some #(path-is-ancestor? % target-path) root-paths))]
-    (if (or (empty? root-paths) target-in-drag?)
-      {:state (assoc-in state [:cue-chain-editor :dragging-paths] nil)}
-      ;; Use centralized move-items-to-target for correct ordering
-      (let [new-items (chains/move-items-to-target items-vec root-paths target-id drop-position)]
-        {:state (-> state
-                    (assoc-in (cue-chain-path col row) new-items)
-                    (assoc-in [:cue-chain-editor :dragging-paths] nil)
-                    (assoc-in [:cue-chain-editor :selected-paths] #{})
-                    mark-dirty)}))))
+  (let [config (chain-handlers/cue-chain-config col row)]
+    {:state (chain-handlers/handle-move-items state config target-id drop-position)}))
 
 (defn- handle-cue-chain-select-item
   "Select an item in the cue chain.
@@ -2282,50 +1967,22 @@
    - :ctrl? - Toggle selection
    - :shift? - Range select"
   [{:keys [col row path ctrl? shift? state]}]
-  (let [current-paths (get-in state [:cue-chain-editor :selected-paths] #{})
-        last-selected (get-in state [:cue-chain-editor :last-selected-path])
-        items-vec (get-in state (cue-chain-path col row) [])
-        new-paths (cond
-                    ctrl?
-                    (if (contains? current-paths path)
-                      (disj current-paths path)
-                      (conj current-paths path))
-                    
-                    shift?
-                    (if last-selected
-                      (let [all-paths (vec (chains/paths-in-chain items-vec))
-                            anchor-idx (.indexOf all-paths last-selected)
-                            target-idx (.indexOf all-paths path)]
-                        (if (and (>= anchor-idx 0) (>= target-idx 0))
-                          (let [start-idx (min anchor-idx target-idx)
-                                end-idx (max anchor-idx target-idx)]
-                            (into #{} (subvec all-paths start-idx (inc end-idx))))
-                          #{path}))
-                      #{path})
-                    
-                    :else
-                    #{path})
-        update-anchor? (not shift?)]
-    {:state (-> state
-                (assoc-in [:cue-chain-editor :selected-paths] new-paths)
-                (cond-> update-anchor?
-                  (assoc-in [:cue-chain-editor :last-selected-path] path)))}))
+  (let [config (chain-handlers/cue-chain-config col row)]
+    {:state (chain-handlers/handle-select-item state config path ctrl? shift?)}))
 
 (defn- handle-cue-chain-select-all
   "Select all items in the cue chain.
    Event keys:
    - :col, :row - Grid cell coordinates"
   [{:keys [col row state]}]
-  (let [items-vec (get-in state (cue-chain-path col row) [])
-        all-paths (into #{} (chains/paths-in-chain items-vec))]
-    {:state (assoc-in state [:cue-chain-editor :selected-paths] all-paths)}))
+  (let [config (chain-handlers/cue-chain-config col row)]
+    {:state (chain-handlers/handle-select-all state config)}))
 
 (defn- handle-cue-chain-clear-selection
   "Clear item selection in the cue chain editor."
-  [{:keys [state]}]
-  {:state (-> state
-              (assoc-in [:cue-chain-editor :selected-paths] #{})
-              (assoc-in [:cue-chain-editor :last-selected-path] nil))})
+  [{:keys [col row state]}]
+  (let [config (chain-handlers/cue-chain-config col row)]
+    {:state (chain-handlers/handle-clear-selection state config)}))
 
 (defn- handle-cue-chain-start-drag
   "Start a multi-drag operation.
@@ -2333,28 +1990,18 @@
    - :col, :row - Grid cell coordinates
    - :initiating-path - Path of the item being dragged"
   [{:keys [col row initiating-path state]}]
-  (let [selected-paths (get-in state [:cue-chain-editor :selected-paths] #{})
-        dragging-paths (if (contains? selected-paths initiating-path)
-                         selected-paths
-                         #{initiating-path})
-        new-selected (if (contains? selected-paths initiating-path)
-                       selected-paths
-                       #{initiating-path})]
-    {:state (-> state
-                (assoc-in [:cue-chain-editor :dragging-paths] dragging-paths)
-                (assoc-in [:cue-chain-editor :selected-paths] new-selected))}))
+  (let [config (chain-handlers/cue-chain-config col row)]
+    {:state (chain-handlers/handle-start-drag state config initiating-path)}))
 
 (defn- handle-cue-chain-copy-selected
   "Copy selected items to clipboard.
    Event keys:
    - :col, :row - Grid cell coordinates"
   [{:keys [col row state]}]
-  (let [selected-paths (get-in state [:cue-chain-editor :selected-paths] #{})
-        items-vec (get-in state (cue-chain-path col row) [])
-        valid-items (when (seq selected-paths)
-                      (vec (keep #(get-in items-vec %) selected-paths)))]
-    (if (seq valid-items)
-      {:state (assoc-in state [:cue-chain-editor :clipboard] valid-items)}
+  (let [config (chain-handlers/cue-chain-config col row)
+        {:keys [state items]} (chain-handlers/handle-copy-selected state config)]
+    (if (seq items)
+      {:state (assoc-in state [:cue-chain-editor :clipboard] items)}
       {:state state})))
 
 (defn- handle-cue-chain-paste
@@ -2362,27 +2009,10 @@
    Event keys:
    - :col, :row - Grid cell coordinates"
   [{:keys [col row state]}]
-  (let [clipboard (get-in state [:cue-chain-editor :clipboard])
-        selected-paths (get-in state [:cue-chain-editor :selected-paths] #{})
-        items-vec (get-in state (cue-chain-path col row) [])]
+  (let [config (chain-handlers/cue-chain-config col row)
+        clipboard (get-in state [:cue-chain-editor :clipboard])]
     (if (seq clipboard)
-      (let [;; Regenerate IDs on pasted items
-            items-with-new-ids (mapv regenerate-ids clipboard)
-            ;; Calculate insert position
-            insert-pos (if (seq selected-paths)
-                         (let [top-level-indices (map first selected-paths)]
-                           (inc (apply max top-level-indices)))
-                         (count items-vec))
-            safe-pos (min insert-pos (count items-vec))
-            new-items (vec (concat (subvec items-vec 0 safe-pos)
-                                   items-with-new-ids
-                                   (subvec items-vec safe-pos)))
-            ;; Select pasted items
-            new-paths (into #{} (map (fn [i] [(+ safe-pos i)]) (range (count items-with-new-ids))))]
-        {:state (-> state
-                    (assoc-in (cue-chain-path col row) new-items)
-                    (assoc-in [:cue-chain-editor :selected-paths] new-paths)
-                    mark-dirty)})
+      {:state (chain-handlers/handle-paste-items state config clipboard)}
       {:state state})))
 
 (defn- handle-cue-chain-group-selected
@@ -2722,16 +2352,14 @@
    - :col, :row - Grid cell coordinates
    - :name (optional) - Group name"
   [{:keys [col row name state]}]
-  (let [group-name (or name "New Group")
+  (let [config (chain-handlers/cue-chain-config col row)
         ensure-cell (fn [s]
                       (if (get-in s [:grid :cells [col row] :cue-chain])
                         s
-                        (assoc-in s [:grid :cells [col row]] {:cue-chain {:items []}})))
-        new-group (make-group group-name [])]
+                        (assoc-in s [:grid :cells [col row]] {:cue-chain {:items []}})))]
     {:state (-> state
                 ensure-cell
-                (update-in (cue-chain-path col row) conj new-group)
-                mark-dirty)}))
+                (chain-handlers/handle-create-empty-group config name))}))
 
 
 ;; NEW Simplified Handlers for Hierarchical List Refactor
