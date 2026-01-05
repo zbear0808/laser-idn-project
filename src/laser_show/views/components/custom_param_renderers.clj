@@ -286,25 +286,32 @@
 
 (defn rgb-curves-visual-editor
  "Visual editor for RGB curves effect with tabbed R/G/B interface.
-  
-  Supports two usage patterns:
-  
-  1. Grid effect mode:
-     - :col, :row - Grid cell coordinates
-     - :effect-path - Path to effect (supports nested)
-     - :current-params - Current parameter values
-     - :dialog-data - Dialog state containing UI modes and active channel
-  
-  2. Projector effect mode:
-     - :projector-id - Projector ID
-     - :effect-path - Path to effect
-     - :current-params - Current parameter values
-     - :dialog-data - (optional) UI state, defaults to empty"
+   
+   Supports two usage patterns:
+   
+   1. Grid effect mode:
+      - :col, :row - Grid cell coordinates
+      - :effect-path - Path to effect (supports nested)
+      - :current-params - Current parameter values
+      - :dialog-data - Dialog state containing UI modes and active channel
+   
+   2. Projector effect mode:
+      - :projector-id - Projector ID
+      - :effect-path - Path to effect
+      - :current-params - Current parameter values
+      - :dialog-data - (optional) UI state, defaults to empty"
  [{:keys [col row projector-id effect-path current-params dialog-data]}]
+ (println "[CURVES EDITOR DEBUG] rgb-curves-visual-editor called:"
+          "projector-id=" projector-id
+          "effect-path=" effect-path
+          "dialog-data=" dialog-data)
  (let [;; Determine mode
        use-projector? (some? projector-id)
        ;; Get active channel from dialog state
        active-channel (get-in dialog-data [:ui-modes effect-path :active-curve-channel] :r)
+       _ (println "[CURVES EDITOR DEBUG] use-projector?=" use-projector?
+                  "active-channel=" active-channel
+                  "ui-modes path=" [:ui-modes effect-path :active-curve-channel])
        ;; Get control points for each channel
        r-points (get current-params :r-curve-points [[0 0] [255 255]])
        g-points (get current-params :g-curve-points [[0 0] [255 255]])

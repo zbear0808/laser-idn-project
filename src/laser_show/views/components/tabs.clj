@@ -31,13 +31,16 @@
    
    Uses CSS classes: .tab-btn, .tab-btn-active"
   [{:keys [tab-id label active? on-action]}]
+  (println "[TABS DEBUG] styled-tab-button rendered: tab-id=" tab-id "active?=" active? "on-action=" on-action)
   {:fx/type :button
    :text label
    ;; Use CSS classes from buttons.clj
    :style-class (if active? "tab-btn-active" "tab-btn")
-   :on-action (if (map? on-action)
-                (assoc on-action :tab-id tab-id)
-                on-action)})
+   :on-action (let [event (if (map? on-action)
+                            (assoc on-action :tab-id tab-id)
+                            on-action)]
+                (println "[TABS DEBUG] Tab clicked! tab-id=" tab-id "event=" event)
+                event)})
 
 
 ;; Tab Bar Component

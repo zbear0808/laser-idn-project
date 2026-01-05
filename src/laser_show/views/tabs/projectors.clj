@@ -502,11 +502,17 @@
 
 (defn- effect-parameter-editor
   "Renders the appropriate editor for a selected effect.
-   Checks for custom ui-hints renderer, falls back to built-in editors."
-  [{:keys [projector-id effect-idx effect]}]
+   Checks for custom ui-hints renderer, falls back to built-in editors.
+   
+   Props:
+   - :projector-id - ID of the projector
+   - :effect-idx - Index of the effect in the chain
+   - :effect - The effect map
+   - :ui-state - UI state for this projector (from projector-effect-ui-state sub)"
+  [{:keys [projector-id effect-idx effect ui-state]}]
   (let [{:keys [effect-id params]} effect
-        effect-def (effects/get-effect effect-id)
-        effect-name (or (:name effect-def) (name effect-id))]
+       effect-def (effects/get-effect effect-id)
+       effect-name (or (:name effect-def) (name effect-id))]
     {:fx/type :v-box
      :spacing 8
      :padding 8
@@ -515,15 +521,20 @@
                  :text (str "Edit: " effect-name)
                  :style "-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 11;"}
                 (cond
-                  ;; Check for custom renderer in ui-hints
-                  (= :rgb-curves (get-in effect-def [:ui-hints :renderer]))
-                  {:fx/type custom-renderers/rgb-curves-visual-editor
-                   :col nil  ;; Not used for projector effects
-                   :row nil
-                   :effect-path [effect-idx]
-                   :current-params params
-                   :dialog-data {}  ;; Projector effects don't use dialog data
-                   :projector-id projector-id}
+                   ;; Check for custom renderer in ui-hints
+                   (= :rgb-curves (get-in effect-def [:ui-hints :renderer]))
+                   (do
+                     (println "[PROJECTORS DEBUG] Rendering rgb-curves-visual-editor:"
+                              "projector-id=" projector-id
+                              "effect-idx=" effect-idx
+                              "ui-state=" ui-state)
+                     {:fx/type custom-renderers/rgb-curves-visual-editor
+                      :col nil  ;; Not used for projector effects
+                      :row nil
+                      :effect-path [effect-idx]
+                      :current-params params
+                      :dialog-data ui-state  ;; FIX: Pass ui-state which contains :ui-modes with active channel
+                      :projector-id projector-id})
                   
                   ;; Built-in editors for specific effect types
                   (= effect-id :corner-pin)
@@ -708,12 +719,13 @@
                                          :spacing 16
                                          :h-box/hgrow :always
                                          :children (vec
-                                                     (concat
-                                                       (when selected-effect
-                                                         [{:fx/type effect-parameter-editor
-                                                           :projector-id projector-id
-                                                           :effect-idx selected-effect-idx
-                                                           :effect selected-effect}])
+                                                      (concat
+                                                        (when selected-effect
+                                                          [{:fx/type effect-parameter-editor
+                                                            :projector-id projector-id
+                                                            :effect-idx selected-effect-idx
+                                                            :effect selected-effect
+                                                            :ui-state ui-state}])
                                                        [{:fx/type :region :v-box/vgrow :always}
                                                         {:fx/type test-pattern-controls}]))}]}}]}
       ;; No projector selected

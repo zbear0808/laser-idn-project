@@ -2166,8 +2166,14 @@
    - :effect-path - Path to effect
    - :tab-id - Channel keyword (:r, :g, or :b)"
   [{:keys [projector-id effect-path tab-id state]}]
-  (let [ui-path (projector-ui-state-path projector-id)]
-    {:state (assoc-in state (conj ui-path :ui-modes effect-path :active-curve-channel) tab-id)}))
+  (log/debug "[CURVE TAB DEBUG] handle-projectors-set-active-curve-channel called:"
+             "projector-id=" projector-id
+             "effect-path=" effect-path
+             "tab-id=" tab-id)
+  (let [ui-path (projector-ui-state-path projector-id)
+        full-path (conj ui-path :ui-modes effect-path :active-curve-channel)]
+    (log/debug "[CURVE TAB DEBUG] Storing at path:" full-path)
+    {:state (assoc-in state full-path tab-id)}))
 
 
 ;; Cue Chain Events
