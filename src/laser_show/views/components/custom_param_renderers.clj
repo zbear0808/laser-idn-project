@@ -23,11 +23,10 @@
    
    Props:
    - :col, :row - Grid cell coordinates
-   - :effect-idx - Index in effect chain (legacy, top-level)
-   - :effect-path - Path to effect (supports nested)
+   - :effect-path - Path to effect
    - :current-params - Current parameter values {:x ... :y ...}
    - :param-specs - Parameter specifications from effect definition"
-  [{:keys [col row effect-idx effect-path current-params param-specs]}]
+  [{:keys [col row effect-path current-params param-specs]}]
   (let [x (get current-params :x 0.0)
         y (get current-params :y 0.0)
         x-spec (first (filter #(= :x (:key %)) param-specs))
@@ -45,7 +44,7 @@
                  :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-style: italic;"}
                 
                 {:fx/type spatial-canvas/spatial-canvas
-                 :fx/key [col row (or effect-path effect-idx)]
+                 :fx/key [col row effect-path]
                  :width 280
                  :height 280
                  :bounds {:x-min x-min :x-max x-max
@@ -55,10 +54,9 @@
                           :y y
                           :color "#4CAF50"
                           :label ""}]
-                 :on-point-drag {:event/type :effects/update-spatial-params
-                                :col col
-                                :row row
-                                :effect-idx effect-idx
+                 :on-point-drag {:event/type :chain/update-spatial-params
+                                :domain :effect-chains
+                                :entity-key [col row]
                                 :effect-path effect-path
                                 :param-map {:center {:x :x :y :y}}}
                  :show-grid true
@@ -84,10 +82,9 @@
    
    Supports two usage patterns:
    
-   1. Legacy props (for effect chain editor):
+   1. Effect chain editor props:
       - :col, :row - Grid cell coordinates
-      - :effect-idx - Index in effect chain (legacy, top-level)
-      - :effect-path - Path to effect (supports nested)
+      - :effect-path - Path to effect
       - :current-params - Current parameter values {:tl-x :tl-y :tr-x ...}
       - :param-specs - Parameter specifications from effect definition
    
@@ -99,7 +96,7 @@
       - :width, :height - (optional) Canvas dimensions, default 280x280
       - :hint-text - (optional) Hint text shown above canvas
       - :bounds - (optional) {:x-min :x-max :y-min :y-max}, defaults to ±1.5 or from param-specs"
-  [{:keys [col row effect-idx effect-path current-params params param-specs
+  [{:keys [col row effect-path current-params params param-specs
            event-template reset-event fx-key width height hint-text bounds]
     :or {width 280 height 280}}]
   (let [;; Support both :current-params and :params (alias)
@@ -134,15 +131,14 @@
                          :br {:x :br-x :y :br-y}}
         on-point-drag-event (if event-template
                               (assoc event-template :param-map corner-param-map)
-                              {:event/type :effects/update-spatial-params
-                               :col col
-                               :row row
-                               :effect-idx effect-idx
+                              {:event/type :chain/update-spatial-params
+                               :domain :effect-chains
+                               :entity-key [col row]
                                :effect-path effect-path
                                :param-map corner-param-map})
         
         ;; Determine fx/key for spatial canvas
-        canvas-key (or fx-key [col row (or effect-path effect-idx)])
+        canvas-key (or fx-key [col row effect-path])
         
         ;; Hint text
         actual-hint (or hint-text "Drag corners to adjust perspective mapping")]
@@ -226,48 +222,32 @@
 
 (defn- curve-editor-for-channel
  "Single curve editor for one color channel.
-  
-  Props:
-  - :col, :row - Grid cell coordinates (for grid effects)
-  - :projector-id - Projector ID (for projector effects, alternative to col/row)
-  - :effect-path - Path to effect
-  - :channel - Channel keyword (:r, :g, or :b)
-  - :current-points - Control points for this channel"
- [{:keys [col row projector-id effect-path channel current-points]}]
+   
+   Props:
+   - :domain - Chain domain (:effect-chains, :projector-effects, or :item-effects)
+   - :entity-key - Entity key ([col row] or projector-id)
+   - :effect-path - Path to effect
+   - :channel - Channel keyword (:r, :g, or :b)
+   - :current-points - Control points for this channel"
+ [{:keys [domain entity-key effect-path channel current-points]}]
  (let [color (curve-channel-color channel)
        points (or current-points [[0 0] [255 255]])
-       ;; Use projector event types if projector-id is provided, otherwise grid effect events
-       use-projector? (some? projector-id)
-       add-event (if use-projector?
-                   {:event/type :projectors/add-curve-point
-                    :projector-id projector-id
-                    :effect-path effect-path
-                    :channel channel}
-                   {:event/type :effects/add-curve-point
-                    :col col :row row
-                    :effect-path effect-path
-                    :channel channel})
-       update-event (if use-projector?
-                      {:event/type :projectors/update-curve-point
-                       :projector-id projector-id
-                       :effect-path effect-path
-                       :channel channel}
-                      {:event/type :effects/update-curve-point
-                       :col col :row row
-                       :effect-path effect-path
-                       :channel channel})
-       remove-event (if use-projector?
-                      {:event/type :projectors/remove-curve-point
-                       :projector-id projector-id
-                       :effect-path effect-path
-                       :channel channel}
-                      {:event/type :effects/remove-curve-point
-                       :col col :row row
-                       :effect-path effect-path
-                       :channel channel})
-       canvas-key (if use-projector?
-                    [:projector projector-id effect-path channel]
-                    [col row effect-path channel])]
+       add-event {:event/type :chain/add-curve-point
+                  :domain domain
+                  :entity-key entity-key
+                  :effect-path effect-path
+                  :channel channel}
+       update-event {:event/type :chain/update-curve-point
+                     :domain domain
+                     :entity-key entity-key
+                     :effect-path effect-path
+                     :channel channel}
+       remove-event {:event/type :chain/remove-curve-point
+                     :domain domain
+                     :entity-key entity-key
+                     :effect-path effect-path
+                     :channel channel}
+       canvas-key [domain entity-key effect-path channel]]
    {:fx/type :v-box
     :spacing 8
     :padding 8
@@ -286,50 +266,35 @@
 
 (defn rgb-curves-visual-editor
  "Visual editor for RGB curves effect with tabbed R/G/B interface.
-   
-   Supports two usage patterns:
-   
-   1. Grid effect mode:
-      - :col, :row - Grid cell coordinates
-      - :effect-path - Path to effect (supports nested)
-      - :current-params - Current parameter values
-      - :dialog-data - Dialog state containing UI modes and active channel
-   
-   2. Projector effect mode:
-      - :projector-id - Projector ID
-      - :effect-path - Path to effect
-      - :current-params - Current parameter values
-      - :dialog-data - (optional) UI state, defaults to empty"
- [{:keys [col row projector-id effect-path current-params dialog-data]}]
- (println "[CURVES EDITOR DEBUG] rgb-curves-visual-editor called:"
-          "projector-id=" projector-id
-          "effect-path=" effect-path
-          "dialog-data=" dialog-data)
- (let [;; Determine mode
-       use-projector? (some? projector-id)
+    
+    Props:
+       - :domain - Chain domain (:effect-chains, :projector-effects, or :item-effects)
+       - :entity-key - Entity key ([col row], projector-id, or item-effects map)
+       - :effect-path - Path to effect
+       - :current-params - Current parameter values
+       - :dialog-data - Dialog state containing UI modes and active channel"
+ [{:keys [domain entity-key effect-path current-params dialog-data]}]
+ (let [
+       
        ;; Get active channel from dialog state
        active-channel (get-in dialog-data [:ui-modes effect-path :active-curve-channel] :r)
-       _ (println "[CURVES EDITOR DEBUG] use-projector?=" use-projector?
-                  "active-channel=" active-channel
-                  "ui-modes path=" [:ui-modes effect-path :active-curve-channel])
+       
        ;; Get control points for each channel
        r-points (get current-params :r-curve-points [[0 0] [255 255]])
        g-points (get current-params :g-curve-points [[0 0] [255 255]])
        b-points (get current-params :b-curve-points [[0 0] [255 255]])
+       
        ;; Get points for active channel
        active-points (case active-channel
                       :r r-points
                       :g g-points
                       :b b-points
                       r-points)
-       ;; Build tab change event based on mode
-       tab-change-event (if use-projector?
-                          {:event/type :projectors/set-active-curve-channel
-                           :projector-id projector-id
-                           :effect-path effect-path}
-                          {:event/type :effects/set-active-curve-channel
-                           :col col :row row
-                           :effect-path effect-path})]
+       
+       tab-change-event {:event/type :chain/set-active-curve-channel
+                         :domain domain
+                         :entity-key entity-key
+                         :effect-path effect-path}]
    {:fx/type :v-box
     :spacing 0
     :style "-fx-background-color: #2A2A2A; -fx-background-radius: 4;"
@@ -338,8 +303,8 @@
                 :active-tab active-channel
                 :on-tab-change tab-change-event}
                {:fx/type curve-editor-for-channel
-                :col col :row row
-                :projector-id projector-id
+                :domain domain
+                :entity-key entity-key
                 :effect-path effect-path
                 :channel active-channel
                 :current-points active-points}]}))

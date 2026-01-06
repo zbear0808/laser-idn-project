@@ -627,43 +627,162 @@
       mark-dirty))
 
 
+;; Curve Editor Handlers
+
+
+(defn handle-add-curve-point
+  "Generic curve point addition for any chain.
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :items-path
+   - event-data: {:effect-path [...] :channel :r :x 128 :y 200}
+   
+   Returns: Updated state"
+  [state config {:keys [effect-path channel x y]}]
+  (let [param-key (keyword (str (name channel) "-curve-points"))
+        items-vec (vec (get-items state config))
+        current-points (get-in items-vec (conj (vec effect-path) :params param-key) [[0 0] [255 255]])
+        new-point [(int x) (int y)]
+        new-points (->> (conj current-points new-point)
+                        (sort-by first)
+                        vec)
+        updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) new-points)]
+    (set-items state config updated-items)))
+
+(defn handle-update-curve-point
+  "Generic curve point update for any chain.
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :items-path
+   - event-data: {:effect-path [...] :channel :r :point-idx 1 :x 128 :y 200}
+   
+   Returns: Updated state"
+  [state config {:keys [effect-path channel point-idx x y]}]
+  (let [param-key (keyword (str (name channel) "-curve-points"))
+        items-vec (vec (get-items state config))
+        current-points (get-in items-vec (conj (vec effect-path) :params param-key) [[0 0] [255 255]])
+        num-points (count current-points)
+        ;; Corner points (first and last) can only move in Y
+        is-corner? (or (= point-idx 0) (= point-idx (dec num-points)))
+        current-point (nth current-points point-idx [0 0])
+        updated-point (if is-corner?
+                        [(first current-point) (int y)]  ;; Keep original X for corners
+                        [(int x) (int y)])
+        updated-points (assoc current-points point-idx updated-point)
+        sorted-points (->> updated-points
+                          (sort-by first)
+                          vec)
+        updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) sorted-points)]
+    (set-items state config updated-items)))
+
+(defn handle-remove-curve-point
+  "Generic curve point removal for any chain.
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :items-path
+   - event-data: {:effect-path [...] :channel :r :point-idx 1}
+   
+   Returns: Updated state"
+  [state config {:keys [effect-path channel point-idx]}]
+  (let [param-key (keyword (str (name channel) "-curve-points"))
+        items-vec (vec (get-items state config))
+        current-points (get-in items-vec (conj (vec effect-path) :params param-key) [[0 0] [255 255]])
+        num-points (count current-points)
+        ;; Cannot remove corner points (first and last)
+        is-corner? (or (= point-idx 0) (= point-idx (dec num-points)))]
+    (if is-corner?
+      state  ;; No change for corner points
+      (let [updated-points (vec (concat (subvec current-points 0 point-idx)
+                                        (subvec current-points (inc point-idx))))
+            updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) updated-points)]
+        (set-items state config updated-items)))))
+
+(defn handle-set-active-curve-channel
+  "Generic active curve channel setter for any chain.
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :ui-path
+   - event-data: {:effect-path [...] :tab-id :r}
+   
+   Returns: Updated state"
+  [state config {:keys [effect-path tab-id]}]
+  (let [ui-path (:ui-path config)]
+    (assoc-in state (conj ui-path :ui-modes effect-path :active-curve-channel) tab-id)))
+
+(defn handle-update-spatial-params
+  "Generic spatial parameter update for any chain.
+   Updates multiple related parameters from spatial drag (e.g., x and y together).
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :items-path
+   - event-data: {:effect-path [...] :point-id :center :x 0.5 :y 0.3 :param-map {...}}
+   
+   Returns: Updated state"
+  [state config {:keys [effect-path point-id x y param-map]}]
+  (let [point-params (get param-map point-id)]
+    (if point-params
+      (let [x-key (:x point-params)
+            y-key (:y point-params)
+            items-vec (vec (get-items state config))
+            updated-items (-> items-vec
+                             (assoc-in (conj (vec effect-path) :params x-key) x)
+                             (assoc-in (conj (vec effect-path) :params y-key) y))]
+        (set-items state config updated-items))
+      state)))
+
+
 ;; Convenience Functions for Creating Configs
 
 
-(defn effects-chain-config
-  "Create configuration for effects chain handlers.
+(defn chain-config
+  "Create a unified chain configuration for any domain.
+   
+   This is the primary config factory for the new :chains-based architecture.
+   All three chain types use consistent paths under [:chains <domain> <key>].
+   
+   Usage:
+   (chain-config :effect-chains [col row])
+   (chain-config :cue-chains [col row])
+   (chain-config :projector-effects projector-id)
+   
+   Parameters:
+   - domain: One of :effect-chains, :cue-chains, :projector-effects
+   - entity-key: The key within the domain ([col row] or projector-id)
+   
+   Returns: Configuration map with :items-path, :ui-path, :domain, :entity-key"
+  [domain entity-key]
+  (let [base-path [:chains domain entity-key]]
+    {:items-path (conj base-path :items)
+     :metadata-path base-path
+     :ui-path (case domain
+                :effect-chains [:ui :dialogs :effect-chain-editor :data]
+                :cue-chains [:cue-chain-editor]
+                :projector-effects [:ui :projector-effect-ui-state entity-key])
+     :domain domain
+     :entity-key entity-key}))
+
+
+;; Item Effects Config (for effects within cue chain items)
+
+
+(defn item-effects-config
+  "Create configuration for effects within a cue chain item.
+   
+   This is for managing effects attached to presets/groups within a cue chain.
    
    Parameters:
    - col: Grid column
    - row: Grid row
+   - item-path: Path to the item within the cue chain (e.g., [0] or [1 :items 0])
    
    Returns: Configuration map"
-  [col row]
-  {:items-path [:effects :cells [col row] :effects]
-   :ui-path [:ui :dialogs :effect-chain-editor :data]
-   :domain :effects})
-
-(defn projector-chain-config
-  "Create configuration for projector chain handlers.
-   
-   Parameters:
-   - projector-id: ID of the projector
-   
-   Returns: Configuration map"
-  [projector-id]
-  {:items-path [:projectors :items projector-id :effects]
-   :ui-path [:ui :projector-effect-ui-state projector-id]
-   :domain :projectors})
-
-(defn cue-chain-config
-  "Create configuration for cue chain handlers.
-   
-   Parameters:
-   - col: Grid column
-   - row: Grid row
-   
-   Returns: Configuration map"
-  [col row]
-  {:items-path [:grid :cells [col row] :cue-chain :items]
-   :ui-path [:cue-chain-editor]
-   :domain :cue-chain})
+  [col row item-path]
+  {:items-path (vec (concat [:chains :cue-chains [col row] :items] item-path [:effects]))
+   :ui-path [:cue-chain-editor :item-effects-ui (vec item-path)]
+   :domain :item-effects
+   :entity-key {:col col :row row :item-path item-path}})

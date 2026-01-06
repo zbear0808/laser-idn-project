@@ -55,13 +55,7 @@
 (defn selected-cell [state]
   (:selected-cell (grid state)))
 
-;; Effects Extractors
 
-(defn effects [state]
-  (:effects state))
-
-(defn effects-cells [state]
-  (:cells (effects state)))
 
 
 (defn ui [state]

@@ -1,31 +1,6 @@
 (ns laser-show.animation.time
   "Time utilities for BPM-synchronized effects.
-   Handles BPM conversions, phase calculations, and time-based computations."
-  (:require [laser-show.state.core :as state]
-            [laser-show.state.queries :as queries])
-  (:refer-clojure :exclude [mod]))
-
-;; Use unchecked-remainder-double for faster modulo on primitives
-(defn ^:private mod ^double [^double x ^double y]
-  (clojure.core/mod x y))
-
-
-;; Global BPM State (delegated to database)
-
-
-(defn set-global-bpm!
-  "Set the global BPM value."
-  [bpm]
-  {:pre [(number? bpm) (pos? bpm)]}
-  (state/assoc-in-state! [:timing :bpm] (double bpm)))
-
-(defn get-global-bpm
-  "Get the current global BPM value."
-  []
-  (queries/bpm))
-
-
-;; BPM Conversions
+   Handles BPM conversions, phase calculations, and time-based computations.")
 
 
 (defn bpm->ms-per-beat
@@ -268,34 +243,3 @@
     (let [t1 (- t 1.0)]
       (+ 1.0 (* 4.0 t1 t1 t1)))))
 
-
-;; Tap Tempo (delegated to state)
-
-
-(defn tap-tempo!
-  "Record a tap for tap-tempo BPM detection.
-   Call this repeatedly to detect BPM from tapping rhythm."
-  []
-  (let [now (System/currentTimeMillis)
-        max-taps 8
-        max-interval 2000]
-    (state/update-in-state! [:timing :tap-times]
-                            (fn [taps]
-                              (let [filtered (filterv #(< (- now %) max-interval) (or taps []))
-                                    updated (conj filtered now)]
-                                (if (> (count updated) max-taps)
-                                  (subvec updated (- (count updated) max-taps))
-                                  updated))))
-    (let [taps (queries/tap-times)]
-      (when (>= (count taps) 2)
-        (let [intervals (mapv - (rest taps) (butlast taps))
-              avg-interval (/ (reduce + intervals) (count intervals))
-              detected-bpm (/ 60000.0 avg-interval)]
-          (when (and (>= detected-bpm 40) (<= detected-bpm 240))
-            (set-global-bpm! detected-bpm)
-            detected-bpm))))))
-
-(defn reset-tap-tempo!
-  "Reset the tap tempo buffer."
-  []
-  (state/assoc-in-state! [:timing :tap-times] []))

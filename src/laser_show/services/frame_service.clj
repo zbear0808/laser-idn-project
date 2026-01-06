@@ -35,25 +35,15 @@
 
 (defn get-active-cell-data
   "Get the cell data for the currently active cell.
-   Returns a map with either :cue-chain or :preset-id (legacy)."
+   Returns a map with :cue-chain from the unified :chains domain."
   []
   (let [s (state/get-raw-state)
         active-cell (get-in s [:playback :active-cell])]
     (when active-cell
-      (let [[col row] active-cell]
-        (get-in s [:grid :cells [col row]])))))
-
-(defn get-active-cell-preset
-  "Get the preset ID for the currently active cell.
-   DEPRECATED: Use get-active-cell-data for cue chain support."
-  []
-  (let [cell-data (get-active-cell-data)]
-    (or (:preset-id cell-data)
-        ;; Legacy support: if cue-chain exists with single preset, use that
-        (when-let [cue-chain (:cue-chain cell-data)]
-          (when-let [first-item (first (:items cue-chain))]
-            (when (= :preset (:type first-item))
-              (:preset-id first-item)))))))
+      (let [[col row] active-cell
+            cue-chain-data (get-in s [:chains :cue-chains [col row]])]
+        (when (seq (:items cue-chain-data))
+          {:cue-chain cue-chain-data})))))
 
 (defn get-trigger-time
   "Get the trigger time for animation timing."
@@ -75,16 +65,16 @@
    Returns an effect chain or nil if no active effects."
   []
   (let [s (state/get-raw-state)
-        effects-cells (get-in s [:effects :cells] {})]
-    (when (seq effects-cells)
-      (let [active-effects (->> effects-cells
+        effect-chains (get-in s [:chains :effect-chains] {})]
+    (when (seq effect-chains)
+      (let [active-effects (->> effect-chains
                                 (vals)
                                 (filter :active)
-                                (mapcat :effects)
+                                (mapcat :items)
                                 (vec))]
         (when (seq active-effects)
           ;; Debug logging - uncomment to trace effect chain construction
-          ;; (println "[DEBUG get-active-effects] Found" (count active-effects) "effects:" 
+          ;; (println "[DEBUG get-active-effects] Found" (count active-effects) "effects:"
           ;;          (mapv :effect-id active-effects))
           {:effects active-effects})))))
 
@@ -207,7 +197,6 @@
 
 (defn generate-current-frame
   "Generate the current animation frame based on state.
-   Supports both cue chains and legacy preset-id format.
    Applies active effects from the effects grid to the base frame.
    Returns a LaserFrame or nil if nothing to render.
    
@@ -221,15 +210,8 @@
             
             ;; Measure base frame generation
             base-start (timing/nanotime)
-            base-frame (cond
-                         ;; New cue chain format
-                         (:cue-chain cell-data)
-                         (generate-frame-from-cue-chain (:cue-chain cell-data) elapsed bpm trigger-time)
-                         
-                         ;; Legacy preset-id format
-                         (:preset-id cell-data)
-                         (when-let [anim (presets/create-animation-from-preset (:preset-id cell-data))]
-                           (t/get-frame anim elapsed)))
+            base-frame (when-let [cue-chain (:cue-chain cell-data)]
+                         (generate-frame-from-cue-chain cue-chain elapsed bpm trigger-time))
             base-end (timing/nanotime)]
         
         (when base-frame

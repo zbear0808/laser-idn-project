@@ -62,65 +62,11 @@
 (defstate grid
   "Cue grid state - the main trigger interface.
    
-   Each cell contains a cue-chain with items (presets and groups), each item
-   can have its own parameters and effect chain:
-   {:cue-chain {:items [{:type :preset
-                          :id (uuid)
-                          :preset-id :circle
-                          :params {:radius 0.5 :color [255 255 255]}
-                          :effects []
-                          :enabled? true}]}
-    :active true}"
-  {:cells {:default {;; Row 0: Basic shapes
-                     [0 0] {:cue-chain {:items [{:type :preset
-                                                 :id #uuid "00000000-0000-0000-0000-000000000001"
-                                                 :preset-id :circle
-                                                 :params {}
-                                                 :effects []
-                                                 :enabled? true}]}}
-                     [1 0] {:cue-chain {:items [{:type :preset
-                                                 :id #uuid "00000000-0000-0000-0000-000000000002"
-                                                 :preset-id :square
-                                                 :params {}
-                                                 :effects []
-                                                 :enabled? true}]}}
-                     [2 0] {:cue-chain {:items [{:type :preset
-                                                 :id #uuid "00000000-0000-0000-0000-000000000003"
-                                                 :preset-id :triangle
-                                                 :params {}
-                                                 :effects []
-                                                 :enabled? true}]}}
-                     [3 0] {:cue-chain {:items [{:type :preset
-                                                 :id #uuid "00000000-0000-0000-0000-000000000004"
-                                                 :preset-id :star
-                                                 :params {}
-                                                 :effects []
-                                                 :enabled? true}]}}
-                     [4 0] {:cue-chain {:items [{:type :preset
-                                                 :id #uuid "00000000-0000-0000-0000-000000000005"
-                                                 :preset-id :spiral
-                                                 :params {}
-                                                 :effects []
-                                                 :enabled? true}]}}
-                     [5 0] {:cue-chain {:items [{:type :preset
-                                                 :id #uuid "00000000-0000-0000-0000-000000000006"
-                                                 :preset-id :wave
-                                                 :params {}
-                                                 :effects []
-                                                 :enabled? true}]}}
-                     [6 0] {:cue-chain {:items [{:type :preset
-                                                 :id #uuid "00000000-0000-0000-0000-000000000007"
-                                                 :preset-id :beam-fan
-                                                 :params {}
-                                                 :effects []
-                                                 :enabled? true}]}}
-                     [7 0] {:cue-chain {:items [{:type :preset
-                                                 :id #uuid "00000000-0000-0000-0000-000000000008"
-                                                 :preset-id :rainbow-circle
-                                                 :params {}
-                                                 :effects []
-                                                 :enabled? true}]}}}
-           :doc "Map of [col row] -> {:cue-chain {:items [...]} :active bool}"}
+   NOTE: Cue chain items are stored in [:chains :cue-chains [col row] :items]
+   This domain stores grid metadata (selection, size) only.
+   See also: defstate chains for cue-chain item storage."
+  {:cells {:default {}
+           :doc "Map of [col row] -> cell metadata (not chain items)"}
    :selected-cell {:default nil
                    :doc "[col row] of selected cell for editing"}
    :size {:default [default-grid-cols default-grid-rows]
@@ -206,7 +152,9 @@
           :doc "MIDI input settings"}})
 
 (defstate projectors
-  "Projector configurations with effect chains for color calibration and safety zoning.
+  "Projector configurations for color calibration and safety zoning.
+   
+   NOTE: Projector effect chains are stored in [:chains :projector-effects projector-id :items]
    
    Each projector entry contains:
    - :name - User-friendly name
@@ -214,11 +162,12 @@
    - :port - IDN port (default 7255)
    - :unit-id - Hardware unit ID from discovery
    - :enabled? - Whether to send output to this projector
-   - :effects - Effect chain applied to output (color cal, corner pin, etc.)
    - :output-config - Bit depth settings
-   - :status - Runtime connection status (not persisted)"
+   - :status - Runtime connection status (not persisted)
+   
+   See also: defstate chains for effect chain storage."
   {:items {:default {}
-           :doc "Map of projector-id -> projector configuration"}
+           :doc "Map of projector-id -> projector configuration (no :effects, see :chains)"}
    :active-projector {:default nil
                       :doc "Currently selected projector ID for editing"}
    :selected-effect-idx {:default nil
@@ -256,6 +205,75 @@
   "Effect type registry."
   {:items {:default {}
            :doc "map of effect-id -> effect-definition"}})
+
+
+;; Unified Chain Storage Domain
+
+
+(defstate chains
+  "Unified chain storage for all hierarchical lists.
+   
+   Three chain types with consistent structure:
+   - :effect-chains - Effect modifiers for grid cells
+   - :cue-chains - Cue presets/groups for grid cells
+   - :projector-effects - Output effects for projectors
+   
+   All chains use the same structure: {:items [...] :active? bool (optional)}
+   This enables generic handlers and simplified subscriptions."
+  {:effect-chains {:default {}
+                   :doc "Map of [col row] -> {:items [...] :active? bool}"}
+   :cue-chains {:default {;; Row 0: Basic shapes - initial default cues
+                          [0 0] {:items [{:type :preset
+                                          :id #uuid "00000000-0000-0000-0000-000000000001"
+                                          :preset-id :circle
+                                          :params {}
+                                          :effects []
+                                          :enabled? true}]}
+                          [1 0] {:items [{:type :preset
+                                          :id #uuid "00000000-0000-0000-0000-000000000002"
+                                          :preset-id :square
+                                          :params {}
+                                          :effects []
+                                          :enabled? true}]}
+                          [2 0] {:items [{:type :preset
+                                          :id #uuid "00000000-0000-0000-0000-000000000003"
+                                          :preset-id :triangle
+                                          :params {}
+                                          :effects []
+                                          :enabled? true}]}
+                          [3 0] {:items [{:type :preset
+                                          :id #uuid "00000000-0000-0000-0000-000000000004"
+                                          :preset-id :star
+                                          :params {}
+                                          :effects []
+                                          :enabled? true}]}
+                          [4 0] {:items [{:type :preset
+                                          :id #uuid "00000000-0000-0000-0000-000000000005"
+                                          :preset-id :spiral
+                                          :params {}
+                                          :effects []
+                                          :enabled? true}]}
+                          [5 0] {:items [{:type :preset
+                                          :id #uuid "00000000-0000-0000-0000-000000000006"
+                                          :preset-id :wave
+                                          :params {}
+                                          :effects []
+                                          :enabled? true}]}
+                          [6 0] {:items [{:type :preset
+                                          :id #uuid "00000000-0000-0000-0000-000000000007"
+                                          :preset-id :beam-fan
+                                          :params {}
+                                          :effects []
+                                          :enabled? true}]}
+                          [7 0] {:items [{:type :preset
+                                          :id #uuid "00000000-0000-0000-0000-000000000008"
+                                          :preset-id :rainbow-circle
+                                          :params {}
+                                          :effects []
+                                          :enabled? true}]}}
+                :doc "Map of [col row] -> {:items [...]}"}
+   :projector-effects {:default {}
+                       :doc "Map of projector-id -> {:items [...]}"}})
 
 
 ;; Backend State Domain

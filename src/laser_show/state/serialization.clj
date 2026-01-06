@@ -234,28 +234,3 @@
                                :on-error on-error
                                :default default)
       (deserialize edn-str :on-error on-error :default default))))
-
-
-;; Data Migrations
-
-
-(defn migrate-effect-enabled-field
- "Ensure all effects have :enabled? field (add if missing, default true).
-  Called during project load for forward compatibility.
-  
-  This handles both old effects (no field) and ensures consistency."
- [state]
- (update-in state [:effects :cells]
-   (fn [cells]
-     (when cells
-       (into {}
-         (map (fn [[coord cell-data]]
-                [coord
-                 (update cell-data :effects
-                   (fn [effects]
-                     (mapv (fn [effect]
-                             (if (contains? effect :enabled?)
-                               effect
-                               (assoc effect :enabled? true)))
-                           effects)))])
-              cells))))))

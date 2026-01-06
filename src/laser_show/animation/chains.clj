@@ -329,7 +329,7 @@
    
    Returns: Updated chain"
   [items path f]
-  (update-in items path f))
+  (update-in (vec items) (vec path) f))
 
 (defn move-item
   "Move an item from one path to another in a chain.

@@ -94,8 +94,7 @@
   []
   (log/info "Starting Laser Show application...")
   
-  (let [initial-state (domains/build-initial-state)]
-    (state/init-state! initial-state))
+  (state/init-state! (domains/build-initial-state))
   
   (init-styles!)
   

@@ -381,28 +381,3 @@
   (testing "Marks project dirty"
     (let [result (ch/handle-set-item-enabled sample-state effects-config [0] false)]
       (is (true? (get-in result [:project :dirty?]))))))
-
-
-;; Config Tests
-
-
-(deftest effects-chain-config-test
-  (testing "Creates correct config for effects"
-    (let [config (ch/effects-chain-config 1 2)]
-      (is (= [:effects :cells [1 2] :effects] (:items-path config)))
-      (is (= [:ui :dialogs :effect-chain-editor :data] (:ui-path config)))
-      (is (= :effects (:domain config))))))
-
-(deftest projector-chain-config-test
-  (testing "Creates correct config for projectors"
-    (let [config (ch/projector-chain-config :proj-1)]
-      (is (= [:projectors :items :proj-1 :effects] (:items-path config)))
-      (is (= [:ui :projector-effect-ui-state :proj-1] (:ui-path config)))
-      (is (= :projectors (:domain config))))))
-
-(deftest cue-chain-config-test
-  (testing "Creates correct config for cue chains"
-    (let [config (ch/cue-chain-config 0 1)]
-      (is (= [:grid :cells [0 1] :cue-chain :items] (:items-path config)))
-      (is (= [:cue-chain-editor] (:ui-path config)))
-      (is (= :cue-chain (:domain config))))))

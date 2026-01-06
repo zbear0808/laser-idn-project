@@ -28,7 +28,7 @@
   (:require [cljfx.api :as fx]
             [laser-show.state.extractors :as ex]
             [laser-show.css.core :as css]
-            [laser-show.animation.effects :as effects]))
+            [laser-show.animation.chains :as chains]))
 
 
 ;; Level 1: Domain Accessors (fx/sub-val wrappers)
@@ -62,12 +62,6 @@
 
 (defn selected-cell [context]
   (ex/selected-cell (fx/sub-val context identity)))
-
-;; --- Effects ---
-
-
-(defn effects-cells [context]
-  (ex/effects-cells (fx/sub-val context identity)))
 
 ;; --- UI ---
 
@@ -131,7 +125,7 @@
   "Computed display data for a grid cell.
    
    Depends on:
-   - grid-cells (for cell content)
+   - chains domain (for cue chain content)
    - active-cell (for active state)
    - selected-cell (for selection state)
    
@@ -144,12 +138,12 @@
    - :selected? - is this cell selected?
    - :has-content? - does cell have any presets?"
   [context col row]
-  (let [cells (fx/sub-ctx context grid-cells)
+  (let [;; Read cue chain from unified :chains domain
+        chains-data (fx/sub-val context :chains)
+        cue-chain-data (get-in chains-data [:cue-chains [col row]] {:items []})
+        items (:items cue-chain-data [])
         active (fx/sub-ctx context active-cell)
         selected (fx/sub-ctx context selected-cell)
-        cell-data (get cells [col row])
-        cue-chain (or (:cue-chain cell-data) {:items []})
-        items (:items cue-chain [])
         ;; Flatten to get all presets (excluding groups)
         flat-items (filter #(= :preset (:type %))
                           (tree-seq #(= :group (:type %))
@@ -159,7 +153,7 @@
         preset-count (count flat-items)]
     {:col col
      :row row
-     :cue-chain cue-chain
+     :cue-chain cue-chain-data
      :preset-count preset-count
      :first-preset-id (:preset-id first-preset)
      :active? (= [col row] active)
@@ -190,7 +184,7 @@
 (defn effect-cell-display-data
   "Computed display data for an effects grid cell.
    
-   Depends on: effects-cells
+   Depends on: chains domain (for effect chain content)
    
    Returns map with:
    - :col, :row - position
@@ -200,11 +194,13 @@
    - :has-effects? - does cell have any effects?
    - :display-text - text to display in the cell"
   [context col row]
-  (let [cells (fx/sub-ctx context effects-cells)
-        cell-data (get cells [col row])
-        effect-chain (:effects cell-data [])
+  (let [;; Read effect chain from unified :chains domain
+        chains-data (fx/sub-val context :chains)
+        cell-data (get-in chains-data [:effect-chains [col row]])
+        ;; Effect chain items are stored under :items key
+        effect-chain (:items cell-data [])
         ;; Flatten the chain to get actual effects (not groups)
-        flattened-effects (effects/flatten-chain effect-chain)
+        flattened-effects (chains/flatten-chain effect-chain)
         first-effect (first flattened-effects)
         effect-count (count flattened-effects)]
     {:col col
@@ -433,10 +429,10 @@
 
 (defn projector-effect-chain
   "Get the effects chain for a specific projector.
-   Depends on: projectors-data"
+   Depends on: chains domain"
   [context projector-id]
-  (get-in (fx/sub-ctx context projectors-data)
-          [:items projector-id :effects]
+  (get-in (fx/sub-val context :chains)
+          [:projector-effects projector-id :items]
           []))
 
 

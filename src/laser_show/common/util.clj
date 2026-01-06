@@ -43,8 +43,8 @@
   (into [] (keep-indexed pred) coll))
 
 (defn mapv-indexed
-  ([f coll]
-   (into [] (map-indexed f) coll)))
+  [f coll]
+  (into [] (map-indexed f) coll))
 
 (defn keepv
   [f coll]

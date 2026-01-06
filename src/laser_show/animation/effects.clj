@@ -27,12 +27,13 @@
     :idx int (point index)
     :count int (total points)
     :raw map (original LaserPoint for pass-through)}"
-  (:require [clojure.tools.logging :as log]
-            [laser-show.animation.time :as time]
-            [laser-show.animation.modulation :as mod]
-            [laser-show.animation.types :as t]
-            [laser-show.animation.chains :as chains]
-            [laser-show.common.util :as u]))
+  (:require
+   [clojure.tools.logging :as log]
+   [laser-show.animation.chains :as chains]
+   [laser-show.animation.modulation :as mod]
+   [laser-show.animation.types :as t]
+   [laser-show.common.util :as u]
+   [laser-show.state.queries :as queries]))
 
 
 ;; Timing Modes
@@ -125,15 +126,8 @@
 
 
 
-;; Effect Instance & Groups
-;;
-;; Re-export generic chain functions from chains.clj for backwards compatibility.
-;; Effect-specific logic remains here.
+;; Effect Instance Checking
 
-
-(def group?
-  "Check if an item is a group. Delegates to chains/group?."
-  chains/group?)
 
 (defn effect?
   "Check if an item is an effect (not a group).
@@ -143,49 +137,8 @@
       (= :effect (:type item))))
 
 (def effect-instance-enabled?
-  "Check if an effect instance is enabled. Delegates to chains/item-enabled?."
+  "Check if an effect instance is enabled."
   chains/item-enabled?)
-
-
-;; Group Utilities - Re-exports from chains.clj
-
-
-(def max-nesting-depth
-  "Maximum allowed nesting depth for groups."
-  chains/max-nesting-depth)
-
-(def flatten-chain
-  "Flatten a nested effect chain into a sequence of effects for processing.
-   Delegates to chains/flatten-chain."
-  chains/flatten-chain)
-
-(def nesting-depth
-  "Calculate the maximum nesting depth of a chain. Delegates to chains/nesting-depth."
-  chains/nesting-depth)
-
-(def can-add-group-at-path?
-  "Check if a new group can be added at the given path. Delegates to chains/can-add-group-at-path?."
-  chains/can-add-group-at-path?)
-
-(def paths-in-chain
-  "Generate all paths in a chain. Delegates to chains/paths-in-chain."
-  chains/paths-in-chain)
-
-(def get-item-at-path
-  "Get an item from a chain at the given path. Delegates to chains/get-item-at-path."
-  chains/get-item-at-path)
-
-(def count-effects-recursive
-  "Count total effects in a chain. Delegates to chains/count-items-recursive."
-  chains/count-items-recursive)
-
-(def find-path-by-id
-  "Find the path to an item with the given ID. Delegates to chains/find-path-by-id."
-  chains/find-path-by-id)
-
-(def ensure-item-id
-  "Ensure an effect or group has an :id field. Delegates to chains/ensure-item-id."
-  chains/ensure-item-id)
 
 
 ;; Point Normalization Transducers
@@ -294,7 +247,7 @@
   [chain time-ms bpm trigger-time frame-ctx]
   (let [effects (:effects chain)
         ;; Flatten the chain to handle nested groups
-        flat-effects (flatten-chain effects)
+        flat-effects (chains/flatten-chain effects)
         transducers (keep #(make-effect-transducer % time-ms bpm trigger-time frame-ctx) flat-effects)]
     (if (empty? transducers)
       (map identity)
@@ -319,7 +272,7 @@
    
    Returns: Transformed frame"
   ([frame chain time-ms]
-   (apply-effect-chain frame chain time-ms (time/get-global-bpm) nil))
+   (apply-effect-chain frame chain time-ms (queries/bpm) nil))
   ([frame chain time-ms bpm]
    (apply-effect-chain frame chain time-ms bpm nil))
   ([frame chain time-ms bpm trigger-time]

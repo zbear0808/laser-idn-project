@@ -523,18 +523,12 @@
                 (cond
                    ;; Check for custom renderer in ui-hints
                    (= :rgb-curves (get-in effect-def [:ui-hints :renderer]))
-                   (do
-                     (println "[PROJECTORS DEBUG] Rendering rgb-curves-visual-editor:"
-                              "projector-id=" projector-id
-                              "effect-idx=" effect-idx
-                              "ui-state=" ui-state)
-                     {:fx/type custom-renderers/rgb-curves-visual-editor
-                      :col nil  ;; Not used for projector effects
-                      :row nil
-                      :effect-path [effect-idx]
-                      :current-params params
-                      :dialog-data ui-state  ;; FIX: Pass ui-state which contains :ui-modes with active channel
-                      :projector-id projector-id})
+                   {:fx/type custom-renderers/rgb-curves-visual-editor
+                    :domain :projector-effects
+                    :entity-key projector-id
+                    :effect-path [effect-idx]
+                    :current-params params
+                    :dialog-data ui-state}
                   
                   ;; Built-in editors for specific effect types
                   (= effect-id :corner-pin)
@@ -582,22 +576,24 @@
 (defn- projector-effects-sidebar
   "Effect chain sidebar using hierarchical-list-editor with built-in keyboard handling.
    Props:
-   - :projector - The projector config map
+   - :fx/context - Context for subscriptions
+   - :projector-id - ID of the projector
    - :selected-ids - Set of selected item IDs
    - :clipboard-items - Items available for pasting"
-  [{:keys [projector selected-ids clipboard-items]}]
-  (let [{:keys [id effects]} projector]
+  [{:keys [fx/context projector-id selected-ids clipboard-items]}]
+  (let [;; Read effects from chains domain, not from projector config
+        effects (fx/sub-ctx context subs/projector-effect-chain projector-id)]
     {:fx/type hierarchical-list/hierarchical-list-editor
      :items (or effects [])
-     :component-id [:projector-effects id]
+     :component-id [:projector-effects projector-id]
      :item-id-key :effect-id
      :label-map (calibration-effect-labels)  ;; Now a function call
      :fallback-label "Unknown Effect"
-     :on-change-event :projectors/set-effects
-     :on-change-params {:projector-id id}
+     :on-change-event :chain/set-items
+     :on-change-params {:domain :projector-effects :entity-key projector-id}
      :items-key :effects
-     :on-selection-event :projectors/update-effect-selection
-     :on-selection-params {:projector-id id}
+     :on-selection-event :chain/update-selection
+     :on-selection-params {:domain :projector-effects :entity-key projector-id}
      :selection-key :selected-ids
      :on-copy-fn (fn [items]
                    (clipboard/copy-effect-chain! {:effects items}))
@@ -670,7 +666,9 @@
         ui-state (when projector-id
                    (fx/sub-ctx context subs/projector-effect-ui-state projector-id))
         selected-ids (:selected-ids ui-state #{})
-        effects (or (:effects projector) [])
+        ;; Read effects from chains domain
+        effects (when projector-id
+                  (fx/sub-ctx context subs/projector-effect-chain projector-id))
         ;; Get selected effect for parameter editor (first selected if single select)
         first-selected-id (when (= 1 (count selected-ids))
                             (first selected-ids))
@@ -711,7 +709,8 @@
                                                                 {:fx/type projector-add-effect-menu
                                                                  :projector-id projector-id}]}
                                                     {:fx/type projector-effects-sidebar
-                                                     :projector projector
+                                                     :fx/context context
+                                                     :projector-id projector-id
                                                      :selected-ids selected-ids
                                                      :clipboard-items clipboard-items}]}
                                         ;; Right: Parameter editor + test patterns

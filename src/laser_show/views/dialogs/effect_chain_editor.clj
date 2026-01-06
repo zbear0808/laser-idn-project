@@ -118,9 +118,8 @@
 
 (defn- param-slider
   "Slider control for numeric parameters with editable text field.
-   The text field allows typing a value and pressing Enter to update.
-   Supports both :effect-idx (legacy, top-level) and :effect-path (nested)."
-  [{:keys [col row effect-idx effect-path param-key param-spec current-value]}]
+   The text field allows typing a value and pressing Enter to update."
+  [{:keys [col row effect-path param-key param-spec current-value]}]
   (let [{:keys [min max]} param-spec
         value (or current-value (:default param-spec) 0)]
     {:fx/type :h-box
@@ -137,7 +136,6 @@
                  :pref-width 150
                  :on-value-changed {:event/type :effects/update-param
                                     :col col :row row
-                                    :effect-idx effect-idx
                                     :effect-path effect-path
                                     :param-key param-key}}
                 {:fx/type :text-field
@@ -146,15 +144,13 @@
                  :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 11; -fx-padding: 2 4;"
                  :on-action {:event/type :effects/update-param-from-text
                              :col col :row row
-                             :effect-idx effect-idx
                              :effect-path effect-path
                              :param-key param-key
                              :min min :max max}}]}))
 
 (defn- param-choice
-  "Combo-box for choice parameters.
-   Supports both :effect-idx (legacy, top-level) and :effect-path (nested)."
-  [{:keys [col row effect-idx effect-path param-key param-spec current-value]}]
+  "Combo-box for choice parameters."
+  [{:keys [col row effect-path param-key param-spec current-value]}]
   (let [choices (:choices param-spec [])
         value (or current-value (:default param-spec))]
     {:fx/type :h-box
@@ -173,14 +169,12 @@
                                 :describe (fn [item] {:text (if item (name item) "")})}
                  :on-value-changed {:event/type :effects/update-param
                                     :col col :row row
-                                    :effect-idx effect-idx
                                     :effect-path effect-path
                                     :param-key param-key}}]}))
 
 (defn- param-checkbox
-  "Checkbox for boolean parameters.
-   Supports both :effect-idx (legacy, top-level) and :effect-path (nested)."
-  [{:keys [col row effect-idx effect-path param-key param-spec current-value]}]
+  "Checkbox for boolean parameters."
+  [{:keys [col row effect-path param-key param-spec current-value]}]
   (let [value (if (some? current-value) current-value (:default param-spec false))]
     {:fx/type :h-box
      :spacing 8
@@ -191,25 +185,21 @@
                  :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"
                  :on-selected-changed {:event/type :effects/update-param
                                        :col col :row row
-                                       :effect-idx effect-idx
                                        :effect-path effect-path
                                        :param-key param-key}}]}))
 
 (defn- param-control
-  "Render appropriate control based on parameter type.
-   Supports both :effect-idx (legacy, top-level) and :effect-path (nested)."
+  "Render appropriate control based on parameter type."
   [{:keys [param-spec] :as props}]
   (case (:type param-spec :float)
     :choice {:fx/type param-choice
              :col (:col props) :row (:row props)
-             :effect-idx (:effect-idx props)
              :effect-path (:effect-path props)
              :param-key (:param-key props)
              :param-spec param-spec
              :current-value (:current-value props)}
     :bool {:fx/type param-checkbox
            :col (:col props) :row (:row props)
-           :effect-idx (:effect-idx props)
            :effect-path (:effect-path props)
            :param-key (:param-key props)
            :param-spec param-spec
@@ -217,7 +207,6 @@
     ;; Default: numeric slider
     {:fx/type param-slider
      :col (:col props) :row (:row props)
-     :effect-idx (:effect-idx props)
      :effect-path (:effect-path props)
      :param-key (:param-key props)
      :param-spec param-spec
@@ -228,21 +217,21 @@
    
    Props:
    - :col, :row - Grid cell coordinates
-   - :effect-idx - Index in effect chain (legacy, for top-level only)
-   - :effect-path - Path to effect (supports nested effects)
+   - :effect-path - Path to effect
    - :effect-def - Effect definition with :ui-hints
    - :current-params - Current parameter values
    - :ui-mode - Current UI mode (:visual or :numeric)
    - :params-map - Parameter specifications map
    - :dialog-data - Dialog state data (for curve editor channel tab tracking)"
-  [{:keys [col row effect-idx effect-path effect-def current-params ui-mode params-map dialog-data]}]
+  [{:keys [col row effect-path effect-def current-params ui-mode params-map dialog-data]}]
   (let [ui-hints (:ui-hints effect-def)
         renderer-type (:renderer ui-hints)
         actual-mode (or ui-mode (:default-mode ui-hints :visual))]
     ;; RGB Curves is visual-only, no mode toggle
     (if (= renderer-type :rgb-curves)
       {:fx/type custom-renderers/rgb-curves-visual-editor
-       :col col :row row
+       :domain :effect-chains
+       :entity-key [col row]
        :effect-path effect-path
        :current-params current-params
        :dialog-data dialog-data}
@@ -265,7 +254,6 @@
                                            "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
                                            "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
                               :on-action {:event/type :effects/set-param-ui-mode
-                                         :effect-idx effect-idx
                                          :effect-path effect-path
                                          :mode :visual}}
                              {:fx/type :button
@@ -275,7 +263,6 @@
                                            "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
                                            "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
                               :on-action {:event/type :effects/set-param-ui-mode
-                                         :effect-idx effect-idx
                                          :effect-path effect-path
                                          :mode :numeric}}]}
                   
@@ -285,14 +272,12 @@
                     (case renderer-type
                       :spatial-2d {:fx/type custom-renderers/translate-visual-editor
                                   :col col :row row
-                                  :effect-idx effect-idx
                                   :effect-path effect-path
                                   :current-params current-params
                                   :param-specs (:parameters effect-def)}
                       
                       :corner-pin-2d {:fx/type custom-renderers/corner-pin-visual-editor
                                      :col col :row row
-                                     :effect-idx effect-idx
                                      :effect-path effect-path
                                      :current-params current-params
                                      :param-specs (:parameters effect-def)}
@@ -304,7 +289,6 @@
                                   (for [[param-key param-spec] params-map]
                                     {:fx/type param-control
                                      :col col :row row
-                                     :effect-idx effect-idx
                                      :effect-path effect-path
                                      :param-key param-key
                                      :param-spec param-spec
@@ -317,33 +301,21 @@
                                 (for [[param-key param-spec] params-map]
                                   {:fx/type param-control
                                    :col col :row row
-                                   :effect-idx effect-idx
                                    :effect-path effect-path
                                    :param-key param-key
                                    :param-spec param-spec
                                    :current-value (get current-params param-key)}))})]})))
 
 (defn- parameter-editor
-  "Parameter editor for the selected effect.
-   Supports both :selected-effect-idx (legacy, top-level only) and
-   :selected-effect-path (nested effects via get-in)."
-  [{:keys [col row selected-effect-idx selected-effect-path effect-chain dialog-data]}]
-  (let [;; Use path-based lookup if available, otherwise fall back to index
-        selected-effect (cond
-                          selected-effect-path
-                          (get-in effect-chain (vec selected-effect-path))
-                          
-                          selected-effect-idx
-                          (nth effect-chain selected-effect-idx nil)
-                          
-                          :else nil)
+  "Parameter editor for the selected effect."
+  [{:keys [col row selected-effect-path effect-chain dialog-data]}]
+  (let [selected-effect (when selected-effect-path
+                          (get-in effect-chain (vec selected-effect-path)))
         effect-def (when selected-effect
                      (effects/get-effect (:effect-id selected-effect)))
         current-params (:params selected-effect {})
         params-map (params-vector->map (:parameters effect-def []))
-        ;; For UI mode lookup, use path if available (stringified for map key)
-        ui-mode-key (or selected-effect-path selected-effect-idx)
-        ui-mode (get-in dialog-data [:ui-modes ui-mode-key])]
+        ui-mode (get-in dialog-data [:ui-modes selected-effect-path])]
     {:fx/type :v-box
      :spacing 8
      :style "-fx-background-color: #2A2A2A; -fx-padding: 8;"
@@ -360,7 +332,6 @@
                      :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
                      :content {:fx/type custom-param-renderer
                               :col col :row row
-                              :effect-idx selected-effect-idx
                               :effect-path selected-effect-path
                               :effect-def effect-def
                               :current-params current-params
@@ -379,7 +350,6 @@
                                          (for [[param-key param-spec] params-map]
                                            {:fx/type param-control
                                             :col col :row row
-                                            :effect-idx selected-effect-idx
                                             :effect-path selected-effect-path
                                             :param-key param-key
                                             :param-spec param-spec
@@ -398,9 +368,9 @@
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
         {:keys [col row selected-ids active-bank-tab]} dialog-data
-        effects-state (fx/sub-val context :effects)
-        cell-data (get-in effects-state [:cells [col row]])
-        effect-chain (:effects cell-data [])
+        chains-state (fx/sub-val context :chains)
+        cell-data (get-in chains-state [:effect-chains [col row]])
+        effect-chain (:items cell-data [])
         active? (:active cell-data false)
         clipboard-items (clipboard/get-effects-to-paste)
         ;; For parameter editor - use first selected ID if single select
@@ -427,10 +397,10 @@
                             :item-registry-fn effects/get-effect
                             :item-name-key :name
                             :fallback-label "Unknown Effect"
-                            :on-change-event :effects/set-chain
-                            :on-change-params {:col col :row row}
-                            :on-selection-event :effects/update-selection
-                            :on-selection-params {:col col :row row}
+                            :on-change-event :chain/set-items
+                            :on-change-params {:domain :effect-chains :entity-key [col row]}
+                            :on-selection-event :chain/update-selection
+                            :on-selection-params {:domain :effect-chains :entity-key [col row]}
                             :selection-key :selected-ids
                             :on-copy-fn (fn [items]
                                           (clipboard/copy-effect-chain! {:effects items}))
@@ -450,7 +420,6 @@
                                        ;; Parameter editor (bottom) - shows first selected
                                        {:fx/type parameter-editor
                                         :col col :row row
-                                        :selected-effect-idx nil
                                         :selected-effect-path first-selected-path
                                         :effect-chain effect-chain
                                         :dialog-data dialog-data}]}]}
@@ -475,35 +444,6 @@
                                         :dialog-id :effect-chain-editor}}]}]}))
 
 
-;; Scene-level Event Filter Setup
-
-
-(defn- setup-scene-key-filter!
-  "Setup Scene-level event filter for Ctrl+C and Ctrl+V.
-   Scene-level filters catch events before any node handlers,
-   allowing us to intercept system clipboard shortcuts."
-  [^javafx.scene.Scene scene col row]
-  (.addEventFilter
-    scene
-    KeyEvent/KEY_PRESSED
-    (reify javafx.event.EventHandler
-      (handle [_ event]
-        (let [code (.getCode event)
-              ctrl? (.isShortcutDown event)]
-          (cond
-            ;; Ctrl+C - Copy
-            (and ctrl? (= code KeyCode/C))
-            (do (events/dispatch! {:event/type :effects/copy-selected
-                                   :col col :row row})
-                (.consume event))
-            
-            ;; Ctrl+V - Paste
-            (and ctrl? (= code KeyCode/V))
-            (do (events/dispatch! {:event/type :effects/paste-into-chain
-                                   :col col :row row})
-                (.consume event))))))))
-
-
 ;; Dialog Window
 
 
@@ -511,15 +451,12 @@
 ;; The CSS string literal has been moved to the centralized CSS system
 
 (defn- effect-chain-editor-scene
-  "Scene component with event filter for Ctrl+C/V.
-   Stylesheets use the centralized CSS system."
-  [{:keys [col row stylesheets]}]
-  {:fx/type fx/ext-on-instance-lifecycle
-   :on-created (fn [^javafx.scene.Scene scene]
-                 (setup-scene-key-filter! scene col row))
-   :desc {:fx/type :scene
-          :stylesheets stylesheets
-          :root {:fx/type effect-chain-editor-content}}})
+  "Scene component for the effect chain editor.
+   Keyboard shortcuts are handled by the hierarchical-list component."
+  [{:keys [stylesheets]}]
+  {:fx/type :scene
+   :stylesheets stylesheets
+   :root {:fx/type effect-chain-editor-content}})
 
 (defn effect-chain-editor-dialog
   "The effect chain editor dialog window."
@@ -539,6 +476,4 @@
      :modality :none
      :on-close-request {:event/type :ui/close-dialog :dialog-id :effect-chain-editor}
      :scene {:fx/type effect-chain-editor-scene
-             :col col
-             :row row
              :stylesheets stylesheets}}))

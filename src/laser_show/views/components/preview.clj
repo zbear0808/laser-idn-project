@@ -30,22 +30,10 @@
                (u/clamp (double (or g 1.0)) 0.0 1.0)
                (u/clamp (double (or b 1.0)) 0.0 1.0)))
 
-;; Legacy helper for backward compatibility
 (defn- color-from-rgb
-  "Create JavaFX Color from RGB values.
-   Handles both normalized (0.0-1.0) and 8-bit (0-255) values."
+  "Create JavaFX Color from normalized RGB values (0.0-1.0)."
   [r g b]
-  (let [r (or r 1.0)
-        g (or g 1.0)
-        b (or b 1.0)]
-    ;; Detect if values are normalized or 8-bit
-    (if (or (> r 1.0) (> g 1.0) (> b 1.0))
-      ;; 8-bit values
-      (Color/rgb (int (u/clamp r 0 255))
-                 (int (u/clamp g 0 255))
-                 (int (u/clamp b 0 255)))
-      ;; Normalized values (0.0-1.0)
-      (color-from-normalized r g b))))
+  (color-from-normalized (or r 1.0) (or g 1.0) (or b 1.0)))
 
 
 ;; Frame Drawing
@@ -65,11 +53,9 @@
   (.strokeLine gc (/ width 2) 0 (/ width 2) height))
 
 (defn- point-blanked?
-  "Check if a point is blanked.
-   Works with both normalized colors and legacy :blanked? key."
-  [{:keys [r g b blanked?]}]
-  (or blanked?
-      (t/blanked? {:r (or r 0) :g (or g 0) :b (or b 0)})))
+  "Check if a point is blanked."
+  [{:keys [r g b]}]
+  (t/blanked? {:r (or r 0) :g (or g 0) :b (or b 0)}))
 
 (defn- draw-frame-points
   "Draw frame points as dots."
