@@ -31,7 +31,8 @@
 
 (deftest channel-message-header-test
   (testing "Empty frame packet has correct header structure"
-    (let [packet (stream/empty-frame-packet 0 1000000)]
+    (let [buf (stream/create-packet-buffer)
+          packet (stream/empty-frame-packet buf 0 1000000)]
       (is (>= (alength packet) 8) "Packet must be at least 8 bytes")
 
       (let [total-size (get-short packet 0)
@@ -45,8 +46,10 @@
 
   (testing "CNL byte structure - bit 7 always set for channel messages"
     (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
-          packet-with-config (stream/frame->packet-with-config frame 5 1000 33333)
-          packet-without-config (stream/frame->packet frame 5 1000 33333)
+          buf1 (stream/create-packet-buffer)
+          buf2 (stream/create-packet-buffer)
+          packet-with-config (stream/frame->packet-with-config buf1 frame 5 1000 33333)
+          packet-without-config (stream/frame->packet buf2 frame 5 1000 33333)
           cnl-with (get-byte packet-with-config 2)
           cnl-without (get-byte packet-without-config 2)]
       (is (bit-test cnl-with 7) "Bit 7 (channel msg) should ALWAYS be set")
@@ -54,14 +57,16 @@
 
   (testing "CCLF bit (bit 6) is set when config is present"
     (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
-          packet (stream/frame->packet-with-config frame 5 1000 33333)
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet-with-config buf frame 5 1000 33333)
           cnl-byte (get-byte packet 2)]
       (is (bit-test cnl-byte 6) "CCLF bit (bit 6) should be set when config present")
       (is (= 5 (bit-and cnl-byte 0x3F)) "Channel ID should be in lower 6 bits")))
 
   (testing "CCLF bit (bit 6) is clear when config is absent"
     (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
-          packet (stream/frame->packet frame 5 1000 33333)
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet buf frame 5 1000 33333)
           cnl-byte (get-byte packet 2)]
       (is (not (bit-test cnl-byte 6)) "CCLF bit (bit 6) should be clear when no config")
       (is (= 5 (bit-and cnl-byte 0x3F)) "Channel ID should be in lower 6 bits"))))
@@ -73,7 +78,8 @@
 (deftest channel-config-header-test
   (testing "Configuration header has correct structure"
     (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
-          packet (stream/frame->packet-with-config frame 0 1000 33333)
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet-with-config buf frame 0 1000 33333)
           config-offset 8
           scwc (get-byte packet config-offset)
           cfl (get-byte packet (+ config-offset 1))
@@ -87,7 +93,8 @@
 
   (testing "Close flag is set when requested"
     (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
-          packet (stream/frame->packet-with-config frame 0 1000 33333 :close? true)
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet-with-config buf frame 0 1000 33333 :close? true)
           cfl (get-byte packet 9)]
       (is (bit-test cfl 1) "Close flag (bit 1) should be set"))))
 
@@ -109,16 +116,17 @@
 
   (testing "Tags are written correctly to packet"
     (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
-          packet (stream/frame->packet-with-config frame 0 1000 33333)
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet-with-config buf frame 0 1000 33333)
           tags-offset 12
-          buf (ByteBuffer/wrap packet)]
-      (.order buf ByteOrder/BIG_ENDIAN)
-      (.position buf tags-offset)
+          read-buf (ByteBuffer/wrap packet)]
+      (.order read-buf ByteOrder/BIG_ENDIAN)
+      (.position read-buf tags-offset)
 
-      (is (= stream/TAG_X (.getShort buf)) "First tag should be X")
-      (is (= stream/TAG_PRECISION (.getShort buf)) "Second tag should be PRECISION")
-      (is (= stream/TAG_Y (.getShort buf)) "Third tag should be Y")
-      (is (= stream/TAG_PRECISION (.getShort buf)) "Fourth tag should be PRECISION"))))
+      (is (= stream/TAG_X (.getShort read-buf)) "First tag should be X")
+      (is (= stream/TAG_PRECISION (.getShort read-buf)) "Second tag should be PRECISION")
+      (is (= stream/TAG_Y (.getShort read-buf)) "Third tag should be Y")
+      (is (= stream/TAG_PRECISION (.getShort read-buf)) "Fourth tag should be PRECISION"))))
 
 
 ;; Frame Samples Data Chunk Tests (Section 6.2)
@@ -127,7 +135,8 @@
 (deftest frame-chunk-header-test
   (testing "Frame chunk header has correct structure"
     (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
-          packet (stream/frame->packet frame 0 1000 33333)
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet buf frame 0 1000 33333)
           chunk-offset 8
           flags (get-byte packet chunk-offset)
           duration-hi (get-byte packet (+ chunk-offset 1))
@@ -142,7 +151,8 @@
 
   (testing "Once flag is set when single-scan requested"
     (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
-          packet (stream/frame->packet frame 0 1000 33333 :single-scan? true)
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet buf frame 0 1000 33333 :single-scan? true)
           flags (get-byte packet 8)]
       (is (= 1 (bit-and flags 0x01)) "Once flag should be set"))))
 
@@ -156,18 +166,19 @@
     ;; Testing with standard-config (8-bit color, 16-bit XY) for predictable byte values
     (let [point (t/make-point 0.5 -0.5 1.0 0.5 0.25)
           frame (t/make-frame [point])
-          packet (stream/frame->packet frame 0 1000 33333
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet buf frame 0 1000 33333
                                        :output-config output-config/standard-config)
           sample-offset 12
-          buf (ByteBuffer/wrap packet)]
-      (.order buf ByteOrder/BIG_ENDIAN)
-      (.position buf sample-offset)
+          read-buf (ByteBuffer/wrap packet)]
+      (.order read-buf ByteOrder/BIG_ENDIAN)
+      (.position read-buf sample-offset)
 
-      (let [x (.getShort buf)
-            y (.getShort buf)
-            r (bit-and (.get buf) 0xFF)
-            g (bit-and (.get buf) 0xFF)
-            b (bit-and (.get buf) 0xFF)]
+      (let [x (.getShort read-buf)
+            y (.getShort read-buf)
+            r (bit-and (.get read-buf) 0xFF)
+            g (bit-and (.get read-buf) 0xFF)
+            b (bit-and (.get read-buf) 0xFF)]
 
         (is (> x 0) "X should be positive for 0.5")
         (is (< y 0) "Y should be negative for -0.5")
@@ -180,7 +191,8 @@
                   (t/make-point 0.5 0.5 0 1.0 0)
                   (t/make-point -0.5 -0.5 0 0 1.0)]
           frame (t/make-frame points)
-          packet (stream/frame->packet frame 0 1000 33333
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet buf frame 0 1000 33333
                                        :output-config output-config/standard-config)]
 
       (is (= (+ 12 (* 7 3)) (alength packet))
@@ -191,7 +203,8 @@
                   (t/make-point 0.5 0.5 0 1.0 0)
                   (t/make-point -0.5 -0.5 0 0 1.0)]
           frame (t/make-frame points)
-          packet (stream/frame->packet frame 0 1000 33333)]
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet buf frame 0 1000 33333)]
       ;; 16-bit XY (4 bytes) + 16-bit RGB (6 bytes) = 10 bytes per point
       (is (= (+ 12 (* 10 3)) (alength packet))
           "Packet size should be header + 3 points * 10 bytes each"))))
@@ -203,13 +216,15 @@
 (deftest packet-validation-test
   (testing "Valid packet passes validation"
     (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
-          packet (stream/frame->packet frame 0 1000 33333)
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet buf frame 0 1000 33333)
           result (stream/validate-packet packet)]
       (is (:valid? result) "Packet should be valid")))
 
   (testing "Packet info extraction"
     (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
-          packet (stream/frame->packet-with-config frame 3 5000000 33333)
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet-with-config buf frame 3 5000000 33333)
           info (stream/packet-info packet)]
       (is (= 3 (:channel-id info)))
       (is (= 5000000 (:timestamp info)))

@@ -609,7 +609,7 @@
 
 (defn- drop-indicator-line
   "Visual horizontal line showing where item will be inserted during drag-and-drop."
-  []
+  [_]
   {:fx/type :h-box
    :style-class "drop-indicator-line"
    :alignment :center-left
