@@ -3,12 +3,16 @@
    
    This file uses the defstate macro to declaratively define all state domains.
    Each domain generates:
-   - Initial state map
-   - Accessor functions (set-*!, update-*!)
+   - Initial state map (e.g., timing-initial)
    - Registration in the domain registry
    
    After loading this namespace, call (build-initial-state) to get the
    complete initial state map for the application.
+   
+   State mutations use low-level primitives from laser-show.state.core:
+   - assoc-in-state! for setting values
+   - update-in-state! for updating values
+   - swap-state! for complex updates
    
    NOTE: This is the single source of truth for ALL application state."
   (:require [laser-show.state.core :refer [defstate build-initial-state-from-domains]]))
@@ -62,12 +66,10 @@
 (defstate grid
   "Cue grid state - the main trigger interface.
    
-   NOTE: Cue chain items are stored in [:chains :cue-chains [col row] :items]
-   This domain stores grid metadata (selection, size) only.
+   NOTE: All cue content is stored in [:chains :cue-chains [col row] :items]
+   This domain only stores grid metadata (selection, size).
    See also: defstate chains for cue-chain item storage."
-  {:cells {:default {}
-           :doc "Map of [col row] -> cell metadata (not chain items)"}
-   :selected-cell {:default nil
+  {:selected-cell {:default nil
                    :doc "[col row] of selected cell for editing"}
    :size {:default [default-grid-cols default-grid-rows]
           :doc "[cols rows] grid dimensions"}})

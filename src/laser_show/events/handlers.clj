@@ -186,51 +186,51 @@
   [{:keys [state]}]
   {:state (assoc-in state [:grid :selected-cell] nil)})
 
-(defn- handle-grid-set-cell-preset
-  "Set a preset for a grid cell."
-  [{:keys [col row preset-id state]}]
-  {:state (-> state
-              (assoc-in [:grid :cells [col row]] {:preset-id preset-id})
-              mark-dirty)})
+;; REMOVED: handle-grid-set-cell-preset
+;; Use :cue-chain/add-preset event instead for adding presets to cells
+;; This consolidates all cue content to [:chains :cue-chains] structure
 
 (defn- handle-grid-clear-cell
-  "Clear a grid cell."
+  "Clear a grid cell's cue chain."
   [{:keys [col row state]}]
   (let [active-cell (get-in state [:playback :active-cell])
         clearing-active? (= [col row] active-cell)]
     {:state (-> state
-                (update-in [:grid :cells] dissoc [col row])
+                (update-in [:chains :cue-chains] dissoc [col row])
                 (cond-> clearing-active?
                   (-> (assoc-in [:playback :playing?] false)
                       (assoc-in [:playback :active-cell] nil)))
                 mark-dirty)}))
 
 (defn- handle-grid-move-cell
-  "Move a cell from one position to another."
+  "Move a cell's cue chain from one position to another."
   [{:keys [from-col from-row to-col to-row state]}]
-  (let [cell-data (get-in state [:grid :cells [from-col from-row]])]
-    (if cell-data
+  (let [cue-chain-data (get-in state [:chains :cue-chains [from-col from-row]])]
+    (if cue-chain-data
       {:state (-> state
-                  (update-in [:grid :cells] dissoc [from-col from-row])
-                  (assoc-in [:grid :cells [to-col to-row]] cell-data)
+                  (update-in [:chains :cue-chains] dissoc [from-col from-row])
+                  (assoc-in [:chains :cue-chains [to-col to-row]] cue-chain-data)
+                  ;; Update playback if moving active cell
+                  (cond-> (= (get-in state [:playback :active-cell]) [from-col from-row])
+                    (assoc-in [:playback :active-cell] [to-col to-row]))
                   mark-dirty)}
       {:state state})))
 
 (defn- handle-grid-copy-cell
-  "Copy a cell to clipboard."
+  "Copy a cell's cue chain to clipboard."
   [{:keys [col row state]}]
-  (let [cell-data (get-in state [:grid :cells [col row]])]
+  (let [cue-chain-data (get-in state [:chains :cue-chains [col row]])]
     {:state (assoc-in state [:ui :clipboard]
-                      {:type :grid-cell
-                       :data cell-data})}))
+                      {:type :cue-chain
+                       :data cue-chain-data})}))
 
 (defn- handle-grid-paste-cell
-  "Paste clipboard to a cell."
+  "Paste clipboard cue chain to a cell."
   [{:keys [col row state]}]
   (let [clipboard (get-in state [:ui :clipboard])]
-    (if (and clipboard (= :grid-cell (:type clipboard)))
+    (if (and clipboard (= :cue-chain (:type clipboard)))
       {:state (-> state
-                  (assoc-in [:grid :cells [col row]] (:data clipboard))
+                  (assoc-in [:chains :cue-chains [col row]] (:data clipboard))
                   mark-dirty)}
       {:state state})))
 
@@ -2363,7 +2363,7 @@
     :grid/trigger-cell (handle-grid-trigger-cell event)
     :grid/select-cell (handle-grid-select-cell event)
     :grid/deselect-cell (handle-grid-deselect-cell event)
-    :grid/set-cell-preset (handle-grid-set-cell-preset event)
+    ;; :grid/set-cell-preset REMOVED - use :cue-chain/add-preset instead
     :grid/clear-cell (handle-grid-clear-cell event)
     :grid/move-cell (handle-grid-move-cell event)
     :grid/copy-cell (handle-grid-copy-cell event)

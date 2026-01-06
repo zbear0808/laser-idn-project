@@ -6,11 +6,8 @@
         domain-name-str (api/sexpr domain-name)
         initial-var-name (symbol (str domain-name-str "-initial"))
         
-        ;; Extract field names from the field-specs map
-        field-map (api/sexpr field-specs)
-        field-names (keys field-map)
-        
         ;; Generate def node for the -initial var
+        ;; This is the only thing the macro generates now
         initial-def-node
         (api/list-node
           [(api/token-node 'def)
@@ -18,27 +15,8 @@
            docstring
            field-specs])
         
-        ;; Generate def nodes for setter and updater functions
-        field-fn-nodes
-        (mapcat
-          (fn [field-name]
-            (let [setter-name (symbol (str "set-" domain-name-str "-" (name field-name) "!"))
-                  updater-name (symbol (str "update-" domain-name-str "-" (name field-name) "!"))]
-              [(api/list-node
-                 [(api/token-node 'defn)
-                  (api/token-node setter-name)
-                  (api/vector-node [(api/token-node 'value)])])
-               (api/list-node
-                 [(api/token-node 'defn)
-                  (api/token-node updater-name)
-                  (api/vector-node [(api/token-node 'f)
-                                    (api/token-node '&)
-                                    (api/token-node 'args)])])]))
-          field-names)
-        
-        ;; Combine all nodes into a do block
+        ;; Combine into a do block (just the initial var now)
         new-node (api/list-node
-                   (list* (api/token-node 'do)
-                          initial-def-node
-                          field-fn-nodes))]
+                   [(api/token-node 'do)
+                    initial-def-node])]
     {:node new-node}))

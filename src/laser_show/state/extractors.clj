@@ -46,8 +46,9 @@
 (defn grid [state]
   (:grid state))
 
-(defn grid-cells [state]
-  (:cells (grid state)))
+;; REMOVED: grid-cells function
+;; All cue content is now stored in [:chains :cue-chains [col row] :items]
+;; Access cue chains directly: (get-in state [:chains :cue-chains])
 
 (defn grid-size [state]
   (:size (grid state)))

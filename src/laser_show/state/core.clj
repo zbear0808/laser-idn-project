@@ -5,7 +5,7 @@
    - A single cljfx context atom for all application state
    - The `defstate` macro for declarative state domain definitions
    - Context-aware state updates that preserve memoization cache
-   - Mutation functions for all state changes
+   - Low-level mutation primitives for all state changes
    
    For READ operations:
    - Backend/services: Use laser-show.state.queries (thread-safe, no memoization)
@@ -13,7 +13,7 @@
    
    Usage:
    1. Initialize with (init-state!)
-   2. Mutate via: (set-timing-bpm! 140), (add-projector! id config)
+   2. Mutate via: (assoc-in-state! [:timing :bpm] 140.0)
    3. Read in backend: (queries/bpm), (queries/projector id)
    4. Read in UI: (fx/sub-ctx context subs/bpm)"
   (:require [cljfx.api :as fx]
@@ -206,14 +206,20 @@
 
 
 (defmacro defstate
-  "Define a state domain with automatic setter generation.
+  "Define a state domain declaratively.
    
    This macro:
    1. Registers the domain in the domain registry
    2. Defines a var with the initial state for this domain
-   3. Generates setter/updater functions for each field
    
-   NOTE: Getter functions are NOT generated - use queries.clj (backend) or subs.clj (UI)
+   State mutations should use the low-level primitives:
+   - assoc-in-state! for setting values
+   - update-in-state! for updating values
+   - swap-state! for complex updates
+   
+   State reads should use:
+   - queries namespace for backend/services (thread-safe, no memoization)
+   - subs namespace for UI components (memoized, context-based)
    
    Parameters:
    - domain-name: Symbol naming the domain (e.g., timing)
@@ -228,33 +234,18 @@
    
    Generates:
    - timing-initial (var with initial state map)
-   - set-timing-bpm!, update-timing-bpm!
-   - set-timing-tap-times!, update-timing-tap-times!"
+   - Domain registration for build-initial-state-from-domains
+   
+   Usage:
+   (assoc-in-state! [:timing :bpm] 140.0)
+   (update-in-state! [:timing :tap-times] conj timestamp)"
   [domain-name docstring field-specs]
   (let [domain-kw (keyword domain-name)
         initial-var-name (symbol (str domain-name "-initial"))
         
         initial-value (into {}
                             (map (fn [[k v]] [k (:default v)]))
-                            field-specs)
-        
-        ;; Generate setter/updater functions for each field (no getters)
-        field-accessors
-        (mapcat
-          (fn [[field-name {:keys [doc]}]]
-            (let [field-kw field-name
-                  setter-name (symbol (str "set-" domain-name "-" (name field-name) "!"))
-                  updater-name (symbol (str "update-" domain-name "-" (name field-name) "!"))]
-              [`(defn ~setter-name
-                  ~(str "Set " (or doc (name field-name)) " in " domain-name " domain.")
-                  [~'value]
-                  (assoc-in-state! [~domain-kw ~field-kw] ~'value))
-               
-               `(defn ~updater-name
-                  ~(str "Update " (or doc (name field-name)) " using function f.")
-                  [~'f & ~'args]
-                  (apply update-in-state! [~domain-kw ~field-kw] ~'f ~'args))]))
-          field-specs)]
+                            field-specs)]
     
     `(do
        (def ~initial-var-name
@@ -262,8 +253,6 @@
          ~initial-value)
        
        (register-domain! ~domain-kw ~initial-value ~field-specs)
-       
-       ~@field-accessors
        
        ;; Return the domain keyword for chaining
        ~domain-kw)))

@@ -97,6 +97,7 @@
         drag-type (:drag-type drag-config)
         on-drop (:on-drop drag-config)]
     {:fx/type :stack-pane
+     :pick-on-bounds true  ; Ensure mouse events are captured by parent, not children
      :pref-width 80
      :pref-height 60
      :style-class style-classes

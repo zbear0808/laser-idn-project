@@ -57,9 +57,6 @@
 (defn grid-size [context]
   (ex/grid-size (fx/sub-val context identity)))
 
-(defn grid-cells [context]
-  (ex/grid-cells (fx/sub-val context identity)))
-
 (defn selected-cell [context]
   (ex/selected-cell (fx/sub-val context identity)))
 
@@ -165,13 +162,16 @@
    
    Depends on:
    - active-cell
-   - grid-cells
+   - chains domain (cue-chains)
    
-   Returns: preset-id keyword or nil if no cell is active"
+   Returns: preset-id keyword of first preset, or nil if no cell is active"
   [context]
   (when-let [[col row] (fx/sub-ctx context active-cell)]
-    (let [cells (fx/sub-ctx context grid-cells)]
-      (get-in cells [[col row] :preset-id]))))
+    ;; Get first preset from cue chain
+    (let [chains-data (fx/sub-val context :chains)
+          cue-chain (get-in chains-data [:cue-chains [col row] :items] [])]
+      ;; Return first preset's ID (filter out groups)
+      (:preset-id (first (filter #(= :preset (:type %)) cue-chain))))))
 
 (defn active-preset
   "Alias for active-cell-preset. Get preset of currently active cell."
