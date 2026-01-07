@@ -263,7 +263,7 @@
    :style-class "menu-container"
    :children [{:fx/type app-icon-view}
               {:fx/type :menu-bar
-               :use-system-menu-bar true
+               :use-system-menu-bar false
                :style-class "menu-bar-transparent"
                :menus [{:fx/type file-menu}
                        {:fx/type edit-menu}
