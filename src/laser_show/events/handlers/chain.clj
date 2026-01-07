@@ -1,4 +1,4 @@
-(ns laser-show.events.chain-handlers
+(ns laser-show.events.handlers.chain
   "Generic handler helpers for hierarchical chain operations.
    
    Supports effects chains, projector chains, and cue chains with
@@ -786,3 +786,87 @@
    :ui-path [:cue-chain-editor :item-effects-ui (vec item-path)]
    :domain :item-effects
    :entity-key {:col col :row row :item-path item-path}})
+
+
+;; Generic Chain Event Handler
+
+
+(defn handle-generic-chain-event
+ "Handle generic chain events that work across all chain types.
+  
+  These events use :domain and :entity-key to create a config and
+  delegate to chain-handlers functions.
+  
+  This is the main entry point for :chain/* events from the dispatcher."
+ [{:keys [event/type domain entity-key state] :as event}]
+ (let [config (chain-config domain entity-key)]
+   (case type
+     :chain/set-items
+     {:state (-> state
+                 (assoc-in (:items-path config) (:items event))
+                 mark-dirty)}
+     
+     :chain/update-selection
+     {:state (handle-clear-selection state config)}
+     
+     :chain/select-item
+     {:state (handle-select-item state config (:path event) (:ctrl? event) (:shift? event))}
+     
+     :chain/select-all
+     {:state (handle-select-all state config)}
+     
+     :chain/clear-selection
+     {:state (handle-clear-selection state config)}
+     
+     :chain/delete-selected
+     {:state (handle-delete-selected state config)}
+     
+     :chain/group-selected
+     {:state (handle-group-selected state config (:name event))}
+     
+     :chain/ungroup
+     {:state (handle-ungroup state config (:path event))}
+     
+     :chain/toggle-collapse
+     {:state (handle-toggle-collapse state config (:path event))}
+     
+     :chain/start-rename
+     {:state (handle-start-rename state config (:path event))}
+     
+     :chain/rename-item
+     {:state (handle-rename-item state config (:path event) (:new-name event))}
+     
+     :chain/cancel-rename
+     {:state (handle-cancel-rename state config)}
+     
+     :chain/set-item-enabled
+     {:state (handle-set-item-enabled state config (:path event) (:enabled? event))}
+     
+     :chain/start-drag
+     {:state (handle-start-drag state config (:initiating-path event))}
+     
+     :chain/move-items
+     {:state (handle-move-items state config (:target-id event) (:drop-position event))}
+     
+     :chain/clear-drag-state
+     {:state (handle-clear-drag-state state config)}
+     
+     :chain/add-curve-point
+     {:state (handle-add-curve-point state config event)}
+     
+     :chain/update-curve-point
+     {:state (handle-update-curve-point state config event)}
+     
+     :chain/remove-curve-point
+     {:state (handle-remove-curve-point state config event)}
+     
+     :chain/set-active-curve-channel
+     {:state (handle-set-active-curve-channel state config event)}
+     
+     :chain/update-spatial-params
+     {:state (handle-update-spatial-params state config event)}
+     
+     ;; Unknown chain event
+     (do
+       (log/warn "Unknown chain event type:" type)
+       {}))))

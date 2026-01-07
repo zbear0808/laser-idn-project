@@ -2,7 +2,7 @@
   "Tests for generic chain handler helpers."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [laser-show.events.chain-handlers :as ch]))
+   [laser-show.events.handlers.chain :as ch]))
 
 
 ;; Test Data Fixtures

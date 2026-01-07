@@ -1,4 +1,6 @@
-(ns laser-show.common.util)
+(ns laser-show.common.util 
+  (:require
+    [laser-show.common.util :as u]))
 
 (defn clamp
   "Clamps numeric values (inclusive).
@@ -108,15 +110,16 @@
   "Returns a new collection consisting of `init` with a pair `[(kf x) (vf x)]`
   added for each element `x` in `xs`. If `init` is unspecified, it will default
   to an empty map. If `vf` is unspecified, it will default to `identity`."
-  ([kf xs] (map-into kf identity xs))
-  ([kf vf xs] (map-into {} kf vf xs))
-  ([init kf vf xs] (into init (map (juxt kf vf)) xs)))
+  ([key-fn coll] (map-into key-fn identity coll))
+  ([key-fn val-fn coll] (map-into {} key-fn val-fn coll))
+  ([init key-fn val-fn coll] (into init (map (juxt key-fn val-fn)) coll)))
 
 
 (defmacro ->map [& symbols]
   "ex > (->map a b c)
    => {:a a, :b b, :c c}"
-  (zipmap (map keyword symbols) symbols))
+  (map-into keyword symbols)
+  #_(zipmap (map keyword symbols) symbols))
 
 
 
@@ -144,6 +147,16 @@
          (map vec)
          (filter (comp some? second)))
         (partition 2 kvs)))
+
+(defn merge-in
+  "Merges a value into a nested map structure at the given path.
+   If no existing value is found at the path, `default` is used as the base
+   for the merge."
+  [m path value & [default]]
+  (let [existing (get-in m path default)
+        merged (merge existing value)]
+    (assoc-in m path merged)))
+
 
 (defn exception->map
   "Converts an exception to a map with useful debugging information.

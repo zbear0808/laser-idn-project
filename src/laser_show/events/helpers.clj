@@ -1,0 +1,209 @@
+(ns laser-show.events.helpers
+  "Shared helper functions for event handlers.
+   
+   These utilities are used across multiple event handler modules to maintain
+   consistent behavior and avoid code duplication."
+  (:require [laser-show.animation.chains :as chains]))
+
+
+;; State Modification Helpers
+
+
+(defn mark-dirty
+  "Mark project as having unsaved changes."
+  [state]
+  (assoc-in state [:project :dirty?] true))
+
+(defn current-time-ms
+  "Get current time from event or system.
+   
+   Accepts an event map and returns:
+   - The :time key from the event if present
+   - The current system time in milliseconds otherwise"
+  [event]
+  (or (:time event) (System/currentTimeMillis)))
+
+
+;; Path-Based Tree Manipulation
+
+
+(defn remove-at-path
+  "Remove an item at the given path from a nested vector structure.
+   Used for group operations in hierarchical chains.
+   
+   Example:
+   (remove-at-path [{:id 1} {:id 2 :items [{:id 3}]}] [1 :items 0])
+   => [{:id 1} {:id 2 :items []}]"
+  [items path]
+  (let [items-vec (vec items)   ;; Ensure items is a vector for subvec
+        path-vec (vec path)]    ;; Ensure path is a vector
+    (if (= 1 (count path-vec))
+      (let [idx (first path-vec)]
+        (if (and (>= idx 0) (< idx (count items-vec)))
+          (vec (concat (subvec items-vec 0 idx)
+                       (subvec items-vec (inc idx))))
+          items-vec))
+      (let [[parent-idx & rest-path] path-vec]
+        (if (and (>= parent-idx 0) (< parent-idx (count items-vec))
+                 (= :items (first rest-path)))
+          (update items-vec parent-idx
+                  #(update % :items
+                           (fn [sub-items]
+                             (remove-at-path (vec (or sub-items [])) (vec (rest rest-path))))))
+          items-vec)))))
+
+(defn insert-at-path
+  "Insert an item at the given path in a nested vector structure.
+   If into-group? is true, insert into the group's items at the path.
+   
+   Example:
+   (insert-at-path [{:id 1}] [1] {:id 2} false)
+   => [{:id 1} {:id 2}]"
+  [items path item into-group?]
+  (let [items-vec (vec items)   ;; Ensure items is a vector for subvec
+        path-vec (vec path)]    ;; Ensure path is a vector
+    (if into-group?
+      ;; Insert into group's items
+      (update-in items-vec (conj path-vec :items) #(conj (vec (or % [])) item))
+      ;; Insert before position
+      (if (= 1 (count path-vec))
+        (let [idx (first path-vec)
+              safe-idx (min idx (count items-vec))]
+          (vec (concat (subvec items-vec 0 safe-idx)
+                       [item]
+                       (subvec items-vec safe-idx))))
+        (let [[parent-idx & rest-path] path-vec]
+          (if (and (>= parent-idx 0) (< parent-idx (count items-vec))
+                   (= :items (first rest-path)))
+            (update items-vec parent-idx
+                    #(update % :items
+                             (fn [sub-items]
+                               (insert-at-path (vec (or sub-items [])) (vec (rest rest-path)) item false))))
+            items-vec))))))
+
+
+;; ID Regeneration for Copy/Paste
+
+
+(defn regenerate-ids
+  "Recursively regenerate :id fields for effects and groups.
+   Ensures pasted items have unique IDs to prevent drag/drop issues
+   when the same item is copied multiple times.
+   
+   Example:
+   (regenerate-ids {:id #uuid \"old\" :items [{:id #uuid \"old2\"}]})
+   => {:id #uuid \"new1\" :items [{:id #uuid \"new2\"}]}"
+  [item]
+  (cond
+    ;; Group - regenerate ID and recurse into items
+    (chains/group? item)
+    (-> item
+        (assoc :id (random-uuid))
+        (update :items #(mapv regenerate-ids %)))
+    
+    ;; Effect or other item - just regenerate ID
+    :else
+    (assoc item :id (random-uuid))))
+
+
+;; Path Filtering for Multi-Selection Operations
+
+
+(defn path-is-ancestor?
+  "Check if ancestor-path is an ancestor of descendant-path.
+   
+   Example:
+   (path-is-ancestor? [0] [0 :items 1]) => true
+   (path-is-ancestor? [1] [0 :items 1]) => false"
+  [ancestor-path descendant-path]
+  (and (< (count ancestor-path) (count descendant-path))
+       (= ancestor-path (take (count ancestor-path) descendant-path))))
+
+(defn filter-to-root-paths
+  "Filter a set of paths to only include root paths (no descendants).
+   This prevents deleting/moving items multiple times when a parent
+   and its children are both selected.
+   
+   Example:
+   (filter-to-root-paths #{[0] [0 :items 1] [2]})
+   => #{[0] [2]}"
+  [paths]
+  (let [sorted-paths (sort-by count paths)]
+    (reduce
+      (fn [acc path]
+        (if (some #(path-is-ancestor? % path) acc)
+          acc  ;; Skip - this path has an ancestor already included
+          (conj acc path)))
+      #{}
+      sorted-paths)))
+
+
+;; Two-Phase Operations (Collect Then Modify)
+;; These avoid index-shifting bugs by collecting items first, then operating
+
+
+(defn collect-items-by-ids
+  "Recursively collect all items matching the given ID set.
+   Returns a vector of items (preserving order as encountered).
+   
+   Example:
+   (collect-items-by-ids [{:id 1} {:id 2 :items [{:id 3}]}] #{1 3})
+   => [{:id 1} {:id 3}]"
+  [items id-set]
+  (reduce
+    (fn [acc item]
+      (let [acc (if (contains? id-set (:id item))
+                  (conj acc item)
+                  acc)]
+        ;; Recurse into groups
+        (if (chains/group? item)
+          (into acc (collect-items-by-ids (:items item []) id-set))
+          acc)))
+    []
+    items))
+
+(defn remove-items-by-ids
+  "Recursively remove all items matching the given ID set.
+   Returns the chain with matching items filtered out.
+   
+   Example:
+   (remove-items-by-ids [{:id 1} {:id 2}] #{1})
+   => [{:id 2}]"
+  [items id-set]
+  (vec
+    (keep
+      (fn [item]
+        (when-not (contains? id-set (:id item))
+          (if (chains/group? item)
+            (update item :items #(remove-items-by-ids % id-set))
+            item)))
+      items)))
+
+(defn insert-items-at-index
+  "Insert items at a specific index in the vector.
+   
+   Example:
+   (insert-items-at-index [{:id 1} {:id 3}] 1 [{:id 2}])
+   => [{:id 1} {:id 2} {:id 3}]"
+  [vec idx items]
+  (let [safe-idx (max 0 (min idx (count vec)))]
+    (into (subvec vec 0 safe-idx)
+          (concat items (subvec vec safe-idx)))))
+
+
+;; Group Creation
+
+
+(defn make-group
+  "Create a new group with given name and items.
+   
+   Example:
+   (make-group \"My Group\" [{:id 1}])
+   => {:type :group :id #uuid \"...\" :name \"My Group\" :collapsed? false :enabled? true :items [{:id 1}]}"
+  [name items]
+  {:type :group
+   :id (random-uuid)
+   :name name
+   :collapsed? false
+   :enabled? true
+   :items (vec items)})
