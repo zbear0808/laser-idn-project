@@ -21,7 +21,7 @@
             [laser-show.css.core :as css]
             [laser-show.views.components.tabs :as tabs]
             [laser-show.views.components.effect-param-ui :as effect-param-ui]
-            [laser-show.views.components.hierarchical-list :as hierarchical-list])
+            [laser-show.views.components.list :as list])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
 
@@ -238,8 +238,9 @@
                 :spacing 0
                 :v-box/vgrow :always
                 :children [;; Left sidebar - chain list with drag-and-drop
-                           ;; Using hierarchical-list-editor with built-in keyboard handling
-                           {:fx/type hierarchical-list/hierarchical-list-editor
+                           ;; Using list-editor with built-in keyboard handling
+                           {:fx/type list/list-editor
+                            :fx/context context
                             :h-box/hgrow :always
                             :items effect-chain
                             :component-id [:effect-chain col row]
@@ -302,7 +303,7 @@
 
 (defn- effect-chain-editor-scene
   "Scene component for the effect chain editor.
-   Keyboard shortcuts are handled by the hierarchical-list component."
+   Keyboard shortcuts are handled by the list component."
   [{:keys [stylesheets]}]
   {:fx/type :scene
    :stylesheets stylesheets

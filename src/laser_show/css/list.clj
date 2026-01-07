@@ -1,4 +1,4 @@
-(ns laser-show.css.hierarchical-list
+(ns laser-show.css.list
   "CSS styles for the hierarchical list component.
    
    Provides CSS classes for:
@@ -15,7 +15,7 @@
    for proper specificity when multiple classes are applied.
    
    Usage:
-   Include (::css/url hierarchical-list) in your scene's :stylesheets vector."
+   Include (::css/url list) in your scene's :stylesheets vector."
   (:require [cljfx.css :as css]
             [laser-show.css.theme :as theme]))
 
@@ -30,9 +30,10 @@
    :depth-3 "#8C7B5B"}) ;; Brown
 
 
-(def hierarchical-list
+#_{:clj-kondo/ignore [:redefined-var]}
+(def list
   "Hierarchical list styles."
-  (css/register ::hierarchical-list
+  (css/register ::list
     (let [{bg-dark      ::theme/bg-dark
            bg-medium    ::theme/bg-medium
            bg-light     ::theme/bg-light
@@ -331,7 +332,7 @@
        ;; ============================================
        
        ".drop-indicator-line"
-       {:-fx-padding ["0px" "0px"]
+       {:-fx-padding ["0px" "4px"]
         :-fx-min-height 4
         :-fx-max-height 4
         :-fx-pref-height 4

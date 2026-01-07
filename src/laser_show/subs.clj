@@ -436,6 +436,37 @@
           []))
 
 
+;; Hierarchical List UI Subscriptions
+
+
+(defn list-ui-state
+  "Get UI state for a specific hierarchical list component.
+   
+   Depends on: list-ui domain
+   
+   Component IDs are typically:
+   - [:effect-chain col row] for effect chain editor
+   - [:cue-chain col row] for cue chain editor
+   - [:item-effects col row item-path] for item effects
+   
+   Returns map with:
+   - :selected-ids - Set of selected item UUIDs
+   - :last-selected-id - UUID of anchor for shift+click
+   - :dragging-ids - Set of UUIDs being dragged
+   - :drop-target-id - UUID of current drop target
+   - :drop-position - :before, :after, or :into
+   - :renaming-id - UUID of item being renamed"
+  [context component-id]
+  (get-in (fx/sub-val context :list-ui)
+          [:components component-id]
+          {:selected-ids #{}
+           :last-selected-id nil
+           :dragging-ids nil
+           :drop-target-id nil
+           :drop-position nil
+           :renaming-id nil}))
+
+
 ;; Stylesheet Subscriptions (CSS Hot-Reload)
 
 

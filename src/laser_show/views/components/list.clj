@@ -1,4 +1,4 @@
-(ns laser-show.views.components.hierarchical-list
+(ns laser-show.views.components.list
   "Self-contained hierarchical list component with drag-and-drop reordering and group support.
    
    This component manages its own internal UI state (selection, drag/drop) and
@@ -26,152 +26,89 @@
    - make-case-label - Creates :get-item-label from a keyword->string map
    
    Wrapper component for even simpler usage:
-   - hierarchical-list-editor - All-in-one wrapper with keyboard handling
+   - list-editor - All-in-one wrapper with keyboard handling
    
-   Styling is defined in laser-show.css.hierarchical-list."
+   Styling is defined in laser-show.css.list."
   (:require
-   [cljfx.api :as fx]
-   [clojure.tools.logging :as log]
-   [laser-show.animation.chains :as chains]
-   [laser-show.common.util :as u]
-   [laser-show.events.core :as events])
-  (:import
-   [javafx.scene.input ClipboardContent TransferMode]))
-
-
-;; ============================================================================
-;; Internal Component State Management
-;; ============================================================================
-
-
-;; Atom holding state for all active component instances.
-;; Map of component-id -> {:selected-ids #{} :dragging-ids #{} ...}
-(defonce ^:private component-states (atom {}))
-
-(defn- get-state
-  "Get component state for the given component ID."
-  [component-id]
-  (get @component-states component-id
-       {:selected-ids #{}
-        :last-selected-id nil
-        :dragging-ids nil
-        :drop-target-id nil
-        :drop-position nil
-        :renaming-id nil
-        :items nil         ;; Current items (updated on each render)
-        :props nil}))      ;; Current props (updated on each render)
-
-(defn- sync-items-and-props!
-  "Sync items and props into component state for use by event handlers.
-   This must be called on each render to keep the state fresh."
-  [component-id items props]
-  (log/debug "sync-items-and-props! component-id:" component-id
-             "items count:" (count items)
-             "items (first 3):" (mapv #(select-keys % [:id :type :name]) (take 3 items)))
-  (swap! component-states update component-id
-         (fn [state]
-           (-> (or state {})
-               (assoc :items items)
-               (assoc :props props)))))
-
-(defn- update-state!
-  "Update component state, optionally calling callback on change."
-  ([component-id f]
-   (swap! component-states update component-id
-          (fn [state] (f (or state {})))))
-  ([component-id f callback-key props]
-   (let [old-state (get @component-states component-id)
-         new-state (swap! component-states update component-id
-                         (fn [state] (f (or state {}))))]
-     ;; Call callback if selection changed and callback exists
-     (when (and callback-key
-                (get props callback-key)
-                (not= (:selected-ids old-state) (:selected-ids (get new-state component-id))))
-       ((get props callback-key)
-        {:selected-ids (:selected-ids (get new-state component-id) #{})
-         :last-selected-id (:last-selected-id (get new-state component-id))})))))
-
-(defn- cleanup-state!
-  "Remove component state on unmount."
-  [component-id]
-  (swap! component-states dissoc component-id))
+  [cljfx.api :as fx]
+  [clojure.tools.logging :as log]
+  [laser-show.animation.chains :as chains]
+  [laser-show.common.util :as u]
+  [laser-show.events.core :as events]
+  [laser-show.subs :as subs]
+  [laser-show.state.core :as state])
+ (:import
+  [javafx.scene.input ClipboardContent TransferMode]))
 
 
 
 
 ;; ============================================================================
-;; Selection Logic (Internal)
+;; Selection Logic (Event Dispatching)
 ;; ============================================================================
 
 
 (defn- handle-selection!
   "Handle selection based on click modifiers.
-   Updates internal state and calls :on-selection-changed callback.
-   
-   IMPORTANT: Reads items and props from component-state to avoid stale closure
-   issues. The items/props are synced on each render via sync-items-and-props!"
-  [component-id item-id ctrl? shift?]
-  (let [state (get-state component-id)
-        items (:items state)
-        props (:props state)
-        selected-ids (:selected-ids state #{})
-        last-selected-id (:last-selected-id state)]
-    (when (and items props)
-      (let [new-state (cond
-                        ;; Ctrl+Click - toggle selection
-                        ctrl?
-                        {:selected-ids (if (contains? selected-ids item-id)
-                                         (disj selected-ids item-id)
-                                         (conj selected-ids item-id))
-                         :last-selected-id item-id}
-                        
-                        ;; Shift+Click - range select
-                        shift?
-                        (let [all-ids (chains/collect-all-ids items)
-                              anchor-id (or last-selected-id item-id)
-                              anchor-idx (.indexOf all-ids anchor-id)
-                              target-idx (.indexOf all-ids item-id)
-                              start (min anchor-idx target-idx)
-                              end (max anchor-idx target-idx)]
-                          (if (and (>= anchor-idx 0) (>= target-idx 0))
-                            {:selected-ids (set (subvec all-ids start (inc end)))
-                             :last-selected-id last-selected-id}  ;; Keep anchor for shift
-                            {:selected-ids #{item-id}
-                             :last-selected-id item-id}))
-                        
-                        ;; Plain click - single select
-                        :else
-                        {:selected-ids #{item-id}
-                         :last-selected-id item-id})]
-        ;; Update internal state
-        (update-state! component-id #(merge % new-state))
-        ;; Notify parent
-        (when-let [callback (:on-selection-changed props)]
-          (callback new-state))))))
+   Dispatches selection event and calls :on-selection-changed callback."
+  [component-id item-id ctrl? shift? items props]
+  (let [mode (cond ctrl? :ctrl
+                   shift? :shift
+                   :else :single)
+        ;; For shift-click, compute range selection here with current state
+        event (if shift?
+                (let [current-state (state/get-in-state [:list-ui :components component-id])
+                      last-selected-id (:last-selected-id current-state)
+                      all-ids (chains/collect-all-ids items)
+                      anchor-id (or last-selected-id item-id)
+                      anchor-idx (.indexOf all-ids anchor-id)
+                      target-idx (.indexOf all-ids item-id)
+                      start (min anchor-idx target-idx)
+                      end (max anchor-idx target-idx)
+                      new-selected (if (and (>= anchor-idx 0) (>= target-idx 0))
+                                     (set (subvec all-ids start (inc end)))
+                                     #{item-id})]
+                  {:event/type :list/select-item
+                   :component-id component-id
+                   :item-id item-id
+                   :mode mode
+                   :selected-ids-override new-selected
+                   :last-id-override last-selected-id})
+                {:event/type :list/select-item
+                 :component-id component-id
+                 :item-id item-id
+                 :mode mode})]
+    (events/dispatch! event)
+    ;; Notify parent callback if provided (after event is processed)
+    (when-let [callback (:on-selection-changed props)]
+      ;; Read the updated state to get actual selection
+      (let [updated-state (state/get-in-state [:list-ui :components component-id])]
+        (callback {:selected-ids (:selected-ids updated-state #{})
+                   :last-selected-id (:last-selected-id updated-state)})))))
 
 (defn- select-all!
-  "Select all items in the chain."
+  "Select all items in the component."
   [component-id items props]
-  (let [all-ids (chains/collect-all-ids-set items)
-        new-state {:selected-ids all-ids
-                   :last-selected-id (first all-ids)}]
-    (update-state! component-id #(merge % new-state))
+  (let [all-ids (chains/collect-all-ids items)]
+    (events/dispatch! {:event/type :list/select-all
+                       :component-id component-id
+                       :all-ids all-ids})
     (when-let [callback (:on-selection-changed props)]
-      (callback new-state))))
+      (callback {:selected-ids (set all-ids)
+                 :last-selected-id (first all-ids)}))))
 
 (defn- clear-selection!
   "Clear selection and cancel rename."
   [component-id props]
-  (let [new-state {:selected-ids #{}
-                   :last-selected-id nil
-                   :renaming-id nil}]
-    (update-state! component-id #(merge % new-state))
-    (when-let [callback (:on-selection-changed props)]
-      (callback new-state))))
+  (events/dispatch! {:event/type :list/clear-selection
+                     :component-id component-id})
+  (when-let [callback (:on-selection-changed props)]
+    (callback {:selected-ids #{}
+               :last-selected-id nil})))
 
 
 ;; ============================================================================
-;; Drag-and-Drop Logic (Internal)
+;; Drag-and-Drop Logic (Event Dispatching)
 ;; ============================================================================
 
 
@@ -179,42 +116,26 @@
   "Start a drag operation. If dragged item is selected, drag all selected items.
    Otherwise, select only the dragged item and drag it."
   [component-id item-id]
-  (let [state (get-state component-id)
-        selected-ids (:selected-ids state #{})
-        dragging-ids (if (contains? selected-ids item-id)
-                       selected-ids
-                       #{item-id})
-        new-selected (if (contains? selected-ids item-id)
-                       selected-ids
-                       #{item-id})]
-    (update-state! component-id
-                   #(assoc %
-                           :dragging-ids dragging-ids
-                           :selected-ids new-selected
-                           :last-selected-id item-id))))
+  (events/dispatch! {:event/type :list/start-drag
+                     :component-id component-id
+                     :item-id item-id}))
 
 (defn- update-drop-target!
   "Update drop target during drag over."
   [component-id target-id drop-position]
-  (update-state! component-id
-                 #(assoc %
-                         :drop-target-id target-id
-                         :drop-position drop-position)))
+  (events/dispatch! {:event/type :list/update-drop-target
+                     :component-id component-id
+                     :target-id target-id
+                     :drop-position drop-position}))
 
 (defn- handle-drop!
   "Handle drop operation. Moves dragged items to target location
-   and calls :on-items-changed callback.
-   
-   IMPORTANT: This function reads items and props from component-state to avoid
-   stale closure issues. The items/props are synced on each render via
-   sync-items-and-props!"
-  [component-id target-id drop-position]
-  (let [state (get-state component-id)
-        dragging-ids (:dragging-ids state)
-        items (:items state)
-        props (:props state)]
+   and calls :on-items-changed callback."
+  [component-id target-id drop-position items props]
+  (let [current-state (state/get-in-state [:list-ui :components component-id])
+        dragging-ids (:dragging-ids current-state)]
     (when (and (seq dragging-ids) (seq items))
-      ;; Convert IDs to paths (fresh lookup from current items)
+      ;; Convert IDs to paths
       (let [id->path (chains/find-paths-by-ids items dragging-ids)
             from-paths (set (vals id->path))]
         (when (seq from-paths)
@@ -227,29 +148,27 @@
 (defn- clear-drag-state!
   "Clear all drag-related state after drop or cancel."
   [component-id]
-  (update-state! component-id
-                 #(assoc %
-                         :dragging-ids nil
-                         :drop-target-id nil
-                         :drop-position nil)))
+  (events/dispatch! {:event/type :list/clear-drag
+                     :component-id component-id}))
 
 
 ;; ============================================================================
-;; Item Operations (Internal)
+;; Item Operations (Callbacks Only - No State Mutation)
 ;; ============================================================================
 
 
 (defn- delete-selected!
   "Delete selected items and call :on-items-changed."
   [component-id items props]
-  (let [state (get-state component-id)
-        selected-ids (:selected-ids state #{})]
+  (let [current-state (state/get-in-state [:list-ui :components component-id])
+        selected-ids (:selected-ids current-state #{})]
     (when (seq selected-ids)
       (let [id->path (chains/find-paths-by-ids items selected-ids)
             paths-to-delete (vals id->path)
             new-items (chains/delete-paths-safely items paths-to-delete)]
-        ;; Clear selection
-        (update-state! component-id #(assoc % :selected-ids #{} :last-selected-id nil))
+        ;; Clear selection via event
+        (events/dispatch! {:event/type :list/clear-selection
+                           :component-id component-id})
         ;; Notify parent
         (when-let [callback (:on-items-changed props)]
           (callback new-items))
@@ -259,22 +178,18 @@
 (defn- copy-selected!
   "Copy selected items and call :on-copy callback."
   [component-id items props]
-  (let [state (get-state component-id)
-        selected-ids (:selected-ids state #{})]
+  (let [current-state (state/get-in-state [:list-ui :components component-id])
+        selected-ids (:selected-ids current-state #{})]
     (log/debug "copy-selected! component-id:" component-id
                "selected-ids:" selected-ids
-               "items count:" (count items)
-               "items from state count:" (count (:items state))
-               "items same as state?" (= items (:items state)))
+               "items count:" (count items))
     (when (seq selected-ids)
       (let [id->path (chains/find-paths-by-ids items selected-ids)
             selected-items (mapv #(chains/get-item-at-path items %) (vals id->path))
             copied-items (chains/deep-copy-items selected-items)]
         (log/debug "copy-selected! id->path:" id->path
                    "selected-items count:" (count selected-items)
-                   "selected-items nil?:" (some nil? selected-items)
-                   "copied-items count:" (count copied-items)
-                   "on-copy callback exists?" (boolean (:on-copy props)))
+                   "copied-items count:" (count copied-items))
         (if-let [callback (:on-copy props)]
           (do
             (log/debug "copy-selected! calling on-copy callback with" (count copied-items) "items")
@@ -286,16 +201,14 @@
   [component-id items props]
   (log/debug "paste-items! component-id:" component-id
              "items count:" (count items)
-             "clipboard-items in props?" (boolean (:clipboard-items props))
-             "clipboard-items count:" (count (:clipboard-items props)))
+             "clipboard-items in props?" (boolean (:clipboard-items props)))
   (if-let [clipboard-items (:clipboard-items props)]
     (if (seq clipboard-items)
-      (let [state (get-state component-id)
-            selected-ids (:selected-ids state #{})
+      (let [current-state (state/get-in-state [:list-ui :components component-id])
             ;; Fresh copy with new IDs
             items-to-paste (chains/deep-copy-items clipboard-items)
             ;; Find insert position
-            last-id (:last-selected-id state)
+            last-id (:last-selected-id current-state)
             path-for-last (when last-id (chains/find-path-by-id items last-id))
             insert-idx (if (and last-id path-for-last)
                          (inc (first path-for-last))
@@ -308,16 +221,15 @@
                         (vec items-to-paste))
             ;; Select pasted items
             pasted-ids (set (map :id items-to-paste))]
-        (log/debug "paste-items! selected-ids:" selected-ids
-                   "last-selected-id:" (:last-selected-id state)
+        (log/debug "paste-items! last-selected-id:" last-id
                    "items-to-paste count:" (count items-to-paste)
-                   "path-for-last-selected:" path-for-last
-                   "insert-idx:" insert-idx
-                   "new-items count:" (count new-items))
-        ;; Update selection to pasted items
-        (update-state! component-id #(assoc %
-                                            :selected-ids pasted-ids
-                                            :last-selected-id (:id (last items-to-paste))))
+                   "insert-idx:" insert-idx)
+        ;; Update selection to pasted items via event
+        (events/dispatch! {:event/type :list/select-item
+                           :component-id component-id
+                           :item-id (:id (last items-to-paste))
+                           :mode :single
+                           :selected-ids-override pasted-ids})
         ;; Notify parent
         (if-let [callback (:on-items-changed props)]
           (do
@@ -333,7 +245,7 @@
 
 
 ;; ============================================================================
-;; Group Operations (Internal)
+;; Group Operations (Callbacks Only)
 ;; ============================================================================
 
 
@@ -343,10 +255,11 @@
   (let [new-group (chains/create-group [])
         new-items (conj items new-group)
         group-id (:id new-group)]
-    ;; Select the new group
-    (update-state! component-id #(assoc %
-                                        :selected-ids #{group-id}
-                                        :last-selected-id group-id))
+    ;; Select the new group via event
+    (events/dispatch! {:event/type :list/select-item
+                       :component-id component-id
+                       :item-id group-id
+                       :mode :single})
     ;; Notify parent
     (when-let [callback (:on-items-changed props)]
       (callback new-items))
@@ -357,64 +270,42 @@
   "Group selected items into a new folder.
    Items must be at the same nesting level to be grouped together."
   [component-id items props]
-  (let [state (get-state component-id)
-        selected-ids (:selected-ids state #{})]
+  (let [current-state (state/get-in-state [:list-ui :components component-id])
+        selected-ids (:selected-ids current-state #{})]
     (log/debug "group-selected! component-id:" component-id
                "selected-ids:" selected-ids
-               "items count:" (count items)
-               "items from state:" (count (:items state))
-               "items same as state?" (= items (:items state)))
+               "items count:" (count items))
     (when (seq selected-ids)
       (let [id->path (chains/find-paths-by-ids items selected-ids)
-            ;; Group items at the same nesting level
-            ;; A path like [0] has length 1 (top-level)
-            ;; A path like [0 :items 0] has length 3 (nested in group at index 0)
-            ;; Items can be grouped if they share the same parent path
             all-paths (vals id->path)
-            ;; Get the parent path for each item (everything except last index)
             parent-paths (map (fn [path]
                                (if (= 1 (count path))
-                                 [] ;; Top-level items have empty parent path
-                                 (vec (butlast path)))) ;; Nested items: parent is path without last element
+                                 []
+                                 (vec (butlast path))))
                              all-paths)
-            ;; Check if all items share the same parent
             unique-parents (set parent-paths)
             same-level? (= 1 (count unique-parents))
             common-parent (first unique-parents)]
-        (log/debug "group-selected! id->path:" id->path
-                   "all-paths:" (vec all-paths)
-                   "parent-paths:" (vec parent-paths)
-                   "unique-parents:" unique-parents
-                   "same-level?:" same-level?
+        (log/debug "group-selected! same-level?:" same-level?
                    "common-parent:" common-parent)
         (if (and same-level? (seq all-paths))
-          (let [;; Get items in document order
-                sorted-paths (sort (fn [a b] (compare (vec a) (vec b))) all-paths)
+          (let [sorted-paths (sort (fn [a b] (compare (vec a) (vec b))) all-paths)
                 items-to-group (mapv #(chains/get-item-at-path items %) sorted-paths)
-                ;; Create group
                 new-group (chains/create-group items-to-group)
-                ;; Remove old items (from highest index first)
                 after-remove (chains/delete-paths-safely items sorted-paths)
-                ;; Insert group at first item's position
-                ;; For top-level items, path is [idx], for nested it's [...parent :items idx]
                 first-path (first sorted-paths)
                 insert-path (if (empty? common-parent)
-                              [(first first-path)]  ;; Top-level: just the index
-                              ;; Nested: parent path + :items + first item's local index
+                              [(first first-path)]
                               (let [local-idx (last first-path)]
                                 (conj common-parent local-idx)))
                 new-items (chains/insert-at-path after-remove insert-path new-group)
                 group-id (:id new-group)]
-            (log/debug "group-selected! sorted-paths:" (vec sorted-paths)
-                       "items-to-group count:" (count items-to-group)
-                       "new-group id:" (:id new-group)
-                       "after-remove count:" (count after-remove)
-                       "insert-path:" insert-path
-                       "new-items count:" (count new-items))
-            ;; Select the new group
-            (update-state! component-id #(assoc %
-                                                :selected-ids #{group-id}
-                                                :last-selected-id group-id))
+            (log/debug "group-selected! new-items count:" (count new-items))
+            ;; Select the new group via event
+            (events/dispatch! {:event/type :list/select-item
+                               :component-id component-id
+                               :item-id group-id
+                               :mode :single})
             ;; Notify parent
             (when-let [callback (:on-items-changed props)]
               (log/debug "group-selected! calling on-items-changed callback")
@@ -422,8 +313,7 @@
             (when-let [callback (:on-selection-changed props)]
               (callback {:selected-ids #{group-id} :last-selected-id group-id}))
             (log/debug "group-selected! SUCCESS"))
-          (log/debug "group-selected! FAILED - items not at same level, unique-parents:" unique-parents
-                     "(need exactly 1 unique parent for all selected items)"))))))
+          (log/debug "group-selected! FAILED - items not at same level"))))))
 
 (defn- ungroup!
   "Ungroup a folder, splicing its contents into the parent."
@@ -432,8 +322,9 @@
     (let [group (chains/get-item-at-path items path)]
       (when (chains/group? group)
         (let [new-items (chains/ungroup items path)]
-          ;; Clear selection
-          (update-state! component-id #(assoc % :selected-ids #{} :last-selected-id nil))
+          ;; Clear selection via event
+          (events/dispatch! {:event/type :list/clear-selection
+                             :component-id component-id})
           ;; Notify parent
           (when-let [callback (:on-items-changed props)]
             (callback new-items))
@@ -451,27 +342,30 @@
 
 
 ;; ============================================================================
-;; Rename Operations (Internal)
+;; Rename Operations (Event Dispatching)
 ;; ============================================================================
 
 
 (defn- start-rename!
   "Enter rename mode for an item."
   [component-id item-id]
-  (update-state! component-id #(assoc % :renaming-id item-id)))
+  (events/dispatch! {:event/type :list/start-rename
+                     :component-id component-id
+                     :item-id item-id}))
 
 (defn- cancel-rename!
   "Cancel rename mode."
   [component-id]
-  (update-state! component-id #(assoc % :renaming-id nil)))
+  (events/dispatch! {:event/type :list/cancel-rename
+                     :component-id component-id}))
 
 (defn- commit-rename!
   "Commit rename and update item name."
   [component-id items props item-id new-name]
   (when-let [path (chains/find-path-by-id items item-id)]
     (let [new-items (chains/update-at-path items path #(assoc % :name new-name))]
-      ;; Exit rename mode
-      (update-state! component-id #(assoc % :renaming-id nil))
+      ;; Exit rename mode via event
+      (cancel-rename! component-id)
       ;; Notify parent
       (when-let [callback (:on-items-changed props)]
         (callback new-items)))))
@@ -679,7 +573,7 @@
             (clear-drop-indicator-classes! node)
             (reset! current-drop-target-node nil)
             ;; Perform the drop
-            (handle-drop! component-id target-id drop-pos)
+            (handle-drop! component-id target-id drop-pos items props)
             (clear-drag-state! component-id)
             (.setDropCompleted event true)
             (.consume event)))))))
@@ -756,7 +650,7 @@
                                              ;; Single-click - select
                                              :else
                                              (do
-                                               (handle-selection! component-id group-id ctrl? shift?)
+                                               (handle-selection! component-id group-id ctrl? shift? items props)
                                                (.consume event))))))))
                      :desc {:fx/type :h-box
                             :style-class header-classes
@@ -857,7 +751,7 @@
                                      (handle [_ event]
                                        (let [ctrl? (.isShortcutDown event)
                                              shift? (.isShiftDown event)]
-                                         (handle-selection! component-id item-id ctrl? shift?)
+                                         (handle-selection! component-id item-id ctrl? shift? items props)
                                          (.consume event))))))
                    :desc {:fx/type :h-box
                           :style-class item-classes
@@ -977,10 +871,11 @@
 ;; ============================================================================
 
 
-(defn hierarchical-list-sidebar
-  "Generic hierarchical list sidebar component with self-contained state.
+(defn list-sidebar
+  "Generic hierarchical list sidebar component using context-based state.
    
    Props:
+   - :fx/context - cljfx context (required)
    - :items - Vector of items (required)
    - :get-item-label - Function item -> string (required)
    - :on-items-changed - Callback with new items vector (required)
@@ -990,24 +885,18 @@
    - :header-label - Header text (default 'LIST')
    - :empty-text - Empty state text (optional)
    - :allow-groups? - Enable grouping (default true)
-   - :component-id - Unique ID for state isolation (auto-generated if not provided)"
-  [{:keys [items get-item-label on-items-changed on-selection-changed
+   - :component-id - Unique ID for state isolation (required)"
+  [{:keys [fx/context items get-item-label on-items-changed on-selection-changed
            on-copy clipboard-items header-label empty-text allow-groups?
            component-id]
     :or {header-label "LIST"
          empty-text "No items"
          allow-groups? true}
     :as props}]
-  ;; Generate component ID on first render if not provided
-  (let [comp-id (or component-id (hash [items header-label]))
-        ;; Sync items and props into component state for handlers to access fresh data
-        _ (sync-items-and-props! comp-id items props)
-        state (get-state comp-id)
-        selected-ids (:selected-ids state #{})
-        dragging-ids (:dragging-ids state)
-        drop-target-id (:drop-target-id state)
-        drop-position (:drop-position state)
-        renaming-id (:renaming-id state)
+  (let [;; Subscribe to UI state from context
+        ui-state (fx/sub-ctx context subs/list-ui-state component-id)
+        {:keys [selected-ids dragging-ids drop-target-id
+                drop-position renaming-id]} ui-state
         selection-count (count selected-ids)
         chain-depth (chains/nesting-depth items)
         can-create-group? (and allow-groups? (< chain-depth chains/max-nesting-depth))
@@ -1032,7 +921,7 @@
                 ;; Group toolbar
                 (when allow-groups?
                   {:fx/type group-toolbar
-                   :component-id comp-id
+                   :component-id component-id
                    :items items
                    :props props
                    :selection-count selection-count
@@ -1045,17 +934,17 @@
                              :text "Copy"
                              :disable (zero? selection-count)
                              :style-class "chain-toolbar-btn"
-                             :on-action (fn [_] (copy-selected! comp-id items props))}
+                             :on-action (fn [_] (copy-selected! component-id items props))}
                             {:fx/type :button
                              :text "Paste"
                              :disable (not can-paste?)
                              :style-class "chain-toolbar-btn"
-                             :on-action (fn [_] (paste-items! comp-id items props))}
+                             :on-action (fn [_] (paste-items! component-id items props))}
                             {:fx/type :button
                              :text "Del"
                              :disable (zero? selection-count)
                              :style-class "chain-toolbar-btn-danger"
-                             :on-action (fn [_] (delete-selected! comp-id items props))}]}
+                             :on-action (fn [_] (delete-selected! component-id items props))}]}
                 (if (empty? items)
                   {:fx/type :label
                    :text (or empty-text "No items\nAdd from bank →")
@@ -1072,7 +961,7 @@
                                         (fn [idx item]
                                           {:fx/type render-list-item
                                            :fx/key [(:id item) idx]
-                                           :component-id comp-id
+                                           :component-id component-id
                                            :items items
                                            :props props
                                            :item item
@@ -1091,79 +980,51 @@
 ;; ============================================================================
 ;; These functions allow external code (like dialog keyboard handlers) to trigger
 ;; the same operations as the internal buttons, ensuring consistent behavior.
+;;
+;; NOTE: These functions now require items and props to be passed in,
+;; since we no longer store them in component state.
 
 
 (defn get-component-state
-  "Get the current state for a component. Returns map with :items, :props, :selected-ids etc."
+  "Get the current UI state for a component. Returns map with :selected-ids, :dragging-ids, etc."
   [component-id]
-  (get-state component-id))
+  (state/get-in-state [:list-ui :components component-id]))
 
 (defn copy-selected-from-component!
   "Copy selected items from a component (for external keyboard handlers).
    Same behavior as the Copy button."
-  [component-id]
-  (let [state (get-state component-id)
-        items (:items state)
-        props (:props state)]
-    (when (and items props)
-      (copy-selected! component-id items props))))
+  [component-id items props]
+  (copy-selected! component-id items props))
 
 (defn paste-items-from-component!
   "Paste items into a component (for external keyboard handlers).
    Same behavior as the Paste button."
-  [component-id]
-  (let [state (get-state component-id)
-        items (:items state)
-        props (:props state)]
-    (when (and items props)
-      (paste-items! component-id items props))))
+  [component-id items props]
+  (paste-items! component-id items props))
 
 (defn delete-selected-from-component!
   "Delete selected items from a component (for external keyboard handlers).
    Same behavior as the Del button."
-  [component-id]
-  (let [state (get-state component-id)
-        items (:items state)
-        props (:props state)]
-    (when (and items props)
-      (delete-selected! component-id items props))))
+  [component-id items props]
+  (delete-selected! component-id items props))
 
 (defn select-all-from-component!
   "Select all items in a component (for external keyboard handlers)."
-  [component-id]
-  (let [state (get-state component-id)
-        items (:items state)
-        props (:props state)]
-    (when (and items props)
-      (select-all! component-id items props))))
+  [component-id items props]
+  (select-all! component-id items props))
 
 (defn group-selected-from-component!
   "Group selected items in a component (for external keyboard handlers).
    This calls the same internal function as the toolbar Group button."
-  [component-id]
-  (let [state (get-state component-id)
-        items (:items state)
-        props (:props state)]
-    (log/debug "group-selected-from-component! component-id:" component-id
-               "state keys:" (keys state)
-               "items from state count:" (count items)
-               "props from state:" (when props (keys props))
-               "items nil?" (nil? items)
-               "props nil?" (nil? props))
-    (when (and items props)
-      (log/debug "group-selected-from-component! calling internal group-selected! with fresh state")
-      (group-selected! component-id items props))
-    (when-not (and items props)
-      (log/warn "group-selected-from-component! items or props is nil - stale state or sync issue!"
-                "All component-states keys:" (keys @component-states)))))
+  [component-id items props]
+  (log/debug "group-selected-from-component! component-id:" component-id
+             "items count:" (count items))
+  (group-selected! component-id items props))
 
 (defn clear-selection-from-component!
   "Clear selection in a component (for external keyboard handlers)."
-  [component-id]
-  (let [state (get-state component-id)
-        props (:props state)]
-    (when props
-      (clear-selection! component-id props))))
+  [component-id props]
+  (clear-selection! component-id props))
 
 
 ;; ============================================================================
@@ -1264,24 +1125,6 @@
 ;; ============================================================================
 
 
-(defn- find-component-id-by-base
-  "Find the current component-id that matches the given base prefix.
-   For example, if base is [:item-effects 3 0], find [:item-effects 3 0 [2]]
-   if that's the current component with items synced.
-   
-   Returns the first matching component-id that has items in its state."
-  [base-component-id]
-  (let [base-vec (vec base-component-id)
-        base-len (count base-vec)]
-    (->> @component-states
-         (filter (fn [[cid state]]
-                   (and (seq (:items state))  ;; Has items synced
-                        (vector? cid)
-                        (>= (count cid) base-len)
-                        (= (subvec (vec cid) 0 base-len) base-vec))))
-         first
-         first)))  ;; Returns component-id or nil
-
 (defn setup-keyboard-handlers-for-component!
   "Setup keyboard handlers on a parent node for a hierarchical list component.
    This eliminates the need for each consumer to duplicate keyboard setup code.
@@ -1296,24 +1139,15 @@
    - Delete: Delete selected items
    - Escape: Clear selection
    
-   IMPORTANT: Stores the 'base' component-id on the node and dynamically looks up
-   the current full component-id at keypress time. This handles cases where
-   component-id includes dynamic parts (like selected-item-path for Item Effects).
+   IMPORTANT: items-atom and props-atom are atoms that are updated on each render
+   to ensure keyboard handlers always use current data (not stale closures).
    
    Args:
    - node: The JavaFX node to attach handlers to
-   - component-id: The component ID (stored as base for dynamic lookup)"
-  [^javafx.scene.Node node component-id]
-  ;; Store the base component-id on the node for dynamic lookup
-  ;; For [:item-effects col row path], we store [:item-effects col row] as base
-  (let [base-id (if (and (vector? component-id)
-                         (= :item-effects (first component-id))
-                         (>= (count component-id) 4))
-                  ;; For item-effects, use first 3 elements as base
-                  (vec (take 3 component-id))
-                  ;; For other components, use as-is
-                  component-id)]
-    (.setUserData node {:base-component-id base-id}))
+   - component-id: The component ID
+   - items-atom: Atom containing current items vector (updated on render)
+   - props-atom: Atom containing current props map (updated on render)"
+  [^javafx.scene.Node node component-id items-atom props-atom]
   (.addEventFilter
     node
     javafx.scene.input.KeyEvent/KEY_PRESSED
@@ -1321,42 +1155,75 @@
       (handle [_ event]
         (let [code (.getCode event)
               ctrl? (.isShortcutDown event)
-              ;; Read base-component-id from node's userData
-              user-data (.getUserData node)
-              base-id (when (map? user-data) (:base-component-id user-data))
-              ;; Find the current full component-id
-              current-component-id (if (= base-id (get @component-states base-id))
-                                     base-id
-                                     (or (find-component-id-by-base base-id) base-id))
-              ;; Get fresh state for this component
-              state (get-state current-component-id)
-              items (:items state)
-              props (:props state)]
-          (when (and items props)
-            (cond
-              (and ctrl? (= code javafx.scene.input.KeyCode/C))
-              (copy-selected-from-component! current-component-id)
+              ;; Dereference atoms to get CURRENT values, not stale closures
+              items @items-atom
+              props @props-atom]
+          (log/debug "Keyboard handler: code=" code "ctrl?=" ctrl?
+                     "items count=" (count items) "has on-items-changed?=" (boolean (:on-items-changed props)))
+          (cond
+            (and ctrl? (= code javafx.scene.input.KeyCode/C))
+            (do
+              (copy-selected-from-component! component-id items props)
+              (.consume event))
 
-              (and ctrl? (= code javafx.scene.input.KeyCode/V))
-              (paste-items-from-component! current-component-id)
+            (and ctrl? (= code javafx.scene.input.KeyCode/V))
+            (do
+              (paste-items-from-component! component-id items props)
+              (.consume event))
 
-              (and ctrl? (= code javafx.scene.input.KeyCode/X))
-              (do (copy-selected-from-component! current-component-id)
-                  (delete-selected-from-component! current-component-id))
+            (and ctrl? (= code javafx.scene.input.KeyCode/X))
+            (do
+              (copy-selected-from-component! component-id items props)
+              (delete-selected-from-component! component-id items props)
+              (.consume event))
 
-              (and ctrl? (= code javafx.scene.input.KeyCode/A))
-              (select-all-from-component! current-component-id)
-              
-              (and ctrl? (= code javafx.scene.input.KeyCode/G))
-              (group-selected-from-component! current-component-id)
+            (and ctrl? (= code javafx.scene.input.KeyCode/A))
+            (do
+              (select-all-from-component! component-id items props)
+              (.consume event))
+            
+            (and ctrl? (= code javafx.scene.input.KeyCode/G))
+            (do
+              (log/debug "Ctrl+G pressed, calling group-selected with" (count items) "items")
+              (group-selected-from-component! component-id items props)
+              (.consume event))
 
-              (= code javafx.scene.input.KeyCode/DELETE)
-              (delete-selected-from-component! current-component-id)
+            (= code javafx.scene.input.KeyCode/DELETE)
+            (do
+              (delete-selected-from-component! component-id items props)
+              (.consume event))
 
-              (= code javafx.scene.input.KeyCode/ESCAPE)
-              (clear-selection-from-component! current-component-id))
+            (= code javafx.scene.input.KeyCode/ESCAPE)
+            (do
+              (clear-selection-from-component! component-id props)
+              (.consume event))))))))
 
-            (.consume event)))))))
+
+;; ============================================================================
+;; Keyboard Handler Atoms Registry
+;; ============================================================================
+;; Atoms are stored per component-id so keyboard handlers can access current
+;; items and props without stale closures.
+
+(defonce ^:private keyboard-handler-atoms (atom {}))
+
+(defn- get-or-create-handler-atoms!
+  "Get or create atoms for a component's keyboard handler state.
+   Returns {:items-atom atom :props-atom atom}."
+  [component-id]
+  (if-let [existing (get @keyboard-handler-atoms component-id)]
+    existing
+    (let [new-atoms {:items-atom (atom [])
+                     :props-atom (atom {})}]
+      (swap! keyboard-handler-atoms assoc component-id new-atoms)
+      new-atoms)))
+
+(defn- update-handler-atoms!
+  "Update the atoms with current items and props values."
+  [component-id items props]
+  (let [{:keys [items-atom props-atom]} (get-or-create-handler-atoms! component-id)]
+    (reset! items-atom items)
+    (reset! props-atom props)))
 
 
 ;; ============================================================================
@@ -1364,12 +1231,13 @@
 ;; ============================================================================
 
 
-(defn hierarchical-list-editor
+(defn list-editor
   "Complete hierarchical list editor with keyboard handling and event dispatch.
    This is the recommended component for most use cases - it provides all
    features with minimal configuration.
    
    Props:
+   - :fx/context - cljfx context (required)
    - :items - Vector of items (required)
    - :component-id - Unique ID for state isolation (required)
    
@@ -1397,7 +1265,7 @@
    - :fallback-label - Label for unknown items (default \"Unknown\")
    
    Example usage:
-   {:fx/type hierarchical-list/hierarchical-list-editor
+   {:fx/type list/list-editor
     :items effect-chain
     :component-id [:effect-chain col row]
     :item-id-key :effect-id
@@ -1410,7 +1278,7 @@
     :clipboard-items clipboard-items
     :header-label \"CHAIN\"
     :empty-text \"No effects\\nAdd from bank →\"}"
-  [{:keys [items component-id
+  [{:keys [fx/context items component-id
            ;; Label options
            get-item-label item-id-key item-registry-fn item-name-key label-map
            ;; Event dispatch options
@@ -1451,14 +1319,27 @@
         
         ;; Build on-selection-changed callback
         on-selection-changed (when on-selection-event
-                               (make-selection-callback on-selection-event on-selection-params selection-key))]
+                               (make-selection-callback on-selection-event on-selection-params selection-key))
+        
+        ;; Build props map for keyboard handlers
+        handler-props {:on-items-changed on-items-changed
+                       :on-selection-changed on-selection-changed
+                       :on-copy on-copy-fn
+                       :clipboard-items clipboard-items}
+        
+        ;; Get or create atoms for this component and update them with current values
+        ;; This ensures keyboard handlers always have access to the latest data
+        {:keys [items-atom props-atom]} (get-or-create-handler-atoms! component-id)
+        _ (update-handler-atoms! component-id items handler-props)]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
-                   (setup-keyboard-handlers-for-component! node component-id)
+                   ;; Pass atoms (not values) so handler can deref current state
+                   (setup-keyboard-handlers-for-component! node component-id items-atom props-atom)
                    (.setFocusTraversable node true)
                    (.requestFocus node))
      :desc {:fx/type :v-box
-            :children [{:fx/type hierarchical-list-sidebar
+            :children [{:fx/type list-sidebar
+                        :fx/context context
                         :v-box/vgrow :always
                         :items items
                         :get-item-label label-fn

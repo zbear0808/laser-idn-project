@@ -690,7 +690,7 @@
 
 (defn- handle-projectors-set-effects
   "Set the entire effects chain for a projector (simple persistence callback).
-   Called by hierarchical-list component's :on-items-changed callback.
+   Called by list component's :on-items-changed callback.
    Event keys:
    - :projector-id - ID of the projector
    - :effects - New effects vector"
@@ -701,7 +701,7 @@
 
 (defn- handle-projectors-update-effect-selection
   "Update the selection state for projector effects.
-   Called by hierarchical-list component's :on-selection-changed callback.
+   Called by list component's :on-selection-changed callback.
    Event keys:
    - :projector-id - ID of the projector
    - :selected-ids - Set of selected item IDs"

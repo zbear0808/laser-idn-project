@@ -19,7 +19,7 @@
             [laser-show.animation.chains :as chains]
             [laser-show.events.core :as events]
             [laser-show.css.core :as css]
-            [laser-show.views.components.hierarchical-list :as hierarchical-list]
+            [laser-show.views.components.list :as list]
             [laser-show.views.components.preset-bank :as preset-bank]
             [laser-show.views.components.preset-param-editor :as param-editor]
             [laser-show.views.components.effect-param-ui :as effect-param-ui]
@@ -354,7 +354,8 @@
                            :children [;; Cue chain list (top)
                                       {:fx/type :v-box
                                        :pref-height 300
-                                       :children [{:fx/type hierarchical-list/hierarchical-list-editor
+                                       :children [{:fx/type list/list-editor
+                                                   :fx/context context
                                                    :v-box/vgrow :always
                                                    :items (:items cue-chain)
                                                    :component-id [:cue-chain col row]
@@ -379,7 +380,8 @@
                                        :v-box/vgrow :always
                                        :style "-fx-border-color: #404040; -fx-border-width: 1 0 0 0;"
                                        :children (if has-item?
-                                                   [{:fx/type hierarchical-list/hierarchical-list-editor
+                                                   [{:fx/type list/list-editor
+                                                     :fx/context context
                                                      :v-box/vgrow :always
                                                      :items item-effects
                                                      :component-id [:item-effects col row first-selected-path]
@@ -458,7 +460,7 @@
 
 (defn- cue-chain-editor-scene
   "Scene component for the cue chain editor.
-   Keyboard shortcuts are handled by the hierarchical-list components."
+   Keyboard shortcuts are handled by the list components."
   [{:keys [stylesheets]}]
   {:fx/type :scene
    :stylesheets stylesheets

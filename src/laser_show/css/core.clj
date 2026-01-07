@@ -20,7 +20,7 @@
             [laser-show.css.layout :as layout]
             [laser-show.css.title-bar :as title-bar]
             [laser-show.css.cue-chain-editor :as cue-chain-editor]
-            [laser-show.css.hierarchical-list :as hierarchical-list]))
+            [laser-show.css.list :as list]))
 
 
 
@@ -41,12 +41,12 @@
    (::css/url layout/layout)
    (::css/url title-bar/menu-theme)
    (::css/url cue-chain-editor/cue-chain-editor)
-   (::css/url hierarchical-list/hierarchical-list)])
+   (::css/url list/list)])
 
 (defn dialog-stylesheet-urls
   "Returns stylesheet URLs appropriate for dialogs.
    Includes theme, buttons, forms, grid-cells, layout, dialogs, menus,
-   cue-chain-editor, and hierarchical-list.
+   cue-chain-editor, and list.
    
    Example:
    {:fx/type :scene
@@ -61,7 +61,7 @@
    (::css/url dialogs/dialogs)
    (::css/url title-bar/menu-theme)
    (::css/url cue-chain-editor/cue-chain-editor)
-   (::css/url hierarchical-list/hierarchical-list)])
+   (::css/url list/list)])
 
 
 ;; Theme color access helpers

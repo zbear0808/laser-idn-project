@@ -298,7 +298,7 @@
 
 (defn- handle-cue-chain-set-item-effects
   "Set the entire effects array for a cue chain item (simple persistence callback).
-   Called by hierarchical-list component's :on-items-changed callback.
+   Called by list component's :on-items-changed callback.
    Event keys:
    - :col, :row - Grid cell coordinates
    - :item-path - Path to the item (preset/group) within cue chain
@@ -316,7 +316,7 @@
 
 (defn- handle-cue-chain-update-item-effect-selection
   "Update the selection state for item effects editor.
-   Called by hierarchical-list component's :on-selection-changed callback.
+   Called by list component's :on-selection-changed callback.
    Event keys:
    - :col, :row - Grid cell coordinates
    - :item-path - Path to the item within cue chain
@@ -327,7 +327,7 @@
 
 (defn- handle-cue-chain-set-item-effects-clipboard
   "Set the clipboard for item effects (separate from cue chain clipboard).
-   Called by hierarchical-list component's :on-copy callback.
+   Called by list component's :on-copy callback.
    Event keys:
    - :col, :row - Grid cell coordinates
    - :item-path - Path to the item within cue chain
@@ -338,7 +338,7 @@
 
 (defn- handle-cue-chain-set-clipboard
   "Set the clipboard for cue chain items (presets and groups).
-   Called by hierarchical-list component's :on-copy callback.
+   Called by list component's :on-copy callback.
    Event keys:
    - :items - Items to copy to clipboard"
   [{:keys [items state]}]

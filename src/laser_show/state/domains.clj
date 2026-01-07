@@ -125,6 +125,19 @@
                           :toolbar nil}
                 :doc "references to UI components for programmatic access"}})
 
+(defstate list-ui
+  "UI state for hierarchical list components (selection, drag-drop, rename).
+   
+   State is keyed by component-id, which is typically:
+   - [:effect-chain col row] for effect chain editor
+   - [:cue-chain col row] for cue chain editor
+   - [:item-effects col row item-path] for item effects in cue chain
+   
+   Each component instance maintains its own selection, drag, and rename state.
+   This state is separate from the actual item data (which lives in :chains domain)."
+  {:components {:default {}
+                :doc "Map of component-id -> {:selected-ids #{} :last-selected-id nil :dragging-ids nil :drop-target-id nil :drop-position nil :renaming-id nil}"}})
+
 (defstate project
   "Project file management state."
   {:current-folder {:default nil

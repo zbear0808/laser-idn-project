@@ -13,7 +13,7 @@
             [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.views.components.custom-param-renderers :as custom-renderers]
-            [laser-show.views.components.hierarchical-list :as hierarchical-list]))
+            [laser-show.views.components.list :as list]))
 
 
 ;; Status Indicators
@@ -574,7 +574,7 @@
                    :style "-fx-text-fill: #808080; -fx-font-style: italic;"})]}))
 
 (defn- projector-effects-sidebar
-  "Effect chain sidebar using hierarchical-list-editor with built-in keyboard handling.
+  "Effect chain sidebar using list-editor with built-in keyboard handling.
    Props:
    - :fx/context - Context for subscriptions
    - :projector-id - ID of the projector
@@ -583,7 +583,7 @@
   [{:keys [fx/context projector-id selected-ids clipboard-items]}]
   (let [;; Read effects from chains domain, not from projector config
         effects (fx/sub-ctx context subs/projector-effect-chain projector-id)]
-    {:fx/type hierarchical-list/hierarchical-list-editor
+    {:fx/type list/list-editor
      :items (or effects [])
      :component-id [:projector-effects projector-id]
      :item-id-key :effect-id

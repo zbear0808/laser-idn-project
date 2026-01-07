@@ -807,7 +807,7 @@
                  mark-dirty)}
      
      :chain/update-selection
-     ;; Store the selected-ids from the hierarchical-list component callback
+     ;; Store the selected-ids from the list component callback
      ;; The component uses IDs (not paths), so store them in the ui-path for the
      ;; parent dialog to use (e.g., for parameter editor display)
      (let [selected-ids (:selected-ids event)
