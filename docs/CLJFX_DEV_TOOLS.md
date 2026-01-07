@@ -18,7 +18,7 @@ The `io.github.cljfx/dev` dependency is added to the `:dev` alias in `deps.edn`:
 
 ```clojure
 :dev
-{:extra-deps {io.github.cljfx/dev {:mvn/version "1.0.0"}}}
+{:extra-deps {io.github.cljfx/dev {:mvn/version "1.10.6.42"}}}
 ```
 
 This ensures dev tools are only available during development, not in production builds.

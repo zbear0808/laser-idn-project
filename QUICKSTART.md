@@ -52,8 +52,8 @@ The REPL will start and show a port number. Connect your editor:
 
 ```clojure
 ;; Load and start the application
-(require '[laser-show.core :as laser])
-(laser/start!)
+(require '[laser-show.app :as app])
+(app/start!)
 
 ```
 
@@ -81,7 +81,7 @@ btw, i've only tested on Windows, if you're not on it maybe it'll cause issues
 ## Next Steps
 
 - Read the full [README.md](README.md) for detailed documentation
-- Explore the source code in `src/laser_show/` and `src/idn_hello/`
+- Explore the source code in `src/laser_show/`
 - Integrate with your laser hardware using the IDN protocol
 
 

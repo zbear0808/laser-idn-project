@@ -31,9 +31,6 @@
               "--enable-native-access=ALL-UNNAMED"]
    :main-opts ["-m" "laser-show.app"]}
   
-  :idn-hello
-  {:main-opts ["-m" "idn-hello.core"]}
-  
   :repl
   {:jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"

@@ -6,7 +6,6 @@ Contains two modules:
 1. **Laser Show** - Live laser show control application
 2. **IDN-Hello** - ILDA Digital Network Hello Protocol implementation
 
-For detailed architecture information, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Table of Contents
 
@@ -56,7 +55,7 @@ Implements ILDA Digital Network Hello Protocol (Draft 2022-03-27):
 
 ### IDN-Stream Protocol
 
-Frame streaming with X/Y coordinates (16-bit) and RGB color (8-bit each). See [`src/laser_show/backend/idn_stream.clj`](src/laser_show/backend/idn_stream.clj) and [`src/laser_show/backend/streaming_engine.clj`](src/laser_show/backend/streaming_engine.clj).
+Frame streaming with X/Y coordinates (16-bit) and RGB color (16-bit each). See [`src/laser_show/backend/idn_stream.clj`](src/laser_show/backend/idn_stream.clj) and [`src/laser_show/backend/streaming_engine.clj`](src/laser_show/backend/streaming_engine.clj).
 
 ## Input System
 
@@ -134,7 +133,7 @@ This is a major architectural addition that requires:
 ## Troubleshooting
 
 ### Laser Show won't start
-- Ensure Java 11+ is installed: `java -version`
+- Ensure Java 21+ is installed: `java -version` (JDK 25 recommended)
 - Download dependencies: `clj -P -M:laser-show`
 
 ### IDN-Hello can't discover devices
@@ -147,7 +146,7 @@ This is a major architectural addition that requires:
 - Check the port number in the console output
 - Ensure your editor is configured for nREPL connection
 
-For more help, see [`QUICKSTART.md`](QUICKSTART.md) or [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+For more help, see [`QUICKSTART.md`](QUICKSTART.md).
 
 ## License
 
