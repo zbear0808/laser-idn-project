@@ -591,7 +591,6 @@
      :fallback-label "Unknown Effect"
      :on-change-event :chain/set-items
      :on-change-params {:domain :projector-effects :entity-key projector-id}
-     :items-key :effects
      :on-selection-event :chain/update-selection
      :on-selection-params {:domain :projector-effects :entity-key projector-id}
      :selection-key :selected-ids

@@ -336,6 +336,14 @@
   (let [ui-path (item-effects-ui-path col row item-path)]
     {:state (assoc-in state (conj ui-path :clipboard) effects)}))
 
+(defn- handle-cue-chain-set-clipboard
+  "Set the clipboard for cue chain items (presets and groups).
+   Called by hierarchical-list component's :on-copy callback.
+   Event keys:
+   - :items - Items to copy to clipboard"
+  [{:keys [items state]}]
+  {:state (assoc-in state [:cue-chain-editor :clipboard :items] items)})
+
 (defn- handle-cue-chain-update-item-effect-param
   "Update a parameter in an item's effect using path-based addressing.
    Supports custom param renderers with visual/numeric modes.
@@ -377,7 +385,8 @@
       (let [x-key (:x point-params)
             y-key (:y point-params)
             effects-path (item-effects-path col row item-path)
-            base-path (vec (concat effects-path effect-path [:params]))]
+            ;; Ensure effect-path is a vector to avoid ClassCastException
+            base-path (vec (concat effects-path (vec effect-path) [:params]))]
         {:state (-> state
                     (assoc-in (conj base-path x-key) x)
                     (assoc-in (conj base-path y-key) y))})
@@ -503,6 +512,7 @@
     ;; Hierarchical list integration
     :cue-chain/set-item-effects (handle-cue-chain-set-item-effects event)
     :cue-chain/update-item-effect-selection (handle-cue-chain-update-item-effect-selection event)
+    :cue-chain/set-clipboard (handle-cue-chain-set-clipboard event)
     :cue-chain/set-item-effects-clipboard (handle-cue-chain-set-item-effects-clipboard event)
     :cue-chain/update-item-effect-param (handle-cue-chain-update-item-effect-param event)
     :cue-chain/set-item-effect-param-ui-mode (handle-cue-chain-set-item-effect-param-ui-mode event)

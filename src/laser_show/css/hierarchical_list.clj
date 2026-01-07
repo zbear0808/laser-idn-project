@@ -55,7 +55,7 @@
           
           ;; Indentation
           base-padding 8
-          depth-indent 16]
+          depth-indent 18]
       
       {
        ;; ============================================
@@ -199,8 +199,8 @@
        {:-fx-background-color "transparent"
         :-fx-text-fill text-muted
         :-fx-font-size 10
-        :-fx-padding ["0px" "2px"]
-        :-fx-min-width 16}
+        :-fx-padding ["0px" "0px"]
+        :-fx-min-width 8}
        
        ".group-name-label"
        {:-fx-font-size 12
@@ -331,7 +331,7 @@
        ;; ============================================
        
        ".drop-indicator-line"
-       {:-fx-padding ["0px" "4px"]
+       {:-fx-padding ["0px" "0px"]
         :-fx-min-height 4
         :-fx-max-height 4
         :-fx-pref-height 4

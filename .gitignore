@@ -24,6 +24,7 @@ pom.xml.asc
 
 .lsp/
 .clinerules/
+.roo/
 
 # OS
 .DS_Store

@@ -29,10 +29,14 @@
    - hierarchical-list-editor - All-in-one wrapper with keyboard handling
    
    Styling is defined in laser-show.css.hierarchical-list."
-  (:require [cljfx.api :as fx]
-            [laser-show.animation.chains :as chains]
-            [laser-show.events.core :as events])
-  (:import [javafx.scene.input TransferMode ClipboardContent]))
+  (:require
+   [cljfx.api :as fx]
+   [clojure.tools.logging :as log]
+   [laser-show.animation.chains :as chains]
+   [laser-show.common.util :as u]
+   [laser-show.events.core :as events])
+  (:import
+   [javafx.scene.input ClipboardContent TransferMode]))
 
 
 ;; ============================================================================
@@ -61,6 +65,9 @@
   "Sync items and props into component state for use by event handlers.
    This must be called on each render to keep the state fresh."
   [component-id items props]
+  (log/debug "sync-items-and-props! component-id:" component-id
+             "items count:" (count items)
+             "items (first 3):" (mapv #(select-keys % [:id :type :name]) (take 3 items)))
   (swap! component-states update component-id
          (fn [state]
            (-> (or state {})
@@ -109,11 +116,6 @@
         props (:props state)
         selected-ids (:selected-ids state #{})
         last-selected-id (:last-selected-id state)]
-    ;; Debug logging
-    (println "[handle-selection!] component-id=" component-id "item-id=" item-id
-             "ctrl?=" ctrl? "shift?=" shift?)
-    (println "  items count:" (count items) "selected-ids:" selected-ids
-             "last-selected-id:" last-selected-id)
     (when (and items props)
       (let [new-state (cond
                         ;; Ctrl+Click - toggle selection
@@ -126,14 +128,11 @@
                         ;; Shift+Click - range select
                         shift?
                         (let [all-ids (chains/collect-all-ids items)
-                              _ (println "  all-ids for shift-select:" all-ids)
                               anchor-id (or last-selected-id item-id)
                               anchor-idx (.indexOf all-ids anchor-id)
                               target-idx (.indexOf all-ids item-id)
                               start (min anchor-idx target-idx)
                               end (max anchor-idx target-idx)]
-                          (println "  anchor-id:" anchor-id "anchor-idx:" anchor-idx
-                                   "target-idx:" target-idx "start:" start "end:" end)
                           (if (and (>= anchor-idx 0) (>= target-idx 0))
                             {:selected-ids (set (subvec all-ids start (inc end)))
                              :last-selected-id last-selected-id}  ;; Keep anchor for shift
@@ -144,7 +143,6 @@
                         :else
                         {:selected-ids #{item-id}
                          :last-selected-id item-id})]
-        (println "  new-state:" new-state)
         ;; Update internal state
         (update-state! component-id #(merge % new-state))
         ;; Notify parent
@@ -263,27 +261,44 @@
   [component-id items props]
   (let [state (get-state component-id)
         selected-ids (:selected-ids state #{})]
+    (log/debug "copy-selected! component-id:" component-id
+               "selected-ids:" selected-ids
+               "items count:" (count items)
+               "items from state count:" (count (:items state))
+               "items same as state?" (= items (:items state)))
     (when (seq selected-ids)
       (let [id->path (chains/find-paths-by-ids items selected-ids)
             selected-items (mapv #(chains/get-item-at-path items %) (vals id->path))
             copied-items (chains/deep-copy-items selected-items)]
-        (when-let [callback (:on-copy props)]
-          (callback copied-items))))))
+        (log/debug "copy-selected! id->path:" id->path
+                   "selected-items count:" (count selected-items)
+                   "selected-items nil?:" (some nil? selected-items)
+                   "copied-items count:" (count copied-items)
+                   "on-copy callback exists?" (boolean (:on-copy props)))
+        (if-let [callback (:on-copy props)]
+          (do
+            (log/debug "copy-selected! calling on-copy callback with" (count copied-items) "items")
+            (callback copied-items))
+          (log/warn "copy-selected! no :on-copy callback in props!"))))))
 
 (defn- paste-items!
   "Paste items from clipboard after selected item (or at end)."
   [component-id items props]
-  (when-let [clipboard-items (:clipboard-items props)]
-    (when (seq clipboard-items)
+  (log/debug "paste-items! component-id:" component-id
+             "items count:" (count items)
+             "clipboard-items in props?" (boolean (:clipboard-items props))
+             "clipboard-items count:" (count (:clipboard-items props)))
+  (if-let [clipboard-items (:clipboard-items props)]
+    (if (seq clipboard-items)
       (let [state (get-state component-id)
             selected-ids (:selected-ids state #{})
             ;; Fresh copy with new IDs
             items-to-paste (chains/deep-copy-items clipboard-items)
             ;; Find insert position
-            insert-idx (if-let [last-id (:last-selected-id state)]
-                         (if-let [path (chains/find-path-by-id items last-id)]
-                           (inc (first path))
-                           (count items))
+            last-id (:last-selected-id state)
+            path-for-last (when last-id (chains/find-path-by-id items last-id))
+            insert-idx (if (and last-id path-for-last)
+                         (inc (first path-for-last))
                          (count items))
             ;; Insert items
             new-items (reduce-kv
@@ -293,16 +308,28 @@
                         (vec items-to-paste))
             ;; Select pasted items
             pasted-ids (set (map :id items-to-paste))]
+        (log/debug "paste-items! selected-ids:" selected-ids
+                   "last-selected-id:" (:last-selected-id state)
+                   "items-to-paste count:" (count items-to-paste)
+                   "path-for-last-selected:" path-for-last
+                   "insert-idx:" insert-idx
+                   "new-items count:" (count new-items))
         ;; Update selection to pasted items
         (update-state! component-id #(assoc %
                                             :selected-ids pasted-ids
                                             :last-selected-id (:id (last items-to-paste))))
         ;; Notify parent
-        (when-let [callback (:on-items-changed props)]
-          (callback new-items))
+        (if-let [callback (:on-items-changed props)]
+          (do
+            (log/debug "paste-items! calling on-items-changed callback")
+            (callback new-items))
+          (log/warn "paste-items! no :on-items-changed callback!"))
         (when-let [callback (:on-selection-changed props)]
           (callback {:selected-ids pasted-ids
-                     :last-selected-id (:id (last items-to-paste))}))))))
+                     :last-selected-id (:id (last items-to-paste))}))
+        (log/debug "paste-items! SUCCESS"))
+      (log/debug "paste-items! clipboard empty"))
+    (log/debug "paste-items! no clipboard in props")))
 
 
 ;; ============================================================================
@@ -327,35 +354,76 @@
       (callback {:selected-ids #{group-id} :last-selected-id group-id}))))
 
 (defn- group-selected!
-  "Group selected items into a new folder."
+  "Group selected items into a new folder.
+   Items must be at the same nesting level to be grouped together."
   [component-id items props]
   (let [state (get-state component-id)
         selected-ids (:selected-ids state #{})]
+    (log/debug "group-selected! component-id:" component-id
+               "selected-ids:" selected-ids
+               "items count:" (count items)
+               "items from state:" (count (:items state))
+               "items same as state?" (= items (:items state)))
     (when (seq selected-ids)
       (let [id->path (chains/find-paths-by-ids items selected-ids)
-            ;; Only group root-level items (not items inside other selections)
-            root-paths (filter #(= 1 (count %)) (vals id->path))]
-        (when (seq root-paths)
+            ;; Group items at the same nesting level
+            ;; A path like [0] has length 1 (top-level)
+            ;; A path like [0 :items 0] has length 3 (nested in group at index 0)
+            ;; Items can be grouped if they share the same parent path
+            all-paths (vals id->path)
+            ;; Get the parent path for each item (everything except last index)
+            parent-paths (map (fn [path]
+                               (if (= 1 (count path))
+                                 [] ;; Top-level items have empty parent path
+                                 (vec (butlast path)))) ;; Nested items: parent is path without last element
+                             all-paths)
+            ;; Check if all items share the same parent
+            unique-parents (set parent-paths)
+            same-level? (= 1 (count unique-parents))
+            common-parent (first unique-parents)]
+        (log/debug "group-selected! id->path:" id->path
+                   "all-paths:" (vec all-paths)
+                   "parent-paths:" (vec parent-paths)
+                   "unique-parents:" unique-parents
+                   "same-level?:" same-level?
+                   "common-parent:" common-parent)
+        (if (and same-level? (seq all-paths))
           (let [;; Get items in document order
-                sorted-paths (sort (fn [a b] (compare (first a) (first b))) root-paths)
+                sorted-paths (sort (fn [a b] (compare (vec a) (vec b))) all-paths)
                 items-to-group (mapv #(chains/get-item-at-path items %) sorted-paths)
                 ;; Create group
                 new-group (chains/create-group items-to-group)
                 ;; Remove old items (from highest index first)
                 after-remove (chains/delete-paths-safely items sorted-paths)
                 ;; Insert group at first item's position
-                insert-idx (first (first sorted-paths))
-                new-items (chains/insert-at-path after-remove [insert-idx] new-group)
+                ;; For top-level items, path is [idx], for nested it's [...parent :items idx]
+                first-path (first sorted-paths)
+                insert-path (if (empty? common-parent)
+                              [(first first-path)]  ;; Top-level: just the index
+                              ;; Nested: parent path + :items + first item's local index
+                              (let [local-idx (last first-path)]
+                                (conj common-parent local-idx)))
+                new-items (chains/insert-at-path after-remove insert-path new-group)
                 group-id (:id new-group)]
+            (log/debug "group-selected! sorted-paths:" (vec sorted-paths)
+                       "items-to-group count:" (count items-to-group)
+                       "new-group id:" (:id new-group)
+                       "after-remove count:" (count after-remove)
+                       "insert-path:" insert-path
+                       "new-items count:" (count new-items))
             ;; Select the new group
             (update-state! component-id #(assoc %
                                                 :selected-ids #{group-id}
                                                 :last-selected-id group-id))
             ;; Notify parent
             (when-let [callback (:on-items-changed props)]
+              (log/debug "group-selected! calling on-items-changed callback")
               (callback new-items))
             (when-let [callback (:on-selection-changed props)]
-              (callback {:selected-ids #{group-id} :last-selected-id group-id}))))))))
+              (callback {:selected-ids #{group-id} :last-selected-id group-id}))
+            (log/debug "group-selected! SUCCESS"))
+          (log/debug "group-selected! FAILED - items not at same level, unique-parents:" unique-parents
+                     "(need exactly 1 unique parent for all selected items)"))))))
 
 (defn- ungroup!
   "Ungroup a folder, splicing its contents into the parent."
@@ -1000,127 +1068,22 @@
                    :style-class "chain-scroll-pane"
                    :content {:fx/type :v-box
                              :spacing 4
-                             :children (vec
-                                        (map-indexed
-                                          (fn [idx item]
-                                            {:fx/type render-list-item
-                                             :fx/key [(:id item) idx]
-                                             :component-id comp-id
-                                             :items items
-                                             :props props
-                                             :item item
-                                             :depth 0
-                                             :selected-ids selected-ids
-                                             :dragging-ids dragging-ids
-                                             :drop-target-id drop-target-id
-                                             :drop-position drop-position
-                                             :renaming-id renaming-id
-                                             :get-item-label get-item-label})
-                                          items))}})]}))
-
-
-;; ============================================================================
-;; Keyboard Handler
-;; ============================================================================
-
-
-(defn create-keyboard-handler
-  "Creates a keyboard event handler function for the hierarchical list.
-   
-   This handler supports:
-   - Ctrl+C: Copy selected items
-   - Ctrl+X: Cut selected items (copy + delete)
-   - Ctrl+V: Paste items
-   - Ctrl+A: Select all items
-   - Ctrl+G: Group selected items
-   - Delete/Backspace: Delete selected items
-   - Escape: Clear selection / Cancel rename
-   - F2: Rename selected item (groups only)
-   
-   Returns a function that takes component-id, items, and props."
-  [component-id items props]
-  (fn [^javafx.scene.input.KeyEvent event]
-    (let [code (.getCode event)
-          ctrl? (.isShortcutDown event)]
-      (cond
-        ;; Ctrl+C - Copy
-        (and ctrl? (= code javafx.scene.input.KeyCode/C))
-        (do (copy-selected! component-id items props)
-            (.consume event))
-        
-        ;; Ctrl+X - Cut (copy then delete)
-        (and ctrl? (= code javafx.scene.input.KeyCode/X))
-        (do (copy-selected! component-id items props)
-            (delete-selected! component-id items props)
-            (.consume event))
-        
-        ;; Ctrl+V - Paste
-        (and ctrl? (= code javafx.scene.input.KeyCode/V))
-        (do (paste-items! component-id items props)
-            (.consume event))
-        
-        ;; Ctrl+A - Select all
-        (and ctrl? (= code javafx.scene.input.KeyCode/A))
-        (do (select-all! component-id items props)
-            (.consume event))
-        
-        ;; Ctrl+G - Group selected
-        (and ctrl? (= code javafx.scene.input.KeyCode/G))
-        (do (group-selected! component-id items props)
-            (.consume event))
-        
-        ;; Delete key - Delete selected (not backspace)
-        (= code javafx.scene.input.KeyCode/DELETE)
-        (do (delete-selected! component-id items props)
-            (.consume event))
-        
-        ;; F2 - Rename first selected group
-        (= code javafx.scene.input.KeyCode/F2)
-        (let [state (get-state component-id)
-              first-id (first (:selected-ids state))]
-          (when first-id
-            (when-let [path (chains/find-path-by-id items first-id)]
-              (when (chains/group? (chains/get-item-at-path items path))
-                (start-rename! component-id first-id))))
-          (.consume event))
-        
-        ;; Escape - Clear selection / Cancel rename
-        (= code javafx.scene.input.KeyCode/ESCAPE)
-        (do (clear-selection! component-id props)
-            (.consume event))))))
-
-(defn setup-keyboard-handlers!
-  "Setup keyboard handlers on a JavaFX node for hierarchical list editing.
-   
-   This sets up both an event filter (for Ctrl+C/V/X which need to intercept
-   system clipboard handling) and a regular key handler (for other shortcuts).
-   
-   Args:
-   - node: The JavaFX node to attach handlers to
-   - component-id: Component state ID
-   - items: Current items vector
-   - props: Props map with callbacks"
-  [^javafx.scene.Node node component-id items props]
-  (let [handler-fn (create-keyboard-handler component-id items props)]
-    ;; Use event filter for Ctrl+C, Ctrl+V, Ctrl+X to intercept system clipboard
-    (.addEventFilter
-      node
-      javafx.scene.input.KeyEvent/KEY_PRESSED
-      (reify javafx.event.EventHandler
-        (handle [_ event]
-          (let [code (.getCode event)
-                ctrl? (.isShortcutDown event)]
-            (when (and ctrl? (or (= code javafx.scene.input.KeyCode/C)
-                                  (= code javafx.scene.input.KeyCode/V)
-                                  (= code javafx.scene.input.KeyCode/X)))
-              (handler-fn event))))))
-    
-    ;; Use regular key handler for other shortcuts
-    (.setOnKeyPressed
-      node
-      (reify javafx.event.EventHandler
-        (handle [_ event]
-          (handler-fn event))))))
+                             :children (u/mapv-indexed
+                                        (fn [idx item]
+                                          {:fx/type render-list-item
+                                           :fx/key [(:id item) idx]
+                                           :component-id comp-id
+                                           :items items
+                                           :props props
+                                           :item item
+                                           :depth 0
+                                           :selected-ids selected-ids
+                                           :dragging-ids dragging-ids
+                                           :drop-target-id drop-target-id
+                                           :drop-position drop-position
+                                           :renaming-id renaming-id
+                                           :get-item-label get-item-label})
+                                        items)}})]}))
 
 
 ;; ============================================================================
@@ -1181,8 +1144,18 @@
   (let [state (get-state component-id)
         items (:items state)
         props (:props state)]
+    (log/debug "group-selected-from-component! component-id:" component-id
+               "state keys:" (keys state)
+               "items from state count:" (count items)
+               "props from state:" (when props (keys props))
+               "items nil?" (nil? items)
+               "props nil?" (nil? props))
     (when (and items props)
-      (group-selected! component-id items props))))
+      (log/debug "group-selected-from-component! calling internal group-selected! with fresh state")
+      (group-selected! component-id items props))
+    (when-not (and items props)
+      (log/warn "group-selected-from-component! items or props is nil - stale state or sync issue!"
+                "All component-states keys:" (keys @component-states)))))
 
 (defn clear-selection-from-component!
   "Clear selection in a component (for external keyboard handlers)."
@@ -1291,6 +1264,24 @@
 ;; ============================================================================
 
 
+(defn- find-component-id-by-base
+  "Find the current component-id that matches the given base prefix.
+   For example, if base is [:item-effects 3 0], find [:item-effects 3 0 [2]]
+   if that's the current component with items synced.
+   
+   Returns the first matching component-id that has items in its state."
+  [base-component-id]
+  (let [base-vec (vec base-component-id)
+        base-len (count base-vec)]
+    (->> @component-states
+         (filter (fn [[cid state]]
+                   (and (seq (:items state))  ;; Has items synced
+                        (vector? cid)
+                        (>= (count cid) base-len)
+                        (= (subvec (vec cid) 0 base-len) base-vec))))
+         first
+         first)))  ;; Returns component-id or nil
+
 (defn setup-keyboard-handlers-for-component!
   "Setup keyboard handlers on a parent node for a hierarchical list component.
    This eliminates the need for each consumer to duplicate keyboard setup code.
@@ -1305,10 +1296,24 @@
    - Delete: Delete selected items
    - Escape: Clear selection
    
+   IMPORTANT: Stores the 'base' component-id on the node and dynamically looks up
+   the current full component-id at keypress time. This handles cases where
+   component-id includes dynamic parts (like selected-item-path for Item Effects).
+   
    Args:
    - node: The JavaFX node to attach handlers to
-   - component-id: The component ID used to identify the hierarchical list state"
+   - component-id: The component ID (stored as base for dynamic lookup)"
   [^javafx.scene.Node node component-id]
+  ;; Store the base component-id on the node for dynamic lookup
+  ;; For [:item-effects col row path], we store [:item-effects col row] as base
+  (let [base-id (if (and (vector? component-id)
+                         (= :item-effects (first component-id))
+                         (>= (count component-id) 4))
+                  ;; For item-effects, use first 3 elements as base
+                  (vec (take 3 component-id))
+                  ;; For other components, use as-is
+                  component-id)]
+    (.setUserData node {:base-component-id base-id}))
   (.addEventFilter
     node
     javafx.scene.input.KeyEvent/KEY_PRESSED
@@ -1316,47 +1321,42 @@
       (handle [_ event]
         (let [code (.getCode event)
               ctrl? (.isShortcutDown event)
+              ;; Read base-component-id from node's userData
+              user-data (.getUserData node)
+              base-id (when (map? user-data) (:base-component-id user-data))
+              ;; Find the current full component-id
+              current-component-id (if (= base-id (get @component-states base-id))
+                                     base-id
+                                     (or (find-component-id-by-base base-id) base-id))
               ;; Get fresh state for this component
-              state (get-state component-id)
+              state (get-state current-component-id)
               items (:items state)
               props (:props state)]
           (when (and items props)
             (cond
-              ;; Ctrl+C - Copy
               (and ctrl? (= code javafx.scene.input.KeyCode/C))
-              (do (copy-selected-from-component! component-id)
-                  (.consume event))
-              
-              ;; Ctrl+V - Paste
+              (copy-selected-from-component! current-component-id)
+
               (and ctrl? (= code javafx.scene.input.KeyCode/V))
-              (do (paste-items-from-component! component-id)
-                  (.consume event))
-              
-              ;; Ctrl+X - Cut (copy + delete)
+              (paste-items-from-component! current-component-id)
+
               (and ctrl? (= code javafx.scene.input.KeyCode/X))
-              (do (copy-selected-from-component! component-id)
-                  (delete-selected-from-component! component-id)
-                  (.consume event))
-              
-              ;; Ctrl+A - Select all
+              (do (copy-selected-from-component! current-component-id)
+                  (delete-selected-from-component! current-component-id))
+
               (and ctrl? (= code javafx.scene.input.KeyCode/A))
-              (do (select-all-from-component! component-id)
-                  (.consume event))
+              (select-all-from-component! current-component-id)
               
-              ;; Ctrl+G - Group selected
               (and ctrl? (= code javafx.scene.input.KeyCode/G))
-              (do (group-selected-from-component! component-id)
-                  (.consume event))
-              
-              ;; Delete key - Delete selected
+              (group-selected-from-component! current-component-id)
+
               (= code javafx.scene.input.KeyCode/DELETE)
-              (do (delete-selected-from-component! component-id)
-                  (.consume event))
-              
-              ;; Escape - Clear selection
+              (delete-selected-from-component! current-component-id)
+
               (= code javafx.scene.input.KeyCode/ESCAPE)
-              (do (clear-selection-from-component! component-id)
-                  (.consume event)))))))))
+              (clear-selection-from-component! current-component-id))
+
+            (.consume event)))))))
 
 
 ;; ============================================================================

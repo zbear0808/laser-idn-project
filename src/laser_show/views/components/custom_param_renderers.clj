@@ -21,32 +21,71 @@
 (defn translate-visual-editor
   "Visual editor for translate effect - single draggable center point.
    
-   Props:
-   - :col, :row - Grid cell coordinates
-   - :effect-path - Path to effect
-   - :current-params - Current parameter values {:x ... :y ...}
-   - :param-specs - Parameter specifications from effect definition"
-  [{:keys [col row effect-path current-params param-specs]}]
-  (let [x (get current-params :x 0.0)
-        y (get current-params :y 0.0)
-        x-spec (first (filter #(= :x (:key %)) param-specs))
-        y-spec (first (filter #(= :y (:key %)) param-specs))
-        x-min (or (:min x-spec) -2.0)
-        x-max (or (:max x-spec) 2.0)
-        y-min (or (:min y-spec) -2.0)
-        y-max (or (:max y-spec) 2.0)]
+   Supports two usage patterns:
+   
+   1. Effect chain editor props:
+      - :col, :row - Grid cell coordinates
+      - :effect-path - Path to effect
+      - :current-params - Current parameter values {:x ... :y ...}
+      - :param-specs - Parameter specifications from effect definition
+   
+   2. Event template pattern (for generic reuse, e.g., cue chain items):
+      - :current-params - Current parameter values (or :params as alias)
+      - :event-template - Base event map for on-point-drag (will add :param-map)
+      - :fx-key - (optional) Unique key for spatial canvas
+      - :width, :height - (optional) Canvas dimensions, default 280x280
+      - :hint-text - (optional) Hint text shown above canvas
+      - :bounds - (optional) {:x-min :x-max :y-min :y-max}, defaults from param-specs or ±2.0"
+  [{:keys [col row effect-path current-params params param-specs
+           event-template fx-key width height hint-text bounds]
+    :or {width 280 height 280}}]
+  (let [;; Support both :current-params and :params (alias)
+        params-map (or current-params params {})
+        
+        ;; Get x/y values
+        x (get params-map :x 0.0)
+        y (get params-map :y 0.0)
+        
+        ;; Get bounds - prefer explicit :bounds, then param-specs, then defaults
+        {:keys [x-min x-max y-min y-max]}
+        (or bounds
+            (when param-specs
+              (let [x-spec (first (filter #(= :x (:key %)) param-specs))
+                    y-spec (first (filter #(= :y (:key %)) param-specs))]
+                {:x-min (or (:min x-spec) -2.0)
+                 :x-max (or (:max x-spec) 2.0)
+                 :y-min (or (:min y-spec) -2.0)
+                 :y-max (or (:max y-spec) 2.0)}))
+            {:x-min -2.0 :x-max 2.0 :y-min -2.0 :y-max 2.0})
+        
+        ;; Build on-point-drag event - use event-template if provided, else legacy pattern
+        param-map {:center {:x :x :y :y}}
+        on-point-drag-event (if event-template
+                              (assoc event-template :param-map param-map)
+                              {:event/type :chain/update-spatial-params
+                               :domain :effect-chains
+                               :entity-key [col row]
+                               :effect-path effect-path
+                               :param-map param-map})
+        
+        ;; Determine fx/key for spatial canvas
+        canvas-key (or fx-key [col row effect-path])
+        
+        ;; Hint text
+        actual-hint (or hint-text "Drag the point to adjust translation")]
+    
     {:fx/type :v-box
      :spacing 8
      :padding 8
      :style "-fx-background-color: #2A2A2A; -fx-background-radius: 4;"
      :children [{:fx/type :label
-                 :text "Drag the point to adjust translation"
+                 :text actual-hint
                  :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-style: italic;"}
                 
                 {:fx/type spatial-canvas/spatial-canvas
-                 :fx/key [col row effect-path]
-                 :width 280
-                 :height 280
+                 :fx/key canvas-key
+                 :width width
+                 :height height
                  :bounds {:x-min x-min :x-max x-max
                          :y-min y-min :y-max y-max}
                  :points [{:id :center
@@ -54,11 +93,7 @@
                           :y y
                           :color "#4CAF50"
                           :label ""}]
-                 :on-point-drag {:event/type :chain/update-spatial-params
-                                :domain :effect-chains
-                                :entity-key [col row]
-                                :effect-path effect-path
-                                :param-map {:center {:x :x :y :y}}}
+                 :on-point-drag on-point-drag-event
                  :show-grid true
                  :show-axes true
                  :show-labels true}

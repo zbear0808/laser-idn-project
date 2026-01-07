@@ -20,7 +20,7 @@
             [laser-show.state.clipboard :as clipboard]
             [laser-show.css.core :as css]
             [laser-show.views.components.tabs :as tabs]
-            [laser-show.views.components.custom-param-renderers :as custom-renderers]
+            [laser-show.views.components.effect-param-ui :as effect-param-ui]
             [laser-show.views.components.hierarchical-list :as hierarchical-list])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
@@ -33,13 +33,8 @@
   [category]
   (effects/list-effects-by-category category))
 
-(defn- params-vector->map
-  "Convert effect parameters from vector format (registry) to map format (UI).
-   [{:key :x-scale :default 1.0 ...}] -> {:x-scale {:default 1.0 ...}}"
-  [params-vector]
-  (into {}
-        (mapv (fn [p] [(:key p) (dissoc p :key)])
-              params-vector)))
+;; Use shared params-vector->map from effect-param-ui
+(def params-vector->map effect-param-ui/params-vector->map)
 
 
 ;; Right Top: Tabbed Effect Bank
@@ -116,104 +111,8 @@
 ;; Right Bottom: Parameter Editor
 
 
-(defn- param-slider
-  "Slider control for numeric parameters with editable text field.
-   The text field allows typing a value and pressing Enter to update."
-  [{:keys [col row effect-path param-key param-spec current-value]}]
-  (let [{:keys [min max]} param-spec
-        value (or current-value (:default param-spec) 0)]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :label
-                 :text (name param-key)
-                 :pref-width 80
-                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
-                {:fx/type :slider
-                 :min min
-                 :max max
-                 :value (double value)
-                 :pref-width 150
-                 :on-value-changed {:event/type :effects/update-param
-                                    :col col :row row
-                                    :effect-path effect-path
-                                    :param-key param-key}}
-                {:fx/type :text-field
-                 :text (format "%.2f" (double value))
-                 :pref-width 55
-                 :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 11; -fx-padding: 2 4;"
-                 :on-action {:event/type :effects/update-param-from-text
-                             :col col :row row
-                             :effect-path effect-path
-                             :param-key param-key
-                             :min min :max max}}]}))
-
-(defn- param-choice
-  "Combo-box for choice parameters."
-  [{:keys [col row effect-path param-key param-spec current-value]}]
-  (let [choices (:choices param-spec [])
-        value (or current-value (:default param-spec))]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :label
-                 :text (name param-key)
-                 :pref-width 80
-                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
-                {:fx/type :combo-box
-                 :items choices
-                 :value value
-                 :pref-width 150
-                 :button-cell (fn [item] {:text (if item (name item) "")})
-                 :cell-factory {:fx/cell-type :list-cell
-                                :describe (fn [item] {:text (if item (name item) "")})}
-                 :on-value-changed {:event/type :effects/update-param
-                                    :col col :row row
-                                    :effect-path effect-path
-                                    :param-key param-key}}]}))
-
-(defn- param-checkbox
-  "Checkbox for boolean parameters."
-  [{:keys [col row effect-path param-key param-spec current-value]}]
-  (let [value (if (some? current-value) current-value (:default param-spec false))]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :check-box
-                 :text (name param-key)
-                 :selected value
-                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"
-                 :on-selected-changed {:event/type :effects/update-param
-                                       :col col :row row
-                                       :effect-path effect-path
-                                       :param-key param-key}}]}))
-
-(defn- param-control
-  "Render appropriate control based on parameter type."
-  [{:keys [param-spec] :as props}]
-  (case (:type param-spec :float)
-    :choice {:fx/type param-choice
-             :col (:col props) :row (:row props)
-             :effect-path (:effect-path props)
-             :param-key (:param-key props)
-             :param-spec param-spec
-             :current-value (:current-value props)}
-    :bool {:fx/type param-checkbox
-           :col (:col props) :row (:row props)
-           :effect-path (:effect-path props)
-           :param-key (:param-key props)
-           :param-spec param-spec
-           :current-value (:current-value props)}
-    ;; Default: numeric slider
-    {:fx/type param-slider
-     :col (:col props) :row (:row props)
-     :effect-path (:effect-path props)
-     :param-key (:param-key props)
-     :param-spec param-spec
-     :current-value (:current-value props)}))
-
 (defn- custom-param-renderer
-  "Renders parameters with custom UI and mode toggle.
+  "Renders parameters with custom UI and mode toggle using shared effect-param-ui.
    
    Props:
    - :col, :row - Grid cell coordinates
@@ -224,87 +123,34 @@
    - :params-map - Parameter specifications map
    - :dialog-data - Dialog state data (for curve editor channel tab tracking)"
   [{:keys [col row effect-path effect-def current-params ui-mode params-map dialog-data]}]
-  (let [ui-hints (:ui-hints effect-def)
-        renderer-type (:renderer ui-hints)
-        actual-mode (or ui-mode (:default-mode ui-hints :visual))]
-    ;; RGB Curves is visual-only, no mode toggle
-    (if (= renderer-type :rgb-curves)
-      {:fx/type custom-renderers/rgb-curves-visual-editor
-       :domain :effect-chains
-       :entity-key [col row]
-       :effect-path effect-path
-       :current-params current-params
-       :dialog-data dialog-data}
-      
-      ;; Other custom renderers have mode toggle
-      {:fx/type :v-box
-       :spacing 8
-       :children [;; Mode toggle buttons
-                  {:fx/type :h-box
-                   :spacing 6
-                   :alignment :center-left
-                   :padding {:bottom 8}
-                   :children [{:fx/type :label
-                              :text "Edit Mode:"
-                              :style "-fx-text-fill: #808080; -fx-font-size: 10;"}
-                             {:fx/type :button
-                              :text "👁 Visual"
-                              :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
-                                         (if (= actual-mode :visual)
-                                           "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
-                                           "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
-                              :on-action {:event/type :effects/set-param-ui-mode
-                                         :effect-path effect-path
-                                         :mode :visual}}
-                             {:fx/type :button
-                              :text "🔢 Numeric"
-                              :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
-                                         (if (= actual-mode :numeric)
-                                           "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
-                                           "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
-                              :on-action {:event/type :effects/set-param-ui-mode
-                                         :effect-path effect-path
-                                         :mode :numeric}}]}
-                  
-                  ;; Render based on mode
-                  (if (= actual-mode :visual)
-                    ;; Custom visual renderer
-                    (case renderer-type
-                      :spatial-2d {:fx/type custom-renderers/translate-visual-editor
-                                  :col col :row row
-                                  :effect-path effect-path
-                                  :current-params current-params
-                                  :param-specs (:parameters effect-def)}
-                      
-                      :corner-pin-2d {:fx/type custom-renderers/corner-pin-visual-editor
-                                     :col col :row row
-                                     :effect-path effect-path
-                                     :current-params current-params
-                                     :param-specs (:parameters effect-def)}
-                      
-                      ;; Fallback to standard params
-                      {:fx/type :v-box
-                       :spacing 6
-                       :children (vec
-                                  (for [[param-key param-spec] params-map]
-                                    {:fx/type param-control
-                                     :col col :row row
-                                     :effect-path effect-path
-                                     :param-key param-key
-                                     :param-spec param-spec
-                                     :current-value (get current-params param-key)}))})
-                    
-                    ;; Numeric mode - standard sliders
-                    {:fx/type :v-box
-                     :spacing 6
-                     :children (vec
-                                (for [[param-key param-spec] params-map]
-                                  {:fx/type param-control
-                                   :col col :row row
-                                   :effect-path effect-path
-                                   :param-key param-key
-                                   :param-spec param-spec
-                                   :current-value (get current-params param-key)}))})]})))
+  {:fx/type effect-param-ui/custom-param-renderer
+   :effect-def effect-def
+   :current-params current-params
+   :ui-mode ui-mode
+   :params-map params-map
+   :dialog-data dialog-data
+   
+   ;; Event templates for spatial editors (translate, corner-pin)
+   :spatial-event-template {:event/type :chain/update-spatial-params
+                           :domain :effect-chains
+                           :entity-key [col row]
+                           :effect-path effect-path}
+   :spatial-event-keys {:col col :row row :effect-path effect-path}
+   
+   ;; Event templates for param controls
+   :on-change-event {:event/type :effects/update-param
+                     :col col :row row
+                     :effect-path effect-path}
+   :on-text-event {:event/type :effects/update-param-from-text
+                   :col col :row row
+                   :effect-path effect-path}
+   :on-mode-change-event {:event/type :effects/set-param-ui-mode
+                         :effect-path effect-path}
+   
+   ;; RGB curves props
+   :rgb-domain :effect-chains
+   :rgb-entity-key [col row]
+   :rgb-effect-path effect-path})
 
 (defn- parameter-editor
   "Parameter editor for the selected effect."
@@ -339,7 +185,7 @@
                               :params-map params-map
                               :dialog-data dialog-data}}
                     
-                    ;; Standard parameters - use existing controls
+                    ;; Standard parameters - use shared param controls
                     {:fx/type :scroll-pane
                      :fit-to-width true
                      :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
@@ -348,12 +194,16 @@
                               :padding {:top 4}
                               :children (vec
                                          (for [[param-key param-spec] params-map]
-                                           {:fx/type param-control
-                                            :col col :row row
-                                            :effect-path selected-effect-path
+                                           {:fx/type effect-param-ui/param-control
                                             :param-key param-key
                                             :param-spec param-spec
-                                            :current-value (get current-params param-key)}))}})
+                                            :current-value (get current-params param-key)
+                                            :on-change-event {:event/type :effects/update-param
+                                                             :col col :row row
+                                                             :effect-path selected-effect-path}
+                                            :on-text-event {:event/type :effects/update-param-from-text
+                                                           :col col :row row
+                                                           :effect-path selected-effect-path}}))}})
                   
                   {:fx/type :label
                    :text "Select an effect from the chain"
