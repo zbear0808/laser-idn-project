@@ -99,42 +99,57 @@
 
 (defn- handle-selection!
   "Handle selection based on click modifiers.
-   Updates internal state and calls :on-selection-changed callback."
-  [component-id items item-id ctrl? shift? props]
+   Updates internal state and calls :on-selection-changed callback.
+   
+   IMPORTANT: Reads items and props from component-state to avoid stale closure
+   issues. The items/props are synced on each render via sync-items-and-props!"
+  [component-id item-id ctrl? shift?]
   (let [state (get-state component-id)
+        items (:items state)
+        props (:props state)
         selected-ids (:selected-ids state #{})
-        last-selected-id (:last-selected-id state)
-        new-state (cond
-                    ;; Ctrl+Click - toggle selection
-                    ctrl?
-                    {:selected-ids (if (contains? selected-ids item-id)
-                                     (disj selected-ids item-id)
-                                     (conj selected-ids item-id))
-                     :last-selected-id item-id}
-                    
-                    ;; Shift+Click - range select
-                    shift?
-                    (let [all-ids (chains/collect-all-ids items)
-                          anchor-id (or last-selected-id item-id)
-                          anchor-idx (.indexOf all-ids anchor-id)
-                          target-idx (.indexOf all-ids item-id)
-                          start (min anchor-idx target-idx)
-                          end (max anchor-idx target-idx)]
-                      (if (and (>= anchor-idx 0) (>= target-idx 0))
-                        {:selected-ids (set (subvec all-ids start (inc end)))
-                         :last-selected-id last-selected-id}  ;; Keep anchor for shift
+        last-selected-id (:last-selected-id state)]
+    ;; Debug logging
+    (println "[handle-selection!] component-id=" component-id "item-id=" item-id
+             "ctrl?=" ctrl? "shift?=" shift?)
+    (println "  items count:" (count items) "selected-ids:" selected-ids
+             "last-selected-id:" last-selected-id)
+    (when (and items props)
+      (let [new-state (cond
+                        ;; Ctrl+Click - toggle selection
+                        ctrl?
+                        {:selected-ids (if (contains? selected-ids item-id)
+                                         (disj selected-ids item-id)
+                                         (conj selected-ids item-id))
+                         :last-selected-id item-id}
+                        
+                        ;; Shift+Click - range select
+                        shift?
+                        (let [all-ids (chains/collect-all-ids items)
+                              _ (println "  all-ids for shift-select:" all-ids)
+                              anchor-id (or last-selected-id item-id)
+                              anchor-idx (.indexOf all-ids anchor-id)
+                              target-idx (.indexOf all-ids item-id)
+                              start (min anchor-idx target-idx)
+                              end (max anchor-idx target-idx)]
+                          (println "  anchor-id:" anchor-id "anchor-idx:" anchor-idx
+                                   "target-idx:" target-idx "start:" start "end:" end)
+                          (if (and (>= anchor-idx 0) (>= target-idx 0))
+                            {:selected-ids (set (subvec all-ids start (inc end)))
+                             :last-selected-id last-selected-id}  ;; Keep anchor for shift
+                            {:selected-ids #{item-id}
+                             :last-selected-id item-id}))
+                        
+                        ;; Plain click - single select
+                        :else
                         {:selected-ids #{item-id}
-                         :last-selected-id item-id}))
-                    
-                    ;; Plain click - single select
-                    :else
-                    {:selected-ids #{item-id}
-                     :last-selected-id item-id})]
-    ;; Update internal state
-    (update-state! component-id #(merge % new-state))
-    ;; Notify parent
-    (when-let [callback (:on-selection-changed props)]
-      (callback new-state))))
+                         :last-selected-id item-id})]
+        (println "  new-state:" new-state)
+        ;; Update internal state
+        (update-state! component-id #(merge % new-state))
+        ;; Notify parent
+        (when-let [callback (:on-selection-changed props)]
+          (callback new-state))))))
 
 (defn- select-all!
   "Select all items in the chain."
@@ -673,7 +688,7 @@
                                              ;; Single-click - select
                                              :else
                                              (do
-                                               (handle-selection! component-id items group-id ctrl? shift? props)
+                                               (handle-selection! component-id group-id ctrl? shift?)
                                                (.consume event))))))))
                      :desc {:fx/type :h-box
                             :style-class header-classes
@@ -774,7 +789,7 @@
                                      (handle [_ event]
                                        (let [ctrl? (.isShortcutDown event)
                                              shift? (.isShiftDown event)]
-                                         (handle-selection! component-id items item-id ctrl? shift? props)
+                                         (handle-selection! component-id item-id ctrl? shift?)
                                          (.consume event))))))
                    :desc {:fx/type :h-box
                           :style-class item-classes

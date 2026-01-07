@@ -559,52 +559,6 @@
     {:state (update-in state ui-path merge updates)}))
 
 
-;; Group Management (via chain-handlers)
-
-
-(defn- handle-projectors-group-effects
-  "Group selected effects in projector chain."
-  [{:keys [projector-id name state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-group-selected state config name)}))
-
-(defn- handle-projectors-ungroup-effects
-  "Ungroup a group in projector chain."
-  [{:keys [projector-id path state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-ungroup state config path)}))
-
-(defn- handle-projectors-create-effect-group
-  "Create empty group in projector chain."
-  [{:keys [projector-id state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-create-empty-group state config)}))
-
-(defn- handle-projectors-toggle-effect-group-collapse
-  "Toggle collapse state of a group in projector chain."
-  [{:keys [projector-id path state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-toggle-collapse state config path)}))
-
-(defn- handle-projectors-start-rename-effect-group
-  "Start renaming a group in projector chain."
-  [{:keys [projector-id path state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-start-rename state config path)}))
-
-(defn- handle-projectors-rename-effect-group
-  "Rename a group in projector chain."
-  [{:keys [projector-id path name state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-rename-item state config path name)}))
-
-(defn- handle-projectors-cancel-rename-effect-group
-  "Cancel renaming a group in projector chain."
-  [{:keys [projector-id state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-cancel-rename state config)}))
-
-
 ;; Effect Parameters (Path-Based)
 
 
@@ -835,15 +789,6 @@
     :projectors/start-effect-drag (handle-projectors-start-effect-drag event)
     :projectors/move-effects (handle-projectors-move-effects event)
     :projectors/update-effect-ui-state (handle-projectors-update-effect-ui-state event)
-    
-    ;; Groups
-    :projectors/group-effects (handle-projectors-group-effects event)
-    :projectors/ungroup-effects (handle-projectors-ungroup-effects event)
-    :projectors/create-effect-group (handle-projectors-create-effect-group event)
-    :projectors/toggle-effect-group-collapse (handle-projectors-toggle-effect-group-collapse event)
-    :projectors/start-rename-effect-group (handle-projectors-start-rename-effect-group event)
-    :projectors/rename-effect-group (handle-projectors-rename-effect-group event)
-    :projectors/cancel-rename-effect-group (handle-projectors-cancel-rename-effect-group event)
     
     ;; Effect parameters
     :projectors/set-effect-enabled-at-path (handle-projectors-set-effect-enabled-at-path event)

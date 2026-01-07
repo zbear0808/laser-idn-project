@@ -807,7 +807,14 @@
                  mark-dirty)}
      
      :chain/update-selection
-     {:state (handle-clear-selection state config)}
+     ;; Store the selected-ids from the hierarchical-list component callback
+     ;; The component uses IDs (not paths), so store them in the ui-path for the
+     ;; parent dialog to use (e.g., for parameter editor display)
+     (let [selected-ids (:selected-ids event)
+           last-selected-id (:last-selected-id event)]
+       {:state (-> state
+                   (assoc-in (conj (:ui-path config) :selected-ids) selected-ids)
+                   (assoc-in (conj (:ui-path config) :last-selected-id) last-selected-id))})
      
      :chain/select-item
      {:state (handle-select-item state config (:path event) (:ctrl? event) (:shift? event))}
@@ -866,7 +873,17 @@
      :chain/update-spatial-params
      {:state (handle-update-spatial-params state config event)}
      
+     :chain/create-empty-group
+     {:state (handle-create-empty-group state config (:name event))}
+     
      ;; Unknown chain event
      (do
        (log/warn "Unknown chain event type:" type)
        {}))))
+
+
+(defn handle
+ "Main dispatcher for :chain/* events.
+  Routes to handle-generic-chain-event."
+ [event]
+ (handle-generic-chain-event event))

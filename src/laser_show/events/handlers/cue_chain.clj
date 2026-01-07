@@ -124,48 +124,6 @@
     {:state (assoc-in state (cue-chain-path col row) updated-items)}))
 
 
-;; Item Manipulation (via chain-handlers)
-
-
-(defn- handle-cue-chain-remove-items
-  "Remove selected items from the cue chain.
-   Event keys:
-   - :col, :row - Grid cell coordinates"
-  [{:keys [col row state]}]
-  (let [config (chain-handlers/chain-config :cue-chains [col row])]
-    {:state (chain-handlers/handle-delete-selected state config)}))
-
-(defn- handle-cue-chain-move-items
-  "Move items to a new position via drag-and-drop.
-   Uses the centralized chains/move-items-to-target for correct ordering.
-   Event keys:
-   - :col, :row - Grid cell coordinates
-   - :target-id - ID of the target item
-   - :drop-position - :before | :into"
-  [{:keys [col row target-id drop-position state]}]
-  (let [config (chain-handlers/chain-config :cue-chains [col row])]
-    {:state (chain-handlers/handle-move-items state config target-id drop-position)}))
-
-
-;; Group Creation
-
-
-(defn- handle-cue-chain-create-group
-  "Create a new empty group.
-   Event keys:
-   - :col, :row - Grid cell coordinates
-   - :name (optional) - Group name"
-  [{:keys [col row name state]}]
- (let [config (chain-handlers/chain-config :cue-chains [col row])
-       ensure-cell (fn [s]
-                     (if (get-in s [:chains :cue-chains [col row]])
-                       s
-                       (assoc-in s [:chains :cue-chains [col row]] {:items []})))]
-   {:state (-> state
-               ensure-cell
-               (chain-handlers/handle-create-empty-group config name))}))
-
-
 ;; Tab Switching
 
 
@@ -525,14 +483,6 @@
     :cue-chain/update-preset-param (handle-cue-chain-update-preset-param event)
     :cue-chain/update-preset-color (handle-cue-chain-update-preset-color event)
     :cue-chain/update-preset-param-from-text (handle-cue-chain-update-preset-param event)
-    
-    ;; Item manipulation
-    :cue-chain/remove-items (handle-cue-chain-remove-items event)
-    :cue-chain/move-items (handle-cue-chain-move-items event)
-    
-    ;; Groups
-    :cue-chain/create-group (handle-cue-chain-create-group event)
-    :cue-chain/create-empty-group (handle-cue-chain-create-group event)
     
     ;; Tab switching
     :cue-chain/set-preset-tab (handle-cue-chain-set-preset-tab event)

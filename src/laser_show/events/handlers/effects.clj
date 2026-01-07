@@ -280,25 +280,6 @@
      {:state state})))
 
 
-;; Effect Chain Group Events
-
-
-(defn- handle-effects-create-empty-group
-  "Create a new empty group at the end of the chain.
-   Event keys:
-   - :col, :row - Grid cell coordinates
-   - :name (optional) - Group name, defaults to 'New Group'"
-  [{:keys [col row name state]}]
-  (let [config (chain-handlers/chain-config :effect-chains [col row])
-        ensure-cell (fn [s]
-                      (if (get-in s [:chains :effect-chains [col row]])
-                        s
-                        (assoc-in s [:chains :effect-chains [col row]] {:items [] :active true})))]
-    {:state (-> state
-                ensure-cell
-                (chain-handlers/handle-create-empty-group config name))}))
-
-
 ;; Public API
 
 
@@ -331,9 +312,6 @@
     :effects/update-curve-point (handle-effects-update-curve-point event)
     :effects/remove-curve-point (handle-effects-remove-curve-point event)
     :effects/set-active-curve-channel (handle-effects-set-active-curve-channel event)
-    
-    ;; Groups
-    :effects/create-empty-group (handle-effects-create-empty-group event)
     
     ;; Unknown event in this domain
     {}))
