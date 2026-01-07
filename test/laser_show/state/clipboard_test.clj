@@ -1,6 +1,14 @@
 (ns laser-show.state.clipboard-test
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [clojure.test :refer [deftest testing is use-fixtures]]
+            [laser-show.state.core :as state]
             [laser-show.state.clipboard :as clipboard]))
+
+(defn init-state-fixture [f]
+  "Initialize state before each test"
+  (state/init-state! {:ui {:clipboard nil}})
+  (f))
+
+(use-fixtures :each init-state-fixture)
 
 (deftest clipboard-types-test
   (testing "valid clipboard types"

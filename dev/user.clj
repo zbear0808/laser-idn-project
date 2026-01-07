@@ -258,7 +258,7 @@
   ;; Profiling
   (profile-cpu 30)                  ;; Profile CPU for 30 seconds
   (profile-alloc 30)                ;; Profile allocations for 30 seconds
-  (profile-section! #(your-code))   ;; Profile specific code
+  (profile-section! prn #_(your-code))   ;; Profile specific code
   (view-flamegraph)                 ;; Open latest flamegraph
   (profiler-ui 8080)                ;; Start web UI
   (profiler-status)                 ;; Check profiler status

@@ -4,11 +4,10 @@
   #_#_:unused-namespace {:level :off}
   :unused-private-var {:level :off}
   :unresolved-namespace {:level :error}
-  :unresolved-var {:level :error}}
- 
- :config-in-ns
- {laser-show.idn.hello {:linters {:clojure-lsp/unused-public-var {:level :off}}}
-  laser-show.idn.stream {:linters {:clojure-lsp/unused-public-var {:level :off}}}}
+  :unresolved-var {:level :error}
+  :clojure-lsp/unused-public-var {:exclude #{laser-show.idn.hello
+                                             laser-show.idn.stream}
+                                  :exclude-when-defined-by #{laser-show.state.core/defstate}}}
  
  :hooks
  {:analyze-call

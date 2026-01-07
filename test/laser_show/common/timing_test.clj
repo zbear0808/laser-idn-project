@@ -156,7 +156,7 @@
       (let [intervals (map (fn [[t1 t2]] (- t2 t1))
                           (partition 2 1 @timestamps))
             mean (/ (reduce + intervals) (count intervals))
-            deviations (map #(Math/abs (- % mean)) intervals)
+            deviations (map #(Math/abs (double (- % mean))) intervals)
             max-jitter (apply max deviations)]
         
         ;; Max jitter should be less than 1ms (1,000,000 nanoseconds)
