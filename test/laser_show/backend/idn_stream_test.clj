@@ -247,6 +247,78 @@
         (is (bit-test cfl 1) "Close flag should be set")))))
 
 
+;; Timestamp Wrapping Tests (Section 2.1 - "Wraps must be taken care of on consumer side")
+
+
+(deftest timestamp-wrapping-test
+  (testing "Normal timestamp values work correctly"
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet buf frame 0 1000000 33333)
+          timestamp (get-int packet 4)]
+      (is (= 1000000 timestamp) "Normal timestamp should be written correctly")))
+
+  (testing "Timestamp near 32-bit signed max works without overflow"
+    ;; Integer/MAX_VALUE = 2147483647
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
+          buf (stream/create-packet-buffer)
+          large-timestamp 2147483647
+          packet (stream/frame->packet buf frame 0 large-timestamp 33333)
+          read-timestamp (get-int packet 4)]
+      (is (= large-timestamp read-timestamp) "Max signed int timestamp should work")))
+
+  (testing "Timestamp beyond 32-bit signed max wraps correctly"
+    ;; Test value that would overflow signed int but fits in unsigned 32-bit
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
+          buf (stream/create-packet-buffer)
+          ;; 3000000000 is beyond Integer/MAX_VALUE but within unsigned 32-bit range
+          overflow-timestamp 3000000000
+          packet (stream/frame->packet buf frame 0 overflow-timestamp 33333)
+          read-timestamp (get-int packet 4)]
+      ;; When read as signed int, this will be negative, but that's expected
+      ;; The bit pattern is preserved correctly
+      (is (= (unchecked-int (bit-and overflow-timestamp 0xFFFFFFFF)) read-timestamp)
+          "Timestamp should wrap correctly within 32-bit range")))
+
+  (testing "Timestamp wrapping at 32-bit unsigned boundary"
+    ;; Test at the unsigned 32-bit max: 4294967295 (0xFFFFFFFF)
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
+          buf (stream/create-packet-buffer)
+          max-unsigned-32 0xFFFFFFFF
+          packet (stream/frame->packet buf frame 0 max-unsigned-32 33333)
+          read-timestamp (get-int packet 4)]
+      (is (= -1 read-timestamp) "Max unsigned 32-bit reads as -1 in signed int (0xFFFFFFFF)")))
+
+  (testing "Very large timestamp beyond 32-bit wraps around"
+    ;; Test with value much larger than 32-bit max
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
+          buf (stream/create-packet-buffer)
+          ;; Simulate ~36+ minutes of streaming (beyond signed int max)
+          very-large-timestamp 5000000000
+          packet (stream/frame->packet buf frame 0 very-large-timestamp 33333)
+          read-timestamp (get-int packet 4)
+          expected (unchecked-int (bit-and very-large-timestamp 0xFFFFFFFF))]
+      (is (= expected read-timestamp)
+          "Very large timestamp should wrap by masking to lower 32 bits")))
+
+  (testing "Timestamp wrapping in packet-with-config"
+    ;; Verify the fix also works in packet-with-config variant
+    (let [frame (t/make-frame [(t/make-point 0 0 1.0 1.0 1.0)])
+          buf (stream/create-packet-buffer)
+          overflow-timestamp 3000000000
+          packet (stream/frame->packet-with-config buf frame 0 overflow-timestamp 33333)
+          read-timestamp (get-int packet 4)]
+      (is (= (unchecked-int (bit-and overflow-timestamp 0xFFFFFFFF)) read-timestamp)
+          "Timestamp wrapping should work in packet-with-config too")))
+
+  (testing "Close channel packet handles large timestamps"
+    (let [overflow-timestamp 3000000000
+          packet (stream/close-channel-packet 0 overflow-timestamp)
+          read-timestamp (get-int packet 4)]
+      (is (= (unchecked-int (bit-and overflow-timestamp 0xFFFFFFFF)) read-timestamp)
+          "Close packet should handle large timestamps correctly"))))
+
+
 ;; Utility Function Tests
 
 

@@ -6,7 +6,8 @@
    - Path-based selection with Ctrl/Shift modifiers"
   (:require
    [clojure.test :refer [deftest is testing]]
-   [laser-show.events.handlers.projector :as projectors]))
+   [laser-show.events.handlers.projector :as projectors]
+   [laser-show.state.domains :refer [build-initial-state]]))
 
 
 ;; Test Data Fixtures
@@ -27,13 +28,13 @@
                :name "Output C"
                :flags {}}]})
 
+(def base-state
+  "Base state using actual app initial state structure."
+  (build-initial-state))
+
 (def sample-state
-  {:projectors {:items {}
-                :active-projector nil
-                :broadcast-address "255.255.255.255"}
-   :chains {:projector-effects {}}
-   :ui {:projector-effect-ui-state {}}
-   :project {:dirty? false}})
+  "Empty projector state for testing device addition."
+  base-state)
 
 
 ;; Multi-Service Addition Tests

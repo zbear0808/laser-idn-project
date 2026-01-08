@@ -7,7 +7,8 @@
    - Curve point operations with corner constraints"
   (:require
    [clojure.test :refer [deftest is testing]]
-   [laser-show.events.handlers.effects :as effects]))
+   [laser-show.events.handlers.effects :as effects]
+   [laser-show.state.domains :refer [build-initial-state]]))
 
 
 ;; Test Data Fixtures
@@ -26,10 +27,15 @@
    (make-effect "2" :rotate)
    (make-effect "3" :intensity)])
 
+(def base-state
+  "Base state using actual app initial state structure."
+  (build-initial-state))
+
 (def sample-state
-  {:chains {:effect-chains {[0 0] {:items sample-effects :active true}}}
-   :ui {:dialogs {:effect-chain-editor {:data {:selected-effect-indices #{}}}}}
-   :project {:dirty? false}})
+  "State with effect chain for testing."
+  (-> base-state
+      (assoc-in [:chains :effect-chains [0 0]] {:items sample-effects :active true})
+      (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})))
 
 
 ;; Reordering Tests

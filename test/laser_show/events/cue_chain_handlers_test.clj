@@ -2,41 +2,52 @@
   "Tests for cue chain event handlers focusing on complex curve and spatial logic."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [laser-show.events.handlers.cue-chain :as cue-chain]))
+   [laser-show.events.handlers.cue-chain :as cue-chain]
+   [laser-show.state.domains :refer [build-initial-state]]))
 
 
 ;; Test Fixtures
 
 
+(def base-state
+  "Base state using actual app initial state structure."
+  (build-initial-state))
+
 (def sample-state-with-item
-  {:chains {:cue-chains {[0 0] {:items [{:preset-id :circle
-                                         :params {:size 100}
-                                         :effects []}]}}}
-   :cue-chain-editor {:cell [0 0]
-                      :selected-paths #{}
-                      :clipboard nil}
-   :project {:dirty? false}})
+  "State with a single cue chain item."
+  (-> base-state
+      (assoc-in [:chains :cue-chains [0 0]]
+                {:items [{:preset-id :circle
+                          :params {:size 100}
+                          :effects []}]})
+      (assoc-in [:cue-chain-editor :cell] [0 0])
+      (assoc-in [:cue-chain-editor :selected-paths] #{})
+      (assoc-in [:cue-chain-editor :clipboard] nil)))
 
 (def sample-state-with-effect
-  {:chains {:cue-chains {[0 0] {:items [{:preset-id :circle
-                                         :params {:size 100}
-                                         :effects [{:id (java.util.UUID/fromString "123e4567-e89b-12d3-a456-426614174000")
-                                                   :effect-id :rgb-curves
-                                                   :enabled? true
-                                                   :params {:r-curve-points [[0 0] [255 255]]
-                                                           :g-curve-points [[0 0] [255 255]]
-                                                           :b-curve-points [[0 0] [255 255]]}}]}]}}}
-   :cue-chain-editor {:cell [0 0]}
-   :project {:dirty? false}})
+  "State with a cue chain item that has an RGB curves effect."
+  (-> base-state
+      (assoc-in [:chains :cue-chains [0 0]]
+                {:items [{:preset-id :circle
+                          :params {:size 100}
+                          :effects [{:id (java.util.UUID/fromString "123e4567-e89b-12d3-a456-426614174000")
+                                     :effect-id :rgb-curves
+                                     :enabled? true
+                                     :params {:r-curve-points [[0 0] [255 255]]
+                                              :g-curve-points [[0 0] [255 255]]
+                                              :b-curve-points [[0 0] [255 255]]}}]}]})
+      (assoc-in [:cue-chain-editor :cell] [0 0])))
 
 (def sample-state-with-spatial-effect
-  {:chains {:cue-chains {[0 0] {:items [{:preset-id :circle
-                                         :effects [{:id (java.util.UUID/fromString "123e4567-e89b-12d3-a456-426614174001")
-                                                   :effect-id :translate
-                                                   :enabled? true
-                                                   :params {:x 0.0 :y 0.0}}]}]}}}
-   :cue-chain-editor {:cell [0 0]}
-   :project {:dirty? false}})
+  "State with a cue chain item that has a spatial effect."
+  (-> base-state
+      (assoc-in [:chains :cue-chains [0 0]]
+                {:items [{:preset-id :circle
+                          :effects [{:id (java.util.UUID/fromString "123e4567-e89b-12d3-a456-426614174001")
+                                     :effect-id :translate
+                                     :enabled? true
+                                     :params {:x 0.0 :y 0.0}}]}]})
+      (assoc-in [:cue-chain-editor :cell] [0 0])))
 
 
 ;; Curve Point Addition Tests

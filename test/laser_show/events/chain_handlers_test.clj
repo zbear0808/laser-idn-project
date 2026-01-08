@@ -2,7 +2,8 @@
   "Tests for generic chain handler helpers."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [laser-show.events.handlers.chain :as ch]))
+   [laser-show.events.handlers.chain :as ch]
+   [laser-show.state.domains :refer [build-initial-state]]))
 
 
 ;; Test Data Fixtures
@@ -38,14 +39,18 @@
 ;; Sample chain: [effect-1, group-a{effect-2, effect-3}, group-b{effect-4}, effect-5]
 (def sample-chain [effect-1 group-a group-b effect-5])
 
+;; Base state using actual app initial state
+(def base-state (build-initial-state))
+
 ;; Sample state with effects chain
 (def sample-state
-  {:chains {:effect-chains {[0 0] {:items sample-chain :active true}}}
-   :ui {:dialogs {:effect-chain-editor {:data {:selected-paths #{}
-                                                :last-selected-path nil
-                                                :dragging-paths nil
-                                                :renaming-path nil}}}}
-   :project {:dirty? false}})
+  (-> base-state
+      (assoc-in [:chains :effect-chains [0 0]] {:items sample-chain :active true})
+      (assoc-in [:ui :dialogs :effect-chain-editor :data]
+                {:selected-paths #{}
+                 :last-selected-path nil
+                 :dragging-paths nil
+                 :renaming-path nil})))
 
 (def effects-config (ch/chain-config :effect-chains [0 0]))
 

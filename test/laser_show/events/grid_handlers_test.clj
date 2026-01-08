@@ -2,33 +2,35 @@
   "Tests for grid event handlers focusing on complex state transitions."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [laser-show.events.handlers.grid :as grid]))
+   [laser-show.events.handlers.grid :as grid]
+   [laser-show.state.domains :refer [build-initial-state]]))
 
 
 ;; Test Fixtures
+;; Start with actual app initial state and only assoc-in the keys relevant to each test
 
+
+(def base-state
+  "Base state using actual app initial state structure."
+  (build-initial-state))
 
 (def sample-state-empty
-  {:chains {:cue-chains {}}
-   :playback {:active-cell nil :playing? false :trigger-time nil}
-   :grid {:selected-cell nil}
-   :ui {:clipboard nil}
-   :project {:dirty? false}})
+  "Empty grid state - clear out default cue chains from initial state."
+  (assoc-in base-state [:chains :cue-chains] {}))
 
 (def sample-state-with-content
-  {:chains {:cue-chains {[0 0] {:items [{:preset-id :circle}]}
-                         [1 1] {:items [{:preset-id :wave}]}}}
-   :playback {:active-cell nil :playing? false :trigger-time nil}
-   :grid {:selected-cell nil}
-   :ui {:clipboard nil}
-   :project {:dirty? false}})
+  "State with some cue chains populated."
+  (-> base-state
+      (assoc-in [:chains :cue-chains [0 0]] {:items [{:preset-id :circle}]})
+      (assoc-in [:chains :cue-chains [1 1]] {:items [{:preset-id :wave}]})))
 
 (def sample-state-playing
-  {:chains {:cue-chains {[0 0] {:items [{:preset-id :circle}]}}}
-   :playback {:active-cell [0 0] :playing? true :trigger-time 1000}
-   :grid {:selected-cell nil}
-   :ui {:clipboard nil}
-   :project {:dirty? false}})
+  "State with active playback."
+  (-> base-state
+      (assoc-in [:chains :cue-chains [0 0]] {:items [{:preset-id :circle}]})
+      (assoc-in [:playback :active-cell] [0 0])
+      (assoc-in [:playback :playing?] true)
+      (assoc-in [:playback :trigger-time] 1000)))
 
 
 ;; Grid Clear Cell Tests
