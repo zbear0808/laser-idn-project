@@ -275,7 +275,11 @@
     (log/debug "group-selected! component-id:" component-id
                "selected-ids:" selected-ids
                "items count:" (count items))
-    (when (seq selected-ids)
+    (cond
+      (empty? selected-ids)
+      (log/warn "group-selected! FAILED - no items selected in component" component-id)
+      
+      :else
       (let [id->path (chains/find-paths-by-ids items selected-ids)
             all-paths (vals id->path)
             parent-paths (map (fn [path]
@@ -313,7 +317,7 @@
             (when-let [callback (:on-selection-changed props)]
               (callback {:selected-ids #{group-id} :last-selected-id group-id}))
             (log/debug "group-selected! SUCCESS"))
-          (log/debug "group-selected! FAILED - items not at same level"))))))
+          (log/warn "group-selected! FAILED - items not at same level. Selected" (count selected-ids) "items across" (count unique-parents) "different parent levels"))))))
 
 (defn- ungroup!
   "Ungroup a folder, splicing its contents into the parent."

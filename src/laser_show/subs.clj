@@ -39,80 +39,59 @@
 ;; --- Timing ---
 
 (defn bpm [context]
-  (ex/bpm (fx/sub-val context identity)))
+  (fx/sub-val context ex/bpm))
 
 
 ;; --- Playback ---
 
 
 (defn playing? [context]
-  (ex/playing? (fx/sub-val context identity)))
+  (fx/sub-val context ex/playing?))
 
 (defn active-cell [context]
-  (ex/active-cell (fx/sub-val context identity)))
+  (fx/sub-val context ex/active-cell))
 
 ;; --- Grid ---
 
 
 (defn grid-size [context]
-  (ex/grid-size (fx/sub-val context identity)))
+  (fx/sub-val context ex/grid-size))
 
 (defn selected-cell [context]
-  (ex/selected-cell (fx/sub-val context identity)))
+  (fx/sub-val context ex/selected-cell))
 
 ;; --- UI ---
 
 
 (defn active-tab [context]
-  (:active-tab (fx/sub-val context :ui)))
+  (fx/sub-val context ex/active-tab))
 
 (defn clipboard [context]
-  (ex/clipboard (fx/sub-val context identity)))
+  (fx/sub-val context ex/clipboard))
 
 
 
 ;; --- Project ---
-(defn project [context]
-  (fx/sub-val context :project))
 
 (defn project-folder [context]
-  (ex/project-folder (fx/sub-val context identity)))
+  (fx/sub-val context ex/project-folder))
 
 (defn project-dirty? [context]
-  (ex/project-dirty? (fx/sub-val context identity)))
+  (fx/sub-val context ex/project-dirty?))
 
 ;; --- Config ---
 
 
 (defn window-config [context]
-  (ex/window-config (fx/sub-val context identity)))
+  (fx/sub-val context ex/window-config))
 
 (defn preview-config [context]
-  (ex/preview-config (fx/sub-val context identity)))
+  (fx/sub-val context ex/preview-config))
 
 
-;; Level 2: Simple Composed Subscriptions
-;; These depend on a single domain and extract specific data.
+;; Level 2: Computed Subscriptions
+;; These compose multiple Level 1 subscriptions or perform computations.
 ;; Memoized via fx/sub-ctx, only recalculated when dependencies change.
-
-
-(defn idn-data
-  "Get IDN connection data from backend.
-   Depends on: backend domain"
-  [context]
-  (:idn (fx/sub-val context :backend)))
-
-(defn streaming-data
-  "Get streaming data from backend.
-   Depends on: backend domain"
-  [context]
-  (:streaming (fx/sub-val context :backend)))
-
-(defn dialogs-data
-  "Get dialogs data from UI.
-   Depends on: ui domain"
-  [context]
-  (:dialogs (fx/sub-val context :ui)))
 
 ;; Level 2: Computed Grid Cell Subscriptions
 ;; These compose from simpler subscriptions for better cache reuse.
@@ -221,7 +200,7 @@
 (defn project-status
   "Get current project status.
    
-   Depends on: project
+   Depends on: project domain
    
    Returns map with:
    - :has-project? - is a project folder set?
@@ -230,7 +209,7 @@
    - :last-saved - timestamp of last save or nil
    - :title - computed window title"
   [context]
-  (let [p (fx/sub-ctx context project)
+  (let [p (fx/sub-val context ex/project)
         folder (:current-folder p)
         dirty? (:dirty? p)]
     {:has-project? (some? folder)
@@ -248,7 +227,7 @@
 (defn connection-status
   "Computed connection status for toolbar.
    
-   Depends on: idn-data
+   Depends on: idn-data from backend domain
    
    Returns map with:
    - :connected? - is connected?
@@ -257,7 +236,7 @@
    - :error - error message
    - :status-text - human-readable status"
   [context]
-  (let [i (fx/sub-ctx context idn-data)]
+  (let [i (fx/sub-val context ex/idn-data)]
     {:connected? (:connected? i)
      :connecting? (:connecting? i)
      :target (:target i)
@@ -275,16 +254,16 @@
 (defn dialog-open?
   "Check if a specific dialog is open.
    
-   Depends on: dialogs-data"
+   Depends on: dialogs from ui domain"
   [context dialog-id]
-  (get-in (fx/sub-ctx context dialogs-data) [dialog-id :open?] false))
+  (get-in (fx/sub-val context ex/dialogs) [dialog-id :open?] false))
 
 (defn dialog-data
   "Get data associated with a dialog.
    
-   Depends on: dialogs-data"
+   Depends on: dialogs from ui domain"
   [context dialog-id]
-  (get-in (fx/sub-ctx context dialogs-data) [dialog-id :data]))
+  (get-in (fx/sub-val context ex/dialogs) [dialog-id :data]))
 
 
 ;; Frame/Preview Subscriptions
@@ -293,78 +272,72 @@
 (defn current-frame
   "Get the current preview frame data.
    
-   Depends on: streaming-data
+   Depends on: streaming-data from backend domain
    
    Returns frame with :points vector."
   [context]
-  (:current-frame (fx/sub-ctx context streaming-data)))
+  (:current-frame (fx/sub-val context ex/streaming-data)))
 
 (defn frame-stats
   "Get frame rendering statistics.
    
-   Depends on: streaming-data"
+   Depends on: streaming-data from backend domain"
   [context]
-  (:frame-stats (fx/sub-ctx context streaming-data)))
+  (:frame-stats (fx/sub-val context ex/streaming-data)))
 
 
 ;; Level 2: Projector Subscriptions
 
 
-(defn projectors-data
-  "Get projectors domain data.
-   Depends on: projectors domain"
-  [context]
-  (fx/sub-val context :projectors))
-
 (defn projectors-list
   "Get list of configured projectors as [{:id :proj-1 :name ...} ...].
-   Depends on: projectors-data"
+   Depends on: projectors domain"
   [context]
-  (let [data (fx/sub-ctx context projectors-data)
+  (let [data (fx/sub-val context :projectors)
         items (:items data {})]
     (mapv (fn [[id config]] (assoc config :id id)) items)))
 
 (defn active-projector-id
   "Get the ID of the currently selected projector.
-   Depends on: projectors-data"
+   Depends on: projectors domain"
   [context]
-  (:active-projector (fx/sub-ctx context projectors-data)))
+  (:active-projector (fx/sub-val context :projectors)))
 
 (defn active-projector
   "Get the full config of the currently selected projector.
-   Depends on: projectors-data, active-projector-id"
+   Depends on: projectors domain"
   [context]
-  (let [data (fx/sub-ctx context projectors-data)
-        active-id (fx/sub-ctx context active-projector-id)]
+  (let [data (fx/sub-val context :projectors)
+        active-id (:active-projector data)]
     (when active-id
       (assoc (get-in data [:items active-id]) :id active-id))))
 
 (defn discovered-devices
   "Get list of devices from the last network scan.
-   Depends on: projectors-data"
+   Depends on: projectors domain"
   [context]
-  (:discovered-devices (fx/sub-ctx context projectors-data) []))
+  (:discovered-devices (fx/sub-val context :projectors) []))
 
 (defn projector-scanning?
   "Check if a network scan is in progress.
-   Depends on: projectors-data"
+   Depends on: projectors domain"
   [context]
-  (:scanning? (fx/sub-ctx context projectors-data) false))
+  (:scanning? (fx/sub-val context :projectors) false))
 
 (defn configured-projector-hosts
   "Get set of already-configured projector hosts.
    Useful for indicating which discovered devices are already configured.
-   Depends on: projectors-data"
+   Depends on: projectors domain"
   [context]
-  (let [items (:items (fx/sub-ctx context projectors-data) {})]
+  (let [items (:items (fx/sub-val context :projectors) {})]
     (into #{} (map :host (vals items)))))
 
 (defn configured-projector-services
   "Get set of [host service-id] pairs for already-configured projectors.
    Allows checking if a specific service/output is already configured.
-   Depends on: projectors-data"
+   Depends on: projectors domain"
   [context]
-  (let [items (:items (fx/sub-ctx context projectors-data) {})]
+  (let [items (:items (fx/sub-val context :projectors) {})]
     (into #{}
           (map (fn [proj]
                  [(:host proj) (or (:service-id proj) 0)])
@@ -373,27 +346,27 @@
 (defn expanded-discovered-devices
   "Get set of device addresses that are expanded in the discovery panel.
    Used for showing/hiding service lists on multi-output devices.
-   Depends on: projectors-data"
+   Depends on: projectors domain"
   [context]
-  (:expanded-devices (fx/sub-ctx context projectors-data) #{}))
+  (:expanded-devices (fx/sub-val context :projectors) #{}))
 
 (defn test-pattern-mode
   "Get the current test pattern mode (:grid, :corners, or nil).
-   Depends on: projectors-data"
+   Depends on: projectors domain"
   [context]
-  (:test-pattern-mode (fx/sub-ctx context projectors-data)))
+  (:test-pattern-mode (fx/sub-val context :projectors)))
 
 (defn enabled-projectors
   "Get list of enabled projectors.
-   Depends on: projectors-list"
+   Depends on: projectors-list (computed)"
   [context]
   (filterv :enabled? (fx/sub-ctx context projectors-list)))
 
 (defn selected-projector-effect-idx
   "Get the index of the selected effect in the projector's chain.
-   Depends on: projectors-data"
+   Depends on: projectors domain"
   [context]
-  (:selected-effect-idx (fx/sub-ctx context projectors-data)))
+  (:selected-effect-idx (fx/sub-val context :projectors)))
 
 (defn projector-effect-ui-state
   "Get the effect chain UI state for a specific projector.

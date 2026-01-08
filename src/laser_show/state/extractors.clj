@@ -62,8 +62,26 @@
 (defn ui [state]
   (:ui state))
 
+(defn active-tab [state]
+  (:active-tab (ui state)))
+
 (defn clipboard [state]
   (:clipboard (ui state)))
+
+(defn dialogs [state]
+  (:dialogs (ui state)))
+
+
+;; Backend Extractors
+
+(defn backend [state]
+  (:backend state))
+
+(defn idn-data [state]
+  (:idn (backend state)))
+
+(defn streaming-data [state]
+  (:streaming (backend state)))
 
 
 ;; Project Extractors

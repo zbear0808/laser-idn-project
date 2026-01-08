@@ -33,9 +33,14 @@
 ;; Co-effect functions take NO arguments and return data to inject.
 
 (defn- co-effect-state
-  "Co-effect that injects current state into event."
+  "Co-effect that injects current state into event.
+   
+   Uses get-raw-state (not get-state) because:
+   - This runs on agent thread, not FX thread
+   - fx/sub-val subscription tracking is not needed for events
+   - Direct state access is thread-safe via swap!"
   []
-  (state/get-state))
+  (state/get-raw-state))
 
 (defn- co-effect-time
   "Co-effect that injects current timestamp into event."
@@ -67,7 +72,7 @@
 (defn- effect-timing-calculate-bpm
   "Effect that calculates BPM from tap times and dispatches result."
   [_ dispatch]
-  (let [state (state/get-state)
+  (let [state (state/get-raw-state)
         tap-times (get-in state [:timing :tap-times] [])
         tap-count (count tap-times)]
     (when (>= tap-count 2)
@@ -113,7 +118,7 @@
   "Effect that stops IDN streaming gracefully."
   [_ _dispatch]
   (log/info "Stopping IDN streaming...")
-  (when-let [engine (get-in (state/get-state) [:backend :idn :streaming-engine])]
+  (when-let [engine (get-in (state/get-raw-state) [:backend :idn :streaming-engine])]
     (when (and engine (not= engine :placeholder-engine))
       (try
         (streaming-engine/stop! engine)
@@ -251,6 +256,16 @@
 
 ;; Convenience Functions
 
+(defonce ^:private *dispatch-fn (atom nil))
+
+(defn set-dispatch-fn!
+  "Set the dispatch function to use for dispatch!
+   
+   Called by app.clj after creating the app to enable dispatch!
+   to route through the app's async event handler."
+  [dispatch-fn]
+  (reset! *dispatch-fn dispatch-fn))
+
 (defn dispatch!
   "Dispatch an event directly, bypassing the wrapped handler.
    
@@ -262,9 +277,13 @@
    Usage:
    (dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})"
   [event]
-  ;; Manually inject co-effects and process effects
-  (let [enriched-event (assoc event
-                               :state (state/get-state)
+  (if-let [dispatch @*dispatch-fn]
+    ;; Use app's dispatch when available (async via agent)
+    (dispatch event)
+    ;; Fallback: Manually inject co-effects and process effects
+    ;; (used during testing or before app is initialized)
+    (let [enriched-event (assoc event
+                               :state (state/get-raw-state)
                                :time (System/currentTimeMillis))
         effects (handlers/handle-event enriched-event)]
     ;; Apply state effect if present
@@ -286,4 +305,4 @@
     (when-let [event-to-dispatch (:dispatch effects)]
       (dispatch! event-to-dispatch))
     
-    effects))
+    effects)))

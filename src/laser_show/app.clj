@@ -23,7 +23,7 @@
             [laser-show.dev-config :as dev-config])
   (:gen-class))
 
-(defonce ^{:private true :doc "The cljfx renderer instance."} *renderer (atom nil))
+(defonce ^{:private true :doc "The cljfx app instance."} *app (atom nil))
 
 (defn- error-handler
   "Error handler for cljfx renderer.
@@ -57,18 +57,24 @@
     #(or (fx/keyword->lifecycle %)
          (fx/fn->lifecycle-with-context %))))
 
-(defn- create-renderer
-  "Create the cljfx renderer with proper middleware."
+(defn- agent-error-handler
+  "Error handler for the event processing agent.
+   
+   Logs errors and continues processing. The agent will remain usable."
+  [agent-ref exception]
+  (log/error exception "Error in event processing agent:")
+  (.printStackTrace exception *err*))
+
+(defn- create-app
+  "Create the cljfx app with async event processing."
   []
-  (fx/create-renderer
-    :middleware (comp
-                  ;; Pass context to every component
-                  fx/wrap-context-desc
-                  ;; Map from context to root view
-                  (fx/wrap-map-desc (fn [_] {:fx/type root/root-view})))
-    :opts {:fx.opt/type->lifecycle (get-type->lifecycle)
-           :fx.opt/map-event-handler events/event-handler}
-    :error-handler error-handler))
+  (fx/create-app
+    (state/get-context-atom)
+    :event-handler events/event-handler
+    :desc-fn (fn [_] {:fx/type root/root-view})
+    :opts {:fx.opt/type->lifecycle (get-type->lifecycle)}
+    :error-handler error-handler
+    :async-agent-options {:error-handler agent-error-handler}))
 
 
 (defn init-styles!
@@ -100,16 +106,17 @@
   
   (frame-service/start-preview-updates! 30)
   
-  (let [renderer (create-renderer)]
-    (reset! *renderer renderer)
-    (fx/mount-renderer (state/get-context-atom) renderer))
+  (let [app (create-app)]
+    (reset! *app app)
+    ;; Wire dispatch! to use app's dispatch function
+    (events/set-dispatch-fn! (:dispatch app)))
   
   ;; Auto-scan for IDN devices on startup
   (log/info "Starting automatic device discovery...")
   (events/dispatch! {:event/type :projectors/scan-network})
   
   (log/info "Laser Show application started.")
-  @*renderer)
+  @*app)
 
 
 
