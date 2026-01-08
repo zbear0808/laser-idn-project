@@ -241,7 +241,9 @@
     (.putShort buf (short total-size))
     (.put buf (unchecked-byte cnl-byte))
     (.put buf (unchecked-byte chunk-type))
-    (.putInt buf (int timestamp))))
+    ;; Timestamp is 32-bit unsigned per IDN-Stream spec Section 2.1
+    ;; Mask to 32 bits and use unchecked-int to handle wrapping
+    (.putInt buf (unchecked-int (bit-and timestamp 0xFFFFFFFF)))))
 
 (defn write-channel-config-header!
   "Write IDN-Stream channel configuration header to ByteBuffer.
