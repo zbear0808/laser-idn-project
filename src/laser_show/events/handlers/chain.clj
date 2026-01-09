@@ -13,6 +13,7 @@
    updated state (not effect maps). Callers wrap results in {:state ...}."
   (:require
    [clojure.tools.logging :as log]
+   [laser-show.events.handlers.effect-params :as effect-params]
    [laser-show.animation.chains :as chains]))
 
 
@@ -626,113 +627,49 @@
       mark-dirty))
 
 
-;; Curve Editor Handlers
+
+
+;; Effect Parameter Operations (Delegate to effect-params)
 
 
 (defn handle-add-curve-point
-  "Generic curve point addition for any chain.
-   
-   Parameters:
-   - state: Application state
-   - config: Configuration map with :items-path
-   - event-data: {:effect-path [...] :channel :r :x 128 :y 200}
-   
-   Returns: Updated state"
+  "Thin wrapper that delegates to effect-params.
+   Extracts params-path from config and effect-path, then calls effect-params."
   [state config {:keys [effect-path channel x y]}]
-  (let [param-key (keyword (str (name channel) "-curve-points"))
-        items-vec (vec (get-items state config))
-        current-points (get-in items-vec (conj (vec effect-path) :params param-key) [[0 0] [255 255]])
-        new-point [(int x) (int y)]
-        new-points (->> (conj current-points new-point)
-                        (sort-by first)
-                        vec)
-        updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) new-points)]
-    (set-items state config updated-items)))
+  (let [items-path (:items-path config)
+        params-path (vec (concat items-path effect-path [:params]))]
+    (effect-params/add-curve-point state params-path channel x y)))
 
 (defn handle-update-curve-point
-  "Generic curve point update for any chain.
-   
-   Parameters:
-   - state: Application state
-   - config: Configuration map with :items-path
-   - event-data: {:effect-path [...] :channel :r :point-idx 1 :x 128 :y 200}
-   
-   Returns: Updated state"
+  "Thin wrapper that delegates to effect-params.
+   Extracts params-path from config and effect-path, then calls effect-params."
   [state config {:keys [effect-path channel point-idx x y]}]
-  (let [param-key (keyword (str (name channel) "-curve-points"))
-        items-vec (vec (get-items state config))
-        current-points (get-in items-vec (conj (vec effect-path) :params param-key) [[0 0] [255 255]])
-        num-points (count current-points)
-        ;; Corner points (first and last) can only move in Y
-        is-corner? (or (= point-idx 0) (= point-idx (dec num-points)))
-        current-point (nth current-points point-idx [0 0])
-        updated-point (if is-corner?
-                        [(first current-point) (int y)]  ;; Keep original X for corners
-                        [(int x) (int y)])
-        updated-points (assoc current-points point-idx updated-point)
-        sorted-points (->> updated-points
-                          (sort-by first)
-                          vec)
-        updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) sorted-points)]
-    (set-items state config updated-items)))
+  (let [items-path (:items-path config)
+        params-path (vec (concat items-path effect-path [:params]))]
+    (effect-params/update-curve-point state params-path channel point-idx x y)))
 
 (defn handle-remove-curve-point
-  "Generic curve point removal for any chain.
-   
-   Parameters:
-   - state: Application state
-   - config: Configuration map with :items-path
-   - event-data: {:effect-path [...] :channel :r :point-idx 1}
-   
-   Returns: Updated state"
+  "Thin wrapper that delegates to effect-params.
+   Extracts params-path from config and effect-path, then calls effect-params."
   [state config {:keys [effect-path channel point-idx]}]
-  (let [param-key (keyword (str (name channel) "-curve-points"))
-        items-vec (vec (get-items state config))
-        current-points (get-in items-vec (conj (vec effect-path) :params param-key) [[0 0] [255 255]])
-        num-points (count current-points)
-        ;; Cannot remove corner points (first and last)
-        is-corner? (or (= point-idx 0) (= point-idx (dec num-points)))]
-    (if is-corner?
-      state  ;; No change for corner points
-      (let [updated-points (vec (concat (subvec current-points 0 point-idx)
-                                        (subvec current-points (inc point-idx))))
-            updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) updated-points)]
-        (set-items state config updated-items)))))
+  (let [items-path (:items-path config)
+        params-path (vec (concat items-path effect-path [:params]))]
+    (effect-params/remove-curve-point state params-path channel point-idx)))
 
 (defn handle-set-active-curve-channel
-  "Generic active curve channel setter for any chain.
-   
-   Parameters:
-   - state: Application state
-   - config: Configuration map with :ui-path
-   - event-data: {:effect-path [...] :tab-id :r}
-   
-   Returns: Updated state"
+  "Thin wrapper that delegates to effect-params.
+   Extracts UI path from config and effect-path, then calls effect-params."
   [state config {:keys [effect-path tab-id]}]
-  (let [ui-path (:ui-path config)]
-    (assoc-in state (conj ui-path :ui-modes effect-path :active-curve-channel) tab-id)))
+  (let [ui-path (conj (:ui-path config) :ui-modes effect-path)]
+    (effect-params/set-active-curve-channel state ui-path tab-id)))
 
 (defn handle-update-spatial-params
-  "Generic spatial parameter update for any chain.
-   Updates multiple related parameters from spatial drag (e.g., x and y together).
-   
-   Parameters:
-   - state: Application state
-   - config: Configuration map with :items-path
-   - event-data: {:effect-path [...] :point-id :center :x 0.5 :y 0.3 :param-map {...}}
-   
-   Returns: Updated state"
+  "Thin wrapper that delegates to effect-params.
+   Extracts params-path from config and effect-path, then calls effect-params."
   [state config {:keys [effect-path point-id x y param-map]}]
-  (let [point-params (get param-map point-id)]
-    (if point-params
-      (let [x-key (:x point-params)
-            y-key (:y point-params)
-            items-vec (vec (get-items state config))
-            updated-items (-> items-vec
-                             (assoc-in (conj (vec effect-path) :params x-key) x)
-                             (assoc-in (conj (vec effect-path) :params y-key) y))]
-        (set-items state config updated-items))
-      state)))
+  (let [items-path (:items-path config)
+        params-path (vec (concat items-path effect-path [:params]))]
+    (effect-params/update-spatial-params state params-path point-id x y param-map)))
 
 
 ;; Convenience Functions for Creating Configs

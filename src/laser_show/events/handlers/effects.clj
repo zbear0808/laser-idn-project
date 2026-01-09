@@ -9,6 +9,7 @@
    - Curve editor operations (add/update/remove control points)
    - Group creation"
   (:require [laser-show.events.helpers :as h]
+            [laser-show.events.handlers.effect-params :as effect-params]
             [laser-show.state.clipboard :as clipboard]))
 
 
@@ -192,15 +193,9 @@
    - :channel - Channel keyword (:r, :g, or :b)
    - :x, :y - Point coordinates"
   [{:keys [col row effect-path channel x y state]}]
-  (let [param-key (keyword (str (name channel) "-curve-points"))
-        effects-vec (vec (get-in state [:chains :effect-chains [col row] :items] []))
-        current-points (get-in effects-vec (conj (vec effect-path) :params param-key) [[0 0] [255 255]])
-        new-point [(int x) (int y)]
-        new-points (->> (conj current-points new-point)
-                        (sort-by first)
-                        vec)
-        updated-effects (assoc-in effects-vec (conj (vec effect-path) :params param-key) new-points)]
-    {:state (assoc-in state [:chains :effect-chains [col row] :items] updated-effects)}))
+  (let [params-path (vec (concat [:chains :effect-chains [col row] :items]
+                                  effect-path [:params]))]
+    {:state (effect-params/add-curve-point state params-path channel x y)}))
 
 (defn- handle-effects-update-curve-point
   "Update a control point in a curve.
@@ -211,22 +206,9 @@
    - :point-idx - Index of the point to update
    - :x, :y - New coordinates"
   [{:keys [col row effect-path channel point-idx x y state]}]
-  (let [param-key (keyword (str (name channel) "-curve-points"))
-        effects-vec (vec (get-in state [:chains :effect-chains [col row] :items] []))
-        current-points (get-in effects-vec (conj (vec effect-path) :params param-key) [[0 0] [255 255]])
-        num-points (count current-points)
-        ;; Corner points (first and last) can only move in Y
-        is-corner? (or (= point-idx 0) (= point-idx (dec num-points)))
-        current-point (nth current-points point-idx [0 0])
-        updated-point (if is-corner?
-                        [(first current-point) (int y)]  ;; Keep original X for corners
-                        [(int x) (int y)])
-        updated-points (assoc current-points point-idx updated-point)
-        sorted-points (->> updated-points
-                          (sort-by first)
-                          vec)
-        updated-effects (assoc-in effects-vec (conj (vec effect-path) :params param-key) sorted-points)]
-    {:state (assoc-in state [:chains :effect-chains [col row] :items] updated-effects)}))
+  (let [params-path (vec (concat [:chains :effect-chains [col row] :items]
+                                  effect-path [:params]))]
+    {:state (effect-params/update-curve-point state params-path channel point-idx x y)}))
 
 (defn- handle-effects-remove-curve-point
   "Remove a control point from a curve.
@@ -236,18 +218,9 @@
    - :channel - Channel keyword (:r, :g, or :b)
    - :point-idx - Index of the point to remove"
   [{:keys [col row effect-path channel point-idx state]}]
-  (let [param-key (keyword (str (name channel) "-curve-points"))
-        effects-vec (vec (get-in state [:chains :effect-chains [col row] :items] []))
-        current-points (get-in effects-vec (conj (vec effect-path) :params param-key) [[0 0] [255 255]])
-        num-points (count current-points)
-        ;; Cannot remove corner points (first and last)
-        is-corner? (or (= point-idx 0) (= point-idx (dec num-points)))]
-    (if is-corner?
-      {:state state}  ;; No change for corner points
-      (let [updated-points (vec (concat (subvec current-points 0 point-idx)
-                                        (subvec current-points (inc point-idx))))
-            updated-effects (assoc-in effects-vec (conj (vec effect-path) :params param-key) updated-points)]
-        {:state (assoc-in state [:chains :effect-chains [col row] :items] updated-effects)}))))
+  (let [params-path (vec (concat [:chains :effect-chains [col row] :items]
+                                  effect-path [:params]))]
+    {:state (effect-params/remove-curve-point state params-path channel point-idx)}))
 
 (defn- handle-effects-set-active-curve-channel
   "Set the active curve channel (R/G/B) for the curve editor.
@@ -256,8 +229,8 @@
    - :effect-path - Path to effect
    - :tab-id - Channel keyword (:r, :g, or :b)"
   [{:keys [col row effect-path tab-id state]}]
-  (let [dialog-data-path [:ui :dialogs :effect-chain-editor :data :ui-modes effect-path]]
-    {:state (assoc-in state (conj dialog-data-path :active-curve-channel) tab-id)}))
+  (let [ui-path [:ui :dialogs :effect-chain-editor :data :ui-modes effect-path]]
+    {:state (effect-params/set-active-curve-channel state ui-path tab-id)}))
 
 (defn- handle-effects-update-spatial-params
   "Update multiple related parameters from spatial drag (e.g., x and y together).
@@ -271,16 +244,9 @@
                   e.g., {:center {:x :x :y :y}
                          :tl {:x :tl-x :y :tl-y}}"
   [{:keys [col row effect-path point-id x y param-map state]}]
- (let [point-params (get param-map point-id)
-       effects-vec (vec (get-in state [:chains :effect-chains [col row] :items] []))]
-   (if point-params
-     (let [x-key (:x point-params)
-           y-key (:y point-params)
-           updated-effects (-> effects-vec
-                              (assoc-in (conj (vec effect-path) :params x-key) x)
-                              (assoc-in (conj (vec effect-path) :params y-key) y))]
-       {:state (assoc-in state [:chains :effect-chains [col row] :items] updated-effects)})
-     {:state state})))
+  (let [params-path (vec (concat [:chains :effect-chains [col row] :items]
+                                  effect-path [:params]))]
+    {:state (effect-params/update-spatial-params state params-path point-id x y param-map)}))
 
 
 ;; Public API
