@@ -399,6 +399,16 @@
   [depth]
   (min depth 3))
 
+(defn- request-list-focus!
+  "Walk up the parent chain to find the focusable list container and request focus on it.
+   This ensures keyboard shortcuts target the correct list when multiple lists are in a dialog."
+  [^javafx.scene.Node node]
+  (loop [current (.getParent node)]
+    (when current
+      (if (.isFocusTraversable current)
+        (.requestFocus current)
+        (recur (.getParent current))))))
+
 
 ;; ============================================================================
 ;; Style Class Builders
@@ -639,23 +649,25 @@
                                    (setup-drag-source! node group-id component-id)
                                    (setup-drag-target! node group-id true component-id items props)
                                    ;; Click handler for selection and double-click rename
-                                   (.setOnMouseClicked node
-                                     (reify javafx.event.EventHandler
-                                       (handle [_ event]
-                                         (let [click-count (.getClickCount event)
-                                               ctrl? (.isShortcutDown event)
-                                               shift? (.isShiftDown event)]
-                                           (cond
-                                             ;; Double-click - start rename
-                                             (= click-count 2)
-                                             (do
-                                               (start-rename! component-id group-id)
-                                               (.consume event))
-                                             ;; Single-click - select
-                                             :else
-                                             (do
-                                               (handle-selection! component-id group-id ctrl? shift? items props)
-                                               (.consume event))))))))
+                                    (.setOnMouseClicked node
+                                      (reify javafx.event.EventHandler
+                                        (handle [_ event]
+                                          (let [click-count (.getClickCount event)
+                                                ctrl? (.isShortcutDown event)
+                                                shift? (.isShiftDown event)]
+                                            (cond
+                                              ;; Double-click - start rename
+                                              (= click-count 2)
+                                              (do
+                                                (start-rename! component-id group-id)
+                                                (.consume event))
+                                              ;; Single-click - select
+                                              :else
+                                              (do
+                                                (handle-selection! component-id group-id ctrl? shift? items props)
+                                                ;; Request focus on parent list container so keyboard shortcuts work
+                                                (request-list-focus! node)
+                                                (.consume event))))))))
                      :desc {:fx/type :h-box
                             :style-class header-classes
                             :children [;; Collapse/Expand chevron
@@ -750,13 +762,15 @@
                                  (setup-drag-source! node item-id component-id)
                                  (setup-drag-target! node item-id false component-id items props)
                                  ;; Click handler for selection
-                                 (.setOnMouseClicked node
-                                   (reify javafx.event.EventHandler
-                                     (handle [_ event]
-                                       (let [ctrl? (.isShortcutDown event)
-                                             shift? (.isShiftDown event)]
-                                         (handle-selection! component-id item-id ctrl? shift? items props)
-                                         (.consume event))))))
+                                  (.setOnMouseClicked node
+                                    (reify javafx.event.EventHandler
+                                      (handle [_ event]
+                                        (let [ctrl? (.isShortcutDown event)
+                                              shift? (.isShiftDown event)]
+                                          (handle-selection! component-id item-id ctrl? shift? items props)
+                                          ;; Request focus on parent list container so keyboard shortcuts work
+                                          (request-list-focus! node)
+                                          (.consume event))))))
                    :desc {:fx/type :h-box
                           :style-class item-classes
                           :children [;; Enable/disable checkbox

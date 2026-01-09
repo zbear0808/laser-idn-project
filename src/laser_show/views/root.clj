@@ -162,7 +162,10 @@
             :desc (filterv
                     some?
                     [;; Main application window with extended style for title bar integration
+                     ;; IMPORTANT: Each component in fx/ext-many needs :fx/key to prevent
+                     ;; position-based matching when dialogs open/close
                      {:fx/type :stage
+                      :fx/key :main-window
                       :title title
                       :style :extended
                       :width (:width window-config 1200)
@@ -176,10 +179,13 @@
                               :root {:fx/type main-layout}}}
                      ;; Effect chain editor dialog
                      (when effect-editor-open?
-                       {:fx/type effect-chain-editor/effect-chain-editor-dialog})
+                       {:fx/type effect-chain-editor/effect-chain-editor-dialog
+                        :fx/key :effect-chain-editor-dialog})
                      ;; Cue chain editor dialog
                      (when cue-editor-open?
-                       {:fx/type cue-chain-editor/cue-chain-editor-dialog})
+                       {:fx/type cue-chain-editor/cue-chain-editor-dialog
+                        :fx/key :cue-chain-editor-dialog})
                      ;; Add projector manually dialog
                      (when add-projector-open?
-                       {:fx/type add-projector-dialog/add-projector-manual-dialog})])}}))
+                       {:fx/type add-projector-dialog/add-projector-manual-dialog
+                        :fx/key :add-projector-manual-dialog})])}}))

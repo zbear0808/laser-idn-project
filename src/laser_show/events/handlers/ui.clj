@@ -22,6 +22,11 @@
 (defn- handle-ui-open-dialog
   "Open a dialog."
   [{:keys [dialog-id data state]}]
+  (log/debug "Opening dialog via ui/open-dialog"
+             {:dialog-id dialog-id
+              :data data
+              :current-open? (get-in state [:ui :dialogs dialog-id :open?])
+              :current-data (get-in state [:ui :dialogs dialog-id :data])})
   {:state (-> state
               (assoc-in [:ui :dialogs dialog-id :open?] true)
               (assoc-in [:ui :dialogs dialog-id :data] data))})

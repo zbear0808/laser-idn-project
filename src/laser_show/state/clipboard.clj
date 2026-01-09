@@ -34,7 +34,8 @@
 
 
 (def clipboard-types
-  #{:cue :zone :projector :effect :effect-chain :cell-assignment})
+  #{:cue :zone :projector :effect :effect-chain :cell-assignment
+    :cue-chain :effects-cell :cue-chain-items :item-effects})
 
 (defn valid-clipboard-type?
   [type]
@@ -230,13 +231,133 @@
       nil)))
 
 
+;; Cue Chain Copy/Paste (for grid cells)
+
+
+(defn copy-cue-chain!
+  "Copy a cue chain to clipboard (from grid cells).
+   Also copies to system clipboard as EDN.
+   
+   Expects cue-chain-data in format: {:items [...] ...}"
+  [cue-chain-data]
+  (when cue-chain-data
+    (let [clip-data {:type :cue-chain
+                     :data cue-chain-data
+                     :copied-at (System/currentTimeMillis)}]
+      (set-internal-clipboard! clip-data)
+      (copy-to-system-clipboard! clip-data)
+      true)))
+
+(defn can-paste-cue-chain?
+  "Check if clipboard contains a cue chain that can be pasted."
+  []
+  (clipboard-has-type? :cue-chain))
+
+(defn get-cue-chain-to-paste
+  "Get cue chain data from clipboard for pasting.
+   Returns the cue-chain data, or nil if clipboard doesn't contain a cue chain."
+  []
+  (when (clipboard-has-type? :cue-chain)
+    (:data (get-clipboard))))
+
+
+;; Effects Cell Copy/Paste (for effects grid cells)
+
+
+(defn copy-effects-cell!
+  "Copy an effects cell to clipboard (from effects grid).
+   Also copies to system clipboard as EDN.
+   
+   Expects cell-data in format: {:items [...] :active true}"
+  [cell-data]
+  (when cell-data
+    (let [clip-data {:type :effects-cell
+                     :data cell-data
+                     :copied-at (System/currentTimeMillis)}]
+      (set-internal-clipboard! clip-data)
+      (copy-to-system-clipboard! clip-data)
+      true)))
+
+(defn can-paste-effects-cell?
+  "Check if clipboard contains an effects cell that can be pasted."
+  []
+  (clipboard-has-type? :effects-cell))
+
+(defn get-effects-cell-to-paste
+  "Get effects cell data from clipboard for pasting.
+   Returns the cell data, or nil if clipboard doesn't contain an effects cell."
+  []
+  (when (clipboard-has-type? :effects-cell)
+    (:data (get-clipboard))))
+
+
+;; Cue Chain Items Copy/Paste (for cue chain editor items)
+
+
+(defn copy-cue-chain-items!
+  "Copy cue chain items (presets/groups) to clipboard.
+   Also copies to system clipboard as EDN.
+   
+   Expects items vector: [{:preset-id :circle ...} ...]"
+  [items]
+  (when (seq items)
+    (let [clip-data {:type :cue-chain-items
+                     :items items
+                     :copied-at (System/currentTimeMillis)}]
+      (set-internal-clipboard! clip-data)
+      (copy-to-system-clipboard! clip-data)
+      true)))
+
+(defn can-paste-cue-chain-items?
+  "Check if clipboard contains cue chain items that can be pasted."
+  []
+  (clipboard-has-type? :cue-chain-items))
+
+(defn get-cue-chain-items-to-paste
+  "Get cue chain items from clipboard for pasting.
+   Returns the items vector, or nil if clipboard doesn't contain cue chain items."
+  []
+  (when (clipboard-has-type? :cue-chain-items)
+    (:items (get-clipboard))))
+
+
+;; Item Effects Copy/Paste (for effects within cue chain items)
+
+
+(defn copy-item-effects!
+  "Copy item effects to clipboard (effects attached to cue chain items).
+   Also copies to system clipboard as EDN.
+   
+   Expects effects vector: [{:effect-id :scale ...} ...]"
+  [effects]
+  (when (seq effects)
+    (let [clip-data {:type :item-effects
+                     :effects (serialize-effect-chain effects)
+                     :copied-at (System/currentTimeMillis)}]
+      (set-internal-clipboard! clip-data)
+      (copy-to-system-clipboard! clip-data)
+      true)))
+
+(defn can-paste-item-effects?
+  "Check if clipboard contains item effects that can be pasted."
+  []
+  (clipboard-has-type? :item-effects))
+
+(defn get-item-effects-to-paste
+  "Get item effects from clipboard for pasting.
+   Returns the effects vector, or nil if clipboard doesn't contain item effects."
+  []
+  (when (clipboard-has-type? :item-effects)
+    (:effects (get-clipboard))))
+
+
 ;; Clipboard Info
 
 
 (defn get-clipboard-description
   "Get a human-readable description of clipboard contents."
   []
-  (if-let [{:keys [type data preset-id effects effect-id] :as clip} (get-internal-clipboard)]
+  (if-let [{:keys [type data preset-id effects effect-id items] :as clip} (get-internal-clipboard)]
     (case type
       :cue (str "Cue: " (:name data))
       :cell-assignment (str "Preset: " (name preset-id))
@@ -249,5 +370,9 @@
                         (str "Effects: " (name (:effect-id first-effect))
                              (when (> effect-count 1) (str " +" (dec effect-count) " more"))))
                       "Effects: (empty)")
+      :cue-chain (str "Cue Chain: " (count (:items data [])) " items")
+      :effects-cell (str "Effects Cell: " (count (:items data [])) " effects")
+      :cue-chain-items (str "Cue Chain Items: " (count items) " items")
+      :item-effects (str "Item Effects: " (count effects) " effects")
       "Unknown")
     "Empty"))

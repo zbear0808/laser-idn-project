@@ -13,6 +13,7 @@
    - Drag-and-drop reordering
    - Copy/paste across cells"
 (:require [cljfx.api :as fx]
+            [clojure.tools.logging :as log]
             [laser-show.subs :as subs]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
@@ -319,8 +320,16 @@
         stylesheets (css/dialog-stylesheet-urls)
         ;; Generate window title with cell identifier
         window-title (str "Effects Chain - Cell "
-                         (char (+ 65 row))
-                         (inc col))]
+                         (char (+ 65 (or row 0)))
+                         (inc (or col 0)))]
+    ;; Log visibility check for debugging
+    (when open?
+      (log/debug "Effect chain editor visibility check"
+                 {:open? open?
+                  :dialog-data dialog-data
+                  :col col
+                  :row row
+                  :showing? open?}))
     {:fx/type :stage
      :showing open?
      :title window-title

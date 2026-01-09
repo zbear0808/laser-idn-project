@@ -24,7 +24,8 @@
             [laser-show.views.components.preset-param-editor :as param-editor]
             [laser-show.views.components.effect-param-ui :as effect-param-ui]
             [laser-show.views.components.tabs :as tabs]
-            [laser-show.common.util :as u])
+            [laser-show.common.util :as u]
+            [clojure.tools.logging :as log])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
 
@@ -164,17 +165,17 @@
   "Parameter editor for the selected effect within an item."
   [{:keys [col row item-path item selected-effect-ids dialog-data]}]
   (let [effects (:effects item [])
-        ;; Get first selected effect
         first-selected-id (first selected-effect-ids)
-        selected-effect (when first-selected-id
-                          (first (filter #(= (:id %) first-selected-id) effects)))
+        ;; Use hierarchical path finding for nested effects
+        effect-path (when first-selected-id
+                      (chains/find-path-by-id effects first-selected-id))
+        ;; Use path to retrieve the effect from nested structure
+        selected-effect (when effect-path
+                          (chains/get-item-at-path effects effect-path))
         effect-def (when selected-effect
                      (effects/get-effect (:effect-id selected-effect)))
         current-params (:params selected-effect {})
         params-map (params-vector->map (:parameters effect-def []))
-        effect-idx (.indexOf (mapv :id effects) first-selected-id)
-        effect-path (when (>= effect-idx 0) [effect-idx])
-        ;; For UI mode lookup, use effect path
         ui-mode (get-in dialog-data [:ui-modes effect-path])]
     {:fx/type :v-box
      :spacing 8
@@ -304,11 +305,10 @@
    Left column: Cue chain list (top) + Item effects list (bottom).
    Right column: Preset config + Effect bank + Effect params."
   [{:keys [fx/context]}]
-  (let [;; Get cue-chain-editor state
-        editor-state (fx/sub-val context :cue-chain-editor)
-        {:keys [cell selected-ids last-selected-id active-preset-tab
-                active-effect-tab clipboard item-effects-ui]} editor-state
-        [col row] cell
+  (let [;; Get cue-chain-editor state from unified dialogs path
+        dialog-data (fx/sub-ctx context subs/dialog-data :cue-chain-editor)
+        {:keys [col row selected-ids last-selected-id active-preset-tab
+                active-effect-tab clipboard item-effects-ui]} dialog-data
         
         ;; Get cue chain data from new unified :chains domain
         chains-state (fx/sub-val context :chains)
@@ -380,30 +380,32 @@
                                        :v-box/vgrow :always
                                        :style "-fx-border-color: #404040; -fx-border-width: 1 0 0 0;"
                                        :children (if has-item?
-                                                   [{:fx/type list/list-editor
-                                                     :fx/context context
-                                                     :v-box/vgrow :always
-                                                     :items item-effects
-                                                     :component-id [:item-effects col row first-selected-path]
-                                                     :item-id-key :effect-id
-                                                     :item-registry-fn effects/get-effect
-                                                     :item-name-key :name
-                                                     :fallback-label "Unknown Effect"
-                                                     :on-change-event :cue-chain/set-item-effects
-                                                     :on-change-params {:col col :row row :item-path first-selected-path}
-                                                     :items-key :effects
-                                                     :on-selection-event :cue-chain/update-item-effect-selection
-                                                     :on-selection-params {:col col :row row :item-path first-selected-path}
-                                                     :selection-key :selected-ids
-                                                     :on-copy-fn (fn [items]
-                                                                   (events/dispatch! {:event/type :cue-chain/set-item-effects-clipboard
-                                                                                      :col col :row row
-                                                                                      :item-path first-selected-path
-                                                                                      :effects items}))
-                                                     :clipboard-items item-effects-clipboard
-                                                     :header-label "ITEM EFFECTS"
-                                                     :empty-text "No effects\nAdd from bank →"
-                                                     :allow-groups? true}]
+                                                    [{:fx/type list/list-editor
+                                                      :fx/context context
+                                                      :v-box/vgrow :always
+                                                      :items item-effects
+                                                      ;; Use stable component-id without the path to avoid state fragmentation
+                                                      ;; The item-path is passed via event params instead
+                                                      :component-id [:item-effects col row]
+                                                      :item-id-key :effect-id
+                                                      :item-registry-fn effects/get-effect
+                                                      :item-name-key :name
+                                                      :fallback-label "Unknown Effect"
+                                                      :on-change-event :cue-chain/set-item-effects
+                                                      :on-change-params {:col col :row row :item-path first-selected-path}
+                                                      :items-key :effects
+                                                      :on-selection-event :cue-chain/update-item-effect-selection
+                                                      :on-selection-params {:col col :row row :item-path first-selected-path}
+                                                      :selection-key :selected-ids
+                                                      :on-copy-fn (fn [items]
+                                                                    (events/dispatch! {:event/type :cue-chain/set-item-effects-clipboard
+                                                                                       :col col :row row
+                                                                                       :item-path first-selected-path
+                                                                                       :effects items}))
+                                                      :clipboard-items item-effects-clipboard
+                                                      :header-label "ITEM EFFECTS"
+                                                      :empty-text "No effects\nAdd from bank →"
+                                                      :allow-groups? true}]
                                                    ;; Placeholder when no item selected
                                                    [{:fx/type :v-box
                                                      :v-box/vgrow :always
@@ -470,15 +472,14 @@
   "The cue chain editor dialog window."
   [{:keys [fx/context]}]
   (let [open? (fx/sub-ctx context subs/dialog-open? :cue-chain-editor)
-        editor-state (fx/sub-val context :cue-chain-editor)
-        cell (:cell editor-state)
-        [col row] (or cell [0 0])
+        dialog-data (fx/sub-ctx context subs/dialog-data :cue-chain-editor)
+        {:keys [col row]} dialog-data
         stylesheets (css/dialog-stylesheet-urls)
         window-title (str "Cue Chain Editor - Cell "
-                         (char (+ 65 row))
-                         (inc col))]
+                         (char (+ 65 (or row 0)))
+                         (inc (or col 0)))]
     {:fx/type :stage
-     :showing (and open? (some? cell))
+     :showing open?
      :title window-title
      :modality :none
      :on-close-request {:event/type :ui/close-dialog :dialog-id :cue-chain-editor}

@@ -9,8 +9,7 @@
    - Curve editor operations (add/update/remove control points)
    - Group creation"
   (:require [laser-show.events.helpers :as h]
-            [laser-show.events.handlers.chain :as chain-handlers]
-            [laser-show.animation.chains :as chains]))
+            [laser-show.state.clipboard :as clipboard]))
 
 
 ;; Effects Grid Events
@@ -113,12 +112,16 @@
                 h/mark-dirty)}))
 
 (defn- handle-effects-copy-cell
-  "Copy an effects cell to clipboard."
+  "Copy an effects cell to clipboard.
+   Also copies to system clipboard as serialized EDN."
   [{:keys [col row state]}]
-  (let [cell-data (get-in state [:chains :effect-chains [col row]])]
-    {:state (assoc-in state [:ui :clipboard]
-                      {:type :effects-cell
-                       :data cell-data})}))
+  (let [cell-data (get-in state [:chains :effect-chains [col row]])
+        clip-data {:type :effects-cell
+                   :data cell-data}]
+    ;; Copy to system clipboard (side effect)
+    (clipboard/copy-effects-cell! cell-data)
+    ;; Return state update for internal clipboard
+    {:state (assoc-in state [:ui :clipboard] clip-data)}))
 
 (defn- handle-effects-paste-cell
   "Paste clipboard to an effects cell."

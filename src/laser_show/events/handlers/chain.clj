@@ -13,8 +13,7 @@
    updated state (not effect maps). Callers wrap results in {:state ...}."
   (:require
    [clojure.tools.logging :as log]
-   [laser-show.animation.chains :as chains]
-   [laser-show.animation.effects :as effects]))
+   [laser-show.animation.chains :as chains]))
 
 
 ;; Helper Functions (internal)
@@ -761,37 +760,15 @@
      :metadata-path base-path
      :ui-path (case domain
                 :effect-chains [:ui :dialogs :effect-chain-editor :data]
-                :cue-chains [:cue-chain-editor]
+                :cue-chains [:ui :dialogs :cue-chain-editor :data]
                 :projector-effects [:ui :projector-effect-ui-state entity-key])
      :domain domain
      :entity-key entity-key}))
 
-
-;; Item Effects Config (for effects within cue chain items)
-
-
-(defn item-effects-config
-  "Create configuration for effects within a cue chain item.
-   
-   This is for managing effects attached to presets/groups within a cue chain.
-   
-   Parameters:
-   - col: Grid column
-   - row: Grid row
-   - item-path: Path to the item within the cue chain (e.g., [0] or [1 :items 0])
-   
-   Returns: Configuration map"
-  [col row item-path]
-  {:items-path (vec (concat [:chains :cue-chains [col row] :items] item-path [:effects]))
-   :ui-path [:cue-chain-editor :item-effects-ui (vec item-path)]
-   :domain :item-effects
-   :entity-key {:col col :row row :item-path item-path}})
-
-
 ;; Generic Chain Event Handler
 
 
-(defn handle-generic-chain-event
+(defn handle
  "Handle generic chain events that work across all chain types.
   
   These events use :domain and :entity-key to create a config and
@@ -810,11 +787,22 @@
      ;; Store the selected-ids from the list component callback
      ;; The component uses IDs (not paths), so store them in the ui-path for the
      ;; parent dialog to use (e.g., for parameter editor display)
+     ;;
+     ;; For cue-chains: Also clear item-effects list selection since the selected
+     ;; cue item changed, and the old effects selection is no longer relevant.
      (let [selected-ids (:selected-ids event)
-           last-selected-id (:last-selected-id event)]
-       {:state (-> state
-                   (assoc-in (conj (:ui-path config) :selected-ids) selected-ids)
-                   (assoc-in (conj (:ui-path config) :last-selected-id) last-selected-id))})
+           last-selected-id (:last-selected-id event)
+           base-update (-> state
+                           (assoc-in (conj (:ui-path config) :selected-ids) selected-ids)
+                           (assoc-in (conj (:ui-path config) :last-selected-id) last-selected-id))]
+       ;; When cue chain selection changes, clear item-effects list component state
+       ;; This ensures the item-effects list starts fresh when user selects a new cue item
+       {:state (if (= domain :cue-chains)
+                 (let [[col row] entity-key
+                       item-effects-component-id [:item-effects col row]]
+                   (assoc-in base-update [:list-ui :components item-effects-component-id]
+                             {:selected-ids #{} :last-selected-id nil}))
+                 base-update)})
      
      :chain/select-item
      {:state (handle-select-item state config (:path event) (:ctrl? event) (:shift? event))}
@@ -880,10 +868,3 @@
      (do
        (log/warn "Unknown chain event type:" type)
        {}))))
-
-
-(defn handle
- "Main dispatcher for :chain/* events.
-  Routes to handle-generic-chain-event."
- [event]
- (handle-generic-chain-event event))

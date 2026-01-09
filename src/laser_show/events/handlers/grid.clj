@@ -5,7 +5,8 @@
    - Cell triggering and selection
    - Cell content management (clear, move)
    - Clipboard operations (copy, paste)"
-  (:require [laser-show.events.helpers :as h]))
+  (:require [laser-show.events.helpers :as h]
+            [laser-show.state.clipboard :as clipboard]))
 
 
 (defn- handle-grid-cell-clicked
@@ -69,12 +70,16 @@
       {:state state})))
 
 (defn- handle-grid-copy-cell
-  "Copy a cell's cue chain to clipboard."
+  "Copy a cell's cue chain to clipboard.
+   Also copies to system clipboard as serialized EDN."
   [{:keys [col row state]}]
-  (let [cue-chain-data (get-in state [:chains :cue-chains [col row]])]
-    {:state (assoc-in state [:ui :clipboard]
-                      {:type :cue-chain
-                       :data cue-chain-data})}))
+  (let [cue-chain-data (get-in state [:chains :cue-chains [col row]])
+        clip-data {:type :cue-chain
+                   :data cue-chain-data}]
+    ;; Copy to system clipboard (side effect)
+    (clipboard/copy-cue-chain! cue-chain-data)
+    ;; Return state update for internal clipboard
+    {:state (assoc-in state [:ui :clipboard] clip-data)}))
 
 (defn- handle-grid-paste-cell
   "Paste clipboard cue chain to a cell."

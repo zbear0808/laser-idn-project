@@ -15,9 +15,9 @@
    - Tab switching (preset banks, effect banks)
    - Selection and clipboard operations"
   (:require [clojure.tools.logging :as log]
-            [laser-show.events.helpers :as h]
-            [laser-show.events.handlers.chain :as chain-handlers]
-            [laser-show.animation.cue-chains :as cue-chains]))
+            [laser-show.events.helpers :as h] 
+            [laser-show.animation.cue-chains :as cue-chains]
+            [laser-show.state.clipboard :as clipboard]))
 
 
 ;; Path Helpers
@@ -39,7 +39,7 @@
   "Get the path to item effects UI state.
    Stored separately per item to track selection, UI modes, etc."
   [col row item-path]
-  [:cue-chain-editor :item-effects-ui (vec item-path)])
+  [:ui :dialogs :cue-chain-editor :data :item-effects-ui (vec item-path)])
 
 
 ;; Editor Lifecycle
@@ -50,20 +50,23 @@
    Event keys:
    - :col, :row - Grid cell coordinates"
   [{:keys [col row state]}]
+  (log/debug "Opening cue chain editor" {:col col :row row})
   {:state (-> state
-              (assoc-in [:cue-chain-editor :cell] [col row])
-              (assoc-in [:cue-chain-editor :selected-paths] #{})
-              (assoc-in [:cue-chain-editor :clipboard] nil)
-              (assoc-in [:cue-chain-editor :active-preset-tab] :geometric)
               (assoc-in [:ui :dialogs :cue-chain-editor :open?] true)
-              (assoc-in [:ui :dialogs :cue-chain-editor :data] {:col col :row row}))})
+              (assoc-in [:ui :dialogs :cue-chain-editor :data]
+                        {:col col
+                         :row row
+                         :selected-paths #{}
+                         :last-selected-path nil
+                         :clipboard nil
+                         :active-preset-tab :geometric
+                         :selected-effect-id nil
+                         :item-effects-ui {}}))})
 
 (defn- handle-cue-chain-close-editor
   "Close the cue chain editor."
   [{:keys [state]}]
-  {:state (-> state
-              (assoc-in [:ui :dialogs :cue-chain-editor :open?] false)
-              (assoc-in [:cue-chain-editor :cell] nil))})
+  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :open?] false)})
 
 
 ;; Preset Management
@@ -87,8 +90,8 @@
    {:state (-> state-with-cell
                (update-in (cue-chain-path col row) conj new-preset)
                ;; Auto-select the newly added preset
-               (assoc-in [:cue-chain-editor :selected-paths] #{new-path})
-               (assoc-in [:cue-chain-editor :last-selected-path] new-path)
+               (assoc-in [:ui :dialogs :cue-chain-editor :data :selected-paths] #{new-path})
+               (assoc-in [:ui :dialogs :cue-chain-editor :data :last-selected-path] new-path)
                h/mark-dirty)}))
 
 (defn- handle-cue-chain-update-preset-param
@@ -132,14 +135,14 @@
    Event keys:
    - :tab-id - Tab ID (e.g., :geometric, :wave, :beam, :abstract)"
   [{:keys [tab-id state]}]
-  {:state (assoc-in state [:cue-chain-editor :active-preset-tab] tab-id)})
+  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :data :active-preset-tab] tab-id)})
 
 (defn- handle-cue-chain-set-effect-tab
   "Set the active effect bank tab.
    Event keys:
    - :tab-id - Tab ID (e.g., :shape, :color, :intensity)"
   [{:keys [tab-id state]}]
-  {:state (assoc-in state [:cue-chain-editor :active-effect-tab] (or tab-id :shape))})
+  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :data :active-effect-tab] (or tab-id :shape))})
 
 
 ;; Legacy Preset Effect Handlers (for compatibility)
@@ -205,7 +208,7 @@
     {:state (-> state
                 (update-in effect-chain-path conj effect-with-fields)
                 ;; Auto-select the newly added effect
-                (assoc-in [:cue-chain-editor :selected-effect-id] (:id effect-with-fields))
+                (assoc-in [:ui :dialogs :cue-chain-editor :data :selected-effect-id] (:id effect-with-fields))
                 h/mark-dirty)}))
 
 (defn- handle-cue-chain-remove-effect-from-item
@@ -219,12 +222,12 @@
         effect-chain-path (vec (concat items-path item-path [:effects]))
         effects (vec (get-in state effect-chain-path []))
         new-effects (vec (remove #(= (:id %) effect-id) effects))
-        selected-effect-id (get-in state [:cue-chain-editor :selected-effect-id])]
+        selected-effect-id (get-in state [:ui :dialogs :cue-chain-editor :data :selected-effect-id])]
     {:state (-> state
                 (assoc-in effect-chain-path new-effects)
                 ;; Clear selection if we deleted the selected effect
                 (cond-> (= effect-id selected-effect-id)
-                  (assoc-in [:cue-chain-editor :selected-effect-id] nil))
+                  (assoc-in [:ui :dialogs :cue-chain-editor :data :selected-effect-id] nil))
                 h/mark-dirty)}))
 
 (defn- handle-cue-chain-update-effect-param
@@ -269,7 +272,7 @@
    - :item-path - Path to the preset/group
    - :effect-id - ID of the effect to select"
   [{:keys [col row item-path effect-id state]}]
-  {:state (assoc-in state [:cue-chain-editor :selected-effect-id] effect-id)})
+  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :data :selected-effect-id] effect-id)})
 
 (defn- handle-cue-chain-set-item-effect-enabled
   "Set the enabled state of an effect within an item.
@@ -328,21 +331,29 @@
 (defn- handle-cue-chain-set-item-effects-clipboard
   "Set the clipboard for item effects (separate from cue chain clipboard).
    Called by list component's :on-copy callback.
+   Also copies to system clipboard as serialized EDN.
    Event keys:
    - :col, :row - Grid cell coordinates
    - :item-path - Path to the item within cue chain
    - :effects - Effects to copy to clipboard"
   [{:keys [col row item-path effects state]}]
   (let [ui-path (item-effects-ui-path col row item-path)]
+    ;; Copy to system clipboard (side effect)
+    (clipboard/copy-item-effects! effects)
+    ;; Return state update for internal clipboard
     {:state (assoc-in state (conj ui-path :clipboard) effects)}))
 
 (defn- handle-cue-chain-set-clipboard
   "Set the clipboard for cue chain items (presets and groups).
    Called by list component's :on-copy callback.
+   Also copies to system clipboard as serialized EDN.
    Event keys:
    - :items - Items to copy to clipboard"
   [{:keys [items state]}]
-  {:state (assoc-in state [:cue-chain-editor :clipboard :items] items)})
+  ;; Copy to system clipboard (side effect)
+  (clipboard/copy-cue-chain-items! items)
+  ;; Return state update for internal clipboard
+  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :data :clipboard :items] items)})
 
 (defn- handle-cue-chain-update-item-effect-param
   "Update a parameter in an item's effect using path-based addressing.
@@ -384,8 +395,8 @@
     (if point-params
       (let [x-key (:x point-params)
             y-key (:y point-params)
-            effects-path (item-effects-path col row item-path)
-            ;; Ensure effect-path is a vector to avoid ClassCastException
+            ;; Ensure both item-path and effect-path are vectors to avoid ClassCastException
+            effects-path (item-effects-path col row (vec item-path))
             base-path (vec (concat effects-path (vec effect-path) [:params]))]
         {:state (-> state
                     (assoc-in (conj base-path x-key) x)

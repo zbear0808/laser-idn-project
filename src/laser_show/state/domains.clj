@@ -74,24 +74,6 @@
    :size {:default [default-grid-cols default-grid-rows]
           :doc "[cols rows] grid dimensions"}})
 
-(defstate cue-chain-editor
-  "State for the cue chain editor dialog.
-   Tracks selection, clipboard, and editing state."
-  {:cell {:default nil
-          :doc "[col row] of cell being edited, nil if editor closed"}
-   :selected-paths {:default #{}
-                    :doc "Set of paths to selected items (presets/groups)"}
-   :last-selected-path {:default nil
-                        :doc "Last clicked path for shift+click range selection"}
-   :clipboard {:default nil
-               :doc "Copied items: {:items [...] :copied-at timestamp}"}
-   :editing-group-name {:default nil
-                        :doc "Path to group currently being renamed, nil if not editing"}
-   :active-preset-tab {:default :geometric
-                       :doc "Currently active tab in preset bank"}
-   :selected-effect-path {:default nil
-                          :doc "Path to selected effect in current preset's effect chain"}})
-
 (defstate ui
   "UI interaction state including window, preview, and component references."
   {:selected-preset {:default nil
@@ -107,10 +89,20 @@
                     :data nil}
           :doc "current drag operation state"}
    :dialogs {:default {:zone-editor {:open? false :zone-id nil}
-                       :projector-config {:open? false}
-                       :cue-chain-editor {:open? false :cell nil}
-                       :settings {:open? false}}
-             :doc "dialog visibility and data states"}
+                        :projector-config {:open? false}
+                        :cue-chain-editor {:open? false
+                                           :data {:col nil
+                                                  :row nil
+                                                  :selected-paths #{}
+                                                  :last-selected-path nil
+                                                  :clipboard nil
+                                                  :active-preset-tab :geometric
+                                                  :selected-effect-id nil
+                                                  :item-effects-ui {}}}
+                        :effect-chain-editor {:open? false :data nil}
+                        :add-projector-manual {:open? false :data nil}
+                        :settings {:open? false}}
+              :doc "dialog visibility and data states"}
    :preview {:default {:frame nil
                        :last-render-time 0}
              :doc "preview panel state"}

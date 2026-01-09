@@ -17,6 +17,7 @@
    - Type variants: grid-cell-effects"
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
+            [clojure.tools.logging :as log]
             [laser-show.subs :as subs]
             [laser-show.events.core :as events]
             [laser-show.views.components.drag-drop-cell :as drag-drop])
@@ -110,12 +111,20 @@
                              ;; Right-click or double-click: dispatch right-click event
                              (or (= button MouseButton/SECONDARY)
                                  (>= click-count 2))
-                             (events/dispatch! (assoc on-right-click 
-                                                     :col col :row row))
+                             (do
+                               (log/debug "Grid cell right-click/double-click"
+                                         {:cell-type cell-type
+                                          :col col
+                                          :row row
+                                          :event-type (:event/type on-right-click)
+                                          :button (str button)
+                                          :click-count click-count})
+                               (events/dispatch! (assoc on-right-click
+                                                       :col col :row row)))
                              
                              ;; Single left-click: dispatch click event
                              :else
-                             (events/dispatch! (assoc on-click 
+                             (events/dispatch! (assoc on-click
                                                      :col col :row row
                                                      :has-content? has-content?)))))
      
