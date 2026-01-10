@@ -191,6 +191,39 @@
           (concat items (subvec vec safe-idx)))))
 
 
+;; Effect/Item Initialization
+
+
+(defn ensure-item-fields
+  "Ensure item has :id and :enabled? fields.
+   Used when adding effects, presets, or other items to chains.
+   
+   Example:
+   (ensure-item-fields {:effect-id :scale})
+   => {:effect-id :scale :id #uuid \"...\" :enabled? true}"
+  [item]
+  (cond-> item
+    (not (contains? item :id)) (assoc :id (random-uuid))
+    (not (contains? item :enabled?)) (assoc :enabled? true)))
+
+
+;; Text Field Parsing
+
+
+(defn parse-and-clamp-from-text-event
+  "Extract text from ActionEvent, parse as double, clamp to bounds.
+   Returns nil if parsing fails.
+   
+   Example:
+   (parse-and-clamp-from-text-event action-event 0.0 1.0)
+   => 0.5"
+  [fx-event min max]
+  (let [text-field (.getSource fx-event)
+        text (.getText text-field)]
+    (when-let [parsed (try (Double/parseDouble text) (catch Exception _ nil))]
+      (-> parsed (clojure.core/max min) (clojure.core/min max)))))
+
+
 ;; Group Creation
 
 

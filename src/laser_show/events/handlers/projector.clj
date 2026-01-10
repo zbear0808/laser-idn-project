@@ -14,6 +14,7 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
             [laser-show.events.handlers.chain :as chain-handlers]
+            [laser-show.events.handlers.effect-params :as effect-params]
             [laser-show.animation.chains :as chains]))
 
 
@@ -283,11 +284,7 @@
 (defn- handle-projectors-add-effect
   "Add an effect to a projector's chain."
   [{:keys [projector-id effect state]}]
-  (let [effect-with-fields (cond-> effect
-                             (not (contains? effect :enabled?))
-                             (assoc :enabled? true)
-                             (not (contains? effect :id))
-                             (assoc :id (random-uuid)))]
+  (let [effect-with-fields (h/ensure-item-fields effect)]
     {:state (-> state
                 (update-in [:chains :projector-effects projector-id :items] conj effect-with-fields)
                 h/mark-dirty)}))
@@ -350,11 +347,7 @@
 (defn- handle-projectors-add-calibration-effect
   "Add a calibration effect to projector chain."
   [{:keys [projector-id effect state]}]
-  (let [effect-with-fields (cond-> effect
-                             (not (contains? effect :enabled?))
-                             (assoc :enabled? true)
-                             (not (contains? effect :id))
-                             (assoc :id (random-uuid)))
+  (let [effect-with-fields (h/ensure-item-fields effect)
         current-effects (get-in state (projector-effects-path projector-id) [])
         new-effect-idx (count current-effects)
         new-effect-path [new-effect-idx]
@@ -371,6 +364,7 @@
 
 (defn- handle-projectors-update-corner-pin
   "Update corner pin parameters from spatial drag.
+   Delegates to effect-params for the actual logic.
    Event keys:
    - :projector-id - ID of the projector
    - :effect-idx - Index of the corner pin effect
@@ -378,14 +372,8 @@
    - :x, :y - New coordinates
    - :param-map - Mapping of point IDs to param keys"
   [{:keys [projector-id effect-idx point-id x y param-map state]}]
-  (let [point-params (get param-map point-id)]
-    (if point-params
-      (let [x-key (:x point-params)
-            y-key (:y point-params)]
-        {:state (-> state
-                    (assoc-in [:chains :projector-effects projector-id :items effect-idx :params x-key] x)
-                    (assoc-in [:chains :projector-effects projector-id :items effect-idx :params y-key] y))})
-      {:state state})))
+  (let [params-path [:chains :projector-effects projector-id :items effect-idx :params]]
+    {:state (effect-params/update-spatial-params state params-path point-id x y param-map)}))
 
 (defn- handle-projectors-reset-corner-pin
   "Reset corner pin effect to default values."
@@ -402,53 +390,24 @@
 
 (defn- handle-projectors-select-effect-at-path
   "Select an effect at a path using path-based selection (supports nested structures).
-   Handles Ctrl+click (toggle) and Shift+click (range select)."
+   Delegates to chain-handlers for the actual logic."
   [{:keys [projector-id path ctrl? shift? state]}]
-  (let [ui-path (projector-ui-state-path projector-id)
-        current-paths (get-in state (conj ui-path :selected-paths) #{})
-        last-selected (get-in state (conj ui-path :last-selected-path))
-        effects-vec (get-in state (projector-effects-path projector-id) [])
-        new-paths (cond
-                    ctrl?
-                    (if (contains? current-paths path)
-                      (disj current-paths path)
-                      (conj current-paths path))
-                    
-                    shift?
-                    (if last-selected
-                      (let [all-paths (vec (chains/paths-in-chain effects-vec))
-                            anchor-idx (.indexOf all-paths last-selected)
-                            target-idx (.indexOf all-paths path)]
-                        (if (and (>= anchor-idx 0) (>= target-idx 0))
-                          (let [start-idx (min anchor-idx target-idx)
-                                end-idx (max anchor-idx target-idx)]
-                            (into #{} (subvec all-paths start-idx (inc end-idx))))
-                          #{path}))
-                      #{path})
-                    
-                    :else
-                    #{path})
-        update-anchor? (not shift?)]
-    {:state (-> state
-                (assoc-in (conj ui-path :selected-paths) new-paths)
-                (cond-> update-anchor?
-                  (assoc-in (conj ui-path :last-selected-path) path)))}))
+  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
+    {:state (chain-handlers/handle-select-item state config path ctrl? shift?)}))
 
 (defn- handle-projectors-select-all-effects
-  "Select all effects in a projector's chain."
+  "Select all effects in a projector's chain.
+   Delegates to chain-handlers for the actual logic."
   [{:keys [projector-id state]}]
-  (let [effects-vec (get-in state (projector-effects-path projector-id) [])
-        all-paths (into #{} (chains/paths-in-chain effects-vec))
-        ui-path (projector-ui-state-path projector-id)]
-    {:state (assoc-in state (conj ui-path :selected-paths) all-paths)}))
+  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
+    {:state (chain-handlers/handle-select-all state config)}))
 
 (defn- handle-projectors-clear-effect-selection
-  "Clear effect selection for a projector."
+  "Clear effect selection for a projector.
+   Delegates to chain-handlers for the actual logic."
   [{:keys [projector-id state]}]
-  (let [ui-path (projector-ui-state-path projector-id)]
-    {:state (-> state
-                (assoc-in (conj ui-path :selected-paths) #{})
-                (assoc-in (conj ui-path :last-selected-path) nil))}))
+  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
+    {:state (chain-handlers/handle-clear-selection state config)}))
 
 
 ;; Clipboard Operations
@@ -497,60 +456,29 @@
                 h/mark-dirty)}))
 
 (defn- handle-projectors-delete-effects
-  "Delete selected effects from projector chain."
+  "Delete selected effects from projector chain.
+   Delegates to chain-handlers for the actual logic."
   [{:keys [projector-id state]}]
-  (let [ui-path (projector-ui-state-path projector-id)
-        selected-paths (get-in state (conj ui-path :selected-paths) #{})
-        effects-vec (get-in state (projector-effects-path projector-id) [])]
-    (if (seq selected-paths)
-      (let [root-paths (h/filter-to-root-paths selected-paths)
-            sorted-paths (sort-by (comp - count) root-paths)
-            new-effects (reduce h/remove-at-path effects-vec sorted-paths)]
-        {:state (-> state
-                    (assoc-in (projector-effects-path projector-id) new-effects)
-                    (assoc-in (conj ui-path :selected-paths) #{})
-                    h/mark-dirty)})
-      {:state state})))
+  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
+    {:state (chain-handlers/handle-delete-selected state config)}))
 
 
 ;; Drag and Drop
 
 
 (defn- handle-projectors-start-effect-drag
-  "Start a multi-drag operation for projector effects."
+  "Start a multi-drag operation for projector effects.
+   Delegates to chain-handlers for the actual logic."
   [{:keys [projector-id initiating-path state]}]
-  (let [ui-path (projector-ui-state-path projector-id)
-        selected-paths (get-in state (conj ui-path :selected-paths) #{})
-        dragging-paths (if (contains? selected-paths initiating-path)
-                         selected-paths
-                         #{initiating-path})
-        new-selected (if (contains? selected-paths initiating-path)
-                       selected-paths
-                       #{initiating-path})]
-    {:state (-> state
-                (assoc-in (conj ui-path :dragging-paths) dragging-paths)
-                (assoc-in (conj ui-path :selected-paths) new-selected))}))
+  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
+    {:state (chain-handlers/handle-start-drag state config initiating-path)}))
 
 (defn- handle-projectors-move-effects
   "Move multiple effects to a new position in projector chain.
-   Uses the centralized chains/move-items-to-target for correct ordering."
+   Delegates to chain-handlers for the actual logic."
   [{:keys [projector-id target-id drop-position state]}]
-  (let [ui-path (projector-ui-state-path projector-id)
-        effects-vec (get-in state (projector-effects-path projector-id) [])
-        dragging-paths (get-in state (conj ui-path :dragging-paths) #{})
-        root-paths (h/filter-to-root-paths dragging-paths)
-        target-path (chains/find-path-by-id effects-vec target-id)
-        target-in-drag? (or (contains? root-paths target-path)
-                           (some #(h/path-is-ancestor? % target-path) root-paths))]
-    (if (or (empty? root-paths) target-in-drag?)
-      {:state (assoc-in state (conj ui-path :dragging-paths) nil)}
-      ;; Use centralized move-items-to-target for correct ordering
-      (let [new-effects (chains/move-items-to-target effects-vec root-paths target-id drop-position)]
-        {:state (-> state
-                    (assoc-in (projector-effects-path projector-id) new-effects)
-                    (assoc-in (conj ui-path :dragging-paths) nil)
-                    (assoc-in (conj ui-path :selected-paths) #{})
-                    h/mark-dirty)}))))
+  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
+    {:state (chain-handlers/handle-move-items state config target-id drop-position)}))
 
 (defn- handle-projectors-update-effect-ui-state
   "Update projector effect UI state (for drag-and-drop feedback)."
@@ -582,16 +510,11 @@
 (defn- handle-projectors-update-effect-param-from-text
   "Update a projector effect parameter from text input."
   [{:keys [projector-id effect-path param-key min max state] :as event}]
-  (let [action-event (:fx/event event)
-        text-field (.getSource action-event)
-        text (.getText text-field)
-        parsed (try (Double/parseDouble text) (catch Exception _ nil))]
-    (if parsed
-      (let [clamped (-> parsed (clojure.core/max min) (clojure.core/min max))
-            effects-vec (vec (get-in state (projector-effects-path projector-id) []))
-            updated-effects (assoc-in effects-vec (conj (vec effect-path) :params param-key) clamped)]
-        {:state (assoc-in state (projector-effects-path projector-id) updated-effects)})
-      {:state state})))
+  (if-let [clamped (h/parse-and-clamp-from-text-event (:fx/event event) min max)]
+    (let [effects-vec (vec (get-in state (projector-effects-path projector-id) []))
+          updated-effects (assoc-in effects-vec (conj (vec effect-path) :params param-key) clamped)]
+      {:state (assoc-in state (projector-effects-path projector-id) updated-effects)})
+    {:state state}))
 
 (defn- handle-projectors-set-effect-ui-mode
   "Set UI mode for a projector effect's parameters."
@@ -605,24 +528,19 @@
 
 (defn- handle-projectors-add-curve-point
   "Add a new control point to a projector's curve.
+   Delegates to effect-params for the actual logic.
    Event keys:
    - :projector-id - ID of the projector
    - :effect-path - Path to effect (supports nested)
    - :channel - Channel keyword (:r, :g, or :b)
    - :x, :y - Point coordinates"
   [{:keys [projector-id effect-path channel x y state]}]
-  (let [param-key (keyword (str (name channel) "-curve-points"))
-        effects-vec (vec (get-in state (projector-effects-path projector-id) []))
-        current-points (get-in effects-vec (conj (vec effect-path) :params param-key) [[0 0] [255 255]])
-        new-point [(int x) (int y)]
-        new-points (->> (conj current-points new-point)
-                        (sort-by first)
-                        vec)
-        updated-effects (assoc-in effects-vec (conj (vec effect-path) :params param-key) new-points)]
-    {:state (assoc-in state (projector-effects-path projector-id) updated-effects)}))
+  (let [params-path (vec (concat (projector-effects-path projector-id) effect-path [:params]))]
+    {:state (effect-params/add-curve-point state params-path channel x y)}))
 
 (defn- handle-projectors-update-curve-point
   "Update a control point in a projector's curve.
+   Delegates to effect-params for the actual logic.
    Event keys:
    - :projector-id - ID of the projector
    - :effect-path - Path to effect (supports nested)
@@ -630,59 +548,31 @@
    - :point-idx - Index of the point to update
    - :x, :y - New coordinates"
   [{:keys [projector-id effect-path channel point-idx x y state]}]
-  (let [param-key (keyword (str (name channel) "-curve-points"))
-        effects-vec (vec (get-in state (projector-effects-path projector-id) []))
-        current-points (get-in effects-vec (conj (vec effect-path) :params param-key) [[0 0] [255 255]])
-        num-points (count current-points)
-        ;; Corner points (first and last) can only move in Y
-        is-corner? (or (= point-idx 0) (= point-idx (dec num-points)))
-        current-point (nth current-points point-idx [0 0])
-        updated-point (if is-corner?
-                        [(first current-point) (int y)]  ;; Keep original X for corners
-                        [(int x) (int y)])
-        updated-points (assoc current-points point-idx updated-point)
-        sorted-points (->> updated-points
-                          (sort-by first)
-                          vec)
-        updated-effects (assoc-in effects-vec (conj (vec effect-path) :params param-key) sorted-points)]
-    {:state (assoc-in state (projector-effects-path projector-id) updated-effects)}))
+  (let [params-path (vec (concat (projector-effects-path projector-id) effect-path [:params]))]
+    {:state (effect-params/update-curve-point state params-path channel point-idx x y)}))
 
 (defn- handle-projectors-remove-curve-point
   "Remove a control point from a projector's curve.
+   Delegates to effect-params for the actual logic.
    Event keys:
    - :projector-id - ID of the projector
    - :effect-path - Path to effect (supports nested)
    - :channel - Channel keyword (:r, :g, or :b)
    - :point-idx - Index of the point to remove"
   [{:keys [projector-id effect-path channel point-idx state]}]
-  (let [param-key (keyword (str (name channel) "-curve-points"))
-        effects-vec (vec (get-in state (projector-effects-path projector-id) []))
-        current-points (get-in effects-vec (conj (vec effect-path) :params param-key) [[0 0] [255 255]])
-        num-points (count current-points)
-        ;; Cannot remove corner points (first and last)
-        is-corner? (or (= point-idx 0) (= point-idx (dec num-points)))]
-    (if is-corner?
-      {:state state}  ;; No change for corner points
-      (let [updated-points (vec (concat (subvec current-points 0 point-idx)
-                                        (subvec current-points (inc point-idx))))
-            updated-effects (assoc-in effects-vec (conj (vec effect-path) :params param-key) updated-points)]
-        {:state (assoc-in state (projector-effects-path projector-id) updated-effects)}))))
+  (let [params-path (vec (concat (projector-effects-path projector-id) effect-path [:params]))]
+    {:state (effect-params/remove-curve-point state params-path channel point-idx)}))
 
 (defn- handle-projectors-set-active-curve-channel
   "Set the active curve channel (R/G/B) for the projector curve editor.
+   Delegates to effect-params for the actual logic.
    Event keys:
    - :projector-id - ID of the projector
    - :effect-path - Path to effect
    - :tab-id - Channel keyword (:r, :g, or :b)"
   [{:keys [projector-id effect-path tab-id state]}]
-  (log/debug "[CURVE TAB DEBUG] handle-projectors-set-active-curve-channel called:"
-             "projector-id=" projector-id
-             "effect-path=" effect-path
-             "tab-id=" tab-id)
-  (let [ui-path (projector-ui-state-path projector-id)
-        full-path (conj ui-path :ui-modes effect-path :active-curve-channel)]
-    (log/debug "[CURVE TAB DEBUG] Storing at path:" full-path)
-    {:state (assoc-in state full-path tab-id)}))
+  (let [ui-path (conj (projector-ui-state-path projector-id) :ui-modes effect-path)]
+    {:state (effect-params/set-active-curve-channel state ui-path tab-id)}))
 
 
 ;; Hierarchical List Integration

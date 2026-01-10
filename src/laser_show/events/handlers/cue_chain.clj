@@ -79,21 +79,20 @@
    - :col, :row - Grid cell coordinates
    - :preset-id - ID of the preset to add (e.g., :circle, :wave)"
   [{:keys [col row preset-id state]}]
- (let [ensure-cell (fn [s]
-                     (if (get-in s [:chains :cue-chains [col row]])
-                       s
-                       (assoc-in s [:chains :cue-chains [col row]] {:items []})))
-       new-preset (cue-chains/create-preset-instance preset-id {})
-       state-with-cell (ensure-cell state)
-       current-items (get-in state-with-cell (cue-chain-path col row) [])
-       new-idx (count current-items)
-       new-path [new-idx]]
-   {:state (-> state-with-cell
-               (update-in (cue-chain-path col row) conj new-preset)
-               ;; Auto-select the newly added preset
-               (assoc-in [:ui :dialogs :cue-chain-editor :data :selected-paths] #{new-path})
-               (assoc-in [:ui :dialogs :cue-chain-editor :data :last-selected-path] new-path)
-               h/mark-dirty)}))
+  (let [ensure-cell (fn [s]
+                      (if (get-in s [:chains :cue-chains [col row]])
+                        s
+                        (assoc-in s [:chains :cue-chains [col row]] {:items []})))
+        new-preset (h/ensure-item-fields (cue-chains/create-preset-instance preset-id {}))
+        state-with-cell (ensure-cell state)
+        current-items (get-in state-with-cell (cue-chain-path col row) [])
+        new-idx (count current-items)
+        new-path [new-idx]]
+    {:state (-> state-with-cell
+                (update-in (cue-chain-path col row) conj new-preset)
+                (assoc-in [:ui :dialogs :cue-chain-editor :data :selected-paths] #{new-path})
+                (assoc-in [:ui :dialogs :cue-chain-editor :data :last-selected-path] new-path)
+                h/mark-dirty)}))
 
 (defn- handle-cue-chain-update-preset-param
   "Update a parameter in a preset.
@@ -156,11 +155,7 @@
    - :preset-path - Path to the preset
    - :effect - Effect to add (e.g., {:effect-id :scale :params {...}})"
   [{:keys [col row preset-path effect state]}]
-  (let [effect-with-fields (cond-> effect
-                             (not (contains? effect :enabled?))
-                             (assoc :enabled? true)
-                             (not (contains? effect :id))
-                             (assoc :id (random-uuid)))
+  (let [effect-with-fields (h/ensure-item-fields effect)
         items-vec (vec (get-in state (cue-chain-path col row) []))
         preset (get-in items-vec preset-path)]
     (if preset
@@ -201,14 +196,11 @@
    - :item-path - Path to the preset/group
    - :effect - Effect to add"
   [{:keys [col row item-path effect state]}]
-  (let [effect-with-fields (-> effect
-                               (assoc :enabled? true)
-                               (assoc :id (random-uuid)))
+  (let [effect-with-fields (h/ensure-item-fields effect)
         items-path (cue-chain-path col row)
         effect-chain-path (vec (concat items-path item-path [:effects]))]
     {:state (-> state
                 (update-in effect-chain-path conj effect-with-fields)
-                ;; Auto-select the newly added effect
                 (assoc-in [:ui :dialogs :cue-chain-editor :data :selected-effect-id] (:id effect-with-fields))
                 h/mark-dirty)}))
 
@@ -255,16 +247,11 @@
    - :param-key - Parameter key
    - :min, :max - Bounds for clamping"
   [{:keys [col row item-path effect-path param-key min max state] :as event}]
-  (let [action-event (:fx/event event)
-        text-field (.getSource action-event)
-        text (.getText text-field)
-        parsed (try (Double/parseDouble text) (catch Exception _ nil))]
-    (if parsed
-      (let [clamped (-> parsed (clojure.core/max min) (clojure.core/min max))
-            items-path (cue-chain-path col row)
-            full-path (vec (concat items-path item-path [:effects] effect-path [:params param-key]))]
-        {:state (assoc-in state full-path clamped)})
-      {:state state})))
+  (if-let [clamped (h/parse-and-clamp-from-text-event (:fx/event event) min max)]
+    (let [items-path (cue-chain-path col row)
+          full-path (vec (concat items-path item-path [:effects] effect-path [:params param-key]))]
+      {:state (assoc-in state full-path clamped)})
+    {:state state}))
 
 (defn- handle-cue-chain-select-item-effect
   "Select an effect within an item for editing.

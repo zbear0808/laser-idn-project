@@ -30,19 +30,12 @@
                       (if (get-in s [:chains :effect-chains [col row]])
                         s
                         (assoc-in s [:chains :effect-chains [col row]] {:items [] :active true})))
-        ;; Ensure the effect has both :enabled? and :id fields
-        effect-with-fields (cond-> effect
-                             (not (contains? effect :enabled?))
-                             (assoc :enabled? true)
-                             (not (contains? effect :id))
-                             (assoc :id (random-uuid)))
-        ;; Calculate the index where the new effect will be inserted (at the end)
+        effect-with-fields (h/ensure-item-fields effect)
         state-with-cell (ensure-cell state)
         current-effects (get-in state-with-cell [:chains :effect-chains [col row] :items] [])
         new-effect-path [(count current-effects)]]
     {:state (-> state-with-cell
                 (update-in [:chains :effect-chains [col row] :items] conj effect-with-fields)
-                ;; Auto-select the newly added effect using path-based selection
                 (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{new-effect-path})
                 (assoc-in [:ui :dialogs :effect-chain-editor :data :last-selected-path] new-effect-path)
                 h/mark-dirty)}))
@@ -80,16 +73,11 @@
    Parses the text, clamps to min/max bounds, and updates the param.
    Called when user presses Enter in the parameter text field."
   [{:keys [col row effect-path param-key min max state] :as event}]
-  (let [action-event (:fx/event event)
-        text-field (.getSource action-event)
-        text (.getText text-field)
-        parsed (try (Double/parseDouble text) (catch Exception _ nil))]
-    (if parsed
-      (let [clamped (-> parsed (clojure.core/max min) (clojure.core/min max))
-            effects-vec (vec (get-in state [:chains :effect-chains [col row] :items] []))
-            updated-effects (assoc-in effects-vec (conj (vec effect-path) :params param-key) clamped)]
-        {:state (assoc-in state [:chains :effect-chains [col row] :items] updated-effects)})
-      {:state state})))
+  (if-let [clamped (h/parse-and-clamp-from-text-event (:fx/event event) min max)]
+    (let [effects-vec (vec (get-in state [:chains :effect-chains [col row] :items] []))
+          updated-effects (assoc-in effects-vec (conj (vec effect-path) :params param-key) clamped)]
+      {:state (assoc-in state [:chains :effect-chains [col row] :items] updated-effects)})
+    {:state state}))
 
 (defn- handle-effects-clear-cell
   "Clear all effects from a cell."

@@ -275,16 +275,39 @@
          (t/make-frame))))
 
 (defn beam-fan-animation
-  "Beam fan animation generator function."
+  "Beam fan animation generator function.
+   Creates a horizontal line at y=0 with discrete blanked points that snake back for seamless looping.
+   Each point consists of: blanked, visible, visible, blanked at the same X coordinate.
+   Points go from left to right, then back from right to left for perfect looping.
+   Per IDN-Stream spec Section 6.2: Blanking points separate each beam point."
   [time-ms params]
-  (let [{:keys [length color]
-         :or {length 0.8 color [1.0 1.0 1.0]}} params
-        half-length (/ length 2)
-        points (generate-line :num-points 32
-                             :start [(- half-length) 0]
-                             :end [half-length 0]
-                             :color color)]
-    (t/make-frame points)))
+  (let [{:keys [num-points color]
+         :or {num-points 8 color [1.0 1.0 1.0]}} params
+        [r g b] color
+        x-min -0.99
+        x-max 0.99
+        y 0.0
+        ;; Calculate X positions evenly spaced, always including endpoints
+        forward-positions (if (= num-points 1)
+                            [0.0]
+                            (mapv (fn [i]
+                                    (let [t (/ (double i) (dec num-points))]
+                                      (lerp x-min x-max t)))
+                                  (range num-points)))
+        ;; Snake back: reverse without duplicating endpoints
+        backward-positions (if (<= num-points 2)
+                             []
+                             (vec (reverse (subvec forward-positions 1 (dec num-points)))))
+        ;; Combine forward and backward for seamless loop
+        all-positions (into forward-positions backward-positions)]
+    (->> all-positions
+         (u/mapcatv (fn [x]
+                      ;; Each point: blanked, visible, visible, blanked
+                      [(t/blanked-point x y)
+                       (t/make-point x y r g b)
+                       (t/make-point x y r g b)
+                       (t/blanked-point x y)]))
+         (t/make-frame))))
 
 (defn horizontal-line-animation
   "Horizontal line animation generator function.

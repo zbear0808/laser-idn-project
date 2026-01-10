@@ -85,7 +85,7 @@
   {:id :beam-fan
    :name "Beam Fan"
    :category :beam
-   :parameters [(float-param :length "Length" 0.8 0.3 1.0)
+   :parameters [(int-param :num-points "Points" 8 2 32)
                 (color-param :color "Color" [255 100 0])]
    :generator gen/beam-fan-animation})
 
