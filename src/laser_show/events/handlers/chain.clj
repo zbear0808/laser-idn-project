@@ -13,6 +13,7 @@
    updated state (not effect maps). Callers wrap results in {:state ...}."
   (:require
    [clojure.tools.logging :as log]
+   [laser-show.events.helpers :as h]
    [laser-show.events.handlers.effect-params :as effect-params]
    [laser-show.animation.chains :as chains]))
 
@@ -672,6 +673,145 @@
     (effect-params/update-spatial-params state params-path point-id x y param-map)))
 
 
+;; Phase 2: Parameter Update Handlers
+
+
+(defn handle-update-param
+  "Update an effect parameter value.
+   Extracts value from :value or :fx/event.
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :items-path
+   - event: Map with :effect-path, :param-key, and :value or :fx/event
+   
+   Returns: Updated state"
+  [state config {:keys [effect-path param-key] :as event}]
+  (let [value (or (:fx/event event) (:value event))
+        items-path (:items-path config)
+        items-vec (vec (get-in state items-path []))
+        updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) value)]
+    (assoc-in state items-path updated-items)))
+
+(defn handle-update-param-from-text
+  "Update a parameter from text field input.
+   Uses h/parse-and-clamp-from-text-event for parsing.
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :items-path
+   - event: Map with :effect-path, :param-key, :min, :max, and :fx/event
+   
+   Returns: Updated state (unchanged if parsing fails)"
+  [state config {:keys [effect-path param-key min max] :as event}]
+  (if-let [clamped (h/parse-and-clamp-from-text-event (:fx/event event) min max)]
+    (let [items-path (:items-path config)
+          items-vec (vec (get-in state items-path []))
+          updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) clamped)]
+      (assoc-in state items-path updated-items))
+    state))
+
+
+;; Phase 3: Effect CRUD Handlers
+
+
+(defn handle-add-item
+  "Add an item (effect/preset) to the chain with auto-selection.
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :items-path and :ui-path
+   - event: Map with :item and optional :parent-path for nested insertion
+            :item - Item to add (will be given :id and :enabled? if missing)
+            :parent-path - Optional path within items to add to (e.g., [0 :effects])
+   
+   Returns: Updated state with item added and selected"
+  [state config {:keys [item parent-path] :as event}]
+  (let [item-with-fields (h/ensure-item-fields item)
+        base-items-path (:items-path config)
+        ;; If parent-path provided, add to nested location within items
+        ;; e.g., for cue-chain item effects: parent-path = [0 :effects]
+        target-path (if parent-path
+                      (vec (concat base-items-path parent-path))
+                      base-items-path)
+        ;; Ensure the chain exists at base level
+        state-with-chain (if (get-in state base-items-path)
+                           state
+                           (assoc-in state base-items-path []))
+        ;; Ensure nested path exists if specified
+        state-with-target (if (and parent-path (nil? (get-in state-with-chain target-path)))
+                            (assoc-in state-with-chain target-path [])
+                            state-with-chain)
+        current-items (get-in state-with-target target-path [])
+        new-item-idx (count current-items)
+        ;; Selection path is relative to items-path, so include parent-path
+        selection-path (if parent-path
+                         (conj (vec parent-path) new-item-idx)
+                         [new-item-idx])]
+    (-> state-with-target
+        (update-in target-path conj item-with-fields)
+        (assoc-in (conj (:ui-path config) :selected-paths) #{selection-path})
+        (assoc-in (conj (:ui-path config) :last-selected-path) selection-path)
+        mark-dirty)))
+
+(defn handle-remove-item-at-path
+  "Remove an item at a specific path.
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :items-path
+   - path: Path to the item to remove
+   
+   Returns: Updated state"
+  [state config path]
+  (let [items-path (:items-path config)
+        items-vec (get-in state items-path [])
+        new-items (chains/remove-at-path items-vec path)]
+    (-> state
+        (assoc-in items-path new-items)
+        mark-dirty)))
+
+(defn handle-reorder-items
+  "Reorder items using from-idx and to-idx.
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :items-path
+   - from-idx: Source index
+   - to-idx: Target index
+   
+   Returns: Updated state"
+  [state config from-idx to-idx]
+  (let [items-path (:items-path config)
+        items-vec (get-in state items-path [])
+        item (nth items-vec from-idx)
+        without (vec (concat (subvec items-vec 0 from-idx)
+                             (subvec items-vec (inc from-idx))))
+        reordered (vec (concat (subvec without 0 to-idx)
+                               [item]
+                               (subvec without to-idx)))]
+    (-> state
+        (assoc-in items-path reordered)
+        mark-dirty)))
+
+
+;; Phase 4: UI Mode Handlers
+
+
+(defn handle-set-ui-mode
+  "Set visual/numeric mode for effect parameter UI.
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :ui-path
+   - effect-path: Path to the effect
+   - mode: :visual or :numeric
+   
+   Returns: Updated state"
+  [state config effect-path mode]
+  (assoc-in state (conj (:ui-path config) :ui-modes effect-path) mode))
+
+
 ;; Convenience Functions for Creating Configs
 
 
@@ -800,6 +940,27 @@
      
      :chain/create-empty-group
      {:state (handle-create-empty-group state config (:name event))}
+     
+     ;; Phase 2: Parameter updates
+     :chain/update-param
+     {:state (handle-update-param state config event)}
+     
+     :chain/update-param-from-text
+     {:state (handle-update-param-from-text state config event)}
+     
+     ;; Phase 3: Effect CRUD
+     :chain/add-item
+     {:state (handle-add-item state config event)}
+     
+     :chain/remove-item-at-path
+     {:state (handle-remove-item-at-path state config (:path event))}
+     
+     :chain/reorder-items
+     {:state (handle-reorder-items state config (:from-idx event) (:to-idx event))}
+     
+     ;; Phase 4: UI mode
+     :chain/set-ui-mode
+     {:state (handle-set-ui-mode state config (:effect-path event) (:mode event))}
      
      ;; Unknown chain event
      (do

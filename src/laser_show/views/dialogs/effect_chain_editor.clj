@@ -55,12 +55,13 @@
     {:fx/type :button
      :text (:name effect-def)
      :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 4 8;"
-     :on-action {:event/type :effects/add-effect
-                 :col col :row row
-                 :effect {:effect-id (:id effect-def)
-                          :params (into {}
-                                        (for [[k v] params-map]
-                                          [k (:default v)]))}}}))
+     :on-action {:event/type :chain/add-item
+                 :domain :effect-chains
+                 :entity-key [col row]
+                 :item {:effect-id (:id effect-def)
+                        :params (into {}
+                                      (for [[k v] params-map]
+                                        [k (:default v)]))}}}))
 
 (defn- effect-bank-tab-content
   "Content for a single category tab in the effect bank."
@@ -139,14 +140,18 @@
    :spatial-event-keys {:col col :row row :effect-path effect-path}
    
    ;; Event templates for param controls
-   :on-change-event {:event/type :effects/update-param
-                     :col col :row row
+   :on-change-event {:event/type :chain/update-param
+                     :domain :effect-chains
+                     :entity-key [col row]
                      :effect-path effect-path}
-   :on-text-event {:event/type :effects/update-param-from-text
-                   :col col :row row
+   :on-text-event {:event/type :chain/update-param-from-text
+                   :domain :effect-chains
+                   :entity-key [col row]
                    :effect-path effect-path}
-   :on-mode-change-event {:event/type :effects/set-param-ui-mode
-                         :effect-path effect-path}
+   :on-mode-change-event {:event/type :chain/set-ui-mode
+                          :domain :effect-chains
+                          :entity-key [col row]
+                          :effect-path effect-path}
    
    ;; RGB curves props
    :rgb-domain :effect-chains
@@ -199,12 +204,14 @@
                                             :param-key param-key
                                             :param-spec param-spec
                                             :current-value (get current-params param-key)
-                                            :on-change-event {:event/type :effects/update-param
-                                                             :col col :row row
-                                                             :effect-path selected-effect-path}
-                                            :on-text-event {:event/type :effects/update-param-from-text
-                                                           :col col :row row
-                                                           :effect-path selected-effect-path}}))}})
+                                            :on-change-event {:event/type :chain/update-param
+                                                              :domain :effect-chains
+                                                              :entity-key [col row]
+                                                              :effect-path selected-effect-path}
+                                            :on-text-event {:event/type :chain/update-param-from-text
+                                                            :domain :effect-chains
+                                                            :entity-key [col row]
+                                                            :effect-path selected-effect-path}}))}})
                   
                   {:fx/type :label
                    :text "Select an effect from the chain"

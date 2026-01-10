@@ -49,17 +49,20 @@
 (defn- add-effect-button
   "Button to add a specific effect to the item's effect chain."
   [{:keys [col row item-path effect-def]}]
-  (let [params-map (params-vector->map (:parameters effect-def))]
+  (let [params-map (params-vector->map (:parameters effect-def))
+        ;; Build the full effect-path: item-path + :effects
+        effects-parent-path (vec (concat item-path [:effects]))]
     {:fx/type :button
      :text (:name effect-def)
      :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 4 8;"
-     :on-action {:event/type :cue-chain/add-effect-to-item
-                 :col col :row row
-                 :item-path item-path
-                 :effect {:effect-id (:id effect-def)
-                         :params (into {}
-                                       (for [[k v] params-map]
-                                         [k (:default v)]))}}}))
+     :on-action {:event/type :chain/add-item
+                 :domain :cue-chains
+                 :entity-key [col row]
+                 :parent-path effects-parent-path
+                 :item {:effect-id (:id effect-def)
+                        :params (into {}
+                                      (for [[k v] params-map]
+                                        [k (:default v)]))}}}))
 
 (defn- effect-bank-tab-content
   "Content for a single category tab in the effect bank."
@@ -126,40 +129,40 @@
    - :params-map - Parameter specifications map
    - :dialog-data - Dialog state data (for curve editor channel tab tracking)"
   [{:keys [col row item-path effect-path effect-def current-params ui-mode params-map dialog-data]}]
-  {:fx/type effect-param-ui/custom-param-renderer
-   :effect-def effect-def
-   :current-params current-params
-   :ui-mode ui-mode
-   :params-map params-map
-   :dialog-data dialog-data
-   
-   ;; Event templates for spatial editors (translate, corner-pin)
-   :spatial-event-template {:event/type :cue-chain/update-item-effect-spatial-params
-                           :col col :row row
-                           :item-path item-path
-                           :effect-path effect-path}
-   :spatial-event-keys {:col col :row row :item-path item-path :effect-path effect-path}
-   
-   ;; Event templates for param controls
-   :on-change-event {:event/type :cue-chain/update-item-effect-param
-                     :col col :row row
-                     :item-path item-path
-                     :effect-path effect-path}
-   :on-text-event {:event/type :cue-chain/update-effect-param-from-text
-                   :col col :row row
-                   :item-path item-path
-                   :effect-path effect-path}
-   :on-mode-change-event {:event/type :cue-chain/set-item-effect-param-ui-mode
-                         :col col :row row
-                         :item-path item-path
-                         :effect-path effect-path}
-   
-   ;; RGB curves props - for item effects, we need custom domain handling
-   ;; Since RGB curves for item effects doesn't use :domain/:entity-key pattern yet,
-   ;; we'll handle it with cue-chain specific events
-   :rgb-domain :item-effects
-   :rgb-entity-key {:col col :row row :item-path item-path}
-   :rgb-effect-path effect-path})
+  ;; Build the full effect path from item-path to effect within item's :effects
+  (let [full-effect-path (vec (concat item-path [:effects] effect-path))]
+    {:fx/type effect-param-ui/custom-param-renderer
+     :effect-def effect-def
+     :current-params current-params
+     :ui-mode ui-mode
+     :params-map params-map
+     :dialog-data dialog-data
+     
+     ;; Event templates for spatial editors (translate, corner-pin)
+     :spatial-event-template {:event/type :chain/update-spatial-params
+                              :domain :cue-chains
+                              :entity-key [col row]
+                              :effect-path full-effect-path}
+     :spatial-event-keys {:domain :cue-chains :entity-key [col row] :effect-path full-effect-path}
+     
+     ;; Event templates for param controls
+     :on-change-event {:event/type :chain/update-param
+                       :domain :cue-chains
+                       :entity-key [col row]
+                       :effect-path full-effect-path}
+     :on-text-event {:event/type :chain/update-param-from-text
+                     :domain :cue-chains
+                     :entity-key [col row]
+                     :effect-path full-effect-path}
+     :on-mode-change-event {:event/type :chain/set-ui-mode
+                            :domain :cue-chains
+                            :entity-key [col row]
+                            :effect-path full-effect-path}
+     
+     ;; RGB curves props - use :cue-chains domain with full effect path
+     :rgb-domain :cue-chains
+     :rgb-entity-key [col row]
+     :rgb-effect-path full-effect-path}))
 
 (defn- effect-parameter-editor
   "Parameter editor for the selected effect within an item."
@@ -176,7 +179,10 @@
                      (effects/get-effect (:effect-id selected-effect)))
         current-params (:params selected-effect {})
         params-map (params-vector->map (:parameters effect-def []))
-        ui-mode (get-in dialog-data [:ui-modes effect-path])]
+        ui-mode (get-in dialog-data [:ui-modes effect-path])
+        ;; Build full effect path: item-path + :effects + effect-path
+        full-effect-path (when effect-path
+                           (vec (concat item-path [:effects] effect-path)))]
     {:fx/type :v-box
      :spacing 8
      :style "-fx-background-color: #2A2A2A; -fx-padding: 8;"
@@ -216,14 +222,14 @@
                                             :param-key param-key
                                             :param-spec param-spec
                                             :current-value (get current-params param-key)
-                                            :on-change-event {:event/type :cue-chain/update-item-effect-param
-                                                             :col col :row row
-                                                             :item-path item-path
-                                                             :effect-path effect-path}
-                                            :on-text-event {:event/type :cue-chain/update-effect-param-from-text
-                                                           :col col :row row
-                                                           :item-path item-path
-                                                           :effect-path effect-path}}))}})
+                                            :on-change-event {:event/type :chain/update-param
+                                                              :domain :cue-chains
+                                                              :entity-key [col row]
+                                                              :effect-path full-effect-path}
+                                            :on-text-event {:event/type :chain/update-param-from-text
+                                                            :domain :cue-chains
+                                                            :entity-key [col row]
+                                                            :effect-path full-effect-path}}))}})
                   
                   {:fx/type :label
                    :text "Select an effect from the chain"
