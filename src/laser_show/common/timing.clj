@@ -82,12 +82,13 @@
    - Shared/cloud computing environments"
   [target-time-nanos]
   (let [now (System/nanoTime)
-        sleep-nanos (- target-time-nanos now)]
+        sleep-nanos (- target-time-nanos now)
+        max-busy-wait-nanos (* 12 1000 1000)] ; 10ms in nanoseconds
     (when (pos? sleep-nanos)
-      ;; Phase 1: Thread/sleep for bulk delay (>2ms)
-      ;; Leave 2ms buffer for busy-wait to ensure we don't overshoot
-      (when (> sleep-nanos 2000000) ; 2ms in nanoseconds
-        (let [coarse-sleep-ms (quot (- sleep-nanos 2000000) 1000000)]
+      ;; Phase 1: Thread/sleep for bulk delay (>10ms)
+      ;; Leave 10ms buffer for busy-wait to ensure we don't overshoot
+      (when (> sleep-nanos max-busy-wait-nanos) ; 2ms in nanoseconds
+        (let [coarse-sleep-ms (quot (- sleep-nanos max-busy-wait-nanos) 1000000)]
           (Thread/sleep coarse-sleep-ms)))
       
       ;; Phase 2: Busy-wait for precise timing (<2ms remaining)

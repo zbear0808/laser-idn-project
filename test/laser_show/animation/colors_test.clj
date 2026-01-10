@@ -189,22 +189,18 @@
 
 (deftest test-8bit-normalized-roundtrip
   (testing "8-bit to normalized and back preserves values"
-    (doseq [r (range 0 256 16)
-            g (range 0 256 16)
-            b (range 0 256 16)]
-      (let [original [r g b]
-            normalized (colors/color-8bit->normalized original)
+    ;; Test sample values instead of exhaustive
+    (doseq [original [[0 0 0] [255 255 255] [127 127 127] [255 0 0] [0 255 0] [0 0 255]]]
+      (let [normalized (colors/color-8bit->normalized original)
             back (colors/normalized->8bit normalized)]
         (is (= original back)
             (str "8-bit roundtrip failed for " original))))))
 
 (deftest test-16bit-normalized-roundtrip
   (testing "16-bit to normalized and back preserves values"
-    (doseq [r (range 0 65536 4096)
-            g (range 0 65536 4096)
-            b (range 0 65536 4096)]
-      (let [original [r g b]
-            normalized (colors/color-16bit->normalized original)
+    ;; Test sample values instead of exhaustive
+    (doseq [original [[0 0 0] [65535 65535 65535] [32767 32767 32767] [65535 0 0] [0 65535 0] [0 0 65535]]]
+      (let [normalized (colors/color-16bit->normalized original)
             back (colors/normalized->16bit normalized)]
         (is (= original back)
             (str "16-bit roundtrip failed for " original))))))

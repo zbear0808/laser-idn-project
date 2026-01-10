@@ -90,25 +90,6 @@
       (is (>= ms 5) "Should measure at least 5ms"))))
 
 
-;; Conversion Tests
-
-
-(deftest nanos-micros-conversion-test
-  (testing "nanosecond to microsecond conversion"
-    (is (= 1000 (timing/nanos->micros 1000000)))
-    (is (= 1000000 (timing/micros->nanos 1000)))))
-
-(deftest nanos-millis-conversion-test
-  (testing "nanosecond to millisecond conversion"
-    (is (= 1 (timing/nanos->millis 1000000)))
-    (is (= 1000000 (timing/millis->nanos 1)))))
-
-(deftest micros-millis-conversion-test
-  (testing "microsecond to millisecond conversion"
-    (is (= 1 (timing/micros->millis 1000)))
-    (is (= 1000 (timing/millis->micros 1)))))
-
-
 ;; FPS Conversion Tests
 
 

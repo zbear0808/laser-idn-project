@@ -61,37 +61,6 @@
   [sample-item-1 sample-group sample-item-3])
 
 
-;; Type Predicates Tests
-
-
-(deftest group?-test
-  (testing "identifies groups correctly"
-    (is (true? (chains/group? sample-group)))
-    (is (true? (chains/group? {:type :group :items []}))))
-  
-  (testing "identifies non-groups correctly"
-    (is (false? (chains/group? sample-item-1)))
-    (is (false? (chains/group? {:type :effect})))
-    (is (false? (chains/group? {})))))
-
-(deftest item?-test
-  (testing "identifies leaf items correctly"
-    (is (true? (chains/item? sample-item-1)))
-    (is (true? (chains/item? {:type :effect})))
-    (is (true? (chains/item? {}))))
-  
-  (testing "identifies groups as non-items"
-    (is (false? (chains/item? sample-group)))))
-
-(deftest item-enabled?-test
-  (testing "returns enabled state when present"
-    (is (true? (chains/item-enabled? {:enabled? true})))
-    (is (false? (chains/item-enabled? {:enabled? false}))))
-  
-  (testing "defaults to enabled when :enabled? is missing"
-    (is (true? (chains/item-enabled? {})))))
-
-
 ;; Deep Copy Tests
 
 

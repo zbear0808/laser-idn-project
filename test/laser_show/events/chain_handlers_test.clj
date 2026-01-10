@@ -227,8 +227,8 @@
 
 (deftest handle-group-selected-test
   (testing "Group multiple items"
-    (let [state-with-selection (assoc-in sample-state 
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths] 
+    (let [state-with-selection (assoc-in sample-state
+                                         [:ui :dialogs :effect-chain-editor :data :selected-paths]
                                          #{[0] [3]})
           result (ch/handle-group-selected state-with-selection effects-config "My Group")
           effects (get-in result [:chains :effect-chains [0 0] :items])]
@@ -239,13 +239,42 @@
       (is (= 2 (count (:items (first effects)))))))
   
   (testing "Group selects the new group"
-    (let [state-with-selection (assoc-in sample-state 
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths] 
+    (let [state-with-selection (assoc-in sample-state
+                                         [:ui :dialogs :effect-chain-editor :data :selected-paths]
                                          #{[0] [3]})
           result (ch/handle-group-selected state-with-selection effects-config "My Group")
           selected (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths])]
       (is (= 1 (count selected)))
-      (is (contains? selected [0])))))
+      (is (contains? selected [0]))))
+  
+  (testing "Group works when selecting group + all its children + another item"
+    ;; This tests the normalize-selected-paths fix:
+    ;; When a group AND all its children are selected along with another top-level item,
+    ;; the children should be treated as redundant, allowing grouping at the same level.
+    ;;
+    ;; Scenario: [empty-group, group-with-child{child}]
+    ;; Selected: #{[0] [1] [1 :items 0]}
+    ;; After normalization: #{[0] [1]} (child removed as redundant)
+    ;; Both at same level -> grouping should succeed
+    (let [empty-group (make-group "c" "Empty Group" [])
+          child-effect (make-effect "d")
+          group-with-child (make-group "e" "Group With Child" [child-effect])
+          test-chain [empty-group group-with-child]
+          test-state (-> base-state
+                         (assoc-in [:chains :effect-chains [0 0]] {:items test-chain :active true})
+                         (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths]
+                                   #{[0] [1] [1 :items 0]}))
+          result (ch/handle-group-selected test-state effects-config "Combined Group")
+          effects (get-in result [:chains :effect-chains [0 0] :items])]
+      ;; Should have exactly 1 item: the new group containing both original groups
+      (is (= 1 (count effects)))
+      (is (= "Combined Group" (:name (first effects))))
+      ;; The new group should contain 2 items: empty-group and group-with-child
+      (is (= 2 (count (:items (first effects)))))
+      ;; Verify the child stayed inside group-with-child
+      (let [nested-group (second (:items (first effects)))]
+        (is (= "Group With Child" (:name nested-group)))
+        (is (= 1 (count (:items nested-group))))))))
 
 (deftest handle-ungroup-test
   (testing "Ungroup inserts children at group position"

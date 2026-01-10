@@ -20,7 +20,7 @@
             [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.css.core :as css]
-            [laser-show.views.components.tabs :as tabs]
+            [laser-show.views.components.tabbed-bank :as tabbed-bank]
             [laser-show.views.components.effect-param-ui :as effect-param-ui]
             [laser-show.views.components.list :as list])
   (:import [javafx.scene.input KeyCode KeyEvent]))
@@ -48,66 +48,36 @@
    {:id :intensity :label "Intensity"}
    {:id :zone :label "Zone"}])
 
-(defn- add-effect-button
-  "Button to add a specific effect to the chain."
-  [{:keys [col row effect-def]}]
-  (let [params-map (params-vector->map (:parameters effect-def))]
-    {:fx/type :button
-     :text (:name effect-def)
-     :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 4 8;"
-     :on-action {:event/type :chain/add-item
-                 :domain :effect-chains
-                 :entity-key [col row]
-                 :item {:effect-id (:id effect-def)
-                        :params (into {}
-                                      (for [[k v] params-map]
-                                        [k (:default v)]))}}}))
-
-(defn- effect-bank-tab-content
-  "Content for a single category tab in the effect bank."
-  [{:keys [col row category]}]
-  (let [category-effects (effects-by-category category)]
-    {:fx/type :flow-pane
-     :hgap 4
-     :vgap 4
-     :padding 8
-     :style "-fx-background-color: #1E1E1E;"
-     :children (if (seq category-effects)
-                 (vec (for [effect category-effects]
-                        {:fx/type add-effect-button
-                         :col col :row row
-                         :effect-def effect}))
-                 [{:fx/type :label
-                   :text "No effects"
-                   :style "-fx-text-fill: #606060;"}])}))
-
-(defn- effect-bank-content-router
-  "Routes to the correct effect bank content based on active tab."
-  [{:keys [col row active-bank-tab]}]
-  (case active-bank-tab
-    :color {:fx/type effect-bank-tab-content :col col :row row :category :color}
-    :shape {:fx/type effect-bank-tab-content :col col :row row :category :shape}
-    :intensity {:fx/type effect-bank-tab-content :col col :row row :category :intensity}
-    {:fx/type effect-bank-tab-content :col col :row row :category :shape}))
+(defn- make-effect-button-fn
+  "Create a button factory function for effect items.
+   
+   Returns a function (effect-def) -> cljfx button description."
+  [{:keys [col row]}]
+  (fn [effect-def]
+    (let [params-map (params-vector->map (:parameters effect-def))]
+      {:fx/type :button
+       :text (:name effect-def)
+       :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 4 8;"
+       :on-action {:event/type :chain/add-item
+                   :domain :effect-chains
+                   :entity-key [col row]
+                   :item {:effect-id (:id effect-def)
+                          :params (into {}
+                                        (for [[k v] params-map]
+                                          [k (:default v)]))}}})))
 
 (defn- effect-bank-tabs
-  "Tabbed effect bank using shared styled-tab-bar - Color, Shape, Intensity."
+  "Tabbed effect bank using generic tabbed-bank component."
   [{:keys [col row active-bank-tab]}]
-  (let [active-tab (or active-bank-tab :shape)]
-    {:fx/type :v-box
-     :pref-height 150
-     :children [{:fx/type tabs/styled-tab-bar
-                 :tabs effect-bank-tab-definitions
-                 :active-tab active-tab
-                 :on-tab-change {:event/type :ui/update-dialog-data
-                                 :dialog-id :effect-chain-editor}}
-                {:fx/type :scroll-pane
-                 :fit-to-width true
-                 :v-box/vgrow :always
-                 :style "-fx-background-color: #1E1E1E; -fx-background: #1E1E1E;"
-                 :content {:fx/type effect-bank-content-router
-                           :col col :row row
-                           :active-bank-tab active-tab}}]}))
+  {:fx/type tabbed-bank/tabbed-bank
+   :tab-definitions effect-bank-tab-definitions
+   :active-tab (or active-bank-tab :shape)
+   :on-tab-change {:event/type :ui/update-dialog-data
+                   :dialog-id :effect-chain-editor}
+   :items-fn effects-by-category
+   :item-button-fn (make-effect-button-fn {:col col :row row})
+   :empty-text "No effects"
+   :pref-height 150})
 
 
 ;; Right Bottom: Parameter Editor

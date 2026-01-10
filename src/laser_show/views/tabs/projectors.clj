@@ -13,6 +13,7 @@
             [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.views.components.custom-param-renderers :as custom-renderers]
+            [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.list :as list]))
 
 
@@ -360,145 +361,93 @@
 
 
 ;; Effect Parameter Editors
+;; Uses shared param-controls with projector-specific event templates
 
 
-(defn- slider-param-editor
-  "Slider control for a numeric parameter."
-  [{:keys [projector-id effect-idx param-key value min-val max-val label step]
-    :or {min-val 0.0 max-val 1.0 step 0.01}}]
-  {:fx/type :h-box
-   :spacing 8
-   :alignment :center-left
-   :children [{:fx/type :label
-               :text (str label ":")
-               :pref-width 80
-               :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
-              {:fx/type :slider
-               :min min-val
-               :max max-val
-               :value (or value (/ (+ min-val max-val) 2))
-               :block-increment step
-               :pref-width 150
-               :on-value-changed {:event/type :projectors/update-effect-param
-                                  :projector-id projector-id
-                                  :effect-idx effect-idx
-                                  :param-key param-key}}
-              {:fx/type :label
-               :text (format "%.2f" (double (or value 0)))
-               :pref-width 40
-               :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-family: 'Consolas', monospace;"}]})
-
-(defn- checkbox-param-editor
-  "Checkbox control for a boolean parameter."
-  [{:keys [projector-id effect-idx param-key value label]}]
-  {:fx/type :h-box
-   :spacing 8
-   :alignment :center-left
-   :children [{:fx/type :check-box
-               :selected (boolean value)
-               :text label
-               :style "-fx-text-fill: #B0B0B0;"
-               :on-selected-changed {:event/type :projectors/update-effect-param
-                                     :projector-id projector-id
-                                     :effect-idx effect-idx
-                                     :param-key param-key}}]})
+(defn- make-projector-param-event
+  "Create event template for projector effect parameter updates."
+  [projector-id effect-idx]
+  {:event/type :projectors/update-effect-param
+   :projector-id projector-id
+   :effect-idx effect-idx})
 
 (defn- rgb-calibration-editor
   "Editor for RGB calibration effect with gain sliders."
   [{:keys [projector-id effect-idx params]}]
-  {:fx/type :v-box
-   :spacing 6
-   :children [{:fx/type slider-param-editor
-               :projector-id projector-id
-               :effect-idx effect-idx
-               :param-key :r-gain
-               :value (get params :r-gain 1.0)
-               :min-val 0.0
-               :max-val 2.0
-               :step 0.01
-               :label "Red Gain"}
-              {:fx/type slider-param-editor
-               :projector-id projector-id
-               :effect-idx effect-idx
-               :param-key :g-gain
-               :value (get params :g-gain 1.0)
-               :min-val 0.0
-               :max-val 2.0
-               :step 0.01
-               :label "Green Gain"}
-              {:fx/type slider-param-editor
-               :projector-id projector-id
-               :effect-idx effect-idx
-               :param-key :b-gain
-               :value (get params :b-gain 1.0)
-               :min-val 0.0
-               :max-val 2.0
-               :step 0.01
-               :label "Blue Gain"}]})
+  (let [event-template (make-projector-param-event projector-id effect-idx)]
+    {:fx/type :v-box
+     :spacing 6
+     :children [{:fx/type param-controls/param-slider
+                 :param-key :r-gain
+                 :param-spec {:min 0.0 :max 2.0 :label "Red Gain" :type :float}
+                 :current-value (get params :r-gain 1.0)
+                 :on-change-event event-template
+                 :on-text-event event-template}
+                {:fx/type param-controls/param-slider
+                 :param-key :g-gain
+                 :param-spec {:min 0.0 :max 2.0 :label "Green Gain" :type :float}
+                 :current-value (get params :g-gain 1.0)
+                 :on-change-event event-template
+                 :on-text-event event-template}
+                {:fx/type param-controls/param-slider
+                 :param-key :b-gain
+                 :param-spec {:min 0.0 :max 2.0 :label "Blue Gain" :type :float}
+                 :current-value (get params :b-gain 1.0)
+                 :on-change-event event-template
+                 :on-text-event event-template}]}))
 
 (defn- gamma-correction-editor
   "Editor for gamma correction effect."
   [{:keys [projector-id effect-idx params]}]
-  {:fx/type :v-box
-   :spacing 6
-   :children [{:fx/type slider-param-editor
-               :projector-id projector-id
-               :effect-idx effect-idx
-               :param-key :r-gamma
-               :value (get params :r-gamma 2.2)
-               :min-val 0.5
-               :max-val 4.0
-               :step 0.1
-               :label "Red Gamma"}
-              {:fx/type slider-param-editor
-               :projector-id projector-id
-               :effect-idx effect-idx
-               :param-key :g-gamma
-               :value (get params :g-gamma 2.2)
-               :min-val 0.5
-               :max-val 4.0
-               :step 0.1
-               :label "Green Gamma"}
-              {:fx/type slider-param-editor
-               :projector-id projector-id
-               :effect-idx effect-idx
-               :param-key :b-gamma
-               :value (get params :b-gamma 2.2)
-               :min-val 0.5
-               :max-val 4.0
-               :step 0.1
-               :label "Blue Gamma"}]})
+  (let [event-template (make-projector-param-event projector-id effect-idx)]
+    {:fx/type :v-box
+     :spacing 6
+     :children [{:fx/type param-controls/param-slider
+                 :param-key :r-gamma
+                 :param-spec {:min 0.5 :max 4.0 :label "Red Gamma" :type :float}
+                 :current-value (get params :r-gamma 2.2)
+                 :on-change-event event-template
+                 :on-text-event event-template}
+                {:fx/type param-controls/param-slider
+                 :param-key :g-gamma
+                 :param-spec {:min 0.5 :max 4.0 :label "Green Gamma" :type :float}
+                 :current-value (get params :g-gamma 2.2)
+                 :on-change-event event-template
+                 :on-text-event event-template}
+                {:fx/type param-controls/param-slider
+                 :param-key :b-gamma
+                 :param-spec {:min 0.5 :max 4.0 :label "Blue Gamma" :type :float}
+                 :current-value (get params :b-gamma 2.2)
+                 :on-change-event event-template
+                 :on-text-event event-template}]}))
 
 (defn- axis-flip-editor
   "Editor for axis flip effect."
   [{:keys [projector-id effect-idx params]}]
-  {:fx/type :h-box
-   :spacing 16
-   :children [{:fx/type checkbox-param-editor
-               :projector-id projector-id
-               :effect-idx effect-idx
-               :param-key :flip-x
-               :value (get params :flip-x false)
-               :label "Flip X"}
-              {:fx/type checkbox-param-editor
-               :projector-id projector-id
-               :effect-idx effect-idx
-               :param-key :flip-y
-               :value (get params :flip-y false)
-               :label "Flip Y"}]})
+  (let [event-template (make-projector-param-event projector-id effect-idx)]
+    {:fx/type :h-box
+     :spacing 16
+     :children [{:fx/type param-controls/param-checkbox
+                 :param-key :flip-x
+                 :param-spec {:label "Flip X" :type :bool}
+                 :current-value (get params :flip-x false)
+                 :on-change-event event-template}
+                {:fx/type param-controls/param-checkbox
+                 :param-key :flip-y
+                 :param-spec {:label "Flip Y" :type :bool}
+                 :current-value (get params :flip-y false)
+                 :on-change-event event-template}]}))
 
 (defn- rotation-offset-editor
   "Editor for rotation offset effect."
   [{:keys [projector-id effect-idx params]}]
-  {:fx/type slider-param-editor
-   :projector-id projector-id
-   :effect-idx effect-idx
-   :param-key :angle
-   :value (get params :angle 0.0)
-   :min-val -180.0
-   :max-val 180.0
-   :step 1.0
-   :label "Angle (°)"})
+  (let [event-template (make-projector-param-event projector-id effect-idx)]
+    {:fx/type param-controls/param-slider
+     :param-key :angle
+     :param-spec {:min -180.0 :max 180.0 :label "Angle (°)" :type :float}
+     :current-value (get params :angle 0.0)
+     :on-change-event event-template
+     :on-text-event event-template}))
 
 (defn- effect-parameter-editor
   "Renders the appropriate editor for a selected effect.

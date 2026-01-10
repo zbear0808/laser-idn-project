@@ -9,140 +9,40 @@
    - Event-template pattern for flexible event routing
    - Support for visual/numeric mode toggle
    - Automatic control type selection based on parameter spec
-   - Custom visual renderers for spatial and curve effects"
-  (:require [laser-show.views.components.custom-param-renderers :as custom-renderers]))
+   - Custom visual renderers for spatial and curve effects
+   
+   Uses parameter-controls namespace for basic control components."
+  (:require [laser-show.views.components.parameter-controls :as param-controls]
+            [laser-show.views.components.custom-param-renderers :as custom-renderers]))
 
 
-;; Parameter Spec Conversion
+;; Re-export commonly used functions from parameter-controls
 
 
-(defn params-vector->map
+(def params-vector->map
   "Convert effect parameters from vector format (registry) to map format (UI).
-   
-   Registry format: [{:key :x-scale :default 1.0 :min 0.0 :max 2.0} ...]
-   UI format: {:x-scale {:default 1.0 :min 0.0 :max 2.0} ...}
-   
-   This makes it easier to look up parameter specs by key in the UI."
-  [params-vector]
-  (into {}
-        (mapv (fn [p] [(:key p) (dissoc p :key)])
-              params-vector)))
+   See parameter-controls/params-vector->map for full docs."
+  param-controls/params-vector->map)
 
-
-;; Basic Parameter Controls
-
-
-(defn param-slider
+(def param-slider
   "Slider control for numeric parameters with editable text field.
-   
-   Props:
-   - :param-key - Parameter key (e.g., :x-scale)
-   - :param-spec - Parameter specification {:min :max :default :type ...}
-   - :current-value - Current parameter value
-   - :on-change-event - Event template with :param-key added for slider changes
-   - :on-text-event - Event template with :param-key, :min, :max added for text field"
-  [{:keys [param-key param-spec current-value on-change-event on-text-event]}]
-  (let [{:keys [min max]} param-spec
-        value (or current-value (:default param-spec) 0)]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :label
-                 :text (name param-key)
-                 :pref-width 80
-                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
-                {:fx/type :slider
-                 :min min
-                 :max max
-                 :value (double value)
-                 :pref-width 150
-                 :on-value-changed (assoc on-change-event :param-key param-key)}
-                {:fx/type :text-field
-                 :text (format "%.2f" (double value))
-                 :pref-width 55
-                 :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 11; -fx-padding: 2 4;"
-                 :on-action (assoc on-text-event
-                                   :param-key param-key
-                                   :min min
-                                   :max max)}]}))
+   See parameter-controls/param-slider for full docs."
+  param-controls/param-slider)
 
-(defn param-choice
+(def param-choice
   "Combo-box for choice parameters.
-   
-   Props:
-   - :param-key - Parameter key
-   - :param-spec - Parameter specification with :choices vector
-   - :current-value - Current parameter value
-   - :on-change-event - Event template with :param-key added"
-  [{:keys [param-key param-spec current-value on-change-event]}]
-  (let [choices (:choices param-spec [])
-        value (or current-value (:default param-spec))]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :label
-                 :text (name param-key)
-                 :pref-width 80
-                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
-                {:fx/type :combo-box
-                 :items choices
-                 :value value
-                 :pref-width 150
-                 :button-cell (fn [item] {:text (if item (name item) "")})
-                 :cell-factory {:fx/cell-type :list-cell
-                                :describe (fn [item] {:text (if item (name item) "")})}
-                 :on-value-changed (assoc on-change-event :param-key param-key)}]}))
+   See parameter-controls/param-choice for full docs."
+  param-controls/param-choice)
 
-(defn param-checkbox
+(def param-checkbox
   "Checkbox for boolean parameters.
-   
-   Props:
-   - :param-key - Parameter key
-   - :param-spec - Parameter specification with :default boolean
-   - :current-value - Current parameter value
-   - :on-change-event - Event template with :param-key added"
-  [{:keys [param-key param-spec current-value on-change-event]}]
-  (let [value (if (some? current-value) current-value (:default param-spec false))]
-    {:fx/type :h-box
-     :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :check-box
-                 :text (name param-key)
-                 :selected value
-                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"
-                 :on-selected-changed (assoc on-change-event :param-key param-key)}]}))
+   See parameter-controls/param-checkbox for full docs."
+  param-controls/param-checkbox)
 
-(defn param-control
+(def param-control
   "Render appropriate control based on parameter type.
-   
-   Routes to param-slider, param-choice, or param-checkbox based on
-   the :type field in param-spec.
-   
-   Props:
-   - :param-key - Parameter key
-   - :param-spec - Parameter specification
-   - :current-value - Current parameter value
-   - :on-change-event - Event template for value changes
-   - :on-text-event - Event template for text field changes (slider only)"
-  [{:keys [param-spec] :as props}]
-  (case (:type param-spec :float)
-    :choice {:fx/type param-choice
-             :param-key (:param-key props)
-             :param-spec param-spec
-             :current-value (:current-value props)
-             :on-change-event (:on-change-event props)}
-    :bool {:fx/type param-checkbox
-           :param-key (:param-key props)
-           :param-spec param-spec
-           :current-value (:current-value props)
-           :on-change-event (:on-change-event props)}
-    ;; Default: numeric slider
-    {:fx/type param-slider
-     :param-key (:param-key props)
-     :param-spec param-spec
-     :current-value (:current-value props)
-     :on-change-event (:on-change-event props)
-     :on-text-event (:on-text-event props)}))
+   See parameter-controls/param-control for full docs."
+  param-controls/param-control)
 
 
 ;; Custom Parameter Renderer with Visual Editors
@@ -235,25 +135,15 @@
                                      :fx-key (get spatial-event-keys :effect-path)}
                       
                       ;; Fallback to standard params
-                      {:fx/type :v-box
-                       :spacing 6
-                       :children (vec
-                                  (for [[param-key param-spec] params-map]
-                                    {:fx/type param-control
-                                     :param-key param-key
-                                     :param-spec param-spec
-                                     :current-value (get current-params param-key)
-                                     :on-change-event on-change-event
-                                     :on-text-event on-text-event}))})
+                      {:fx/type param-controls/param-controls-list
+                       :params-map params-map
+                       :current-params current-params
+                       :on-change-event on-change-event
+                       :on-text-event on-text-event})
                     
                     ;; Numeric mode - standard sliders
-                    {:fx/type :v-box
-                     :spacing 6
-                     :children (vec
-                                (for [[param-key param-spec] params-map]
-                                  {:fx/type param-control
-                                   :param-key param-key
-                                   :param-spec param-spec
-                                   :current-value (get current-params param-key)
-                                   :on-change-event on-change-event
-                                   :on-text-event on-text-event}))})]})))
+                    {:fx/type param-controls/param-controls-list
+                     :params-map params-map
+                     :current-params current-params
+                     :on-change-event on-change-event
+                     :on-text-event on-text-event})]})))

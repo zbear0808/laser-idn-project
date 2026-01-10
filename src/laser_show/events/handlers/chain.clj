@@ -110,6 +110,46 @@
                      paths))
          paths)))
 
+(defn- get-descendant-paths
+  "Get all descendant paths of a group at the given path.
+   Returns paths like [1 :items 0], [1 :items 1], [1 :items 0 :items 0] etc."
+  [items-vec group-path]
+  (let [group (get-in items-vec (vec group-path))]
+    (when (chains/group? group)
+      (let [group-items (:items group [])]
+        (chains/paths-in-chain group-items (conj (vec group-path) :items))))))
+
+(defn- normalize-selected-paths
+  "Remove redundant child paths when a group AND all its children are selected.
+   
+   This handles the case where selecting a group plus all its children
+   should be treated as just selecting the group, allowing grouping with
+   other items at the same level.
+   
+   Algorithm:
+   1. For each selected path that is a group
+   2. Get all descendant paths of that group
+   3. If ALL descendants are also selected, remove them (keep only the group)
+   
+   Example: Given chain [empty-group, group-b{child}] where selected = #{[0] [1] [1 :items 0]}
+   - [1] is a group with descendant [1 :items 0]
+   - [1 :items 0] is in selected, so it's redundant
+   - Result: #{[0] [1]} - both at top level, can be grouped"
+  [selected-paths items-vec]
+  (let [;; Find which selected paths are groups
+        group-paths (filter #(chains/group? (get-in items-vec (vec %))) selected-paths)]
+    (reduce
+      (fn [paths group-path]
+        (let [descendant-paths (set (get-descendant-paths items-vec group-path))]
+          (if (and (seq descendant-paths)
+                   (every? #(contains? paths %) descendant-paths))
+            ;; All descendants are selected - remove them as redundant
+            (apply disj paths descendant-paths)
+            ;; Not all descendants selected - keep as is
+            paths)))
+      (set selected-paths)
+      group-paths)))
+
 (defn- remove-at-path
   "Remove an item at the given path from a nested vector structure."
   [items path]
@@ -380,9 +420,11 @@
   "Group currently selected items into a new group.
    
    Uses two-phase operation to avoid index-shifting bugs:
-   1. Collect selected items by ID
-   2. Remove items by ID set
-   3. Insert new group at computed position
+   1. Normalize selection (remove redundant children when group + all children selected)
+   2. Filter to root paths only
+   3. Collect selected items by ID
+   4. Remove items by ID set
+   5. Insert new group at computed position
    
    Parameters:
    - state: Application state
@@ -395,8 +437,12 @@
         selected-paths (get-selected-paths state config)
         items-vec (get-items state config)]
     (if (seq selected-paths)
-      (let [;; Filter to root paths only
-            root-paths (filter-to-root-paths selected-paths)
+      (let [;; Normalize selection: if a group + ALL its children are selected,
+            ;; treat it as just the group being selected. This allows grouping
+            ;; items at different visual levels when their parent groups are also selected.
+            normalized-paths (normalize-selected-paths selected-paths items-vec)
+            ;; Filter to root paths only
+            root-paths (filter-to-root-paths normalized-paths)
             ;; Sort by visual order to maintain relative ordering
             all-paths (vec (chains/paths-in-chain items-vec))
             sorted-paths (sort-by #(.indexOf all-paths %) root-paths)

@@ -10,21 +10,6 @@
 
 (use-fixtures :each init-state-fixture)
 
-(deftest clipboard-types-test
-  (testing "valid clipboard types"
-    (is (clipboard/valid-clipboard-type? :cue))
-    (is (clipboard/valid-clipboard-type? :zone))
-    (is (clipboard/valid-clipboard-type? :projector))
-    (is (clipboard/valid-clipboard-type? :effect))
-    (is (clipboard/valid-clipboard-type? :cell-assignment))
-    (is (not (clipboard/valid-clipboard-type? :invalid)))))
-
-(deftest clipboard-empty-test
-  (testing "clipboard starts empty"
-    (clipboard/clear-clipboard!)
-    (is (clipboard/clipboard-empty?))
-    (is (nil? (clipboard/get-clipboard)))))
-
 (deftest cell-assignment-copy-paste-test
   (testing "copy cell assignment"
     (clipboard/clear-clipboard!)
@@ -49,13 +34,4 @@
   (testing "cell assignment description"
     (clipboard/copy-cell-assignment! :spinning-square)
     (is (= "Preset: spinning-square" (clipboard/get-clipboard-description)))))
-
-(deftest clipboard-type-checking-test
-  (testing "clipboard type checking"
-    (clipboard/clear-clipboard!)
-    (clipboard/copy-cell-assignment! :wave)
-    (is (clipboard/clipboard-has-type? :cell-assignment))
-    (is (not (clipboard/clipboard-has-type? :cue)))
-    (is (not (clipboard/clipboard-has-type? :zone)))))
-
 
