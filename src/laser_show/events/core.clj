@@ -279,30 +279,39 @@
   [event]
   (if-let [dispatch @*dispatch-fn]
     ;; Use app's dispatch when available (async via agent)
-    (dispatch event)
+    (do
+      (log/debug "dispatch! using app dispatch-fn for event:" (:event/type event))
+      (dispatch event))
     ;; Fallback: Manually inject co-effects and process effects
     ;; (used during testing or before app is initialized)
-    (let [enriched-event (assoc event
+    (let [_ (log/debug "dispatch! using FALLBACK for event:" (:event/type event))
+          enriched-event (assoc event
                                :state (state/get-raw-state)
                                :time (System/currentTimeMillis))
-        effects (handlers/handle-event enriched-event)]
-    ;; Apply state effect if present
-    (when-let [new-state (:state effects)]
-      (state/reset-state! new-state))
-    
-    ;; Handle clipboard effects (for keyboard shortcuts in effect chain editor)
-    (when-let [effects-to-copy (:clipboard/copy-effects effects)]
-      (effect-clipboard-copy-effects effects-to-copy nil))
-    
-    (when-let [paste-params (:clipboard/paste-effects effects)]
-      (effect-clipboard-paste-effects paste-params dispatch!))
-    
-    ;; Handle projector scanning effect (for auto-scan on startup)
-    (when-let [scan-params (:projectors/scan effects)]
-      (effect-projectors-scan scan-params dispatch!))
-    
-    ;; Handle dispatch effect (for event chaining)
-    (when-let [event-to-dispatch (:dispatch effects)]
-      (dispatch! event-to-dispatch))
-    
-    effects)))
+          effects (handlers/handle-event enriched-event)]
+      (log/debug "dispatch! fallback - effects keys:" (keys effects))
+      ;; Apply state effect if present
+      (when-let [new-state (:state effects)]
+        (log/debug "dispatch! fallback - applying :state effect")
+        (state/reset-state! new-state))
+      
+      ;; Handle clipboard effects (for keyboard shortcuts in effect chain editor)
+      (when-let [effects-to-copy (:clipboard/copy-effects effects)]
+        (effect-clipboard-copy-effects effects-to-copy nil))
+      
+      (when-let [paste-params (:clipboard/paste-effects effects)]
+        (effect-clipboard-paste-effects paste-params dispatch!))
+      
+      ;; Handle projector scanning effect (for auto-scan on startup)
+      (when-let [scan-params (:projectors/scan effects)]
+        (effect-projectors-scan scan-params dispatch!))
+      
+      ;; Handle dispatch effect (for event chaining)
+      (when-let [event-to-dispatch (:dispatch effects)]
+        (log/debug "dispatch! fallback - processing :dispatch effect:" (:event/type event-to-dispatch))
+        (try
+          (dispatch! event-to-dispatch)
+          (catch Exception e
+            (log/error e "dispatch! fallback - error dispatching nested event"))))
+      
+      effects)))

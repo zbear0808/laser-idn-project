@@ -227,6 +227,27 @@
     acc
     items)))
 
+(defn collect-descendant-ids
+ "Collect all descendant IDs from a group's children recursively.
+  Does NOT include the group's own ID, only its descendants.
+  Returns nil if item is not a group.
+  
+  Parameters:
+  - group: A group item (must have :type :group)
+  
+  Returns: Set of UUIDs of all descendants, or nil if not a group"
+ [group]
+ (when (group? group)
+   (reduce
+     (fn [ids item]
+       (let [with-item (if (:id item) (conj ids (:id item)) ids)]
+         (if (group? item)
+           (into with-item (collect-descendant-ids item))
+           with-item)))
+     #{}
+     (:items group []))))
+
+
 ;; Counting
 
 

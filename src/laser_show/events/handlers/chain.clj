@@ -899,12 +899,16 @@
   
   This is the main entry point for :chain/* events from the dispatcher."
  [{:keys [event/type domain entity-key state] :as event}]
+ (log/debug "chain/handle ENTER - type:" type "domain:" domain "entity-key:" entity-key)
  (let [config (chain-config domain entity-key)]
    (case type
      :chain/set-items
-     {:state (-> state
-                 (assoc-in (:items-path config) (:items event))
-                 mark-dirty)}
+     (do
+       (log/debug "chain/set-items - items count:" (count (:items event))
+                  "items-path:" (:items-path config))
+       {:state (-> state
+                   (assoc-in (:items-path config) (:items event))
+                   mark-dirty)})
      
      :chain/update-selection
      ;; Store the selected-ids from the list component callback

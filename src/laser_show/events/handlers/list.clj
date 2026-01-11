@@ -4,7 +4,9 @@
    These handlers manage selection, drag-drop, and rename state
    for all hierarchical list components (effect chains, cue chains, item effects).
    
-   State is stored in [:list-ui :components component-id]")
+   State is stored in [:list-ui :components component-id]"
+  (:require [clojure.tools.logging :as log]
+            [laser-show.animation.chains :as chains]))
 
 
 ;; Selection Handlers
@@ -84,6 +86,71 @@
                            :drop-target-id nil
                            :drop-position nil})})
 
+(defn- handle-perform-drop
+  "Perform the heavy computation for drag-drop operation.
+   
+   This runs on the agent thread (async), moving computation off the FX thread.
+   After computing new items, dispatches the on-change-event with the result.
+   
+   IMPORTANT: Items are read from state using domain/entity-key to avoid stale
+   closure issues. The items passed in the event are ignored.
+   
+   Event keys:
+   - :component-id - List component identifier
+   - :dragging-ids - Set of IDs being dragged
+   - :target-id - Drop target item ID
+   - :drop-position - :before, :after, or :into
+   - :on-change-event - Event type to dispatch with result (e.g., :chain/set-items)
+   - :on-change-params - Base params for the change event (must include :domain and :entity-key)
+   - :items-key - Key for items in dispatched event (default :items)"
+  [{:keys [component-id dragging-ids target-id drop-position
+           on-change-event on-change-params items-key state]
+    :or {items-key :items}}]
+  ;; Read items DIRECTLY from state to avoid stale closure issues
+  ;; The items passed in the event may be stale from drag handler setup
+  (let [{:keys [domain entity-key]} on-change-params
+        items-path [:chains domain entity-key :items]
+        items (get-in state items-path [])]
+    (log/debug "handle-perform-drop ENTER - thread:" (.getName (Thread/currentThread))
+               "component-id:" component-id
+               "on-change-event:" on-change-event
+               "on-change-params:" on-change-params
+               "items-key:" items-key
+               "items-path:" items-path
+               "items count:" (count items)
+               "dragging-ids:" dragging-ids)
+    (if (and (seq dragging-ids) (seq items))
+      (let [id->path (chains/find-paths-by-ids items dragging-ids)
+            from-paths (set (vals id->path))]
+        (log/debug "handle-perform-drop - from-paths:" from-paths)
+        (if (seq from-paths)
+          (let [new-items (chains/move-items-to-target items from-paths target-id drop-position)
+                dispatch-event (assoc on-change-params
+                                      :event/type on-change-event
+                                      items-key new-items)]
+            (log/debug "handle-perform-drop SUCCESS - dispatching:" (:event/type dispatch-event)
+                       "new-items count:" (count new-items))
+            ;; Clear drag state AND dispatch result event
+            {:state (update-in state [:list-ui :components component-id]
+                               merge {:dragging-ids nil
+                                      :drop-target-id nil
+                                      :drop-position nil})
+             :dispatch dispatch-event})
+          ;; No valid paths found - just clear drag state
+          (do
+            (log/debug "handle-perform-drop - no valid from-paths, clearing drag state")
+            {:state (update-in state [:list-ui :components component-id]
+                               merge {:dragging-ids nil
+                                      :drop-target-id nil
+                                      :drop-position nil})})))
+      ;; No items or dragging IDs - just clear drag state
+      (do
+        (log/debug "handle-perform-drop - no items or dragging IDs")
+        {:state (update-in state [:list-ui :components component-id]
+                           merge {:dragging-ids nil
+                                  :drop-target-id nil
+                                  :drop-position nil})}))))
+
 
 ;; Rename Handlers
 
@@ -114,6 +181,7 @@
     :list/start-drag (handle-start-drag event)
     :list/update-drop-target (handle-update-drop-target event)
     :list/clear-drag (handle-clear-drag event)
+    :list/perform-drop (handle-perform-drop event)
     :list/start-rename (handle-start-rename event)
     :list/cancel-rename (handle-cancel-rename event)
     

@@ -129,21 +129,31 @@
                      :drop-position drop-position}))
 
 (defn- handle-drop!
-  "Handle drop operation. Moves dragged items to target location
-   and calls :on-items-changed callback."
+  "Handle drop operation by dispatching to async handler.
+   The heavy computation (move-items-to-target) is performed by the event handler
+   on the agent thread, not on the JavaFX Application Thread."
   [component-id target-id drop-position items props]
   (let [current-state (state/get-in-state [:list-ui :components component-id])
         dragging-ids (:dragging-ids current-state)]
+    (log/debug "handle-drop! ENTER - thread:" (.getName (Thread/currentThread))
+               "component-id:" component-id
+               "on-change-event:" (:on-change-event props)
+               "on-change-params:" (:on-change-params props)
+               "items-key:" (:items-key props)
+               "dragging-ids:" dragging-ids)
     (when (and (seq dragging-ids) (seq items))
-      ;; Convert IDs to paths
-      (let [id->path (chains/find-paths-by-ids items dragging-ids)
-            from-paths (set (vals id->path))]
-        (when (seq from-paths)
-          ;; Use centralized move logic from chains.clj
-          (let [new-items (chains/move-items-to-target items from-paths target-id drop-position)]
-            ;; Notify parent with new items
-            (when-let [callback (:on-items-changed props)]
-              (callback new-items))))))))
+      ;; Dispatch raw data - handler does computation async
+      (log/debug "handle-drop! dispatching :list/perform-drop event")
+      (events/dispatch!
+        {:event/type :list/perform-drop
+         :component-id component-id
+         :items items
+         :dragging-ids dragging-ids
+         :target-id target-id
+         :drop-position drop-position
+         :on-change-event (:on-change-event props)
+         :on-change-params (:on-change-params props)
+         :items-key (or (:items-key props) :items)}))))
 
 (defn- clear-drag-state!
   "Clear all drag-related state after drop or cancel."
@@ -249,6 +259,50 @@
 ;; ============================================================================
 
 
+(defn- normalize-selected-ids
+  "Remove redundant descendant IDs when a group AND all its descendants are selected.
+   
+   This handles the case where selecting a group plus all its children
+   should be treated as just selecting the group, allowing grouping with
+   other items at the same level.
+   
+   Algorithm:
+   1. For each selected ID that corresponds to a group in items
+   2. Get all descendant IDs of that group
+   3. If ALL descendants are also in selected-ids, remove them as redundant
+   
+   Example:
+   - items: [group-a{child-1, child-2}, effect-b]
+   - selected-ids: #{group-a-id child-1-id child-2-id effect-b-id}
+   - After normalization: #{group-a-id effect-b-id}
+   - Both are at top level -> grouping succeeds"
+  [selected-ids items]
+  (let [id->path (chains/find-paths-by-ids items selected-ids)
+        ;; Find which selected IDs correspond to groups
+        group-ids (filter
+                    (fn [id]
+                      (when-let [path (get id->path id)]
+                        (chains/group? (chains/get-item-at-path items path))))
+                    selected-ids)]
+    (reduce
+      (fn [ids group-id]
+        (let [path (get id->path group-id)
+              group (chains/get-item-at-path items path)
+              descendant-ids (chains/collect-descendant-ids group)]
+          (if (and (seq descendant-ids)
+                   ;; Check against ORIGINAL selected-ids, not accumulated ids.
+                   ;; This is critical because groups may be processed in any order,
+                   ;; and a nested group might remove its descendants first, causing
+                   ;; parent group's check to incorrectly fail.
+                   (every? #(contains? selected-ids %) descendant-ids))
+            ;; All descendants are selected - remove them as redundant
+            (apply disj ids descendant-ids)
+            ;; Not all descendants selected - keep as is
+            ids)))
+      (set selected-ids)
+      group-ids)))
+
+
 (defn- create-empty-group!
   "Create an empty group at the end of the chain."
   [component-id items props]
@@ -268,7 +322,10 @@
 
 (defn- group-selected!
   "Group selected items into a new folder.
-   Items must be at the same nesting level to be grouped together."
+   Items must be at the same nesting level to be grouped together.
+   
+   When a group AND all its children are selected, this is treated as just
+   selecting the group (children are redundant), allowing grouping to succeed."
   [component-id items props]
   (let [current-state (state/get-in-state [:list-ui :components component-id])
         selected-ids (:selected-ids current-state #{})]
@@ -280,7 +337,13 @@
       (log/warn "group-selected! FAILED - no items selected in component" component-id)
       
       :else
-      (let [id->path (chains/find-paths-by-ids items selected-ids)
+      ;; Normalize selection: if a group + ALL its children are selected,
+      ;; treat it as just the group being selected
+      (let [normalized-ids (normalize-selected-ids selected-ids items)
+            _ (when (not= selected-ids normalized-ids)
+                (log/debug "group-selected! normalized-ids:" normalized-ids
+                           "(removed" (- (count selected-ids) (count normalized-ids)) "redundant children)"))
+            id->path (chains/find-paths-by-ids items normalized-ids)
             all-paths (vals id->path)
             parent-paths (map (fn [path]
                                (if (= 1 (count path))
@@ -317,7 +380,7 @@
             (when-let [callback (:on-selection-changed props)]
               (callback {:selected-ids #{group-id} :last-selected-id group-id}))
             (log/debug "group-selected! SUCCESS"))
-          (log/warn "group-selected! FAILED - items not at same level. Selected" (count selected-ids) "items across" (count unique-parents) "different parent levels"))))))
+          (log/warn "group-selected! FAILED - items not at same level. Selected" (count normalized-ids) "items across" (count unique-parents) "different parent levels"))))))
 
 (defn- ungroup!
   "Ungroup a folder, splicing its contents into the parent."
@@ -594,32 +657,12 @@
 
 
 ;; ============================================================================
-;; Drop Indicator Line Component
-;; ============================================================================
-
-
-(defn- drop-indicator-line
-  "Visual horizontal line showing where item will be inserted during drag-and-drop."
-  [_]
-  {:fx/type :h-box
-   :style-class "drop-indicator-line"
-   :alignment :center-left
-   :children [{:fx/type :label
-               :text "▶"
-               :style-class "drop-indicator-arrow"}
-              {:fx/type :region
-               :style-class "drop-indicator-bar"
-               :h-box/hgrow :always}]})
-
-
-;; ============================================================================
 ;; Group Header Component
 ;; ============================================================================
 
 
 (defn- group-header
-  "Header for a group showing collapse toggle, name, and item count.
-   Shows visual drop indicator line when dropping before this group."
+  "Header for a group showing collapse toggle, name, and item count."
   [{:keys [component-id items props group depth selected? dragging? drop-target-id drop-position renaming? parent-disabled?]}]
   (let [group-id (:id group)
         enabled? (:enabled? group true)
@@ -629,7 +672,6 @@
         is-drop-target? (= group-id drop-target-id)
         drop-before? (and is-drop-target? (= drop-position :before))
         drop-into? (and is-drop-target? (= drop-position :into))
-        show-before-indicator? drop-before?
         
         header-classes (group-header-style-classes
                         {:depth depth
@@ -641,92 +683,82 @@
         name-classes (group-name-style-classes
                       {:depth depth
                        :selected? selected?
-                       :effectively-disabled? effectively-disabled?})
-        
-        ;; The actual header card content
-        header-card {:fx/type fx/ext-on-instance-lifecycle
-                     :on-created (fn [node]
-                                   (setup-drag-source! node group-id component-id)
-                                   (setup-drag-target! node group-id true component-id items props)
-                                   ;; Click handler for selection and double-click rename
-                                    (.setOnMouseClicked node
-                                      (reify javafx.event.EventHandler
-                                        (handle [_ event]
-                                          (let [click-count (.getClickCount event)
-                                                ctrl? (.isShortcutDown event)
-                                                shift? (.isShiftDown event)]
-                                            (cond
-                                              ;; Double-click - start rename
-                                              (= click-count 2)
-                                              (do
-                                                (start-rename! component-id group-id)
-                                                (.consume event))
-                                              ;; Single-click - select
-                                              :else
-                                              (do
-                                                (handle-selection! component-id group-id ctrl? shift? items props)
-                                                ;; Request focus on parent list container so keyboard shortcuts work
-                                                (request-list-focus! node)
-                                                (.consume event))))))))
-                     :desc {:fx/type :h-box
-                            :style-class header-classes
-                            :children [;; Collapse/Expand chevron
-                                       {:fx/type :button
-                                        :text (if collapsed? "▶" "▼")
-                                        :style-class "group-collapse-btn"
-                                        :on-action (fn [_] (toggle-collapse! component-id items props group-id))}
-                                       
-                                       ;; Enable/disable checkbox
-                                       {:fx/type :check-box
-                                        :selected enabled?
-                                        :on-selected-changed (fn [enabled?]
-                                                               (set-enabled! component-id items props group-id enabled?))}
-                                       
-                                       ;; Group name (editable when renaming)
-                                       (if renaming?
-                                         {:fx/type fx/ext-on-instance-lifecycle
-                                          :on-created (fn [^javafx.scene.control.TextField node]
-                                                        (.requestFocus node)
-                                                        (.selectAll node))
-                                          :desc {:fx/type :text-field
-                                                 :text (or (:name group) "Group")
-                                                 :style-class "group-name-input"
-                                                 :on-action (fn [^javafx.event.ActionEvent e]
-                                                              (let [text-field (.getSource e)
-                                                                    new-name (.getText text-field)]
-                                                                (commit-rename! component-id items props group-id new-name)))
-                                                 :on-key-pressed (fn [^javafx.scene.input.KeyEvent e]
-                                                                   (case (.getCode e)
-                                                                     javafx.scene.input.KeyCode/ESCAPE
-                                                                     (cancel-rename! component-id)
-                                                                     nil))
-                                                 :on-focused-changed (fn [focused?]
-                                                                       (when-not focused?
-                                                                         (cancel-rename! component-id)))}}
-                                         {:fx/type :label
-                                          :text (or (:name group) "Group")
-                                          :style-class name-classes})
-                                       
-                                       ;; Item count badge
-                                       {:fx/type :label
-                                        :text (str "(" item-count ")")
-                                        :style-class "group-count-badge"}
-                                       
-                                       {:fx/type :region :h-box/hgrow :always}
-                                       
-                                       ;; Ungroup button
-                                       {:fx/type :button
-                                        :text "⊗"
-                                        :style-class "group-ungroup-btn"
-                                        :on-action (fn [_] (ungroup! component-id items props group-id))}]}}]
-    ;; Wrap in v-box to show drop indicator line when dropping before
-    (if show-before-indicator?
-      {:fx/type :v-box
-       :spacing 0
-       :children [{:fx/type drop-indicator-line}
-                  header-card]}
-      ;; No indicator needed - just return the header card
-      header-card)))
+                       :effectively-disabled? effectively-disabled?})]
+    {:fx/type fx/ext-on-instance-lifecycle
+     :on-created (fn [node]
+                   (setup-drag-source! node group-id component-id)
+                   (setup-drag-target! node group-id true component-id items props)
+                   ;; Click handler for selection and double-click rename
+                    (.setOnMouseClicked node
+                      (reify javafx.event.EventHandler
+                        (handle [_ event]
+                          (let [click-count (.getClickCount event)
+                                ctrl? (.isShortcutDown event)
+                                shift? (.isShiftDown event)]
+                            (cond
+                              ;; Double-click - start rename
+                              (= click-count 2)
+                              (do
+                                (start-rename! component-id group-id)
+                                (.consume event))
+                              ;; Single-click - select
+                              :else
+                              (do
+                                (handle-selection! component-id group-id ctrl? shift? items props)
+                                ;; Request focus on parent list container so keyboard shortcuts work
+                                (request-list-focus! node)
+                                (.consume event))))))))
+     :desc {:fx/type :h-box
+            :style-class header-classes
+            :children [;; Collapse/Expand chevron
+                       {:fx/type :button
+                        :text (if collapsed? "▶" "▼")
+                        :style-class "group-collapse-btn"
+                        :on-action (fn [_] (toggle-collapse! component-id items props group-id))}
+                       
+                       ;; Enable/disable checkbox
+                       {:fx/type :check-box
+                        :selected enabled?
+                        :on-selected-changed (fn [enabled?]
+                                               (set-enabled! component-id items props group-id enabled?))}
+                       
+                       ;; Group name (editable when renaming)
+                       (if renaming?
+                         {:fx/type fx/ext-on-instance-lifecycle
+                          :on-created (fn [^javafx.scene.control.TextField node]
+                                        (.requestFocus node)
+                                        (.selectAll node))
+                          :desc {:fx/type :text-field
+                                 :text (or (:name group) "Group")
+                                 :style-class "group-name-input"
+                                 :on-action (fn [^javafx.event.ActionEvent e]
+                                              (let [text-field (.getSource e)
+                                                    new-name (.getText text-field)]
+                                                (commit-rename! component-id items props group-id new-name)))
+                                 :on-key-pressed (fn [^javafx.scene.input.KeyEvent e]
+                                                   (case (.getCode e)
+                                                     javafx.scene.input.KeyCode/ESCAPE
+                                                     (cancel-rename! component-id)
+                                                     nil))
+                                 :on-focused-changed (fn [focused?]
+                                                       (when-not focused?
+                                                         (cancel-rename! component-id)))}}
+                         {:fx/type :label
+                          :text (or (:name group) "Group")
+                          :style-class name-classes})
+                       
+                       ;; Item count badge
+                       {:fx/type :label
+                        :text (str "(" item-count ")")
+                        :style-class "group-count-badge"}
+                       
+                       {:fx/type :region :h-box/hgrow :always}
+                       
+                       ;; Ungroup button
+                       {:fx/type :button
+                        :text "⊗"
+                        :style-class "group-ungroup-btn"
+                        :on-action (fn [_] (ungroup! component-id items props group-id))}]}}))
 
 
 ;; ============================================================================
@@ -735,15 +767,12 @@
 
 
 (defn- list-item-card
-  "A single item in the list with drag-and-drop support.
-   Shows visual drop indicator lines when this item is a drop target."
+  "A single item in the list with drag-and-drop support."
   [{:keys [component-id items props item item-label depth selected? dragging? drop-target-id drop-position parent-disabled?]}]
   (let [item-id (:id item)
         enabled? (:enabled? item true)
         effectively-disabled? (or (not enabled?) parent-disabled?)
         is-drop-target? (= item-id drop-target-id)
-        show-before-indicator? (and is-drop-target? (= drop-position :before))
-        show-after-indicator? (and is-drop-target? (= drop-position :after))
         
         item-classes (list-item-style-classes
                       {:depth depth
@@ -754,47 +783,33 @@
                        :effectively-disabled? effectively-disabled?})
         name-classes (list-item-name-style-classes
                       {:selected? selected?
-                       :effectively-disabled? effectively-disabled?})
-        
-        ;; The actual item card content
-        item-card {:fx/type fx/ext-on-instance-lifecycle
-                   :on-created (fn [node]
-                                 (setup-drag-source! node item-id component-id)
-                                 (setup-drag-target! node item-id false component-id items props)
-                                 ;; Click handler for selection
-                                  (.setOnMouseClicked node
-                                    (reify javafx.event.EventHandler
-                                      (handle [_ event]
-                                        (let [ctrl? (.isShortcutDown event)
-                                              shift? (.isShiftDown event)]
-                                          (handle-selection! component-id item-id ctrl? shift? items props)
-                                          ;; Request focus on parent list container so keyboard shortcuts work
-                                          (request-list-focus! node)
-                                          (.consume event))))))
-                   :desc {:fx/type :h-box
-                          :style-class item-classes
-                          :children [;; Enable/disable checkbox
-                                     {:fx/type :check-box
-                                      :selected enabled?
-                                      :on-selected-changed (fn [enabled?]
-                                                             (set-enabled! component-id items props item-id enabled?))}
-                                     
-                                     ;; Item name
-                                     {:fx/type :label
-                                      :text (or item-label "Unknown")
-                                      :style-class name-classes}]}}]
-    ;; Wrap in v-box to show drop indicator lines
-    (if (or show-before-indicator? show-after-indicator?)
-      {:fx/type :v-box
-       :spacing 0
-       :children (filterv some?
-                   [(when show-before-indicator?
-                      {:fx/type drop-indicator-line})
-                    item-card
-                    (when show-after-indicator?
-                      {:fx/type drop-indicator-line})])}
-      ;; No indicators needed - just return the item card
-      item-card)))
+                       :effectively-disabled? effectively-disabled?})]
+    {:fx/type fx/ext-on-instance-lifecycle
+     :on-created (fn [node]
+                   (setup-drag-source! node item-id component-id)
+                   (setup-drag-target! node item-id false component-id items props)
+                   ;; Click handler for selection
+                    (.setOnMouseClicked node
+                      (reify javafx.event.EventHandler
+                        (handle [_ event]
+                          (let [ctrl? (.isShortcutDown event)
+                                shift? (.isShiftDown event)]
+                            (handle-selection! component-id item-id ctrl? shift? items props)
+                            ;; Request focus on parent list container so keyboard shortcuts work
+                            (request-list-focus! node)
+                            (.consume event))))))
+     :desc {:fx/type :h-box
+            :style-class item-classes
+            :children [;; Enable/disable checkbox
+                       {:fx/type :check-box
+                        :selected enabled?
+                        :on-selected-changed (fn [enabled?]
+                                               (set-enabled! component-id items props item-id enabled?))}
+                       
+                       ;; Item name
+                       {:fx/type :label
+                        :text (or item-label "Unknown")
+                        :style-class name-classes}]}}))
 
 
 ;; ============================================================================
@@ -903,13 +918,17 @@
    - :header-label - Header text (default 'LIST')
    - :empty-text - Empty state text (optional)
    - :allow-groups? - Enable grouping (default true)
-   - :component-id - Unique ID for state isolation (required)"
+   - :component-id - Unique ID for state isolation (required)
+   - :on-change-event - Event type for async drag-drop (optional)
+   - :on-change-params - Base params for async drag-drop (optional)
+   - :items-key - Key for items in dispatched event (optional)"
   [{:keys [fx/context items get-item-label on-items-changed on-selection-changed
            on-copy clipboard-items header-label empty-text allow-groups?
-           component-id]
+           component-id on-change-event on-change-params items-key]
     :or {header-label "LIST"
          empty-text "No items"
-         allow-groups? true}
+         allow-groups? true
+         items-key :items}
     :as props}]
   (let [;; Subscribe to UI state from context
         ui-state (fx/sub-ctx context subs/list-ui-state component-id)
@@ -1368,4 +1387,8 @@
                         :header-label header-label
                         :empty-text empty-text
                         :allow-groups? allow-groups?
-                        :component-id component-id}]}}))
+                        :component-id component-id
+                        ;; Pass event-based props for async drag-drop
+                        :on-change-event on-change-event
+                        :on-change-params on-change-params
+                        :items-key items-key}]}}))

@@ -327,30 +327,6 @@
        
        
        ;; ============================================
-       ;; Drop Indicator Line
-       ;; Visual horizontal line showing where item will be inserted
-       ;; ============================================
-       
-       ".drop-indicator-line"
-       {:-fx-padding ["0px" "4px"]
-        :-fx-min-height 4
-        :-fx-max-height 4
-        :-fx-pref-height 4
-        :-fx-alignment "CENTER_LEFT"}
-       
-       ".drop-indicator-arrow"
-       {:-fx-text-fill drop-border
-        :-fx-font-size 10
-        :-fx-font-weight "bold"}
-       
-       ".drop-indicator-bar"
-       {:-fx-background-color drop-border
-        :-fx-pref-height 2
-        :-fx-min-height 2
-        :-fx-background-radius 1}
-       
-       
-       ;; ============================================
        ;; Scroll Pane
        ;; ============================================
        
