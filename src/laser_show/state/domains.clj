@@ -177,8 +177,6 @@
            :doc "Map of projector-id -> projector configuration (no :effects, see :chains)"}
    :active-projector {:default nil
                       :doc "Currently selected projector ID for editing"}
-   :selected-effect-idx {:default nil
-                         :doc "Index of currently selected effect in projector's chain"}
    :test-pattern-mode {:default nil
                        :doc "Active test pattern: nil, :grid, or :corners"}
    :discovered-devices {:default []

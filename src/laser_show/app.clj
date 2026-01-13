@@ -108,8 +108,8 @@
   
   (let [app (create-app)]
     (reset! *app app)
-    ;; Wire dispatch! to use app's dispatch function
-    (events/set-dispatch-fn! (:dispatch app)))
+    ;; Wire dispatch! to use app's handler (wrapped with async agent)
+    (events/set-dispatch-fn! (:handler app)))
   
   ;; Auto-scan for IDN devices on startup
   (log/info "Starting automatic device discovery...")

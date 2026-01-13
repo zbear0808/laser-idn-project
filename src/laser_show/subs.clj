@@ -362,11 +362,6 @@
   [context]
   (filterv :enabled? (fx/sub-ctx context projectors-list)))
 
-(defn selected-projector-effect-idx
-  "Get the index of the selected effect in the projector's chain.
-   Depends on: projectors domain"
-  [context]
-  (:selected-effect-idx (fx/sub-val context :projectors)))
 
 (defn projector-effect-ui-state
   "Get the effect chain UI state for a specific projector.

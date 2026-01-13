@@ -4,8 +4,12 @@
    Uses both the centralized state and the system clipboard for EDN data.
    
    NOTE: Clipboard state is stored in state.core at [:ui :clipboard]
-   to maintain a single source of truth for all application state."
-  (:require [clojure.string :as str]
+   to maintain a single source of truth for all application state.
+   
+   THREADING: System clipboard operations MUST run on the JavaFX thread.
+   All functions that access JavaFX Clipboard use fx/on-fx-thread internally."
+  (:require [cljfx.api :as fx]
+            [clojure.string :as str]
             [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
             [laser-show.state.queries :as queries]
@@ -51,40 +55,47 @@
   (Clipboard/getSystemClipboard))
 
 (defn- copy-to-system-clipboard!
-  "Copy EDN data to the system clipboard as a string."
+  "Copy EDN data to the system clipboard as a string.
+   MUST be called from any thread - internally uses fx/on-fx-thread."
   [data]
-  (try
-    (let [clipboard (get-system-clipboard)
-          edn-str (ser/serialize-for-clipboard data)
-          content (doto (ClipboardContent.)
-                    (.putString edn-str))]
-      (.setContent clipboard content)
-      true)
-    (catch Exception e
-      (log/warn "Failed to copy to system clipboard:" (.getMessage e))
-      false)))
+  (let [edn-str (ser/serialize-for-clipboard data)]
+    ;; Use fx/on-fx-thread to ensure we're on the JavaFX thread
+    ;; This blocks until the operation completes
+    @(fx/on-fx-thread
+       (try
+         (let [clipboard (get-system-clipboard)
+               content (doto (ClipboardContent.)
+                         (.putString edn-str))]
+           (.setContent clipboard content)
+           true)
+         (catch Exception e
+           (log/warn "Failed to copy to system clipboard:" (.getMessage e))
+           false)))))
 
 (defn- read-from-system-clipboard
   "Read string content from the system clipboard and try to parse as EDN.
    Only returns data if it's a valid clipboard data structure (has :type key).
-   Silently returns nil for non-EDN content (like text from other apps)."
+   Silently returns nil for non-EDN content (like text from other apps).
+   MUST be called from any thread - internally uses fx/on-fx-thread."
   []
-  (try
-    (let [clipboard (get-system-clipboard)]
-      (when (.hasString clipboard)
-        (let [content (.getString clipboard)]
-          (when (and (string? content)
-                     ;; Quick check - must start with { to be valid EDN map
-                     (str/starts-with? (str/trim content) "{"))
-            ;; Use silent mode to avoid logging errors for non-EDN clipboard content
-            (let [data (ser/deserialize content :silent? true)]
-              (when (and (map? data)
-                         (contains? data :type)
-                         (valid-clipboard-type? (:type data)))
-                data))))))
-    (catch Exception _
-      ;; Silently return nil - system clipboard often contains non-parseable content
-      nil)))
+  ;; Use fx/on-fx-thread to ensure we're on the JavaFX thread
+  @(fx/on-fx-thread
+     (try
+       (let [clipboard (get-system-clipboard)]
+         (when (.hasString clipboard)
+           (let [content (.getString clipboard)]
+             (when (and (string? content)
+                        ;; Quick check - must start with { to be valid EDN map
+                        (str/starts-with? (str/trim content) "{"))
+               ;; Use silent mode to avoid logging errors for non-EDN clipboard content
+               (let [data (ser/deserialize content :silent? true)]
+                 (when (and (map? data)
+                            (contains? data :type)
+                            (valid-clipboard-type? (:type data)))
+                   data))))))
+       (catch Exception _
+         ;; Silently return nil - system clipboard often contains non-parseable content
+         nil))))
 
 
 ;; Generic Clipboard Operations
@@ -98,16 +109,18 @@
       (get-internal-clipboard)))
 
 (defn clear-clipboard!
-  "Clear the clipboard (both internal state and system clipboard)."
+  "Clear the clipboard (both internal state and system clipboard).
+   MUST be called from any thread - internally uses fx/on-fx-thread."
   []
   (set-internal-clipboard! nil)
-  (try
-    (let [clipboard (get-system-clipboard)
-          content (doto (ClipboardContent.)
-                    (.putString ""))]
-      (.setContent clipboard content))
-    (catch Exception _
-      nil)))
+  @(fx/on-fx-thread
+     (try
+       (let [clipboard (get-system-clipboard)
+             content (doto (ClipboardContent.)
+                       (.putString ""))]
+         (.setContent clipboard content))
+       (catch Exception _
+         nil))))
 
 (defn clipboard-has-type?
   "Check if clipboard contains data of a specific type."

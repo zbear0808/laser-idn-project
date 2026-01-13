@@ -46,6 +46,7 @@
     (case domain
       "grid" (grid/handle event)
       "effects" (effects/handle event)
+      "effect-chain" (effects/handle event)  ; Effect chain bank events -> effects handler
       "cue-chain" (cue-chain/handle event)
       "projectors" (projectors/handle event)
       "timing" (timing/handle event)

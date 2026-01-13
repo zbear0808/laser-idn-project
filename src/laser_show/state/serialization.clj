@@ -57,15 +57,14 @@
   (try
     (edn/read-string {:eof ::eof} edn-str)
     (catch Exception e
-      (if default
-        default
-        (if on-error
-          (on-error e)
-          (do
-            (when-not silent?
-              (log/error "Deserialization error:" (.getMessage e))
-              (log/debug "Input string (first 100 chars):" (subs (str edn-str) 0 (min 100 (count (str edn-str))))))
-            nil))))))
+      (cond
+        default default
+        on-error (on-error e)
+        :else (do
+                (when-not silent?
+                  (log/error "Deserialization error:" (.getMessage e))
+                  (log/debug "Input string (first 100 chars):" (subs (str edn-str) 0 (min 100 (count (str edn-str))))))
+                nil)))))
 
 
 ;; Validation & Type Checking
@@ -90,17 +89,17 @@
    => {:type :cue}"
   [edn-str & {:keys [schema-fn on-error on-invalid default]}]
   (let [data (deserialize edn-str :on-error on-error :default default)]
-    (if (and data schema-fn)
-      (if (schema-fn data)
-        data
-        (if default
-          default
-          (if on-invalid
-            (on-invalid data)
-            (do
+    (cond
+      ;; No data or no schema - return data as-is
+      (not (and data schema-fn)) data
+      ;; Schema validates - return data
+      (schema-fn data) data
+      ;; Schema fails - use fallback
+      default default
+      on-invalid (on-invalid data)
+      :else (do
               (log/warn "Schema validation failed for data:" data)
               nil))))
-      data)))
 
 (defn with-type-check
   "Create a schema validator that checks for a specific :type field.
@@ -180,22 +179,21 @@
   [filepath & {:keys [if-not-found on-error schema-fn default]
                :or {if-not-found nil}}]
   (let [file (io/file filepath)]
-    (if (.exists file)
+    (if-not (.exists file)
+      if-not-found
       (try
         (let [content (slurp file)
               data (deserialize content :on-error on-error :default default)]
-          (if schema-fn
-            (if (schema-fn data)
-              data
-              (or default if-not-found))
-            data))
+          (cond
+            (not schema-fn) data
+            (schema-fn data) data
+            :else (or default if-not-found)))
         (catch Exception e
-          (if on-error
-            (on-error e)
-            (do
-              (log/error "Error loading file" filepath ":" (.getMessage e))
-              (or default if-not-found)))))
-      if-not-found)))
+          (cond
+            on-error (on-error e)
+            :else (do
+                    (log/error "Error loading file" filepath ":" (.getMessage e))
+                    (or default if-not-found))))))))
 
 
 ;; String/Clipboard Operations

@@ -18,7 +18,8 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
             [laser-show.events.handlers.chain :as chain-handlers]
-            [laser-show.events.handlers.effect-params :as effect-params]))
+            [laser-show.events.handlers.effect-params :as effect-params]
+            [laser-show.common.util :as u]))
 
 
 ;; Path Helpers
@@ -67,137 +68,124 @@
 ;; Device/Service Addition
 
 
+(def DEFAULT_PROJECTOR_EFFECTS
+  "Default effects for all projectors - creates fresh instances each time."
+  [{:effect-id :rgb-curves
+    :id (random-uuid)
+    :enabled? true
+    :params {:r-curve-points [[0 0] [255 255]]
+             :g-curve-points [[0 0] [255 255]]
+             :b-curve-points [[0 0] [255 255]]}}
+   {:effect-id :corner-pin
+    :id (random-uuid)
+    :enabled? true
+    :params {:tl-x -1.0 :tl-y 1.0
+             :tr-x 1.0 :tr-y 1.0
+             :bl-x -1.0 :bl-y -1.0
+             :br-x 1.0 :br-y -1.0}}])
+
+
+(defn- make-projector-config
+  "Create a projector configuration map with defaults.
+   
+   Required keys: :name, :host
+   Optional keys: :port, :service-id, :service-name, :unit-id"
+  [{:keys [name host port service-id service-name unit-id]
+    :or {port 7255}}]
+  {:name name
+   :host host
+   :port port
+   :service-id service-id
+   :service-name service-name
+   :unit-id unit-id
+   :enabled? true
+   :output-config {:color-bit-depth 8
+                   :xy-bit-depth 16}
+   :status {:connected? false}})
+
+
 (defn- handle-projectors-add-device
   "Add a discovered device as a configured projector.
    If device has services, adds the default service (or first one).
    For multi-output devices, use :projectors/add-service instead."
   [{:keys [device state]}]
-  (let [host (:address device)
-        services (:services device [])
-        ;; Use default service if available, otherwise first, otherwise nil
+  (let [{:keys [address host-name unit-id]
+         device-services :services
+         device-port :port} device
+        services (or device-services [])
         default-service (or (first (filter #(get-in % [:flags :default-service]) services))
                             (first services))
-        service-id (if default-service (:service-id default-service) 0)
-        service-name (when default-service (:name default-service))
-        host-name (:host-name device)
-        ;; Prefer service name, then host name, then IP address
-        name (or service-name host-name host)
+        {:keys [service-id]
+         :or {service-id 0}} default-service
+        service-name (:name default-service)
+        name (or service-name
+                 (when host-name (str host-name "." service-id))
+                 address)
         projector-id (keyword (str "projector-" (System/currentTimeMillis)))
-        ;; Default effect chain with color calibration and corner pin
-        default-effects [{:effect-id :rgb-curves
-                          :id (random-uuid)
-                          :enabled? true
-                          :params {:r-curve-points [[0 0] [255 255]]
-                                   :g-curve-points [[0 0] [255 255]]
-                                   :b-curve-points [[0 0] [255 255]]}}
-                         {:effect-id :corner-pin
-                          :id (random-uuid)
-                          :enabled? true
-                          :params {:tl-x -1.0 :tl-y 1.0
-                                   :tr-x 1.0 :tr-y 1.0
-                                   :bl-x -1.0 :bl-y -1.0
-                                   :br-x 1.0 :br-y -1.0}}]
-        projector-config {:name name
-                          :host host
-                          :port (:port device 7255)
-                          :service-id service-id
-                          :service-name service-name
-                          :unit-id (:unit-id device)
-                          :enabled? true
-                          :output-config {:color-bit-depth 8
-                                          :xy-bit-depth 16}
-                          :status {:connected? false}}]
+        projector-config (make-projector-config
+                           {:name name
+                            :host address
+                            :port (or device-port 7255)
+                            :service-id service-id
+                            :service-name service-name
+                            :unit-id unit-id})]
     {:state (-> state
                 (assoc-in [:projectors :items projector-id] projector-config)
-                (assoc-in [:chains :projector-effects projector-id :items] default-effects)
+                (assoc-in [:chains :projector-effects projector-id :items] DEFAULT_PROJECTOR_EFFECTS)
                 (assoc-in [:projectors :active-projector] projector-id)
-                h/mark-dirty)}))
+                (h/mark-dirty))}))
+
 
 (defn- handle-projectors-add-service
   "Add a specific service/output from a discovered device as a projector.
    Used when a device has multiple outputs and user wants to add a specific one."
   [{:keys [device service state]}]
-  (let [host (:address device)
-        service-id (:service-id service)
-        service-name (:name service)
-        host-name (:host-name device)
-        ;; Prefer service name, then host name, then IP address
-        name (or service-name host-name host)
+  (let [{:keys [address host-name unit-id]
+         device-port :port} device
+        {:keys [service-id]
+         service-name :name} service
+        name (or service-name host-name address)
         projector-id (keyword (str "projector-" (System/currentTimeMillis) "-" service-id))
-        ;; Default effect chain with color calibration and corner pin
-        default-effects [{:effect-id :rgb-curves
-                          :id (random-uuid)
-                          :enabled? true
-                          :params {:r-curve-points [[0 0] [255 255]]
-                                   :g-curve-points [[0 0] [255 255]]
-                                   :b-curve-points [[0 0] [255 255]]}}
-                         {:effect-id :corner-pin
-                          :id (random-uuid)
-                          :enabled? true
-                          :params {:tl-x -1.0 :tl-y 1.0
-                                   :tr-x 1.0 :tr-y 1.0
-                                   :bl-x -1.0 :bl-y -1.0
-                                   :br-x 1.0 :br-y -1.0}}]
-        projector-config {:name name
-                          :host host
-                          :port (:port device 7255)
-                          :service-id service-id
-                          :service-name service-name
-                          :unit-id (:unit-id device)
-                          :enabled? true
-                          :output-config {:color-bit-depth 8
-                                          :xy-bit-depth 16}
-                          :status {:connected? false}}]
+        projector-config (make-projector-config
+                           {:name name
+                            :host address
+                            :port (or device-port 7255)
+                            :service-id service-id
+                            :service-name service-name
+                            :unit-id unit-id})]
     {:state (-> state
                 (assoc-in [:projectors :items projector-id] projector-config)
-                (assoc-in [:chains :projector-effects projector-id :items] default-effects)
+                (assoc-in [:chains :projector-effects projector-id :items] DEFAULT_PROJECTOR_EFFECTS)
                 (assoc-in [:projectors :active-projector] projector-id)
-                h/mark-dirty)}))
+                (h/mark-dirty))}))
+
 
 (defn- handle-projectors-add-all-services
   "Add all services from a discovered device as configured projectors."
   [{:keys [device state]}]
-  (let [host (:address device)
-        services (:services device [])
-        host-name (:host-name device)
+  (let [{:keys [address host-name unit-id]
+         device-services :services
+         device-port :port} device
+        services (or device-services [])
         now (System/currentTimeMillis)
-        ;; Build projector configs and effect chains separately
         projector-data (reduce
-                        (fn [acc [idx service]]
-                          (let [service-id (:service-id service)
-                                service-name (:name service)
-                                ;; Prefer service name, then host name, then IP address
-                                name (or service-name host-name host)
-                                projector-id (keyword (str "projector-" now "-" service-id "-" idx))
-                                default-effects [{:effect-id :rgb-curves
-                                                  :id (random-uuid)
-                                                  :enabled? true
-                                                  :params {:r-curve-points [[0 0] [255 255]]
-                                                           :g-curve-points [[0 0] [255 255]]
-                                                           :b-curve-points [[0 0] [255 255]]}}
-                                                 {:effect-id :corner-pin
-                                                  :id (random-uuid)
-                                                  :enabled? true
-                                                  :params {:tl-x -1.0 :tl-y 1.0
-                                                           :tr-x 1.0 :tr-y 1.0
-                                                           :bl-x -1.0 :bl-y -1.0
-                                                           :br-x 1.0 :br-y -1.0}}]
-                                projector-config {:name name
-                                                  :host host
-                                                  :port (:port device 7255)
-                                                  :service-id service-id
-                                                  :service-name service-name
-                                                  :unit-id (:unit-id device)
-                                                  :enabled? true
-                                                  :output-config {:color-bit-depth 8
-                                                                  :xy-bit-depth 16}
-                                                  :status {:connected? false}}]
-                            (-> acc
-                                (assoc-in [:projectors projector-id] projector-config)
-                                ;; Wrap effects in {:items ...} to match expected structure
-                                (assoc-in [:effects projector-id] {:items default-effects}))))
-                        {:projectors {} :effects {}}
-                        (map-indexed vector services))
+                         (fn [acc [idx service]]
+                           (let [{:keys [service-id]
+                                  service-name :name} service
+                                 name (or service-name host-name address)
+                                 projector-id (keyword (str "projector-" now "-" service-id "-" idx))
+                                 projector-config (make-projector-config
+                                                    {:name name
+                                                     :host address
+                                                     :port (or device-port 7255)
+                                                     :service-id service-id
+                                                     :service-name service-name
+                                                     :unit-id unit-id})]
+                             (-> acc
+                                 (assoc-in [:projectors projector-id] projector-config)
+                                 (assoc-in [:effects projector-id] {:items DEFAULT_PROJECTOR_EFFECTS}))))
+                         {:projectors {} :effects {}}
+                         (map-indexed vector services))
         first-projector-id (first (keys (:projectors projector-data)))]
     {:state (-> state
                 (update-in [:projectors :items] merge (:projectors projector-data))
@@ -205,36 +193,20 @@
                 (assoc-in [:projectors :active-projector] first-projector-id)
                 h/mark-dirty)}))
 
+
 (defn- handle-projectors-add-manual
   "Add a projector manually (not from discovery)."
   [{:keys [name host port state]}]
   (let [projector-id (keyword (str "projector-" (System/currentTimeMillis)))
-        default-effects [{:effect-id :rgb-curves
-                          :id (random-uuid)
-                          :enabled? true
-                          :params {:r-curve-points [[0 0] [255 255]]
-                                   :g-curve-points [[0 0] [255 255]]
-                                   :b-curve-points [[0 0] [255 255]]}}
-                         {:effect-id :corner-pin
-                          :id (random-uuid)
-                          :enabled? true
-                          :params {:tl-x -1.0 :tl-y 1.0
-                                   :tr-x 1.0 :tr-y 1.0
-                                   :bl-x -1.0 :bl-y -1.0
-                                   :br-x 1.0 :br-y -1.0}}]
-        projector-config {:name (or name host)
-                          :host host
-                          :port (or port 7255)
-                          :unit-id nil
-                          :enabled? true
-                          :output-config {:color-bit-depth 8
-                                          :xy-bit-depth 16}
-                          :status {:connected? false}}]
+        projector-config (make-projector-config
+                           {:name (or name host)
+                            :host host
+                            :port (or port 7255)})]
     {:state (-> state
                 (assoc-in [:projectors :items projector-id] projector-config)
-                (assoc-in [:chains :projector-effects projector-id :items] default-effects)
+                (assoc-in [:chains :projector-effects projector-id :items] DEFAULT_PROJECTOR_EFFECTS)
                 (assoc-in [:projectors :active-projector] projector-id)
-                h/mark-dirty)}))
+                (h/mark-dirty))}))
 
 
 ;; Projector Management
@@ -298,11 +270,11 @@
    DEPRECATED: Use :chain/remove-item-at-path with {:domain :projector-effects} instead."
   [{:keys [projector-id effect-idx state]}]
   (let [effects-vec (get-in state [:chains :projector-effects projector-id :items] [])
-        new-effects (vec (concat (subvec effects-vec 0 effect-idx)
-                                 (subvec effects-vec (inc effect-idx))))]
+        new-effects (u/removev-indexed (fn [i _] (= i effect-idx)) effects-vec)]
     {:state (-> state
                 (assoc-in [:chains :projector-effects projector-id :items] new-effects)
                 h/mark-dirty)}))
+
 
 (defn- handle-projectors-reorder-effects
   "Reorder effects in a projector's chain.
@@ -310,30 +282,24 @@
   [{:keys [projector-id from-idx to-idx state]}]
   (let [effects-vec (get-in state [:chains :projector-effects projector-id :items] [])
         effect (nth effects-vec from-idx)
-        without (vec (concat (subvec effects-vec 0 from-idx)
-                             (subvec effects-vec (inc from-idx))))
-        reordered (vec (concat (subvec without 0 to-idx)
-                               [effect]
-                               (subvec without to-idx)))]
+        without (u/removev-indexed (fn [i _] (= i from-idx)) effects-vec)
+        reordered (u/concatv (subvec without 0 to-idx)
+                             [effect]
+                             (subvec without to-idx))]
     {:state (-> state
                 (assoc-in [:chains :projector-effects projector-id :items] reordered)
                 h/mark-dirty)}))
 
 
-;; Legacy Selection
+;; Effect Selection
 
 
 (defn- handle-projectors-select-effect
   "Select an effect in the projector's chain for editing.
-   Supports both legacy index-based selection (:effect-idx) and
-   new path-based selection (:path with :ctrl? and :shift? modifiers)."
-  [{:keys [projector-id effect-idx path ctrl? shift? state] :as _event}]
-  (if path
-    ;; New path-based selection
-    (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-      {:state (chain-handlers/handle-select-item state config path ctrl? shift?)})
-    ;; Legacy index-based selection
-    {:state (assoc-in state [:projectors :selected-effect-idx] effect-idx)}))
+   Uses path-based selection with :ctrl? and :shift? modifiers."
+  [{:keys [projector-id path ctrl? shift? state]}]
+  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
+    {:state (chain-handlers/handle-select-item state config path ctrl? shift?)}))
 
 
 ;; Calibration Effects
@@ -351,7 +317,7 @@
                 (update-in (projector-effects-path projector-id) conj effect-with-fields)
                 (assoc-in (conj ui-path :selected-paths) #{new-effect-path})
                 (assoc-in (conj ui-path :last-selected-path) new-effect-path)
-                h/mark-dirty)}))
+                (h/mark-dirty))}))
 
 
 ;; Corner Pin (projector-specific calibration)

@@ -249,26 +249,25 @@
         last-selected (get-last-selected-path state config)
         items-vec (get-items state config)
         new-paths (cond
+                    ;; Ctrl+click: toggle selection
                     ctrl?
                     (if (contains? current-paths path)
                       (disj current-paths path)
                       (conj current-paths path))
                     
-                    shift?
-                    (if last-selected
-                      ;; Range select: get all paths between anchor and clicked in visual order
-                      (let [all-paths (vec (chains/paths-in-chain items-vec))
-                            anchor-idx (.indexOf all-paths last-selected)
-                            target-idx (.indexOf all-paths path)]
-                        (if (and (>= anchor-idx 0) (>= target-idx 0))
-                          (let [start-idx (min anchor-idx target-idx)
-                                end-idx (max anchor-idx target-idx)]
-                            (into #{} (subvec all-paths start-idx (inc end-idx))))
-                          ;; Fallback if paths not found - just select clicked
-                          #{path}))
-                      ;; No anchor - just select clicked
-                      #{path})
+                    ;; Shift+click with anchor: range select
+                    (and shift? last-selected)
+                    (let [all-paths (vec (chains/paths-in-chain items-vec))
+                          anchor-idx (.indexOf all-paths last-selected)
+                          target-idx (.indexOf all-paths path)]
+                      (if (and (>= anchor-idx 0) (>= target-idx 0))
+                        (let [start-idx (min anchor-idx target-idx)
+                              end-idx (max anchor-idx target-idx)]
+                          (into #{} (subvec all-paths start-idx (inc end-idx))))
+                        ;; Fallback if paths not found - just select clicked
+                        #{path}))
                     
+                    ;; Shift+click without anchor, or regular click: select single
                     :else
                     #{path})
         ;; Only update anchor on regular click or ctrl+click, NOT on shift+click
@@ -495,27 +494,26 @@
   [state config path]
   (let [items-vec (get-items state config)
         item (get-in items-vec path)]
-    (if (chains/group? item)
+    (if-not (chains/group? item)
+      state
       (let [group-items (:items item [])
             is-top-level? (= 1 (count path))
             group-idx (if is-top-level? (first path) (last path))
-            parent-path (if is-top-level? [] (vec (butlast (butlast path))))
-            parent-vec (if is-top-level?
-                         items-vec
-                         (get-in items-vec (conj parent-path :items) []))
+            parent-path (when-not is-top-level? (vec (butlast (butlast path))))
+            parent-vec (cond-> items-vec
+                         (not is-top-level?) (get-in (conj parent-path :items) []))
             ;; Remove group and insert its items
             new-parent (vec (concat (subvec parent-vec 0 group-idx)
                                     group-items
                                     (subvec parent-vec (inc group-idx))))
             ;; Update the items
-            new-items (if is-top-level?
-                        new-parent
-                        (assoc-in items-vec (conj parent-path :items) new-parent))]
+            new-items (cond-> new-parent
+                        (not is-top-level?)
+                        (->> (assoc-in items-vec (conj parent-path :items))))]
         (-> state
             (set-items config new-items)
             (set-selected-paths config #{})
-            mark-dirty))
-      state)))
+            mark-dirty)))))
 
 (defn handle-toggle-collapse
   "Toggle a group's collapsed state.
@@ -777,23 +775,21 @@
         base-items-path (:items-path config)
         ;; If parent-path provided, add to nested location within items
         ;; e.g., for cue-chain item effects: parent-path = [0 :effects]
-        target-path (if parent-path
-                      (vec (concat base-items-path parent-path))
-                      base-items-path)
+        target-path (cond-> base-items-path
+                      parent-path (-> (concat parent-path) vec))
         ;; Ensure the chain exists at base level
-        state-with-chain (if (get-in state base-items-path)
-                           state
-                           (assoc-in state base-items-path []))
+        state-with-chain (cond-> state
+                           (nil? (get-in state base-items-path))
+                           (assoc-in base-items-path []))
         ;; Ensure nested path exists if specified
-        state-with-target (if (and parent-path (nil? (get-in state-with-chain target-path)))
-                            (assoc-in state-with-chain target-path [])
-                            state-with-chain)
+        state-with-target (cond-> state-with-chain
+                            (and parent-path (nil? (get-in state-with-chain target-path)))
+                            (assoc-in target-path []))
         current-items (get-in state-with-target target-path [])
         new-item-idx (count current-items)
         ;; Selection path is relative to items-path, so include parent-path
-        selection-path (if parent-path
-                         (conj (vec parent-path) new-item-idx)
-                         [new-item-idx])]
+        selection-path (cond-> [new-item-idx]
+                         parent-path (->> (into (vec parent-path))))]
     (-> state-with-target
         (update-in target-path conj item-with-fields)
         (assoc-in (conj (:ui-path config) :selected-paths) #{selection-path})
@@ -910,26 +906,9 @@
                    (assoc-in (:items-path config) (:items event))
                    mark-dirty)})
      
-     :chain/update-selection
-     ;; Store the selected-ids from the list component callback
-     ;; The component uses IDs (not paths), so store them in the ui-path for the
-     ;; parent dialog to use (e.g., for parameter editor display)
-     ;;
-     ;; For cue-chains: Also clear item-effects list selection since the selected
-     ;; cue item changed, and the old effects selection is no longer relevant.
-     (let [selected-ids (:selected-ids event)
-           last-selected-id (:last-selected-id event)
-           base-update (-> state
-                           (assoc-in (conj (:ui-path config) :selected-ids) selected-ids)
-                           (assoc-in (conj (:ui-path config) :last-selected-id) last-selected-id))]
-       ;; When cue chain selection changes, clear item-effects list component state
-       ;; This ensures the item-effects list starts fresh when user selects a new cue item
-       {:state (if (= domain :cue-chains)
-                 (let [[col row] entity-key
-                       item-effects-component-id [:item-effects col row]]
-                   (assoc-in base-update [:list-ui :components item-effects-component-id]
-                             {:selected-ids #{} :last-selected-id nil}))
-                 base-update)})
+     ;; NOTE: :chain/update-selection removed - selection state is now managed
+     ;; directly in [:list-ui :components component-id] and read via subs/list-ui-state
+     ;; See list-selection-state-consolidation plan for details.
      
      :chain/select-item
      {:state (handle-select-item state config (:path event) (:ctrl? event) (:shift? event))}

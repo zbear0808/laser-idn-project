@@ -50,36 +50,8 @@
    Parameters:
    - target-time-nanos: Absolute target time in nanoseconds (from System/nanoTime)
    
-   Example:
-   ```clojure
-   ;; Sleep for exactly 10ms from now
-   (let [target (+ (nanotime) 10000000)]
-     (precise-sleep-until target))
-   
-   ;; Precise periodic timing (30 FPS)
-   (loop [next-frame (+ (nanotime) 33333333)]
-     (do-work)
-     (precise-sleep-until next-frame)
-     (recur (+ next-frame 33333333)))
-   ```
-   
-   Trade-offs:
-   - Precision: ±100μs (vs ±1-15ms for Thread/sleep alone)
-   - CPU Usage: 2-5% of one core during sleep (vs <0.1% for Thread/sleep)
-   - Power: Slightly higher during busy-wait phase
-   
-   Suitable for:
-   - Laser control and IDN streaming
-   - Audio processing (low-latency)
-   - Game engine timesteps
-   - Real-time data acquisition
-   - Precision packet pacing
-   
    Not recommended for:
-   - Battery-powered devices
-   - Non-critical timing (UI animations)
-   - Long sleep durations (>1 second)
-   - Shared/cloud computing environments"
+   - Non-critical timing (UI animations)"
   [target-time-nanos]
   (let [now (System/nanoTime)
         sleep-nanos (- target-time-nanos now)

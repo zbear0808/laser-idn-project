@@ -69,13 +69,17 @@
 
 
 (defn- handle-cue-chain-add-preset
-  "Add a preset to the cue chain."
-  [{:keys [col row preset-id state]}]
-  (let [ensure-cell (fn [s]
+  "Add a preset to the cue chain.
+   
+   Supports both legacy format (preset-id) and new data-driven format (item-id from bank)."
+  [{:keys [col row preset-id item-id state]}]
+  (let [;; Support both old :preset-id and new :item-id (from data-driven banks)
+        pid (or preset-id item-id)
+        ensure-cell (fn [s]
                       (if (get-in s [:chains :cue-chains [col row]])
                         s
                         (assoc-in s [:chains :cue-chains [col row]] {:items []})))
-        new-preset (h/ensure-item-fields (cue-chains/create-preset-instance preset-id {}))
+        new-preset (h/ensure-item-fields (cue-chains/create-preset-instance pid {}))
         state-with-cell (ensure-cell state)
         current-items (get-in state-with-cell (cue-chain-path col row) [])
         new-idx (count current-items)
@@ -84,6 +88,31 @@
                 (update-in (cue-chain-path col row) conj new-preset)
                 (assoc-in [:ui :dialogs :cue-chain-editor :data :selected-paths] #{new-path})
                 (assoc-in [:ui :dialogs :cue-chain-editor :data :last-selected-path] new-path)
+                h/mark-dirty)}))
+
+(defn- handle-cue-chain-add-effect-from-bank
+  "Add an effect to a cue chain item from the effect bank.
+   
+   This handles the data-driven event format from effect-bank component,
+   where :item contains the full effect definition and :item-id is the effect-id."
+  [{:keys [col row parent-path item item-id state]}]
+  (let [effect-id (or item-id (:id item))
+        params-map (reduce (fn [acc {:keys [key default]}]
+                             (assoc acc key default))
+                           {}
+                           (:parameters item []))
+        new-effect (h/ensure-item-fields {:effect-id effect-id
+                                          :params params-map})
+        ensure-cell (fn [s]
+                      (if (get-in s [:chains :cue-chains [col row]])
+                        s
+                        (assoc-in s [:chains :cue-chains [col row]] {:items []})))
+        state-with-cell (ensure-cell state)
+        ;; parent-path should be something like [0 :effects]
+        target-path (vec (concat [:chains :cue-chains [col row] :items] parent-path))
+        current-effects (get-in state-with-cell target-path [])]
+    {:state (-> state-with-cell
+                (assoc-in target-path (conj current-effects new-effect))
                 h/mark-dirty)}))
 
 (defn- handle-cue-chain-update-preset-param
@@ -207,6 +236,9 @@
     :cue-chain/update-preset-param (handle-cue-chain-update-preset-param event)
     :cue-chain/update-preset-color (handle-cue-chain-update-preset-color event)
     :cue-chain/update-preset-param-from-text (handle-cue-chain-update-preset-param event)
+    
+    ;; Effect bank (data-driven) - add effect to cue chain item
+    :cue-chain/add-effect-from-bank (handle-cue-chain-add-effect-from-bank event)
     
     ;; Tab switching
     :cue-chain/set-preset-tab (handle-cue-chain-set-preset-tab event)

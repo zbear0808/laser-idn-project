@@ -20,7 +20,7 @@
             [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.css.core :as css]
-            [laser-show.views.components.tabbed-bank :as tabbed-bank]
+            [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.views.components.effect-param-ui :as effect-param-ui]
             [laser-show.views.components.list :as list])
   (:import [javafx.scene.input KeyCode KeyEvent]))
@@ -29,54 +29,25 @@
 ;; Effect Registry Access
 
 
-(defn- effects-by-category
-  "Get effects filtered by category (excludes :calibration)."
-  [category]
-  (effects/list-effects-by-category category))
-
 ;; Use shared params-vector->map from effect-param-ui
 (def params-vector->map effect-param-ui/params-vector->map)
 
 
-;; Right Top: Tabbed Effect Bank
+;; Right Top: Tabbed Effect Bank (using data-driven component)
 
-
-(def effect-bank-tab-definitions
-  "Tab definitions for the effect bank categories."
-  [{:id :shape :label "Shape"}
-   {:id :color :label "Color"}
-   {:id :intensity :label "Intensity"}
-   {:id :zone :label "Zone"}])
-
-(defn- make-effect-button-fn
-  "Create a button factory function for effect items.
-   
-   Returns a function (effect-def) -> cljfx button description."
-  [{:keys [col row]}]
-  (fn [effect-def]
-    (let [params-map (params-vector->map (:parameters effect-def))]
-      {:fx/type :button
-       :text (:name effect-def)
-       :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 4 8;"
-       :on-action {:event/type :chain/add-item
-                   :domain :effect-chains
-                   :entity-key [col row]
-                   :item {:effect-id (:id effect-def)
-                          :params (into {}
-                                        (for [[k v] params-map]
-                                          [k (:default v)]))}}})))
 
 (defn- effect-bank-tabs
-  "Tabbed effect bank using generic tabbed-bank component."
+  "Tabbed effect bank using data-driven effect-bank component."
   [{:keys [col row active-bank-tab]}]
-  {:fx/type tabbed-bank/tabbed-bank
-   :tab-definitions effect-bank-tab-definitions
+  {:fx/type effect-bank/effect-bank
    :active-tab (or active-bank-tab :shape)
    :on-tab-change {:event/type :ui/update-dialog-data
                    :dialog-id :effect-chain-editor}
-   :items-fn effects-by-category
-   :item-button-fn (make-effect-button-fn {:col col :row row})
-   :empty-text "No effects"
+   ;; Data-driven event template - handler will receive :item-id and :item
+   :item-event-template {:event/type :effect-chain/add-effect-from-bank
+                         :col col
+                         :row row}
+   :include-zone? true
    :pref-height 150})
 
 
@@ -195,7 +166,10 @@
   "Main content of the effect chain editor dialog."
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
-        {:keys [col row selected-ids active-bank-tab]} dialog-data
+        {:keys [col row active-bank-tab]} dialog-data
+        ;; Read selection from canonical list-ui state instead of dialog-data
+        list-state (fx/sub-ctx context subs/list-ui-state [:effect-chain col row])
+        selected-ids (:selected-ids list-state #{})
         chains-state (fx/sub-val context :chains)
         cell-data (get-in chains-state [:effect-chains [col row]])
         effect-chain (:items cell-data [])
@@ -228,9 +202,6 @@
                             :fallback-label "Unknown Effect"
                             :on-change-event :chain/set-items
                             :on-change-params {:domain :effect-chains :entity-key [col row]}
-                            :on-selection-event :chain/update-selection
-                            :on-selection-params {:domain :effect-chains :entity-key [col row]}
-                            :selection-key :selected-ids
                             :on-copy-fn (fn [items]
                                           (clipboard/copy-effect-chain! {:effects items}))
                             :clipboard-items clipboard-items

@@ -14,8 +14,7 @@
     :tabs [{:id :color :label \"Color\"}
            {:id :shape :label \"Shape\"}]
     :active-tab :color
-    :on-tab-change {:event/type :some/event}}"
-  (:require [clojure.tools.logging :as log]))
+    :on-tab-change {:event/type :some/event}}")
 
 
 ;; Tab Button Component
@@ -32,7 +31,6 @@
    
    Uses CSS classes: .tab-btn, .tab-btn-active"
   [{:keys [tab-id label active? on-action]}]
-  (log/debug "styled-tab-button rendered:" {:tab-id tab-id :active? active?})
   {:fx/type :button
    :text label
    ;; Use CSS classes from buttons.clj

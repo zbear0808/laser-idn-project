@@ -5,19 +5,29 @@
    - Wrapped event handler with fx/wrap-co-effects and fx/wrap-effects
    - Effect implementations for side-effects (IDN streaming, timing, etc.)
    - The main event-handler to pass to fx/create-app
+   - dispatch! for programmatic event dispatch
    
    Architecture:
    
    Event Flow:
    1. UI dispatches event map {:event/type :grid/trigger-cell :col 0 :row 0}
-   2. wrap-co-effects injects :state and :time into event
-   3. Pure handler processes event, returns effects map
-   4. wrap-effects executes side effects (:state update, :idn/*, etc.)
+   2. Event is queued to agent (returns immediately, non-blocking)
+   3. Agent thread: wrap-co-effects injects :state and :time into event
+   4. Agent thread: Pure handler processes event, returns effects map
+   5. Agent thread: wrap-effects executes side effects (:state update, etc.)
+   6. State atom watch triggers re-render on FX thread
+   
+   Threading:
+   - UI callbacks (inline fns) run briefly on FX thread, then delegate to agent
+   - Co-effects, handlers, and effects all run on agent thread (NOT FX thread)
+   - State updates (atom swap) are thread-safe
+   - Re-rendering happens on FX thread via atom watch
    
    Benefits:
    - Pure handlers are easy to test
    - Side effects are isolated and explicit
-   - State updates preserve cljfx context memoization"
+   - State updates preserve cljfx context memoization
+   - Heavy event processing doesn't block UI rendering"
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
@@ -267,12 +277,19 @@
   (reset! *dispatch-fn dispatch-fn))
 
 (defn dispatch!
-  "Dispatch an event directly, bypassing the wrapped handler.
+  "Dispatch an event through the app's async event handler (agent thread).
    
-   This is useful for:
-   - REPL testing
-   - Non-UI event sources (MIDI, OSC, keyboard)
+   When the app is running, events are queued to the agent and processed
+   asynchronously with full co-effects injection and effects execution.
+   The call returns immediately (non-blocking).
+   
+   Fallback: Before app initialization (or in tests when app not started),
+   processes synchronously on the calling thread with basic effect handling.
+   
+   Use cases:
    - Imperative event handlers in UI (drag/drop, context menus)
+   - Non-UI event sources (MIDI, OSC, keyboard)
+   - REPL testing (uses fallback when app not initialized)
    
    Usage:
    (dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})"

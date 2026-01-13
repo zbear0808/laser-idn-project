@@ -13,7 +13,11 @@
 
 
 (defn- handle-select-item
-  "Handle item selection with different modes (single/ctrl/shift)."
+  "Handle item selection with different modes (single/ctrl/shift).
+   
+   When selecting in a cue-chain component, also clears the item-effects
+   selection since the selected cue item changed and old effects selection
+   is no longer relevant."
   [{:keys [component-id item-id mode selected-ids-override last-id-override state]}]
   (let [current-state (get-in state [:list-ui :components component-id] {})
         {:keys [selected-ids last-selected-id]} current-state
@@ -33,8 +37,20 @@
                     ;; Single click - replace selection
                     :single
                     {:selected-ids #{item-id}
-                     :last-selected-id item-id})]
-    {:state (update-in state [:list-ui :components component-id] merge new-state)}))
+                     :last-selected-id item-id})
+        state-with-selection (update-in state [:list-ui :components component-id] merge new-state)
+        ;; If this is a cue-chain component, clear the item-effects selection
+        ;; The item-effects list shows effects for the selected cue item, so
+        ;; when cue selection changes, old effects selection is no longer valid
+        state-final (if (and (vector? component-id)
+                             (= :cue-chain (first component-id)))
+                      (let [[_ col row] component-id
+                            item-effects-component-id [:item-effects col row]]
+                        (assoc-in state-with-selection
+                                  [:list-ui :components item-effects-component-id]
+                                  {:selected-ids #{} :last-selected-id nil}))
+                      state-with-selection)]
+    {:state state-final}))
 
 (defn- handle-select-all
   "Select all items in the component."
@@ -92,7 +108,7 @@
    This runs on the agent thread (async), moving computation off the FX thread.
    After computing new items, dispatches the on-change-event with the result.
    
-   IMPORTANT: Items are read from state using domain/entity-key to avoid stale
+   IMPORTANT: Items are read from state using items-path to avoid stale
    closure issues. The items passed in the event are ignored.
    
    Event keys:
@@ -101,16 +117,24 @@
    - :target-id - Drop target item ID
    - :drop-position - :before, :after, or :into
    - :on-change-event - Event type to dispatch with result (e.g., :chain/set-items)
-   - :on-change-params - Base params for the change event (must include :domain and :entity-key)
-   - :items-key - Key for items in dispatched event (default :items)"
+   - :on-change-params - Base params for the change event
+   - :items-key - Key for items in dispatched event (default :items)
+   - :items-path - Direct path to items in state (optional, overrides domain/entity-key construction)
+   
+   If :items-path is not provided, constructs path as [:chains domain entity-key :items]
+   using :domain and :entity-key from on-change-params."
   [{:keys [component-id dragging-ids target-id drop-position
-           on-change-event on-change-params items-key state]
+           on-change-event on-change-params items-key items-path state]
     :or {items-key :items}}]
   ;; Read items DIRECTLY from state to avoid stale closure issues
   ;; The items passed in the event may be stale from drag handler setup
   (let [{:keys [domain entity-key]} on-change-params
-        items-path [:chains domain entity-key :items]
-        items (get-in state items-path [])]
+        ;; Use explicit items-path if provided, otherwise construct from domain/entity-key
+        items-path (or items-path [:chains domain entity-key :items])
+        items (get-in state items-path [])
+        clear-drag-state {:dragging-ids nil
+                          :drop-target-id nil
+                          :drop-position nil}]
     (log/debug "handle-perform-drop ENTER - thread:" (.getName (Thread/currentThread))
                "component-id:" component-id
                "on-change-event:" on-change-event
@@ -119,37 +143,32 @@
                "items-path:" items-path
                "items count:" (count items)
                "dragging-ids:" dragging-ids)
-    (if (and (seq dragging-ids) (seq items))
+    (cond
+      ;; No items or dragging IDs - just clear drag state
+      (not (and (seq dragging-ids) (seq items)))
+      (do
+        (log/debug "handle-perform-drop - no items or dragging IDs")
+        {:state (update-in state [:list-ui :components component-id] merge clear-drag-state)})
+      
+      ;; Have items and dragging IDs - try to perform drop
+      :else
       (let [id->path (chains/find-paths-by-ids items dragging-ids)
             from-paths (set (vals id->path))]
         (log/debug "handle-perform-drop - from-paths:" from-paths)
         (if (seq from-paths)
+          ;; Valid paths - perform move and dispatch
           (let [new-items (chains/move-items-to-target items from-paths target-id drop-position)
                 dispatch-event (assoc on-change-params
                                       :event/type on-change-event
                                       items-key new-items)]
             (log/debug "handle-perform-drop SUCCESS - dispatching:" (:event/type dispatch-event)
                        "new-items count:" (count new-items))
-            ;; Clear drag state AND dispatch result event
-            {:state (update-in state [:list-ui :components component-id]
-                               merge {:dragging-ids nil
-                                      :drop-target-id nil
-                                      :drop-position nil})
+            {:state (update-in state [:list-ui :components component-id] merge clear-drag-state)
              :dispatch dispatch-event})
-          ;; No valid paths found - just clear drag state
+          ;; No valid paths - just clear drag state
           (do
             (log/debug "handle-perform-drop - no valid from-paths, clearing drag state")
-            {:state (update-in state [:list-ui :components component-id]
-                               merge {:dragging-ids nil
-                                      :drop-target-id nil
-                                      :drop-position nil})})))
-      ;; No items or dragging IDs - just clear drag state
-      (do
-        (log/debug "handle-perform-drop - no items or dragging IDs")
-        {:state (update-in state [:list-ui :components component-id]
-                           merge {:dragging-ids nil
-                                  :drop-target-id nil
-                                  :drop-position nil})}))))
+            {:state (update-in state [:list-ui :components component-id] merge clear-drag-state)}))))))
 
 
 ;; Rename Handlers

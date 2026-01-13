@@ -4,7 +4,7 @@
    Displays available presets organized by category tabs (Geometric, Wave, Beam, Abstract).
    Each preset can be added to the cue chain with a single click.
    
-   Uses the generic tabbed-bank component for the UI structure."
+   Uses the data-driven tabbed-bank component for the UI structure."
   (:require [laser-show.animation.presets :as presets]
             [laser-show.views.components.tabbed-bank :as tabbed-bank]))
 
@@ -20,33 +20,15 @@
    {:id :abstract :label "Abstract"}])
 
 
-;; Preset Button Factory
+;; Pre-computed items by category (computed once at load time)
 
 
-(defn- make-preset-button-fn
-  "Create a button factory function for preset items.
-   
-   Returns a function (preset-def) -> cljfx button description."
-  [{:keys [cell on-add-preset]}]
-  (let [[col row] cell]
-    (fn [preset-def]
-      {:fx/type :button
-       :text (:name preset-def)
-       :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 6 12;"
-       :on-action (if on-add-preset
-                    (fn [_] (on-add-preset (:id preset-def)))
-                    {:event/type :cue-chain/add-preset
-                     :col col :row row
-                     :preset-id (:id preset-def)})})))
-
-
-;; Items Function
-
-
-(defn- presets-by-category
-  "Get presets filtered by category."
-  [category]
-  (filterv #(= category (:category %)) presets/all-presets))
+(def ^:private presets-by-category
+  "Map of category -> presets vector, pre-computed for stable identity."
+  (reduce (fn [acc preset-def]
+            (update acc (:category preset-def) (fnil conj []) preset-def))
+          {}
+          presets/all-presets))
 
 
 ;; Main Preset Bank Component
@@ -55,22 +37,29 @@
 (defn preset-bank
   "Tabbed preset bank showing available presets by category.
    
-   Uses the generic tabbed-bank component with preset-specific configuration.
+   Uses the data-driven tabbed-bank component with pre-computed category data.
    
    Props:
    - :cell - [col row] of the cell being edited
    - :active-tab - Currently active category tab (default: :geometric)
-   - :on-tab-change - Event map or function for tab changes
-   - :on-add-preset - (optional) Function to call when adding preset, receives preset-id"
-  [{:keys [cell active-tab on-tab-change on-add-preset]}]
-  {:fx/type tabbed-bank/tabbed-bank
-   :tab-definitions preset-bank-tab-definitions
-   :active-tab (or active-tab :geometric)
-   :on-tab-change (or on-tab-change {:event/type :cue-chain/set-preset-tab})
-   :items-fn presets-by-category
-   :item-button-fn (make-preset-button-fn {:cell cell :on-add-preset on-add-preset})
-   :empty-text "No presets in this category"
-   :pref-height 150
-   :hgap 6
-   :vgap 6
-   :padding 10})
+   - :on-tab-change - Event map or function for tab changes"
+  [{:keys [cell active-tab on-tab-change]}]
+  (let [[col row] cell]
+    {:fx/type tabbed-bank/tabbed-bank
+     :tab-definitions preset-bank-tab-definitions
+     :active-tab (or active-tab :geometric)
+     :on-tab-change (or on-tab-change {:event/type :cue-chain/set-preset-tab})
+     ;; Data-driven: pass items map instead of function
+     :items-by-category presets-by-category
+     ;; Data-driven event template - handler will receive :item-id and :item
+     :item-event-template {:event/type :cue-chain/add-preset
+                           :col col
+                           :row row}
+     :item-name-key :name
+     :item-id-key :id
+     :button-style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 6 12;"
+     :empty-text "No presets in this category"
+     :pref-height 150
+     :hgap 6
+     :vgap 6
+     :padding 10}))

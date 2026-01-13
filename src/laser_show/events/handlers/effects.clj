@@ -75,6 +75,34 @@
   {:state (assoc-in state [:effects :selected-cell] [col row])})
 
 
+;; Effect Bank (data-driven event from effect-chain editor)
+
+
+(defn- handle-effect-chain-add-effect-from-bank
+  "Add an effect to an effect chain from the effect bank.
+   
+   This handles the data-driven event format from effect-bank component,
+   where :item contains the full effect definition and :item-id is the effect-id."
+  [{:keys [col row item item-id state]}]
+  (let [effect-id (or item-id (:id item))
+        params-map (reduce (fn [acc {:keys [key default]}]
+                             (assoc acc key default))
+                           {}
+                           (:parameters item []))
+        new-effect {:effect-id effect-id
+                    :params params-map
+                    :uuid (random-uuid)}
+        ensure-cell (fn [s]
+                      (if (get-in s [:chains :effect-chains [col row]])
+                        s
+                        (assoc-in s [:chains :effect-chains [col row]] {:items [] :active false})))
+        state-with-cell (ensure-cell state)
+        current-effects (get-in state-with-cell [:chains :effect-chains [col row] :items] [])]
+    {:state (-> state-with-cell
+                (assoc-in [:chains :effect-chains [col row] :items] (conj current-effects new-effect))
+                h/mark-dirty)}))
+
+
 ;; Public API
 
 
@@ -98,6 +126,9 @@
     :effects/paste-cell (handle-effects-paste-cell event)
     :effects/move-cell (handle-effects-move-cell event)
     :effects/select-cell (handle-effects-select-cell event)
+    
+    ;; Effect bank (data-driven) - add effect from bank
+    :effect-chain/add-effect-from-bank (handle-effect-chain-add-effect-from-bank event)
     
     ;; Unknown event in this domain
     {}))

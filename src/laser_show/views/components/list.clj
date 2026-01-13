@@ -50,8 +50,8 @@
 
 (defn- handle-selection!
   "Handle selection based on click modifiers.
-   Dispatches selection event and calls :on-selection-changed callback."
-  [component-id item-id ctrl? shift? items props]
+   Dispatches selection event to update canonical list-ui state."
+  [component-id item-id ctrl? shift? items _props]
   (let [mode (cond ctrl? :ctrl
                    shift? :shift
                    :else :single)
@@ -78,33 +78,21 @@
                  :component-id component-id
                  :item-id item-id
                  :mode mode})]
-    (events/dispatch! event)
-    ;; Notify parent callback if provided (after event is processed)
-    (when-let [callback (:on-selection-changed props)]
-      ;; Read the updated state to get actual selection
-      (let [updated-state (state/get-in-state [:list-ui :components component-id])]
-        (callback {:selected-ids (:selected-ids updated-state #{})
-                   :last-selected-id (:last-selected-id updated-state)})))))
+    (events/dispatch! event)))
 
 (defn- select-all!
   "Select all items in the component."
-  [component-id items props]
+  [component-id items _props]
   (let [all-ids (chains/collect-all-ids items)]
     (events/dispatch! {:event/type :list/select-all
                        :component-id component-id
-                       :all-ids all-ids})
-    (when-let [callback (:on-selection-changed props)]
-      (callback {:selected-ids (set all-ids)
-                 :last-selected-id (first all-ids)}))))
+                       :all-ids all-ids})))
 
 (defn- clear-selection!
   "Clear selection and cancel rename."
-  [component-id props]
+  [component-id _props]
   (events/dispatch! {:event/type :list/clear-selection
-                     :component-id component-id})
-  (when-let [callback (:on-selection-changed props)]
-    (callback {:selected-ids #{}
-               :last-selected-id nil})))
+                     :component-id component-id}))
 
 
 ;; ============================================================================
@@ -130,8 +118,7 @@
 
 (defn- handle-drop!
   "Handle drop operation by dispatching to async handler.
-   The heavy computation (move-items-to-target) is performed by the event handler
-   on the agent thread, not on the JavaFX Application Thread."
+   The actual item reordering computation runs on the event agent thread."
   [component-id target-id drop-position items props]
   (let [current-state (state/get-in-state [:list-ui :components component-id])
         dragging-ids (:dragging-ids current-state)]
@@ -140,6 +127,7 @@
                "on-change-event:" (:on-change-event props)
                "on-change-params:" (:on-change-params props)
                "items-key:" (:items-key props)
+               "items-path:" (:items-path props)
                "dragging-ids:" dragging-ids)
     (when (and (seq dragging-ids) (seq items))
       ;; Dispatch raw data - handler does computation async
@@ -153,7 +141,8 @@
          :drop-position drop-position
          :on-change-event (:on-change-event props)
          :on-change-params (:on-change-params props)
-         :items-key (or (:items-key props) :items)}))))
+         :items-key (or (:items-key props) :items)
+         :items-path (:items-path props)}))))
 
 (defn- clear-drag-state!
   "Clear all drag-related state after drop or cancel."
@@ -179,11 +168,9 @@
         ;; Clear selection via event
         (events/dispatch! {:event/type :list/clear-selection
                            :component-id component-id})
-        ;; Notify parent
+        ;; Notify parent of items change only
         (when-let [callback (:on-items-changed props)]
-          (callback new-items))
-        (when-let [callback (:on-selection-changed props)]
-          (callback {:selected-ids #{} :last-selected-id nil}))))))
+          (callback new-items))))))
 
 (defn- copy-selected!
   "Copy selected items and call :on-copy callback."
@@ -240,15 +227,12 @@
                            :item-id (:id (last items-to-paste))
                            :mode :single
                            :selected-ids-override pasted-ids})
-        ;; Notify parent
+        ;; Notify parent of items change only
         (if-let [callback (:on-items-changed props)]
           (do
             (log/debug "paste-items! calling on-items-changed callback")
             (callback new-items))
           (log/warn "paste-items! no :on-items-changed callback!"))
-        (when-let [callback (:on-selection-changed props)]
-          (callback {:selected-ids pasted-ids
-                     :last-selected-id (:id (last items-to-paste))}))
         (log/debug "paste-items! SUCCESS"))
       (log/debug "paste-items! clipboard empty"))
     (log/debug "paste-items! no clipboard in props")))
@@ -314,11 +298,9 @@
                        :component-id component-id
                        :item-id group-id
                        :mode :single})
-    ;; Notify parent
+    ;; Notify parent of items change only
     (when-let [callback (:on-items-changed props)]
-      (callback new-items))
-    (when-let [callback (:on-selection-changed props)]
-      (callback {:selected-ids #{group-id} :last-selected-id group-id}))))
+      (callback new-items))))
 
 (defn- group-selected!
   "Group selected items into a new folder.
@@ -373,12 +355,10 @@
                                :component-id component-id
                                :item-id group-id
                                :mode :single})
-            ;; Notify parent
+            ;; Notify parent of items change only
             (when-let [callback (:on-items-changed props)]
               (log/debug "group-selected! calling on-items-changed callback")
               (callback new-items))
-            (when-let [callback (:on-selection-changed props)]
-              (callback {:selected-ids #{group-id} :last-selected-id group-id}))
             (log/debug "group-selected! SUCCESS"))
           (log/warn "group-selected! FAILED - items not at same level. Selected" (count normalized-ids) "items across" (count unique-parents) "different parent levels"))))))
 
@@ -392,11 +372,9 @@
           ;; Clear selection via event
           (events/dispatch! {:event/type :list/clear-selection
                              :component-id component-id})
-          ;; Notify parent
+          ;; Notify parent of items change only
           (when-let [callback (:on-items-changed props)]
-            (callback new-items))
-          (when-let [callback (:on-selection-changed props)]
-            (callback {:selected-ids #{} :last-selected-id nil})))))))
+            (callback new-items)))))))
 
 (defn- toggle-collapse!
   "Toggle collapse/expand state of a group."
@@ -921,10 +899,11 @@
    - :component-id - Unique ID for state isolation (required)
    - :on-change-event - Event type for async drag-drop (optional)
    - :on-change-params - Base params for async drag-drop (optional)
-   - :items-key - Key for items in dispatched event (optional)"
+   - :items-key - Key for items in dispatched event (optional)
+   - :items-path - Direct path to items in state for async drag-drop (optional)"
   [{:keys [fx/context items get-item-label on-items-changed on-selection-changed
            on-copy clipboard-items header-label empty-text allow-groups?
-           component-id on-change-event on-change-params items-key]
+           component-id on-change-event on-change-params items-key items-path]
     :or {header-label "LIST"
          empty-text "No items"
          allow-groups? true
@@ -1287,6 +1266,7 @@
    - :on-change-event - Event type for items changed (e.g., :effects/set-chain)
    - :on-change-params - Base params for change event (e.g., {:col col :row row})
    - :items-key - Key for items in event (default :items)
+   - :items-path - Direct path to items in state (optional, for nested items)
    
    - :on-selection-event - Event type for selection changed (optional)
    - :on-selection-params - Base params for selection event
@@ -1319,7 +1299,7 @@
            ;; Label options
            get-item-label item-id-key item-registry-fn item-name-key label-map
            ;; Event dispatch options
-           on-change-event on-change-params items-key
+           on-change-event on-change-params items-key items-path
            on-selection-event on-selection-params selection-key
            on-copy-fn clipboard-items
            ;; UI options
@@ -1391,4 +1371,5 @@
                         ;; Pass event-based props for async drag-drop
                         :on-change-event on-change-event
                         :on-change-params on-change-params
-                        :items-key items-key}]}}))
+                        :items-key items-key
+                        :items-path items-path}]}}))

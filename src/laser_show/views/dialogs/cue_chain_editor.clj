@@ -23,61 +23,31 @@
             [laser-show.views.components.preset-bank :as preset-bank]
             [laser-show.views.components.preset-param-editor :as param-editor]
             [laser-show.views.components.effect-param-ui :as effect-param-ui]
-            [laser-show.views.components.tabbed-bank :as tabbed-bank]
+            [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.common.util :as u]
             [clojure.tools.logging :as log])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
 
-;; Effect Bank and Effect Editor Components
+;; Effect Bank (using data-driven component)
 
-
-(def effect-bank-tab-definitions
-  "Tab definitions for the effect bank categories."
-  [{:id :shape :label "Shape"}
-   {:id :color :label "Color"}
-   {:id :intensity :label "Intensity"}])
-
-(defn- effects-by-category
-  "Get effects filtered by category."
-  [category]
-  (effects/list-effects-by-category category))
 
 ;; Use shared params-vector->map from effect-param-ui
 (def params-vector->map effect-param-ui/params-vector->map)
 
-(defn- make-effect-button-fn
-  "Create a button factory function for effect items.
-   
-   Returns a function (effect-def) -> cljfx button description."
-  [{:keys [col row item-path]}]
-  (let [effects-parent-path (vec (concat item-path [:effects]))]
-    (fn [effect-def]
-      (let [params-map (params-vector->map (:parameters effect-def))]
-        {:fx/type :button
-         :text (:name effect-def)
-         :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 4 8;"
-         :on-action {:event/type :chain/add-item
-                     :domain :cue-chains
-                     :entity-key [col row]
-                     :parent-path effects-parent-path
-                     :item {:effect-id (:id effect-def)
-                            :params (into {}
-                                          (for [[k v] params-map]
-                                            [k (:default v)]))}}}))))
-
 (defn- effect-bank-tabs
-  "Tabbed effect bank using generic tabbed-bank component."
+  "Tabbed effect bank using data-driven effect-bank component."
   [{:keys [col row item-path active-effect-tab]}]
-  {:fx/type tabbed-bank/tabbed-bank
-   :tab-definitions effect-bank-tab-definitions
-   :active-tab (or active-effect-tab :shape)
-   :on-tab-change {:event/type :cue-chain/set-effect-tab
-                   :tab-id nil}
-   :items-fn effects-by-category
-   :item-button-fn (make-effect-button-fn {:col col :row row :item-path item-path})
-   :empty-text "No effects"
-   :pref-height 140})
+  (let [effects-parent-path (vec (concat item-path [:effects]))]
+    {:fx/type effect-bank/effect-bank
+     :active-tab (or active-effect-tab :shape)
+     :on-tab-change {:event/type :cue-chain/set-effect-tab}
+     ;; Data-driven event template - handler will receive :item-id and :item
+     :item-event-template {:event/type :cue-chain/add-effect-from-bank
+                           :col col
+                           :row row
+                           :parent-path effects-parent-path}
+     :pref-height 140}))
 
 
 ;; Parameter Editor for Effects (with Custom Renderers)
@@ -264,10 +234,7 @@
   [item-effects-ui item-path]
   (get-in item-effects-ui [(vec item-path) :clipboard] []))
 
-(defn- get-item-effects-selected-ids
-  "Get selected effect IDs for the item's effects list."
-  [item-effects-ui item-path]
-  (get-in item-effects-ui [(vec item-path) :selected-ids] #{}))
+;; NOTE: get-item-effects-selected-ids removed - now reading from subs/list-ui-state
 
 
 ;; Main Dialog Content
@@ -280,8 +247,15 @@
   [{:keys [fx/context]}]
   (let [;; Get cue-chain-editor state from unified dialogs path
         dialog-data (fx/sub-ctx context subs/dialog-data :cue-chain-editor)
-        {:keys [col row selected-ids last-selected-id active-preset-tab
-                active-effect-tab clipboard item-effects-ui]} dialog-data
+        {:keys [col row active-preset-tab active-effect-tab clipboard item-effects-ui]} dialog-data
+        
+        ;; Read cue chain selection from canonical list-ui state
+        cue-list-state (fx/sub-ctx context subs/list-ui-state [:cue-chain col row])
+        selected-ids (:selected-ids cue-list-state #{})
+        
+        ;; Read item effects selection from canonical list-ui state
+        item-effects-list-state (fx/sub-ctx context subs/list-ui-state [:item-effects col row])
+        selected-effect-ids (:selected-ids item-effects-list-state #{})
         
         ;; Get cue chain data from new unified :chains domain
         chains-state (fx/sub-val context :chains)
@@ -302,11 +276,9 @@
         ;; Clipboard check
         clipboard-items (:items clipboard)
         
-        ;; Get UI state for item effects
+        ;; Get clipboard for item effects
         item-effects-clipboard (when has-item?
                                  (get-item-effects-clipboard item-effects-ui first-selected-path))
-        selected-effect-ids (when has-item?
-                              (get-item-effects-selected-ids item-effects-ui first-selected-path))
         
         ;; Dialog data for custom renderers (UI modes, etc.)
         dialog-data (merge item-effects-ui {:item-effects-ui item-effects-ui})]
@@ -338,9 +310,6 @@
                                                    :fallback-label "Unknown Preset"
                                                    :on-change-event :chain/set-items
                                                    :on-change-params {:domain :cue-chains :entity-key [col row]}
-                                                   :on-selection-event :chain/update-selection
-                                                   :on-selection-params {:domain :cue-chains :entity-key [col row]}
-                                                   :selection-key :selected-ids
                                                    :on-copy-fn (fn [items]
                                                                  (events/dispatch! {:event/type :cue-chain/set-clipboard
                                                                                     :items items}))
@@ -353,32 +322,32 @@
                                        :v-box/vgrow :always
                                        :style "-fx-border-color: #404040; -fx-border-width: 1 0 0 0;"
                                        :children (if has-item?
-                                                    [{:fx/type list/list-editor
-                                                      :fx/context context
-                                                      :v-box/vgrow :always
-                                                      :items item-effects
-                                                      ;; Use stable component-id without the path to avoid state fragmentation
-                                                      ;; The item-path is passed via event params instead
-                                                      :component-id [:item-effects col row]
-                                                      :item-id-key :effect-id
-                                                      :item-registry-fn effects/get-effect
-                                                      :item-name-key :name
-                                                      :fallback-label "Unknown Effect"
-                                                      :on-change-event :cue-chain/set-item-effects
-                                                      :on-change-params {:col col :row row :item-path first-selected-path}
-                                                      :items-key :effects
-                                                      :on-selection-event :cue-chain/update-item-effect-selection
-                                                      :on-selection-params {:col col :row row :item-path first-selected-path}
-                                                      :selection-key :selected-ids
-                                                      :on-copy-fn (fn [items]
-                                                                    (events/dispatch! {:event/type :cue-chain/set-item-effects-clipboard
-                                                                                       :col col :row row
-                                                                                       :item-path first-selected-path
-                                                                                       :effects items}))
-                                                      :clipboard-items item-effects-clipboard
-                                                      :header-label "ITEM EFFECTS"
-                                                      :empty-text "No effects\nAdd from bank →"
-                                                      :allow-groups? true}]
+                                                     [{:fx/type list/list-editor
+                                                       :fx/context context
+                                                       :v-box/vgrow :always
+                                                       :items item-effects
+                                                       ;; Use stable component-id without the path to avoid state fragmentation
+                                                       ;; The item-path is passed via event params instead
+                                                       :component-id [:item-effects col row]
+                                                       :item-id-key :effect-id
+                                                       :item-registry-fn effects/get-effect
+                                                       :item-name-key :name
+                                                       :fallback-label "Unknown Effect"
+                                                       :on-change-event :cue-chain/set-item-effects
+                                                       :on-change-params {:col col :row row :item-path first-selected-path}
+                                                       :items-key :effects
+                                                       ;; Direct path to items in state for async drag-drop
+                                                       ;; Path: [:chains :cue-chains [col row] :items <first-selected-path...> :effects]
+                                                       :items-path (vec (concat [:chains :cue-chains [col row] :items] first-selected-path [:effects]))
+                                                       :on-copy-fn (fn [items]
+                                                                     (events/dispatch! {:event/type :cue-chain/set-item-effects-clipboard
+                                                                                        :col col :row row
+                                                                                        :item-path first-selected-path
+                                                                                        :effects items}))
+                                                       :clipboard-items item-effects-clipboard
+                                                       :header-label "ITEM EFFECTS"
+                                                       :empty-text "No effects\nAdd from bank →"
+                                                       :allow-groups? true}]
                                                    ;; Placeholder when no item selected
                                                    [{:fx/type :v-box
                                                      :v-box/vgrow :always
