@@ -115,27 +115,9 @@
                 (assoc-in target-path (conj current-effects new-effect))
                 h/mark-dirty)}))
 
-(defn- handle-cue-chain-update-preset-param
-  "Update a parameter in a preset."
-  [{:keys [col row preset-path param-key state] :as event}]
-  (let [value (or (:fx/event event) (:value event))
-        items-vec (vec (get-in state (cue-chain-path col row) []))
-        updated-items (assoc-in items-vec (conj (vec preset-path) :params param-key) value)]
-    {:state (assoc-in state (cue-chain-path col row) updated-items)}))
-
-(defn- handle-cue-chain-update-preset-color
-  "Update a color parameter in a preset.
-   Extracts color from ActionEvent's source ColorPicker."
-  [{:keys [col row preset-path param-key state] :as event}]
-  (let [action-event (:fx/event event)
-        color-picker (.getSource action-event)
-        color (.getValue color-picker)
-        rgb-value [(int (* 255 (.getRed color)))
-                   (int (* 255 (.getGreen color)))
-                   (int (* 255 (.getBlue color)))]
-        items-vec (vec (get-in state (cue-chain-path col row) []))
-        updated-items (assoc-in items-vec (conj (vec preset-path) :params param-key) rgb-value)]
-    {:state (assoc-in state (cue-chain-path col row) updated-items)}))
+;; NOTE: Preset parameter handlers have been removed - now using generic :chain/* events
+;; from chain.clj with {:domain :cue-chains :entity-key [col row] :effect-path preset-path}
+;; This includes :chain/update-param, :chain/update-param-from-text, :chain/update-color-param
 
 
 ;; Tab Switching
@@ -193,18 +175,16 @@
    Also copies to system clipboard as serialized EDN."
   [{:keys [col row item-path effects state]}]
   (let [ui-path (item-effects-ui-path col row item-path)]
-    ;; Copy to system clipboard (side effect)
-    (clipboard/copy-item-effects! effects)
-    ;; Return state update for internal clipboard
+    (when (seq effects)
+      (clipboard/copy-item-effects! effects))
     {:state (assoc-in state (conj ui-path :clipboard) effects)}))
 
 (defn- handle-cue-chain-set-clipboard
   "Set the clipboard for cue chain items (presets and groups).
    Also copies to system clipboard as serialized EDN."
   [{:keys [items state]}]
-  ;; Copy to system clipboard (side effect)
-  (clipboard/copy-cue-chain-items! items)
-  ;; Return state update for internal clipboard
+  (when (seq items)
+    (clipboard/copy-cue-chain-items! items))
   {:state (assoc-in state [:ui :dialogs :cue-chain-editor :data :clipboard :items] items)})
 
 
@@ -233,9 +213,10 @@
     
     ;; Preset management
     :cue-chain/add-preset (handle-cue-chain-add-preset event)
-    :cue-chain/update-preset-param (handle-cue-chain-update-preset-param event)
-    :cue-chain/update-preset-color (handle-cue-chain-update-preset-color event)
-    :cue-chain/update-preset-param-from-text (handle-cue-chain-update-preset-param event)
+    ;; NOTE: :cue-chain/update-preset-param, :cue-chain/update-preset-color, and
+    ;; :cue-chain/update-preset-param-from-text have been removed.
+    ;; Use :chain/update-param, :chain/update-color-param, :chain/update-param-from-text
+    ;; with {:domain :cue-chains :entity-key [col row] :effect-path preset-path} instead.
     
     ;; Effect bank (data-driven) - add effect to cue chain item
     :cue-chain/add-effect-from-bank (handle-cue-chain-add-effect-from-bank event)

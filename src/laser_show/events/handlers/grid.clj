@@ -73,23 +73,17 @@
   "Copy a cell's cue chain to clipboard.
    Also copies to system clipboard as serialized EDN."
   [{:keys [col row state]}]
-  (let [cue-chain-data (get-in state [:chains :cue-chains [col row]])
-        clip-data {:type :cue-chain
-                   :data cue-chain-data}]
-    ;; Copy to system clipboard (side effect)
-    (clipboard/copy-cue-chain! cue-chain-data)
-    ;; Return state update for internal clipboard
-    {:state (assoc-in state [:ui :clipboard] clip-data)}))
+  (h/handle-copy-to-clipboard state
+                              [:chains :cue-chains [col row]]
+                              :cue-chain
+                              clipboard/copy-cue-chain!))
 
 (defn- handle-grid-paste-cell
   "Paste clipboard cue chain to a cell."
   [{:keys [col row state]}]
-  (let [clipboard (get-in state [:ui :clipboard])]
-    (if (and clipboard (= :cue-chain (:type clipboard)))
-      {:state (-> state
-                  (assoc-in [:chains :cue-chains [col row]] (:data clipboard))
-                  h/mark-dirty)}
-      {:state state})))
+  (h/handle-paste-from-clipboard state
+                                 [:chains :cue-chains [col row]]
+                                 :cue-chain))
 
 
 ;; Public API

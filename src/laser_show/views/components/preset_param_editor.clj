@@ -41,28 +41,34 @@
         [col row] (if (and (vector? cell) (= 2 (count cell)))
                     cell
                     [0 0])
-        ;; Build event templates for the parameter controls
+        ;; Build event templates using generic chain handlers
         ;; These get :param-key added by the controls
+        ;; Use :effect-path key for consistency with chain handlers (path to item within chain)
         on-change-event (if on-param-change
                           ;; Custom handler - wrap in a map that will invoke the fn
                           {:event/type :cue-chain/invoke-param-callback
                            :callback on-param-change}
-                          ;; Default event
-                          {:event/type :cue-chain/update-preset-param
-                           :col col :row row
-                           :preset-path preset-path})
+                          ;; Use generic chain handler
+                          {:event/type :chain/update-param
+                           :domain :cue-chains
+                           :entity-key [col row]
+                           :effect-path preset-path})
         on-text-event (if on-param-change
                         {:event/type :cue-chain/invoke-param-text-callback
                          :callback on-param-change}
-                        {:event/type :cue-chain/update-preset-param-from-text
-                         :col col :row row
-                         :preset-path preset-path})
+                        ;; Use generic chain handler
+                        {:event/type :chain/update-param-from-text
+                         :domain :cue-chains
+                         :entity-key [col row]
+                         :effect-path preset-path})
         on-color-event (if on-param-change
                          {:event/type :cue-chain/invoke-param-color-callback
                           :callback on-param-change}
-                         {:event/type :cue-chain/update-preset-color
-                          :col col :row row
-                          :preset-path preset-path})]
+                         ;; Use generic chain handler for color (converts color picker action event)
+                         {:event/type :chain/update-color-param
+                          :domain :cue-chains
+                          :entity-key [col row]
+                          :effect-path preset-path})]
     {:fx/type :v-box
      :spacing 8
      :style "-fx-background-color: #2A2A2A; -fx-padding: 8;"

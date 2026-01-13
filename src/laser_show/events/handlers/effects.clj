@@ -40,23 +40,17 @@
   "Copy an effects cell to clipboard.
    Also copies to system clipboard as serialized EDN."
   [{:keys [col row state]}]
-  (let [cell-data (get-in state [:chains :effect-chains [col row]])
-        clip-data {:type :effects-cell
-                   :data cell-data}]
-    ;; Copy to system clipboard (side effect)
-    (clipboard/copy-effects-cell! cell-data)
-    ;; Return state update for internal clipboard
-    {:state (assoc-in state [:ui :clipboard] clip-data)}))
+  (h/handle-copy-to-clipboard state
+                              [:chains :effect-chains [col row]]
+                              :effects-cell
+                              clipboard/copy-effects-cell!))
 
 (defn- handle-effects-paste-cell
   "Paste clipboard to an effects cell."
   [{:keys [col row state]}]
-  (let [clipboard (get-in state [:ui :clipboard])]
-    (if (and clipboard (= :effects-cell (:type clipboard)))
-      {:state (-> state
-                  (assoc-in [:chains :effect-chains [col row]] (:data clipboard))
-                  h/mark-dirty)}
-      {:state state})))
+  (h/handle-paste-from-clipboard state
+                                 [:chains :effect-chains [col row]]
+                                 :effects-cell))
 
 (defn- handle-effects-move-cell
   "Move an effects cell from one position to another."
@@ -89,9 +83,8 @@
                              (assoc acc key default))
                            {}
                            (:parameters item []))
-        new-effect {:effect-id effect-id
-                    :params params-map
-                    :uuid (random-uuid)}
+        new-effect (h/ensure-item-fields {:effect-id effect-id
+                                          :params params-map})
         ensure-cell (fn [s]
                       (if (get-in s [:chains :effect-chains [col row]])
                         s

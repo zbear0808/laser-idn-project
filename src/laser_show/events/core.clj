@@ -176,6 +176,16 @@
                :insert-pos insert-pos
                :effects effects})))
 
+(defn- effect-clipboard-paste-projector-effects
+  "Effect that pastes effects from clipboard into a projector chain.
+   Dispatches :projectors/insert-pasted-effects with the effects to insert."
+  [{:keys [projector-id insert-pos]} dispatch]
+  (when-let [effects (clipboard/get-effects-to-paste)]
+    (dispatch {:event/type :projectors/insert-pasted-effects
+               :projector-id projector-id
+               :insert-pos insert-pos
+               :effects effects})))
+
 ;; Projector Scanning Effects
 
 (defn- effect-projectors-scan
@@ -239,7 +249,8 @@
    - :project/save - save project to disk
    - :project/load - load project from disk
    - :clipboard/copy-effects - copy effects to clipboard
-   - :clipboard/paste-effects - paste effects from clipboard
+   - :clipboard/paste-effects - paste effects from clipboard (effects grid)
+   - :clipboard/paste-projector-effects - paste effects from clipboard (projector chain)
    - :projectors/scan - scan network for IDN devices"
   (-> handlers/handle-event
       
@@ -261,6 +272,7 @@
          ;; Clipboard effects for effect chain editor
          :clipboard/copy-effects effect-clipboard-copy-effects
          :clipboard/paste-effects effect-clipboard-paste-effects
+         :clipboard/paste-projector-effects effect-clipboard-paste-projector-effects
          ;; Projector scanning effects
          :projectors/scan effect-projectors-scan})))
 
@@ -318,6 +330,9 @@
       
       (when-let [paste-params (:clipboard/paste-effects effects)]
         (effect-clipboard-paste-effects paste-params dispatch!))
+      
+      (when-let [paste-params (:clipboard/paste-projector-effects effects)]
+        (effect-clipboard-paste-projector-effects paste-params dispatch!))
       
       ;; Handle projector scanning effect (for auto-scan on startup)
       (when-let [scan-params (:projectors/scan effects)]

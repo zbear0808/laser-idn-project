@@ -21,11 +21,6 @@
 ;; Helper Functions (internal)
 
 
-(defn- mark-dirty
-  "Mark project as having unsaved changes."
-  [state]
-  (assoc-in state [:project :dirty?] true))
-
 (defn- get-items
   "Get the items vector from state using config."
   [state config]
@@ -362,7 +357,7 @@
       (-> state
           (set-items config new-items)
           (set-selected-paths config new-paths)
-          mark-dirty))))
+          h/mark-dirty))))
 
 
 ;; Delete Operations
@@ -392,7 +387,7 @@
         (-> state
             (set-items config new-items)
             (set-selected-paths config #{})
-            mark-dirty))
+            h/mark-dirty))
       state)))
 
 
@@ -413,7 +408,7 @@
         new-group (make-group group-name [])]
     (-> state
         (update-in (:items-path config) conj new-group)
-        mark-dirty)))
+        h/mark-dirty)))
 
 (defn handle-group-selected
   "Group currently selected items into a new group.
@@ -479,7 +474,7 @@
         (-> state
             (set-items config new-items)
             (set-selected-paths config #{new-group-path})
-            mark-dirty))
+            h/mark-dirty))
       state)))
 
 (defn handle-ungroup
@@ -513,7 +508,7 @@
         (-> state
             (set-items config new-items)
             (set-selected-paths config #{})
-            mark-dirty)))))
+            h/mark-dirty)))))
 
 (defn handle-toggle-collapse
   "Toggle a group's collapsed state.
@@ -577,7 +572,7 @@
       (-> state
           (assoc-in (into (:items-path config) (conj path :name)) new-name)
           (set-renaming-path config nil)
-          mark-dirty)
+          h/mark-dirty)
       state)))
 
 
@@ -639,7 +634,7 @@
             (set-items config new-items)
             (set-dragging-paths config nil)
             (set-selected-paths config #{})
-            mark-dirty)))))
+            h/mark-dirty)))))
 
 (defn handle-clear-drag-state
   "Clear the dragging state.
@@ -669,7 +664,7 @@
   [state config path enabled?]
   (-> state
       (assoc-in (into (:items-path config) (conj (vec path) :enabled?)) enabled?)
-      mark-dirty))
+      (h/mark-dirty)))
 
 
 
@@ -755,6 +750,28 @@
       (assoc-in state items-path updated-items))
     state))
 
+(defn handle-update-color-param
+  "Update a color parameter from ColorPicker's ActionEvent.
+   Extracts the color from the ColorPicker source and converts to RGB vector.
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :items-path
+   - event: Map with :effect-path, :param-key, and :fx/event (ActionEvent)
+   
+   Returns: Updated state"
+  [state config {:keys [effect-path param-key] :as event}]
+  (let [action-event (:fx/event event)
+        color-picker (.getSource action-event)
+        color (.getValue color-picker)
+        rgb-value [(int (* 255 (.getRed color)))
+                   (int (* 255 (.getGreen color)))
+                   (int (* 255 (.getBlue color)))]
+        items-path (:items-path config)
+        items-vec (vec (get-in state items-path []))
+        updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) rgb-value)]
+    (assoc-in state items-path updated-items)))
+
 
 ;; Phase 3: Effect CRUD Handlers
 
@@ -788,13 +805,13 @@
         current-items (get-in state-with-target target-path [])
         new-item-idx (count current-items)
         ;; Selection path is relative to items-path, so include parent-path
-        selection-path (cond-> [new-item-idx]
-                         parent-path (->> (into (vec parent-path))))]
+        selection-path (cond->> [new-item-idx]
+                         parent-path (into (vec parent-path)))]
     (-> state-with-target
         (update-in target-path conj item-with-fields)
         (assoc-in (conj (:ui-path config) :selected-paths) #{selection-path})
         (assoc-in (conj (:ui-path config) :last-selected-path) selection-path)
-        mark-dirty)))
+        (h/mark-dirty))))
 
 (defn handle-remove-item-at-path
   "Remove an item at a specific path.
@@ -811,7 +828,7 @@
         new-items (chains/remove-at-path items-vec path)]
     (-> state
         (assoc-in items-path new-items)
-        mark-dirty)))
+        (h/mark-dirty))))
 
 (defn handle-reorder-items
   "Reorder items using from-idx and to-idx.
@@ -834,7 +851,7 @@
                                (subvec without to-idx)))]
     (-> state
         (assoc-in items-path reordered)
-        mark-dirty)))
+        (h/mark-dirty))))
 
 
 ;; Phase 4: UI Mode Handlers
@@ -904,7 +921,7 @@
                   "items-path:" (:items-path config))
        {:state (-> state
                    (assoc-in (:items-path config) (:items event))
-                   mark-dirty)})
+                   (h/mark-dirty))})
      
      ;; NOTE: :chain/update-selection removed - selection state is now managed
      ;; directly in [:list-ui :components component-id] and read via subs/list-ui-state
@@ -976,6 +993,9 @@
      
      :chain/update-param-from-text
      {:state (handle-update-param-from-text state config event)}
+     
+     :chain/update-color-param
+     {:state (handle-update-color-param state config event)}
      
      ;; Phase 3: Effect CRUD
      :chain/add-item

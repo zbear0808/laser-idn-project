@@ -533,6 +533,7 @@
   (let [;; Read effects from chains domain, not from projector config
         effects (fx/sub-ctx context subs/projector-effect-chain projector-id)]
     {:fx/type list/list-editor
+     :fx/context context  ;; Required for list-sidebar to subscribe to list-ui-state
      :items (or effects [])
      :component-id [:projector-effects projector-id]
      :item-id-key :effect-id
@@ -610,10 +611,16 @@
   [{:keys [fx/context]}]
   (let [projector (fx/sub-ctx context subs/active-projector)
         projector-id (:id projector)
-        ;; Get UI state for the effect chain (selection)
-        ui-state (when projector-id
-                   (fx/sub-ctx context subs/projector-effect-ui-state projector-id))
-        selected-ids (:selected-ids ui-state #{})
+        ;; Get UI state from list-ui domain (where list/list-editor stores selection)
+        ;; Component ID must match what's used in projector-effects-sidebar
+        list-component-id (when projector-id [:projector-effects projector-id])
+        list-ui-state (when list-component-id
+                        (fx/sub-ctx context subs/list-ui-state list-component-id))
+        selected-ids (:selected-ids list-ui-state #{})
+        ;; Also get projector-effect-ui-state for UI modes (active curve channel, etc.)
+        ;; This is separate from selection state and used by effect parameter editors
+        effect-ui-state (when projector-id
+                          (fx/sub-ctx context subs/projector-effect-ui-state projector-id))
         ;; Read effects from chains domain
         effects (when projector-id
                   (fx/sub-ctx context subs/projector-effect-chain projector-id))
@@ -657,6 +664,7 @@
                                                                 {:fx/type projector-add-effect-menu
                                                                  :projector-id projector-id}]}
                                                     {:fx/type projector-effects-sidebar
+                                                     :fx/key projector-id  ;; Force recreation when projector changes to avoid stale closures
                                                      :fx/context context
                                                      :projector-id projector-id
                                                      :selected-ids selected-ids
@@ -668,11 +676,11 @@
                                          :children (vec
                                                       (concat
                                                         (when selected-effect
-                                                          [{:fx/type effect-parameter-editor
-                                                            :projector-id projector-id
-                                                            :effect-idx selected-effect-idx
-                                                            :effect selected-effect
-                                                            :ui-state ui-state}])
+                                                           [{:fx/type effect-parameter-editor
+                                                             :projector-id projector-id
+                                                             :effect-idx selected-effect-idx
+                                                             :effect selected-effect
+                                                             :ui-state effect-ui-state}])
                                                        [{:fx/type :region :v-box/vgrow :always}
                                                         {:fx/type test-pattern-controls}]))}]}}]}
       ;; No projector selected

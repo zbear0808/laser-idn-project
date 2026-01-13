@@ -3,7 +3,8 @@
    
    These utilities are used across multiple event handler modules to maintain
    consistent behavior and avoid code duplication."
-  (:require [laser-show.animation.chains :as chains]))
+  (:require [laser-show.animation.chains :as chains]
+            [laser-show.state.clipboard :as clipboard]))
 
 
 ;; State Modification Helpers
@@ -240,3 +241,77 @@
    :collapsed? false
    :enabled? true
    :items (vec items)})
+
+
+;; Clipboard Operations
+
+
+(defn handle-copy-to-clipboard
+  "Generic copy handler that reads data from state and copies to clipboard.
+   
+   Parameters:
+   - state: Application state
+   - source-path: Path to read data from (e.g., [:chains :effect-chains [col row]])
+   - clipboard-type: Keyword for clipboard type (e.g., :effects-cell)
+   - system-clipboard-fn: Function to call for system clipboard (e.g., clipboard/copy-effects-cell!)
+   
+   Returns: {:state updated-state} with internal clipboard set
+   
+   Example:
+   (handle-copy-to-clipboard state
+                             [:chains :effect-chains [0 1]]
+                             :effects-cell
+                             clipboard/copy-effects-cell!)"
+  [state source-path clipboard-type system-clipboard-fn]
+  (let [data (get-in state source-path)
+        clip-data {:type clipboard-type :data data}]
+    ;; Copy to system clipboard (side effect)
+    (when (and system-clipboard-fn data)
+      (system-clipboard-fn data))
+    ;; Return state update for internal clipboard
+    {:state (assoc-in state [:ui :clipboard] clip-data)}))
+
+(defn handle-paste-from-clipboard
+  "Generic paste handler that writes clipboard data to target path.
+   
+   Parameters:
+   - state: Application state
+   - target-path: Path to write data to (e.g., [:chains :effect-chains [col row]])
+   - expected-type: Expected clipboard type keyword (e.g., :effects-cell)
+   - transform-fn: Optional function to transform data before pasting (e.g., regenerate-ids)
+   
+   Returns: {:state updated-state} or {:state state} if clipboard type doesn't match
+   
+   Example:
+   (handle-paste-from-clipboard state
+                                [:chains :effect-chains [0 2]]
+                                :effects-cell
+                                identity)"
+  [state target-path expected-type & [transform-fn]]
+  (let [cb (get-in state [:ui :clipboard])]
+    (if (and cb (= expected-type (:type cb)))
+      (let [data (:data cb)
+            transformed-data (if transform-fn (transform-fn data) data)]
+        {:state (-> state
+                    (assoc-in target-path transformed-data)
+                    mark-dirty)})
+      {:state state})))
+
+(defn handle-copy-items-to-clipboard
+  "Generic copy handler for items (effects, presets) where data is passed directly.
+   Used when copying selected items rather than a whole cell/chain.
+   
+   Parameters:
+   - state: Application state
+   - items: Vector of items to copy
+   - clipboard-type: Keyword for clipboard type (e.g., :cue-chain-items, :item-effects)
+   - system-clipboard-fn: Function to call for system clipboard
+   
+   Returns: {:state updated-state}
+   
+   Example:
+   (handle-copy-items-to-clipboard state selected-items :cue-chain-items clipboard/copy-cue-chain-items!)"
+  [state items clipboard-type system-clipboard-fn]
+  (when (seq items)
+    (system-clipboard-fn items))
+  {:state (assoc-in state [:ui :clipboard] {:type clipboard-type :items items})})
