@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Console appender with colorful output -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan(%logger{36}) - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Root logger configuration -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+    </root>
+
+    <!-- Set DEBUG level for laser_show namespace during development -->
+    <logger name="laser_show" level="DEBUG" />
+    <logger name="laser-show" level="DEBUG" />
+    
+    <!-- Quiet down noisy libraries -->
+    <logger name="org.eclipse.jetty" level="WARN" />
+    <logger name="io.netty" level="WARN" />
+</configuration>

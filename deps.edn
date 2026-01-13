@@ -22,7 +22,7 @@
         com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.3.1"}
         
         org.clojure/tools.logging {:mvn/version "1.3.0"}
-        org.slf4j/slf4j-simple {:mvn/version "2.0.17"}}
+        ch.qos.logback/logback-classic {:mvn/version "1.5.16"}}
  
  :aliases
  {:laser-show
@@ -35,7 +35,6 @@
   {:jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"
               "--enable-native-access=ALL-UNNAMED"
-              "-Dorg.slf4j.simpleLogger.defaultLogLevel=debug"
               ;; Required for clj-async-profiler
               "-Djdk.attach.allowAttachSelf"
               "-XX:+UnlockDiagnosticVMOptions"
@@ -51,7 +50,6 @@
    :jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"
               "--enable-native-access=ALL-UNNAMED"
-              "-Dorg.slf4j.simpleLogger.defaultLogLevel=debug"
               "-Dlaser-show.dev=true"
               ;; Required for clj-async-profiler
               "-Djdk.attach.allowAttachSelf"
@@ -140,8 +138,6 @@
                           "-XX:+DebugNonSafepoints"
                           "-XX:+EnableDynamicAgentLoading"
                           "--enable-native-access=ALL-UNNAMED"]
-               :extra-deps {is.simm/repl-mcp {:git/url "https://github.com/simm-is/repl-mcp" :git/sha "latest-sha"}
-                            org.slf4j/slf4j-api {:mvn/version "2.0.17"}
-                            org.slf4j/slf4j-simple {:mvn/version "2.0.17"}}}
+               :extra-deps {is.simm/repl-mcp {:git/url "https://github.com/simm-is/repl-mcp" :git/sha "latest-sha"}}}
   
   }}

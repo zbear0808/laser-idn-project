@@ -45,3 +45,5 @@ test-*.log
 # Local configuration (not committed)
 /config/
 /plans
+
+/cljfx cljfx 1.10.6 examples/
