@@ -40,6 +40,35 @@
 (defn active-cell [state]
   (:active-cell (playback state)))
 
+(defn trigger-time [state]
+  (:trigger-time (playback state)))
+
+;; Beat Accumulation Extractors
+
+(defn accumulated-beats [state]
+  (:accumulated-beats (playback state)))
+
+(defn accumulated-ms [state]
+  (:accumulated-ms (playback state)))
+
+(defn last-frame-time [state]
+  (:last-frame-time (playback state)))
+
+(defn phase-offset [state]
+  (:phase-offset (playback state)))
+
+(defn phase-offset-target [state]
+  (:phase-offset-target (playback state)))
+
+(defn resync-rate [state]
+  (:resync-rate (playback state)))
+
+(defn effective-beats
+  "Calculate effective beats (accumulated-beats + phase-offset)."
+  [state]
+  (+ (or (accumulated-beats state) 0.0)
+     (or (phase-offset state) 0.0)))
+
 ;; Grid Extractors
 
 

@@ -19,6 +19,8 @@
 
 ;; Forward declarations for modulator-config? and evaluators
 (declare modulator-config?)
+;; Forward declarations for beat calculation helpers
+(declare get-beats-from-context get-ms-from-context)
 
 
 
@@ -33,14 +35,27 @@
    - bpm: Current BPM
    - trigger-time: Time when the cue/effect was triggered (optional, for once-mode modulators)
    - midi-state: Map of {[channel cc] -> value} (optional)
-   - osc-state: Map of {path -> value} (optional)"
-  [{:keys [time-ms bpm trigger-time midi-state osc-state]
-    :or {midi-state {} osc-state {}}}]
+   - osc-state: Map of {path -> value} (optional)
+   
+   Beat Accumulation Parameters (for smooth BPM-change animation):
+   - accumulated-beats: Running total of beats since cue trigger (incremental)
+   - accumulated-ms: Running total of ms since cue trigger (incremental)
+   - phase-offset: Current smoothed phase correction offset
+   - effective-beats: accumulated-beats + phase-offset (use for looping modulators)"
+  [{:keys [time-ms bpm trigger-time midi-state osc-state
+           accumulated-beats accumulated-ms phase-offset]
+    :or {midi-state {} osc-state {}
+         accumulated-beats 0.0 accumulated-ms 0.0 phase-offset 0.0}}]
   {:time-ms time-ms
    :bpm bpm
    :trigger-time trigger-time
    :midi-state midi-state
-   :osc-state osc-state})
+   :osc-state osc-state
+   ;; Beat accumulation fields
+   :accumulated-beats (or accumulated-beats 0.0)
+   :accumulated-ms (or accumulated-ms 0.0)
+   :phase-offset (or phase-offset 0.0)
+   :effective-beats (+ (or accumulated-beats 0.0) (or phase-offset 0.0))})
 
 
 
@@ -92,30 +107,39 @@
 (defn- calculate-modulator-phase
   "Calculate the phase for a modulator based on loop-mode and timing settings.
    
+   For looping modulators, uses effective-beats (accumulated-beats + phase-offset)
+   which enables smooth animation during BPM changes and phase resync on tap tempo.
+   
+   For once-mode modulators, uses raw accumulated-beats without phase correction
+   since these should play through exactly once from trigger without resync effects.
+   
    Parameters:
-   - context: Modulation context with :time-ms, :bpm, and optionally :trigger-time
+   - context: Modulation context with timing fields
    - period: Beats per cycle (converted to frequency internally)
-   - phase-offset: Phase offset (0.0-1.0)
+   - phase-param: Phase offset parameter (0.0-1.0)
    - loop-mode: :loop or :once
    - duration: Duration for once-mode
    - time-unit: :beats or :seconds
    - trigger-override: Optional trigger time to use instead of context's trigger-time
    
    Returns: Phase value for oscillation"
-  ([context period phase-offset loop-mode duration time-unit]
-   (calculate-modulator-phase context period phase-offset loop-mode duration time-unit nil))
-  ([{:keys [time-ms bpm trigger-time]} period phase-offset loop-mode duration time-unit trigger-override]
-   (let [time-ms (double time-ms)
-         bpm (double bpm)
+  ([context period phase-param loop-mode duration time-unit]
+   (calculate-modulator-phase context period phase-param loop-mode duration time-unit nil))
+  ([{:keys [time-ms bpm trigger-time] :as context}
+    period phase-param loop-mode duration time-unit trigger-override]
+   (let [bpm (double (or bpm 120.0))
          frequency (period->frequency (double period))
-         effective-trigger-time (or (resolve-trigger-time trigger-override) trigger-time)
-         start-time (double (or effective-trigger-time 0.0))
-         elapsed (- time-ms start-time)]
+         phase-param (double (or phase-param 0.0))]
      (if (= loop-mode :once)
-       (let [progress (calculate-once-progress time-ms effective-trigger-time duration time-unit bpm)]
-         (+ (* progress frequency) phase-offset))
-       (let [beats (time/ms->beats elapsed bpm)]
-         (+ (* beats frequency) phase-offset))))))
+       ;; Once mode: use raw accumulated-beats (no phase correction)
+       ;; for predictable one-shot behavior from trigger
+       (let [effective-trigger-time (or (resolve-trigger-time trigger-override) trigger-time)
+             progress (calculate-once-progress (or time-ms 0) effective-trigger-time duration time-unit bpm)]
+         (+ (* progress frequency) phase-param))
+       ;; Loop mode: use effective-beats (with phase correction for tap resync)
+       ;; Falls back to calculating from time-ms/bpm for backward compatibility
+       (let [beats (get-beats-from-context context)]
+         (+ (* beats frequency) phase-param))))))
 
 
 ;; Per-Point Context Detection
@@ -150,6 +174,37 @@
     false))
 
 
+;; Beat Calculation Helper
+
+(defn- get-beats-from-context
+  "Get the current beat count from context with proper fallback.
+   
+   Priority:
+   1. effective-beats (includes phase correction for looping)
+   2. accumulated-beats (raw incremental beats)
+   3. Calculate from time-ms and bpm (backward compatibility with tests)
+   4. Default to 0.0
+   
+   This ensures backward compatibility with contexts that only have time-ms/bpm."
+  ^double [{:keys [effective-beats accumulated-beats time-ms bpm]}]
+  (double
+   (or effective-beats
+       accumulated-beats
+       (when (and time-ms bpm (pos? bpm))
+         (time/ms->beats time-ms bpm))
+       0.0)))
+
+(defn- get-ms-from-context
+  "Get the current milliseconds from context with proper fallback.
+   
+   Priority:
+   1. accumulated-ms (incremental since trigger)
+   2. time-ms (absolute timestamp - backward compatibility with tests)
+   3. Default to 0.0"
+  ^double [{:keys [accumulated-ms time-ms]}]
+  (double (or accumulated-ms time-ms 0.0)))
+
+
 ;; Internal Modulator Implementations
 
 
@@ -170,41 +225,47 @@
     (time/oscillate (double min) (double max) p :triangle)))
 
 (defn- eval-sawtooth
-  "Evaluate sawtooth wave modulator."
+  "Evaluate sawtooth wave modulator.
+   Uses effective-beats for smooth BPM-change animation."
   [{:keys [min max period phase]
     :or {min 0.0 max 1.0 period 1.0 phase 0.0}}
-   {:keys [time-ms bpm]}]
+   context]
   (let [freq (period->frequency (double period))
-        beats (time/ms->beats (double time-ms) (double bpm))
+        beats (get-beats-from-context context)
         p (+ (* beats freq) (double phase))]
     (time/oscillate (double min) (double max) p :sawtooth)))
 
 (defn- eval-square
-  "Evaluate square wave modulator."
+  "Evaluate square wave modulator.
+   Uses effective-beats for smooth BPM-change animation."
   [{:keys [min max period duty-cycle phase]
     :or {min 0.0 max 1.0 period 1.0 duty-cycle 0.5 phase 0.0}}
-   {:keys [time-ms bpm]}]
+   context]
   (let [freq (period->frequency (double period))
-        beats (time/ms->beats (double time-ms) (double bpm))
+        beats (get-beats-from-context context)
         cycle-phase (mod (+ (* beats freq) (double phase)) 1.0)]
     (if (< cycle-phase (double duty-cycle))
       (double max)
       (double min))))
 
 (defn- eval-sine-hz
-  "Evaluate sine wave at fixed Hz frequency."
+  "Evaluate sine wave at fixed Hz frequency.
+   Uses accumulated-ms for smooth animation unaffected by BPM changes."
   [{:keys [min max frequency-hz]
     :or {min 0.0 max 1.0 frequency-hz 1.0}}
-   {:keys [time-ms]}]
-  (let [p (time/time->phase (double time-ms) (double frequency-hz))]
+   context]
+  (let [ms (get-ms-from-context context)
+        p (* ms (double frequency-hz) 0.001)]  ;; Convert to cycles
     (time/oscillate (double min) (double max) p :sine)))
 
 (defn- eval-square-hz
-  "Evaluate square wave at fixed Hz frequency."
+  "Evaluate square wave at fixed Hz frequency.
+   Uses accumulated-ms for smooth animation unaffected by BPM changes."
   [{:keys [min max frequency-hz duty-cycle]
     :or {min 0.0 max 1.0 frequency-hz 1.0 duty-cycle 0.5}}
-   {:keys [time-ms]}]
-  (let [p (time/time->phase (double time-ms) (double frequency-hz))]
+   context]
+  (let [ms (get-ms-from-context context)
+        p (mod (* ms (double frequency-hz) 0.001) 1.0)]
     (if (< p (double duty-cycle))
       (double max)
       (double min))))
@@ -231,11 +292,13 @@
     (+ (double end) (* decay-factor range-v))))
 
 (defn- eval-exp-decay
-  "Evaluate exponential decay (beat-synced)."
+  "Evaluate exponential decay (beat-synced).
+   Uses effective-beats for smooth BPM-change animation."
   [{:keys [min max decay-type]
     :or {min 0.0 max 1.0 decay-type :linear}}
-   {:keys [time-ms bpm]}]
-  (let [phase (time/time->beat-phase (double time-ms) (double bpm))
+   context]
+  (let [beats (get-beats-from-context context)
+        phase (mod beats 1.0)
         start-v (double max)
         end-v (double min)]
     (case decay-type
@@ -247,11 +310,12 @@
         (+ start-v (* phase range-v))))))
 
 (defn- eval-random
-  "Evaluate random modulator."
+  "Evaluate random modulator.
+   Uses effective-beats for smooth BPM-change animation."
   [{:keys [min max changes-per-beat]
     :or {min 0.0 max 1.0 changes-per-beat 1.0}}
-   {:keys [time-ms bpm]}]
-  (let [beats (time/ms->beats (double time-ms) (double bpm))
+   context]
+  (let [beats (get-beats-from-context context)
         seed (long (* beats (double changes-per-beat)))
         rng (java.util.Random. seed)
         t (.nextDouble ^java.util.Random rng)
@@ -259,11 +323,12 @@
     (+ (double min) (* t range-v))))
 
 (defn- eval-step
-  "Evaluate step modulator."
+  "Evaluate step modulator.
+   Uses effective-beats for smooth BPM-change animation."
   [{:keys [values steps-per-beat]
     :or {values [0 1] steps-per-beat 1.0}}
-   {:keys [time-ms bpm]}]
-  (let [beats (time/ms->beats (double time-ms) (double bpm))
+   context]
+  (let [beats (get-beats-from-context context)
         idx (mod (long (* beats (double steps-per-beat))) (count values))]
     (nth values idx)))
 
@@ -375,32 +440,36 @@
     (double min)))
 
 (defn- eval-pos-scroll
-  "Evaluate position scroll modulator."
+  "Evaluate position scroll modulator.
+   Uses effective-beats for smooth BPM-change animation."
   [{:keys [min max axis speed wave-type]
     :or {min 0.0 max 1.0 axis :x speed 1.0 wave-type :sine}}
-   {:keys [x y time-ms bpm]}]
-  (if (and x y time-ms bpm)
+   {:keys [x y] :as context}]
+  (if (and x y)
     (let [pos-val (case axis :x (double x) :y (double y))
-          time-offset (* (time/time->beat-phase (double time-ms) (double bpm)) (double speed))
+          beats (get-beats-from-context context)
+          time-offset (* (mod beats 1.0) (double speed))
           phase (+ pos-val time-offset)]
       (time/oscillate (double min) (double max) phase wave-type))
     (double min)))
 
 (defn- eval-rainbow-hue
-  "Evaluate rainbow hue modulator."
+  "Evaluate rainbow hue modulator.
+   Uses accumulated-ms for smooth animation unaffected by BPM changes."
   [{:keys [axis speed] :or {axis :x speed 60.0}}
-   {:keys [x y time-ms]}]
-  (if (and x y time-ms)
-    (let [position (case axis
-                     :x (/ (+ (double x) 1.0) 2.0)
-                     :y (/ (+ (double y) 1.0) 2.0)
-                     :radial (Math/sqrt (+ (* (double x) (double x))
-                                           (* (double y) (double y))))
-                     :angle (/ (+ (Math/atan2 (double y) (double x)) Math/PI)
-                               (* 2.0 Math/PI)))
-          time-offset (mod (* (/ (double time-ms) 1000.0) (double speed)) 360.0)]
-      (mod (+ (* position 360.0) time-offset) 360.0))
-    0.0))
+   {:keys [x y] :as context}]
+  (let [ms (get-ms-from-context context)]
+    (if (and x y)
+      (let [position (case axis
+                       :x (/ (+ (double x) 1.0) 2.0)
+                       :y (/ (+ (double y) 1.0) 2.0)
+                       :radial (Math/sqrt (+ (* (double x) (double x))
+                                             (* (double y) (double y))))
+                       :angle (/ (+ (Math/atan2 (double y) (double x)) Math/PI)
+                                 (* 2.0 Math/PI)))
+            time-offset (mod (* (/ ms 1000.0) (double speed)) 360.0)]
+        (mod (+ (* position 360.0) time-offset) 360.0))
+      0.0)))
 
 
 ;; Modulator Evaluators Registry

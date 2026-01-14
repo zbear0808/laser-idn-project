@@ -1,6 +1,6 @@
 (ns laser-show.animation.effects.shape
   "Shape effects - geometric transformations for laser frames.
-   Includes scale, translate, rotate, viewport, corner-pin, and distortion effects.
+   Includes scale, translate, rotate, corner-pin, and distortion effects.
    These effects can be used at any level (cue, zone group, zone, projector).
    
    Note: Scale supports negative values for mirroring (e.g., x-scale -1 = mirror X).
@@ -23,8 +23,8 @@
 ;; Scale Effect
 
 
-(defn- scale-xf [_time-ms _bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params _time-ms _bpm)
+(defn- scale-xf [time-ms bpm params ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         x-scale (:x-scale resolved)
         y-scale (:y-scale resolved)]
     (map (fn [{:keys [x y] :as pt}]
@@ -55,8 +55,8 @@
 ;; Translate Effect
 
 
-(defn- translate-xf [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
+(defn- translate-xf [time-ms bpm params ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         dx (:x resolved)
         dy (:y resolved)]
     (map (fn [{px :x py :y :as pt}]
@@ -90,8 +90,8 @@
 ;; Rotation Effect
 
 
-(defn- rotation-xf [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
+(defn- rotation-xf [time-ms bpm params ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         angle (:angle resolved)
         radians (Math/toRadians angle)
         cos-a (Math/cos radians)
@@ -116,67 +116,11 @@
 
 
 
-;; Viewport Effect
-
-
-(defn- viewport-xf [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
-        x-min (:x-min resolved)
-        x-max (:x-max resolved)
-        y-min (:y-min resolved)
-        y-max (:y-max resolved)
-        viewport-width (- x-max x-min)
-        viewport-height (- y-max y-min)]
-    (map (fn [{:keys [x y] :as pt}]
-           (let [in-viewport? (and (>= x x-min) (<= x x-max)
-                                   (>= y y-min) (<= y y-max))]
-             (if in-viewport?
-               (assoc pt
-                 :x (if (zero? viewport-width)
-                      0.0
-                      (- (* 2.0 (/ (- x x-min) viewport-width)) 1.0))
-                 :y (if (zero? viewport-height)
-                      0.0
-                      (- (* 2.0 (/ (- y y-min) viewport-height)) 1.0)))
-               (assoc pt :x 0.0 :y 0.0)))))))
-
-(effects/register-effect!
- {:id :viewport
-  :name "Viewport"
-  :category :shape
-  :timing :static
-  :parameters [{:key :x-min
-                :label "X Min"
-                :type :float
-                :default -1.0
-                :min -1.0
-                :max 1.0}
-               {:key :x-max
-                :label "X Max"
-                :type :float
-                :default 1.0
-                :min -1.0
-                :max 1.0}
-               {:key :y-min
-                :label "Y Min"
-                :type :float
-                :default -1.0
-                :min -1.0
-                :max 1.0}
-               {:key :y-max
-                :label "Y Max"
-                :type :float
-                :default 1.0
-                :min -1.0
-                :max 1.0}]
-  :apply-transducer viewport-xf})
-
-
 ;; Pinch/Bulge Effect
 
 
-(defn- pinch-bulge-xf [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
+(defn- pinch-bulge-xf [time-ms bpm params ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         amount (:amount resolved)]
     (map (fn [{:keys [x y] :as pt}]
            (let [distance (Math/sqrt (+ (* x x) (* y y)))
@@ -213,8 +157,8 @@
    - tr (top-right): maps from (1, 1)
    - bl (bottom-left): maps from (-1, -1)
    - br (bottom-right): maps from (1, -1)"
-  [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
+  [time-ms bpm params ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         tl-x (:tl-x resolved) tl-y (:tl-y resolved)
         tr-x (:tr-x resolved) tr-y (:tr-y resolved)
         bl-x (:bl-x resolved) bl-y (:bl-y resolved)
@@ -302,8 +246,8 @@
 ;; Lens Distortion Effect (barrel/pincushion)
 
 
-(defn- lens-distortion-xf [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
+(defn- lens-distortion-xf [time-ms bpm params ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         k1 (:k1 resolved)
         k2 (:k2 resolved)]
     (map (fn [{:keys [x y] :as pt}]
@@ -342,8 +286,8 @@
 ;; Wave Distortion Effect (Special)
 
 
-(defn- wave-distort-xf [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
+(defn- wave-distort-xf [time-ms bpm params ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         amplitude (:amplitude resolved)
         frequency (:frequency resolved)
         axis (:axis resolved)

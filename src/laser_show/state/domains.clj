@@ -61,7 +61,23 @@
    :active-cue {:default nil
                 :doc "Currently active cue data"}
    :cue-queue {:default []
-               :doc "Queue of pending cues"}})
+               :doc "Queue of pending cues"}
+   
+   ;; Beat accumulation fields
+   :accumulated-beats {:default 0.0
+                       :doc "Running total of beats since cue trigger"}
+   :accumulated-ms {:default 0.0
+                    :doc "Running total of ms since cue trigger"}
+   :last-frame-time {:default 0
+                     :doc "Timestamp of last frame for delta calculation"}
+   
+   ;; Phase resync fields
+   :phase-offset {:default 0.0
+                  :doc "Current phase correction offset"}
+   :phase-offset-target {:default 0.0
+                         :doc "Target phase offset from tap resync"}
+   :resync-rate {:default 4.0
+                 :doc "Beats to reach ~63% of target phase correction"}})
 
 (defstate grid
   "Cue grid state - the main trigger interface.

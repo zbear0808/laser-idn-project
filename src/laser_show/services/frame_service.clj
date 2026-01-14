@@ -13,10 +13,12 @@
    - Presets render one after another in time"
   (:require [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
+            [laser-show.state.queries :as queries]
             [laser-show.animation.presets :as presets]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.types :as t]
+            [laser-show.animation.time :as anim-time]
             [laser-show.common.timing :as timing]
             [laser-show.profiling.frame-profiler :as profiler]
             ;; Require effect implementations to register them
@@ -24,6 +26,58 @@
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
             [laser-show.animation.effects.calibration]))
+
+
+;; Beat Accumulation
+;;
+;; These functions manage the incremental beat/time accumulators that enable
+;; smooth animation during BPM changes. Instead of recalculating beats from
+;; elapsed time (which causes jumps), we accumulate beats incrementally.
+
+
+(defn- update-timing-accumulators!
+  "Update beat/time accumulators for the current frame.
+   Call once per frame before generating animation.
+   
+   Handles:
+   - Incremental beat and ms accumulation (ALWAYS runs - for modulator preview)
+   - Phase offset exponential decay toward target
+   - Protection against large deltas (>1 second gaps)
+   
+   NOTE: Beat accumulation runs continuously, not just when playing.
+   This allows modulators to animate in editor preview mode.
+   The retrigger button resets accumulators to zero."
+  [current-time-ms]
+  (let [bpm (queries/bpm)]
+    (state/swap-state!
+      (fn [s]
+        (let [{:keys [last-frame-time accumulated-beats accumulated-ms
+                      phase-offset phase-offset-target resync-rate]} (:playback s)
+              resync-rate (or resync-rate 4.0)]
+          (if (pos? last-frame-time)
+            ;; Normal frame - calculate deltas and update
+            (let [delta-ms (- current-time-ms last-frame-time)]
+              ;; Guard against unreasonable deltas (>1 second = probably pause/resume)
+              (if (> delta-ms 1000)
+                ;; Skip accumulation, just update timestamp
+                (assoc-in s [:playback :last-frame-time] current-time-ms)
+                ;; Normal accumulation - runs continuously for modulator preview
+                (let [delta-beats (* delta-ms (/ bpm 60000.0))
+                      new-accumulated-beats (+ (or accumulated-beats 0.0) delta-beats)
+                      new-accumulated-ms (+ (or accumulated-ms 0.0) delta-ms)
+                      ;; Exponential decay toward target phase offset
+                      decay (Math/exp (- (/ delta-beats (max 0.1 resync-rate))))
+                      new-phase-offset (+ (or phase-offset-target 0.0)
+                                          (* (- (or phase-offset 0.0)
+                                                (or phase-offset-target 0.0))
+                                             decay))]
+                  (-> s
+                      (assoc-in [:playback :accumulated-beats] new-accumulated-beats)
+                      (assoc-in [:playback :accumulated-ms] new-accumulated-ms)
+                      (assoc-in [:playback :phase-offset] new-phase-offset)
+                      (assoc-in [:playback :last-frame-time] current-time-ms)))))
+            ;; First frame - just initialize timestamp
+            (assoc-in s [:playback :last-frame-time] current-time-ms)))))))
 
 
 ;; Frame Generation
@@ -59,6 +113,17 @@
   "Check if playback is active."
   []
   (get-in (state/get-raw-state) [:playback :playing?] false))
+
+(defn get-timing-context
+  "Get the timing context for modulator evaluation.
+   Returns a map with accumulated-beats, accumulated-ms, phase-offset, effective-beats."
+  []
+  (let [s (state/get-raw-state)
+        {:keys [accumulated-beats accumulated-ms phase-offset]} (:playback s)]
+    {:accumulated-beats (or accumulated-beats 0.0)
+     :accumulated-ms (or accumulated-ms 0.0)
+     :phase-offset (or phase-offset 0.0)
+     :effective-beats (+ (or accumulated-beats 0.0) (or phase-offset 0.0))}))
 
 (defn get-active-effects
   "Get all active effect instances from the effects grid.
@@ -104,11 +169,11 @@
 
 (defn- apply-item-effects
   "Apply an item's (preset or group) effect chain to a frame."
-  [frame item elapsed-ms bpm trigger-time]
+  [frame item elapsed-ms bpm trigger-time timing-ctx]
   (let [item-effects (:effects item [])]
     (if (seq item-effects)
       (try
-        (effects/apply-effect-chain frame {:effects item-effects} elapsed-ms bpm trigger-time)
+        (effects/apply-effect-chain frame {:effects item-effects} elapsed-ms bpm trigger-time timing-ctx)
         (catch Exception e
           (log/error "apply-item-effects: Effect chain failed for" (:type item) ":" (.getMessage e))
           frame))
@@ -163,21 +228,21 @@
    - For groups: render children → concatenate → apply group effects
    
    Returns a LaserFrame or nil if disabled/empty."
-  [item elapsed-ms bpm trigger-time]
+  [item elapsed-ms bpm trigger-time timing-ctx]
   (when (:enabled? item true)
     (cond
       ;; Preset: render and apply its effects
       (= :preset (:type item))
       (when-let [frame (render-preset-instance item elapsed-ms)]
-        (apply-item-effects frame item elapsed-ms bpm trigger-time))
+        (apply-item-effects frame item elapsed-ms bpm trigger-time timing-ctx))
       
       ;; Group: render children, concatenate, then apply group effects
       (chains/group? item)
-      (let [child-frames (keep #(render-item-with-effects % elapsed-ms bpm trigger-time)
+      (let [child-frames (keep #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx)
                                (:items item []))
             concatenated (concatenate-frames child-frames elapsed-ms)]
         (when concatenated
-          (apply-item-effects concatenated item elapsed-ms bpm trigger-time)))
+          (apply-item-effects concatenated item elapsed-ms bpm trigger-time timing-ctx)))
       
       :else nil)))
 
@@ -190,9 +255,9 @@
    3. Final concatenation of all top-level items
    
    This creates the effect of all shapes being displayed at once via persistence of vision."
-  [cue-chain elapsed-ms bpm trigger-time]
+  [cue-chain elapsed-ms bpm trigger-time timing-ctx]
   (let [items (:items cue-chain [])
-        rendered-frames (keep #(render-item-with-effects % elapsed-ms bpm trigger-time) items)]
+        rendered-frames (keep #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx) items)]
     (concatenate-frames rendered-frames elapsed-ms)))
 
 (defn generate-current-frame
@@ -207,11 +272,13 @@
       (let [trigger-time (get-trigger-time)
             elapsed (- (System/currentTimeMillis) trigger-time)
             bpm (get-bpm)
+            ;; Get timing context for modulator evaluation
+            timing-ctx (get-timing-context)
             
             ;; Measure base frame generation
             base-start (timing/nanotime)
             base-frame (when-let [cue-chain (:cue-chain cell-data)]
-                         (generate-frame-from-cue-chain cue-chain elapsed bpm trigger-time))
+                         (generate-frame-from-cue-chain cue-chain elapsed bpm trigger-time timing-ctx))
             base-end (timing/nanotime)]
         
         (when base-frame
@@ -221,7 +288,7 @@
                 effects-start (timing/nanotime)
                 final-frame (if effect-chain
                               (try
-                                (effects/apply-effect-chain base-frame effect-chain elapsed bpm trigger-time)
+                                (effects/apply-effect-chain base-frame effect-chain elapsed bpm trigger-time timing-ctx)
                                 (catch Exception e
                                   (log/error "generate-current-frame: Effect chain failed:" (.getMessage e))
                                   (log/debug "  effect-chain:" effect-chain)
@@ -289,8 +356,12 @@
 
 (defn update-preview-frame!
   "Update the preview frame in state.
-   Call this periodically to update the preview."
+   Call this periodically to update the preview.
+   Also updates timing accumulators for smooth beat-synced animation."
   []
+  ;; Update timing accumulators FIRST, before generating frame
+  (update-timing-accumulators! (System/currentTimeMillis))
+  
   (let [frame (get-preview-frame)
         ;; Get recent profiler stats (last 30 frames = ~1 second at 30fps)
         recent-stats (profiler/get-recent-stats 30)
@@ -298,7 +369,7 @@
                       {:avg-latency-us (:avg-total-us recent-stats)
                        :p95-latency-us (:p95-total-us recent-stats)
                        :max-latency-us (:max-total-us recent-stats)})]
-    (state/swap-state! 
+    (state/swap-state!
       (fn [s]
         (cond-> s
           true (assoc-in [:backend :streaming :current-frame] frame)

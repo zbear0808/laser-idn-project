@@ -168,4 +168,23 @@
         :-fx-cursor "hand"
         
         ":hover"
-        {:-fx-background-color bg-hover}}})))
+        {:-fx-background-color bg-hover}}
+       
+       
+       ;; Retrigger Button (for modulator controls)
+       
+       
+       ".retrigger-button"
+       {:-fx-background-color bg-light
+        :-fx-text-fill text-primary
+        :-fx-font-size 10
+        :-fx-padding ["2px" "8px"]
+        :-fx-cursor "hand"
+        :-fx-background-radius 3
+        
+        ":hover"
+        {:-fx-background-color accent-primary
+         :-fx-text-fill text-primary}
+        
+        ":pressed"
+        {:-fx-background-color accent-hover}}})))

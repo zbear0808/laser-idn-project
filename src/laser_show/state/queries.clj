@@ -28,3 +28,29 @@
 (defn clipboard []
   (ex/clipboard (raw-state)))
 
+;; Beat Accumulation Queries
+
+(defn accumulated-beats []
+  (ex/accumulated-beats (raw-state)))
+
+(defn accumulated-ms []
+  (ex/accumulated-ms (raw-state)))
+
+(defn last-frame-time []
+  (ex/last-frame-time (raw-state)))
+
+(defn phase-offset []
+  (ex/phase-offset (raw-state)))
+
+(defn phase-offset-target []
+  (ex/phase-offset-target (raw-state)))
+
+(defn resync-rate []
+  (ex/resync-rate (raw-state)))
+
+(defn effective-beats []
+  (ex/effective-beats (raw-state)))
+
+(defn trigger-time []
+  (ex/trigger-time (raw-state)))
+

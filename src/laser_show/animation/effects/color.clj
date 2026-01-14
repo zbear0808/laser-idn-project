@@ -31,21 +31,21 @@
 ;; Hue Shift Effect
 
 
-(defn- hue-shift-xf [time-ms bpm params _ctx]
+(defn- hue-shift-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
     ;; Per-point path
     (map (fn [{:keys [x y r g b idx count] :as pt}]
            (if (common/blanked? pt)
              pt  ;; Skip blanked points
-             (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
+             (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
                    degrees (:degrees resolved)
                    [h s v] (colors/normalized->hsv r g b)
                    new-h (mod (+ h degrees) 360)
                    [nr ng nb] (colors/hsv->normalized new-h s v)]
                (assoc pt :r nr :g ng :b nb)))))
     ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm)
+    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           degrees (:degrees resolved)]
       (map (fn [{:keys [r g b] :as pt}]
              (if (common/blanked? pt)
@@ -72,21 +72,21 @@
 ;; Saturation Effect
 
 
-(defn- saturation-xf [time-ms bpm params _ctx]
+(defn- saturation-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
     ;; Per-point path
     (map (fn [{:keys [x y r g b idx count] :as pt}]
            (if (common/blanked? pt)
              pt  ;; Skip blanked points
-             (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
+             (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
                    amount (:amount resolved)
                    [h s v] (colors/normalized->hsv r g b)
                    new-s (common/clamp-normalized (* s amount))
                    [nr ng nb] (colors/hsv->normalized h new-s v)]
                (assoc pt :r nr :g ng :b nb)))))
     ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm)
+    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           amount (:amount resolved)]
       (map (fn [{:keys [r g b] :as pt}]
              (if (common/blanked? pt)
@@ -113,12 +113,12 @@
 ;; Color Filter Effect
 
 
-(defn- color-filter-xf [time-ms bpm params _ctx]
+(defn- color-filter-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
     ;; Per-point path
     (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
+           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
                  r-mult (:r-mult resolved)
                  g-mult (:g-mult resolved)
                  b-mult (:b-mult resolved)]
@@ -127,7 +127,7 @@
                :g (common/clamp-normalized (* g g-mult))
                :b (common/clamp-normalized (* b b-mult))))))
     ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm)
+    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           r-mult (:r-mult resolved)
           g-mult (:g-mult resolved)
           b-mult (:b-mult resolved)]
@@ -185,7 +185,7 @@
 ;; Set Hue Effect (sets all points to specific hue, preserving saturation/value)
 
 
-(defn- set-hue-xf [time-ms bpm params _ctx]
+(defn- set-hue-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
     ;; Per-point path - enables rainbow gradients!
@@ -193,13 +193,13 @@
            (let [[_h s v] (colors/normalized->hsv r g b)]
              ;; Only apply to non-black points with some saturation
              (if (and (pos? v) (not (common/blanked? pt)))
-               (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
+               (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
                      hue (:hue resolved)
                      [nr ng nb] (colors/hsv->normalized hue s v)]
                  (assoc pt :r nr :g ng :b nb))
                pt))))
     ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm)
+    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           hue (:hue resolved)]
       (map (fn [{:keys [r g b] :as pt}]
              (let [[_h s v] (colors/normalized->hsv r g b)]
@@ -233,8 +233,8 @@
                 (* (- g1 g2) (- g1 g2))
                 (* (- b1 b2) (- b1 b2)))))
 
-(defn- color-replace-xf [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
+(defn- color-replace-xf [time-ms bpm params ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         ;; Convert 0-255 params to normalized 0.0-1.0
         from-r (/ (:from-r resolved) 255.0)
         from-g (/ (:from-g resolved) 255.0)
@@ -302,8 +302,8 @@
 ;; Set Color Effect (replaces color of ALL points)
 
 
-(defn- set-color-xf [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
+(defn- set-color-xf [time-ms bpm params ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         ;; Convert 0-255 params to normalized 0.0-1.0
         red (/ (:red resolved) 255.0)
         green (/ (:green resolved) 255.0)
@@ -350,8 +350,8 @@
 ;; For more control, use hue-shift with rainbow-hue modulator.
 
 
-(defn- rainbow-position-xf [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
+(defn- rainbow-position-xf [time-ms bpm params ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         speed (:speed resolved)
         axis (:axis resolved)
         time-offset (mod (* (/ time-ms 1000.0) speed) 360)]

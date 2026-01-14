@@ -9,6 +9,17 @@
             [laser-show.state.clipboard :as clipboard]))
 
 
+(defn- reset-timing-accumulators
+  "Reset all timing accumulators to zero.
+   Called when triggering a new cue for fresh animation start."
+  [state]
+  (-> state
+      (assoc-in [:playback :accumulated-beats] 0.0)
+      (assoc-in [:playback :accumulated-ms] 0.0)
+      (assoc-in [:playback :phase-offset] 0.0)
+      (assoc-in [:playback :phase-offset-target] 0.0)
+      (assoc-in [:playback :last-frame-time] 0)))
+
 (defn- handle-grid-cell-clicked
   "Handle grid cell click - dispatches to trigger or select.
    Note: Button detection is handled in grid_cell.clj before dispatching.
@@ -20,7 +31,8 @@
       {:state (-> state
                   (assoc-in [:playback :active-cell] [col row])
                   (assoc-in [:playback :playing?] true)
-                  (assoc-in [:playback :trigger-time] now))})
+                  (assoc-in [:playback :trigger-time] now)
+                  reset-timing-accumulators)})
     ;; Left click on empty - select
     {:state (assoc-in state [:grid :selected-cell] [col row])}))
 
@@ -31,7 +43,8 @@
     {:state (-> state
                 (assoc-in [:playback :active-cell] [col row])
                 (assoc-in [:playback :playing?] true)
-                (assoc-in [:playback :trigger-time] now))}))
+                (assoc-in [:playback :trigger-time] now)
+                reset-timing-accumulators)}))
 
 (defn- handle-grid-select-cell
   "Select a cell for editing."

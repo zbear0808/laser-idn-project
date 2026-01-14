@@ -66,38 +66,45 @@
    - :params-map - Parameter specifications map
    - :dialog-data - Dialog state data (for curve editor channel tab tracking)"
   [{:keys [col row effect-path effect-def current-params ui-mode params-map dialog-data]}]
-  {:fx/type effect-param-ui/custom-param-renderer
-   :effect-def effect-def
-   :current-params current-params
-   :ui-mode ui-mode
-   :params-map params-map
-   :dialog-data dialog-data
-   
-   ;; Event templates for spatial editors (translate, corner-pin)
-   :spatial-event-template {:event/type :chain/update-spatial-params
-                           :domain :effect-chains
-                           :entity-key [col row]
-                           :effect-path effect-path}
-   :spatial-event-keys {:col col :row row :effect-path effect-path}
-   
-   ;; Event templates for param controls
-   :on-change-event {:event/type :chain/update-param
-                     :domain :effect-chains
-                     :entity-key [col row]
-                     :effect-path effect-path}
-   :on-text-event {:event/type :chain/update-param-from-text
-                   :domain :effect-chains
-                   :entity-key [col row]
-                   :effect-path effect-path}
-   :on-mode-change-event {:event/type :chain/set-ui-mode
+ {:fx/type effect-param-ui/custom-param-renderer
+  :effect-def effect-def
+  :current-params current-params
+  :ui-mode ui-mode
+  :params-map params-map
+  :dialog-data dialog-data
+  
+  ;; Enable modulator support for numeric parameters
+  :enable-modulators? true
+  
+  ;; Event templates for spatial editors (translate, corner-pin)
+  :spatial-event-template {:event/type :chain/update-spatial-params
                           :domain :effect-chains
                           :entity-key [col row]
                           :effect-path effect-path}
-   
-   ;; RGB curves props
-   :rgb-domain :effect-chains
-   :rgb-entity-key [col row]
-   :rgb-effect-path effect-path})
+  :spatial-event-keys {:col col :row row :effect-path effect-path}
+  
+  ;; Event templates for param controls
+  :on-change-event {:event/type :chain/update-param
+                    :domain :effect-chains
+                    :entity-key [col row]
+                    :effect-path effect-path}
+  :on-text-event {:event/type :chain/update-param-from-text
+                  :domain :effect-chains
+                  :entity-key [col row]
+                  :effect-path effect-path}
+  :on-mode-change-event {:event/type :chain/set-ui-mode
+                         :domain :effect-chains
+                         :entity-key [col row]
+                         :effect-path effect-path}
+  ;; Modulator event base for modulator toggle/type/param operations
+  :modulator-event-base {:domain :effect-chains
+                         :entity-key [col row]
+                         :effect-path effect-path}
+  
+  ;; RGB curves props
+  :rgb-domain :effect-chains
+  :rgb-entity-key [col row]
+  :rgb-effect-path effect-path})
 
 (defn- parameter-editor
   "Parameter editor for the selected effect."
@@ -132,27 +139,24 @@
                               :params-map params-map
                               :dialog-data dialog-data}}
                     
-                    ;; Standard parameters - use shared param controls
+                    ;; Standard parameters - use modulatable param controls
                     {:fx/type :scroll-pane
                      :fit-to-width true
                      :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
-                     :content {:fx/type :v-box
-                              :spacing 6
-                              :padding {:top 4}
-                              :children (vec
-                                         (for [[param-key param-spec] params-map]
-                                           {:fx/type effect-param-ui/param-control
-                                            :param-key param-key
-                                            :param-spec param-spec
-                                            :current-value (get current-params param-key)
-                                            :on-change-event {:event/type :chain/update-param
-                                                              :domain :effect-chains
-                                                              :entity-key [col row]
-                                                              :effect-path selected-effect-path}
-                                            :on-text-event {:event/type :chain/update-param-from-text
-                                                            :domain :effect-chains
-                                                            :entity-key [col row]
-                                                            :effect-path selected-effect-path}}))}})
+                     :content {:fx/type effect-param-ui/modulatable-param-controls-list
+                              :params-map params-map
+                              :current-params current-params
+                              :on-change-event {:event/type :chain/update-param
+                                                :domain :effect-chains
+                                                :entity-key [col row]
+                                                :effect-path selected-effect-path}
+                              :on-text-event {:event/type :chain/update-param-from-text
+                                              :domain :effect-chains
+                                              :entity-key [col row]
+                                              :effect-path selected-effect-path}
+                              :modulator-event-base {:domain :effect-chains
+                                                     :entity-key [col row]
+                                                     :effect-path selected-effect-path}}})
                   
                   {:fx/type :label
                    :text "Select an effect from the chain"

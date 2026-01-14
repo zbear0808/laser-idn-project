@@ -33,19 +33,19 @@
 ;; Intensity Effect (replaces dim/brighten)
 
 
-(defn- intensity-xf [time-ms bpm params _ctx]
+(defn- intensity-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
     ;; Per-point path - enables spatial brightness patterns!
     (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
+           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
                  amount (:amount resolved)]
              (assoc pt
                :r (common/clamp-normalized (* r amount))
                :g (common/clamp-normalized (* g amount))
                :b (common/clamp-normalized (* b amount))))))
     ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm)
+    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           amount (:amount resolved)]
       (map (fn [{:keys [r g b] :as pt}]
              (assoc pt
@@ -70,8 +70,8 @@
 ;; Blackout Effect
 
 
-(defn- blackout-xf [time-ms bpm params _ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm)
+(defn- blackout-xf [time-ms bpm params ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         enabled (:enabled resolved)]
     (if enabled
       (map (fn [pt]
@@ -93,12 +93,12 @@
 ;; Threshold Effect (cut low intensities)
 
 
-(defn- threshold-xf [time-ms bpm params _ctx]
+(defn- threshold-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
     ;; Per-point path
     (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
+           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
                  ;; Convert threshold from 0-255 to 0.0-1.0
                  threshold (/ (:threshold resolved) 255.0)
                  max-val (max r g b)]
@@ -106,7 +106,7 @@
                (assoc pt :r 0.0 :g 0.0 :b 0.0)
                pt))))
     ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm)
+    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           ;; Convert threshold from 0-255 to 0.0-1.0
           threshold (/ (:threshold resolved) 255.0)]
       (map (fn [{:keys [r g b] :as pt}]
@@ -132,12 +132,12 @@
 ;; Gamma Correction Effect
 
 
-(defn- gamma-xf [time-ms bpm params _ctx]
+(defn- gamma-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
     ;; Per-point path
     (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count)
+           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
                  gamma (:gamma resolved)
                  inv-gamma (/ 1.0 gamma)]
              (assoc pt
@@ -145,7 +145,7 @@
                :g (common/clamp-normalized (Math/pow g inv-gamma))
                :b (common/clamp-normalized (Math/pow b inv-gamma))))))
     ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm)
+    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           gamma (:gamma resolved)
           inv-gamma (/ 1.0 gamma)]
       (map (fn [{:keys [r g b] :as pt}]

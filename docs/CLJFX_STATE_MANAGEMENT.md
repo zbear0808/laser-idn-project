@@ -137,7 +137,7 @@ Contexts wrap your state and provide memoized subscription functions:
 | Function | Purpose | Example |
 |----------|---------|---------|
 | `fx/create-context` | Create initial context | `(fx/create-context {:data []} cache/lru-cache-factory)` |
-| `fx/sub-val` | Subscribe to raw value | `(fx/sub-val context :title)` |
+| `fx/sub-val` | Subscribe to raw value (keyword or fn) | `(fx/sub-val context :title)` or `(fx/sub-val context get-in [:users i])` |
 | `fx/sub-ctx` | Subscribe via function | `(fx/sub-ctx context sorted-items)` |
 | `fx/swap-context` | Update context (preserves cache) | `(swap! *state fx/swap-context assoc :x 1)` |
 | `fx/reset-context` | Replace context state | `(swap! *state fx/reset-context new-state)` |
@@ -200,15 +200,18 @@ Contexts wrap your state and provide memoized subscription functions:
   (fx/sub-val ctx :data))  ;; Mutates internal cache!
 ```
 
-The cache is designed for the render cycle, not concurrent access. For worker threads:
+The cache is designed for the render cycle, not concurrent access. For worker threads, extract the specific data you need on the main thread first:
 
 ```clojure
-;; SAFE: Extract raw data for worker
+;; SAFE: Extract specific data before spawning worker
 (let [ctx @*state
-      raw-state (fx/sub-val ctx identity)]  ;; Get wrapped map once
-  ;; Pass raw-state to worker - it's just immutable data
-  (future (process-data raw-state)))
+      data (fx/sub-val ctx :document)
+      settings (fx/sub-val ctx :settings)]
+  ;; Pass extracted data to worker - it's just immutable data
+  (future (process-data data settings)))
 ```
+
+> **Note:** Avoid calling `fx/sub-val` or `fx/sub-ctx` from within worker threads. Extract all needed data on the FX thread before spawning the worker.
 
 ### Modifying State from Other Threads
 
@@ -287,24 +290,8 @@ Spawn async work directly from an event handler:
 ### Pattern 2: File Operations
 
 ```clojure
+;; Extract data before spawning thread
 (defn handle-save-file [_event]
-  (swap! *state fx/swap-context assoc :saving true)
-  
-  (future
-    (try
-      (let [data (-> @*state (fx/sub-val identity) :document)
-            path (-> @*state (fx/sub-val identity) :file-path)]
-        (spit path (pr-str data))
-        (swap! *state fx/swap-context assoc
-               :saving false
-               :last-saved (java.time.Instant/now)))
-      (catch Exception e
-        (swap! *state fx/swap-context assoc
-               :saving false
-               :save-error (.getMessage e))))))
-
-;; Better: Extract data before spawning thread
-(defn handle-save-file-v2 [_event]
   (let [ctx @*state
         data (fx/sub-val ctx :document)
         path (fx/sub-val ctx :file-path)]
@@ -452,7 +439,83 @@ For expensive operations triggered by typing:
 
 ### Pattern 6: Using Effects (Pure Event Handling)
 
-For maximum testability, use the effects system:
+For maximum testability, use the effects system. cljfx provides helper functions to simplify setup:
+
+| Helper Function | Purpose |
+|-----------------|---------|
+| `fx/make-deref-co-effect` | Creates a co-effect that derefs an atom |
+| `fx/make-reset-effect` | Creates an effect that resets an atom |
+| `fx/dispatch-effect` | Built-in effect for dispatching new events |
+
+**Example using contexts (from e18_pure_event_handling):**
+
+```clojure
+(ns myapp.events
+  (:require [cljfx.api :as fx]))
+
+;; Pure event handler - returns effects as data
+(defmulti event-handler :event/type)
+
+(defmethod event-handler ::type-url [{:keys [fx/context fx/event]}]
+  {:context (fx/swap-context context assoc :typed-url event)})
+
+(defmethod event-handler ::open-url [{:keys [fx/context url]}]
+  {:context (fx/swap-context context assoc :typed-url url :loading true)
+   :http {:method :get
+          :url url
+          :on-response {:event/type ::on-response :result :success}
+          :on-exception {:event/type ::on-response :result :failure}}})
+
+(defmethod event-handler ::on-response [{:keys [fx/context result response exception]}]
+  {:context (fx/swap-context context assoc
+                             :loading false
+                             :result result
+                             :response response
+                             :error exception)})
+```
+
+```clojure
+(ns myapp.core
+  (:require [cljfx.api :as fx]
+            [clojure.core.cache :as cache]
+            [myapp.events :as events]))
+
+(def *state
+  (atom (fx/create-context {:typed-url "" :loading false}
+                           cache/lru-cache-factory)))
+
+;; Custom effect for HTTP requests
+(defn http-effect [v dispatch!]
+  (future
+    (try
+      (let [response (http/request (dissoc v :on-response :on-exception))]
+        (dispatch! (assoc (:on-response v) :response response)))
+      (catch Exception e
+        (dispatch! (assoc (:on-exception v) :exception e))))))
+
+;; Wire up with helper functions
+(def event-handler
+  (-> events/event-handler
+      (fx/wrap-co-effects
+        {:fx/context (fx/make-deref-co-effect *state)})  ;; Helper!
+      (fx/wrap-effects
+        {:context (fx/make-reset-effect *state)          ;; Helper!
+         :dispatch fx/dispatch-effect                     ;; Built-in!
+         :http http-effect})))
+
+(def renderer
+  (fx/create-renderer
+    :middleware (comp
+                  fx/wrap-context-desc
+                  (fx/wrap-map-desc (fn [_] {:fx/type root})))
+    :opts {:fx.opt/map-event-handler event-handler
+           :fx.opt/type->lifecycle #(or (fx/keyword->lifecycle %)
+                                        (fx/fn->lifecycle-with-context %))}))
+
+(fx/mount-renderer *state renderer)
+```
+
+**Simpler example without contexts:**
 
 ```clojure
 (defn handle-event [event]
@@ -479,7 +542,7 @@ For maximum testability, use the effects system:
       (fx/wrap-co-effects {:state #(deref *state)})
       (fx/wrap-effects
         {:state (fn [state _] (reset! *state state))
-         
+         :dispatch fx/dispatch-effect
          :async (fn [{:keys [action on-success on-error] :as params} dispatch!]
                   (future
                     (try

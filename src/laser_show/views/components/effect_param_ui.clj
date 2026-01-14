@@ -10,10 +10,12 @@
    - Support for visual/numeric mode toggle
    - Automatic control type selection based on parameter spec
    - Custom visual renderers for spatial and curve effects
+   - Optional modulator support for numeric parameters
    
    Uses parameter-controls namespace for basic control components."
   (:require [laser-show.views.components.parameter-controls :as param-controls]
-            [laser-show.views.components.custom-param-renderers :as custom-renderers]))
+            [laser-show.views.components.custom-param-renderers :as custom-renderers]
+            [laser-show.views.components.modulator-param-control :as mod-param]))
 
 
 ;; Re-export commonly used functions from parameter-controls
@@ -45,6 +47,19 @@
   param-controls/param-control)
 
 
+;; Re-export modulator-aware controls
+
+(def modulatable-param-control
+  "Parameter control with modulator support for numeric types.
+   See modulator-param-control/modulatable-param-control for full docs."
+  mod-param/modulatable-param-control)
+
+(def modulatable-param-controls-list
+  "Parameter controls list with modulator support.
+   See modulator-param-control/modulatable-param-controls-list for full docs."
+  mod-param/modulatable-param-controls-list)
+
+
 ;; Custom Parameter Renderer with Visual Editors
 
 
@@ -62,6 +77,7 @@
    - :params-map - Parameter specifications map (from params-vector->map)
    - :ui-mode - Current UI mode (:visual or :numeric)
    - :dialog-data - Dialog state data (for curve editor channel tracking, ui-modes)
+   - :enable-modulators? - Enable modulator toggle buttons on numeric params (default false)
    
    Event template props (for visual editors):
    - :spatial-event-template - Base event for spatial param updates (translate, corner-pin)
@@ -71,6 +87,7 @@
    - :on-change-event - Event template for param value changes
    - :on-text-event - Event template for text field updates
    - :on-mode-change-event - Event template for visual/numeric mode toggle
+   - :modulator-event-base - Base event template for modulator operations (domain, entity-key, effect-path)
    
    RGB Curves props:
    - :rgb-domain - Domain for RGB curves (:effect-chains, :item-effects, etc.)
@@ -78,11 +95,21 @@
    - :rgb-effect-path - Effect path for RGB curves"
   [{:keys [effect-def current-params ui-mode params-map dialog-data
            spatial-event-template spatial-event-keys
-           on-change-event on-text-event on-mode-change-event
-           rgb-domain rgb-entity-key rgb-effect-path]}]
+           on-change-event on-text-event on-mode-change-event modulator-event-base
+           rgb-domain rgb-entity-key rgb-effect-path
+           enable-modulators?]}]
   (let [ui-hints (:ui-hints effect-def)
         renderer-type (:renderer ui-hints)
-        actual-mode (or ui-mode (:default-mode ui-hints :visual))]
+        ;; Check if any params have active modulators
+        has-modulators? (boolean (some (fn [[_k v]] (map? v)) current-params))
+        ;; Force numeric mode if modulators are active
+        actual-mode (if has-modulators?
+                      :numeric
+                      (or ui-mode (:default-mode ui-hints :visual)))
+        ;; Select the appropriate param controls list based on modulator support
+        param-list-type (if enable-modulators?
+                          mod-param/modulatable-param-controls-list
+                          param-controls/param-controls-list)]
     ;; RGB Curves is visual-only, no mode toggle - use the public rgb-curves-visual-editor
     (if (= renderer-type :rgb-curves)
       {:fx/type custom-renderers/rgb-curves-visual-editor
@@ -100,23 +127,39 @@
                    :spacing 6
                    :alignment :center-left
                    :padding {:bottom 8}
-                   :children [{:fx/type :label
-                              :text "Edit Mode:"
-                              :style "-fx-text-fill: #808080; -fx-font-size: 10;"}
-                             {:fx/type :button
-                              :text "👁 Visual"
-                              :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
-                                         (if (= actual-mode :visual)
-                                           "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
-                                           "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
-                              :on-action (assoc on-mode-change-event :mode :visual)}
-                             {:fx/type :button
-                              :text "🔢 Numeric"
-                              :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
-                                         (if (= actual-mode :numeric)
-                                           "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
-                                           "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
-                              :on-action (assoc on-mode-change-event :mode :numeric)}]}
+                   :children (filterv some?
+                              [{:fx/type :label
+                               :text "Edit Mode:"
+                               :style "-fx-text-fill: #808080; -fx-font-size: 10;"}
+                              ;; Visual mode button - conditionally add :on-action only when valid
+                              (cond-> {:fx/type :button
+                                       :text "👁 Visual"
+                                       :disable has-modulators?
+                                       :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
+                                                  (cond
+                                                    has-modulators?
+                                                    "-fx-background-color: #353535; -fx-text-fill: #606060; -fx-cursor: not-allowed;"
+                                                    (= actual-mode :visual)
+                                                    "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
+                                                    :else
+                                                    "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))}
+                                ;; Only add :on-action when we have a valid event and modulators aren't blocking
+                                (and (not has-modulators?) on-mode-change-event)
+                                (assoc :on-action (assoc on-mode-change-event :mode :visual)))
+                              ;; Numeric mode button - conditionally add :on-action only when valid
+                              (cond-> {:fx/type :button
+                                       :text "🔢 Numeric"
+                                       :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
+                                                  (if (= actual-mode :numeric)
+                                                    "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
+                                                    "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))}
+                                on-mode-change-event
+                                (assoc :on-action (assoc on-mode-change-event :mode :numeric)))
+                              ;; Show tooltip when modulators are blocking visual mode
+                              (when has-modulators?
+                                {:fx/type :label
+                                 :text "(modulators active)"
+                                 :style "-fx-text-fill: #707070; -fx-font-size: 9; -fx-font-style: italic;"})])}
                   
                   ;; Render based on mode
                   (if (= actual-mode :visual)
@@ -134,16 +177,18 @@
                                      :event-template (merge spatial-event-template spatial-event-keys)
                                      :fx-key (get spatial-event-keys :effect-path)}
                       
-                      ;; Fallback to standard params
-                      {:fx/type param-controls/param-controls-list
+                      ;; Fallback to standard params (with optional modulator support)
+                      {:fx/type param-list-type
                        :params-map params-map
                        :current-params current-params
                        :on-change-event on-change-event
-                       :on-text-event on-text-event})
+                       :on-text-event on-text-event
+                       :modulator-event-base modulator-event-base})
                     
-                    ;; Numeric mode - standard sliders
-                    {:fx/type param-controls/param-controls-list
+                    ;; Numeric mode - sliders (with optional modulator support)
+                    {:fx/type param-list-type
                      :params-map params-map
                      :current-params current-params
                      :on-change-event on-change-event
-                     :on-text-event on-text-event})]})))
+                     :on-text-event on-text-event
+                     :modulator-event-base modulator-event-base})]})))
