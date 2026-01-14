@@ -186,11 +186,13 @@
    - :unit-id - Hardware unit ID from discovery
    - :enabled? - Whether to send output to this projector
    - :output-config - Bit depth settings
+   - :zone-ids - Vector of zone UUIDs created for this projector (3 zones: default, graphics, crowd)
    - :status - Runtime connection status (not persisted)
    
-   See also: defstate chains for effect chain storage."
+   See also: defstate chains for effect chain storage.
+   See also: defstate zones for zone definitions."
   {:items {:default {}
-           :doc "Map of projector-id -> projector configuration (no :effects, see :chains)"}
+           :doc "Map of projector-id -> projector configuration (includes :zone-ids refs)"}
    :active-projector {:default nil
                       :doc "Currently selected projector ID for editing"}
    :test-pattern-mode {:default nil
@@ -203,14 +205,72 @@
                        :doc "Broadcast address for device discovery"}})
 
 (defstate zones
-  "Zone configurations for spatial mapping."
+  "Zone definitions - output destinations with effect chains.
+   
+   Each projector automatically creates 3 zones: default, graphics, crowd-scanning.
+   Zones are first-class entities referenced by UUID.
+   
+   Zone effects are stored in [:chains :zone-effects zone-id :items] just like
+   projector effects. This allows using the same UI and effect system for zones.
+   
+   Recommended zone effects: corner-pin, flip, scale, offset, rotation
+   (These are the same calibration effects available for projectors)
+   
+   Zone structure:
+   {:id zone-id                          ; UUID
+    :name \"Projector 1 - Default\"       ; User-friendly name
+    :projector-id projector-id           ; Parent projector keyword
+    :type :default                       ; :default, :graphics, or :crowd-scanning
+    :enabled? true                       ; Whether this zone is active
+    :zone-groups [:all :left]}           ; Zone groups this zone belongs to (ordered by priority)
+   
+   NOTE: Zone effects (geometry, etc.) are stored in :chains :zone-effects, NOT inline.
+   See also: defstate chains for zone effect chain storage."
   {:items {:default {}
-           :doc "map of zone-id -> {:corners [...] :transform {...} ...}"}})
+           :doc "Map of zone-id (UUID) -> zone configuration"}
+   :selected-zone {:default nil
+                   :doc "Currently selected zone ID for editing"}})
 
 (defstate zone-groups
-  "Zone group configurations for multi-zone output."
-  {:items {:default {}
-           :doc "map of group-id -> {:name :zone-ids [...]}"}})
+  "Zone group definitions - category tags for organizing zones.
+   
+   Users assign zones to zone groups, then target cues to zone groups.
+   Zone groups have metadata: name, description, color for UI.
+   
+   Default zone groups are provided:
+   - :all - All zones
+   - :left - Left side zones
+   - :right - Right side zones
+   - :center - Center zones
+   - :graphics - Graphics-specific zones
+   - :crowd - Audience scanning zones"
+  {:items {:default {:all {:id :all
+                           :name "All"
+                           :description "All zones"
+                           :color "#808080"}
+                     :left {:id :left
+                            :name "Left"
+                            :description "Left side zones"
+                            :color "#4A90D9"}
+                     :right {:id :right
+                             :name "Right"
+                             :description "Right side zones"
+                             :color "#D94A4A"}
+                     :center {:id :center
+                              :name "Center"
+                              :description "Center zones"
+                              :color "#4AD94A"}
+                     :graphics {:id :graphics
+                                :name "Graphics"
+                                :description "Graphics-specific zones"
+                                :color "#9B59B6"}
+                     :crowd {:id :crowd
+                             :name "Crowd Scanning"
+                             :description "Audience scanning zones"
+                             :color "#E67E22"}}
+           :doc "Map of zone-group-id (keyword) -> {:id :name :description :color}"}
+   :selected-group {:default nil
+                    :doc "Currently selected zone group ID for editing"}})
 
 (defstate cues
   "Cue definitions."
@@ -234,10 +294,11 @@
 (defstate chains
   "Unified chain storage for all hierarchical lists.
    
-   Three chain types with consistent structure:
+   Four chain types with consistent structure:
    - :effect-chains - Effect modifiers for grid cells
    - :cue-chains - Cue presets/groups for grid cells
    - :projector-effects - Output effects for projectors
+   - :zone-effects - Geometry/calibration effects for zones
    
    All chains use the same structure: {:items [...] :active? bool (optional)}
    This enables generic handlers and simplified subscriptions."
@@ -294,7 +355,9 @@
                                           :enabled? true}]}}
                 :doc "Map of [col row] -> {:items [...]}"}
    :projector-effects {:default {}
-                       :doc "Map of projector-id -> {:items [...]}"}})
+                       :doc "Map of projector-id -> {:items [...]}"}
+   :zone-effects {:default {}
+                  :doc "Map of zone-id (UUID) -> {:items [...]}"}})
 
 
 ;; Backend State Domain

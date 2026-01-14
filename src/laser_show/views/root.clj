@@ -26,10 +26,12 @@
    [laser-show.views.dialogs.effect-chain-editor :as effect-chain-editor]
    [laser-show.views.dialogs.cue-chain-editor :as cue-chain-editor]
    [laser-show.views.dialogs.add-projector-manual :as add-projector-dialog]
+   [laser-show.views.dialogs.zone-group-editor :as zone-group-editor]
    [laser-show.views.status-bar :as status-bar]
    [laser-show.views.tabs.effects :as effects-tab]
    [laser-show.views.tabs.grid :as grid-tab]
    [laser-show.views.tabs.projectors :as projectors-tab]
+   [laser-show.views.tabs.zones :as zones-tab]
    [laser-show.views.toolbar :as toolbar]))
 
 
@@ -54,6 +56,7 @@
       :grid {:fx/type grid-tab/grid-tab}
       :effects {:fx/type effects-tab/effects-tab}
       :projectors {:fx/type projectors-tab/projectors-tab}
+      :zones {:fx/type zones-tab/zones-tab}
       :settings {:fx/type :v-box
                  :padding 20
                  :children [{:fx/type :label
@@ -74,6 +77,7 @@
   [{:id :grid :label "Grid"}
    {:id :effects :label "Effects"}
    {:id :projectors :label "Projectors"}
+   {:id :zones :label "Zones"}
    {:id :settings :label "Settings"}])
 
 (defn tab-bar
@@ -91,10 +95,10 @@
 
 (defn main-content
   "Main content area with tab content and optional preview panel.
-   Preview is hidden when on the projectors tab."
+   Preview is hidden when on the projectors or zones tab."
   [{:keys [fx/context]}]
   (let [active-tab (fx/sub-ctx context subs/active-tab)
-        show-preview? (not= active-tab :projectors)
+        show-preview? (not (#{:projectors :zones} active-tab))
         bg-primary (css/bg-primary)
         bg-elevated (css/bg-elevated)]
     (if show-preview?
@@ -144,7 +148,8 @@
         stylesheets (fx/sub-ctx context subs/stylesheet-urls)
         effect-editor-open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)
         cue-editor-open? (fx/sub-ctx context subs/dialog-open? :cue-chain-editor)
-        add-projector-open? (fx/sub-ctx context subs/dialog-open? :add-projector-manual)]
+        add-projector-open? (fx/sub-ctx context subs/dialog-open? :add-projector-manual)
+        zone-group-editor-open? (fx/sub-ctx context subs/dialog-open? :zone-group-editor)]
     {:fx/type fx/ext-set-env
      :env {::layout-config layout-config}  ; For any components that need spacing/fonts
      :desc {:fx/type fx/ext-many
@@ -177,4 +182,8 @@
                      ;; Add projector manually dialog
                      (when add-projector-open?
                        {:fx/type add-projector-dialog/add-projector-manual-dialog
-                        :fx/key :add-projector-manual-dialog})])}}))
+                        :fx/key :add-projector-manual-dialog})
+                     ;; Zone group editor dialog
+                     (when zone-group-editor-open?
+                       {:fx/type zone-group-editor/zone-group-editor-dialog
+                        :fx/key :zone-group-editor-dialog})])}}))

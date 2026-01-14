@@ -188,6 +188,39 @@
   {:state (assoc-in state [:ui :dialogs :cue-chain-editor :data :clipboard :items] items)})
 
 
+;; Destination Zone Operations
+
+
+(defn- handle-cue-chain-set-destination-zone-group
+  "Set the destination zone group for a cue chain item.
+   
+   Updates the item at item-path with the specified zone group ID.
+   This is the recommended way to configure routing - target zone groups
+   rather than individual zones."
+  [{:keys [col row item-path group-id state]}]
+  (let [items-path (cue-chain-path col row)
+        dest-zone-path (vec (concat items-path item-path [:destination-zone]))]
+    {:state (-> state
+                (assoc-in (conj dest-zone-path :mode) :zone-group)
+                (assoc-in (conj dest-zone-path :zone-group-id) group-id)
+                h/mark-dirty)}))
+
+(defn- handle-cue-chain-set-preferred-zone-type
+  "Set the preferred zone type when multiple zones match.
+   
+   When a cue targets a zone group that contains multiple zones for the same
+   projector, the preferred zone type determines which zone wins:
+   - :default - Standard laser graphics zone
+   - :graphics - Specialized graphics content zone
+   - :crowd-scanning - Audience scanning zone (with safety restrictions)"
+  [{:keys [col row item-path fx/event state]}]
+  (let [items-path (cue-chain-path col row)
+        dest-zone-path (vec (concat items-path item-path [:destination-zone :preferred-zone-type]))]
+    {:state (-> state
+                (assoc-in dest-zone-path event)
+                h/mark-dirty)}))
+
+
 ;; Public API
 
 
@@ -233,6 +266,10 @@
     :cue-chain/update-item-effect-selection (handle-cue-chain-update-item-effect-selection event)
     :cue-chain/set-clipboard (handle-cue-chain-set-clipboard event)
     :cue-chain/set-item-effects-clipboard (handle-cue-chain-set-item-effects-clipboard event)
+    
+    ;; Destination zone routing
+    :cue-chain/set-destination-zone-group (handle-cue-chain-set-destination-zone-group event)
+    :cue-chain/set-preferred-zone-type (handle-cue-chain-set-preferred-zone-type event)
     
     ;; Unknown event in this domain
     {}))

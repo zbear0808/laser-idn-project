@@ -55,8 +55,9 @@
    - :shape - Geometric transformations (scale, rotate, offset, etc.)
    - :color - Color modifications (hue, saturation, filters)
    - :intensity - Brightness and visibility effects
-   - :calibration - Hardware-specific corrections (projector-only)"
-  #{:shape :color :intensity :calibration})
+   - :calibration - Hardware-specific corrections (projector-only)
+   - :zone - Routing effects that modify where cues are sent (not frame transforms)"
+  #{:shape :color :intensity :calibration :zone})
 
 
 ;; Effect Registry

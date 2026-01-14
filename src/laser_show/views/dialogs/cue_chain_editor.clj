@@ -47,6 +47,8 @@
                            :col col
                            :row row
                            :parent-path effects-parent-path}
+     ;; Include zone effects tab for routing control
+     :include-zone? true
      :pref-height 140}))
 
 
@@ -75,6 +77,9 @@
      :params-map params-map
      :dialog-data dialog-data
      
+     ;; Enable modulator support for numeric parameters
+     :enable-modulators? true
+     
      ;; Event templates for spatial editors (translate, corner-pin)
      :spatial-event-template {:event/type :chain/update-spatial-params
                               :domain :cue-chains
@@ -93,6 +98,10 @@
                      :effect-path full-effect-path}
      :on-mode-change-event {:event/type :chain/set-ui-mode
                             :domain :cue-chains
+                            :entity-key [col row]
+                            :effect-path full-effect-path}
+     ;; Modulator event base for modulator toggle/type/param operations
+     :modulator-event-base {:domain :cue-chains
                             :entity-key [col row]
                             :effect-path full-effect-path}
      
@@ -145,32 +154,109 @@
                               :params-map params-map
                               :dialog-data dialog-data}}
                     
-                    ;; Standard parameters - use shared param controls
+                    ;; Standard parameters - use modulatable param controls
                     {:fx/type :scroll-pane
                      :fit-to-width true
                      :v-box/vgrow :always
                      :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
-                     :content {:fx/type :v-box
-                              :spacing 6
-                              :padding {:top 4}
-                              :children (vec
-                                         (for [[param-key param-spec] params-map]
-                                           {:fx/type effect-param-ui/param-control
-                                            :param-key param-key
-                                            :param-spec param-spec
-                                            :current-value (get current-params param-key)
-                                            :on-change-event {:event/type :chain/update-param
-                                                              :domain :cue-chains
-                                                              :entity-key [col row]
-                                                              :effect-path full-effect-path}
-                                            :on-text-event {:event/type :chain/update-param-from-text
-                                                            :domain :cue-chains
-                                                            :entity-key [col row]
-                                                            :effect-path full-effect-path}}))}})
+                     :content {:fx/type effect-param-ui/modulatable-param-controls-list
+                              :params-map params-map
+                              :current-params current-params
+                              :on-change-event {:event/type :chain/update-param
+                                                :domain :cue-chains
+                                                :entity-key [col row]
+                                                :effect-path full-effect-path}
+                              :on-text-event {:event/type :chain/update-param-from-text
+                                              :domain :cue-chains
+                                              :entity-key [col row]
+                                              :effect-path full-effect-path}
+                              :modulator-event-base {:domain :cue-chains
+                                                     :entity-key [col row]
+                                                     :effect-path full-effect-path}}})
                   
                   {:fx/type :label
                    :text "Select an effect from the chain"
                    :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"})]}))
+
+
+;; Destination Zone Picker
+
+
+(defn- zone-group-chip
+  "Small colored chip for a zone group selection."
+  [{:keys [group selected? on-click]}]
+  (let [{:keys [id name color]} group]
+    {:fx/type :label
+     :text name
+     :style (str "-fx-background-color: " (if selected? color (str color "60")) "; "
+                "-fx-text-fill: white; "
+                "-fx-padding: 3 8; "
+                "-fx-background-radius: 10; "
+                "-fx-font-size: 10;"
+                (when on-click " -fx-cursor: hand;"))
+     :on-mouse-clicked on-click}))
+
+(defn- destination-zone-picker
+  "UI for selecting destination zone group for a cue item.
+   
+   Props:
+   - :col, :row - Grid coordinates
+   - :item-path - Path to the item
+   - :destination-zone - Current destination-zone config
+   - :zone-groups - List of available zone groups"
+  [{:keys [col row item-path destination-zone zone-groups]}]
+  (let [current-mode (or (:mode destination-zone) :zone-group)
+        current-group-id (:zone-group-id destination-zone :all)
+        preferred-type (or (:preferred-zone-type destination-zone) :default)]
+    {:fx/type :v-box
+     :spacing 6
+     :style "-fx-background-color: #333333; -fx-padding: 8; -fx-background-radius: 4;"
+     :children [{:fx/type :label
+                 :text "DESTINATION ZONE"
+                 :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-weight: bold;"}
+                ;; Zone group selection
+                {:fx/type :flow-pane
+                 :hgap 4
+                 :vgap 4
+                 :children (vec (for [group zone-groups]
+                                  {:fx/type zone-group-chip
+                                   :fx/key (:id group)
+                                   :group group
+                                   :selected? (= (:id group) current-group-id)
+                                   :on-click {:event/type :cue-chain/set-destination-zone-group
+                                              :col col
+                                              :row row
+                                              :item-path item-path
+                                              :group-id (:id group)}}))}
+                ;; Preferred zone type selector
+                {:fx/type :h-box
+                 :spacing 6
+                 :alignment :center-left
+                 :children [{:fx/type :label
+                             :text "Prefer:"
+                             :style "-fx-text-fill: #707070; -fx-font-size: 10;"}
+                            {:fx/type :combo-box
+                             :value preferred-type
+                             :pref-width 100
+                             :items [:default :graphics :crowd-scanning]
+                             :style "-fx-font-size: 10;"
+                             :button-cell (fn [type]
+                                            {:text (case type
+                                                     :default "Default"
+                                                     :graphics "Graphics"
+                                                     :crowd-scanning "Crowd"
+                                                     "Default")})
+                             :cell-factory {:fx/cell-type :list-cell
+                                            :describe (fn [type]
+                                                        {:text (case type
+                                                                 :default "Default"
+                                                                 :graphics "Graphics"
+                                                                 :crowd-scanning "Crowd"
+                                                                 "Default")})}
+                             :on-value-changed {:event/type :cue-chain/set-preferred-zone-type
+                                                :col col
+                                                :row row
+                                                :item-path item-path}}]}]}))
 
 
 ;; Middle Section (Preset Config)
@@ -178,12 +264,14 @@
 
 (defn- middle-section
   "Middle section with preset bank and parameter editor."
-  [{:keys [col row active-preset-tab selected-item-path cue-chain]}]
+  [{:keys [fx/context col row active-preset-tab selected-item-path cue-chain]}]
   (let [;; Get selected item instance if single selection
         selected-item (when selected-item-path
                         (chains/get-item-at-path (:items cue-chain) selected-item-path))
         is-preset? (and selected-item (= :preset (:type selected-item)))
-        is-group? (and selected-item (chains/group? selected-item))]
+        is-group? (and selected-item (chains/group? selected-item))
+        ;; Get zone groups for destination picker
+        zone-groups (fx/sub-ctx context subs/zone-groups-list)]
     {:fx/type :v-box
      :spacing 0
      :children (filterv
@@ -196,14 +284,24 @@
                   
                   ;; Preset/Group parameter editor (bottom)
                   (if is-preset?
-                    {:fx/type param-editor/preset-param-editor
-                     :cell [col row]
-                     :preset-path selected-item-path
-                     :preset-instance selected-item}
+                    {:fx/type :v-box
+                     :spacing 8
+                     :children [{:fx/type param-editor/preset-param-editor
+                                 :cell [col row]
+                                 :preset-path selected-item-path
+                                 :preset-instance selected-item}
+                                ;; Destination zone picker for presets
+                                {:fx/type destination-zone-picker
+                                 :col col
+                                 :row row
+                                 :item-path selected-item-path
+                                 :destination-zone (:destination-zone selected-item)
+                                 :zone-groups zone-groups}]}
                     (when is-group?
                       {:fx/type :v-box
                        :style "-fx-background-color: #2A2A2A; -fx-padding: 8;"
                        :v-box/vgrow :always
+                       :spacing 8
                        :children [{:fx/type :label
                                    :text "GROUP PROPERTIES"
                                    :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
@@ -212,7 +310,14 @@
                                    :style "-fx-text-fill: #B0B0B0; -fx-font-size: 10;"}
                                   {:fx/type :label
                                    :text (str "Items: " (count (:items selected-item [])))
-                                   :style "-fx-text-fill: #B0B0B0; -fx-font-size: 10;"}]}))
+                                   :style "-fx-text-fill: #B0B0B0; -fx-font-size: 10;"}
+                                  ;; Destination zone picker for groups
+                                  {:fx/type destination-zone-picker
+                                   :col col
+                                   :row row
+                                   :item-path selected-item-path
+                                   :destination-zone (:destination-zone selected-item)
+                                   :zone-groups zone-groups}]}))
                   
                   (when (not selected-item)
                     {:fx/type :v-box
@@ -364,6 +469,7 @@
                            :children (filterv some?
                                        [;; Preset bank + params
                                         {:fx/type middle-section
+                                         :fx/context context
                                          :col col :row row
                                          :active-preset-tab active-preset-tab
                                          :selected-item-path first-selected-path

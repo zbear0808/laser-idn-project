@@ -47,23 +47,35 @@
                  :state sample-state}
           result (projectors/handle event)
           projectors (get-in result [:state :projectors :items])
-          effects (get-in result [:state :chains :projector-effects])]
+          effects (get-in result [:state :chains :projector-effects])
+          zones (get-in result [:state :zones :items])
+          zone-effects (get-in result [:state :chains :zone-effects])]
       ;; Should create 3 projectors (one per service)
       (is (= 3 (count projectors)))
       (is (= 3 (count effects)))
+      
+      ;; Each projector should create 3 zones (9 total zones)
+      (is (= 9 (count zones)))
+      (is (= 9 (count zone-effects)))
       
       ;; Each projector should have correct service-id
       (let [projector-ids (keys projectors)
             service-ids (set (map #(get-in projectors [% :service-id]) projector-ids))]
         (is (= #{0 1 2} service-ids)))
       
-      ;; Each projector should have default effects chain
-      (doseq [[projector-id effect-data] effects]
+      ;; Each projector should have default effects chain (color calibration only)
+      ;; Corner-pin is now on zones, not projectors
+      (doseq [[_projector-id effect-data] effects]
         (is (vector? (:items effect-data)))
-        ;; Should have RGB curves and corner pin
-        (is (= 2 (count (:items effect-data))))
-        (is (= :rgb-curves (get-in effect-data [:items 0 :effect-id])))
-        (is (= :corner-pin (get-in effect-data [:items 1 :effect-id]))))
+        ;; Should have only RGB curves (color calibration)
+        (is (= 1 (count (:items effect-data))))
+        (is (= :rgb-curves (get-in effect-data [:items 0 :effect-id]))))
+      
+      ;; Each zone should have corner-pin effect (geometry calibration)
+      (doseq [[_zone-id zone-effect-data] zone-effects]
+        (is (vector? (:items zone-effect-data)))
+        (is (= 1 (count (:items zone-effect-data))))
+        (is (= :corner-pin (get-in zone-effect-data [:items 0 :effect-id]))))
       
       ;; First projector should be selected
       (is (some? (get-in result [:state :projectors :active-projector])))

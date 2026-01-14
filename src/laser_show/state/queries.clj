@@ -54,3 +54,48 @@
 (defn trigger-time []
   (ex/trigger-time (raw-state)))
 
+
+;; Zones Queries
+
+
+(defn zones-items []
+  (ex/zones-items (raw-state)))
+
+(defn zone [zone-id]
+  (ex/zone (raw-state) zone-id))
+
+(defn zones-by-projector [projector-id]
+  (ex/zones-by-projector (raw-state) projector-id))
+
+(defn zones-by-zone-group [zone-group-id]
+  (ex/zones-by-zone-group (raw-state) zone-group-id))
+
+(defn zones-by-type [zone-type]
+  (ex/zones-by-type (raw-state) zone-type))
+
+(defn enabled-zones []
+  (ex/enabled-zones (raw-state)))
+
+
+;; Zone Groups Queries
+
+
+(defn zone-groups-items []
+  (ex/zone-groups-items (raw-state)))
+
+(defn zone-group [zone-group-id]
+  (ex/zone-group (raw-state) zone-group-id))
+
+
+;; Projector Queries
+
+
+(defn projectors-items []
+  (ex/projectors-items (raw-state)))
+
+(defn projector [projector-id]
+  (ex/projector (raw-state) projector-id))
+
+(defn projector-zone-ids [projector-id]
+  (ex/projector-zone-ids (raw-state) projector-id))
+

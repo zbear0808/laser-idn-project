@@ -215,13 +215,14 @@
    - :schema-fn - Validation predicate
    - :required-keys - Set of required keys that must be present
    - :on-error - Error handler
+   - :on-invalid - Handler for schema validation failures
    - :default - Default value on error
    
    Returns: Validated data or nil
    
    Example:
    (deserialize-from-clipboard str :required-keys #{:type})"
-  [edn-str & {:keys [schema-fn required-keys on-error default]}]
+  [edn-str & {:keys [schema-fn required-keys on-error on-invalid default]}]
   (let [validator (cond
                     schema-fn schema-fn
                     required-keys (with-required-keys required-keys)
@@ -230,5 +231,6 @@
       (deserialize-with-schema edn-str
                                :schema-fn validator
                                :on-error on-error
+                               :on-invalid on-invalid
                                :default default)
       (deserialize edn-str :on-error on-error :default default))))

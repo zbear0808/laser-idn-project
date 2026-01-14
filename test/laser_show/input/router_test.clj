@@ -15,7 +15,9 @@
   (router/clear-event-log!)
   (router/enable!)
   (router/disable-logging!)
+  (router/disable-error-logging!)
   (f)
+  (router/enable-error-logging!)
   (router/clear-handlers!))
 
 (use-fixtures :each reset-router-fixture)

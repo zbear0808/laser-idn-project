@@ -10,6 +10,8 @@
    - effects-handlers: Effect chain operations
    - cue-chain-handlers: Cue chain editor (presets and groups)
    - projector-handlers: Projector configuration and effects
+   - zones-handlers: Zone management and effects
+   - zone-groups-handlers: Zone group management
    - timing-handlers: BPM, tap tempo, and transport controls
    - ui-handlers: UI state (tabs, dialogs, drag/drop)
    - project-handlers: Project state management
@@ -22,6 +24,8 @@
    [laser-show.events.handlers.effects :as effects]
    [laser-show.events.handlers.cue-chain :as cue-chain]
    [laser-show.events.handlers.projector :as projectors]
+   [laser-show.events.handlers.zones :as zones]
+   [laser-show.events.handlers.zone-groups :as zone-groups]
    [laser-show.events.handlers.timing :as timing]
    [laser-show.events.handlers.ui :as ui]
    [laser-show.events.handlers.project :as project]
@@ -50,6 +54,8 @@
       "effect-chain" (effects/handle event)  ; Effect chain bank events -> effects handler
       "cue-chain" (cue-chain/handle event)
       "projectors" (projectors/handle event)
+      "zones" (zones/handle event)
+      "zone-groups" (zone-groups/handle event)
       "timing" (timing/handle event)
       "transport" (timing/handle event)  ; Transport grouped with timing
       "ui" (ui/handle event)

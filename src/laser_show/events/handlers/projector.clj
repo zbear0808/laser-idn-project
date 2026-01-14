@@ -65,18 +65,51 @@
   {:state (assoc-in state [:projectors :scanning?] false)})
 
 
-;; Device/Service Addition
+;; Zone Creation Helpers
 
 
-(def DEFAULT_PROJECTOR_EFFECTS
-  "Default effects for all projectors - creates fresh instances each time."
-  [{:effect-id :rgb-curves
-    :id (random-uuid)
-    :enabled? true
-    :params {:r-curve-points [[0 0] [255 255]]
-             :g-curve-points [[0 0] [255 255]]
-             :b-curve-points [[0 0] [255 255]]}}
-   {:effect-id :corner-pin
+(defn- zone-type->default-groups
+  "Return default zone groups for a zone type."
+  [zone-type]
+  (case zone-type
+    :default [:all]
+    :graphics [:all :graphics]
+    :crowd-scanning [:all :crowd]
+    [:all]))
+
+(defn- zone-type->name-suffix
+  "Return name suffix for a zone type."
+  [zone-type]
+  (case zone-type
+    :default "Default"
+    :graphics "Graphics"
+    :crowd-scanning "Crowd Scanning"
+    "Unknown"))
+
+(defn- create-zone
+  "Create a zone configuration for a projector.
+   
+   Args:
+   - projector-id: keyword ID of the parent projector
+   - projector-name: name of the projector (for zone naming)
+   - zone-type: :default, :graphics, or :crowd-scanning
+   
+   NOTE: Zone effects (geometry, etc.) are stored separately in :chains :zone-effects.
+   This function only creates the zone metadata."
+  [projector-id projector-name zone-type]
+  (let [zone-id (random-uuid)]
+    {:id zone-id
+     :name (str projector-name " - " (zone-type->name-suffix zone-type))
+     :projector-id projector-id
+     :type zone-type
+     :enabled? true
+     :zone-groups (zone-type->default-groups zone-type)}))
+
+(defn- make-default-zone-effects
+  "Create default effects chain for a zone.
+   Zones typically need basic geometry effects like corner-pin for calibration."
+  []
+  [{:effect-id :corner-pin
     :id (random-uuid)
     :enabled? true
     :params {:tl-x -1.0 :tl-y 1.0
@@ -84,21 +117,61 @@
              :bl-x -1.0 :bl-y -1.0
              :br-x 1.0 :br-y -1.0}}])
 
+(defn- create-projector-zones
+  "Create all 3 zones for a new projector.
+   Returns:
+   - :zones-map - Map of {zone-id zone-config}
+   - :zone-ids - Vector of zone UUIDs
+   - :zone-effects-map - Map of {zone-id {:items [effects]}} for chains storage"
+  [projector-id projector-name]
+  (let [zone-types [:default :graphics :crowd-scanning]
+        zones (mapv #(create-zone projector-id projector-name %) zone-types)]
+    {:zones-map (into {} (map (fn [z] [(:id z) z]) zones))
+     :zone-ids (mapv :id zones)
+     :zone-effects-map (into {} (map (fn [z] [(:id z) {:items (make-default-zone-effects)}]) zones))}))
+
+
+;; Device/Service Addition
+
+
+(def DEFAULT_PROJECTOR_EFFECTS
+  "Default effects for all projectors - color calibration only.
+   
+   Spatial/geometry calibration (corner-pin, flip, scale, offset, rotation)
+   should be applied at the ZONE level, not the projector level.
+   
+   Projectors handle color calibration:
+   - RGB curves for color balancing
+   - (future: white balance, intensity curves, etc.)"
+  [{:effect-id :rgb-curves
+    :id (random-uuid)
+    :enabled? true
+    :params {:r-curve-points [[0 0] [255 255]]
+             :g-curve-points [[0 0] [255 255]]
+             :b-curve-points [[0 0] [255 255]]}}])
+
 
 (defn- make-projector-config
   "Create a projector configuration map with defaults.
    
    Required keys: :name, :host
-   Optional keys: :port, :service-id, :service-name, :unit-id"
-  [{:keys [name host port service-id service-name unit-id]
-    :or {port 7255}}]
+   Optional keys: :port, :service-id, :service-name, :unit-id, :zone-ids, :scan-rate
+   
+   :scan-rate is in points per second (pps). Default is 30,000 pps which is common
+   for entry-level galvo systems. Higher-end systems may support 40-60k+ pps.
+   
+   TODO: Use scan-rate to calculate point limits for projected images (max points = scan-rate / fps)"
+  [{:keys [name host port service-id service-name unit-id zone-ids scan-rate]
+    :or {port 7255 zone-ids [] scan-rate 30000}}]
   {:name name
    :host host
    :port port
    :service-id service-id
    :service-name service-name
    :unit-id unit-id
+   :zone-ids zone-ids
    :enabled? true
+   :scan-rate scan-rate
    :output-config {:color-bit-depth 8
                    :xy-bit-depth 16}
    :status {:connected? false}})
@@ -107,7 +180,10 @@
 (defn- handle-projectors-add-device
   "Add a discovered device as a configured projector.
    If device has services, adds the default service (or first one).
-   For multi-output devices, use :projectors/add-service instead."
+   For multi-output devices, use :projectors/add-service instead.
+   
+   Also creates 3 zones for the projector: default, graphics, crowd-scanning.
+   Zone effects are stored in [:chains :zone-effects zone-id :items]."
   [{:keys [device state]}]
   (let [{:keys [address host-name unit-id]
          device-services :services
@@ -122,23 +198,31 @@
                  (when host-name (str host-name "." service-id))
                  address)
         projector-id (keyword (str "projector-" (System/currentTimeMillis)))
+        ;; Create zones for this projector (includes zone effects)
+        {:keys [zones-map zone-ids zone-effects-map]} (create-projector-zones projector-id name)
         projector-config (make-projector-config
                            {:name name
                             :host address
                             :port (or device-port 7255)
                             :service-id service-id
                             :service-name service-name
-                            :unit-id unit-id})]
+                            :unit-id unit-id
+                            :zone-ids zone-ids})]
     {:state (-> state
                 (assoc-in [:projectors :items projector-id] projector-config)
                 (assoc-in [:chains :projector-effects projector-id :items] DEFAULT_PROJECTOR_EFFECTS)
+                (update-in [:zones :items] merge zones-map)
+                (update-in [:chains :zone-effects] merge zone-effects-map)
                 (assoc-in [:projectors :active-projector] projector-id)
                 (h/mark-dirty))}))
 
 
 (defn- handle-projectors-add-service
   "Add a specific service/output from a discovered device as a projector.
-   Used when a device has multiple outputs and user wants to add a specific one."
+   Used when a device has multiple outputs and user wants to add a specific one.
+   
+   Also creates 3 zones for the projector: default, graphics, crowd-scanning.
+   Zone effects are stored in [:chains :zone-effects zone-id :items]."
   [{:keys [device service state]}]
   (let [{:keys [address host-name unit-id]
          device-port :port} device
@@ -146,22 +230,30 @@
          service-name :name} service
         name (or service-name host-name address)
         projector-id (keyword (str "projector-" (System/currentTimeMillis) "-" service-id))
+        ;; Create zones for this projector (includes zone effects)
+        {:keys [zones-map zone-ids zone-effects-map]} (create-projector-zones projector-id name)
         projector-config (make-projector-config
                            {:name name
                             :host address
                             :port (or device-port 7255)
                             :service-id service-id
                             :service-name service-name
-                            :unit-id unit-id})]
+                            :unit-id unit-id
+                            :zone-ids zone-ids})]
     {:state (-> state
                 (assoc-in [:projectors :items projector-id] projector-config)
                 (assoc-in [:chains :projector-effects projector-id :items] DEFAULT_PROJECTOR_EFFECTS)
+                (update-in [:zones :items] merge zones-map)
+                (update-in [:chains :zone-effects] merge zone-effects-map)
                 (assoc-in [:projectors :active-projector] projector-id)
                 (h/mark-dirty))}))
 
 
 (defn- handle-projectors-add-all-services
-  "Add all services from a discovered device as configured projectors."
+  "Add all services from a discovered device as configured projectors.
+   
+   Also creates 3 zones per projector: default, graphics, crowd-scanning.
+   Zone effects are stored in [:chains :zone-effects zone-id :items]."
   [{:keys [device state]}]
   (let [{:keys [address host-name unit-id]
          device-services :services
@@ -174,37 +266,53 @@
                                   service-name :name} service
                                  name (or service-name host-name address)
                                  projector-id (keyword (str "projector-" now "-" service-id "-" idx))
+                                 ;; Create zones for this projector (includes zone effects)
+                                 {:keys [zones-map zone-ids zone-effects-map]} (create-projector-zones projector-id name)
                                  projector-config (make-projector-config
                                                     {:name name
                                                      :host address
                                                      :port (or device-port 7255)
                                                      :service-id service-id
                                                      :service-name service-name
-                                                     :unit-id unit-id})]
+                                                     :unit-id unit-id
+                                                     :zone-ids zone-ids})]
                              (-> acc
                                  (assoc-in [:projectors projector-id] projector-config)
-                                 (assoc-in [:effects projector-id] {:items DEFAULT_PROJECTOR_EFFECTS}))))
-                         {:projectors {} :effects {}}
+                                 (assoc-in [:effects projector-id] {:items DEFAULT_PROJECTOR_EFFECTS})
+                                 (update :zones merge zones-map)
+                                 (update :zone-effects merge zone-effects-map))))
+                         {:projectors {} :effects {} :zones {} :zone-effects {}}
                          (map-indexed vector services))
         first-projector-id (first (keys (:projectors projector-data)))]
     {:state (-> state
                 (update-in [:projectors :items] merge (:projectors projector-data))
                 (update-in [:chains :projector-effects] merge (:effects projector-data))
+                (update-in [:zones :items] merge (:zones projector-data))
+                (update-in [:chains :zone-effects] merge (:zone-effects projector-data))
                 (assoc-in [:projectors :active-projector] first-projector-id)
                 h/mark-dirty)}))
 
 
 (defn- handle-projectors-add-manual
-  "Add a projector manually (not from discovery)."
+  "Add a projector manually (not from discovery).
+   
+   Also creates 3 zones for the projector: default, graphics, crowd-scanning.
+   Zone effects are stored in [:chains :zone-effects zone-id :items]."
   [{:keys [name host port state]}]
   (let [projector-id (keyword (str "projector-" (System/currentTimeMillis)))
+        proj-name (or name host)
+        ;; Create zones for this projector (includes zone effects)
+        {:keys [zones-map zone-ids zone-effects-map]} (create-projector-zones projector-id proj-name)
         projector-config (make-projector-config
-                           {:name (or name host)
+                           {:name proj-name
                             :host host
-                            :port (or port 7255)})]
+                            :port (or port 7255)
+                            :zone-ids zone-ids})]
     {:state (-> state
                 (assoc-in [:projectors :items projector-id] projector-config)
                 (assoc-in [:chains :projector-effects projector-id :items] DEFAULT_PROJECTOR_EFFECTS)
+                (update-in [:zones :items] merge zones-map)
+                (update-in [:chains :zone-effects] merge zone-effects-map)
                 (assoc-in [:projectors :active-projector] projector-id)
                 (h/mark-dirty))}))
 
@@ -218,18 +326,28 @@
   {:state (assoc-in state [:projectors :active-projector] projector-id)})
 
 (defn- handle-projectors-remove-projector
-  "Remove a projector configuration."
+  "Remove a projector configuration and its associated zones and zone effects."
   [{:keys [projector-id state]}]
   (let [active (get-in state [:projectors :active-projector])
         items (get-in state [:projectors :items])
+        ;; Get zone IDs to delete
+        zone-ids-to-remove (get-in items [projector-id :zone-ids] [])
         new-items (dissoc items projector-id)
         ;; If removing active projector, select first remaining
         new-active (if (= active projector-id)
                      (first (keys new-items))
-                     active)]
+                     active)
+        ;; Remove zones from zones domain
+        zones-items (get-in state [:zones :items] {})
+        new-zones-items (apply dissoc zones-items zone-ids-to-remove)
+        ;; Remove zone effects from chains domain
+        zone-effects (get-in state [:chains :zone-effects] {})
+        new-zone-effects (apply dissoc zone-effects zone-ids-to-remove)]
     {:state (-> state
                 (assoc-in [:projectors :items] new-items)
                 (assoc-in [:projectors :active-projector] new-active)
+                (assoc-in [:zones :items] new-zones-items)
+                (assoc-in [:chains :zone-effects] new-zone-effects)
                 h/mark-dirty)}))
 
 (defn- handle-projectors-update-settings

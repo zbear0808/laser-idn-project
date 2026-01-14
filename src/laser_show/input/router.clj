@@ -14,6 +14,7 @@
          :enabled true          ; Global enable/disable
          :event-log []          ; Recent events for debugging
          :log-enabled false     ; Whether to log events
+         :log-errors true       ; Whether to log handler errors
          :max-log-size 100}))   ; Max events to keep in log
 
 
@@ -77,23 +78,27 @@
   "Dispatches an event to all matching handlers.
    Returns the event (useful for chaining)."
   [event]
-  (when (and event (:enabled @!router-state))
-    (log-event! event)
-    
-    ;; Call global handlers first
-    (doseq [[_id handler-fn] (:global-handlers @!router-state)]
-      (try
-        (handler-fn event)
-        (catch Exception e
-          (log/error "Error in global handler:" (.getMessage e)))))
-    
-    ;; Call pattern-matched handlers
-    (doseq [[_id {:keys [pattern handler]}] (:handlers @!router-state)]
-      (when (events/matches? event pattern)
+  (let [state @!router-state
+        log-errors? (:log-errors state)]
+    (when (and event (:enabled state))
+      (log-event! event)
+      
+      ;; Call global handlers first
+      (doseq [[_id handler-fn] (:global-handlers state)]
         (try
-          (handler event)
+          (handler-fn event)
           (catch Exception e
-            (log/error "Error in handler:" (.getMessage e)))))))
+            (when log-errors?
+              (log/error "Error in global handler:" (.getMessage e))))))
+      
+      ;; Call pattern-matched handlers
+      (doseq [[_id {:keys [pattern handler]}] (:handlers state)]
+        (when (events/matches? event pattern)
+          (try
+            (handler event)
+            (catch Exception e
+              (when log-errors?
+                (log/error "Error in handler:" (.getMessage e)))))))))
   event)
 
 (defn dispatch-many!
@@ -131,6 +136,16 @@
   "Disables event logging."
   []
   (swap! !router-state assoc :log-enabled false))
+
+(defn enable-error-logging!
+  "Enables error logging for handler exceptions."
+  []
+  (swap! !router-state assoc :log-errors true))
+
+(defn disable-error-logging!
+  "Disables error logging for handler exceptions (useful in tests)."
+  []
+  (swap! !router-state assoc :log-errors false))
 
 (defn get-event-log
   "Returns the recent event log."

@@ -35,6 +35,7 @@
             [laser-show.state.clipboard :as clipboard]
             [laser-show.events.handlers :as handlers]
             [laser-show.backend.streaming-engine :as streaming-engine]
+            [laser-show.backend.multi-engine :as multi-engine]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.common.util :as u]
             [laser-show.idn.hello :as idn-hello]))
@@ -228,6 +229,38 @@
         (dispatch {:event/type :projectors/scan-failed
                    :error (.getMessage e)})))))
 
+;; Multi-Engine Streaming Effects
+
+(defn- effect-multi-engine-start
+  "Effect that starts multi-engine streaming to all enabled projectors.
+   Creates one streaming engine per projector with zone-aware frame providers."
+  [_ dispatch]
+  (future
+    (try
+      (log/info "Starting multi-engine streaming...")
+      (let [engines (multi-engine/start-engines!)
+            engine-count (count engines)]
+        (log/info (format "Multi-engine streaming started: %d engine(s)" engine-count))
+        (dispatch {:event/type :idn/multi-streaming-started
+                   :engine-count engine-count}))
+      (catch Exception e
+        (log/error "Multi-engine streaming failed:" (.getMessage e))
+        (dispatch {:event/type :idn/connection-failed
+                   :error (.getMessage e)})))))
+
+(defn- effect-multi-engine-stop
+  "Effect that stops all streaming engines."
+  [_ dispatch]
+  (future
+    (try
+      (log/info "Stopping multi-engine streaming...")
+      (multi-engine/stop-engines!)
+      (log/info "Multi-engine streaming stopped")
+      (dispatch {:event/type :idn/multi-streaming-stopped})
+      (catch Exception e
+        (log/error "Error stopping multi-engine streaming:" (.getMessage e))))))
+
+
 ;; Wrapped Event Handler
 
 (def event-handler
@@ -244,8 +277,10 @@
    - :dispatch - dispatch another event
    - :dispatch-later - dispatch event after delay
    - :timing/calculate-bpm - calculate BPM from taps
-   - :idn/start-streaming - start IDN streaming
-   - :idn/stop-streaming - stop IDN streaming
+   - :idn/start-streaming - start IDN streaming (legacy single-target)
+   - :idn/stop-streaming - stop IDN streaming (legacy single-target)
+   - :multi-engine/start - start multi-engine streaming to all projectors
+   - :multi-engine/stop - stop multi-engine streaming
    - :project/save - save project to disk
    - :project/load - load project from disk
    - :clipboard/copy-effects - copy effects to clipboard
@@ -265,8 +300,13 @@
          :dispatch effect-dispatch
          :dispatch-later effect-dispatch-later
          :timing/calculate-bpm effect-timing-calculate-bpm
+         ;; Legacy single-target streaming
          :idn/start-streaming effect-idn-start-streaming
          :idn/stop-streaming effect-idn-stop-streaming
+         ;; Multi-engine streaming (new zone-aware system)
+         :multi-engine/start effect-multi-engine-start
+         :multi-engine/stop effect-multi-engine-stop
+         ;; Project persistence
          :project/save effect-save-project
          :project/load effect-load-project
          ;; Clipboard effects for effect chain editor

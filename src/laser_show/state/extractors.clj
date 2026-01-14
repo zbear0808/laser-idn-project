@@ -101,6 +101,78 @@
   (:dialogs (ui state)))
 
 
+;; Zones Extractors
+
+
+(defn zones [state]
+  (:zones state))
+
+(defn zones-items [state]
+  (:items (zones state)))
+
+(defn zone [state zone-id]
+  (get (zones-items state) zone-id))
+
+(defn zones-by-projector
+  "Get all zones for a specific projector."
+  [state projector-id]
+  (->> (zones-items state)
+       (filter (fn [[_id zone]] (= (:projector-id zone) projector-id)))
+       (into {})))
+
+(defn zones-by-zone-group
+  "Get all zones that belong to a specific zone group."
+  [state zone-group-id]
+  (->> (zones-items state)
+       (filter (fn [[_id zone]] (some #(= % zone-group-id) (:zone-groups zone))))
+       (into {})))
+
+(defn zones-by-type
+  "Get all zones of a specific type (:default, :graphics, :crowd-scanning)."
+  [state zone-type]
+  (->> (zones-items state)
+       (filter (fn [[_id zone]] (= (:type zone) zone-type)))
+       (into {})))
+
+(defn enabled-zones
+  "Get all enabled zones."
+  [state]
+  (->> (zones-items state)
+       (filter (fn [[_id zone]] (:enabled? zone)))
+       (into {})))
+
+
+;; Zone Groups Extractors
+
+
+(defn zone-groups [state]
+  (:zone-groups state))
+
+(defn zone-groups-items [state]
+  (:items (zone-groups state)))
+
+(defn zone-group [state zone-group-id]
+  (get (zone-groups-items state) zone-group-id))
+
+
+;; Projectors Extractors
+
+
+(defn projectors [state]
+  (:projectors state))
+
+(defn projectors-items [state]
+  (:items (projectors state)))
+
+(defn projector [state projector-id]
+  (get (projectors-items state) projector-id))
+
+(defn projector-zone-ids
+  "Get the zone IDs for a projector."
+  [state projector-id]
+  (:zone-ids (projector state projector-id)))
+
+
 ;; Backend Extractors
 
 (defn backend [state]

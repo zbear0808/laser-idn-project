@@ -49,14 +49,16 @@
     (let [effect-data {:type :effect :data {}}
           serialized (ser/serialize effect-data)
           result (ser/deserialize-with-schema serialized
-                   :schema-fn (ser/with-type-check :cue))]
+                   :schema-fn (ser/with-type-check :cue)
+                   :on-invalid (constantly nil))]
       (is (nil? result))))
   
   (testing "Reject data without type"
     (let [no-type-data {:data {}}
           serialized (ser/serialize no-type-data)
           result (ser/deserialize-with-schema serialized
-                   :schema-fn (ser/with-type-check :cue))]
+                   :schema-fn (ser/with-type-check :cue)
+                   :on-invalid (constantly nil))]
       (is (nil? result)))))
 
 (deftest clipboard-type-safety-test
@@ -64,7 +66,8 @@
     (let [effect {:type :effect-assignment :effect-id :color-cycle}
           serialized (ser/serialize-for-clipboard effect)
           result (ser/deserialize-from-clipboard serialized
-                   :schema-fn (ser/with-type-check :cell-assignment))]
+                   :schema-fn (ser/with-type-check :cell-assignment)
+                   :on-invalid (constantly nil))]
       (is (nil? result))
       (is (not= effect result))))
   
@@ -80,7 +83,8 @@
     (let [cue {:type :cell-assignment :preset-id :circle}
           serialized (ser/serialize-for-clipboard cue)
           result (ser/deserialize-from-clipboard serialized
-                   :schema-fn (ser/with-type-check :effect-assignment))]
+                   :schema-fn (ser/with-type-check :effect-assignment)
+                   :on-invalid (constantly nil))]
       (is (nil? result))
       (is (not= cue result))))
   

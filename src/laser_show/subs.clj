@@ -435,6 +435,111 @@
            :renaming-id nil}))
 
 
+;; Level 2: Zone Subscriptions
+
+
+(defn zones-list
+  "Get all zones as a flat list.
+   Depends on: zones domain"
+  [context]
+  (let [items (:items (fx/sub-val context :zones) {})]
+    (mapv (fn [[id config]] (assoc config :id id)) items)))
+
+(defn zones-by-projector
+  "Get zones grouped by projector ID.
+   Depends on: zones domain
+   Returns: {projector-id [zone1 zone2 zone3] ...}"
+  [context]
+  (let [zones (fx/sub-ctx context zones-list)]
+    (group-by :projector-id zones)))
+
+(defn zones-for-projector
+  "Get zones for a specific projector.
+   Depends on: zones-by-projector"
+  [context projector-id]
+  (get (fx/sub-ctx context zones-by-projector) projector-id []))
+
+(defn zone
+  "Get a single zone by ID.
+   Depends on: zones domain"
+  [context zone-id]
+  (when zone-id
+    (let [data (fx/sub-val context :zones)]
+      (when-let [z (get-in data [:items zone-id])]
+        (assoc z :id zone-id)))))
+
+(defn selected-zone-id
+  "Get the currently selected zone ID.
+   Depends on: zones domain"
+  [context]
+  (:selected-zone (fx/sub-val context :zones)))
+
+(defn selected-zone
+  "Get the currently selected zone.
+   Depends on: selected-zone-id, zone"
+  [context]
+  (when-let [id (fx/sub-ctx context selected-zone-id)]
+    (fx/sub-ctx context zone id)))
+
+(defn zone-effect-chain
+  "Get the effects chain for a specific zone.
+   Depends on: chains domain"
+  [context zone-id]
+  (get-in (fx/sub-val context :chains)
+          [:zone-effects zone-id :items]
+          []))
+
+
+;; Level 2: Zone Group Subscriptions
+
+
+(defn zone-groups-list
+  "Get all zone groups as a flat list.
+   Depends on: zone-groups domain"
+  [context]
+  (let [items (:items (fx/sub-val context :zone-groups) {})]
+    (mapv (fn [[id config]] (assoc config :id id)) items)))
+
+(defn zone-group
+  "Get a single zone group by ID.
+   Depends on: zone-groups domain"
+  [context group-id]
+  (when group-id
+    (let [data (fx/sub-val context :zone-groups)]
+      (when-let [g (get-in data [:items group-id])]
+        (assoc g :id group-id)))))
+
+(defn selected-zone-group-id
+  "Get the currently selected zone group ID.
+   Depends on: zone-groups domain"
+  [context]
+  (:selected-group (fx/sub-val context :zone-groups)))
+
+(defn selected-zone-group
+  "Get the currently selected zone group.
+   Depends on: selected-zone-group-id, zone-group"
+  [context]
+  (when-let [id (fx/sub-ctx context selected-zone-group-id)]
+    (fx/sub-ctx context zone-group id)))
+
+(defn zones-in-group
+  "Get all zones that belong to a specific zone group.
+   Depends on: zones-list"
+  [context group-id]
+  (filterv #(some #{group-id} (:zone-groups %))
+           (fx/sub-ctx context zones-list)))
+
+(defn zone-group-usage
+  "Get usage info for a zone group: which zones and how many cues use it.
+   Depends on: zones-list
+   Returns: {:zone-count n :cue-count n :zones [...]}"
+  [context group-id]
+  (let [zones (fx/sub-ctx context zones-in-group group-id)]
+    {:zone-count (count zones)
+     :cue-count 0 ;; TODO: Count cues targeting this group
+     :zones zones}))
+
+
 ;; Stylesheet Subscriptions (CSS Hot-Reload)
 
 
