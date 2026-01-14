@@ -16,18 +16,16 @@
 (def forms
   "Form element styles for the application."
   (css/register ::forms
-    (let [{bg-light     ::theme/bg-light
-           bg-hover     ::theme/bg-hover
-           text-primary ::theme/text-primary
-           text-secondary ::theme/text-secondary
-           text-muted   ::theme/text-muted} theme/theme]
+    (let [;; Use semantic colors from theme
+          {:keys [bg-interactive bg-hover
+                  text-primary text-secondary text-muted]} theme/semantic-colors]
       
       {
        ;; Text Fields
        
        
        ".text-field-dark"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
         :-fx-font-size 12
         :-fx-padding ["4px" "8px"]
@@ -37,7 +35,7 @@
         {:-fx-background-color bg-hover}}
        
        ".text-field-dark-sm"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
         :-fx-font-size 11
         :-fx-padding ["2px" "4px"]
@@ -74,7 +72,7 @@
        
        
        ".combo-box-dark"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-secondary
         :-fx-font-size 11}
        
@@ -93,7 +91,7 @@
        ;; This provides basic track/thumb styling
        ".slider-dark"
        {" .track"
-        {:-fx-background-color bg-light
+        {:-fx-background-color bg-interactive
          :-fx-background-radius 4}
         
         " .thumb"

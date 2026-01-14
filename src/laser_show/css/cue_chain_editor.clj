@@ -13,28 +13,26 @@
             [laser-show.css.theme :as theme]))
 
 
-;; Preset category colors
+;; Preset category colors - alias to theme category colors
 
 (def preset-category-colors
   "Colors for preset categories in the bank."
-  {:geometric "#4A7B9D"   ;; Blue
-   :wave      "#6B5B8C"   ;; Purple
-   :beam      "#5B8C6B"   ;; Green
-   :abstract  "#8C7B5B"}) ;; Brown
+  (let [{:keys [geometric wave beam abstract]} theme/category-colors]
+    {:geometric geometric
+     :wave      wave
+     :beam      beam
+     :abstract  abstract}))
 
 
 (def cue-chain-editor
   "Cue chain editor styles."
   (css/register ::cue-chain-editor
-    (let [{bg-dark      ::theme/bg-dark
-           bg-medium    ::theme/bg-medium
-           bg-light     ::theme/bg-light
-           bg-hover     ::theme/bg-hover
-           bg-active    ::theme/bg-active
-           text-primary ::theme/text-primary
-           text-muted   ::theme/text-muted
-           accent-blue-dark ::theme/accent-blue-dark
-           accent-blue  ::theme/accent-blue} theme/theme]
+    (let [;; Use semantic colors from theme
+          {:keys [bg-surface bg-elevated bg-interactive bg-hover bg-active
+                  text-primary text-muted text-secondary
+                  selection-bg border-subtle accent-danger]} theme/semantic-colors
+          {:keys [blue-600 gray-500 red-500]} theme/base-colors
+          {:keys [drop-target-bg drop-target-border accent-danger-hover]} theme/computed-colors]
       
       {
        ;; ============================================
@@ -42,15 +40,15 @@
        ;; ============================================
        
        ".cue-chain-editor"
-       {:-fx-background-color bg-dark
+       {:-fx-background-color bg-surface
         :-fx-padding 0}
        
        ".cue-chain-editor-content"
-       {:-fx-background-color bg-dark
+       {:-fx-background-color bg-surface
         :-fx-padding 0}
        
        ".cue-chain-left-sidebar"
-       {:-fx-background-color bg-dark
+       {:-fx-background-color bg-surface
         :-fx-min-width 280
         :-fx-pref-width 300
         :-fx-max-width 350
@@ -58,7 +56,7 @@
         :-fx-spacing 8}
        
        ".cue-chain-right-section"
-       {:-fx-background-color bg-medium
+       {:-fx-background-color bg-elevated
         :-fx-padding 8
         :-fx-spacing 8}
        
@@ -73,7 +71,7 @@
         :-fx-font-weight "bold"}
        
        ".cue-chain-hint"
-       {:-fx-text-fill "#505050"
+       {:-fx-text-fill gray-500
         :-fx-font-size 8
         :-fx-font-style "italic"
         :-fx-wrap-text true}
@@ -86,16 +84,16 @@
        ".preset-item"
        {:-fx-spacing 6
         :-fx-alignment "CENTER_LEFT"
-        :-fx-background-color bg-light
+        :-fx-background-color bg-interactive
         :-fx-background-radius 4
         :-fx-padding ["6px" "8px"]
         
         ".preset-item-selected"
-        {:-fx-background-color "#4A6FA5"}
+        {:-fx-background-color selection-bg}
         
         ".preset-item-drop-target"
-        {:-fx-background-color "#5A8FCF"
-         :-fx-border-color "#7AB8FF"
+        {:-fx-background-color drop-target-bg
+         :-fx-border-color drop-target-border
          :-fx-border-width ["2px" "0px" "0px" "0px"]}
         
         ".preset-item-dragging"
@@ -114,13 +112,13 @@
         :-fx-text-fill text-primary
         
         ".preset-item-name-selected"
-        {:-fx-text-fill "white"}
+        {:-fx-text-fill text-primary}
         
         ".preset-item-name-disabled"
         {:-fx-text-fill text-muted}}
        
        ".preset-item-effects-badge"
-       {:-fx-text-fill "#707070"
+       {:-fx-text-fill text-muted
         :-fx-font-size 10
         :-fx-font-style "italic"}
        
@@ -130,7 +128,7 @@
        ;; ============================================
        
        ".preset-bank"
-       {:-fx-background-color bg-medium
+       {:-fx-background-color bg-elevated
         :-fx-background-radius 4
         :-fx-padding 8
         :-fx-spacing 8
@@ -148,7 +146,7 @@
         :-fx-padding ["0px" "0px" "4px" "0px"]}
        
        ".preset-bank-tab"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-muted
         :-fx-font-size 10
         :-fx-padding ["4px" "10px"]
@@ -159,8 +157,8 @@
         {:-fx-background-color bg-hover}}
        
        ".preset-bank-tab-active"
-       {:-fx-background-color accent-blue-dark
-        :-fx-text-fill "white"
+       {:-fx-background-color blue-600
+        :-fx-text-fill text-primary
         :-fx-font-weight "bold"}
        
        ".preset-bank-grid"
@@ -170,7 +168,7 @@
         :-fx-padding 4}
        
        ".preset-bank-btn"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
         :-fx-font-size 11
         :-fx-padding ["8px" "12px"]
@@ -209,7 +207,7 @@
        ;; ============================================
        
        ".preset-param-editor"
-       {:-fx-background-color bg-medium
+       {:-fx-background-color bg-elevated
         :-fx-background-radius 4
         :-fx-padding 8
         :-fx-spacing 8}
@@ -243,8 +241,8 @@
         :-fx-pref-width 160}
        
        ".preset-param-text"
-       {:-fx-background-color bg-dark
-        :-fx-text-fill "white"
+       {:-fx-background-color bg-surface
+        :-fx-text-fill text-primary
         :-fx-font-size 10
         :-fx-padding ["2px" "4px"]
         :-fx-pref-width 60
@@ -265,7 +263,7 @@
        ;; ============================================
        
        ".preset-effects-section"
-       {:-fx-background-color bg-medium
+       {:-fx-background-color bg-elevated
         :-fx-background-radius 4
         :-fx-padding 8
         :-fx-spacing 4}
@@ -276,7 +274,7 @@
         :-fx-font-weight "bold"}
        
        ".preset-effects-empty"
-       {:-fx-text-fill "#505050"
+       {:-fx-text-fill gray-500
         :-fx-font-size 10
         :-fx-font-style "italic"}
        
@@ -286,7 +284,7 @@
         :-fx-padding ["4px" "0px"]}
        
        ".preset-effect-item"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-background-radius 4
         :-fx-padding ["4px" "8px"]
         :-fx-spacing 6
@@ -298,13 +296,13 @@
        
        ".preset-effect-remove-btn"
        {:-fx-background-color "transparent"
-        :-fx-text-fill "#803030"
+        :-fx-text-fill accent-danger
         :-fx-font-size 12
         :-fx-padding ["0px" "4px"]
         :-fx-cursor "hand"
         
         ":hover"
-        {:-fx-text-fill "#C05050"}}
+        {:-fx-text-fill accent-danger-hover}}
        
        
        ;; ============================================
@@ -312,7 +310,7 @@
        ;; ============================================
        
        ".mini-effect-bank"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-background-radius 4
         :-fx-padding 4
         :-fx-spacing 4
@@ -337,7 +335,7 @@
        
        ".cue-chain-scroll-pane"
        {:-fx-background-color "transparent"
-        :-fx-background bg-dark
+        :-fx-background bg-surface
         
         " > .viewport"
         {:-fx-background-color "transparent"}}
@@ -348,6 +346,6 @@
        ;; ============================================
        
        ".cue-chain-separator"
-       {:-fx-border-color "#303030"
+       {:-fx-border-color border-subtle
         :-fx-border-width ["1px" "0px" "0px" "0px"]
         :-fx-padding ["4px" "0px" "0px" "0px"]}})))

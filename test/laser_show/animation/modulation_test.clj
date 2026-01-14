@@ -86,14 +86,14 @@
     (let [bpm 120
           ms-per-beat (/ 60000 bpm)  ; 500ms
           config {:type :sine :min 0.0 :max 1.0 :period 1.0}]
-      ;; At phase 0, sine is at midpoint
-      (is (approx= 0.5 (mod/resolve-param config (make-test-context 0 bpm)) 0.05))
-      ;; At phase 0.25 (1/4 beat), sine should be at max
-      (is (approx= 1.0 (mod/resolve-param config (make-test-context (* 0.25 ms-per-beat) bpm)) 0.05))
-      ;; At phase 0.5 (1/2 beat), sine is back at midpoint
-      (is (approx= 0.5 (mod/resolve-param config (make-test-context (* 0.5 ms-per-beat) bpm)) 0.05))
-      ;; At phase 0.75 (3/4 beat), sine should be at min
-      (is (approx= 0.0 (mod/resolve-param config (make-test-context (* 0.75 ms-per-beat) bpm)) 0.05)))))
+      ;; At phase 0, sine starts at peak (uses cosine for intuitive visual behavior)
+      (is (approx= 1.0 (mod/resolve-param config (make-test-context 0 bpm)) 0.05))
+      ;; At phase 0.25 (1/4 beat), sine should be at midpoint
+      (is (approx= 0.5 (mod/resolve-param config (make-test-context (* 0.25 ms-per-beat) bpm)) 0.05))
+      ;; At phase 0.5 (1/2 beat), sine is at min
+      (is (approx= 0.0 (mod/resolve-param config (make-test-context (* 0.5 ms-per-beat) bpm)) 0.05))
+      ;; At phase 0.75 (3/4 beat), sine should be back at midpoint
+      (is (approx= 0.5 (mod/resolve-param config (make-test-context (* 0.75 ms-per-beat) bpm)) 0.05)))))
 
 (deftest sine-mod-period-speed-test
   (testing "Period controls cycle speed"
@@ -111,8 +111,10 @@
     (let [bpm 120
           config-no-offset {:type :sine :min 0.0 :max 1.0 :period 1.0 :phase 0.0}
           config-quarter-offset {:type :sine :min 0.0 :max 1.0 :period 1.0 :phase 0.25}]
-      ;; With 0.25 phase offset at t=0, should be at peak (like 0.25 phase without offset)
-      (is (approx= 1.0 (mod/resolve-param config-quarter-offset (make-test-context 0 bpm)) 0.05)))))
+      ;; With no offset at t=0, should be at peak (1.0)
+      (is (approx= 1.0 (mod/resolve-param config-no-offset (make-test-context 0 bpm)) 0.05))
+      ;; With 0.25 phase offset at t=0, should be at midpoint descending (like 0.25 phase without offset)
+      (is (approx= 0.5 (mod/resolve-param config-quarter-offset (make-test-context 0 bpm)) 0.05)))))
 
 
 ;; Square Wave Modulator Tests
@@ -159,11 +161,12 @@
 
 
 (deftest sawtooth-mod-ramp-test
-  (testing "Sawtooth ramps from min to max"
+  (testing "Sawtooth ramps from max to min (starts at peak for visual intuition)"
     (let [bpm 120
           ms-per-beat (/ 60000 bpm)
           config {:type :sawtooth :min 0.0 :max 1.0 :period 1.0}]
-      (is (approx= 0.0 (mod/resolve-param config (make-test-context 0 bpm)) 0.05))
+      ;; Sawtooth starts at peak (max) and ramps down to min
+      (is (approx= 1.0 (mod/resolve-param config (make-test-context 0 bpm)) 0.05))
       (is (approx= 0.5 (mod/resolve-param config (make-test-context (* 0.5 ms-per-beat) bpm)) 0.05)))))
 
 
@@ -173,12 +176,12 @@
 (deftest sine-hz-test
   (testing "Sine Hz modulator uses Hz instead of BPM"
     (let [config {:type :sine-hz :min 0.0 :max 1.0 :frequency-hz 1.0}]  ; 1 Hz = 1 cycle per second
-      ;; At t=0, should be at midpoint
-      (is (approx= 0.5 (mod/resolve-param config (make-test-context 0 120)) 0.05))
-      ;; At t=250ms (quarter cycle), should be at max
-      (is (approx= 1.0 (mod/resolve-param config (make-test-context 250 120)) 0.05))
-      ;; At t=500ms (half cycle), back to midpoint
-      (is (approx= 0.5 (mod/resolve-param config (make-test-context 500 120)) 0.05)))))
+      ;; At t=0, should be at peak (uses cosine internally)
+      (is (approx= 1.0 (mod/resolve-param config (make-test-context 0 120)) 0.05))
+      ;; At t=250ms (quarter cycle), should be at midpoint
+      (is (approx= 0.5 (mod/resolve-param config (make-test-context 250 120)) 0.05))
+      ;; At t=500ms (half cycle), at min
+      (is (approx= 0.0 (mod/resolve-param config (make-test-context 500 120)) 0.05)))))
 
 
 ;; Decay Modulator Tests
@@ -393,26 +396,26 @@
 (deftest point-index-wave-test
   (testing "Point index wave creates wave patterns along points"
     (let [config {:type :point-wave :min 0.0 :max 1.0 :cycles 2.0 :wave-type :sine}]  ; 2 cycles
-      ;; At start (index 0), should be at mid of sine
-      (is (approx= 0.5 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 0 100)) 0.1))
+      ;; At start (index 0), should be at peak (cosine starts at peak)
+      (is (approx= 1.0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 0 100)) 0.1))
       
-      ;; At 1/4 through points, should be near peak of first cycle
-      (is (approx= 1.0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 12 100)) 0.2))
+      ;; At 1/4 through points (phase 0.5), should be near min of first cycle
+      (is (approx= 0.0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 25 100)) 0.2))
       
-      ;; At halfway, should be at mid (between two peaks)
-      (is (approx= 0.5 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 50 100)) 0.1)))))
+      ;; At halfway (phase 1.0), should be at peak (completed one full cycle)
+      (is (approx= 1.0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 50 100)) 0.1)))))
 
 (deftest position-wave-test
   (testing "Position wave creates spatial wave patterns"
     (let [config {:type :pos-wave :min 0.0 :max 1.0 :axis :x :frequency 2.0 :wave-type :sine}]  ; 2 cycles across X
-      ;; At X=-1, phase=0, should be at sine midpoint
-      (is (approx= 0.5 (mod/resolve-param config (make-point-context 0 120 -1.0 0.0 0 100)) 0.1))
+      ;; At X=-1, phase=0, should be at sine peak (cosine starts at peak)
+      (is (approx= 1.0 (mod/resolve-param config (make-point-context 0 120 -1.0 0.0 0 100)) 0.1))
       
-      ;; At X=0, phase=1, should be back at midpoint (1 full cycle)
-      (is (approx= 0.5 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 0 100)) 0.1))
+      ;; At X=0, phase=1, should be back at peak (1 full cycle)
+      (is (approx= 1.0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 0 100)) 0.1))
       
-      ;; At X=1, phase=2, should be at midpoint (2 full cycles)
-      (is (approx= 0.5 (mod/resolve-param config (make-point-context 0 120 1.0 0.0 0 100)) 0.1)))))
+      ;; At X=1, phase=2, should be at peak (2 full cycles)
+      (is (approx= 1.0 (mod/resolve-param config (make-point-context 0 120 1.0 0.0 0 100)) 0.1)))))
 
 (deftest rainbow-hue-test
   (testing "Rainbow hue creates animated rainbow based on position"

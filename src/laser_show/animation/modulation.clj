@@ -14,6 +14,7 @@
    ;; MIDI controlled
    {:effect-id :scale :params {:x-scale {:type :midi :channel 1 :cc 7 :min 0.5 :max 2.0}}}"
   (:require
+   [clojure.edn :as edn]
    [laser-show.animation.time :as time]
    [laser-show.common.util :as u]))
 
@@ -322,15 +323,27 @@
         range-v (- (double max) (double min))]
     (+ (double min) (* t range-v))))
 
+(defn- parse-step-values
+  "Parse step values - handles both vectors and EDN strings."
+  [values]
+  (cond
+    (vector? values) values
+    (string? values) (try
+                       (let [parsed (edn/read-string values)]
+                         (if (vector? parsed) parsed [0 1]))
+                       (catch Exception _ [0 1]))
+    :else [0 1]))
+
 (defn- eval-step
   "Evaluate step modulator.
    Uses effective-beats for smooth BPM-change animation."
   [{:keys [values steps-per-beat]
     :or {values [0 1] steps-per-beat 1.0}}
    context]
-  (let [beats (get-beats-from-context context)
-        idx (mod (long (* beats (double steps-per-beat))) (count values))]
-    (nth values idx)))
+  (let [parsed-values (parse-step-values values)
+        beats (get-beats-from-context context)
+        idx (mod (long (* beats (double steps-per-beat))) (count parsed-values))]
+    (nth parsed-values idx)))
 
 (defn- eval-midi
   "Evaluate MIDI CC modulator."

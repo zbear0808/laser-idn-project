@@ -14,13 +14,11 @@
 (def buttons
   "Button styles for the application."
   (css/register ::buttons
-    (let [{bg-light    ::theme/bg-light
-           bg-hover    ::theme/bg-hover
-           bg-active   ::theme/bg-active
-           text-primary ::theme/text-primary
-           accent-primary ::theme/accent-primary
-           accent-hover ::theme/accent-hover
-           accent-red  ::theme/accent-red} theme/theme]
+    (let [;; Use semantic colors from theme
+          {:keys [bg-interactive bg-hover bg-active
+                  text-primary
+                  accent-success accent-danger]} theme/semantic-colors
+          {:keys [accent-success-hover accent-danger-hover]} theme/computed-colors]
       
       {
        ;; Base Button Styles
@@ -28,7 +26,7 @@
        
        ;; Standard button - dark theme
        ".btn"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
         :-fx-cursor "hand"
         :-fx-background-radius 4
@@ -42,7 +40,7 @@
        
        ;; Small button variant
        ".btn-sm"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
         :-fx-cursor "hand"
         :-fx-background-radius 4
@@ -54,7 +52,7 @@
        
        ;; Extra small button
        ".btn-xs"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
         :-fx-cursor "hand"
         :-fx-background-radius 3
@@ -70,43 +68,43 @@
        
        ;; Primary action button (green)
        ".btn-primary"
-       {:-fx-background-color accent-primary
+       {:-fx-background-color accent-success
         :-fx-text-fill text-primary
         :-fx-cursor "hand"
         :-fx-background-radius 4
         :-fx-padding ["6px" "20px"]
         
         ":hover"
-        {:-fx-background-color accent-hover}}
+        {:-fx-background-color accent-success-hover}}
        
        ;; Danger button (red) - for delete actions
        ".btn-danger"
-       {:-fx-background-color accent-red
+       {:-fx-background-color accent-danger
         :-fx-text-fill text-primary
         :-fx-cursor "hand"
         :-fx-background-radius 4
         :-fx-padding ["4px" "12px"]
         
         ":hover"
-        {:-fx-background-color "#B71C1C"}}
+        {:-fx-background-color accent-danger-hover}}
        
        ;; Small danger button
        ".btn-danger-sm"
-       {:-fx-background-color accent-red
+       {:-fx-background-color accent-danger
         :-fx-text-fill text-primary
         :-fx-cursor "hand"
         :-fx-font-size 9
         :-fx-padding ["2px" "6px"]
         
         ":hover"
-        {:-fx-background-color "#B71C1C"}}
+        {:-fx-background-color accent-danger-hover}}
        
        
        ;; Transport Buttons (for toolbar)
        
        
        ".transport-btn"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
         :-fx-font-size 14
         :-fx-min-width 40
@@ -120,7 +118,7 @@
        
        ;; Active transport button (e.g., playing state)
        ".transport-btn-active"
-       {:-fx-background-color accent-primary
+       {:-fx-background-color accent-success
         :-fx-text-fill text-primary
         :-fx-font-size 14
         :-fx-min-width 40
@@ -130,31 +128,31 @@
         :-fx-cursor "hand"
         
         ":hover"
-        {:-fx-background-color accent-hover}}
+        {:-fx-background-color accent-success-hover}}
        
        
        ;; Tab Buttons
        
        
        ".tab-btn"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
         :-fx-background-radius ["4px" "4px" "0px" "0px"]
         :-fx-padding ["8px" "16px"]
         :-fx-cursor "hand"
         
         ":hover"
-        {:-fx-background-color accent-hover}}
+        {:-fx-background-color accent-success-hover}}
        
        ".tab-btn-active"
-       {:-fx-background-color accent-primary
+       {:-fx-background-color accent-success
         :-fx-text-fill text-primary
         :-fx-background-radius ["4px" "4px" "0px" "0px"]
         :-fx-padding ["8px" "16px"]
         :-fx-cursor "hand"
         
         ":hover"
-        {:-fx-background-color accent-primary}}
+        {:-fx-background-color accent-success}}
        
        
        ;; Effect Bank Buttons
@@ -175,7 +173,7 @@
        
        
        ".retrigger-button"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
         :-fx-font-size 10
         :-fx-padding ["2px" "8px"]
@@ -183,8 +181,37 @@
         :-fx-background-radius 3
         
         ":hover"
-        {:-fx-background-color accent-primary
+        {:-fx-background-color accent-success
          :-fx-text-fill text-primary}
         
         ":pressed"
-        {:-fx-background-color accent-hover}}})))
+        {:-fx-background-color accent-success-hover}}
+       
+       
+       ;; Modulator Toggle Button
+       
+       
+       ".modulator-toggle"
+       {:-fx-background-color bg-interactive
+        :-fx-text-fill text-primary
+        :-fx-font-size 10
+        :-fx-padding ["2px" "4px"]
+        :-fx-cursor "hand"
+        :-fx-background-radius 3
+        :-fx-min-width 28
+        
+        ":hover"
+        {:-fx-background-color bg-hover}}
+       
+       ;; Modulator toggle when active (modulated)
+       ".modulator-toggle-active"
+       {:-fx-background-color accent-success
+        :-fx-text-fill text-primary
+        :-fx-font-size 10
+        :-fx-padding ["2px" "4px"]
+        :-fx-cursor "hand"
+        :-fx-background-radius 3
+        :-fx-min-width 28
+        
+        ":hover"
+        {:-fx-background-color accent-success-hover}}})))

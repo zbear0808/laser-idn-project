@@ -1,7 +1,8 @@
 (ns laser-show.views.status-bar
   "Status bar component showing current state information."
   (:require [cljfx.api :as fx]
-            [laser-show.subs :as subs]))
+            [laser-show.subs :as subs]
+            [laser-show.css.core :as css]))
 
 
 ;; Status Items
@@ -15,10 +16,10 @@
    :alignment :center-left
    :children [{:fx/type :label
                :text (str label ":")
-               :style "-fx-text-fill: #808080; -fx-font-size: 11;"}
+               :style (str "-fx-text-fill: " (css/text-muted) "; -fx-font-size: 11;")}
               {:fx/type :label
                :text (str value)
-               :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}]})
+               :style (str "-fx-text-fill: " (css/text-secondary) "; -fx-font-size: 11;")}]})
 
 
 ;; Cell Status
@@ -93,7 +94,7 @@
       {:fx/type :label
        :text (if dirty? "● Modified" "✓ Saved")
        :style (str "-fx-text-fill: "
-                   (if dirty? "#FF9800" "#4CAF50")
+                   (if dirty? (css/accent-warning) (css/accent-success))
                    "; -fx-font-size: 11;")}
       {:fx/type :label :text "" :pref-width 0})))
 
@@ -105,7 +106,10 @@
   "Main status bar component."
   [{:keys [fx/context]}]
   {:fx/type :h-box
-   :style "-fx-background-color: #252525; -fx-padding: 4 16; -fx-border-color: #3D3D3D; -fx-border-width: 1 0 0 0;"
+   :style (str "-fx-background-color: " (css/bg-surface) "; "
+               "-fx-padding: 4 16; "
+               "-fx-border-color: " (css/border-default) "; "
+               "-fx-border-width: 1 0 0 0;")
    :spacing 24
    :alignment :center-left
    :children [{:fx/type cell-status}

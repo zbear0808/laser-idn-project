@@ -7,61 +7,51 @@
    
    Usage:
    Include (::css/url menu-theme) in your scene's :stylesheets vector"
-  (:require [cljfx.css :as css]))
+  (:require [cljfx.css :as css]
+            [laser-show.css.theme :as theme]))
 
 (def menu-theme
   "Dark theme styling for menu components.
    
    This creates a registered cljfx/css style map that can be loaded as a URL.
-   The URL is available at (::css/url menu-theme).
-   
-   Colors and style constants are available as keyword keys:
-   - ::background - Main menu background
-   - ::background-hover - Hover state background
-   - ::background-focused - Focused state background
-   - ::text - Text color
-   - ::border - Border color
-   - ::separator - Separator line color"
+   The URL is available at (::css/url menu-theme)."
   (css/register ::menu-theme
-    (let [;; Color palette for menus
-          bg "#2d2d2d"
-          bg-hover "#404040"
-          bg-focused "#3d3d3d"
-          text-color "#e0e0e0"
-          border-color "#3d3d3d"
-          header-bg "#1e1e1eff"]
+    (let [;; Use semantic colors from theme
+          {:keys [bg-elevated bg-hover bg-interactive
+                  text-primary text-disabled
+                  border-default bg-primary]} theme/semantic-colors]
       
-      {;; Store colors as keywords for code access
-       ::background bg
+      {;; Store colors as keywords for code access (legacy support)
+       ::background bg-elevated
        ::background-hover bg-hover
-       ::background-focused bg-focused
-       ::text text-color
-       ::border border-color
-       ::separator border-color
-       ::header-background header-bg
+       ::background-focused bg-interactive
+       ::text text-primary
+       ::border border-default
+       ::separator border-default
+       ::header-background bg-primary
 
        ".header-bar"
-       {:-fx-background-color header-bg}
+       {:-fx-background-color bg-primary}
 
        ".menu-container"
-       {:-fx-background-color header-bg}
+       {:-fx-background-color bg-primary}
 
        ".menu-bar-transparent"
        {:-fx-background-color :transparent
-        :-fx-text-fill text-color
+        :-fx-text-fill text-primary
         :-fx-border-color :transparent
         :-fx-border-width "0"
         :-fx-padding "0"}
 
        ".menu-label"
-       {:-fx-text-fill text-color}
+       {:-fx-text-fill text-primary}
 
        ".menu"
        {:-fx-padding "2px"
         :-fx-background-radius "4px"
         
         ":hover"
-        {:-fx-background-color "#3d3d3d"}
+        {:-fx-background-color bg-interactive}
         
         ;; Hide the dropdown arrow 
         " > .arrow-button"
@@ -77,15 +67,15 @@
          :-fx-shape ""}}
 
        ".context-menu"
-       {:-fx-background-color bg
-        :-fx-border-color border-color
+       {:-fx-background-color bg-elevated
+        :-fx-border-color border-default
         :-fx-border-width "1px"
         :-fx-background-radius "4px"
         :-fx-border-radius "4px"}
 
        ".menu-item"
-       {:-fx-background-color bg
-        :-fx-text-fill text-color
+       {:-fx-background-color bg-elevated
+        :-fx-text-fill text-primary
         :-fx-background-radius "2px"
 
         ":hover"
@@ -93,11 +83,11 @@
          :-fx-cursor "hand"}
 
         ":focused"
-        {:-fx-background-color bg-focused
+        {:-fx-background-color bg-interactive
          :-fx-border-width "1px"}
 
         " .label"
-        {:-fx-text-fill text-color}}
+        {:-fx-text-fill text-primary}}
 
 
        ".menu-item:disabled"
@@ -105,13 +95,13 @@
         :-fx-cursor "default"
 
         " .label"
-        {:-fx-text-fill "#707070"}}
+        {:-fx-text-fill text-disabled}}
 
        
        ".separator-menu-item"
        {:-fx-padding ["2px" "0px"]
 
         " .line"
-        {:-fx-border-color border-color
+        {:-fx-border-color border-default
          :-fx-border-width "1px 0 0 0"
          :-fx-padding "0px"}}})))

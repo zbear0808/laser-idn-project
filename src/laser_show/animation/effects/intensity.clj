@@ -1,6 +1,6 @@
 (ns laser-show.animation.effects.intensity
   "Intensity effects for laser frames.
-   Includes intensity control, blackout, threshold, and gamma effects.
+   Includes intensity control, blackout, and threshold effects.
    
    NOTE: All color values are NORMALIZED (0.0-1.0), not 8-bit (0-255).
    This provides full precision for intensity calculations.
@@ -127,42 +127,3 @@
                 :min 0
                 :max 255}]
   :apply-transducer threshold-xf})
-
-
-;; Gamma Correction Effect
-
-
-(defn- gamma-xf [time-ms bpm params ctx]
-  ;; Check if any params use per-point modulators
-  (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path
-    (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                 gamma (:gamma resolved)
-                 inv-gamma (/ 1.0 gamma)]
-             (assoc pt
-               :r (common/clamp-normalized (Math/pow r inv-gamma))
-               :g (common/clamp-normalized (Math/pow g inv-gamma))
-               :b (common/clamp-normalized (Math/pow b inv-gamma))))))
-    ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          gamma (:gamma resolved)
-          inv-gamma (/ 1.0 gamma)]
-      (map (fn [{:keys [r g b] :as pt}]
-             (assoc pt
-               :r (common/clamp-normalized (Math/pow r inv-gamma))
-               :g (common/clamp-normalized (Math/pow g inv-gamma))
-               :b (common/clamp-normalized (Math/pow b inv-gamma))))))))
-
-(effects/register-effect!
- {:id :gamma
-  :name "Gamma"
-  :category :intensity
-  :timing :static
-  :parameters [{:key :gamma
-                :label "Gamma"
-                :type :float
-                :default 2.2
-                :min 0.5
-                :max 4.0}]
-  :apply-transducer gamma-xf})

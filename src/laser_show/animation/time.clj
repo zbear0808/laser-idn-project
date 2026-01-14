@@ -93,37 +93,43 @@
 
 
 (defn sine-wave
-  "Generate a sine wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0)."
+  "Generate a cosine wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0).
+   Starts at peak (1.0) when phase=0 for intuitive visual behavior."
   ^double [^double phase]
-  (Math/sin (* phase 2.0 Math/PI)))
+  (Math/cos (* phase 2.0 Math/PI)))
 
 (defn sine-wave-normalized
-  "Generate a normalized sine wave value (0.0 to 1.0) at the given phase."
+  "Generate a normalized cosine wave value (0.0 to 1.0) at the given phase.
+   Starts at peak (1.0) when phase=0."
   ^double [^double phase]
   (* 0.5 (+ 1.0 (sine-wave phase))))
 
 (defn triangle-wave
-  "Generate a triangle wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0)."
+  "Generate a triangle wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0).
+   Starts at peak (1.0) when phase=0 for intuitive visual behavior."
   ^double [^double phase]
-  (let [p (mod phase 1.0)]
+  (let [p (mod (+ phase 0.25) 1.0)]  ;; Shift by 0.25 to start at peak
     (if (< p 0.5)
       (- (* 4.0 p) 1.0)
       (- 3.0 (* 4.0 p)))))
 
 (defn triangle-wave-normalized
-  "Generate a normalized triangle wave value (0.0 to 1.0) at the given phase."
+  "Generate a normalized triangle wave value (0.0 to 1.0) at the given phase.
+   Starts at peak (1.0) when phase=0."
   ^double [^double phase]
   (* 0.5 (+ 1.0 (triangle-wave phase))))
 
 (defn sawtooth-wave
-  "Generate a sawtooth wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0)."
+  "Generate a sawtooth wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0).
+   Starts at peak (1.0) when phase=0, ramps down to -1.0 for intuitive visual behavior."
   ^double [^double phase]
-  (- (* 2.0 (mod phase 1.0)) 1.0))
+  (- 1.0 (* 2.0 (mod phase 1.0))))
 
 (defn sawtooth-wave-normalized
-  "Generate a normalized sawtooth wave value (0.0 to 1.0) at the given phase."
+  "Generate a normalized sawtooth wave value (0.0 to 1.0) at the given phase.
+   Starts at peak (1.0) when phase=0, ramps down to 0.0."
   ^double [^double phase]
-  (mod phase 1.0))
+  (- 1.0 (mod phase 1.0)))
 
 (defn square-wave
   "Generate a square wave value (-1.0 or 1.0) at the given phase (0.0 to 1.0).

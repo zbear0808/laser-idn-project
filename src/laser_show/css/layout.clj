@@ -15,20 +15,18 @@
 (def layout
   "Layout and container styles for the application."
   (css/register ::layout
-    (let [{bg-darkest     ::theme/bg-darkest
-           bg-dark        ::theme/bg-dark
-           bg-medium      ::theme/bg-medium
-           text-primary   ::theme/text-primary
-           text-muted     ::theme/text-muted
-           border-medium  ::theme/border-medium
-           border-dark    ::theme/border-dark} theme/theme]
+    (let [;; Use semantic colors from theme
+          {:keys [bg-primary bg-surface bg-elevated
+                  text-primary text-muted
+                  border-default border-subtle
+                  accent-success accent-danger accent-warning]} theme/semantic-colors]
       
       {
        ;; Toolbar
        
        
        ".toolbar"
-       {:-fx-background-color bg-medium
+       {:-fx-background-color bg-elevated
         :-fx-padding ["8px" "16px"]
         :-fx-spacing 24}
        
@@ -41,9 +39,9 @@
        
        
        ".status-bar"
-       {:-fx-background-color bg-dark
+       {:-fx-background-color bg-surface
         :-fx-padding ["4px" "16px"]
-        :-fx-border-color border-medium
+        :-fx-border-color border-default
         :-fx-border-width ["1px" "0px" "0px" "0px"]
         :-fx-spacing 24}
        
@@ -52,12 +50,12 @@
        
        
        ".title-bar"
-       {:-fx-background-color bg-darkest}
+       {:-fx-background-color bg-primary}
        
        ".menu-bar"
-       {:-fx-background-color bg-darkest
+       {:-fx-background-color bg-primary
         :-fx-text-fill text-primary
-        :-fx-border-color border-dark
+        :-fx-border-color border-subtle
         :-fx-border-width ["0px" "0px" "1px" "0px"]
         :-fx-padding 0}
        
@@ -71,20 +69,20 @@
        
        
        ".main-content"
-       {:-fx-background-color bg-darkest}
+       {:-fx-background-color bg-primary}
        
        ".side-panel"
-       {:-fx-background-color bg-medium}
+       {:-fx-background-color bg-elevated}
        
        
        ;; Preview Panel
        
        
        ".preview-panel"
-       {:-fx-background-color bg-medium}
+       {:-fx-background-color bg-elevated}
        
        ".preview-header"
-       {:-fx-background-color bg-dark
+       {:-fx-background-color bg-surface
         :-fx-padding 8}
        
        
@@ -92,10 +90,10 @@
        
        
        ".tab-container"
-       {:-fx-background-color bg-darkest}
+       {:-fx-background-color bg-primary}
        
        ".tab-header"
-       {:-fx-background-color bg-dark
+       {:-fx-background-color bg-surface
         :-fx-padding ["8px" "8px" "0px" "8px"]}
        
        
@@ -103,7 +101,7 @@
        
        
        ".split-pane"
-       {:-fx-background-color bg-darkest}
+       {:-fx-background-color bg-primary}
        
        
        ;; Connection Status Indicator
@@ -113,10 +111,10 @@
        {:-fx-background-radius 5}
        
        ".status-indicator-connected"
-       {:-fx-background-color "#4CAF50"}
+       {:-fx-background-color accent-success}
        
        ".status-indicator-disconnected"
-       {:-fx-background-color "#F44336"}
+       {:-fx-background-color accent-danger}
        
        ".status-indicator-connecting"
-       {:-fx-background-color "#FF9800"}})))
+       {:-fx-background-color accent-warning}})))

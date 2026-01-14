@@ -371,87 +371,24 @@
    :projector-id projector-id
    :effect-idx effect-idx})
 
-(defn- rgb-calibration-editor
-  "Editor for RGB calibration effect with gain sliders."
-  [{:keys [projector-id effect-idx params]}]
-  (let [event-template (make-projector-param-event projector-id effect-idx)]
-    {:fx/type :v-box
-     :spacing 6
-     :children [{:fx/type param-controls/param-slider
-                 :param-key :r-gain
-                 :param-spec {:min 0.0 :max 2.0 :label "Red Gain" :type :float}
-                 :current-value (get params :r-gain 1.0)
-                 :on-change-event event-template
-                 :on-text-event event-template}
-                {:fx/type param-controls/param-slider
-                 :param-key :g-gain
-                 :param-spec {:min 0.0 :max 2.0 :label "Green Gain" :type :float}
-                 :current-value (get params :g-gain 1.0)
-                 :on-change-event event-template
-                 :on-text-event event-template}
-                {:fx/type param-controls/param-slider
-                 :param-key :b-gain
-                 :param-spec {:min 0.0 :max 2.0 :label "Blue Gain" :type :float}
-                 :current-value (get params :b-gain 1.0)
-                 :on-change-event event-template
-                 :on-text-event event-template}]}))
-
-(defn- gamma-correction-editor
-  "Editor for gamma correction effect."
-  [{:keys [projector-id effect-idx params]}]
-  (let [event-template (make-projector-param-event projector-id effect-idx)]
-    {:fx/type :v-box
-     :spacing 6
-     :children [{:fx/type param-controls/param-slider
-                 :param-key :r-gamma
-                 :param-spec {:min 0.5 :max 4.0 :label "Red Gamma" :type :float}
-                 :current-value (get params :r-gamma 2.2)
-                 :on-change-event event-template
-                 :on-text-event event-template}
-                {:fx/type param-controls/param-slider
-                 :param-key :g-gamma
-                 :param-spec {:min 0.5 :max 4.0 :label "Green Gamma" :type :float}
-                 :current-value (get params :g-gamma 2.2)
-                 :on-change-event event-template
-                 :on-text-event event-template}
-                {:fx/type param-controls/param-slider
-                 :param-key :b-gamma
-                 :param-spec {:min 0.5 :max 4.0 :label "Blue Gamma" :type :float}
-                 :current-value (get params :b-gamma 2.2)
-                 :on-change-event event-template
-                 :on-text-event event-template}]}))
-
-(defn- axis-flip-editor
-  "Editor for axis flip effect."
-  [{:keys [projector-id effect-idx params]}]
-  (let [event-template (make-projector-param-event projector-id effect-idx)]
-    {:fx/type :h-box
-     :spacing 16
-     :children [{:fx/type param-controls/param-checkbox
-                 :param-key :flip-x
-                 :param-spec {:label "Flip X" :type :bool}
-                 :current-value (get params :flip-x false)
-                 :on-change-event event-template}
-                {:fx/type param-controls/param-checkbox
-                 :param-key :flip-y
-                 :param-spec {:label "Flip Y" :type :bool}
-                 :current-value (get params :flip-y false)
-                 :on-change-event event-template}]}))
-
-(defn- rotation-offset-editor
-  "Editor for rotation offset effect."
-  [{:keys [projector-id effect-idx params]}]
-  (let [event-template (make-projector-param-event projector-id effect-idx)]
-    {:fx/type param-controls/param-slider
-     :param-key :angle
-     :param-spec {:min -180.0 :max 180.0 :label "Angle (°)" :type :float}
-     :current-value (get params :angle 0.0)
+(defn- standard-effect-params-editor
+  "Generic parameter editor using effect registry parameters.
+   
+   Uses param-controls-list to render all parameters from the effect definition.
+   This replaces individual effect-specific editors like rgb-calibration-editor,
+   gamma-correction-editor, axis-flip-editor, and rotation-offset-editor."
+  [{:keys [projector-id effect-idx effect-def params]}]
+  (let [event-template (make-projector-param-event projector-id effect-idx)
+        params-map (param-controls/params-vector->map (:parameters effect-def []))]
+    {:fx/type param-controls/param-controls-list
+     :params-map params-map
+     :current-params params
      :on-change-event event-template
      :on-text-event event-template}))
 
 (defn- effect-parameter-editor
   "Renders the appropriate editor for a selected effect.
-   Checks for custom ui-hints renderer, falls back to built-in editors.
+   Checks for custom ui-hints renderer, falls back to generic params editor.
    
    Props:
    - :projector-id - ID of the projector
@@ -461,7 +398,8 @@
   [{:keys [projector-id effect-idx effect ui-state]}]
   (let [{:keys [effect-id params]} effect
        effect-def (effects/get-effect effect-id)
-       effect-name (or (:name effect-def) (name effect-id))]
+       effect-name (or (:name effect-def) (name effect-id))
+       renderer-type (get-in effect-def [:ui-hints :renderer])]
     {:fx/type :v-box
      :spacing 8
      :padding 8
@@ -470,8 +408,8 @@
                  :text (str "Edit: " effect-name)
                  :style "-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 11;"}
                 (cond
-                   ;; Check for custom renderer in ui-hints
-                   (= :rgb-curves (get-in effect-def [:ui-hints :renderer]))
+                   ;; Check for custom renderer in ui-hints: rgb-curves
+                   (= :rgb-curves renderer-type)
                    {:fx/type custom-renderers/rgb-curves-visual-editor
                     :domain :projector-effects
                     :entity-key projector-id
@@ -479,7 +417,20 @@
                     :current-params params
                     :dialog-data ui-state}
                   
-                  ;; Built-in editors for specific effect types
+                  ;; Check for custom renderer in ui-hints: corner-pin-2d
+                  (= :corner-pin-2d renderer-type)
+                  {:fx/type custom-renderers/corner-pin-visual-editor
+                   :params params
+                   :event-template {:event/type :projectors/update-corner-pin
+                                    :projector-id projector-id
+                                    :effect-idx effect-idx}
+                   :reset-event {:event/type :projectors/reset-corner-pin
+                                 :projector-id projector-id
+                                 :effect-idx effect-idx}
+                   :fx-key [:projector projector-id effect-idx]
+                   :hint-text "Drag corners to adjust output geometry"}
+                  
+                  ;; Legacy fallback for :corner-pin effect-id (if not using ui-hints)
                   (= effect-id :corner-pin)
                   {:fx/type custom-renderers/corner-pin-visual-editor
                    :params params
@@ -492,34 +443,20 @@
                    :fx-key [:projector projector-id effect-idx]
                    :hint-text "Drag corners to adjust output geometry"}
                   
-                  (= effect-id :rgb-calibration)
-                  {:fx/type rgb-calibration-editor
+                  ;; Default: use generic param-controls-list based on effect registry
+                  ;; This replaces individual editors like rgb-calibration-editor,
+                  ;; gamma-correction-editor, axis-flip-editor, rotation-offset-editor
+                  effect-def
+                  {:fx/type standard-effect-params-editor
                    :projector-id projector-id
                    :effect-idx effect-idx
+                   :effect-def effect-def
                    :params params}
                   
-                  (= effect-id :gamma-correction)
-                  {:fx/type gamma-correction-editor
-                   :projector-id projector-id
-                   :effect-idx effect-idx
-                   :params params}
-                  
-                  (= effect-id :axis-flip)
-                  {:fx/type axis-flip-editor
-                   :projector-id projector-id
-                   :effect-idx effect-idx
-                   :params params}
-                  
-                  (= effect-id :rotation-offset)
-                  {:fx/type rotation-offset-editor
-                   :projector-id projector-id
-                   :effect-idx effect-idx
-                   :params params}
-                  
-                  ;; Default: show message for unsupported effects
+                  ;; No effect definition found
                   :else
                   {:fx/type :label
-                   :text "No visual editor available for this effect"
+                   :text "Unknown effect - no parameters available"
                    :style "-fx-text-fill: #808080; -fx-font-style: italic;"})]}))
 
 (defn- projector-effects-sidebar

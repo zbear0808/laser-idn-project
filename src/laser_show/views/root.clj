@@ -19,6 +19,7 @@
 (:require
    [cljfx.api :as fx]
    [laser-show.subs :as subs]
+   [laser-show.css.core :as css]
    [laser-show.views.components.title-bar :as title-bar]
    [laser-show.views.components.preview :as preview]
    [laser-show.views.components.tabs :as tabs]
@@ -32,26 +33,12 @@
    [laser-show.views.toolbar :as toolbar]))
 
 
-;; Theme
+;; Layout Constants (non-color theme values)
 
-
-(def theme
-  "Application theme colors and styles."
-  {:colors {:background "#1E1E1E"
-            :surface "#2D2D2D"
-            :surface-light "#3D3D3D"
-            :primary "#4CAF50"
-            :primary-dark "#388E3C"
-            :secondary "#2196F3"
-            :accent "#FF9800"
-            :text "#FFFFFF"
-            :text-secondary "#B0B0B0"
-            :error "#F44336"
-            :cell-empty "#424242"
-            :cell-content "#616161"
-            :cell-active "#4CAF50"
-            :cell-selected "#2196F3"}
-   :spacing {:xs 4 :sm 8 :md 16 :lg 24 :xl 32}
+(def layout-config
+  "Layout spacing and font configuration.
+   For colors, use laser-show.css.core accessor functions."
+  {:spacing {:xs 4 :sm 8 :md 16 :lg 24 :xl 32}
    :fonts {:default "System"
            :mono "Consolas"}})
 
@@ -71,10 +58,10 @@
                  :padding 20
                  :children [{:fx/type :label
                              :text "Settings"
-                             :style "-fx-font-size: 18; -fx-text-fill: white;"}
+                             :style (str "-fx-font-size: 18; -fx-text-fill: " (css/text-primary) ";")}
                             {:fx/type :label
                              :text "Coming soon..."
-                             :style "-fx-text-fill: #808080;"}]}
+                             :style (str "-fx-text-fill: " (css/text-muted) ";")}]}
       ;; Default
       {:fx/type :label :text "Unknown tab"})))
 
@@ -107,21 +94,23 @@
    Preview is hidden when on the projectors tab."
   [{:keys [fx/context]}]
   (let [active-tab (fx/sub-ctx context subs/active-tab)
-        show-preview? (not= active-tab :projectors)]
+        show-preview? (not= active-tab :projectors)
+        bg-primary (css/bg-primary)
+        bg-elevated (css/bg-elevated)]
     (if show-preview?
       ;; Show split pane with preview for non-projector tabs
       {:fx/type :split-pane
-       :style "-fx-background-color: #1E1E1E;"
+       :style (str "-fx-background-color: " bg-primary ";")
        :divider-positions [0.65]
        :items [{:fx/type :border-pane
-                :style "-fx-background-color: #1E1E1E;"
+                :style (str "-fx-background-color: " bg-primary ";")
                 :center {:fx/type tab-content}}
                {:fx/type :border-pane
-                :style "-fx-background-color: #2D2D2D;"
+                :style (str "-fx-background-color: " bg-elevated ";")
                 :center {:fx/type preview/preview-panel}}]}
       ;; Just show tab content without preview for projectors tab
       {:fx/type :border-pane
-       :style "-fx-background-color: #1E1E1E;"
+       :style (str "-fx-background-color: " bg-primary ";")
        :center {:fx/type tab-content}})))
 
 
@@ -132,7 +121,7 @@
   "Main application layout with HeaderBar in title bar area."
   [{:keys [fx/context]}]
   {:fx/type :border-pane
-   :style "-fx-background-color: #1E1E1E;"
+   :style (str "-fx-background-color: " (css/bg-primary) ";")
    :top {:fx/type :v-box
          :children [{:fx/type title-bar/header-view}
                     {:fx/type toolbar/toolbar}
@@ -157,7 +146,7 @@
         cue-editor-open? (fx/sub-ctx context subs/dialog-open? :cue-chain-editor)
         add-projector-open? (fx/sub-ctx context subs/dialog-open? :add-projector-manual)]
     {:fx/type fx/ext-set-env
-     :env {::theme theme}
+     :env {::layout-config layout-config}  ; For any components that need spacing/fonts
      :desc {:fx/type fx/ext-many
             :desc (filterv
                     some?

@@ -23,36 +23,25 @@
 ;; Group depth colors (exported for use in components that need programmatic access)
 
 (def group-colors
-  "Colors for different group nesting depths."
-  {:depth-0 "#4A7B9D"   ;; Blue
-   :depth-1 "#6B5B8C"   ;; Purple
-   :depth-2 "#5B8C6B"   ;; Green
-   :depth-3 "#8C7B5B"}) ;; Brown
+  "Colors for different group nesting depths.
+   Alias to theme/category-colors for backward compatibility."
+  theme/category-colors)
 
 
 #_{:clj-kondo/ignore [:redefined-var]}
 (def list
   "Hierarchical list styles."
   (css/register ::list
-    (let [{bg-dark      ::theme/bg-dark
-           bg-medium    ::theme/bg-medium
-           bg-light     ::theme/bg-light
-           bg-hover     ::theme/bg-hover
-           bg-active    ::theme/bg-active
-           text-primary ::theme/text-primary
-           text-muted   ::theme/text-muted
-           accent-blue-dark ::theme/accent-blue-dark} theme/theme
+    (let [;; Use semantic colors from theme
+          {:keys [bg-surface bg-elevated bg-interactive bg-hover bg-active
+                  text-primary text-muted text-secondary
+                  selection-bg border-subtle]} theme/semantic-colors
+          {:keys [selection-hover drop-target-bg drop-target-border
+                  drop-target-glow]} theme/computed-colors
+          {:keys [blue-600 gray-500]} theme/base-colors
           
-          ;; Selection/drop colors
-          selected-bg "#4A6FA5"
-          drop-into-bg "#5A8FCF"
-          drop-border "#7AB8FF"
-          
-          ;; Group depth colors
-          depth-0-color (:depth-0 group-colors)
-          depth-1-color (:depth-1 group-colors)
-          depth-2-color (:depth-2 group-colors)
-          depth-3-color (:depth-3 group-colors)
+          ;; Category colors for depth
+          {:keys [depth-0 depth-1 depth-2 depth-3]} theme/category-colors
           
           ;; Indentation
           base-padding 8
@@ -64,7 +53,7 @@
        ;; ============================================
        
        ".chain-sidebar"
-       {:-fx-background-color bg-dark
+       {:-fx-background-color bg-surface
         :-fx-padding 8
         :-fx-spacing 8
         :-fx-min-width 180
@@ -81,16 +70,16 @@
         :-fx-font-weight "bold"}
        
        ".chain-selection-count"
-       {:-fx-text-fill accent-blue-dark
+       {:-fx-text-fill blue-600
         :-fx-font-size 9}
        
        ".chain-hint-text"
-       {:-fx-text-fill "#505050"
+       {:-fx-text-fill gray-500
         :-fx-font-size 8
         :-fx-font-style "italic"}
        
        ".chain-empty-text"
-       {:-fx-text-fill "#606060"
+       {:-fx-text-fill text-muted
         :-fx-font-style "italic"
         :-fx-font-size 11}
        
@@ -101,7 +90,7 @@
        
        ".chain-toolbar-btn"
        {:-fx-background-color bg-hover
-        :-fx-text-fill "white"
+        :-fx-text-fill text-primary
         :-fx-font-size 9
         :-fx-padding ["2px" "6px"]
         
@@ -109,13 +98,13 @@
         {:-fx-background-color bg-active}}
        
        ".chain-toolbar-btn-danger"
-       {:-fx-background-color "#803030"
-        :-fx-text-fill "white"
+       {:-fx-background-color "#803030"  ; Dark red - keep as accent
+        :-fx-text-fill text-primary
         :-fx-font-size 9
         :-fx-padding ["2px" "6px"]
         
         ":hover"
-        {:-fx-background-color "#903030"}}
+        {:-fx-background-color "#903030"}}  ; Lighter red on hover
        
        
        ;; ============================================
@@ -126,28 +115,28 @@
        ".group-header"
        {:-fx-spacing 6
         :-fx-alignment "CENTER_LEFT"
-        :-fx-background-color "#333333"
+        :-fx-background-color bg-elevated
         :-fx-background-radius 4
         :-fx-border-radius 4
         :-fx-border-width ["0px" "0px" "0px" "3px"]
         
         ;; State variants as compound selectors (.group-header.group-header-selected)
         ".group-header-selected"
-        {:-fx-background-color selected-bg}
+        {:-fx-background-color selection-bg}
         
         ;; Drop-into indicator - enhanced with glow for dropping into group
         ".group-header-drop-into"
-        {:-fx-background-color drop-into-bg
-         :-fx-border-color drop-border
+        {:-fx-background-color drop-target-bg
+         :-fx-border-color drop-target-border
          :-fx-border-width "2px"
-         :-fx-effect "dropshadow(three-pass-box, rgba(122, 184, 255, 0.6), 12, 0, 0, 0)"}
+         :-fx-effect (str "dropshadow(three-pass-box, " drop-target-glow ", 12, 0, 0, 0)")}
         
         ;; Drop-before indicator - enhanced with glow
         ".group-header-drop-before"
-        {:-fx-border-color drop-border
+        {:-fx-border-color drop-target-border
          :-fx-border-width ["3px" "0px" "0px" "3px"]
-         :-fx-background-color "#3A3A5A"
-         :-fx-effect "dropshadow(three-pass-box, rgba(122, 184, 255, 0.5), 8, 0, 0, -3)"}
+         :-fx-background-color drop-target-bg
+         :-fx-effect (str "dropshadow(three-pass-box, " drop-target-glow ", 8, 0, 0, -3)")}
         
         ;; Dragging group - looks "lifted"
         ".group-header-dragging"
@@ -163,16 +152,16 @@
        ;; ============================================
        
        ".group-header.group-depth-0"
-       {:-fx-border-color depth-0-color}
+       {:-fx-border-color depth-0}
        
        ".group-header.group-depth-1"
-       {:-fx-border-color depth-1-color}
+       {:-fx-border-color depth-1}
        
        ".group-header.group-depth-2"
-       {:-fx-border-color depth-2-color}
+       {:-fx-border-color depth-2}
        
        ".group-header.group-depth-3"
-       {:-fx-border-color depth-3-color}
+       {:-fx-border-color depth-3}
        
        
        ;; ============================================
@@ -217,31 +206,31 @@
         
         ;; Depth colors (when not selected/disabled)
         ".group-name-depth-0"
-        {:-fx-text-fill depth-0-color}
+        {:-fx-text-fill depth-0}
         
         ".group-name-depth-1"
-        {:-fx-text-fill depth-1-color}
+        {:-fx-text-fill depth-1}
         
         ".group-name-depth-2"
-        {:-fx-text-fill depth-2-color}
+        {:-fx-text-fill depth-2}
         
         ".group-name-depth-3"
-        {:-fx-text-fill depth-3-color}}
+        {:-fx-text-fill depth-3}}
        
        ".group-name-input"
-       {:-fx-background-color bg-dark
-        :-fx-text-fill "white"
+       {:-fx-background-color bg-surface
+        :-fx-text-fill text-primary
         :-fx-font-size 12
         :-fx-font-weight "bold"
         :-fx-padding ["0px" "4px"]}
        
        ".group-count-badge"
-       {:-fx-text-fill "#606060"
+       {:-fx-text-fill text-muted
         :-fx-font-size 10}
        
        ".group-ungroup-btn"
        {:-fx-background-color bg-active
-        :-fx-text-fill "#A0A0A0"
+        :-fx-text-fill text-secondary
         :-fx-padding ["1px" "3px"]
         :-fx-font-size 8
         
@@ -256,7 +245,7 @@
        ".chain-item"
        {:-fx-spacing 6
         :-fx-alignment "CENTER_LEFT"
-        :-fx-background-color bg-light
+        :-fx-background-color bg-interactive
         :-fx-background-radius 4}
        
        ;; ============================================
@@ -264,25 +253,25 @@
        ;; ============================================
        
        ".chain-item.chain-item-selected"
-       {:-fx-background-color selected-bg}
+       {:-fx-background-color selection-bg}
        
        ;; Drop indicator when hovering over top half - place before
        ;; Enhanced with glow effect and background highlight for better visibility
        ".chain-item.chain-item-drop-before"
-       {:-fx-border-color drop-border
+       {:-fx-border-color drop-target-border
         :-fx-border-width ["3px" "0px" "0px" "0px"]
         :-fx-border-radius 4
-        :-fx-background-color "#3A3A5A"
-        :-fx-effect "dropshadow(three-pass-box, rgba(122, 184, 255, 0.5), 8, 0, 0, -3)"}
+        :-fx-background-color drop-target-bg
+        :-fx-effect (str "dropshadow(three-pass-box, " drop-target-glow ", 8, 0, 0, -3)")}
        
        ;; Drop indicator when hovering over bottom half - place after
        ;; Enhanced with glow effect and background highlight for better visibility
        ".chain-item.chain-item-drop-after"
-       {:-fx-border-color drop-border
+       {:-fx-border-color drop-target-border
         :-fx-border-width ["0px" "0px" "3px" "0px"]
         :-fx-border-radius 4
-        :-fx-background-color "#3A3A5A"
-        :-fx-effect "dropshadow(three-pass-box, rgba(122, 184, 255, 0.5), 8, 0, 0, 3)"}
+        :-fx-background-color drop-target-bg
+        :-fx-effect (str "dropshadow(three-pass-box, " drop-target-glow ", 8, 0, 0, 3)")}
        
        ;; Dragging item - looks "lifted" from the list
        ".chain-item.chain-item-dragging"
@@ -332,7 +321,7 @@
        
        ".chain-scroll-pane"
        {:-fx-background-color "transparent"
-        :-fx-background bg-dark
+        :-fx-background bg-surface
         
         " > .viewport"
         {:-fx-background-color "transparent"}}})))

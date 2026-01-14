@@ -163,25 +163,6 @@
   :apply-transducer color-filter-xf})
 
 
-;; Invert Effect
-
-
-(defn- invert-xf [_time-ms _bpm _params _ctx]
-  (map (fn [{:keys [r g b] :as pt}]
-         (assoc pt
-           :r (- 1.0 r)
-           :g (- 1.0 g)
-           :b (- 1.0 b)))))
-
-(effects/register-effect!
- {:id :invert
-  :name "Invert Colors"
-  :category :color
-  :timing :static
-  :parameters []
-  :apply-transducer invert-xf})
-
-
 ;; Set Hue Effect (sets all points to specific hue, preserving saturation/value)
 
 

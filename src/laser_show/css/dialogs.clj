@@ -14,12 +14,10 @@
 (def dialogs
   "Dialog-specific styles for the application."
   (css/register ::dialogs
-    (let [{bg-dark        ::theme/bg-dark
-           bg-medium      ::theme/bg-medium
-           bg-light       ::theme/bg-light
-           text-primary   ::theme/text-primary
-           text-muted     ::theme/text-muted
-           accent-blue-dark ::theme/accent-blue-dark} theme/theme]
+    (let [;; Use semantic colors from theme
+          {:keys [bg-surface bg-elevated bg-interactive
+                  text-primary text-muted]} theme/semantic-colors
+          {:keys [blue-600]} theme/base-colors]
       
       {
        ;; Dialog Root
@@ -27,22 +25,22 @@
        
        ;; Dark dialog root override
        ".dialog-root"
-       {:-fx-base bg-medium
-        :-fx-background bg-medium}
+       {:-fx-base bg-elevated
+        :-fx-background bg-elevated}
        
        
        ;; Dialog Sections
        
        
        ".dialog-header"
-       {:-fx-background-color bg-dark
+       {:-fx-background-color bg-surface
         :-fx-padding 12}
        
        ".dialog-content"
-       {:-fx-background-color bg-medium}
+       {:-fx-background-color bg-elevated}
        
        ".dialog-footer"
-       {:-fx-background-color bg-dark
+       {:-fx-background-color bg-surface
         :-fx-padding 12}
        
        
@@ -53,14 +51,14 @@
        ".tab-pane"
        {" > .tab-header-area"
         {" > .tab-header-background"
-         {:-fx-background-color bg-dark}}}
+         {:-fx-background-color bg-surface}}}
        
        ;; Individual tab styling
        ".tab"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         
         ":selected"
-        {:-fx-background-color accent-blue-dark}
+        {:-fx-background-color blue-600}
         
         " .tab-label"
         {:-fx-text-fill text-primary}}
@@ -71,16 +69,16 @@
        
        ;; Chain panel (left side)
        ".chain-panel"
-       {:-fx-background-color bg-dark
+       {:-fx-background-color bg-surface
         :-fx-padding 8}
        
        ;; Effect bank panel (right side)
        ".effect-bank-panel"
-       {:-fx-background-color bg-medium}
+       {:-fx-background-color bg-elevated}
        
        ;; Parameter panel (bottom right)
        ".param-panel"
-       {:-fx-background-color "#2A2A2A"
+       {:-fx-background-color bg-surface
         :-fx-padding 8}
        
        
@@ -88,7 +86,7 @@
        
        
        ".empty-state-text"
-       {:-fx-text-fill "#606060"
+       {:-fx-text-fill text-muted
         :-fx-font-style "italic"
         :-fx-font-size 11}
        
@@ -97,7 +95,7 @@
        
        
        ".selection-count"
-       {:-fx-text-fill accent-blue-dark
+       {:-fx-text-fill blue-600
         :-fx-font-size 9}
        
        

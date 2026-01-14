@@ -20,12 +20,14 @@
 (def grid-cells
   "Grid cell styles for the application."
   (css/register ::grid-cells
-    (let [{bg-light       ::theme/bg-light
-           bg-medium      ::theme/bg-medium
-           bg-hover       ::theme/bg-hover
-           text-primary   ::theme/text-primary
-           accent-blue    ::theme/accent-blue
-           accent-primary ::theme/accent-primary} theme/theme]
+    (let [;; Use semantic colors from theme
+          {:keys [bg-interactive bg-hover text-primary text-muted
+                  accent-success accent-info border-default
+                  selection-bg]} theme/semantic-colors
+          {:keys [cell-content cell-content-hover
+                  effects-content effects-content-hover
+                  drop-target-bg drop-target-border]} theme/computed-colors
+          {:keys [green-500]} theme/base-colors]
       
       {
        ;; Base Grid Cell
@@ -34,11 +36,11 @@
        ".grid-cell"
        {:-fx-background-radius 4
         :-fx-border-radius 4
-        :-fx-border-color "#404040"
+        :-fx-border-color border-default
         :-fx-border-width 1
         :-fx-cursor "hand"
         ;; Default background for empty cells
-        :-fx-background-color bg-light}
+        :-fx-background-color bg-interactive}
        
        
        ;; State-Based Background Colors
@@ -47,20 +49,20 @@
        
        ;; Empty cell (default state)
        ".grid-cell-empty"
-       {:-fx-background-color bg-light}
+       {:-fx-background-color bg-interactive}
        
        ;; Cell with content (cues/effects assigned)
        ".grid-cell-content"
-       {:-fx-background-color "#616161"}
+       {:-fx-background-color cell-content}
        
        ;; Active/playing cell (green)
        ".grid-cell-active"
-       {:-fx-background-color accent-primary
-        :-fx-effect "dropshadow(gaussian, #4CAF50, 10, 0.5, 0, 0)"}
+       {:-fx-background-color accent-success
+        :-fx-effect (str "dropshadow(gaussian, " green-500 ", 10, 0.5, 0, 0)")}
        
        ;; Selected cell (blue border)
        ".grid-cell-selected"
-       {:-fx-border-color accent-blue
+       {:-fx-border-color accent-info
         :-fx-border-width 2
         :-fx-border-radius 4}
        
@@ -71,7 +73,7 @@
        
        ;; Effects cells with content use purple
        ".grid-cell-effects.grid-cell-content"
-       {:-fx-background-color "#7E57C2"}
+       {:-fx-background-color effects-content}
        
        
        ;; Hover States
@@ -79,20 +81,20 @@
        
        ".grid-cell:hover"
        {:-fx-background-color bg-hover
-        :-fx-border-color "#606060"}
+        :-fx-border-color text-muted}
        
        ;; Active cells stay green on hover, just reduce opacity slightly
        ".grid-cell-active:hover"
-       {:-fx-background-color accent-primary
+       {:-fx-background-color accent-success
         :-fx-opacity 0.9}
        
        ;; Content cells get lighter on hover
        ".grid-cell-content:hover"
-       {:-fx-background-color "#717171"}
+       {:-fx-background-color cell-content-hover}
        
        ;; Effects content cells get lighter purple
        ".grid-cell-effects.grid-cell-content:hover"
-       {:-fx-background-color "#8E67D2"}
+       {:-fx-background-color effects-content-hover}
        
        
        ;; Active Indicator (small dot/bar showing active state)
@@ -117,20 +119,20 @@
        
        
        ".chain-item"
-       {:-fx-background-color bg-light
+       {:-fx-background-color bg-interactive
         :-fx-padding ["6px" "8px"]
         :-fx-background-radius 4
         :-fx-cursor "hand"}
        
        ".chain-item-selected"
-       {:-fx-background-color "#5A8FCF"
+       {:-fx-background-color selection-bg
         :-fx-padding ["6px" "8px"]
         :-fx-background-radius 4
         :-fx-cursor "hand"}
        
        ".chain-item-drop-target"
-       {:-fx-background-color "#5A8FCF"
-        :-fx-border-color "#7AB8FF"
+       {:-fx-background-color drop-target-bg
+        :-fx-border-color drop-target-border
         :-fx-border-width ["2px" "0px" "0px" "0px"]}
        
        ".chain-item-dragging"
@@ -138,7 +140,7 @@
        
        ;; Drag handle for chain items
        ".chain-item-handle"
-       {:-fx-text-fill "#606060"
+       {:-fx-text-fill text-muted
         :-fx-font-size 10
         :-fx-cursor "move"}
        

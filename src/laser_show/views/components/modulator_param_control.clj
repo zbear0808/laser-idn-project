@@ -19,7 +19,8 @@
                       :effect-path [0]}
     :on-text-event {:event/type :chain/update-param-from-text ...}}
    ```"
-  (:require [laser-show.animation.modulator-defs :as mod-defs]))
+  (:require [laser-show.animation.modulator-defs :as mod-defs]
+            [laser-show.views.components.parameter-controls :as param-controls]))
 
 
 ;; UI Components
@@ -264,15 +265,13 @@
                                :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
                               
                               ;; Modulate toggle button - uses event map
-                              {:fx/type :toggle-button
-                               :text (if is-modulated? "〰️" "⏸")
-                               :selected is-modulated?
-                               :pref-width 28
-                               :style (str "-fx-font-size: 10; -fx-padding: 2 4; "
-                                           (if is-modulated?
-                                             "-fx-background-color: #6B8E23;"
-                                             "-fx-background-color: #404040;"))
-                               :on-selected-changed toggle-event}
+                               {:fx/type :toggle-button
+                                :text "∿"
+                                :selected is-modulated?
+                                :style-class [(if is-modulated?
+                                                "modulator-toggle-active"
+                                                "modulator-toggle")]
+                                :on-selected-changed toggle-event}
                               
                               ;; Value display (static) or type selector (modulated)
                               (if is-modulated?
@@ -318,11 +317,13 @@
 (defn modulatable-param-control
   "Like param-control but with modulator support for numeric types.
    
-   Routes to modulator-param-control for :float/:int, otherwise uses standard controls.
+   Routes to modulator-param-control for :float/:int, otherwise delegates
+   to the standard param-control from parameter-controls namespace.
    
    Props: same as modulator-param-control plus support for non-numeric types."
   [{:keys [param-spec] :as props}]
   (case (:type param-spec :float)
+    ;; Numeric types: use modulator-capable control
     (:float :int) {:fx/type modulator-param-control
                    :param-key (:param-key props)
                    :param-spec param-spec
@@ -331,35 +332,15 @@
                    :on-text-event (:on-text-event props)
                    :modulator-event-base (:modulator-event-base props)
                    :label-width (:label-width props)}
-    ;; Non-numeric types: use standard param-control behavior
-    :choice {:fx/type :h-box
-             :spacing 8
-             :alignment :center-left
-             :children [{:fx/type :label
-                         :text (or (:label param-spec) (name (:param-key props)))
-                         :pref-width (or (:label-width props) 80)
-                         :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
-                        {:fx/type :combo-box
-                         :items (vec (or (:choices param-spec) []))
-                         :value (or (:current-value props) (:default param-spec))
-                         :pref-width 150
-                         :button-cell (fn [item] {:text (if item (name item) "")})
-                         :cell-factory {:fx/cell-type :list-cell
-                                        :describe (fn [item] {:text (if item (name item) "")})}
-                         :on-value-changed (assoc (:on-change-event props) :param-key (:param-key props))}]}
-    :bool {:fx/type :h-box
-           :spacing 8
-           :alignment :center-left
-           :children [{:fx/type :check-box
-                       :text (or (:label param-spec) (name (:param-key props)))
-                       :selected (if (some? (:current-value props))
-                                   (:current-value props)
-                                   (:default param-spec false))
-                       :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"
-                       :on-selected-changed (assoc (:on-change-event props) :param-key (:param-key props))}]}
-    ;; Default fallback
-    {:fx/type :label
-     :text (str "Unsupported type: " (:type param-spec))}))
+    ;; Non-numeric types: delegate to standard param-control
+    ;; This avoids duplicating the choice/bool/color rendering logic
+    {:fx/type param-controls/param-control
+     :param-key (:param-key props)
+     :param-spec param-spec
+     :current-value (:current-value props)
+     :on-change-event (:on-change-event props)
+     :on-text-event (:on-text-event props)
+     :label-width (:label-width props)}))
 
 
 (defn modulatable-param-controls-list
