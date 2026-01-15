@@ -93,7 +93,7 @@
    - :rgb-domain - Domain for RGB curves (:effect-chains, :item-effects, etc.)
    - :rgb-entity-key - Entity key for RGB curves
    - :rgb-effect-path - Effect path for RGB curves"
-  [{:keys [effect-def current-params ui-mode params-map dialog-data
+  [{:keys [fx/context effect-def current-params ui-mode params-map dialog-data
            spatial-event-template spatial-event-keys
            on-change-event on-text-event on-mode-change-event modulator-event-base
            rgb-domain rgb-entity-key rgb-effect-path
@@ -110,8 +110,9 @@
         param-list-type (if enable-modulators?
                           mod-param/modulatable-param-controls-list
                           param-controls/param-controls-list)]
-    ;; RGB Curves is visual-only, no mode toggle - use the public rgb-curves-visual-editor
-    (if (= renderer-type :rgb-curves)
+    ;; RGB Curves is visual-only, no mode toggle
+    (cond
+      (= renderer-type :rgb-curves)
       {:fx/type custom-renderers/rgb-curves-visual-editor
        :domain rgb-domain
        :entity-key rgb-entity-key
@@ -119,7 +120,15 @@
        :current-params current-params
        :dialog-data dialog-data}
       
+      ;; Zone reroute is visual-only (zone group selector)
+      (= renderer-type :zone-reroute)
+      {:fx/type custom-renderers/zone-reroute-visual-editor
+       :fx/context context
+       :current-params current-params
+       :on-change-event on-change-event}
+      
       ;; Other custom renderers have mode toggle
+      :else
       {:fx/type :v-box
        :spacing 8
        :children [;; Mode toggle buttons

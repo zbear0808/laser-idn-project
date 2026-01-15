@@ -59,6 +59,7 @@
   "Renders parameters with custom UI and mode toggle using shared effect-param-ui.
    
    Props:
+   - :fx/context - cljfx context (required for zone effects)
    - :col, :row - Grid cell coordinates
    - :item-path - Path to the item within cue chain
    - :effect-path - Path to effect within item's effect chain
@@ -67,10 +68,11 @@
    - :ui-mode - Current UI mode (:visual or :numeric)
    - :params-map - Parameter specifications map
    - :dialog-data - Dialog state data (for curve editor channel tab tracking)"
-  [{:keys [col row item-path effect-path effect-def current-params ui-mode params-map dialog-data]}]
+  [{:keys [fx/context col row item-path effect-path effect-def current-params ui-mode params-map dialog-data]}]
   ;; Build the full effect path from item-path to effect within item's :effects
   (let [full-effect-path (vec (concat item-path [:effects] effect-path))]
     {:fx/type effect-param-ui/custom-param-renderer
+     :fx/context context
      :effect-def effect-def
      :current-params current-params
      :ui-mode ui-mode
@@ -112,12 +114,16 @@
 
 (defn- effect-parameter-editor
   "Parameter editor for the selected effect within an item."
-  [{:keys [col row item-path item selected-effect-ids dialog-data]}]
+  [{:keys [fx/context col row item-path item selected-effect-ids dialog-data]}]
   (let [effects (:effects item [])
         first-selected-id (first selected-effect-ids)
         ;; Use hierarchical path finding for nested effects
         effect-path (when first-selected-id
                       (chains/find-path-by-id effects first-selected-id))
+        ;; Build full effect path: item-path + :effects + effect-path
+        ;; IMPORTANT: This must be computed before ui-mode lookup since ui-mode is stored by full-effect-path
+        full-effect-path (when effect-path
+                           (vec (concat item-path [:effects] effect-path)))
         ;; Use path to retrieve the effect from nested structure
         selected-effect (when effect-path
                           (chains/get-item-at-path effects effect-path))
@@ -125,10 +131,9 @@
                      (effects/get-effect (:effect-id selected-effect)))
         current-params (:params selected-effect {})
         params-map (params-vector->map (:parameters effect-def []))
-        ui-mode (get-in dialog-data [:ui-modes effect-path])
-        ;; Build full effect path: item-path + :effects + effect-path
-        full-effect-path (when effect-path
-                           (vec (concat item-path [:effects] effect-path)))]
+        ;; IMPORTANT: ui-mode is stored by full-effect-path (item-path + :effects + effect-path)
+        ;; so we must read it using the same key
+        ui-mode (get-in dialog-data [:ui-modes full-effect-path])]
     {:fx/type :v-box
      :spacing 8
      :style "-fx-background-color: #2A2A2A; -fx-padding: 8;"
@@ -145,6 +150,7 @@
                      :v-box/vgrow :always
                      :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
                      :content {:fx/type custom-param-renderer
+                              :fx/context context
                               :col col :row row
                               :item-path item-path
                               :effect-path effect-path
@@ -386,7 +392,8 @@
                                  (get-item-effects-clipboard item-effects-ui first-selected-path))
         
         ;; Dialog data for custom renderers (UI modes, etc.)
-        dialog-data (merge item-effects-ui {:item-effects-ui item-effects-ui})]
+        ;; Merge ui-modes and item-effects-ui together so effects can access both
+        effect-dialog-data (merge dialog-data item-effects-ui {:item-effects-ui item-effects-ui})]
    {:fx/type :v-box
     :spacing 0
     :style "-fx-background-color: #2D2D2D;"
@@ -485,12 +492,13 @@
                                         ;; Effect parameter editor (when effect selected)
                                         (when (and has-item? (seq selected-effect-ids))
                                           {:fx/type effect-parameter-editor
+                                           :fx/context context
                                            :v-box/vgrow :always
                                            :col col :row row
                                            :item-path first-selected-path
                                            :item selected-item
                                            :selected-effect-ids selected-effect-ids
-                                           :dialog-data dialog-data})])}]}
+                                           :dialog-data effect-dialog-data})])}]}
                
                ;; Footer with close button
                {:fx/type :h-box

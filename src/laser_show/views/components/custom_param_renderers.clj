@@ -5,11 +5,14 @@
    - Translate: 2D point dragging for X/Y position
    - Corner Pin: 4-corner quadrilateral manipulation
    - RGB Curves: Photoshop-style curve editor for color channel adjustment
+   - Zone Reroute: Zone group selector for routing effects
    
    These components support both:
    1. Legacy props (:col, :row, :effect-idx, :effect-path) for effect chain editor
    2. Event template pattern (:event-template) for generic reuse (e.g., projectors)"
-  (:require
+  (:require [cljfx.api :as fx]
+            [clojure.string :as str]
+            [laser-show.subs :as subs]
             [laser-show.views.components.spatial-canvas :as spatial-canvas]
             [laser-show.views.components.curve-canvas :as curve-canvas]
             [laser-show.views.components.tabs :as tabs]))
@@ -330,16 +333,135 @@
                          :domain domain
                          :entity-key entity-key
                          :effect-path effect-path}]
+  {:fx/type :v-box
+   :spacing 0
+   :style "-fx-background-color: #2A2A2A; -fx-background-radius: 4;"
+   :children [{:fx/type tabs/styled-tab-bar
+               :tabs curve-tab-definitions
+               :active-tab active-channel
+               :on-tab-change tab-change-event}
+              {:fx/type curve-editor-for-channel
+               :domain domain
+               :entity-key entity-key
+               :effect-path effect-path
+               :channel active-channel
+               :current-points active-points}]}))
+
+
+;; Zone Reroute Visual Editor
+
+
+(def ^:private mode-labels
+ "Labels for zone reroute modes."
+ {:replace "Replace"
+  :add "Add"
+  :filter "Filter"})
+
+(def ^:private mode-descriptions
+ "Descriptions for zone reroute modes."
+ {:replace "Override destination with these zone groups"
+  :add "Add these zone groups to existing destination"
+  :filter "Only keep zones that are in BOTH destinations"})
+
+(defn- zone-group-select-chip
+ "Clickable chip for selecting/deselecting a zone group."
+ [{:keys [group selected? on-toggle]}]
+ (let [{:keys [id name color]} group]
+   {:fx/type :label
+    :text name
+    :style (str "-fx-background-color: " (if selected? color (str color "40")) "; "
+               "-fx-text-fill: " (if selected? "white" "#808080") "; "
+               "-fx-padding: 4 10; "
+               "-fx-background-radius: 12; "
+               "-fx-font-size: 11; "
+               "-fx-cursor: hand;")
+    :on-mouse-clicked on-toggle}))
+
+(defn zone-reroute-visual-editor
+ "Visual editor for zone-reroute effect - zone group selector with mode.
+  
+  This component requires fx/context to access zone groups.
+  
+  Props:
+  - :fx/context - cljfx context (required)
+  - :current-params - Current parameter values {:mode :target-zone-groups ...}
+  - :on-change-event - Base event template for param changes (will add :param-key :value)"
+ [{:keys [fx/context current-params on-change-event]}]
+ (let [;; Get zone groups from context
+       zone-groups (fx/sub-ctx context subs/zone-groups-list)
+       
+       ;; Get current values
+       mode (get current-params :mode :replace)
+       target-mode (get current-params :target-mode :zone-groups)
+       target-zone-groups (set (get current-params :target-zone-groups [:all]))
+       
+       ;; Mode selector
+       mode-button (fn [m]
+                     {:fx/type :button
+                      :text (get mode-labels m (name m))
+                      :style (str "-fx-font-size: 10; -fx-padding: 4 10; "
+                                 (if (= mode m)
+                                   "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
+                                   "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
+                      :on-action (assoc on-change-event :param-key :mode :value m)})]
+   
    {:fx/type :v-box
-    :spacing 0
+    :spacing 12
+    :padding 12
     :style "-fx-background-color: #2A2A2A; -fx-background-radius: 4;"
-    :children [{:fx/type tabs/styled-tab-bar
-                :tabs curve-tab-definitions
-                :active-tab active-channel
-                :on-tab-change tab-change-event}
-               {:fx/type curve-editor-for-channel
-                :domain domain
-                :entity-key entity-key
-                :effect-path effect-path
-                :channel active-channel
-                :current-points active-points}]}))
+    :children [;; Mode selector
+               {:fx/type :v-box
+                :spacing 6
+                :children [{:fx/type :label
+                            :text "ROUTING MODE"
+                            :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-weight: bold;"}
+                           {:fx/type :h-box
+                            :spacing 4
+                            :children [(mode-button :replace)
+                                      (mode-button :add)
+                                      (mode-button :filter)]}
+                           {:fx/type :label
+                            :text (get mode-descriptions mode "")
+                            :style "-fx-text-fill: #606060; -fx-font-size: 9; -fx-font-style: italic;"}]}
+               
+               ;; Zone group selector
+               {:fx/type :v-box
+                :spacing 6
+                :children [{:fx/type :label
+                            :text "TARGET ZONE GROUPS"
+                            :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-weight: bold;"}
+                           {:fx/type :flow-pane
+                            :hgap 6
+                            :vgap 6
+                            :children (vec
+                                       (for [group zone-groups]
+                                         {:fx/type zone-group-select-chip
+                                          :fx/key (:id group)
+                                          :group group
+                                          :selected? (contains? target-zone-groups (:id group))
+                                          :on-toggle (let [new-groups (if (contains? target-zone-groups (:id group))
+                                                                       (vec (disj target-zone-groups (:id group)))
+                                                                       (vec (conj target-zone-groups (:id group))))]
+                                                      (assoc on-change-event
+                                                             :param-key :target-zone-groups
+                                                             :value (if (empty? new-groups) [:all] new-groups)))}))}
+                           {:fx/type :label
+                            :text (str "Selected: " (if (empty? target-zone-groups)
+                                                     "none"
+                                                     (str/join ", " (map name target-zone-groups))))
+                            :style "-fx-text-fill: #606060; -fx-font-size: 9;"}]}
+               
+               ;; Info about current routing
+               {:fx/type :v-box
+                :spacing 4
+                :style "-fx-background-color: #353535; -fx-padding: 8; -fx-background-radius: 4;"
+                :children [{:fx/type :label
+                            :text "ℹ️ Zone effects modify routing BEFORE frame generation"
+                            :style "-fx-text-fill: #7A9EC2; -fx-font-size: 10;"}
+                           {:fx/type :label
+                            :text (case mode
+                                   :replace "This will completely override the cue's destination"
+                                   :add "This will add to the cue's existing destination"
+                                   :filter "This will restrict to zones matching both destinations"
+                                   "")
+                            :style "-fx-text-fill: #909090; -fx-font-size: 9;"}]}]}))

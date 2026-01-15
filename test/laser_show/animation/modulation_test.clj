@@ -461,3 +461,208 @@
       (is (= 0.0 (mod/resolve-param {:type :pos-x :min 0.0 :max 100.0} context)))
       (is (= 0.0 (mod/resolve-param {:type :pos-y :min 0.0 :max 100.0} context)))
       (is (= 0.0 (mod/resolve-param {:type :point-index :min 0.0 :max 100.0} context))))))
+
+
+;; Once-Mode (Loop Mode) Tests
+
+
+(defn make-once-mode-context
+  "Create a test context with trigger-time for once-mode testing."
+  [time-ms bpm trigger-time]
+  {:time-ms time-ms
+   :bpm bpm
+   :trigger-time trigger-time
+   :midi-state {}
+   :osc-state {}})
+
+(deftest sine-once-mode-test
+  (testing "Sine modulator in once mode holds at max after one period"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)  ; 500ms per beat
+          config {:type :sine :min 0.0 :max 1.0 :period 1.0 :loop-mode :once}
+          trigger-time 0]
+      ;; At start, should be at peak (max)
+      (is (approx= 1.0 (mod/resolve-param config (make-once-mode-context 0 bpm trigger-time)) 0.05))
+      ;; At half period, should be at min
+      (is (approx= 0.0 (mod/resolve-param config (make-once-mode-context (* 0.5 ms-per-beat) bpm trigger-time)) 0.05))
+      ;; After one full period, should hold at max
+      (is (approx= 1.0 (mod/resolve-param config (make-once-mode-context ms-per-beat bpm trigger-time)) 0.05))
+      ;; Well after period, should still hold at max
+      (is (approx= 1.0 (mod/resolve-param config (make-once-mode-context (* 5 ms-per-beat) bpm trigger-time)) 0.05)))))
+
+(deftest triangle-once-mode-test
+  (testing "Triangle modulator in once mode holds at max after one period"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)
+          config {:type :triangle :min 0.0 :max 1.0 :period 1.0 :loop-mode :once}
+          trigger-time 0]
+      ;; At start, should be at peak (max)
+      (is (approx= 1.0 (mod/resolve-param config (make-once-mode-context 0 bpm trigger-time)) 0.05))
+      ;; After one full period, should hold at max
+      (is (approx= 1.0 (mod/resolve-param config (make-once-mode-context ms-per-beat bpm trigger-time)) 0.05))
+      ;; Well after period, should still hold at max
+      (is (approx= 1.0 (mod/resolve-param config (make-once-mode-context (* 5 ms-per-beat) bpm trigger-time)) 0.05)))))
+
+(deftest sawtooth-once-mode-test
+  (testing "Sawtooth modulator in once mode holds at min after one period"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)
+          config {:type :sawtooth :min 0.0 :max 1.0 :period 1.0 :loop-mode :once}
+          trigger-time 0]
+      ;; At start, should be at max (sawtooth starts at peak)
+      (is (approx= 1.0 (mod/resolve-param config (make-once-mode-context 0 bpm trigger-time)) 0.05))
+      ;; At half period, should be at mid
+      (is (approx= 0.5 (mod/resolve-param config (make-once-mode-context (* 0.5 ms-per-beat) bpm trigger-time)) 0.1))
+      ;; After one full period, should hold at min
+      (is (approx= 0.0 (mod/resolve-param config (make-once-mode-context ms-per-beat bpm trigger-time)) 0.05))
+      ;; Well after period, should still hold at min
+      (is (approx= 0.0 (mod/resolve-param config (make-once-mode-context (* 5 ms-per-beat) bpm trigger-time)) 0.05)))))
+
+(deftest square-once-mode-test
+  (testing "Square modulator in once mode holds at min after one period"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)
+          config {:type :square :min 0.0 :max 1.0 :period 1.0 :duty-cycle 0.5 :loop-mode :once}
+          trigger-time 0]
+      ;; At start (within duty cycle), should be at max
+      (is (= 1.0 (mod/resolve-param config (make-once-mode-context 0 bpm trigger-time))))
+      ;; After duty cycle but before period end, should be at min
+      (is (= 0.0 (mod/resolve-param config (make-once-mode-context (* 0.6 ms-per-beat) bpm trigger-time))))
+      ;; After one full period, should hold at min
+      (is (= 0.0 (mod/resolve-param config (make-once-mode-context ms-per-beat bpm trigger-time))))
+      ;; Well after period, should still hold at min
+      (is (= 0.0 (mod/resolve-param config (make-once-mode-context (* 5 ms-per-beat) bpm trigger-time)))))))
+
+(deftest random-once-mode-test
+  (testing "Random modulator in once mode holds consistent value after one period"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)
+          config {:type :random :min 0.0 :max 1.0 :period 1.0 :loop-mode :once}
+          trigger-time 0
+          ;; Get the value at 1.5 periods
+          val-after-period (mod/resolve-param config (make-once-mode-context (* 1.5 ms-per-beat) bpm trigger-time))
+          ;; Get the value at 5 periods
+          val-well-after (mod/resolve-param config (make-once-mode-context (* 5 ms-per-beat) bpm trigger-time))]
+      ;; Values should be in range
+      (is (>= val-after-period 0.0))
+      (is (<= val-after-period 1.0))
+      ;; Values after period should be the same (held)
+      (is (= val-after-period val-well-after)))))
+
+(deftest step-once-mode-test
+  (testing "Step modulator in once mode holds at last value after one period"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)
+          config {:type :step :values [1 2 3 4] :period 1.0 :loop-mode :once}
+          trigger-time 0]
+      ;; At start, should be first value
+      (is (= 1 (mod/resolve-param config (make-once-mode-context 0 bpm trigger-time))))
+      ;; After one full period, should hold at last value
+      (is (= 4 (mod/resolve-param config (make-once-mode-context ms-per-beat bpm trigger-time))))
+      ;; Well after period, should still hold at last value
+      (is (= 4 (mod/resolve-param config (make-once-mode-context (* 5 ms-per-beat) bpm trigger-time)))))))
+
+(deftest loop-mode-default-test
+  (testing "Loop mode defaults to :loop (continues oscillating)"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)
+          config {:type :sine :min 0.0 :max 1.0 :period 1.0}  ; No loop-mode specified
+          ;; Should wrap and continue oscillating
+          val-at-0 (mod/resolve-param config (make-test-context 0 bpm))
+          val-at-2beats (mod/resolve-param config (make-test-context (* 2 ms-per-beat) bpm))]
+      ;; Both should be at peak since they're at phase 0 and phase 2 (wrapped to 0)
+      (is (approx= 1.0 val-at-0 0.05))
+      (is (approx= 1.0 val-at-2beats 0.05)))))
+
+(deftest once-mode-with-different-periods-test
+  (testing "Once mode respects period setting"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)
+          config {:type :sawtooth :min 0.0 :max 1.0 :period 2.0 :loop-mode :once}  ; 2 beat period
+          trigger-time 0]
+      ;; At 1 beat (half period), should still be animating
+      (is (approx= 0.5 (mod/resolve-param config (make-once-mode-context ms-per-beat bpm trigger-time)) 0.1))
+      ;; At 2 beats (full period), should hold at min
+      (is (approx= 0.0 (mod/resolve-param config (make-once-mode-context (* 2 ms-per-beat) bpm trigger-time)) 0.05)))))
+
+(deftest once-periods-test
+  (testing "Once mode with once-periods runs for multiple periods before holding"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)
+          ;; 1 beat period, run for 3 periods before holding
+          config {:type :sawtooth :min 0.0 :max 1.0 :period 1.0 :loop-mode :once :once-periods 3.0}
+          trigger-time 0]
+      ;; At 1 beat (1/3 of total), should still be animating - at end of first period
+      (is (approx= 0.0 (mod/resolve-param config (make-once-mode-context ms-per-beat bpm trigger-time)) 0.05))
+      ;; At 2 beats (2/3 of total), should still be animating - at end of second period
+      (is (approx= 0.0 (mod/resolve-param config (make-once-mode-context (* 2 ms-per-beat) bpm trigger-time)) 0.05))
+      ;; At 3 beats (full once-periods), should hold at min
+      (is (approx= 0.0 (mod/resolve-param config (make-once-mode-context (* 3 ms-per-beat) bpm trigger-time)) 0.05))
+      ;; At 5 beats (well after), should still hold at min
+      (is (approx= 0.0 (mod/resolve-param config (make-once-mode-context (* 5 ms-per-beat) bpm trigger-time)) 0.05)))))
+
+(deftest once-periods-partial-test
+  (testing "Once mode with partial once-periods (less than 1 period)"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)
+          ;; 1 beat period, run for 0.5 periods (half a cycle)
+          ;; Sawtooth goes from 1.0 to 0.0 over one full cycle
+          ;; So 0.5 periods = half cycle = ends at 0.5
+          config {:type :sawtooth :min 0.0 :max 1.0 :period 1.0 :loop-mode :once :once-periods 0.5}
+          trigger-time 0]
+      ;; At 0.25 beats (half of 0.5 periods), phase = 0.25, sawtooth ≈ 0.75
+      (is (approx= 0.75 (mod/resolve-param config (make-once-mode-context (* 0.25 ms-per-beat) bpm trigger-time)) 0.1))
+      ;; At 0.5 beats (full once-periods), phase = 0.5, sawtooth = 0.5, holds here
+      (is (approx= 0.5 (mod/resolve-param config (make-once-mode-context (* 0.5 ms-per-beat) bpm trigger-time)) 0.1))
+      ;; At 2 beats (well after), should still hold at 0.5
+      (is (approx= 0.5 (mod/resolve-param config (make-once-mode-context (* 2 ms-per-beat) bpm trigger-time)) 0.1)))))
+
+(deftest once-periods-sine-test
+  (testing "Sine once mode with multiple periods"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)
+          ;; 1 beat period, run for 2 periods (2 full cycles)
+          config {:type :sine :min 0.0 :max 1.0 :period 1.0 :loop-mode :once :once-periods 2.0}
+          trigger-time 0]
+      ;; At start, should be at max (peak)
+      (is (approx= 1.0 (mod/resolve-param config (make-once-mode-context 0 bpm trigger-time)) 0.05))
+      ;; At 1 beat (end of first cycle), should be at max again
+      (is (approx= 1.0 (mod/resolve-param config (make-once-mode-context ms-per-beat bpm trigger-time)) 0.05))
+      ;; At 2 beats (full once-periods), should hold at max
+      (is (approx= 1.0 (mod/resolve-param config (make-once-mode-context (* 2 ms-per-beat) bpm trigger-time)) 0.05))
+      ;; At 5 beats (well after), should still hold at max
+      (is (approx= 1.0 (mod/resolve-param config (make-once-mode-context (* 5 ms-per-beat) bpm trigger-time)) 0.05)))))
+
+(deftest once-periods-fractional-holds-at-position-test
+  (testing "Once mode with fractional periods holds at the exact final position"
+    (let [bpm 120
+          ms-per-beat (/ 60000 bpm)]
+      ;; Sine: 1.5 periods means it ends at phase 1.5
+      ;; Sine at phase 1.5 = at min (cosine at 1.5*2π = 3π = -1 mapped to min)
+      (let [config {:type :sine :min 0.0 :max 1.0 :period 1.0 :loop-mode :once :once-periods 1.5}
+            trigger-time 0
+            final-val (mod/resolve-param config (make-once-mode-context (* 1.5 ms-per-beat) bpm trigger-time))
+            held-val (mod/resolve-param config (make-once-mode-context (* 5 ms-per-beat) bpm trigger-time))]
+        ;; At 1.5 periods and after, should hold at the same position (min for sine at phase 1.5)
+        (is (approx= 0.0 final-val 0.05))
+        (is (approx= final-val held-val 0.01) "Should hold at exact final position"))
+      
+      ;; Sawtooth: 1.25 periods means it ends at phase 1.25 (cycle phase 0.25)
+      ;; Sawtooth ramps from 1.0 to 0.0, so at phase 0.25, it's at 0.75
+      (let [config {:type :sawtooth :min 0.0 :max 1.0 :period 1.0 :loop-mode :once :once-periods 1.25}
+            trigger-time 0
+            final-val (mod/resolve-param config (make-once-mode-context (* 1.25 ms-per-beat) bpm trigger-time))
+            held-val (mod/resolve-param config (make-once-mode-context (* 5 ms-per-beat) bpm trigger-time))]
+        ;; At 1.25 periods, should be at sawtooth value for phase 0.25 of second cycle
+        (is (approx= 0.75 final-val 0.1))
+        (is (approx= final-val held-val 0.01) "Should hold at exact final position"))
+      
+      ;; Square: 1.25 periods with 0.5 duty cycle means phase 1.25 = cycle phase 0.25
+      ;; 0.25 < 0.5 duty cycle, so should be at max
+      (let [config {:type :square :min 0.0 :max 1.0 :period 1.0 :duty-cycle 0.5 :loop-mode :once :once-periods 1.25}
+            trigger-time 0
+            final-val (mod/resolve-param config (make-once-mode-context (* 1.25 ms-per-beat) bpm trigger-time))
+            held-val (mod/resolve-param config (make-once-mode-context (* 5 ms-per-beat) bpm trigger-time))]
+        ;; At phase 0.25 of cycle (within duty cycle), should be at max
+        (is (= 1.0 final-val))
+        (is (= final-val held-val) "Should hold at exact final position")))))

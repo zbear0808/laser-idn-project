@@ -71,5 +71,5 @@
       "modulator" (modulator/handle event)
       ;; Unknown domain
       (do
-        (log/warn "Unknown event domain:" domain "type:" type)
+        (log/error "Unknown event domain:" domain "type:" type)
         {}))))

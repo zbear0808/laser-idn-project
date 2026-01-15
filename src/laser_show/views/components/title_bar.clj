@@ -272,6 +272,18 @@
                        {:fx/type help-menu}]}]})
 
 
+;; Title Component
+
+
+(defn- window-title
+  "Window title component showing project name and dirty indicator."
+  [{:keys [fx/context]}]
+  (let [{:keys [title]} (fx/sub-ctx context subs/project-status)]
+    {:fx/type :label
+     :text title
+     :style-class "window-title"}))
+
+
 ;; Public API
 
 
@@ -286,4 +298,5 @@
   [{:keys [fx/context]}]
   {:fx/type header-bar-lifecycle
    :style-class "header-bar"
-   :leading {:fx/type menu-bar}})
+   :leading {:fx/type menu-bar}
+   :center {:fx/type window-title}})

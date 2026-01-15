@@ -58,6 +58,7 @@
   "Renders parameters with custom UI and mode toggle using shared effect-param-ui.
    
    Props:
+   - :fx/context - cljfx context (required for zone effects)
    - :col, :row - Grid cell coordinates
    - :effect-path - Path to effect
    - :effect-def - Effect definition with :ui-hints
@@ -65,8 +66,9 @@
    - :ui-mode - Current UI mode (:visual or :numeric)
    - :params-map - Parameter specifications map
    - :dialog-data - Dialog state data (for curve editor channel tab tracking)"
-  [{:keys [col row effect-path effect-def current-params ui-mode params-map dialog-data]}]
+  [{:keys [fx/context col row effect-path effect-def current-params ui-mode params-map dialog-data]}]
  {:fx/type effect-param-ui/custom-param-renderer
+  :fx/context context
   :effect-def effect-def
   :current-params current-params
   :ui-mode ui-mode
@@ -108,7 +110,7 @@
 
 (defn- parameter-editor
   "Parameter editor for the selected effect."
-  [{:keys [col row selected-effect-path effect-chain dialog-data]}]
+  [{:keys [fx/context col row selected-effect-path effect-chain dialog-data]}]
   (let [selected-effect (when selected-effect-path
                           (get-in effect-chain (vec selected-effect-path)))
         effect-def (when selected-effect
@@ -131,6 +133,7 @@
                      :fit-to-width true
                      :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
                      :content {:fx/type custom-param-renderer
+                              :fx/context context
                               :col col :row row
                               :effect-path selected-effect-path
                               :effect-def effect-def
@@ -223,6 +226,7 @@
                                        
                                        ;; Parameter editor (bottom) - shows first selected
                                        {:fx/type parameter-editor
+                                        :fx/context context
                                         :col col :row row
                                         :selected-effect-path first-selected-path
                                         :effect-chain effect-chain

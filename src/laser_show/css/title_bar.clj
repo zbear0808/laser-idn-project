@@ -33,6 +33,11 @@
        ".header-bar"
        {:-fx-background-color bg-primary}
 
+       ".window-title"
+       {:-fx-text-fill text-primary
+        :-fx-font-size "13px"
+        :-fx-font-weight "normal"}
+
        ".menu-container"
        {:-fx-background-color bg-primary}
 

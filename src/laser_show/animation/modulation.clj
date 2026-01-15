@@ -210,44 +210,83 @@
 
 
 (defn- eval-sine
-  "Evaluate sine wave modulator."
-  [{:keys [min max period phase loop-mode duration time-unit]
-    :or {min 0.0 max 1.0 period 1.0 phase 0.0 loop-mode :loop duration 1.0 time-unit :beats}}
-   context]
-  (let [p (calculate-modulator-phase context period phase loop-mode duration time-unit)]
-    (time/oscillate (double min) (double max) p :sine)))
+  "Evaluate sine wave modulator.
+   In once mode, completes once-periods cycles then holds at the final position."
+  [{:keys [min max period phase loop-mode once-periods time-unit]
+    :or {min 0.0 max 1.0 period 1.0 phase 0.0 loop-mode :loop once-periods 1.0 time-unit :beats}
+    :as config}
+   {:keys [time-ms bpm trigger-time] :as context}]
+  (if (= loop-mode :once)
+    ;; Once mode: complete once-periods cycles then hold at final position
+    (let [num-cycles (double (or once-periods 1.0))
+          total-duration (* (double period) num-cycles)
+          progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
+          ;; Phase goes from 0 to num-cycles over the duration
+          p (+ (* progress num-cycles) (double phase))
+          ;; Clamp phase to num-cycles (+ phase) to hold at final position
+          clamped-p (clojure.core/min p (+ num-cycles (double phase)))]
+      (time/oscillate (double min) (double max) clamped-p :sine))
+    ;; Loop mode: use standard phase calculation
+    (let [p (calculate-modulator-phase context period phase :loop period (or time-unit :beats))]
+      (time/oscillate (double min) (double max) p :sine))))
 
 (defn- eval-triangle
-  "Evaluate triangle wave modulator."
-  [{:keys [min max period phase loop-mode duration time-unit]
-    :or {min 0.0 max 1.0 period 1.0 phase 0.0 loop-mode :loop duration 1.0 time-unit :beats}}
-   context]
-  (let [p (calculate-modulator-phase context period phase loop-mode duration time-unit)]
-    (time/oscillate (double min) (double max) p :triangle)))
+  "Evaluate triangle wave modulator.
+   In once mode, completes once-periods cycles then holds at the final position."
+  [{:keys [min max period phase loop-mode once-periods time-unit]
+    :or {min 0.0 max 1.0 period 1.0 phase 0.0 loop-mode :loop once-periods 1.0 time-unit :beats}
+    :as config}
+   {:keys [time-ms bpm trigger-time] :as context}]
+  (if (= loop-mode :once)
+    (let [num-cycles (double (or once-periods 1.0))
+          total-duration (* (double period) num-cycles)
+          progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
+          p (+ (* progress num-cycles) (double phase))
+          clamped-p (clojure.core/min p (+ num-cycles (double phase)))]
+      (time/oscillate (double min) (double max) clamped-p :triangle))
+    (let [p (calculate-modulator-phase context period phase :loop period (or time-unit :beats))]
+      (time/oscillate (double min) (double max) p :triangle))))
 
 (defn- eval-sawtooth
   "Evaluate sawtooth wave modulator.
-   Uses effective-beats for smooth BPM-change animation."
-  [{:keys [min max period phase]
-    :or {min 0.0 max 1.0 period 1.0 phase 0.0}}
-   context]
-  (let [freq (period->frequency (double period))
-        beats (get-beats-from-context context)
-        p (+ (* beats freq) (double phase))]
-    (time/oscillate (double min) (double max) p :sawtooth)))
+   In once mode, completes once-periods cycles then holds at the final position.
+   Uses effective-beats for smooth BPM-change animation in loop mode."
+  [{:keys [min max period phase loop-mode once-periods time-unit]
+    :or {min 0.0 max 1.0 period 1.0 phase 0.0 loop-mode :loop once-periods 1.0 time-unit :beats}
+    :as config}
+   {:keys [time-ms bpm trigger-time] :as context}]
+  (if (= loop-mode :once)
+    (let [num-cycles (double (or once-periods 1.0))
+          total-duration (* (double period) num-cycles)
+          progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
+          p (+ (* progress num-cycles) (double phase))
+          clamped-p (clojure.core/min p (+ num-cycles (double phase)))]
+      (time/oscillate (double min) (double max) clamped-p :sawtooth))
+    (let [p (calculate-modulator-phase context period phase :loop period (or time-unit :beats))]
+      (time/oscillate (double min) (double max) p :sawtooth))))
 
 (defn- eval-square
   "Evaluate square wave modulator.
-   Uses effective-beats for smooth BPM-change animation."
-  [{:keys [min max period duty-cycle phase]
-    :or {min 0.0 max 1.0 period 1.0 duty-cycle 0.5 phase 0.0}}
-   context]
-  (let [freq (period->frequency (double period))
-        beats (get-beats-from-context context)
-        cycle-phase (mod (+ (* beats freq) (double phase)) 1.0)]
-    (if (< cycle-phase (double duty-cycle))
-      (double max)
-      (double min))))
+   In once mode, completes once-periods cycles then holds at the final position.
+   Uses effective-beats for smooth BPM-change animation in loop mode."
+  [{:keys [min max period duty-cycle phase loop-mode once-periods time-unit]
+    :or {min 0.0 max 1.0 period 1.0 duty-cycle 0.5 phase 0.0 loop-mode :loop once-periods 1.0 time-unit :beats}
+    :as config}
+   {:keys [time-ms bpm trigger-time] :as context}]
+  (let [square-fn (fn [p]
+                    (let [cycle-phase (mod p 1.0)]
+                      (if (< cycle-phase (double duty-cycle))
+                        (double max)
+                        (double min))))]
+    (if (= loop-mode :once)
+      (let [num-cycles (double (or once-periods 1.0))
+            total-duration (* (double period) num-cycles)
+            progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
+            p (+ (* progress num-cycles) (double phase))
+            clamped-p (clojure.core/min p (+ num-cycles (double phase)))]
+        (square-fn clamped-p))
+      (let [p (calculate-modulator-phase context period phase :loop period (or time-unit :beats))]
+        (square-fn p)))))
 
 (defn- eval-sine-hz
   "Evaluate sine wave at fixed Hz frequency.
@@ -312,16 +351,31 @@
 
 (defn- eval-random
   "Evaluate random modulator.
-   Uses effective-beats for smooth BPM-change animation."
-  [{:keys [min max changes-per-beat]
-    :or {min 0.0 max 1.0 changes-per-beat 1.0}}
-   context]
-  (let [beats (get-beats-from-context context)
-        seed (long (* beats (double changes-per-beat)))
-        rng (java.util.Random. seed)
-        t (.nextDouble ^java.util.Random rng)
-        range-v (- (double max) (double min))]
-    (+ (double min) (* t range-v))))
+   In once mode, generates random values through once-periods cycles then holds at the final position.
+   Uses effective-beats for smooth BPM-change animation in loop mode."
+  [{:keys [min max period changes-per-beat loop-mode once-periods time-unit]
+    :or {min 0.0 max 1.0 period 1.0 changes-per-beat 1.0 loop-mode :loop once-periods 1.0 time-unit :beats}}
+   {:keys [time-ms bpm trigger-time] :as context}]
+  (let [random-fn (fn [p]
+                    (let [changes-in-period (double (or changes-per-beat (/ 1.0 period)))
+                          seed (long (* p changes-in-period))
+                          rng (java.util.Random. seed)
+                          t (.nextDouble ^java.util.Random rng)
+                          range-v (- (double max) (double min))]
+                      (+ (double min) (* t range-v))))]
+    (if (= loop-mode :once)
+      ;; Once mode: complete once-periods cycles then hold at final position
+      (let [num-cycles (double (or once-periods 1.0))
+            total-duration (* (double period) num-cycles)
+            progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
+            ;; Phase goes from 0 to num-cycles over the duration
+            p (* progress num-cycles)
+            ;; Clamp to num-cycles to hold at final position
+            clamped-p (clojure.core/min p num-cycles)]
+        (random-fn clamped-p))
+      ;; Loop mode: use standard phase calculation
+      (let [p (calculate-modulator-phase context period 0.0 :loop period (or time-unit :beats))]
+        (random-fn p)))))
 
 (defn- parse-step-values
   "Parse step values - handles both vectors and EDN strings."
@@ -336,14 +390,29 @@
 
 (defn- eval-step
   "Evaluate step modulator.
-   Uses effective-beats for smooth BPM-change animation."
-  [{:keys [values steps-per-beat]
-    :or {values [0 1] steps-per-beat 1.0}}
-   context]
+   In once mode, steps through values once-periods times then holds at the final position.
+   Uses effective-beats for smooth BPM-change animation in loop mode."
+  [{:keys [values period steps-per-beat loop-mode once-periods time-unit]
+    :or {values [0 1] period 1.0 steps-per-beat 1.0 loop-mode :loop once-periods 1.0 time-unit :beats}}
+   {:keys [time-ms bpm trigger-time] :as context}]
   (let [parsed-values (parse-step-values values)
-        beats (get-beats-from-context context)
-        idx (mod (long (* beats (double steps-per-beat))) (count parsed-values))]
-    (nth parsed-values idx)))
+        num-values (count parsed-values)
+        step-fn (fn [p]
+                  (let [idx (mod (long (* p (double steps-per-beat) num-values)) num-values)]
+                    (nth parsed-values idx)))]
+    (if (= loop-mode :once)
+      ;; Once mode: complete once-periods cycles then hold at final position
+      (let [num-cycles (double (or once-periods 1.0))
+            total-duration (* (double period) num-cycles)
+            progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
+            ;; Phase goes from 0 to num-cycles over the duration
+            p (* progress num-cycles)
+            ;; Clamp to num-cycles to hold at final position
+            clamped-p (clojure.core/min p num-cycles)]
+        (step-fn clamped-p))
+      ;; Loop mode: use standard phase calculation
+      (let [p (calculate-modulator-phase context period 0.0 :loop period (or time-unit :beats))]
+        (step-fn p)))))
 
 (defn- eval-midi
   "Evaluate MIDI CC modulator."
