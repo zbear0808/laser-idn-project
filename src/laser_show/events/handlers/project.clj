@@ -21,10 +21,10 @@
                 (assoc-in [:project :dirty?] false)
                 (assoc-in [:project :last-saved] now))}))
 
-(defn- handle-project-set-folder
-  "Set the current project folder."
-  [{:keys [folder state]}]
-  {:state (assoc-in state [:project :current-folder] folder)})
+(defn- handle-project-set-file
+  "Set the current project file path."
+  [{:keys [file-path state]}]
+  {:state (assoc-in state [:project :current-file] file-path)})
 
 
 ;; Public API
@@ -38,7 +38,7 @@
   (case type
     :project/mark-dirty (handle-project-mark-dirty event)
     :project/mark-clean (handle-project-mark-clean event)
-    :project/set-folder (handle-project-set-folder event)
+    :project/set-file (handle-project-set-file event)
     
     ;; Unknown event in this domain
     {}))

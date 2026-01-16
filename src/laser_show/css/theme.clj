@@ -298,77 +298,19 @@
        
        
        ;; =========================================================================
-       ;; Typography Classes
-       ;; =========================================================================
-       
-       ;; Primary text styles
-       ".text-primary"
-       {:-fx-text-fill text-primary}
-       
-       ".text-secondary"
-       {:-fx-text-fill text-secondary}
-       
-       ".text-muted"
-       {:-fx-text-fill text-muted}
-       
-       ".text-disabled"
-       {:-fx-text-fill text-disabled}
-       
-       ;; Headings
-       ".heading"
-       {:-fx-text-fill text-primary
-        :-fx-font-size 16
-        :-fx-font-weight "bold"}
-       
-       ".heading-sm"
-       {:-fx-text-fill text-primary
-        :-fx-font-size 14
-        :-fx-font-weight "bold"}
-       
-       ;; Body text
-       ".body-text"
-       {:-fx-text-fill text-primary
-        :-fx-font-size 12}
-       
-       ".body-text-sm"
-       {:-fx-text-fill text-secondary
-        :-fx-font-size 11}
-       
-       ".hint-text"
-       {:-fx-text-fill text-muted
-        :-fx-font-size 11
-        :-fx-font-style "italic"}
-       
-       
-       ;; =========================================================================
-       ;; Container/Panel Classes
+       ;; Container/Panel Classes (only keep used classes)
        ;; =========================================================================
        
        ".panel-primary"
        {:-fx-background-color bg-primary}
        
-       ".panel-surface"
-       {:-fx-background-color bg-surface}
+       ;; Text muted class (used by tabbed_bank for empty message)
+       ".text-muted"
+       {:-fx-text-fill text-muted}
        
-       ".panel-elevated"
-       {:-fx-background-color bg-elevated}
-       
-       ;; Legacy names (for compatibility)
-       ".panel-dark"
-       {:-fx-background-color bg-primary}
-       
-       ".panel-medium"
-       {:-fx-background-color bg-elevated}
-       
-       ".panel-light"
-       {:-fx-background-color bg-surface}
-       
-       ;; Panel with standard padding
-       ".panel-padded"
-       {:-fx-padding 16}
-       
-       ".panel-padded-sm"
-       {:-fx-padding 8}
+       ;; Label primary class (used in effect_chain_editor checkbox)
+       ".label-primary"
+       {:-fx-text-fill text-primary}
        
        
        ;; =========================================================================

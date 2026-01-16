@@ -6,7 +6,8 @@
    - Edit menu: Undo, Redo, Copy, Paste, Clear
    - View menu: Toggle Preview, Fullscreen
    - Help menu: Documentation, About, Check Updates"
-  (:require [clojure.tools.logging :as log]))
+  (:require [clojure.tools.logging :as log]
+            [laser-show.state.persistent :as persistent]))
 
 
 ;; Forward declarations for helper handlers
@@ -18,37 +19,76 @@
 
 
 (defn- handle-file-new-project
-  "Create a new project (TODO: Implement confirmation dialog if dirty)."
+  "Create a new project."
   [{:keys [state]}]
-  (log/debug "File > New Project")
+  (log/info "File > New Project")
   ;; TODO: Show confirmation dialog if project is dirty
-  ;; For now, just log
+  (persistent/new-project!)
   {:state state})
 
 (defn- handle-file-open
-  "Open a project from disk (TODO: Implement file dialog)."
+  "Open a project from disk using file chooser dialog."
   [{:keys [state]}]
-  (log/debug "File > Open")
-  ;; TODO: Show file chooser dialog
-  ;; :file/open-dialog effect to be implemented
-  {:state state})
+  (log/info "File > Open")
+  {:state state
+   :fx/show-file-chooser {:title "Open Project"
+                          :initial-directory (or persistent/default-projects-dir
+                                                (System/getProperty "user.home"))
+                          :extension-filters [{:description "Laser Show Projects"
+                                              :extensions ["*.zip"]}]
+                          :on-result {:event/type :file/open-result}}})
 
-(defn- handle-file-save
-  "Save the current project (TODO: Implement save logic)."
-  [{:keys [state]}]
-  (log/debug "File > Save")
-  ;; TODO: Implement actual save to disk
-  ;; For now, just mark as clean
-  {:state (-> state
-              (assoc-in [:project :dirty?] false)
-              (assoc-in [:project :last-saved] (System/currentTimeMillis)))})
+(defn- handle-file-open-result
+  "Handle result from open file dialog."
+  [{:keys [state file-path]}]
+  (if file-path
+    (do
+      (log/info "Opening project:" file-path)
+      (persistent/load-project! file-path)
+      {:state state})
+    {:state state}))
 
 (defn- handle-file-save-as
-  "Save the project to a new location (TODO: Implement file dialog)."
+  "Save the project to a new location using file chooser dialog."
   [{:keys [state]}]
-  (log/debug "File > Save As")
-  ;; TODO: Show file chooser dialog and save
-  {:state state})
+  (log/info "File > Save As")
+  (let [current-file (get-in state [:project :current-file])
+        initial-dir (if current-file
+                      (.getParent (java.io.File. current-file))
+                      (or persistent/default-projects-dir
+                          (System/getProperty "user.home")))]
+    {:state state
+     :fx/show-file-chooser {:title "Save Project As"
+                            :initial-directory initial-dir
+                            :initial-file-name (or (when current-file
+                                                    (.getName (java.io.File. current-file)))
+                                                  (persistent/get-default-project-path))
+                            :extension-filters [{:description "Laser Show Projects"
+                                                :extensions ["*.zip"]}]
+                            :mode :save
+                            :on-result {:event/type :file/save-as-result}}}))
+
+(defn- handle-file-save
+  "Save the current project."
+  [{:keys [state]}]
+  (let [current-file (get-in state [:project :current-file])]
+    (if current-file
+      (do
+        (log/info "Saving project to:" current-file)
+        (persistent/save-project! current-file)
+        {:state state})
+      ;; No current file, trigger Save As
+      (handle-file-save-as {:state state}))))
+
+(defn- handle-file-save-as-result
+  "Handle result from save-as file dialog."
+  [{:keys [state file-path]}]
+  (if file-path
+    (do
+      (log/info "Saving project as:" file-path)
+      (persistent/save-project! file-path)
+      {:state state})
+    {:state state}))
 
 (defn- handle-file-export
   "Export project data (TODO: Implement export dialog)."
@@ -199,8 +239,10 @@
     ;; File menu
     :file/new-project (handle-file-new-project event)
     :file/open (handle-file-open event)
+    :file/open-result (handle-file-open-result event)
     :file/save (handle-file-save event)
     :file/save-as (handle-file-save-as event)
+    :file/save-as-result (handle-file-save-as-result event)
     :file/export (handle-file-export event)
     :file/exit (handle-file-exit event)
     

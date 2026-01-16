@@ -148,8 +148,8 @@
 
 (defstate project
   "Project file management state."
-  {:current-folder {:default nil
-                    :doc "path to current project folder"}
+  {:current-file {:default nil
+                  :doc "path to current project zip file"}
    :dirty? {:default false
             :doc "whether changes have been made since last save"}
    :last-saved {:default nil

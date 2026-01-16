@@ -18,7 +18,6 @@
             [laser-show.css.buttons :as buttons]
             [laser-show.css.forms :as forms]
             [laser-show.css.grid-cells :as grid-cells]
-            [laser-show.css.dialogs :as dialogs]
             [laser-show.css.layout :as layout]
             [laser-show.css.title-bar :as title-bar]
             [laser-show.css.cue-chain-editor :as cue-chain-editor]
@@ -42,7 +41,6 @@
    (::css/url buttons/buttons)
    (::css/url forms/forms)
    (::css/url grid-cells/grid-cells)
-   (::css/url dialogs/dialogs)
    (::css/url layout/layout)
    (::css/url title-bar/menu-theme)
    (::css/url cue-chain-editor/cue-chain-editor)
@@ -50,7 +48,7 @@
 
 (defn dialog-stylesheet-urls
   "Returns stylesheet URLs appropriate for dialogs.
-   Includes theme, buttons, forms, grid-cells, layout, dialogs, menus,
+   Includes theme, buttons, forms, grid-cells, layout, menus,
    cue-chain-editor, and list.
    
    Example:
@@ -63,7 +61,6 @@
    (::css/url forms/forms)
    (::css/url grid-cells/grid-cells)
    (::css/url layout/layout)
-   (::css/url dialogs/dialogs)
    (::css/url title-bar/menu-theme)
    (::css/url cue-chain-editor/cue-chain-editor)
    (::css/url list/list)])

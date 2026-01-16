@@ -52,7 +52,7 @@
 (defn- file-menu-items
   "Create File menu items with dynamic state."
   [context]
-  (let [has-project? (fx/sub-ctx context subs/project-folder)
+  (let [has-project? (fx/sub-ctx context subs/project-file)
         dirty? (fx/sub-ctx context subs/project-dirty?)]
     [{:fx/type :menu-item
       :text "New Project"

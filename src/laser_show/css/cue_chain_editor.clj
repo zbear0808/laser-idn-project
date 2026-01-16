@@ -28,10 +28,10 @@
   "Cue chain editor styles."
   (css/register ::cue-chain-editor
     (let [;; Use semantic colors from theme
-          {:keys [bg-surface bg-elevated bg-interactive bg-hover bg-active
+          {:keys [bg-primary bg-surface bg-elevated bg-interactive bg-hover bg-active
                   text-primary text-muted text-secondary
-                  selection-bg border-subtle accent-danger]} theme/semantic-colors
-          {:keys [blue-600 gray-500 red-500]} theme/base-colors
+                  selection-bg border-subtle accent-success accent-danger]} theme/semantic-colors
+          {:keys [blue-600 gray-500]} theme/base-colors
           {:keys [drop-target-bg drop-target-border accent-danger-hover]} theme/computed-colors]
       
       {
@@ -39,26 +39,87 @@
        ;; Main Dialog Layout
        ;; ============================================
        
-       ".cue-chain-editor"
+       ".dialog-content"
        {:-fx-background-color bg-surface
-        :-fx-padding 0}
+        :-fx-spacing 0}
        
-       ".cue-chain-editor-content"
-       {:-fx-background-color bg-surface
-        :-fx-padding 0}
+       ".dialog-footer"
+       {:-fx-background-color bg-primary
+        :-fx-padding 12
+        :-fx-spacing 8
+        :-fx-border-color border-subtle
+        :-fx-border-width ["1px" "0px" "0px" "0px"]}
        
-       ".cue-chain-left-sidebar"
-       {:-fx-background-color bg-surface
-        :-fx-min-width 280
-        :-fx-pref-width 300
-        :-fx-max-width 350
-        :-fx-padding 8
-        :-fx-spacing 8}
-       
-       ".cue-chain-right-section"
+       ".dialog-section"
        {:-fx-background-color bg-elevated
         :-fx-padding 8
-        :-fx-spacing 8}
+        :-fx-spacing 8
+        :-fx-border-color border-subtle
+        :-fx-border-width 1
+        :-fx-border-radius 4}
+       
+       ".dialog-section-header"
+       {:-fx-text-fill text-muted
+        :-fx-font-size 11
+        :-fx-font-weight "bold"}
+       
+       ".dialog-placeholder"
+       {:-fx-background-color bg-primary
+        :-fx-alignment "center"}
+       
+       ".dialog-placeholder-text"
+       {:-fx-text-fill text-muted
+        :-fx-font-style "italic"
+        :-fx-font-size 11
+        :-fx-text-alignment "center"}
+       
+       ".dialog-separator"
+       {:-fx-border-color border-subtle
+        :-fx-border-width ["1px" "0px" "0px" "0px"]}
+       
+       ".dialog-scroll-pane"
+       {:-fx-background-color "transparent"
+        :-fx-background bg-elevated
+        
+        " > .viewport"
+        {:-fx-background-color "transparent"}}
+       
+       ".cue-chain-left-column"
+       {:-fx-pref-width 280
+        :-fx-max-width 280
+        :-fx-spacing 0}
+       
+       ".btn-primary"
+       {:-fx-background-color accent-success
+        :-fx-text-fill text-primary
+        :-fx-padding ["6px" "20px"]
+        :-fx-cursor "hand"}
+       
+       ;; ============================================
+       ;; Zone Picker Section
+       ;; ============================================
+       
+       ".zone-picker"
+       {:-fx-background-color bg-elevated
+        :-fx-padding 8
+        :-fx-background-radius 4
+        :-fx-spacing 6
+        :-fx-border-color border-subtle
+        :-fx-border-width 1
+        :-fx-border-radius 4}
+       
+       ".zone-picker-header"
+       {:-fx-text-fill text-muted
+        :-fx-font-size 10
+        :-fx-font-weight "bold"}
+       
+       ".zone-picker-label"
+       {:-fx-text-fill text-secondary
+        :-fx-font-size 10}
+       
+       ".group-properties-label"
+       {:-fx-text-fill text-secondary
+        :-fx-font-size 10}
        
        
        ;; ============================================
@@ -133,7 +194,10 @@
         :-fx-padding 8
         :-fx-spacing 8
         :-fx-min-height 150
-        :-fx-pref-height 180}
+        :-fx-pref-height 180
+        :-fx-border-color border-subtle
+        :-fx-border-width 1
+        :-fx-border-radius 4}
        
        ".preset-bank-header"
        {:-fx-text-fill text-muted
@@ -210,7 +274,10 @@
        {:-fx-background-color bg-elevated
         :-fx-background-radius 4
         :-fx-padding 8
-        :-fx-spacing 8}
+        :-fx-spacing 8
+        :-fx-border-color border-subtle
+        :-fx-border-width 1
+        :-fx-border-radius 4}
        
        ".preset-param-header"
        {:-fx-text-fill text-muted
@@ -266,7 +333,10 @@
        {:-fx-background-color bg-elevated
         :-fx-background-radius 4
         :-fx-padding 8
-        :-fx-spacing 4}
+        :-fx-spacing 4
+        :-fx-border-color border-subtle
+        :-fx-border-width 1
+        :-fx-border-radius 4}
        
        ".preset-effects-header"
        {:-fx-text-fill text-muted
@@ -315,7 +385,10 @@
         :-fx-padding 4
         :-fx-spacing 4
         :-fx-orientation "HORIZONTAL"
-        :-fx-alignment "CENTER_LEFT"}
+        :-fx-alignment "CENTER_LEFT"
+        :-fx-border-color border-subtle
+        :-fx-border-width 1
+        :-fx-border-radius 4}
        
        ".mini-effect-btn"
        {:-fx-background-color bg-hover

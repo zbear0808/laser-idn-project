@@ -14,7 +14,9 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.pprint :as pprint]
-            [clojure.tools.logging :as log]))
+            [clojure.tools.logging :as log])
+  (:import [java.util.zip ZipOutputStream ZipInputStream ZipEntry]
+           [java.io ByteArrayOutputStream ByteArrayInputStream]))
 
 
 ;; Core Serialization Functions
@@ -234,3 +236,89 @@
                                :on-invalid on-invalid
                                :default default)
       (deserialize edn-str :on-error on-error :default default))))
+
+
+;; ZIP File Operations
+
+
+(defn save-to-zip!
+  "Save multiple files to a zip archive.
+   
+   Parameters:
+   - zip-path: Path to the zip file to create
+   - files: Map of {filename data} where data will be serialized to EDN
+   
+   Options:
+   - :pretty? - Pretty print EDN (default true)
+   - :create-dirs? - Create parent directories (default true)
+   - :on-error - Error handler: (on-error exception) -> value
+   
+   Returns: true on success, false on failure
+   
+   Example:
+   (save-to-zip! \"project.zip\"
+                 {\"metadata.edn\" {:config {...}}
+                  \"hardware.edn\" {:projectors {...}}})"
+  [zip-path files & {:keys [pretty? create-dirs? on-error]
+                     :or {pretty? true create-dirs? true}}]
+  (try
+    (when create-dirs?
+      (ensure-parent-dirs! zip-path))
+    
+    (with-open [file-out (io/output-stream zip-path)
+                zip-out (ZipOutputStream. file-out)]
+      (doseq [[filename data] files]
+        (let [entry (ZipEntry. filename)
+              edn-str (serialize data :pretty? pretty?)]
+          (.putNextEntry zip-out entry)
+          (.write zip-out (.getBytes edn-str "UTF-8"))
+          (.closeEntry zip-out))))
+    true
+    (catch Exception e
+      (if on-error
+        (on-error e)
+        (do
+          (log/error "Error saving to zip" zip-path ":" (.getMessage e))
+          false)))))
+
+(defn load-from-zip
+  "Load files from a zip archive and deserialize EDN content.
+   
+   Parameters:
+   - zip-path: Path to the zip file to read
+   
+   Options:
+   - :if-not-found - Value to return if file doesn't exist (default nil)
+   - :on-error - Error handler for read/parse errors
+   - :filenames - Optional set of filenames to load (loads all if not specified)
+   
+   Returns: Map of {filename data} or default value
+   
+   Example:
+   (load-from-zip \"project.zip\")
+   => {\"metadata.edn\" {:config {...}}, \"hardware.edn\" {:projectors {...}}}"
+  [zip-path & {:keys [if-not-found on-error filenames]
+               :or {if-not-found nil}}]
+  (let [file (io/file zip-path)]
+    (if-not (.exists file)
+      if-not-found
+      (try
+        (with-open [file-in (io/input-stream zip-path)
+                    zip-in (ZipInputStream. file-in)]
+          (loop [result {}]
+            (if-let [entry (.getNextEntry zip-in)]
+              (let [filename (.getName entry)]
+                (if (or (nil? filenames) (contains? filenames filename))
+                  (let [baos (ByteArrayOutputStream.)]
+                    (io/copy zip-in baos)
+                    (let [content (.toString baos "UTF-8")
+                          data (deserialize content :on-error on-error)]
+                      (recur (assoc result filename data))))
+                  (recur result)))
+              result)))
+        (catch Exception e
+          (cond
+            on-error (on-error e)
+            :else (do
+                    (log/error "Error loading from zip" zip-path ":" (.getMessage e))
+                    if-not-found)))))))

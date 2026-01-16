@@ -136,19 +136,19 @@
         ui-mode (get-in dialog-data [:ui-modes full-effect-path])]
     {:fx/type :v-box
      :spacing 8
-     :style "-fx-background-color: #2A2A2A; -fx-padding: 8;"
+     :style-class "dialog-section"
      :children [{:fx/type :label
                  :text (if effect-def
                          (str "PARAMETERS: " (:name effect-def))
                          "PARAMETERS")
-                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                 :style-class "dialog-section-header"}
                 (if effect-def
                   (if (:ui-hints effect-def)
                     ;; Has custom UI - use custom renderer with mode toggle
                     {:fx/type :scroll-pane
                      :fit-to-width true
                      :v-box/vgrow :always
-                     :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
+                     :style-class "dialog-scroll-pane"
                      :content {:fx/type custom-param-renderer
                               :fx/context context
                               :col col :row row
@@ -164,7 +164,7 @@
                     {:fx/type :scroll-pane
                      :fit-to-width true
                      :v-box/vgrow :always
-                     :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
+                     :style-class "dialog-scroll-pane"
                      :content {:fx/type effect-param-ui/modulatable-param-controls-list
                               :params-map params-map
                               :current-params current-params
@@ -182,7 +182,7 @@
                   
                   {:fx/type :label
                    :text "Select an effect from the chain"
-                   :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"})]}))
+                   :style-class "dialog-placeholder-text"})]}))
 
 
 ;; Destination Zone Picker
@@ -216,10 +216,10 @@
         preferred-type (or (:preferred-zone-type destination-zone) :default)]
     {:fx/type :v-box
      :spacing 6
-     :style "-fx-background-color: #333333; -fx-padding: 8; -fx-background-radius: 4;"
+     :style-class "zone-picker"
      :children [{:fx/type :label
                  :text "DESTINATION ZONE"
-                 :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-weight: bold;"}
+                 :style-class "zone-picker-header"}
                 ;; Zone group selection
                 {:fx/type :flow-pane
                  :hgap 4
@@ -240,12 +240,11 @@
                  :alignment :center-left
                  :children [{:fx/type :label
                              :text "Prefer:"
-                             :style "-fx-text-fill: #707070; -fx-font-size: 10;"}
+                             :style-class "zone-picker-label"}
                             {:fx/type :combo-box
                              :value preferred-type
                              :pref-width 100
                              :items [:default :graphics :crowd-scanning]
-                             :style "-fx-font-size: 10;"
                              :button-cell (fn [type]
                                             {:text (case type
                                                      :default "Default"
@@ -305,18 +304,18 @@
                                  :zone-groups zone-groups}]}
                     (when is-group?
                       {:fx/type :v-box
-                       :style "-fx-background-color: #2A2A2A; -fx-padding: 8;"
+                       :style-class "dialog-section"
                        :v-box/vgrow :always
                        :spacing 8
                        :children [{:fx/type :label
                                    :text "GROUP PROPERTIES"
-                                   :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                                   :style-class "dialog-section-header"}
                                   {:fx/type :label
                                    :text (str "Name: " (:name selected-item "Unnamed Group"))
-                                   :style "-fx-text-fill: #B0B0B0; -fx-font-size: 10;"}
+                                   :style-class "group-properties-label"}
                                   {:fx/type :label
                                    :text (str "Items: " (count (:items selected-item [])))
-                                   :style "-fx-text-fill: #B0B0B0; -fx-font-size: 10;"}
+                                   :style-class "group-properties-label"}
                                   ;; Destination zone picker for groups
                                   {:fx/type destination-zone-picker
                                    :col col
@@ -328,13 +327,13 @@
                   (when (not selected-item)
                     {:fx/type :v-box
                      :v-box/vgrow :always
-                     :style "-fx-background-color: #2A2A2A; -fx-padding: 8;"
+                     :style-class "dialog-section"
                      :children [{:fx/type :label
                                  :text "ITEM PROPERTIES"
-                                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                                 :style-class "dialog-section-header"}
                                 {:fx/type :label
                                  :text "Select a preset or group from the chain"
-                                 :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"}]})])}))
+                                 :style-class "dialog-placeholder-text"}]})])}))
 
 
 ;; Helper Functions for Item Effects UI State
@@ -394,123 +393,119 @@
         ;; Dialog data for custom renderers (UI modes, etc.)
         ;; Merge ui-modes and item-effects-ui together so effects can access both
         effect-dialog-data (merge dialog-data item-effects-ui {:item-effects-ui item-effects-ui})]
-   {:fx/type :v-box
-    :spacing 0
-    :style "-fx-background-color: #2D2D2D;"
-    :pref-width 800
-    :pref-height 700
-    :children [;; Main content area - 2 columns
+  {:fx/type :v-box
+   :spacing 0
+   :style-class "dialog-content"
+   :pref-width 800
+   :pref-height 700
+   :children [;; Main content area - 2 columns
+             {:fx/type :h-box
+              :spacing 0
+              :v-box/vgrow :always
+              :children [;; Left column - cue chain list (top) + item effects (bottom)
+                         {:fx/type :v-box
+                          :style-class "cue-chain-left-column"
+                          :children [;; Cue chain list (top)
+                                     {:fx/type :v-box
+                                      :pref-height 300
+                                      :children [{:fx/type list/list-editor
+                                                  :fx/context context
+                                                  :v-box/vgrow :always
+                                                  :items (:items cue-chain)
+                                                  :component-id [:cue-chain col row]
+                                                  :item-id-key :preset-id
+                                                  :item-registry-fn presets/get-preset
+                                                  :item-name-key :name
+                                                  :fallback-label "Unknown Preset"
+                                                  :on-change-event :chain/set-items
+                                                  :on-change-params {:domain :cue-chains :entity-key [col row]}
+                                                  :on-copy-fn (fn [items]
+                                                                (events/dispatch! {:event/type :cue-chain/set-clipboard
+                                                                                   :items items}))
+                                                  :clipboard-items clipboard-items
+                                                  :header-label "CUE CHAIN"
+                                                  :empty-text "No presets\nAdd from bank →"}]}
+                                     
+                                     ;; Item effects list (bottom) - always present, shows placeholder if no selection
+                                     {:fx/type :v-box
+                                      :v-box/vgrow :always
+                                      :style-class "dialog-separator"
+                                      :children (if has-item?
+                                                    [{:fx/type list/list-editor
+                                                      :fx/context context
+                                                      :v-box/vgrow :always
+                                                      :items item-effects
+                                                      ;; Use stable component-id without the path to avoid state fragmentation
+                                                      ;; The item-path is passed via event params instead
+                                                      :component-id [:item-effects col row]
+                                                      :item-id-key :effect-id
+                                                      :item-registry-fn effects/get-effect
+                                                      :item-name-key :name
+                                                      :fallback-label "Unknown Effect"
+                                                      :on-change-event :cue-chain/set-item-effects
+                                                      :on-change-params {:col col :row row :item-path first-selected-path}
+                                                      :items-key :effects
+                                                      ;; Direct path to items in state for async drag-drop
+                                                      ;; Path: [:chains :cue-chains [col row] :items <first-selected-path...> :effects]
+                                                      :items-path (vec (concat [:chains :cue-chains [col row] :items] first-selected-path [:effects]))
+                                                      :on-copy-fn (fn [items]
+                                                                    (events/dispatch! {:event/type :cue-chain/set-item-effects-clipboard
+                                                                                       :col col :row row
+                                                                                       :item-path first-selected-path
+                                                                                       :effects items}))
+                                                      :clipboard-items item-effects-clipboard
+                                                      :header-label "ITEM EFFECTS"
+                                                      :empty-text "No effects\nAdd from bank →"
+                                                      :allow-groups? true}]
+                                                  ;; Placeholder when no item selected
+                                                  [{:fx/type :v-box
+                                                    :v-box/vgrow :always
+                                                    :style-class "dialog-placeholder"
+                                                    :alignment :center
+                                                    :children [{:fx/type :label
+                                                                :text "Select an item above\nto edit its effects"
+                                                                :style-class "dialog-placeholder-text"}]}])}]}
+                         
+                         ;; Right column - preset config + effect bank + effect params
+                         {:fx/type :v-box
+                          :h-box/hgrow :always
+                          :spacing 0
+                          :children (filterv some?
+                                      [;; Preset bank + params
+                                       {:fx/type middle-section
+                                        :fx/context context
+                                        :col col :row row
+                                        :active-preset-tab active-preset-tab
+                                        :selected-item-path first-selected-path
+                                        :cue-chain cue-chain}
+                                       
+                                       ;; Effect bank (when item selected)
+                                       (when has-item?
+                                         {:fx/type effect-bank-tabs
+                                          :col col :row row
+                                          :item-path first-selected-path
+                                          :active-effect-tab active-effect-tab})
+                                       
+                                       ;; Effect parameter editor (when effect selected)
+                                       (when (and has-item? (seq selected-effect-ids))
+                                         {:fx/type effect-parameter-editor
+                                          :fx/context context
+                                          :v-box/vgrow :always
+                                          :col col :row row
+                                          :item-path first-selected-path
+                                          :item selected-item
+                                          :selected-effect-ids selected-effect-ids
+                                          :dialog-data effect-dialog-data})])}]}
+              
+              ;; Footer with close button
               {:fx/type :h-box
-               :spacing 0
-               :v-box/vgrow :always
-               :children [;; Left column - cue chain list (top) + item effects (bottom)
-                          {:fx/type :v-box
-                           :pref-width 280
-                           :max-width 280
-                           :spacing 0
-                           :children [;; Cue chain list (top)
-                                      {:fx/type :v-box
-                                       :pref-height 300
-                                       :children [{:fx/type list/list-editor
-                                                   :fx/context context
-                                                   :v-box/vgrow :always
-                                                   :items (:items cue-chain)
-                                                   :component-id [:cue-chain col row]
-                                                   :item-id-key :preset-id
-                                                   :item-registry-fn presets/get-preset
-                                                   :item-name-key :name
-                                                   :fallback-label "Unknown Preset"
-                                                   :on-change-event :chain/set-items
-                                                   :on-change-params {:domain :cue-chains :entity-key [col row]}
-                                                   :on-copy-fn (fn [items]
-                                                                 (events/dispatch! {:event/type :cue-chain/set-clipboard
-                                                                                    :items items}))
-                                                   :clipboard-items clipboard-items
-                                                   :header-label "CUE CHAIN"
-                                                   :empty-text "No presets\nAdd from bank →"}]}
-                                      
-                                      ;; Item effects list (bottom) - always present, shows placeholder if no selection
-                                      {:fx/type :v-box
-                                       :v-box/vgrow :always
-                                       :style "-fx-border-color: #404040; -fx-border-width: 1 0 0 0;"
-                                       :children (if has-item?
-                                                     [{:fx/type list/list-editor
-                                                       :fx/context context
-                                                       :v-box/vgrow :always
-                                                       :items item-effects
-                                                       ;; Use stable component-id without the path to avoid state fragmentation
-                                                       ;; The item-path is passed via event params instead
-                                                       :component-id [:item-effects col row]
-                                                       :item-id-key :effect-id
-                                                       :item-registry-fn effects/get-effect
-                                                       :item-name-key :name
-                                                       :fallback-label "Unknown Effect"
-                                                       :on-change-event :cue-chain/set-item-effects
-                                                       :on-change-params {:col col :row row :item-path first-selected-path}
-                                                       :items-key :effects
-                                                       ;; Direct path to items in state for async drag-drop
-                                                       ;; Path: [:chains :cue-chains [col row] :items <first-selected-path...> :effects]
-                                                       :items-path (vec (concat [:chains :cue-chains [col row] :items] first-selected-path [:effects]))
-                                                       :on-copy-fn (fn [items]
-                                                                     (events/dispatch! {:event/type :cue-chain/set-item-effects-clipboard
-                                                                                        :col col :row row
-                                                                                        :item-path first-selected-path
-                                                                                        :effects items}))
-                                                       :clipboard-items item-effects-clipboard
-                                                       :header-label "ITEM EFFECTS"
-                                                       :empty-text "No effects\nAdd from bank →"
-                                                       :allow-groups? true}]
-                                                   ;; Placeholder when no item selected
-                                                   [{:fx/type :v-box
-                                                     :v-box/vgrow :always
-                                                     :style "-fx-background-color: #252525;"
-                                                     :alignment :center
-                                                     :children [{:fx/type :label
-                                                                 :text "Select an item above\nto edit its effects"
-                                                                 :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11; -fx-text-alignment: center;"}]}])}]}
-                          
-                          ;; Right column - preset config + effect bank + effect params
-                          {:fx/type :v-box
-                           :h-box/hgrow :always
-                           :spacing 0
-                           :children (filterv some?
-                                       [;; Preset bank + params
-                                        {:fx/type middle-section
-                                         :fx/context context
-                                         :col col :row row
-                                         :active-preset-tab active-preset-tab
-                                         :selected-item-path first-selected-path
-                                         :cue-chain cue-chain}
-                                        
-                                        ;; Effect bank (when item selected)
-                                        (when has-item?
-                                          {:fx/type effect-bank-tabs
-                                           :col col :row row
-                                           :item-path first-selected-path
-                                           :active-effect-tab active-effect-tab})
-                                        
-                                        ;; Effect parameter editor (when effect selected)
-                                        (when (and has-item? (seq selected-effect-ids))
-                                          {:fx/type effect-parameter-editor
-                                           :fx/context context
-                                           :v-box/vgrow :always
-                                           :col col :row row
-                                           :item-path first-selected-path
-                                           :item selected-item
-                                           :selected-effect-ids selected-effect-ids
-                                           :dialog-data effect-dialog-data})])}]}
-               
-               ;; Footer with close button
-               {:fx/type :h-box
-                :alignment :center-right
-                :spacing 8
-                :padding 12
-                :style "-fx-background-color: #252525;"
-                :children [{:fx/type :button
-                            :text "Close"
-                            :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-padding: 6 20;"
-                            :on-action {:event/type :ui/close-dialog
-                                        :dialog-id :cue-chain-editor}}]}]}))
+               :alignment :center-right
+               :style-class "dialog-footer"
+               :children [{:fx/type :button
+                           :text "Close"
+                           :style-class "btn-primary"
+                           :on-action {:event/type :ui/close-dialog
+                                       :dialog-id :cue-chain-editor}}]}]}))
 
 
 ;; Dialog Window

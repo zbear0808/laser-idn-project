@@ -107,6 +107,6 @@
      :item-event-template item-event-template
      :item-name-key :name
      :item-id-key :id
-     :button-style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 4 8;"
+     :button-style-class "bank-item-btn"
      :empty-text "No effects"
      :pref-height (or pref-height 140)}))

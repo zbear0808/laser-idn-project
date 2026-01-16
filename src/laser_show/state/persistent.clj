@@ -18,6 +18,10 @@
 
 (def config-dir "config")
 
+(def default-projects-dir
+  "Default directory for saving projects."
+  (str (System/getProperty "user.home") "/LaserShowProjects"))
+
 (def config-files
   "Map of config type to file path.
    
@@ -29,6 +33,12 @@
   {:project-metadata "config/project-metadata.edn"
    :hardware        "config/hardware.edn"
    :content         "config/content.edn"})
+
+(def zip-filenames
+  "Filenames used inside the project zip file."
+  {:project-metadata "project-metadata.edn"
+   :hardware        "hardware.edn"
+   :content         "content.edn"})
 
 
 ;; Persistence Mapping
@@ -157,83 +167,80 @@
 ;; Project-Based Persistence Functions
 
 
-(defn get-project-file-paths
-  "Get all file paths for a project folder.
-   
-   Parameters:
-   - project-folder - Base folder path for the project
-   
-   Returns: Map of file-key -> full-path
-   
-   Example:
-   (get-project-file-paths \"/path/to/project\")
-   => {:project-metadata \"/path/to/project/project-metadata.edn\", ...}"
-  [project-folder]
-  {:project-metadata (str project-folder "/project-metadata.edn")
-   :hardware        (str project-folder "/hardware.edn")
-   :content         (str project-folder "/content.edn")})
-
 (defn save-project!
-  "Save all state to specified project folder.
-   Creates folder if it doesn't exist.
-   Updates project state with folder and marks as clean.
+  "Save all state to a zip file.
+   Creates parent directories if they don't exist.
+   Updates project state with file path and marks as clean.
    
    Parameters:
-   - project-folder - Folder path where project should be saved
+   - zip-path - Path to the zip file (should end with .zip)
    
    Returns: true on success, false on failure
    
    Example:
-   (save-project! \"/path/to/my-project\")"
-  [project-folder]
+   (save-project! \"/path/to/my-project.zip\")"
+  [zip-path]
   (try
-    (let [file-paths (get-project-file-paths project-folder)]
-      ;; Save each file
-      (doseq [[file-key filepath] file-paths]
-        (when-let [{:keys [paths]} (get persistent-state-mapping file-key)]
-          (let [data (collect-data-for-paths paths)]
-            (ser/save-to-file! filepath data))))
+    ;; Collect data for each file
+    (let [files (into {}
+                      (map (fn [[file-key filename]]
+                             (when-let [{:keys [paths]} (get persistent-state-mapping file-key)]
+                               [filename (collect-data-for-paths paths)]))
+                           zip-filenames))]
       
-      ;; Update project state
-      (state/assoc-in-state! [:project :current-folder] project-folder)
-      (state/swap-state! #(-> %
-                              (assoc-in [:project :dirty?] false)
-                              (assoc-in [:project :last-saved] (System/currentTimeMillis))))
-      true)
+      ;; Save to zip
+      (when (ser/save-to-zip! zip-path files)
+        ;; Update project state
+        (state/assoc-in-state! [:project :current-file] zip-path)
+        (state/swap-state! #(-> %
+                                (assoc-in [:project :dirty?] false)
+                                (assoc-in [:project :last-saved] (System/currentTimeMillis))))
+        true))
     (catch Exception e
       (log/error "Error saving project:" (.getMessage e))
       false)))
 
 (defn load-project!
-  "Load all state from specified project folder.
+  "Load all state from a zip file.
    Merges loaded data into existing state.
-   Updates project state with folder.
+   Updates project state with file path.
    
    Parameters:
-   - project-folder - Folder path to load project from
+   - zip-path - Path to the zip file to load
    
-   Returns: true if successful, false if folder doesn't exist or load fails
+   Returns: true if successful, false if file doesn't exist or load fails
    
    Example:
-   (load-project! \"/path/to/my-project\")"
-  [project-folder]
+   (load-project! \"/path/to/my-project.zip\")"
+  [zip-path]
   (try
-    (let [folder (java.io.File. project-folder)]
-      (if (.exists folder)
-        (let [file-paths (get-project-file-paths project-folder)]
-          ;; Load each file
-          (doseq [[file-key filepath] file-paths]
-            (when-let [{:keys [paths]} (get persistent-state-mapping file-key)]
-              (load-and-merge-paths! filepath paths)))
-          
-          ;; Update project state
-          (state/assoc-in-state! [:project :current-folder] project-folder)
-          (state/swap-state! #(-> %
-                                  (assoc-in [:project :dirty?] false)
-                                  (assoc-in [:project :last-saved] (System/currentTimeMillis))))
-          true)
+    (let [file (java.io.File. zip-path)]
+      (if (.exists file)
+        (let [zip-contents (ser/load-from-zip zip-path)]
+          (when zip-contents
+            ;; Load each file from zip
+            (doseq [[file-key filename] zip-filenames]
+              (when-let [file-data (get zip-contents filename)]
+                (when-let [{:keys [paths]} (get persistent-state-mapping file-key)]
+                  ;; Merge data into state for each path
+                  (doseq [{:keys [path keys]} paths]
+                    (when path
+                      (let [data-from-file (get-in file-data path)
+                            data-to-merge (if (and keys data-from-file)
+                                            (select-keys data-from-file keys)
+                                            data-from-file)]
+                        (when data-to-merge
+                          (state/swap-state! (fn [state]
+                                               (update-in state path merge data-to-merge))))))))))
+            
+            ;; Update project state
+            (state/assoc-in-state! [:project :current-file] zip-path)
+            (state/swap-state! #(-> %
+                                    (assoc-in [:project :dirty?] false)
+                                    (assoc-in [:project :last-saved] (System/currentTimeMillis))))
+            true))
         (do
-          (log/warn "Project folder does not exist:" project-folder)
+          (log/warn "Project file does not exist:" zip-path)
           false)))
     (catch Exception e
       (log/error "Error loading project:" (.getMessage e))
@@ -260,24 +267,31 @@
       (log/error "Error creating new project:" (.getMessage e))
       false)))
 
-(defn folder-has-project-files?
-  "Check if a folder contains any project files.
-   Useful for warning about overwriting existing projects.
+(defn ensure-projects-dir!
+  "Ensure the default projects directory exists.
+   Creates it if it doesn't exist.
    
-   Parameters:
-   - project-folder - Folder path to check
+   Returns: true if directory exists or was created successfully"
+  []
+  (try
+    (let [dir (java.io.File. default-projects-dir)]
+      (when-not (.exists dir)
+        (.mkdirs dir))
+      (.exists dir))
+    (catch Exception e
+      (log/error "Error creating projects directory:" (.getMessage e))
+      false)))
+
+(defn get-default-project-path
+  "Generate a default project file path with timestamp.
    
-   Returns: true if folder contains .edn files, false otherwise
+   Returns: Full path to a new project file in the default projects directory
    
    Example:
-   (folder-has-project-files? \"/path/to/folder\")"
-  [project-folder]
-  (try
-    (let [folder (java.io.File. project-folder)]
-      (if (.exists folder)
-        (let [edn-files (filter #(.endsWith (.getName %) ".edn")
-                                (.listFiles folder))]
-          (seq edn-files))
-        false))
-    (catch Exception e
-      false)))
+   (get-default-project-path)
+   => \"/home/user/LaserShowProjects/project-2026-01-15-182030.zip\""
+  []
+  (ensure-projects-dir!)
+  (let [timestamp (.format (java.text.SimpleDateFormat. "yyyy-MM-dd-HHmmss")
+                           (java.util.Date.))]
+    (str default-projects-dir "/project-" timestamp ".zip")))

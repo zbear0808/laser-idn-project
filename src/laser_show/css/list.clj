@@ -57,7 +57,10 @@
         :-fx-padding 8
         :-fx-spacing 8
         :-fx-min-width 180
-        :-fx-pref-width 220}
+        :-fx-pref-width 220
+        :-fx-border-color border-subtle
+        :-fx-border-width 1
+        :-fx-border-radius 4}
        
        
        ;; ============================================

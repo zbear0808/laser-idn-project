@@ -17,28 +17,11 @@
     (let [;; Use semantic colors from theme
           {:keys [bg-interactive bg-hover bg-active
                   text-primary
-                  accent-success accent-danger]} theme/semantic-colors
-          {:keys [accent-success-hover accent-danger-hover]} theme/computed-colors]
+                  accent-success]} theme/semantic-colors
+          {:keys [accent-success-hover]} theme/computed-colors]
       
       {
-       ;; Base Button Styles
-       
-       
-       ;; Standard button - dark theme
-       ".btn"
-       {:-fx-background-color bg-interactive
-        :-fx-text-fill text-primary
-        :-fx-cursor "hand"
-        :-fx-background-radius 4
-        :-fx-padding ["4px" "12px"]
-        
-        ":hover"
-        {:-fx-background-color bg-hover}
-        
-        ":pressed"
-        {:-fx-background-color bg-active}}
-       
-       ;; Small button variant
+       ;; Small button variant (used in toolbar)
        ".btn-sm"
        {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
@@ -49,55 +32,6 @@
         
         ":hover"
         {:-fx-background-color bg-hover}}
-       
-       ;; Extra small button
-       ".btn-xs"
-       {:-fx-background-color bg-interactive
-        :-fx-text-fill text-primary
-        :-fx-cursor "hand"
-        :-fx-background-radius 3
-        :-fx-font-size 9
-        :-fx-padding ["2px" "6px"]
-        
-        ":hover"
-        {:-fx-background-color bg-hover}}
-       
-       
-       ;; Action Button Variants
-       
-       
-       ;; Primary action button (green)
-       ".btn-primary"
-       {:-fx-background-color accent-success
-        :-fx-text-fill text-primary
-        :-fx-cursor "hand"
-        :-fx-background-radius 4
-        :-fx-padding ["6px" "20px"]
-        
-        ":hover"
-        {:-fx-background-color accent-success-hover}}
-       
-       ;; Danger button (red) - for delete actions
-       ".btn-danger"
-       {:-fx-background-color accent-danger
-        :-fx-text-fill text-primary
-        :-fx-cursor "hand"
-        :-fx-background-radius 4
-        :-fx-padding ["4px" "12px"]
-        
-        ":hover"
-        {:-fx-background-color accent-danger-hover}}
-       
-       ;; Small danger button
-       ".btn-danger-sm"
-       {:-fx-background-color accent-danger
-        :-fx-text-fill text-primary
-        :-fx-cursor "hand"
-        :-fx-font-size 9
-        :-fx-padding ["2px" "6px"]
-        
-        ":hover"
-        {:-fx-background-color accent-danger-hover}}
        
        
        ;; Transport Buttons (for toolbar)
@@ -155,11 +89,26 @@
         {:-fx-background-color accent-success}}
        
        
-       ;; Effect Bank Buttons
+       ;; Bank Item Buttons (for effect banks and preset banks)
        
        
+       ".bank-item-btn"
+       {:-fx-background-color bg-interactive
+        :-fx-text-fill text-primary
+        :-fx-font-size 10
+        :-fx-padding ["4px" "8px"]
+        :-fx-cursor "hand"
+        :-fx-background-radius 3
+        
+        ":hover"
+        {:-fx-background-color bg-hover}
+        
+        ":pressed"
+        {:-fx-background-color bg-active}}
+       
+       ;; Legacy effect bank button (alias for bank-item-btn)
        ".effect-btn"
-       {:-fx-background-color bg-active
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
         :-fx-font-size 10
         :-fx-padding ["4px" "8px"]

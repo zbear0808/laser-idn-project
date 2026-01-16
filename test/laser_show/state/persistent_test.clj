@@ -16,21 +16,20 @@
 ;; Test Fixtures
 
 
-(def test-project-dir "test-output/test-project")
+(def test-project-file "test-output/test-project.zip")
 
 (defn cleanup-test-files [f]
-  "Remove test project directory before and after tests."
-  (let [dir (io/file test-project-dir)]
-    (when (.exists dir)
-      (doseq [file (.listFiles dir)]
-        (.delete file))
-      (.delete dir)))
+  "Remove test project file before and after tests."
+  (let [file (io/file test-project-file)
+        dir (io/file "test-output")]
+    (when (.exists file)
+      (.delete file))
+    (when-not (.exists dir)
+      (.mkdirs dir)))
   (f)
-  (let [dir (io/file test-project-dir)]
-    (when (.exists dir)
-      (doseq [file (.listFiles dir)]
-        (.delete file))
-      (.delete dir))))
+  (let [file (io/file test-project-file)]
+    (when (.exists file)
+      (.delete file))))
 
 (use-fixtures :each cleanup-test-files)
 
@@ -83,11 +82,11 @@
 
 
 (deftest test-file-structure
-  (testing "New file structure uses 3 files"
-    (is (= 3 (count persistent/config-files)))
-    (is (contains? persistent/config-files :project-metadata))
-    (is (contains? persistent/config-files :hardware))
-    (is (contains? persistent/config-files :content))))
+  (testing "Zip file structure uses 3 internal files"
+    (is (= 3 (count persistent/zip-filenames)))
+    (is (contains? persistent/zip-filenames :project-metadata))
+    (is (contains? persistent/zip-filenames :hardware))
+    (is (contains? persistent/zip-filenames :content))))
 
 (deftest test-persistence-mapping
   (testing "Persistence mapping includes all critical state"
@@ -113,18 +112,23 @@
           (is (some #(= (:path %) [:chains :zone-effects]) paths)))))))
 
 (deftest test-save-project
-  (testing "Save project creates correct files"
+  (testing "Save project creates zip file with correct contents"
     (init-test-state!)
     
-    (is (persistent/save-project! test-project-dir))
+    (is (persistent/save-project! test-project-file))
     
-    (testing "All 3 files are created"
-      (is (.exists (io/file (str test-project-dir "/project-metadata.edn"))))
-      (is (.exists (io/file (str test-project-dir "/hardware.edn"))))
-      (is (.exists (io/file (str test-project-dir "/content.edn")))))
+    (testing "Zip file is created"
+      (is (.exists (io/file test-project-file))))
+    
+    (testing "Zip contains all 3 EDN files"
+      (let [zip-contents (ser/load-from-zip test-project-file)]
+        (is (contains? zip-contents "project-metadata.edn"))
+        (is (contains? zip-contents "hardware.edn"))
+        (is (contains? zip-contents "content.edn"))))
     
     (testing "project-metadata.edn contains expected data"
-      (let [data (ser/load-from-file (str test-project-dir "/project-metadata.edn"))]
+      (let [zip-contents (ser/load-from-zip test-project-file)
+            data (get zip-contents "project-metadata.edn")]
         (is (contains? data :config))
         (is (contains? data :timing))
         (is (= 140.0 (get-in data [:timing :bpm])))
@@ -132,14 +136,16 @@
         (is (= [8 4] (get-in data [:grid :size])))))
     
     (testing "hardware.edn contains expected data"
-      (let [data (ser/load-from-file (str test-project-dir "/hardware.edn"))]
+      (let [zip-contents (ser/load-from-zip test-project-file)
+            data (get zip-contents "hardware.edn")]
         (is (contains? data :projectors))
         (is (contains? (get-in data [:projectors :items]) :test-proj))
         (is (contains? data :zones))
         (is (contains? (get-in data [:zones :items]) #uuid "33333333-3333-3333-3333-333333333333"))))
     
     (testing "content.edn contains expected data"
-      (let [data (ser/load-from-file (str test-project-dir "/content.edn"))]
+      (let [zip-contents (ser/load-from-zip test-project-file)
+            data (get zip-contents "content.edn")]
         (is (contains? data :chains))
         (is (contains? (get-in data [:chains :cue-chains]) [0 0]))
         (is (= 1 (count (get-in data [:chains :cue-chains [0 0] :items]))))
@@ -147,9 +153,9 @@
         (is (= 1 (count (get-in data [:chains :effect-chains [0 0] :items]))))))))
 
 (deftest test-load-project
-  (testing "Load project restores all data"
+  (testing "Load project restores all data from zip"
     (init-test-state!)
-    (persistent/save-project! test-project-dir)
+    (persistent/save-project! test-project-file)
     
     ;; Reset state to initial
     (state/reset-state! (domains/build-initial-state))
@@ -161,7 +167,7 @@
       (is (not= :test-preset (get-in initial-cue [:items 0 :preset-id]))))
     
     ;; Load project
-    (is (persistent/load-project! test-project-dir))
+    (is (persistent/load-project! test-project-file))
     
     (testing "BPM is restored"
       (is (= 140.0 (state/get-in-state [:timing :bpm]))))
@@ -190,7 +196,7 @@
         (is (= :test-proj (:projector-id zone)))))))
 
 (deftest test-round-trip
-  (testing "Save and load preserves all data"
+  (testing "Save and load preserves all data with zip format"
     (init-test-state!)
     
     ;; Capture original state
@@ -200,9 +206,9 @@
           original-projector (state/get-in-state [:projectors :items :test-proj])]
       
       ;; Save and reload
-      (persistent/save-project! test-project-dir)
+      (persistent/save-project! test-project-file)
       (state/reset-state! (domains/build-initial-state))
-      (persistent/load-project! test-project-dir)
+      (persistent/load-project! test-project-file)
       
       ;; Verify everything matches
       (is (= original-bpm (state/get-in-state [:timing :bpm])))

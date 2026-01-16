@@ -4,9 +4,6 @@
    Provides CSS classes for:
    - Text fields and inputs
    - Labels
-   - Sliders
-   - Combo boxes
-   - Checkboxes
    
    Usage:
    Include (::css/url forms) in your scene's :stylesheets vector."
@@ -16,24 +13,9 @@
 (def forms
   "Form element styles for the application."
   (css/register ::forms
-    (let [;; Use semantic colors from theme
-          {:keys [bg-interactive bg-hover
-                  text-primary text-secondary text-muted]} theme/semantic-colors]
+    (let [{:keys [bg-interactive text-primary text-secondary]} theme/semantic-colors]
       
-      {
-       ;; Text Fields
-       
-       
-       ".text-field-dark"
-       {:-fx-background-color bg-interactive
-        :-fx-text-fill text-primary
-        :-fx-font-size 12
-        :-fx-padding ["4px" "8px"]
-        :-fx-background-radius 4
-        
-        ":focused"
-        {:-fx-background-color bg-hover}}
-       
+      {;; Small text field (used in dialogs and parameter editors)
        ".text-field-dark-sm"
        {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
@@ -41,58 +23,7 @@
         :-fx-padding ["2px" "4px"]
         :-fx-background-radius 3}
        
-       
-       ;; Labels
-       
-       
-       ".label-primary"
-       {:-fx-text-fill text-primary}
-       
+       ;; Secondary label (used throughout UI)
        ".label-secondary"
        {:-fx-text-fill text-secondary
-        :-fx-font-size 11}
-       
-       ".label-muted"
-       {:-fx-text-fill text-muted
-        :-fx-font-size 11}
-       
-       ;; Label with colon (for form fields)
-       ".label-field"
-       {:-fx-text-fill text-secondary
-        :-fx-font-size 11}
-       
-       ;; Section header labels
-       ".label-header"
-       {:-fx-text-fill text-muted
-        :-fx-font-size 11
-        :-fx-font-weight "bold"}
-       
-       
-       ;; Combo Boxes
-       
-       
-       ".combo-box-dark"
-       {:-fx-background-color bg-interactive
-        :-fx-text-fill text-secondary
-        :-fx-font-size 11}
-       
-       
-       ;; Checkboxes
-       
-       
-       ".check-box-dark"
-       {:-fx-text-fill text-primary}
-       
-       
-       ;; Sliders
-       
-       
-       ;; Note: Slider styling in JavaFX requires targeting internal elements
-       ;; This provides basic track/thumb styling
-       ".slider-dark"
-       {" .track"
-        {:-fx-background-color bg-interactive
-         :-fx-background-radius 4}
-        
-        " .thumb"
-        {:-fx-background-color text-secondary}}})))
+        :-fx-font-size 11}})))

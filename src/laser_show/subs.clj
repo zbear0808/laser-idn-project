@@ -73,8 +73,8 @@
 
 ;; --- Project ---
 
-(defn project-folder [context]
-  (fx/sub-val context ex/project-folder))
+(defn project-file [context]
+  (fx/sub-val context ex/project-file))
 
 (defn project-dirty? [context]
   (fx/sub-val context ex/project-dirty?))
@@ -203,21 +203,21 @@
    Depends on: project domain
    
    Returns map with:
-   - :has-project? - is a project folder set?
-   - :folder - project folder path or nil
+   - :has-project? - is a project file set?
+   - :file - project file path or nil
    - :dirty? - has unsaved changes?
    - :last-saved - timestamp of last save or nil
    - :title - computed window title"
   [context]
   (let [p (fx/sub-val context ex/project)
-        folder (:current-folder p)
+        file (:current-file p)
         dirty? (:dirty? p)]
-    {:has-project? (some? folder)
-     :folder folder
+    {:has-project? (some? file)
+     :file file
      :dirty? dirty?
      :last-saved (:last-saved p)
      :title (str "Laser Show"
-                 (when folder (str " - " folder))
+                 (when file (str " - " file))
                  (when dirty? " *"))}))
 
 

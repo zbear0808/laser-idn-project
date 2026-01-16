@@ -190,8 +190,8 @@
 (defn project [state]
   (:project state))
 
-(defn project-folder [state]
-  (:current-folder (project state)))
+(defn project-file [state]
+  (:current-file (project state)))
 
 (defn project-dirty? [state]
   (:dirty? (project state)))

@@ -25,7 +25,8 @@
     :item-name-key :name
     :empty-text \"No items\"}
    ```"
-  (:require [laser-show.views.components.tabs :as tabs]))
+  (:require [laser-show.views.components.tabs :as tabs]
+            [laser-show.css.theme :as theme]))
 
 
 ;; Item Button (data-driven, no function props)
@@ -39,16 +40,15 @@
    - :item-name-key - Key to get display name (default :name)
    - :item-id-key - Key to get item ID (default :id)
    - :event-template - Base event map to merge item-id into
-   - :button-style - Optional inline style override"
-  [{:keys [item item-name-key item-id-key event-template button-style]}]
+   - :style-class - CSS class for button (default: \"bank-item-btn\")"
+  [{:keys [item item-name-key item-id-key event-template style-class]}]
   (let [name-key (or item-name-key :name)
         id-key (or item-id-key :id)
         item-id (get item id-key)
         item-name (get item name-key "Unknown")]
     {:fx/type :button
      :text item-name
-     :style (or button-style
-                "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 4 8;")
+     :style-class (or style-class "bank-item-btn")
      :on-action (merge event-template {:item-id item-id :item item})}))
 
 
@@ -75,7 +75,7 @@
    - :item-event-template - Event map base, will have :item-id and :item merged
    - :item-name-key - Key to get display name from item (default: :name)
    - :item-id-key - Key to get item ID (default: :id)
-   - :button-style - Optional custom button style
+   - :button-style-class - CSS class for buttons (default: \"bank-item-btn\")
    
    Layout:
    - :empty-text - Text shown when category is empty (default: \"No items\")
@@ -85,7 +85,7 @@
    - :padding - Padding around flow pane (default: 8)"
   [{:keys [tab-definitions active-tab on-tab-change
            items items-by-category
-           item-event-template item-name-key item-id-key button-style
+           item-event-template item-name-key item-id-key button-style-class
            empty-text pref-height hgap vgap padding]}]
   (let [active (or active-tab (:id (first tab-definitions)))
         ;; Get items either directly or from category map
@@ -98,9 +98,13 @@
         pad (or padding 8)
         empty-msg (or empty-text "No items")
         name-key (or item-name-key :name)
-        id-key (or item-id-key :id)]
+        id-key (or item-id-key :id)
+        ;; Use theme colors
+        bg-color (::theme/bg-primary theme/theme)]
     {:fx/type :v-box
      :pref-height h
+     :max-height h
+     :style-class "panel-primary"
      :children [{:fx/type tabs/styled-tab-bar
                  :tabs tab-definitions
                  :active-tab active
@@ -108,12 +112,13 @@
                 {:fx/type :scroll-pane
                  :fit-to-width true
                  :v-box/vgrow :always
-                 :style "-fx-background-color: #1E1E1E; -fx-background: #1E1E1E;"
+                 :style-class "scroll-pane-transparent"
+                 :style (str "-fx-background-color: " bg-color "; -fx-background: " bg-color ";")
                  :content {:fx/type :flow-pane
                            :hgap hg
                            :vgap vg
                            :padding pad
-                           :style "-fx-background-color: #1E1E1E;"
+                           :style (str "-fx-background-color: " bg-color ";")
                            :children (if (seq display-items)
                                        (vec (for [item display-items]
                                               {:fx/type item-button
@@ -122,7 +127,7 @@
                                                :item-name-key name-key
                                                :item-id-key id-key
                                                :event-template item-event-template
-                                               :button-style button-style}))
+                                               :style-class button-style-class}))
                                        [{:fx/type :label
                                          :text empty-msg
-                                         :style "-fx-text-fill: #606060;"}])}}]}))
+                                         :style-class "text-muted"}])}}]}))

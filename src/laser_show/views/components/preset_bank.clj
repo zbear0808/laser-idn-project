@@ -31,7 +31,6 @@
           presets/all-presets))
 
 
-;; Main Preset Bank Component
 
 
 (defn preset-bank
@@ -57,7 +56,7 @@
                            :row row}
      :item-name-key :name
      :item-id-key :id
-     :button-style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 6 12;"
+     :button-style-class "bank-item-btn"
      :empty-text "No presets in this category"
      :pref-height 150
      :hgap 6

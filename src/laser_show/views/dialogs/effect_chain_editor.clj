@@ -120,18 +120,18 @@
         ui-mode (get-in dialog-data [:ui-modes selected-effect-path])]
     {:fx/type :v-box
      :spacing 8
-     :style "-fx-background-color: #2A2A2A; -fx-padding: 8;"
+     :style-class "dialog-section"
      :children [{:fx/type :label
                  :text (if effect-def
                          (str "PARAMETERS: " (:name effect-def))
                          "PARAMETERS")
-                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                 :style-class "dialog-section-header"}
                 (if effect-def
                   (if (:ui-hints effect-def)
                     ;; Has custom UI - use custom renderer with mode toggle
                     {:fx/type :scroll-pane
                      :fit-to-width true
-                     :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
+                     :style-class "dialog-scroll-pane"
                      :content {:fx/type custom-param-renderer
                               :fx/context context
                               :col col :row row
@@ -145,7 +145,7 @@
                     ;; Standard parameters - use modulatable param controls
                     {:fx/type :scroll-pane
                      :fit-to-width true
-                     :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
+                     :style-class "dialog-scroll-pane"
                      :content {:fx/type effect-param-ui/modulatable-param-controls-list
                               :params-map params-map
                               :current-params current-params
@@ -163,7 +163,7 @@
                   
                   {:fx/type :label
                    :text "Select an effect from the chain"
-                   :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"})]}))
+                   :style-class "dialog-placeholder-text"})]}))
 
 
 ;; Main Dialog Content
@@ -189,7 +189,7 @@
                               (chains/find-path-by-id effect-chain first-selected-id))]
     {:fx/type :v-box
      :spacing 0
-     :style "-fx-background-color: #2D2D2D;"
+     :style-class "dialog-content"
      :pref-width 600
      :pref-height 550
      :children [;; Main content area
@@ -235,19 +235,17 @@
                ;; Footer with Active checkbox and close button
                {:fx/type :h-box
                 :alignment :center-left
-                :spacing 8
-                :padding 12
-                :style "-fx-background-color: #252525;"
+                :style-class "dialog-footer"
                 :children [{:fx/type :check-box
                             :text "Active"
                             :selected active?
-                            :style "-fx-text-fill: white;"
+                            :style-class "label-primary"
                             :on-selected-changed {:event/type :effects/toggle-cell
                                                   :col col :row row}}
                            {:fx/type :region :h-box/hgrow :always}
                            {:fx/type :button
                             :text "Close"
-                            :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-padding: 6 20;"
+                            :style-class "btn-primary"
                             :on-action {:event/type :ui/close-dialog
                                         :dialog-id :effect-chain-editor}}]}]}))
 
