@@ -19,16 +19,16 @@
 (def config-dir "config")
 
 (def config-files
-  "Map of config type to file path."
-  {:settings     "config/settings.edn"
-   :grid         "config/grid.edn"
-   :projectors   "config/projectors.edn"
-   :zones        "config/zones.edn"
-   :zone-groups  "config/zone-groups.edn"
-   :cues         "config/cues.edn"
-   :cue-lists    "config/cue-lists.edn"
-   :effects      "config/effects.edn"
-   :effects-grid "config/effects-grid.edn"})
+  "Map of config type to file path.
+   
+   Consolidated from 9 files to 4 files:
+   - project-metadata.edn: Settings, grid config, BPM
+   - hardware.edn: Projectors, zones, zone-groups
+   - content.edn: All chains (cue-chains, effect-chains, projector-effects, zone-effects)
+   - mappings.edn: Input router handlers (future)"
+  {:project-metadata "config/project-metadata.edn"
+   :hardware        "config/hardware.edn"
+   :content         "config/content.edn"})
 
 
 ;; Persistence Mapping
@@ -38,51 +38,68 @@
 (def persistent-state-mapping
   "Defines the mapping between file keys and state paths.
    
-   Format: {:file-key {:path [:domain :field] or [:domain]
-                       :keys nil-or-vector}}
+   Format: {:file-key {:paths [{:path [:domain :field] :keys nil-or-vector}]}}
    
+   - :paths - Vector of path specs to save/load for this file
    - :path - Path into the unified state map
    - :keys - nil means save whole domain, vector means select-keys for partial save
    
-   When loading: data from file is merged into the state at :path
+   When loading: data from file is merged into the state at each :path
    When saving: if :keys is nil, save full domain; if :keys is a vector, save (select-keys)"
-  {:settings     {:path [:config]
-                  :keys nil}
-   :grid         {:path [:grid]
-                  :keys [:cells]}  ; Only persist cells, not selected-cell or size
-   :projectors   {:path [:projectors :items]
-                  :keys nil}
-   :zones        {:path [:zones :items]
-                  :keys nil}
-   :zone-groups  {:path [:zone-groups :items]
-                  :keys nil}
-   :cues         {:path [:cues :items]
-                  :keys nil}
-   :cue-lists    {:path [:cue-lists :items]
-                  :keys nil}
-   :effects      {:path [:effect-registry :items]
-                  :keys nil}
-   :effects-grid {:path [:effects]
-                  :keys [:cells]}}) ; Persist effect grid cell assignments
+  {:project-metadata
+   {:paths [{:path [:config] :keys nil}
+            {:path [:timing] :keys [:bpm]}
+            {:path [:grid] :keys [:size]}]}
+   
+   :hardware
+   {:paths [{:path [:projectors :items] :keys nil}
+            {:path [:zones :items] :keys nil}
+            {:path [:zone-groups :items] :keys nil}]}
+   
+   :content
+   {:paths [{:path [:chains :cue-chains] :keys nil}
+            {:path [:chains :effect-chains] :keys nil}
+            {:path [:chains :projector-effects] :keys nil}
+            {:path [:chains :zone-effects] :keys nil}]}})
 
 
 ;; Load Functions
 
+
+(defn- load-and-merge-paths!
+  "Load data from file and merge into state at multiple paths.
+   
+   Parameters:
+   - filepath: Path to file to load
+   - path-specs: Vector of {:path [:domain :field] :keys nil-or-vector}
+   
+   Returns: true if loaded successfully, false otherwise"
+  [filepath path-specs]
+  (if-let [file-data (ser/load-from-file filepath)]
+    (do
+      (doseq [{:keys [path keys]} path-specs]
+        (when path
+          (let [;; Extract data for this path from file
+                ;; For nested paths like [:chains :cue-chains], get-in from file
+                data-from-file (get-in file-data path)
+                ;; Apply key filtering if specified
+                data-to-merge (if (and keys data-from-file)
+                                (select-keys data-from-file keys)
+                                data-from-file)]
+            (when data-to-merge
+              (state/swap-state! (fn [state]
+                                   (update-in state path merge data-to-merge)))))))
+      true)
+    false))
 
 (defn load-single!
   "Load a single config file and merge into state.
    Returns true if loaded successfully, false otherwise."
   [file-key]
   (let [filepath (get config-files file-key)
-        {:keys [path keys]} (get persistent-state-mapping file-key)]
-    (when (and filepath path)
-      (if-let [data (ser/load-from-file filepath)]
-        (do
-          (let [data-to-merge (if keys (select-keys data keys) data)]
-            (state/swap-state! (fn [state]
-                                 (update-in state path merge data-to-merge))))
-          true)
-        false))))
+        {:keys [paths]} (get persistent-state-mapping file-key)]
+    (when (and filepath paths)
+      (load-and-merge-paths! filepath paths))))
 
 (defn load-from-disk!
   "Load all persistent state from disk. Called once at app startup.
@@ -95,17 +112,39 @@
 ;; Save Functions
 
 
+(defn- collect-data-for-paths
+  "Collect data from state for multiple paths into a single map.
+   
+   Parameters:
+   - path-specs: Vector of {:path [:domain :field] :keys nil-or-vector}
+   
+   Returns: Map with data organized by top-level domain keys"
+  [path-specs]
+  (reduce
+    (fn [acc {:keys [path keys]}]
+      (if path
+        (let [domain-key (first path)
+              domain-data (state/get-in-state path)
+              data (if keys
+                     (select-keys domain-data keys)
+                     domain-data)]
+          (if (= 1 (count path))
+            ;; Top-level domain - merge directly
+            (assoc acc domain-key data)
+            ;; Nested path - need to preserve structure
+            (assoc-in acc path data)))
+        acc))
+    {}
+    path-specs))
+
 (defn save-single!
   "Save a single config file from state.
    Returns true if saved successfully, false otherwise."
   [file-key]
   (let [filepath (get config-files file-key)
-        {:keys [path keys]} (get persistent-state-mapping file-key)]
-    (when (and filepath path)
-      (let [domain-data (state/get-in-state path)
-            data (if keys
-                   (select-keys domain-data keys)
-                   domain-data)]
+        {:keys [paths]} (get persistent-state-mapping file-key)]
+    (when (and filepath paths)
+      (let [data (collect-data-for-paths paths)]
         (ser/save-to-file! filepath data)))))
 
 (defn save-to-disk!
@@ -113,7 +152,6 @@
   []
   (doseq [file-key (keys persistent-state-mapping)]
     (save-single! file-key)))
-
 
 
 ;; Project-Based Persistence Functions
@@ -129,17 +167,11 @@
    
    Example:
    (get-project-file-paths \"/path/to/project\")
-   => {:settings \"/path/to/project/settings.edn\", ...}"
+   => {:project-metadata \"/path/to/project/project-metadata.edn\", ...}"
   [project-folder]
-  {:settings     (str project-folder "/settings.edn")
-   :grid         (str project-folder "/grid.edn")
-   :projectors   (str project-folder "/projectors.edn")
-   :zones        (str project-folder "/zones.edn")
-   :zone-groups  (str project-folder "/zone-groups.edn")
-   :cues         (str project-folder "/cues.edn")
-   :cue-lists    (str project-folder "/cue-lists.edn")
-   :effects      (str project-folder "/effects.edn")
-   :effects-grid (str project-folder "/effects-grid.edn")})
+  {:project-metadata (str project-folder "/project-metadata.edn")
+   :hardware        (str project-folder "/hardware.edn")
+   :content         (str project-folder "/content.edn")})
 
 (defn save-project!
   "Save all state to specified project folder.
@@ -158,12 +190,8 @@
     (let [file-paths (get-project-file-paths project-folder)]
       ;; Save each file
       (doseq [[file-key filepath] file-paths]
-        (when-let [mapping (get persistent-state-mapping file-key)]
-          (let [{:keys [path keys]} mapping
-                domain-data (state/get-in-state path)
-                data (if keys
-                       (select-keys domain-data keys)
-                       domain-data)]
+        (when-let [{:keys [paths]} (get persistent-state-mapping file-key)]
+          (let [data (collect-data-for-paths paths)]
             (ser/save-to-file! filepath data))))
       
       ;; Update project state
@@ -195,12 +223,8 @@
         (let [file-paths (get-project-file-paths project-folder)]
           ;; Load each file
           (doseq [[file-key filepath] file-paths]
-            (when-let [mapping (get persistent-state-mapping file-key)]
-              (let [{:keys [path keys]} mapping]
-                (when-let [data (ser/load-from-file filepath :if-not-found nil)]
-                  (let [data-to-merge (if keys (select-keys data keys) data)]
-                    (state/swap-state! (fn [state]
-                                         (update-in state path merge data-to-merge))))))))
+            (when-let [{:keys [paths]} (get persistent-state-mapping file-key)]
+              (load-and-merge-paths! filepath paths)))
           
           ;; Update project state
           (state/assoc-in-state! [:project :current-folder] project-folder)

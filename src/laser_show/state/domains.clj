@@ -272,22 +272,6 @@
    :selected-group {:default nil
                     :doc "Currently selected zone group ID for editing"}})
 
-(defstate cues
-  "Cue definitions."
-  {:items {:default {}
-           :doc "map of cue-id -> {:name :preset-id :animation ...}"}})
-
-(defstate cue-lists
-  "Cue list definitions."
-  {:items {:default {}
-           :doc "map of list-id -> {:name :cues [...]}"}})
-
-(defstate effect-registry
-  "Effect type registry."
-  {:items {:default {}
-           :doc "map of effect-id -> effect-definition"}})
-
-
 ;; Unified Chain Storage Domain
 
 

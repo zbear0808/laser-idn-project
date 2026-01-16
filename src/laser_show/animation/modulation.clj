@@ -38,12 +38,19 @@
    - midi-state: Map of {[channel cc] -> value} (optional)
    - osc-state: Map of {path -> value} (optional)
    
+   Per-Point Parameters (for position-based modulators):
+   - x: Normalized x coordinate (-1.0 to 1.0)
+   - y: Normalized y coordinate (-1.0 to 1.0)
+   - point-index: Index of current point in frame
+   - point-count: Total number of points in frame
+   
    Beat Accumulation Parameters (for smooth BPM-change animation):
    - accumulated-beats: Running total of beats since cue trigger (incremental)
    - accumulated-ms: Running total of ms since cue trigger (incremental)
    - phase-offset: Current smoothed phase correction offset
    - effective-beats: accumulated-beats + phase-offset (use for looping modulators)"
   [{:keys [time-ms bpm trigger-time midi-state osc-state
+           x y point-index point-count
            accumulated-beats accumulated-ms phase-offset]
     :or {midi-state {} osc-state {}
          accumulated-beats 0.0 accumulated-ms 0.0 phase-offset 0.0}}]
@@ -52,6 +59,11 @@
    :trigger-time trigger-time
    :midi-state midi-state
    :osc-state osc-state
+   ;; Per-point fields for position-based modulators
+   :x x
+   :y y
+   :point-index point-index
+   :point-count point-count
    ;; Beat accumulation fields
    :accumulated-beats (or accumulated-beats 0.0)
    :accumulated-ms (or accumulated-ms 0.0)
@@ -664,4 +676,3 @@
    Returns the config map or nil if not found."
   [preset-key]
   (get presets preset-key))
-

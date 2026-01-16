@@ -284,15 +284,28 @@
 
 
 (defn- set-color-xf [time-ms bpm params ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        ;; Convert 0-255 params to normalized 0.0-1.0
-        red (/ (:red resolved) 255.0)
-        green (/ (:green resolved) 255.0)
-        blue (/ (:blue resolved) 255.0)]
-    (map (fn [pt]
+  ;; Check if any params use per-point modulators
+  (if (mod/any-param-requires-per-point? params)
+    ;; Per-point path - enables position-based color gradients
+    (map (fn [{:keys [x y idx count] :as pt}]
            (if (common/blanked? pt)
              pt  ;; Skip blanked points
-             (assoc pt :r red :g green :b blue))))))
+             (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
+                   ;; Convert 0-255 params to normalized 0.0-1.0
+                   red (/ (:red resolved) 255.0)
+                   green (/ (:green resolved) 255.0)
+                   blue (/ (:blue resolved) 255.0)]
+               (assoc pt :r red :g green :b blue)))))
+    ;; Global path
+    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
+          ;; Convert 0-255 params to normalized 0.0-1.0
+          red (/ (:red resolved) 255.0)
+          green (/ (:green resolved) 255.0)
+          blue (/ (:blue resolved) 255.0)]
+      (map (fn [pt]
+             (if (common/blanked? pt)
+               pt  ;; Skip blanked points
+               (assoc pt :r red :g green :b blue)))))))
 
 (effects/register-effect!
  {:id :set-color
