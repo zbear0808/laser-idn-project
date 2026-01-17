@@ -33,9 +33,9 @@
   "Hierarchical list styles."
   (css/register ::list
     (let [;; Use semantic colors from theme
-          {:keys [bg-surface bg-elevated bg-interactive bg-hover bg-active
+          {:keys [bg-primary bg-surface bg-elevated bg-interactive bg-hover bg-active
                   text-primary text-muted text-secondary
-                  selection-bg border-subtle]} theme/semantic-colors
+                  selection-bg border-subtle border-default]} theme/semantic-colors
           {:keys [selection-hover drop-target-bg drop-target-border
                   drop-target-glow]} theme/computed-colors
           {:keys [blue-600 gray-500]} theme/base-colors
@@ -53,14 +53,13 @@
        ;; ============================================
        
        ".chain-sidebar"
-       {:-fx-background-color bg-surface
+       {:-fx-background-color bg-primary
         :-fx-padding 8
         :-fx-spacing 8
         :-fx-min-width 180
         :-fx-pref-width 220
-        :-fx-border-color border-subtle
-        :-fx-border-width 1
-        :-fx-border-radius 4}
+        :-fx-border-color border-default
+        :-fx-border-width ["0px" "1px" "0px" "0px"]}
        
        
        ;; ============================================
@@ -221,7 +220,7 @@
         {:-fx-text-fill depth-3}}
        
        ".group-name-input"
-       {:-fx-background-color bg-surface
+       {:-fx-background-color bg-primary
         :-fx-text-fill text-primary
         :-fx-font-size 12
         :-fx-font-weight "bold"
@@ -324,7 +323,7 @@
        
        ".chain-scroll-pane"
        {:-fx-background-color "transparent"
-        :-fx-background bg-surface
+        :-fx-background bg-primary
         
         " > .viewport"
         {:-fx-background-color "transparent"}}})))

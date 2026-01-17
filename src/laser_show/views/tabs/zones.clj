@@ -87,6 +87,7 @@
     {:fx/type :v-box
      :spacing 8
      :pref-width 220
+     :style (str "-fx-border-color: " (css/border-default) "; -fx-border-width: 0 1px 0 0;")
      :children [{:fx/type :h-box
                  :alignment :center-left
                  :children [{:fx/type :label
@@ -187,6 +188,7 @@
         projectors-data (fx/sub-val context :projectors)]
     {:fx/type :v-box
      :spacing 8
+     :style (str "-fx-border-color: " (css/border-default) "; -fx-border-width: 0 1px 0 0;")
      :children [{:fx/type :label
                  :text "ZONES"
                  :style-class ["header-section"]}

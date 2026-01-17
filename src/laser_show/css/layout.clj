@@ -35,7 +35,7 @@
         :-fx-background-radius 4}
        
        ".panel-surface"
-       {:-fx-background-color bg-surface
+       {:-fx-background-color bg-primary
         :-fx-border-color border-subtle
         :-fx-border-width 1
         :-fx-border-radius 4
@@ -77,9 +77,9 @@
        ".container-primary"
        {:-fx-background-color bg-primary}
        
-       ;; Surface container (panel background)
+       ;; Surface container (panel background) - now uses primary for consistency
        ".container-surface"
-       {:-fx-background-color bg-surface}
+       {:-fx-background-color bg-primary}
        
        ;; Elevated container (cards, dialogs)
        ".container-elevated"
@@ -91,8 +91,8 @@
        
        ;; Dark scroll pane (for content areas)
        ".scroll-pane-dark"
-       {:-fx-background-color bg-surface
-        :-fx-background bg-surface
+       {:-fx-background-color bg-primary
+        :-fx-background bg-primary
         
         " > .viewport"
-        {:-fx-background-color bg-surface}}})))
+        {:-fx-background-color bg-primary}}})))

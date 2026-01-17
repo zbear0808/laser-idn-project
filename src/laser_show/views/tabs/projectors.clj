@@ -173,6 +173,7 @@
     {:fx/type :v-box
      :spacing 8
      :pref-width 300
+     :style (str "-fx-border-color: " (css/border-default) "; -fx-border-width: 0 1px 0 0;")
      :children [{:fx/type :label
                  :text "DISCOVER DEVICES"
                  :style-class ["header-section"]}
@@ -261,6 +262,7 @@
     {:fx/type :v-box
      :spacing 8
      :pref-width 280
+     :style (str "-fx-border-color: " (css/border-default) "; -fx-border-width: 0 1px 0 0;")
      :children [{:fx/type :label
                  :text "CONFIGURED PROJECTORS"
                  :style-class ["header-section"]}
@@ -580,11 +582,11 @@
                    :v-box/vgrow :always
                    :fit-to-width true
                    :fit-to-height true
-                   :style "-fx-background-color: #2D2D2D; -fx-background: #2D2D2D;"
+                   :style (str "-fx-background-color: " (css/bg-primary) "; -fx-background: " (css/bg-primary) ";")
                    :content {:fx/type :h-box
                              :spacing 16
                              :padding 16
-                             :style "-fx-background-color: #2D2D2D;"
+                             :style (str "-fx-background-color: " (css/bg-primary) ";")
                              :children [;; Left: Effect chain sidebar
                                         {:fx/type :v-box
                                          :spacing 8
@@ -629,11 +631,11 @@
                    :v-box/vgrow :always
                    :fit-to-width true
                    :fit-to-height true
-                   :style "-fx-background-color: #2D2D2D; -fx-background: #2D2D2D;"
+                   :style (str "-fx-background-color: " (css/bg-primary) "; -fx-background: " (css/bg-primary) ";")
                    :content {:fx/type :v-box
                              :spacing 16
                              :padding 16
-                             :style "-fx-background-color: #2D2D2D; -fx-background-radius: 4;"
+                             :style (str "-fx-background-color: " (css/bg-primary) "; -fx-background-radius: 4;")
                              :children [{:fx/type :label
                                          :text "Select a projector to configure"
                                          :style "-fx-text-fill: #606060; -fx-font-style: italic;"}]}}]})))

@@ -40,7 +40,7 @@
        ;; ============================================
        
        ".dialog-content"
-       {:-fx-background-color bg-surface
+       {:-fx-background-color bg-primary
         :-fx-spacing 0}
        
        ".dialog-footer"
@@ -308,7 +308,7 @@
         :-fx-pref-width 160}
        
        ".preset-param-text"
-       {:-fx-background-color bg-surface
+       {:-fx-background-color bg-primary
         :-fx-text-fill text-primary
         :-fx-font-size 10
         :-fx-padding ["2px" "4px"]
@@ -408,7 +408,7 @@
        
        ".cue-chain-scroll-pane"
        {:-fx-background-color "transparent"
-        :-fx-background bg-surface
+        :-fx-background bg-primary
         
         " > .viewport"
         {:-fx-background-color "transparent"}}
