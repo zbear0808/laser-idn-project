@@ -15,7 +15,19 @@
   (css/register ::forms
     (let [{:keys [bg-interactive text-primary text-secondary]} theme/semantic-colors]
       
-      {;; Small text field (used in dialogs and parameter editors)
+      {;; Standard text field styling (dark background, white text)
+       ".text-field"
+       {:-fx-background-color bg-interactive
+        :-fx-text-fill text-primary
+        :-fx-background-radius 3}
+       
+       ;; Dark text field variant (used in config panels)
+       ".text-field-dark"
+       {:-fx-background-color bg-interactive
+        :-fx-text-fill text-primary
+        :-fx-background-radius 3}
+       
+       ;; Small text field (used in dialogs and parameter editors)
        ".text-field-dark-sm"
        {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary

@@ -51,7 +51,7 @@
    :spacing 8
    :children [{:fx/type :label
                :text "Color"
-               :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
+               :style-class ["label-secondary"]}
               {:fx/type :flow-pane
                :hgap 6
                :vgap 6
@@ -67,11 +67,12 @@
                :alignment :center-left
                :children [{:fx/type :label
                            :text "Hex:"
-                           :style "-fx-text-fill: #808080;"}
+                           :style-class ["label-hint"]
+                           :style "-fx-font-style: normal;"}
                           {:fx/type :text-field
                            :text (or selected-color "#808080")
                            :pref-width 90
-                           :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-family: monospace;"
+                           :style-class ["text-field" "text-monospace"]
                            :on-text-changed {:event/type :ui/update-dialog-data
                                              :dialog-id dialog-id
                                              :updates {:color :fx/event}}}

@@ -137,38 +137,36 @@
                    :alignment :center-left
                    :padding {:bottom 8}
                    :children (filterv some?
-                              [{:fx/type :label
-                               :text "Edit Mode:"
-                               :style "-fx-text-fill: #808080; -fx-font-size: 10;"}
-                              ;; Visual mode button - conditionally add :on-action only when valid
-                              (cond-> {:fx/type :button
-                                       :text "👁 Visual"
-                                       :disable has-modulators?
-                                       :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
-                                                  (cond
-                                                    has-modulators?
-                                                    "-fx-background-color: #353535; -fx-text-fill: #606060; -fx-cursor: not-allowed;"
-                                                    (= actual-mode :visual)
-                                                    "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
-                                                    :else
-                                                    "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))}
-                                ;; Only add :on-action when we have a valid event and modulators aren't blocking
-                                (and (not has-modulators?) on-mode-change-event)
-                                (assoc :on-action (assoc on-mode-change-event :mode :visual)))
-                              ;; Numeric mode button - conditionally add :on-action only when valid
-                              (cond-> {:fx/type :button
-                                       :text "🔢 Numeric"
-                                       :style (str "-fx-font-size: 9; -fx-padding: 3 10; "
-                                                  (if (= actual-mode :numeric)
-                                                    "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
-                                                    "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))}
-                                on-mode-change-event
-                                (assoc :on-action (assoc on-mode-change-event :mode :numeric)))
-                              ;; Show tooltip when modulators are blocking visual mode
-                              (when has-modulators?
-                                {:fx/type :label
-                                 :text "(modulators active)"
-                                 :style "-fx-text-fill: #707070; -fx-font-size: 9; -fx-font-style: italic;"})])}
+                               [{:fx/type :label
+                                :text "Edit Mode:"
+                                :style-class ["label-hint"]
+                                :style "-fx-font-size: 10; -fx-font-style: normal;"}
+                               ;; Visual mode button - conditionally add :on-action only when valid
+                               (cond-> {:fx/type :button
+                                        :text "👁 Visual"
+                                        :disable has-modulators?
+                                        :style-class [(cond
+                                                        has-modulators? "chip"
+                                                        (= actual-mode :visual) "chip-selected"
+                                                        :else "chip")]
+                                        :style (str "-fx-font-size: 9; -fx-padding: 3 10;"
+                                                   (when has-modulators? " -fx-cursor: not-allowed;"))}
+                                 ;; Only add :on-action when we have a valid event and modulators aren't blocking
+                                 (and (not has-modulators?) on-mode-change-event)
+                                 (assoc :on-action (assoc on-mode-change-event :mode :visual)))
+                               ;; Numeric mode button - conditionally add :on-action only when valid
+                               (cond-> {:fx/type :button
+                                        :text "🔢 Numeric"
+                                        :style-class [(if (= actual-mode :numeric) "chip-selected" "chip")]
+                                        :style "-fx-font-size: 9; -fx-padding: 3 10;"}
+                                 on-mode-change-event
+                                 (assoc :on-action (assoc on-mode-change-event :mode :numeric)))
+                               ;; Show tooltip when modulators are blocking visual mode
+                               (when has-modulators?
+                                 {:fx/type :label
+                                  :text "(modulators active)"
+                                  :style-class ["label-hint"]
+                                  :style "-fx-font-size: 9;"})])}
                   
                   ;; Render based on mode
                   (if (= actual-mode :visual)

@@ -65,7 +65,7 @@
      :children [{:fx/type :label
                  :text display-label
                  :pref-width label-w
-                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
+                 :style-class ["label-secondary"]}
                 {:fx/type :slider
                  :min min
                  :max max
@@ -79,7 +79,8 @@
                          (str (int value))
                          (format "%.2f" (double value)))
                  :pref-width 55
-                 :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 11; -fx-padding: 2 4;"
+                 :style-class ["text-field"]
+                 :style "-fx-font-size: 11; -fx-padding: 2 4;"
                  :on-action (assoc on-text-event
                                    :param-key param-key
                                    :min min
@@ -106,7 +107,7 @@
      :children [{:fx/type :label
                  :text display-label
                  :pref-width label-w
-                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
+                 :style-class ["label-secondary"]}
                 {:fx/type :combo-box
                  :items (vec (or choices []))
                  :value value
@@ -134,7 +135,7 @@
      :children [{:fx/type :check-box
                  :text display-label
                  :selected value
-                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"
+                 :style-class ["label-secondary"]
                  :on-selected-changed (assoc on-change-event :param-key param-key)}]}))
 
 (defn param-color-picker
@@ -167,7 +168,7 @@
      :children [{:fx/type :label
                  :text display-label
                  :pref-width label-w
-                 :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
+                 :style-class ["label-secondary"]}
                 {:fx/type :color-picker
                  :value color-value
                  :pref-width 100

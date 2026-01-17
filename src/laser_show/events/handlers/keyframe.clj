@@ -339,8 +339,6 @@
       state)))
 
 
-;; Main Event Handler
-
 
 (defn handle
   "Handle keyframe modulator events.

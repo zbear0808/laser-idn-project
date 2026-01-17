@@ -19,14 +19,14 @@
     {:fx/type :v-box
      :spacing 16
      :padding 20
-     :style "-fx-background-color: #2D2D2D;"
+     :style-class ["container-primary"]
      :pref-width 380
      :children [{:fx/type :label
                  :text "Add Projector Manually"
-                 :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}
+                 :style-class ["header-primary"]}
                 {:fx/type :label
                  :text "Enter the connection details for your IDN laser projector."
-                 :style "-fx-text-fill: #808080; -fx-font-size: 11;"}
+                 :style-class ["label-secondary"]}
                 {:fx/type :v-box
                  :spacing 12
                  :children [{:fx/type :h-box
@@ -35,12 +35,12 @@
                              :children [{:fx/type :label
                                          :text "Name:"
                                          :pref-width 50
-                                         :style "-fx-text-fill: #B0B0B0;"}
+                                         :style-class ["label-secondary"]}
                                         {:fx/type :text-field
                                          :text name-value
                                          :prompt-text "My Projector"
                                          :pref-width 280
-                                         :style "-fx-background-color: #404040; -fx-text-fill: white;"
+                                         :style-class ["text-field"]
                                          :on-text-changed {:event/type :ui/update-dialog-data
                                                            :dialog-id :add-projector-manual
                                                            :updates {:name :fx/event}}}]}
@@ -50,23 +50,23 @@
                              :children [{:fx/type :label
                                          :text "Host:"
                                          :pref-width 50
-                                         :style "-fx-text-fill: #B0B0B0;"}
+                                         :style-class ["label-secondary"]}
                                         {:fx/type :text-field
                                          :text host-value
                                          :prompt-text "192.168.1.100"
                                          :pref-width 180
-                                         :style "-fx-background-color: #404040; -fx-text-fill: white;"
+                                         :style-class ["text-field"]
                                          :on-text-changed {:event/type :ui/update-dialog-data
                                                            :dialog-id :add-projector-manual
                                                            :updates {:host :fx/event}}}
                                         {:fx/type :label
                                          :text "Port:"
-                                         :style "-fx-text-fill: #B0B0B0;"}
+                                         :style-class ["label-secondary"]}
                                         {:fx/type :text-field
                                          :text port-value
                                          :prompt-text "7255"
                                          :pref-width 60
-                                         :style "-fx-background-color: #404040; -fx-text-fill: white;"
+                                         :style-class ["text-field"]
                                          :on-text-changed {:event/type :ui/update-dialog-data
                                                            :dialog-id :add-projector-manual
                                                            :updates {:port :fx/event}}}]}]}
@@ -75,12 +75,12 @@
                  :alignment :center-right
                  :children [{:fx/type :button
                              :text "Cancel"
-                             :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-padding: 8 20;"
+                             :style-class ["button-secondary"]
                              :on-action {:event/type :ui/close-dialog
                                          :dialog-id :add-projector-manual}}
                             {:fx/type :button
                              :text "Add Projector"
-                             :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-padding: 8 20;"
+                             :style-class ["button-primary"]
                              :disable (str/blank? host-value)
                              :on-action {:event/type :projectors/add-manual
                                          :name (if (str/blank? name-value) host-value name-value)

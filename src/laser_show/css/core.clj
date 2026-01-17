@@ -15,6 +15,8 @@
    (css/status-color :online) => \"#4CAF50\""
   (:require [cljfx.css :as css]
             [laser-show.css.theme :as theme]
+            [laser-show.css.typography :as typography]
+            [laser-show.css.components :as components]
             [laser-show.css.buttons :as buttons]
             [laser-show.css.forms :as forms]
             [laser-show.css.grid-cells :as grid-cells]
@@ -38,6 +40,8 @@
     :root {...}}"
   []
   [(::css/url theme/theme)
+   (::css/url typography/typography)
+   (::css/url components/components)
    (::css/url buttons/buttons)
    (::css/url forms/forms)
    (::css/url grid-cells/grid-cells)
@@ -48,8 +52,8 @@
 
 (defn dialog-stylesheet-urls
   "Returns stylesheet URLs appropriate for dialogs.
-   Includes theme, buttons, forms, grid-cells, layout, menus,
-   cue-chain-editor, and list.
+   Includes theme, typography, components, buttons, forms, grid-cells,
+   layout, menus, cue-chain-editor, and list.
    
    Example:
    {:fx/type :scene
@@ -57,6 +61,8 @@
     :root {...}}"
   []
   [(::css/url theme/theme)
+   (::css/url typography/typography)
+   (::css/url components/components)
    (::css/url buttons/buttons)
    (::css/url forms/forms)
    (::css/url grid-cells/grid-cells)

@@ -15,7 +15,8 @@
 
 
 (defn- zone-type-badge
-  "Badge showing zone type with appropriate color."
+  "Badge showing zone type with appropriate color.
+   Uses .badge CSS class for base styles with dynamic background color."
   [{:keys [type]}]
   (let [color (case type
                 :default "#4A6FA5"
@@ -29,28 +30,22 @@
                 "Unknown")]
     {:fx/type :label
      :text label
-     :style (str "-fx-background-color: " color "; "
-                "-fx-text-fill: white; "
-                "-fx-padding: 2 6; "
-                "-fx-background-radius: 3; "
-                "-fx-font-size: 9;")}))
+     :style-class ["badge"]
+     :style (str "-fx-background-color: " color ";")}))
 
 
 ;; Zone Group Chip
 
 
 (defn- zone-group-chip
-  "Small colored chip for a zone group."
+  "Small colored chip for a zone group.
+   Uses .chip or .chip-selected CSS classes with dynamic color."
   [{:keys [group selected? on-click]}]
   (let [{:keys [name color]} group]
     {:fx/type :label
      :text name
-     :style (str "-fx-background-color: " (if selected? color (str color "80")) "; "
-                "-fx-text-fill: white; "
-                "-fx-padding: 2 6; "
-                "-fx-background-radius: 8; "
-                "-fx-font-size: 10;"
-                (when on-click " -fx-cursor: hand;"))
+     :style-class [(if selected? "chip-selected" "chip")]
+     :style (str "-fx-background-color: " (if selected? color (str color "80")) ";")
      :on-mouse-clicked on-click}))
 
 
@@ -58,15 +53,15 @@
 
 
 (defn- zone-group-item
-  "Single zone group in the list."
+  "Single zone group in the list.
+   Uses .list-item/.list-item-selected CSS classes with dynamic selection state."
   [{:keys [group selected? zone-count]}]
   (let [{:keys [id name description color]} group]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
      :padding 8
-     :style (str "-fx-background-color: " (if selected? "#4A6FA5" "#3D3D3D") "; "
-                "-fx-background-radius: 4;")
+     :style-class [(if selected? "list-item-selected" "list-item")]
      :on-mouse-clicked {:event/type :zone-groups/select
                         :group-id id}
      :children [{:fx/type :circle
@@ -76,13 +71,13 @@
                  :h-box/hgrow :always
                  :children [{:fx/type :label
                              :text name
-                             :style "-fx-text-fill: white; -fx-font-weight: bold;"}
+                             :style-class ["label-bold"]}
                             {:fx/type :label
                              :text (or description "")
-                             :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]}
+                             :style-class ["text-description"]}]}
                 {:fx/type :label
                  :text (str zone-count)
-                 :style "-fx-text-fill: #606060; -fx-font-size: 11;"}]}))
+                 :style-class ["text-count"]}]}))
 
 (defn- zone-groups-panel
   "Panel listing all zone groups."
@@ -96,16 +91,16 @@
                  :alignment :center-left
                  :children [{:fx/type :label
                              :text "ZONE GROUPS"
-                             :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                             :style-class ["header-section"]}
                             {:fx/type :region :h-box/hgrow :always}
                             {:fx/type :button
                              :text "+"
-                             :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 12; -fx-padding: 2 8;"
+                             :style-class ["button-add"]
                              :on-action {:event/type :zone-groups/add}}]}
                 {:fx/type :scroll-pane
                  :fit-to-width true
                  :v-box/vgrow :always
-                 :style "-fx-background-color: #2D2D2D; -fx-background: #2D2D2D;"
+                 :style-class ["scroll-pane-dark"]
                  :content {:fx/type :v-box
                            :spacing 4
                            :padding 4
@@ -119,23 +114,26 @@
                                                  :zone-count (:zone-count usage 0)})))
                                        [{:fx/type :label
                                          :text "No zone groups defined"
-                                         :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-padding: 16;"}])}}]}))
+                                         :style-class ["label-hint"]
+                                         :style "-fx-padding: 16;"}])}}]}))
 
 
 ;; Zones Panel (Center)
 
 
 (defn- zone-item
-  "Single zone in the list."
+  "Single zone in the list.
+   Uses .list-item/.list-item-selected/.list-item-disabled CSS classes."
   [{:keys [zone selected?]}]
   (let [{:keys [id name type enabled? zone-groups]} zone]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
      :padding 8
-     :style (str "-fx-background-color: " (if selected? "#4A6FA5" "#3D3D3D") "; "
-                "-fx-background-radius: 4;"
-                (when-not enabled? " -fx-opacity: 0.5;"))
+     :style-class [(cond
+                     (not enabled?) "list-item-disabled"
+                     selected? "list-item-selected"
+                     :else "list-item")]
      :on-mouse-clicked {:event/type :zones/select-zone
                         :zone-id id}
      :children [{:fx/type :check-box
@@ -150,7 +148,7 @@
                              :alignment :center-left
                              :children [{:fx/type :label
                                          :text name
-                                         :style "-fx-text-fill: white; -fx-font-weight: bold;"}
+                                         :style-class ["label-bold"]}
                                         {:fx/type zone-type-badge
                                          :type type}]}
                             {:fx/type :h-box
@@ -159,7 +157,7 @@
                                               {:fx/type :label
                                                :fx/key gid
                                                :text (clojure.core/name gid)
-                                               :style "-fx-text-fill: #808080; -fx-font-size: 9;"}))}]}]}))
+                                               :style-class ["text-tiny" "text-muted"]}))}]}]}))
 
 (defn- projector-zone-section
   "Section showing zones for a single projector.
@@ -169,7 +167,8 @@
    :spacing 4
    :children [{:fx/type :label
                :text (str "📽 " projector-name)
-               :style "-fx-text-fill: #B0B0B0; -fx-font-weight: bold; -fx-font-size: 11;"}
+               :style-class ["label-secondary"]
+               :style "-fx-font-weight: bold;"}
               {:fx/type :v-box
                :spacing 2
                :padding {:left 12}
@@ -190,11 +189,11 @@
      :spacing 8
      :children [{:fx/type :label
                  :text "ZONES"
-                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                 :style-class ["header-section"]}
                 {:fx/type :scroll-pane
                  :fit-to-width true
                  :v-box/vgrow :always
-                 :style "-fx-background-color: #2D2D2D; -fx-background: #2D2D2D;"
+                 :style-class ["scroll-pane-dark"]
                  :content {:fx/type :v-box
                            :spacing 12
                            :padding 8
@@ -208,7 +207,8 @@
                                                :selected-zone-id selected-zone-id}))
                                        [{:fx/type :label
                                          :text "No zones configured.\nAdd projectors to create zones."
-                                         :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-padding: 16;"}])}}]}))
+                                         :style-class ["label-hint"]
+                                         :style "-fx-padding: 16;"}])}}]}))
 
 
 ;; Usage/Details Panel (Right)
@@ -224,7 +224,7 @@
        :spacing 12
        :children [{:fx/type :label
                    :text (str "Zone: " (:name zone))
-                   :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
+                   :style-class ["header-primary"]}
                   {:fx/type :separator}
                   ;; Zone info
                   {:fx/type :v-box
@@ -233,23 +233,25 @@
                                :spacing 8
                                :children [{:fx/type :label
                                            :text "Type:"
-                                           :style "-fx-text-fill: #808080;"}
+                                           :style-class ["text-muted"]}
                                           {:fx/type zone-type-badge
                                            :type (:type zone)}]}
                               {:fx/type :h-box
                                :spacing 8
                                :children [{:fx/type :label
                                            :text "Enabled:"
-                                           :style "-fx-text-fill: #808080;"}
+                                           :style-class ["text-muted"]}
                                           {:fx/type :label
                                            :text (if (:enabled? zone) "Yes" "No")
+                                           ;; Dynamic color based on state - must remain inline
                                            :style (str "-fx-text-fill: "
                                                       (if (:enabled? zone) "#4CAF50" "#F44336") ";")}]}]}
                   {:fx/type :separator}
                   ;; Zone group membership
                   {:fx/type :label
                    :text "ZONE GROUPS"
-                   :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-weight: bold;"}
+                   :style-class ["header-section"]
+                   :style "-fx-font-size: 10;"}
                   {:fx/type :flow-pane
                    :hgap 4
                    :vgap 4
@@ -266,14 +268,15 @@
                   ;; Edit effects button
                   {:fx/type :button
                    :text "Edit Zone Effects..."
-                   :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-padding: 8 16;"
+                   :style-class ["button-secondary"]
+                   :style "-fx-padding: 8 16;"
                    :on-action {:event/type :zones/edit-effects
                                :zone-id (:id zone)}}]}
       ;; No zone selected
       {:fx/type :v-box
        :children [{:fx/type :label
                    :text "Select a zone to view details"
-                   :style "-fx-text-fill: #606060; -fx-font-style: italic;"}]})))
+                   :style-class ["label-hint"]}]})))
 
 (defn- zone-group-details-panel
   "Details panel for the selected zone group."
@@ -291,25 +294,26 @@
                                :fill (:color group)}
                               {:fx/type :label
                                :text (:name group)
-                               :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}]}
+                               :style-class ["header-primary"]}]}
                   {:fx/type :label
                    :text (or (:description group) "No description")
-                   :style "-fx-text-fill: #808080; -fx-font-style: italic;"}
+                   :style-class ["label-hint"]}
                   {:fx/type :separator}
                   ;; Usage stats
                   {:fx/type :v-box
                    :spacing 4
                    :children [{:fx/type :label
                                :text (str "Zones in group: " (:zone-count usage 0))
-                               :style "-fx-text-fill: #B0B0B0;"}
+                               :style-class ["label-secondary"]}
                               {:fx/type :label
                                :text (str "Cues targeting: " (:cue-count usage 0))
-                               :style "-fx-text-fill: #B0B0B0;"}]}
+                               :style-class ["label-secondary"]}]}
                   {:fx/type :separator}
                   ;; Zones in this group
                   {:fx/type :label
                    :text "ZONES IN THIS GROUP"
-                   :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-weight: bold;"}
+                   :style-class ["header-section"]
+                   :style "-fx-font-size: 10;"}
                   {:fx/type :v-box
                    :spacing 2
                    :children (if (seq (:zones usage))
@@ -317,29 +321,29 @@
                                       {:fx/type :label
                                        :fx/key (:id zone)
                                        :text (str "• " (:name zone))
-                                       :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}))
+                                       :style-class ["label-secondary"]}))
                                [{:fx/type :label
                                  :text "No zones in this group"
-                                 :style "-fx-text-fill: #606060; -fx-font-style: italic;"}])}
+                                 :style-class ["label-hint"]}])}
                   {:fx/type :region :v-box/vgrow :always}
                   ;; Edit/Delete buttons
                   {:fx/type :h-box
                    :spacing 8
                    :children [{:fx/type :button
                                :text "Edit..."
-                               :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-padding: 6 12;"
+                               :style-class ["button-secondary"]
                                :on-action {:event/type :zone-groups/edit
                                            :group-id (:id group)}}
                               {:fx/type :button
                                :text "Delete"
-                               :style "-fx-background-color: #663333; -fx-text-fill: white; -fx-padding: 6 12;"
+                               :style-class ["button-danger"]
                                :on-action {:event/type :zone-groups/remove
                                            :group-id (:id group)}}]}]}
       ;; No group selected
       {:fx/type :v-box
        :children [{:fx/type :label
                    :text "Select a zone group to view details"
-                   :style "-fx-text-fill: #606060; -fx-font-style: italic;"}]})))
+                   :style-class ["label-hint"]}]})))
 
 (defn- details-panel
   "Right panel showing details of selected zone or zone group.
@@ -353,11 +357,11 @@
      :pref-width 260
      :children [{:fx/type :label
                  :text "DETAILS"
-                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                 :style-class ["header-section"]}
                 {:fx/type :scroll-pane
                  :fit-to-width true
                  :v-box/vgrow :always
-                 :style "-fx-background-color: #2D2D2D; -fx-background: #2D2D2D;"
+                 :style-class ["scroll-pane-dark"]
                  :content {:fx/type :v-box
                            :padding 12
                            :children [(cond
@@ -371,7 +375,7 @@
                                         :else
                                         {:fx/type :label
                                          :text "Select a zone or zone group\nto view details"
-                                         :style "-fx-text-fill: #606060; -fx-font-style: italic;"})]}}]}))
+                                         :style-class ["label-hint"]})]}}]}))
 
 
 ;; Main Tab
@@ -381,15 +385,15 @@
   "Complete zones tab with zone groups, zones, and details panels."
   [{:keys [fx/context]}]
   {:fx/type :v-box
-   :style (str "-fx-background-color: " (css/bg-primary) ";")
+   :style-class ["container-primary"]
    :padding 16
    :spacing 8
    :children [{:fx/type :label
                :text "Zone Configuration"
-               :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}
+               :style-class ["header-primary"]}
               {:fx/type :label
                :text "Manage zone groups • Configure zone geometry • Assign zones to groups"
-               :style "-fx-text-fill: #808080; -fx-font-size: 11;"}
+               :style-class ["label-secondary"]}
               {:fx/type :h-box
                :spacing 16
                :v-box/vgrow :always

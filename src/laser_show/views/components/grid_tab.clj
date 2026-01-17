@@ -75,7 +75,7 @@
                     :text (str (inc col))
                     :pref-width 80
                     :alignment :center
-                    :style "-fx-text-fill: #808080; -fx-font-size: 11;"}))}))
+                    :style-class ["label-secondary"]}))}))
 
 
 ;; Grid with Row Labels
@@ -99,7 +99,7 @@
                                 :pref-width 24
                                 :pref-height 60
                                 :alignment :center
-                                :style "-fx-text-fill: #808080; -fx-font-size: 11;"}))}
+                                :style-class ["label-secondary"]}))}
                 {:fx/type grid
                  :cell-component cell-component}]}))
 

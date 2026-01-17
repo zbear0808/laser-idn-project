@@ -294,7 +294,10 @@
        
        ".root"
        {:-fx-base bg-primary
-        :-fx-background bg-primary}
+        :-fx-background bg-primary
+        ;; Set default text color for dark theme (prevents black text on labels)
+        :-fx-text-background-color text-primary
+        :-fx-text-fill text-primary}
        
        
        ;; =========================================================================

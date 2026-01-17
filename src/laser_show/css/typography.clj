@@ -43,7 +43,8 @@
        
        ;; Hint text - italicized hints, empty state messages (gray-400)
        ".label-hint"
-       {:-fx-text-fill "#606060"
+       {:-fx-text-fill "#808080"
+        :-fx-font-size 10
         :-fx-font-style "italic"}
        
        ;; Bold white label for names/titles in lists
@@ -63,11 +64,13 @@
        
        ;; Small text (10px)
        ".text-small"
-       {:-fx-font-size 10}
+       {:-fx-text-fill text-secondary
+        :-fx-font-size 10}
        
        ;; Tiny text (9px)
        ".text-tiny"
-       {:-fx-font-size 9}
+       {:-fx-text-fill text-secondary
+        :-fx-font-size 9}
        
        ;; Description text (gray, small)
        ".text-description"

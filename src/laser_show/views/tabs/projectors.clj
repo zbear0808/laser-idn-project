@@ -12,6 +12,7 @@
             [laser-show.animation.effects :as effects]
             [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
+            [laser-show.css.core :as css]
             [laser-show.views.components.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.list :as list]))
@@ -49,18 +50,17 @@
      :spacing 8
      :alignment :center-left
      :padding {:left 24 :right 8 :top 4 :bottom 4}
-     :style "-fx-background-color: #353535; -fx-background-radius: 2;"
+     :style-class ["card"]
      :children [{:fx/type :label
                  :text (str "• " service-display-name)
-                 :style (str "-fx-text-fill: " (if configured? "#606060" "#B0B0B0") "; -fx-font-size: 11;")}
+                 :style-class [(if configured? "label-hint" "label-secondary")]
+                 :style "-fx-font-size: 11;"}
                 {:fx/type :region :h-box/hgrow :always}
                 {:fx/type :button
                  :text (if configured? "✓" "+")
                  :disable configured?
-                 :style (str "-fx-background-color: " (if configured? "#404040" "#4A6FA5")
-                            "; -fx-text-fill: " (if configured? "#606060" "white")
-                            "; -fx-font-size: 14; -fx-font-weight: bold; -fx-padding: 2 8;"
-                            "; -fx-min-width: 28; -fx-min-height: 24;")
+                 :style-class [(if configured? "button-secondary" "button-info")]
+                 :style "-fx-min-width: 28; -fx-min-height: 24;"
                  :on-action {:event/type :projectors/add-service
                              :device device
                              :service service}}]}))
@@ -175,23 +175,23 @@
      :pref-width 300
      :children [{:fx/type :label
                  :text "DISCOVER DEVICES"
-                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                 :style-class ["header-section"]}
                 {:fx/type :h-box
                  :spacing 8
                  :children [{:fx/type :button
                              :text (if scanning? "Scanning..." "Scan Network")
                              :disable scanning?
-                             :style "-fx-background-color: #2196F3; -fx-text-fill: white; -fx-padding: 6 16;"
+                             :style-class ["button-info"]
                              :on-action {:event/type :projectors/scan-network}}
                             {:fx/type :button
                              :text "Add Manual..."
-                             :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-padding: 6 16;"
+                             :style-class ["button-secondary"]
                              :on-action {:event/type :ui/open-dialog
                                          :dialog-id :add-projector-manual}}]}
                 {:fx/type :scroll-pane
                  :fit-to-width true
                  :v-box/vgrow :always
-                 :style "-fx-background-color: #2D2D2D; -fx-background: #2D2D2D;"
+                 :style-class ["scroll-pane-dark"]
                  :content {:fx/type :v-box
                            :spacing 4
                            :padding 4
@@ -209,7 +209,8 @@
                                          :text (if scanning?
                                                  "Searching for devices..."
                                                  "No devices found.\nClick 'Scan Network' to search.")
-                                         :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-padding: 16;"}])}}]}))
+                                         :style-class ["label-hint"]
+                                         :style "-fx-padding: 16;"}])}}]}))
 
 
 ;; Configured Projectors List
@@ -229,7 +230,7 @@
      :spacing 8
      :alignment :center-left
      :padding 8
-     :style (str "-fx-background-color: " (if selected? "#4A6FA5" "#3D3D3D") "; -fx-background-radius: 4;")
+     :style-class [(if selected? "list-item-selected" "list-item")]
      :on-mouse-clicked {:event/type :projectors/select-projector
                         :projector-id id}
      :children [{:fx/type :check-box
@@ -240,15 +241,15 @@
                  :status (if connected? :connected :offline)}
                 {:fx/type :v-box
                  :children [{:fx/type :label
-                             :text name
-                             :style "-fx-text-fill: white; -fx-font-weight: bold;"}
+                             :text (or (when (string? name) name) "")
+                             :style-class ["label-bold"]}
                             {:fx/type :label
-                             :text host-display
-                             :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]}
+                             :text (str host-display)
+                             :style-class ["text-small" "label-secondary"]}]}
                 {:fx/type :region :h-box/hgrow :always}
                 {:fx/type :button
                  :text "✕"
-                 :style "-fx-background-color: transparent; -fx-text-fill: #808080; -fx-font-size: 14; -fx-padding: 2 6;"
+                 :style-class ["button-close"]
                  :on-action {:event/type :projectors/remove-projector
                              :projector-id id}}]}))
 
@@ -262,11 +263,11 @@
      :pref-width 280
      :children [{:fx/type :label
                  :text "CONFIGURED PROJECTORS"
-                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                 :style-class ["header-section"]}
                 {:fx/type :scroll-pane
                  :fit-to-width true
                  :v-box/vgrow :always
-                 :style "-fx-background-color: #2D2D2D; -fx-background: #2D2D2D;"
+                 :style-class ["scroll-pane-dark"]
                  :content {:fx/type :v-box
                            :spacing 4
                            :padding 4
@@ -278,7 +279,8 @@
                                                :selected? (= (:id projector) active-id)}))
                                        [{:fx/type :label
                                          :text "No projectors configured.\nAdd from discovered devices or manually."
-                                         :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-padding: 16;"}])}}]}))
+                                         :style-class ["label-hint"]
+                                         :style "-fx-padding: 16;"}])}}]}))
 
 
 ;; Projector Configuration Panel
@@ -299,11 +301,11 @@
                      :children [{:fx/type :label
                                  :text "Name:"
                                  :pref-width 50
-                                 :style "-fx-text-fill: #B0B0B0;"}
+                                 :style-class ["label-secondary"]}
                                 {:fx/type :text-field
                                  :text (or name "")
                                  :pref-width 200
-                                 :style "-fx-background-color: #404040; -fx-text-fill: white;"
+                                 :style-class ["text-field-dark"]
                                  :on-text-changed {:event/type :projectors/update-settings
                                                    :projector-id id
                                                    :updates {:name :fx/event}}}]}
@@ -314,21 +316,21 @@
                      :children [{:fx/type :label
                                  :text "Host:"
                                  :pref-width 50
-                                 :style "-fx-text-fill: #B0B0B0;"}
+                                 :style-class ["label-secondary"]}
                                 {:fx/type :text-field
                                  :text (or host "")
                                  :pref-width 150
-                                 :style "-fx-background-color: #404040; -fx-text-fill: white;"
+                                 :style-class ["text-field-dark"]
                                  :on-text-changed {:event/type :projectors/update-settings
                                                    :projector-id id
                                                    :updates {:host :fx/event}}}
                                 {:fx/type :label
                                  :text "Port:"
-                                 :style "-fx-text-fill: #B0B0B0;"}
+                                 :style-class ["label-secondary"]}
                                 {:fx/type :text-field
                                  :text (str (or port 7255))
                                  :pref-width 60
-                                 :style "-fx-background-color: #404040; -fx-text-fill: white;"}]}]
+                                 :style-class ["text-field-dark"]}]}]
                    ;; Service info (if multi-output device)
                    (when (and service-id (pos? service-id))
                      [{:fx/type :h-box
@@ -337,11 +339,11 @@
                        :children [{:fx/type :label
                                    :text "Output:"
                                    :pref-width 50
-                                   :style "-fx-text-fill: #B0B0B0;"}
+                                   :style-class ["label-secondary"]}
                                   {:fx/type :label
                                    :text (str "Service #" service-id
                                              (when service-name (str " - " service-name)))
-                                   :style "-fx-text-fill: #4A6FA5; -fx-font-size: 11;"}]}])))}))
+                                   :style (str "-fx-text-fill: " (css/selection-bg) "; -fx-font-size: 11;")}]}])))}))
 
 
 ;; Calibration effect helpers
@@ -403,10 +405,11 @@
     {:fx/type :v-box
      :spacing 8
      :padding 8
-     :style "-fx-background-color: #353535; -fx-background-radius: 4;"
+     :style-class ["panel-elevated"]
      :children [{:fx/type :label
                  :text (str "Edit: " effect-name)
-                 :style "-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 11;"}
+                 :style-class ["label-bold"]
+                 :style "-fx-font-size: 11;"}
                 (cond
                    ;; Check for custom renderer in ui-hints: rgb-curves
                    (= :rgb-curves renderer-type)

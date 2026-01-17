@@ -80,10 +80,10 @@
     {:fx/type :v-box
      :spacing 8
      :padding 8
-     :style "-fx-background-color: #2A2A2A; -fx-background-radius: 4;"
+     :style-class ["card"]
      :children [{:fx/type :label
                  :text actual-hint
-                 :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-style: italic;"}
+                 :style-class ["label-hint"]}
                 
                 {:fx/type spatial-canvas/spatial-canvas
                  :fx/key canvas-key
@@ -106,10 +106,10 @@
                  :alignment :center
                  :children [{:fx/type :label
                             :text (format "X: %.3f" x)
-                            :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11; -fx-font-family: 'Consolas', monospace;"}
+                            :style-class ["text-monospace"]}
                            {:fx/type :label
                             :text (format "Y: %.3f" y)
-                            :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11; -fx-font-family: 'Consolas', monospace;"}]}]}))
+                            :style-class ["text-monospace"]}]}]}))
 
 
 ;; Corner Pin Effect Visual Editor

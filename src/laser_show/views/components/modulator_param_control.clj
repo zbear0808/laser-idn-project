@@ -72,7 +72,8 @@
      :children [{:fx/type :label
                  :text label
                  :pref-width 90
-                 :style "-fx-text-fill: #909090; -fx-font-size: 10;"}
+                 :style-class ["text-small"]
+                 :style "-fx-text-fill: #909090;"}
                 {:fx/type :slider
                  :min min
                  :max max
@@ -83,7 +84,8 @@
                 {:fx/type :text-field
                  :text (format "%.2f" (double value))
                  :pref-width 50
-                 :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 2 4;"
+                 :style-class ["text-field"]
+                 :style "-fx-font-size: 10; -fx-padding: 2 4;"
                  ;; Text field event includes mod-param-key and text field marker
                  :on-action (assoc text-event
                                    :mod-param-key key
@@ -106,7 +108,8 @@
      :children [{:fx/type :label
                  :text label
                  :pref-width 90
-                 :style "-fx-text-fill: #909090; -fx-font-size: 10;"}
+                 :style-class ["text-small"]
+                 :style "-fx-text-fill: #909090;"}
                 {:fx/type :combo-box
                  :items (vec choices)
                  :value value
