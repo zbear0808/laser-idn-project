@@ -13,27 +13,24 @@
    - Effect grouping within items
    - Custom parameter renderers (RGB curves, spatial editors)"
   (:require [cljfx.api :as fx]
-            [laser-show.subs :as subs]
-            [laser-show.animation.presets :as presets]
-            [laser-show.animation.effects :as effects]
-            [laser-show.animation.chains :as chains]
-            [laser-show.events.core :as events]
-            [laser-show.css.core :as css]
-            [laser-show.views.components.list :as list]
-            [laser-show.views.components.preset-bank :as preset-bank]
-            [laser-show.views.components.preset-param-editor :as param-editor]
-            [laser-show.views.components.effect-param-ui :as effect-param-ui]
-            [laser-show.views.components.effect-bank :as effect-bank]
-            [laser-show.common.util :as u]
-            [clojure.tools.logging :as log])
-  (:import [javafx.scene.input KeyCode KeyEvent]))
+              [laser-show.subs :as subs]
+              [laser-show.animation.presets :as presets]
+              [laser-show.animation.effects :as effects]
+              [laser-show.animation.chains :as chains]
+              [laser-show.events.core :as events]
+              [laser-show.css.core :as css]
+              [laser-show.views.components.list :as list]
+              [laser-show.views.components.preset-bank :as preset-bank]
+              [laser-show.views.components.preset-param-editor :as preset-param-editor]
+              [laser-show.views.components.effect-parameter-editor :as effect-param-editor]
+              [laser-show.views.components.effect-bank :as effect-bank]
+              [laser-show.common.util :as u]
+              [clojure.tools.logging :as log])
+    (:import [javafx.scene.input KeyCode KeyEvent]))
 
 
 ;; Effect Bank (using data-driven component)
 
-
-;; Use shared params-vector->map from effect-param-ui
-(def params-vector->map effect-param-ui/params-vector->map)
 
 (defn- effect-bank-tabs
   "Tabbed effect bank using data-driven effect-bank component."
@@ -52,137 +49,44 @@
      :pref-height 140}))
 
 
-;; Parameter Editor for Effects (with Custom Renderers)
+;; Parameter Editor for Effects (using shared component)
 
 
-(defn- custom-param-renderer
-  "Renders parameters with custom UI and mode toggle using shared effect-param-ui.
-   
-   Props:
-   - :fx/context - cljfx context (required for zone effects)
-   - :col, :row - Grid cell coordinates
-   - :item-path - Path to the item within cue chain
-   - :effect-path - Path to effect within item's effect chain
-   - :effect-def - Effect definition with :ui-hints
-   - :current-params - Current parameter values
-   - :ui-mode - Current UI mode (:visual or :numeric)
-   - :params-map - Parameter specifications map
-   - :dialog-data - Dialog state data (for curve editor channel tab tracking)"
-  [{:keys [fx/context col row item-path effect-path effect-def current-params ui-mode params-map dialog-data]}]
-  ;; Build the full effect path from item-path to effect within item's :effects
-  (let [full-effect-path (vec (concat item-path [:effects] effect-path))]
-    {:fx/type effect-param-ui/custom-param-renderer
-     :fx/context context
-     :effect-def effect-def
-     :current-params current-params
-     :ui-mode ui-mode
-     :params-map params-map
-     :dialog-data dialog-data
-     
-     ;; Enable modulator support for numeric parameters
-     :enable-modulators? true
-     
-     ;; Event templates for spatial editors (translate, corner-pin)
-     :spatial-event-template {:event/type :chain/update-spatial-params
-                              :domain :cue-chains
-                              :entity-key [col row]
-                              :effect-path full-effect-path}
-     :spatial-event-keys {:domain :cue-chains :entity-key [col row] :effect-path full-effect-path}
-     
-     ;; Event templates for param controls
-     :on-change-event {:event/type :chain/update-param
-                       :domain :cue-chains
-                       :entity-key [col row]
-                       :effect-path full-effect-path}
-     :on-text-event {:event/type :chain/update-param-from-text
-                     :domain :cue-chains
-                     :entity-key [col row]
-                     :effect-path full-effect-path}
-     :on-mode-change-event {:event/type :chain/set-ui-mode
-                            :domain :cue-chains
-                            :entity-key [col row]
-                            :effect-path full-effect-path}
-     ;; Modulator event base for modulator toggle/type/param operations
-     :modulator-event-base {:domain :cue-chains
-                            :entity-key [col row]
-                            :effect-path full-effect-path}
-     
-     ;; RGB curves props - use :cue-chains domain with full effect path
-     :rgb-domain :cue-chains
-     :rgb-entity-key [col row]
-     :rgb-effect-path full-effect-path}))
-
-(defn- effect-parameter-editor
-  "Parameter editor for the selected effect within an item."
+(defn- item-effect-parameter-editor
+  "Parameter editor for the selected effect within an item.
+   Uses the shared effect-parameter-editor component with keyframe support."
   [{:keys [fx/context col row item-path item selected-effect-ids dialog-data]}]
-  (let [effects (:effects item [])
+  (let [item-effects (:effects item [])
         first-selected-id (first selected-effect-ids)
         ;; Use hierarchical path finding for nested effects
         effect-path (when first-selected-id
-                      (chains/find-path-by-id effects first-selected-id))
-        ;; Build full effect path: item-path + :effects + effect-path
-        ;; IMPORTANT: This must be computed before ui-mode lookup since ui-mode is stored by full-effect-path
-        full-effect-path (when effect-path
-                           (vec (concat item-path [:effects] effect-path)))
+                      (chains/find-path-by-id item-effects first-selected-id))
         ;; Use path to retrieve the effect from nested structure
         selected-effect (when effect-path
-                          (chains/get-item-at-path effects effect-path))
+                          (chains/get-item-at-path item-effects effect-path))
         effect-def (when selected-effect
-                     (effects/get-effect (:effect-id selected-effect)))
-        current-params (:params selected-effect {})
-        params-map (params-vector->map (:parameters effect-def []))
-        ;; IMPORTANT: ui-mode is stored by full-effect-path (item-path + :effects + effect-path)
-        ;; so we must read it using the same key
-        ui-mode (get-in dialog-data [:ui-modes full-effect-path])]
-    {:fx/type :v-box
-     :spacing 8
-     :style-class "dialog-section"
-     :children [{:fx/type :label
-                 :text (if effect-def
-                         (str "PARAMETERS: " (:name effect-def))
-                         "PARAMETERS")
-                 :style-class "dialog-section-header"}
-                (if effect-def
-                  (if (:ui-hints effect-def)
-                    ;; Has custom UI - use custom renderer with mode toggle
-                    {:fx/type :scroll-pane
-                     :fit-to-width true
-                     :v-box/vgrow :always
-                     :style-class "dialog-scroll-pane"
-                     :content {:fx/type custom-param-renderer
-                              :fx/context context
-                              :col col :row row
-                              :item-path item-path
-                              :effect-path effect-path
-                              :effect-def effect-def
-                              :current-params current-params
-                              :ui-mode ui-mode
-                              :params-map params-map
-                              :dialog-data dialog-data}}
-                    
-                    ;; Standard parameters - use modulatable param controls
-                    {:fx/type :scroll-pane
-                     :fit-to-width true
-                     :v-box/vgrow :always
-                     :style-class "dialog-scroll-pane"
-                     :content {:fx/type effect-param-ui/modulatable-param-controls-list
-                              :params-map params-map
-                              :current-params current-params
-                              :on-change-event {:event/type :chain/update-param
-                                                :domain :cue-chains
-                                                :entity-key [col row]
-                                                :effect-path full-effect-path}
-                              :on-text-event {:event/type :chain/update-param-from-text
-                                              :domain :cue-chains
-                                              :entity-key [col row]
-                                              :effect-path full-effect-path}
-                              :modulator-event-base {:domain :cue-chains
-                                                     :entity-key [col row]
-                                                     :effect-path full-effect-path}}})
-                  
+                     (effects/get-effect (:effect-id selected-effect)))]
+    (if selected-effect
+      ;; Use shared effect parameter editor component with item-path for cue chains
+      {:fx/type effect-param-editor/effect-parameter-editor
+       :fx/context context
+       :domain :cue-chains
+       :entity-key [col row]
+       :effect-path effect-path
+       :item-path item-path  ;; Important: pass item-path for cue chains domain
+       :effect selected-effect
+       :effect-def effect-def
+       :dialog-data dialog-data}
+      ;; No effect selected - show placeholder
+      {:fx/type :v-box
+       :spacing 8
+       :style-class "dialog-section"
+       :children [{:fx/type :label
+                   :text "PARAMETERS"
+                   :style-class "dialog-section-header"}
                   {:fx/type :label
                    :text "Select an effect from the chain"
-                   :style-class "dialog-placeholder-text"})]}))
+                   :style-class "dialog-placeholder-text"}]})))
 
 
 ;; Destination Zone Picker
@@ -291,7 +195,7 @@
                   (if is-preset?
                     {:fx/type :v-box
                      :spacing 8
-                     :children [{:fx/type param-editor/preset-param-editor
+                     :children [{:fx/type preset-param-editor/preset-param-editor
                                  :cell [col row]
                                  :preset-path selected-item-path
                                  :preset-instance selected-item}
@@ -488,7 +392,7 @@
                                        
                                        ;; Effect parameter editor (when effect selected)
                                        (when (and has-item? (seq selected-effect-ids))
-                                         {:fx/type effect-parameter-editor
+                                         {:fx/type item-effect-parameter-editor
                                           :fx/context context
                                           :v-box/vgrow :always
                                           :col col :row row
