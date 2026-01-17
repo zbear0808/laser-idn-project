@@ -666,3 +666,246 @@
         ;; At phase 0.25 of cycle (within duty cycle), should be at max
         (is (= 1.0 final-val))
         (is (= final-val held-val) "Should hold at exact final position")))))
+
+
+;; Keyframe Modulator Tests
+
+
+(deftest keyframe-modulator?-test
+  (testing "keyframe-modulator? correctly identifies keyframe configs"
+    ;; Valid keyframe modulator config
+    (is (mod/keyframe-modulator?
+          {:enabled? true
+           :period 1.0
+           :keyframes [{:position 0.0 :params {:scale 1.0}}
+                       {:position 1.0 :params {:scale 2.0}}]}))
+    ;; Also valid without enabled? key (just needs :keyframes vector)
+    (is (mod/keyframe-modulator?
+          {:period 1.0
+           :keyframes [{:position 0.0 :params {:scale 1.0}}]}))
+    ;; Empty keyframes is still a keyframe modulator
+    (is (mod/keyframe-modulator? {:keyframes []}))
+    ;; Not a keyframe modulator - regular modulator config
+    (is (not (mod/keyframe-modulator? {:type :sine :min 0 :max 1})))
+    ;; Not a keyframe modulator - no keyframes key
+    (is (not (mod/keyframe-modulator? {:enabled? true :period 1.0})))
+    ;; Not a keyframe modulator - keyframes is not a vector
+    (is (not (mod/keyframe-modulator? {:keyframes {:pos 0.5 :params {}}})))
+    ;; Not a keyframe modulator - plain number
+    (is (not (mod/keyframe-modulator? 1.5)))))
+
+(deftest find-surrounding-keyframes-test
+  (testing "Finding surrounding keyframes"
+    (let [keyframes [{:position 0.0 :params {:x 0}}
+                     {:position 0.25 :params {:x 25}}
+                     {:position 0.5 :params {:x 50}}
+                     {:position 0.75 :params {:x 75}}]]
+      ;; Exact position match
+      (let [[before after] (#'mod/find-surrounding-keyframes keyframes 0.25)]
+        (is (= 0.0 (:position before)))
+        (is (= 0.25 (:position after))))
+      ;; Between keyframes
+      (let [[before after] (#'mod/find-surrounding-keyframes keyframes 0.3)]
+        (is (= 0.25 (:position before)))
+        (is (= 0.5 (:position after))))
+      ;; Near start
+      (let [[before after] (#'mod/find-surrounding-keyframes keyframes 0.1)]
+        (is (= 0.0 (:position before)))
+        (is (= 0.25 (:position after))))
+      ;; After last keyframe (wrap to first)
+      (let [[before after] (#'mod/find-surrounding-keyframes keyframes 0.9)]
+        (is (= 0.75 (:position before)))
+        (is (= 0.0 (:position after))))))
+  
+  (testing "Single keyframe"
+    (let [keyframes [{:position 0.5 :params {:x 50}}]
+          [before after] (#'mod/find-surrounding-keyframes keyframes 0.3)]
+      ;; Both should be the same keyframe
+      (is (= 0.5 (:position before)))
+      (is (= 0.5 (:position after))))))
+
+(deftest calculate-interp-factor-test
+  (testing "Interpolation factor calculation"
+    (let [kf1 {:position 0.0 :params {}}
+          kf2 {:position 1.0 :params {}}]
+      ;; At start
+      (is (approx= 0.0 (#'mod/calculate-interp-factor kf1 kf2 0.0) 0.01))
+      ;; At midpoint
+      (is (approx= 0.5 (#'mod/calculate-interp-factor kf1 kf2 0.5) 0.01))
+      ;; Near end
+      (is (approx= 0.9 (#'mod/calculate-interp-factor kf1 kf2 0.9) 0.01))))
+  
+  (testing "Partial range"
+    (let [kf1 {:position 0.25 :params {}}
+          kf2 {:position 0.75 :params {}}]
+      ;; At start of range
+      (is (approx= 0.0 (#'mod/calculate-interp-factor kf1 kf2 0.25) 0.01))
+      ;; At midpoint of range
+      (is (approx= 0.5 (#'mod/calculate-interp-factor kf1 kf2 0.5) 0.01))
+      ;; At end of range
+      (is (approx= 1.0 (#'mod/calculate-interp-factor kf1 kf2 0.75) 0.01))))
+  
+  (testing "Wrap-around case"
+    (let [kf1 {:position 0.75 :params {}}
+          kf2 {:position 0.25 :params {}}]
+      ;; Phase after kf1 but before wrap
+      (is (approx= 0.25 (#'mod/calculate-interp-factor kf1 kf2 0.875) 0.01))
+      ;; Phase after wrap but before kf2
+      (is (approx= 0.75 (#'mod/calculate-interp-factor kf1 kf2 0.125) 0.01))))
+  
+  (testing "Same position keyframes"
+    (let [kf1 {:position 0.5 :params {}}
+          kf2 {:position 0.5 :params {}}]
+      ;; Should return 0.0 (avoid division by zero)
+      (is (= 0.0 (#'mod/calculate-interp-factor kf1 kf2 0.5))))))
+
+(deftest interpolate-params-test
+  (testing "Linear interpolation of numeric params"
+    (let [p1 {:scale 1.0 :hue 0.0 :amount 100.0}
+          p2 {:scale 2.0 :hue 360.0 :amount 200.0}]
+      ;; At t=0 should equal p1
+      (let [result (#'mod/interpolate-params p1 p2 0.0)]
+        (is (approx= 1.0 (:scale result)))
+        (is (approx= 0.0 (:hue result)))
+        (is (approx= 100.0 (:amount result))))
+      ;; At t=0.5 should be midpoint
+      (let [result (#'mod/interpolate-params p1 p2 0.5)]
+        (is (approx= 1.5 (:scale result)))
+        (is (approx= 180.0 (:hue result)))
+        (is (approx= 150.0 (:amount result))))
+      ;; At t=1 should equal p2
+      (let [result (#'mod/interpolate-params p1 p2 1.0)]
+        (is (approx= 2.0 (:scale result)))
+        (is (approx= 360.0 (:hue result)))
+        (is (approx= 200.0 (:amount result))))))
+  
+  (testing "Non-numeric params use first value"
+    (let [p1 {:mode :linear :name "first"}
+          p2 {:mode :radial :name "second"}]
+      ;; Non-numeric values should use first value
+      (let [result (#'mod/interpolate-params p1 p2 0.5)]
+        (is (= :linear (:mode result)))
+        (is (= "first" (:name result))))))
+  
+  (testing "Missing keys in second map"
+    (let [p1 {:scale 1.0 :extra 10.0}
+          p2 {:scale 2.0}]
+      ;; :extra should interpolate with itself (use p1 value)
+      (let [result (#'mod/interpolate-params p1 p2 0.5)]
+        (is (approx= 1.5 (:scale result)))
+        (is (approx= 10.0 (:extra result)))))))
+
+(deftest eval-keyframe-basic-test
+  (testing "Basic keyframe evaluation"
+    ;; Use positions 0.0 and 0.5 since position 1.0 wraps to 0.0 in looping mode
+    (let [config {:keyframes [{:position 0.0 :params {:scale 1.0}}
+                              {:position 0.5 :params {:scale 2.0}}]
+                  :period 1.0
+                  :time-unit :beats}
+          bpm 120
+          ms-per-beat (/ 60000 bpm)]
+      ;; At start of period (position 0.0), should be scale 1.0
+      (let [ctx (make-test-context 0 bpm)
+            result (mod/eval-keyframe config ctx)]
+        (is (approx= 1.0 (:scale result) 0.1)))
+      ;; At position 0.25 (between 0.0 and 0.5), should interpolate to 1.5
+      (let [ctx (make-test-context (* 0.25 ms-per-beat) bpm)
+            result (mod/eval-keyframe config ctx)]
+        (is (approx= 1.5 (:scale result) 0.1)))
+      ;; At position 0.5, should be scale 2.0
+      (let [ctx (make-test-context (* 0.5 ms-per-beat) bpm)
+            result (mod/eval-keyframe config ctx)]
+        (is (approx= 2.0 (:scale result) 0.1))))))
+
+(deftest eval-keyframe-multiple-keyframes-test
+  (testing "Multiple keyframes evaluation"
+    (let [config {:keyframes [{:position 0.0 :params {:x 0.0 :y 0.0}}
+                              {:position 0.25 :params {:x 100.0 :y 50.0}}
+                              {:position 0.5 :params {:x 200.0 :y 100.0}}
+                              {:position 0.75 :params {:x 100.0 :y 50.0}}]
+                  :period 1.0
+                  :time-unit :beats}
+          bpm 120
+          ms-per-beat (/ 60000 bpm)]
+      ;; At position 0.25 (exactly at keyframe)
+      (let [ctx (make-test-context (* 0.25 ms-per-beat) bpm)
+            result (mod/eval-keyframe config ctx)]
+        (is (approx= 100.0 (:x result) 1.0))
+        (is (approx= 50.0 (:y result) 1.0)))
+      ;; At position 0.375 (between 0.25 and 0.5)
+      (let [ctx (make-test-context (* 0.375 ms-per-beat) bpm)
+            result (mod/eval-keyframe config ctx)]
+        (is (approx= 150.0 (:x result) 5.0))
+        (is (approx= 75.0 (:y result) 5.0))))))
+
+(deftest eval-keyframe-period-test
+  (testing "Keyframe period affects cycle speed"
+    (let [config-1beat {:keyframes [{:position 0.0 :params {:scale 1.0}}
+                                    {:position 0.5 :params {:scale 2.0}}]
+                        :period 1.0
+                        :time-unit :beats}
+          config-2beat {:keyframes [{:position 0.0 :params {:scale 1.0}}
+                                    {:position 0.5 :params {:scale 2.0}}]
+                        :period 2.0
+                        :time-unit :beats}
+          bpm 120
+          ms-per-beat (/ 60000 bpm)]
+      ;; At 0.5 beats:
+      ;; - 1-beat period: phase = 0.5, scale should be at max (2.0)
+      ;; - 2-beat period: phase = 0.25, scale should be between (1.5)
+      (let [ctx (make-test-context (* 0.5 ms-per-beat) bpm)
+            result-1 (mod/eval-keyframe config-1beat ctx)
+            result-2 (mod/eval-keyframe config-2beat ctx)]
+        (is (approx= 2.0 (:scale result-1) 0.1))
+        (is (approx= 1.5 (:scale result-2) 0.1))))))
+
+(deftest eval-keyframe-loop-mode-test
+  (testing "Keyframe loop mode vs once mode"
+    ;; Use positions 0.0 and 0.5 to avoid wrap-around ambiguity
+    (let [config-loop {:keyframes [{:position 0.0 :params {:scale 0.0}}
+                                   {:position 0.5 :params {:scale 1.0}}]
+                       :period 1.0
+                       :loop-mode :loop
+                       :time-unit :beats}
+          config-once {:keyframes [{:position 0.0 :params {:scale 0.0}}
+                                   {:position 0.5 :params {:scale 1.0}}]
+                       :period 1.0
+                       :loop-mode :once
+                       :time-unit :beats}
+          bpm 120
+          ms-per-beat (/ 60000 bpm)]
+      ;; At 1.25 beats:
+      ;; - loop mode: phase = 0.25 (wrapped from 1.25), scale = 0.5 (between 0.0 and 0.5)
+      ;; - once mode: phase = 1.0 (clamped), scale = 0.0 (at phase 1.0 which wraps to first keyframe)
+      (let [ctx (make-once-mode-context (* 1.25 ms-per-beat) bpm 0)
+            result-loop (mod/eval-keyframe config-loop ctx)]
+        ;; Loop mode at phase 0.25 should interpolate between 0.0 and 1.0 -> 0.5
+        (is (approx= 0.5 (:scale result-loop) 0.1)))
+      ;; Test once mode separately at phase 0.5 (within the period)
+      (let [ctx-once (make-once-mode-context (* 0.5 ms-per-beat) bpm 0)
+            result-once (mod/eval-keyframe config-once ctx-once)]
+        ;; At phase 0.5 exactly, should be at scale 1.0
+        (is (approx= 1.0 (:scale result-once) 0.1))))))
+
+(deftest eval-keyframe-empty-keyframes-test
+  (testing "Empty keyframes returns nil"
+    (let [config {:keyframes [] :period 1.0}
+          ctx (make-test-context 0 120)]
+      (is (nil? (mod/eval-keyframe config ctx))))))
+
+(deftest eval-keyframe-wrap-around-test
+  (testing "Keyframe interpolation wraps around at period boundary"
+    (let [config {:keyframes [{:position 0.0 :params {:scale 1.0}}
+                              {:position 0.5 :params {:scale 2.0}}]
+                  :period 1.0
+                  :loop-mode :loop
+                  :time-unit :beats}
+          bpm 120
+          ms-per-beat (/ 60000 bpm)]
+      ;; At phase 0.75 (between 0.5 and wrap-around to 0.0)
+      (let [ctx (make-test-context (* 0.75 ms-per-beat) bpm)
+            result (mod/eval-keyframe config ctx)]
+        ;; Interpolates from position 0.5 (scale=2.0) to position 0.0 (scale=1.0)
+        ;; At phase 0.75, we're halfway between 0.5 and 1.0, so t=0.5
+        ;; Result = 2.0 + 0.5*(1.0-2.0) = 1.5
+        (is (approx= 1.5 (:scale result) 0.1))))))

@@ -22,7 +22,8 @@
             [laser-show.css.core :as css]
             [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.views.components.effect-param-ui :as effect-param-ui]
-            [laser-show.views.components.list :as list])
+            [laser-show.views.components.list :as list]
+            [laser-show.views.components.keyframe-modulator-panel :as keyframe-panel])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
 
@@ -109,61 +110,132 @@
   :rgb-effect-path effect-path})
 
 (defn- parameter-editor
-  "Parameter editor for the selected effect."
+  "Parameter editor for the selected effect.
+   
+   When keyframe modulation is enabled:
+   - Shows keyframe modulator panel at the top
+   - Parameter editor edits the selected keyframe's params
+   
+   When keyframe modulation is disabled:
+   - Shows normal parameter editor with per-param modulators"
   [{:keys [fx/context col row selected-effect-path effect-chain dialog-data]}]
   (let [selected-effect (when selected-effect-path
                           (get-in effect-chain (vec selected-effect-path)))
         effect-def (when selected-effect
                      (effects/get-effect (:effect-id selected-effect)))
-        current-params (:params selected-effect {})
+        
+        ;; Keyframe modulator state
+        keyframe-mod (:keyframe-modulator selected-effect)
+        keyframe-enabled? (:enabled? keyframe-mod false)
+        selected-kf-idx (:selected-keyframe keyframe-mod 0)
+        keyframes (:keyframes keyframe-mod [])
+        
+        ;; When keyframe mode enabled, edit selected keyframe's params
+        ;; Otherwise edit effect's base params
+        current-params (if (and keyframe-enabled? (seq keyframes))
+                         (get-in keyframes [selected-kf-idx :params] {})
+                         (:params selected-effect {}))
+        
         params-map (params-vector->map (:parameters effect-def []))
-        ui-mode (get-in dialog-data [:ui-modes selected-effect-path])]
+        ui-mode (get-in dialog-data [:ui-modes selected-effect-path])
+        
+        ;; Event routing: when keyframe enabled, route to keyframe param updates
+        base-event-params {:domain :effect-chains
+                           :entity-key [col row]
+                           :effect-path selected-effect-path}
+        
+        ;; Choose event types based on keyframe mode
+        on-change-event (if keyframe-enabled?
+                          {:event/type :keyframe/update-param
+                           :domain :effect-chains
+                           :entity-key [col row]
+                           :effect-path selected-effect-path
+                           :keyframe-idx selected-kf-idx}
+                          {:event/type :chain/update-param
+                           :domain :effect-chains
+                           :entity-key [col row]
+                           :effect-path selected-effect-path})
+        
+        on-text-event (if keyframe-enabled?
+                        {:event/type :keyframe/update-param
+                         :domain :effect-chains
+                         :entity-key [col row]
+                         :effect-path selected-effect-path
+                         :keyframe-idx selected-kf-idx}
+                        {:event/type :chain/update-param-from-text
+                         :domain :effect-chains
+                         :entity-key [col row]
+                         :effect-path selected-effect-path})
+        
+        spatial-event-template (if keyframe-enabled?
+                                 {:event/type :keyframe/update-params
+                                  :domain :effect-chains
+                                  :entity-key [col row]
+                                  :effect-path selected-effect-path
+                                  :keyframe-idx selected-kf-idx}
+                                 {:event/type :chain/update-spatial-params
+                                  :domain :effect-chains
+                                  :entity-key [col row]
+                                  :effect-path selected-effect-path})]
     {:fx/type :v-box
      :spacing 8
      :style-class "dialog-section"
-     :children [{:fx/type :label
-                 :text (if effect-def
-                         (str "PARAMETERS: " (:name effect-def))
-                         "PARAMETERS")
-                 :style-class "dialog-section-header"}
-                (if effect-def
-                  (if (:ui-hints effect-def)
-                    ;; Has custom UI - use custom renderer with mode toggle
-                    {:fx/type :scroll-pane
-                     :fit-to-width true
-                     :style-class "dialog-scroll-pane"
-                     :content {:fx/type custom-param-renderer
-                              :fx/context context
-                              :col col :row row
-                              :effect-path selected-effect-path
-                              :effect-def effect-def
-                              :current-params current-params
-                              :ui-mode ui-mode
-                              :params-map params-map
-                              :dialog-data dialog-data}}
-                    
-                    ;; Standard parameters - use modulatable param controls
-                    {:fx/type :scroll-pane
-                     :fit-to-width true
-                     :style-class "dialog-scroll-pane"
-                     :content {:fx/type effect-param-ui/modulatable-param-controls-list
-                              :params-map params-map
-                              :current-params current-params
-                              :on-change-event {:event/type :chain/update-param
-                                                :domain :effect-chains
-                                                :entity-key [col row]
-                                                :effect-path selected-effect-path}
-                              :on-text-event {:event/type :chain/update-param-from-text
-                                              :domain :effect-chains
-                                              :entity-key [col row]
-                                              :effect-path selected-effect-path}
-                              :modulator-event-base {:domain :effect-chains
-                                                     :entity-key [col row]
-                                                     :effect-path selected-effect-path}}})
-                  
-                  {:fx/type :label
-                   :text "Select an effect from the chain"
-                   :style-class "dialog-placeholder-text"})]}))
+     ;; Filter out nil children - (when effect-def ...) returns nil when no effect selected
+     :children (filterv some?
+                [(when effect-def
+                   ;; Keyframe modulator panel (collapsible section)
+                   {:fx/type keyframe-panel/keyframe-modulator-panel
+                    :keyframe-modulator keyframe-mod
+                    :domain :effect-chains
+                    :entity-key [col row]
+                    :effect-path selected-effect-path})
+                 
+                 {:fx/type :label
+                  :text (if effect-def
+                          (str "PARAMETERS: " (:name effect-def)
+                               (when keyframe-enabled?
+                                 (str " (Keyframe " (inc selected-kf-idx) ")")))
+                          "PARAMETERS")
+                  :style-class "dialog-section-header"}
+                 (if effect-def
+                   (if (:ui-hints effect-def)
+                     ;; Has custom UI - use custom renderer with mode toggle
+                     {:fx/type :scroll-pane
+                      :fit-to-width true
+                      :style-class "dialog-scroll-pane"
+                      :v-box/vgrow :always
+                      :content {:fx/type custom-param-renderer
+                               :fx/context context
+                               :col col :row row
+                               :effect-path selected-effect-path
+                               :effect-def effect-def
+                               :current-params current-params
+                               :ui-mode ui-mode
+                               :params-map params-map
+                               :dialog-data dialog-data
+                               ;; Route spatial events appropriately for keyframe mode
+                               :spatial-event-template spatial-event-template
+                               :on-change-event on-change-event
+                               :on-text-event on-text-event}}
+                     
+                     ;; Standard parameters - use modulatable param controls
+                     ;; Disable modulators when in keyframe mode (keyframes replace modulators)
+                     {:fx/type :scroll-pane
+                      :fit-to-width true
+                      :style-class "dialog-scroll-pane"
+                      :v-box/vgrow :always
+                      :content {:fx/type effect-param-ui/modulatable-param-controls-list
+                               :params-map params-map
+                               :current-params current-params
+                               :on-change-event on-change-event
+                               :on-text-event on-text-event
+                               ;; Disable per-param modulators when keyframe mode is on
+                               :enable-modulators? (not keyframe-enabled?)
+                               :modulator-event-base base-event-params}})
+                   
+                   {:fx/type :label
+                    :text "Select an effect from the chain"
+                    :style-class "dialog-placeholder-text"})])}))
 
 
 ;; Main Dialog Content

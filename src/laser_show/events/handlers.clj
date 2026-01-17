@@ -33,7 +33,8 @@
    [laser-show.events.handlers.menu :as menu]
    [laser-show.events.handlers.chain :as chain]
    [laser-show.events.handlers.list :as list]
-   [laser-show.events.handlers.modulator :as modulator]))
+   [laser-show.events.handlers.modulator :as modulator]
+   [laser-show.events.handlers.keyframe :as keyframe]))
 
 (defn handle-event
   "Main event dispatcher - PURE FUNCTION.
@@ -69,6 +70,7 @@
       "chain" (chain/handle event)
       "list" (list/handle event)
       "modulator" (modulator/handle event)
+      "keyframe" (keyframe/handle event)
       ;; Unknown domain
       (do
         (log/error "Unknown event domain:" domain "type:" type)

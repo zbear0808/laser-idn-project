@@ -13,11 +13,6 @@
             [laser-show.state.serialization :as ser]))
 
 
-;; File Paths
-
-
-(def config-dir "config")
-
 (def default-projects-dir
   "Default directory for saving projects."
   (str (System/getProperty "user.home") "/LaserShowProjects"))
@@ -25,7 +20,6 @@
 (def config-files
   "Map of config type to file path.
    
-   Consolidated from 9 files to 4 files:
    - project-metadata.edn: Settings, grid config, BPM
    - hardware.edn: Projectors, zones, zone-groups
    - content.edn: All chains (cue-chains, effect-chains, projector-effects, zone-effects)
@@ -41,14 +35,11 @@
    :content         "content.edn"})
 
 
-;; Persistence Mapping
-
-;; Defines what state is persistent. Maps file keys to state paths.
 
 (def persistent-state-mapping
   "Defines the mapping between file keys and state paths.
    
-   Format: {:file-key {:paths [{:path [:domain :field] :keys nil-or-vector}]}}
+   Format: {:file-key {:paths [{:path [:domain :field]-or-vector}]}}
    
    - :paths - Vector of path specs to save/load for this file
    - :path - Path into the unified state map
@@ -57,49 +48,53 @@
    When loading: data from file is merged into the state at each :path
    When saving: if :keys is nil, save full domain; if :keys is a vector, save (select-keys)"
   {:project-metadata
-   {:paths [{:path [:config] :keys nil}
+   {:paths [{:path [:config]}
             {:path [:timing] :keys [:bpm]}
             {:path [:grid] :keys [:size]}]}
    
    :hardware
-   {:paths [{:path [:projectors :items] :keys nil}
-            {:path [:zones :items] :keys nil}
-            {:path [:zone-groups :items] :keys nil}]}
+   {:paths [{:path [:projectors :items]}
+            {:path [:zones :items]}
+            {:path [:zone-groups :items]}]}
    
    :content
-   {:paths [{:path [:chains :cue-chains] :keys nil}
-            {:path [:chains :effect-chains] :keys nil}
-            {:path [:chains :projector-effects] :keys nil}
-            {:path [:chains :zone-effects] :keys nil}]}})
+   {:paths [{:path [:chains :cue-chains]}
+            {:path [:chains :effect-chains]}
+            {:path [:chains :projector-effects]}
+            {:path [:chains :zone-effects]}]}})
 
 
 ;; Load Functions
 
+
+(defn- merge-data-at-paths!
+  "Merge file data into state at multiple paths.
+   
+   Parameters:
+   - file-data: Map of data loaded from file
+   - path-specs: Vector of {:path [:domain :field] :keys nil-or-vector}"
+  [file-data path-specs]
+  (doseq [{:keys [path keys]} path-specs
+          :when path
+          :let [data-from-file (get-in file-data path)
+                data-to-merge (if (and keys data-from-file)
+                                (select-keys data-from-file keys)
+                                data-from-file)]
+          :when data-to-merge]
+    (state/swap-state! #(update-in % path merge data-to-merge))))
 
 (defn- load-and-merge-paths!
   "Load data from file and merge into state at multiple paths.
    
    Parameters:
    - filepath: Path to file to load
-   - path-specs: Vector of {:path [:domain :field] :keys nil-or-vector}
+   - path-specs: Vector of {:path [:domain :field]-or-vector}
    
    Returns: true if loaded successfully, false otherwise"
   [filepath path-specs]
   (if-let [file-data (ser/load-from-file filepath)]
-    (do
-      (doseq [{:keys [path keys]} path-specs]
-        (when path
-          (let [;; Extract data for this path from file
-                ;; For nested paths like [:chains :cue-chains], get-in from file
-                data-from-file (get-in file-data path)
-                ;; Apply key filtering if specified
-                data-to-merge (if (and keys data-from-file)
-                                (select-keys data-from-file keys)
-                                data-from-file)]
-            (when data-to-merge
-              (state/swap-state! (fn [state]
-                                   (update-in state path merge data-to-merge)))))))
-      true)
+    (do (merge-data-at-paths! file-data path-specs)
+        true)
     false))
 
 (defn load-single!
@@ -157,15 +152,42 @@
       (let [data (collect-data-for-paths paths)]
         (ser/save-to-file! filepath data)))))
 
-(defn save-to-disk!
-  "Save all persistent state to disk. Called when user saves."
+
+
+
+;; Project Save/Load Helpers
+
+(defn- collect-files-for-zip
+  "Collect data for all files to be saved in zip."
   []
-  (doseq [file-key (keys persistent-state-mapping)]
-    (save-single! file-key)))
+  (into {}
+        (keep (fn [[file-key filename]]
+                (when-let [{:keys [paths]} (get persistent-state-mapping file-key)]
+                  [filename (collect-data-for-paths paths)])))
+        zip-filenames))
+
+(defn- update-project-state-after-save!
+  "Update project state after successful save/load."
+  [zip-path]
+  (state/swap-state! #(-> %
+                          (assoc-in [:project :current-file] zip-path)
+                          (assoc-in [:project :dirty?] false)
+                          (assoc-in [:project :last-saved] (System/currentTimeMillis)))))
+
+(defn- load-zip-contents!
+  "Load zip contents and merge into state.
+   Returns true if successful, nil otherwise."
+  [zip-path]
+  (when-let [zip-contents (ser/load-from-zip zip-path)]
+    (doseq [[file-key filename] zip-filenames
+            :let [file-data (get zip-contents filename)
+                  {:keys [paths]} (get persistent-state-mapping file-key)]
+            :when (and file-data paths)]
+      (merge-data-at-paths! file-data paths))
+    true))
 
 
-;; Project-Based Persistence Functions
-
+;; Project Operations
 
 (defn save-project!
   "Save all state to a zip file.
@@ -181,21 +203,9 @@
    (save-project! \"/path/to/my-project.zip\")"
   [zip-path]
   (try
-    ;; Collect data for each file
-    (let [files (into {}
-                      (map (fn [[file-key filename]]
-                             (when-let [{:keys [paths]} (get persistent-state-mapping file-key)]
-                               [filename (collect-data-for-paths paths)]))
-                           zip-filenames))]
-      
-      ;; Save to zip
-      (when (ser/save-to-zip! zip-path files)
-        ;; Update project state
-        (state/assoc-in-state! [:project :current-file] zip-path)
-        (state/swap-state! #(-> %
-                                (assoc-in [:project :dirty?] false)
-                                (assoc-in [:project :last-saved] (System/currentTimeMillis))))
-        true))
+    (when (ser/save-to-zip! zip-path (collect-files-for-zip))
+      (update-project-state-after-save! zip-path)
+      true)
     (catch Exception e
       (log/error "Error saving project:" (.getMessage e))
       false)))
@@ -214,34 +224,12 @@
    (load-project! \"/path/to/my-project.zip\")"
   [zip-path]
   (try
-    (let [file (java.io.File. zip-path)]
-      (if (.exists file)
-        (let [zip-contents (ser/load-from-zip zip-path)]
-          (when zip-contents
-            ;; Load each file from zip
-            (doseq [[file-key filename] zip-filenames]
-              (when-let [file-data (get zip-contents filename)]
-                (when-let [{:keys [paths]} (get persistent-state-mapping file-key)]
-                  ;; Merge data into state for each path
-                  (doseq [{:keys [path keys]} paths]
-                    (when path
-                      (let [data-from-file (get-in file-data path)
-                            data-to-merge (if (and keys data-from-file)
-                                            (select-keys data-from-file keys)
-                                            data-from-file)]
-                        (when data-to-merge
-                          (state/swap-state! (fn [state]
-                                               (update-in state path merge data-to-merge))))))))))
-            
-            ;; Update project state
-            (state/assoc-in-state! [:project :current-file] zip-path)
-            (state/swap-state! #(-> %
-                                    (assoc-in [:project :dirty?] false)
-                                    (assoc-in [:project :last-saved] (System/currentTimeMillis))))
-            true))
-        (do
-          (log/warn "Project file does not exist:" zip-path)
-          false)))
+    (if-not (.exists (java.io.File. zip-path))
+      (do (log/warn "Project file does not exist:" zip-path)
+          false)
+      (when (load-zip-contents! zip-path)
+        (update-project-state-after-save! zip-path)
+        true))
     (catch Exception e
       (log/error "Error loading project:" (.getMessage e))
       false)))

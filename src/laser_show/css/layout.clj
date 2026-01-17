@@ -67,4 +67,32 @@
        {:-fx-background-color accent-danger}
        
        ".status-indicator-connecting"
-       {:-fx-background-color accent-warning}})))
+       {:-fx-background-color accent-warning}
+       
+       ;; =========================================================================
+       ;; Container Classes
+       ;; =========================================================================
+       
+       ;; Primary container (darkest background)
+       ".container-primary"
+       {:-fx-background-color bg-primary}
+       
+       ;; Surface container (panel background)
+       ".container-surface"
+       {:-fx-background-color bg-surface}
+       
+       ;; Elevated container (cards, dialogs)
+       ".container-elevated"
+       {:-fx-background-color bg-elevated}
+       
+       ;; =========================================================================
+       ;; Scroll Pane Variants
+       ;; =========================================================================
+       
+       ;; Dark scroll pane (for content areas)
+       ".scroll-pane-dark"
+       {:-fx-background-color bg-surface
+        :-fx-background bg-surface
+        
+        " > .viewport"
+        {:-fx-background-color bg-surface}}})))

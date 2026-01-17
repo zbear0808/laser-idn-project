@@ -4,6 +4,7 @@
    Provides CSS classes for:
    - Transport buttons (play, stop, etc.)
    - Action buttons (primary, secondary, danger)
+   - Icon buttons
    - Small utility buttons
    
    Usage:
@@ -16,9 +17,10 @@
   (css/register ::buttons
     (let [;; Use semantic colors from theme
           {:keys [bg-interactive bg-hover bg-active
-                  text-primary
-                  accent-success]} theme/semantic-colors
-          {:keys [accent-success-hover]} theme/computed-colors]
+                  text-primary text-muted
+                  accent-success accent-info accent-danger]} theme/semantic-colors
+          {:keys [accent-success-hover accent-danger-hover]} theme/computed-colors
+          {:keys [gray-500]} theme/base-colors]
       
       {
        ;; Small button variant (used in toolbar)
@@ -163,4 +165,113 @@
         :-fx-min-width 28
         
         ":hover"
-        {:-fx-background-color accent-success-hover}}})))
+        {:-fx-background-color accent-success-hover}}
+       
+       
+       ;; =========================================================================
+       ;; Action Buttons (Primary, Secondary, Danger)
+       ;; =========================================================================
+       
+       ;; Primary action button (green, for main actions like Save, Add)
+       ".button-primary"
+       {:-fx-background-color accent-success
+        :-fx-text-fill text-primary
+        :-fx-padding ["8px" "20px"]
+        :-fx-cursor "hand"
+        :-fx-background-radius 4
+        
+        ":hover"
+        {:-fx-background-color accent-success-hover}
+        
+        ":disabled"
+        {:-fx-background-color "#404040"
+         :-fx-text-fill "#606060"
+         :-fx-cursor "default"}}
+       
+       ;; Secondary action button (gray, for secondary actions)
+       ".button-secondary"
+       {:-fx-background-color gray-500
+        :-fx-text-fill text-primary
+        :-fx-padding ["6px" "12px"]
+        :-fx-cursor "hand"
+        :-fx-background-radius 4
+        
+        ":hover"
+        {:-fx-background-color bg-hover}
+        
+        ":disabled"
+        {:-fx-background-color "#404040"
+         :-fx-text-fill "#606060"
+         :-fx-cursor "default"}}
+       
+       ;; Danger button (red, for destructive actions like Delete)
+       ".button-danger"
+       {:-fx-background-color "#663333"
+        :-fx-text-fill text-primary
+        :-fx-padding ["6px" "12px"]
+        :-fx-cursor "hand"
+        :-fx-background-radius 4
+        
+        ":hover"
+        {:-fx-background-color accent-danger-hover}
+        
+        ":disabled"
+        {:-fx-background-color "#404040"
+         :-fx-text-fill "#606060"
+         :-fx-cursor "default"}}
+       
+       ;; Info/Scan button (blue, for informational actions)
+       ".button-info"
+       {:-fx-background-color accent-info
+        :-fx-text-fill text-primary
+        :-fx-padding ["6px" "16px"]
+        :-fx-cursor "hand"
+        :-fx-background-radius 4
+        
+        ":hover"
+        {:-fx-background-color "#1976D2"}
+        
+        ":disabled"
+        {:-fx-background-color "#404040"
+         :-fx-text-fill "#606060"
+         :-fx-cursor "default"}}
+       
+       
+       ;; =========================================================================
+       ;; Icon Buttons
+       ;; =========================================================================
+       
+       ;; Icon-only button (transparent background, for inline actions)
+       ".button-icon"
+       {:-fx-background-color "transparent"
+        :-fx-text-fill text-muted
+        :-fx-font-size 14
+        :-fx-padding ["2px" "6px"]
+        :-fx-cursor "hand"
+        
+        ":hover"
+        {:-fx-text-fill text-primary
+         :-fx-background-color bg-interactive}}
+       
+       ;; Add/Plus button (compact gray button)
+       ".button-add"
+       {:-fx-background-color gray-500
+        :-fx-text-fill text-primary
+        :-fx-font-size 12
+        :-fx-padding ["2px" "8px"]
+        :-fx-cursor "hand"
+        :-fx-background-radius 3
+        
+        ":hover"
+        {:-fx-background-color bg-hover}}
+       
+       ;; Close/Remove button (small X button)
+       ".button-close"
+       {:-fx-background-color "transparent"
+        :-fx-text-fill text-muted
+        :-fx-font-size 14
+        :-fx-padding ["2px" "6px"]
+        :-fx-cursor "hand"
+        
+        ":hover"
+        {:-fx-text-fill accent-danger}}})))

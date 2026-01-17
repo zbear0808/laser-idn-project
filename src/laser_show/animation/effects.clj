@@ -207,11 +207,14 @@
   "Create a transducer for a single effect instance.
    
    Parameters:
-   - effect-instance: {:effect-id :scale :enabled true :params {...}}
+   - effect-instance: {:effect-id :scale :enabled true :params {...} :keyframe-modulator {...}}
    - time-ms: Current time in milliseconds
    - bpm: Current BPM
    - trigger-time: When the effect was triggered (for once-mode modulators)
    - frame-ctx: {:point-count n :timing-ctx {...}}
+   
+   Supports keyframe modulation: if :keyframe-modulator is present and enabled,
+   the keyframe modulator's interpolated params are used instead of per-param modulators.
    
    Returns: A transducer, or nil if effect is disabled or unknown."
   [effect-instance time-ms bpm trigger-time frame-ctx]
@@ -219,11 +222,28 @@
     (let [effect-id (:effect-id effect-instance)]
       (when-let [effect-def (get-effect effect-id)]
         (let [xf-fn (:apply-transducer effect-def)
-              user-params (:params effect-instance)
+              
+              ;; Check for keyframe modulator FIRST
+              keyframe-mod (:keyframe-modulator effect-instance)
+              keyframe-enabled? (and keyframe-mod (:enabled? keyframe-mod))
+              
+              ;; Resolve params based on modulation mode
+              user-params (if keyframe-enabled?
+                            ;; Keyframe mode: evaluate keyframe modulator to get params
+                            (let [timing-ctx (:timing-ctx frame-ctx)
+                                  context (mod/make-context (merge {:time-ms time-ms
+                                                                    :bpm bpm
+                                                                    :trigger-time trigger-time}
+                                                                   timing-ctx))]
+                              (mod/eval-keyframe keyframe-mod context))
+                            ;; Normal mode: use per-param modulators
+                            (:params effect-instance))
+              
               merged-params (merge-with-defaults effect-id user-params)]
           ;; Note: We pass merged-params (may contain modulators) to the transducer factory
           ;; The transducer is responsible for resolving them (either globally or per-point)
           ;; frame-ctx now includes :timing-ctx for modulator beat accumulation
+          ;; When in keyframe mode, params are already resolved (no modulators)
           (try
             (xf-fn time-ms bpm merged-params frame-ctx)
             (catch Exception e
