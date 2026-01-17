@@ -223,12 +223,12 @@
    - keyframe-idx: Index of keyframe to move
    - new-position: New position (0.0-1.0)
    
-   Returns: Updated state"
+   Returns: Updated state (unchanged if index invalid)"
   [state config effect-path keyframe-idx new-position]
   (let [keyframe-mod (get-keyframe-modulator state config effect-path)
         keyframes (:keyframes keyframe-mod [])
         clamped-pos (clamp-position new-position)]
-    (when (and (>= keyframe-idx 0) (< keyframe-idx (count keyframes)))
+    (if (and (>= keyframe-idx 0) (< keyframe-idx (count keyframes)))
       (let [updated-keyframe (assoc (nth keyframes keyframe-idx) :position clamped-pos)
             updated-keyframes (sort-keyframes
                                (assoc keyframes keyframe-idx updated-keyframe))
@@ -239,7 +239,8 @@
                                        assoc
                                        :keyframes updated-keyframes
                                        :selected-keyframe new-idx)
-            h/mark-dirty)))))
+            h/mark-dirty))
+      state)))
 
 (defn handle-delete-keyframe
   "Delete a keyframe. Cannot delete if only one keyframe remains.
