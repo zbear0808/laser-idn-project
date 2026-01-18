@@ -51,7 +51,7 @@ jobs:
     
     # Build application (platform-specific JAR)
     - name: Build JAR
-      run: clojure -T:build:linux uber
+      run: clojure -T:build uber :platform :linux
     
     # Upload JAR artifact
     - name: Upload JAR artifact

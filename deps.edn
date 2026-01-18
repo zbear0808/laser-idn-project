@@ -128,7 +128,11 @@
    :exec-fn cognitect.test-runner.api/test}
   
   ;; ============================================================================
-  ;; Build alias - combine with platform: clj -T:build:win uber
+  ;; Build alias - builds platform-specific uberjars
+  ;; Usage:
+  ;;   clj -T:build uber :platform :win    ; Windows
+  ;;   clj -T:build uber :platform :mac    ; macOS
+  ;;   clj -T:build uber :platform :linux  ; Linux
   ;; ============================================================================
   :build
   {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}

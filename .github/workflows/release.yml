@@ -77,7 +77,8 @@ jobs:
           if [ "$PLATFORM_ALIAS" == "windows" ]; then
             PLATFORM_ALIAS="win"
           fi
-          clojure -T:build:$PLATFORM_ALIAS uber
+          # Pass platform as argument to uber task (not as alias)
+          clojure -T:build uber :platform :$PLATFORM_ALIAS
           echo "Built JAR for ${{ matrix.platform }}"
           ls -lh target/
       

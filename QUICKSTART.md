@@ -102,13 +102,13 @@ For performance analysis, see [docs/PROFILING.md](docs/PROFILING.md).
 ### Building Uber JARs
 
 ```bash
-# Build platform-specific JAR (combines :build + platform alias)
-clj -T:build:win uber      # Windows JAR
-clj -T:build:mac uber      # macOS JAR
-clj -T:build:linux uber    # Linux JAR
+# Build platform-specific JAR (pass platform as argument)
+clj -T:build uber :platform :win      # Windows JAR
+clj -T:build uber :platform :mac      # macOS JAR
+clj -T:build uber :platform :linux    # Linux JAR
 ```
 
-The JAR will be created at `target/laser-show-X.X.X-standalone.jar`
+The JAR will be created at `target/laser-show-0.1.0-standalone.jar`
 
 ## Troubleshooting
 btw, i've mostly tested on Windows, if you're not on it maybe it'll cause issues
