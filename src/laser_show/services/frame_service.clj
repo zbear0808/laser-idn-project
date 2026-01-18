@@ -21,6 +21,7 @@
             [laser-show.animation.time :as anim-time]
             [laser-show.common.timing :as timing]
             [laser-show.profiling.frame-profiler :as profiler]
+            [laser-show.profiling.jfr-profiler :as jfr]
             ;; Require effect implementations to register them
             [laser-show.animation.effects.shape]
             [laser-show.animation.effects.color]
@@ -297,12 +298,25 @@
                 effects-end (timing/nanotime)]
             
             ;; Record timing (profiler adds timestamp and calculates total)
-            (profiler/record-frame-timing!
-              {:base-time-us (timing/nanos->micros (- base-end base-start))
-               :effects-time-us (if effect-chain
-                                  (timing/nanos->micros (- effects-end effects-start))
-                                  0)
-               :effect-count (if effect-chain (count (:effects effect-chain)) 0)})
+            (let [base-time-us (timing/nanos->micros (- base-end base-start))
+                  effects-time-us (if effect-chain
+                                    (timing/nanos->micros (- effects-end effects-start))
+                                    0)
+                  effect-count (if effect-chain (count (:effects effect-chain)) 0)
+                  point-count (count (:points final-frame))]
+              
+              ;; Frame profiler (always-on stats)
+              (profiler/record-frame-timing!
+                {:base-time-us base-time-us
+                 :effects-time-us effects-time-us
+                 :effect-count effect-count})
+              
+              ;; JFR event (low-overhead, for continuous recording and spike detection)
+              (jfr/emit-frame-event!
+                {:base-time-us base-time-us
+                 :effects-time-us effects-time-us
+                 :effect-count effect-count
+                 :point-count point-count}))
             
             final-frame))))))
 

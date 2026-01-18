@@ -7,7 +7,7 @@
       "autoSelectForJackIn": true,
       "autoSelectForConnect": true,
       "menuSelections": {
-        "cljAliases": ["dev", "repl"]
+        "cljAliases": ["win", "dev", "laser-show", "repl"]
       },
       //"afterPrimaryReplConnectedCode": "(do (start) (watch-styles!) )"
     }

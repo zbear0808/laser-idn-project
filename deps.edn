@@ -1,16 +1,13 @@
-{:paths ["src" "resources"]
+{:paths ["src" "resources" "classes"]
  
+ ;; Java source path for JFR custom events (compiled separately)
+ :java-src-paths ["java"]
+ 
+ ;; NOTE: JavaFX is platform-specific. Add :win, :mac, or :linux alias when running.
+ ;; Example: clj -M:dev:laser-show:win
  :deps {org.clojure/clojure {:mvn/version "1.12.4"}
         cljfx/cljfx {:mvn/version "1.10.6"}
         cljfx/css {:mvn/version "1.1.0"}
-
-        ;; Core JavaFX modules (i think all required for complete GUI)
-        org.openjfx/javafx-base$win {:mvn/version "26-ea+19"}
-        org.openjfx/javafx-controls$win {:mvn/version "26-ea+19"}
-        org.openjfx/javafx-graphics$win {:mvn/version "26-ea+19"}
-        org.openjfx/javafx-media$win {:mvn/version "26-ea+19"}
-        org.openjfx/javafx-swing$win {:mvn/version "26-ea+19"}
-        org.openjfx/javafx-web$win {:mvn/version "26-ea+19"}
         
         overtone/midi-clj {:mvn/version "0.5.0"}
         overtone/osc-clj {:mvn/version "0.9.0"}
@@ -28,7 +25,10 @@
  {:laser-show
   {:jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"
-              "--enable-native-access=ALL-UNNAMED"]
+              "--enable-native-access=ALL-UNNAMED"
+              ;; Low-latency GC settings
+              "-XX:+UseZGC"
+              "-XX:NewRatio=1"]
    :main-opts ["-m" "laser-show.app"]}
   
   :repl
@@ -45,12 +45,11 @@
    :main-opts ["-m" "nrepl.cmdline"
                "--middleware" "[cider.nrepl/cider-middleware]"]}
   
+  ;; Dev extras - combine with :laser-show for full dev environment
+  ;; Use: clj -M:dev:laser-show
   :dev
   {:extra-paths ["dev"]
-   :jvm-opts ["-Djavafx.enablePreview=true"
-              "-Djavafx.suppressPreviewWarning=true"
-              "--enable-native-access=ALL-UNNAMED"
-              "-Dlaser-show.dev=true"
+   :jvm-opts ["-Dlaser-show.dev=true"
               ;; Required for clj-async-profiler
               "-Djdk.attach.allowAttachSelf"
               "-XX:+UnlockDiagnosticVMOptions"
@@ -61,6 +60,39 @@
                 org.clojure/tools.namespace {:mvn/version "1.5.0"}
                 hawk/hawk {:mvn/version "0.2.11"}
                 io.github.cljfx/dev {:mvn/version "1.10.6.42"}}}
+  
+  ;; JFR continuous recording add-on - combine with :dev:laser-show
+  ;; Use: clj -M:dev:laser-show:jfr
+  :jfr
+  {:jvm-opts ["-XX:StartFlightRecording=name=continuous,settings=profile,maxage=5m"]}
+  
+  ;; ============================================================================
+  ;; Platform-specific JavaFX dependencies
+  ;; Add ONE of these when running: clj -M:dev:laser-show:win
+  ;; ============================================================================
+  :win
+  {:extra-deps {org.openjfx/javafx-base {:mvn/version "26-ea+19" :classifier "win"}
+                org.openjfx/javafx-controls {:mvn/version "26-ea+19" :classifier "win"}
+                org.openjfx/javafx-graphics {:mvn/version "26-ea+19" :classifier "win"}
+                org.openjfx/javafx-media {:mvn/version "26-ea+19" :classifier "win"}
+                org.openjfx/javafx-swing {:mvn/version "26-ea+19" :classifier "win"}
+                org.openjfx/javafx-web {:mvn/version "26-ea+19" :classifier "win"}}}
+  
+  :mac
+  {:extra-deps {org.openjfx/javafx-base {:mvn/version "26-ea+19" :classifier "mac"}
+                org.openjfx/javafx-controls {:mvn/version "26-ea+19" :classifier "mac"}
+                org.openjfx/javafx-graphics {:mvn/version "26-ea+19" :classifier "mac"}
+                org.openjfx/javafx-media {:mvn/version "26-ea+19" :classifier "mac"}
+                org.openjfx/javafx-swing {:mvn/version "26-ea+19" :classifier "mac"}
+                org.openjfx/javafx-web {:mvn/version "26-ea+19" :classifier "mac"}}}
+  
+  :linux
+  {:extra-deps {org.openjfx/javafx-base {:mvn/version "26-ea+19" :classifier "linux"}
+                org.openjfx/javafx-controls {:mvn/version "26-ea+19" :classifier "linux"}
+                org.openjfx/javafx-graphics {:mvn/version "26-ea+19" :classifier "linux"}
+                org.openjfx/javafx-media {:mvn/version "26-ea+19" :classifier "linux"}
+                org.openjfx/javafx-swing {:mvn/version "26-ea+19" :classifier "linux"}
+                org.openjfx/javafx-web {:mvn/version "26-ea+19" :classifier "linux"}}}
   
   :test
   {:extra-paths ["test"]
@@ -94,39 +126,12 @@
    :main-opts ["-m" "cognitect.test-runner"]
    :exec-fn cognitect.test-runner.api/test}
   
+  ;; ============================================================================
+  ;; Build alias - combine with platform: clj -T:build:win uber
+  ;; ============================================================================
   :build
   {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
    :ns-default build}
-  
-  :build-windows
-  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
-   :ns-default build
-   :override-deps {org.openjfx/javafx-base {:mvn/version "26-ea+19" :classifier "win"}
-                   org.openjfx/javafx-controls {:mvn/version "26-ea+19" :classifier "win"}
-                   org.openjfx/javafx-graphics {:mvn/version "26-ea+19" :classifier "win"}
-                   org.openjfx/javafx-media {:mvn/version "26-ea+19" :classifier "win"}
-                   org.openjfx/javafx-swing {:mvn/version "26-ea+19" :classifier "win"}
-                   org.openjfx/javafx-web {:mvn/version "26-ea+19" :classifier "win"}}}
-  
-  :build-mac
-  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
-   :ns-default build
-   :override-deps {org.openjfx/javafx-base {:mvn/version "26-ea+19" :classifier "mac"}
-                   org.openjfx/javafx-controls {:mvn/version "26-ea+19" :classifier "mac"}
-                   org.openjfx/javafx-graphics {:mvn/version "26-ea+19" :classifier "mac"}
-                   org.openjfx/javafx-media {:mvn/version "26-ea+19" :classifier "mac"}
-                   org.openjfx/javafx-swing {:mvn/version "26-ea+19" :classifier "mac"}
-                   org.openjfx/javafx-web {:mvn/version "26-ea+19" :classifier "mac"}}}
-  
-  :build-linux
-  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
-   :ns-default build
-   :override-deps {org.openjfx/javafx-base {:mvn/version "26-ea+19" :classifier "linux"}
-                   org.openjfx/javafx-controls {:mvn/version "26-ea+19" :classifier "linux"}
-                   org.openjfx/javafx-graphics {:mvn/version "26-ea+19" :classifier "linux"}
-                   org.openjfx/javafx-media {:mvn/version "26-ea+19" :classifier "linux"}
-                   org.openjfx/javafx-swing {:mvn/version "26-ea+19" :classifier "linux"}
-                   org.openjfx/javafx-web {:mvn/version "26-ea+19" :classifier "linux"}}}
   
   :repl-mcp {:main-opts ["-m" "is.simm.repl-mcp"]
                :extra-paths ["test"] ;; If you want it to be able to run the tests

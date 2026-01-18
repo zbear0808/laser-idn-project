@@ -4,7 +4,7 @@
 
 1. **Install Java** (if not already installed)
    - Download from https://adoptium.net/
-   - Minimum version: idk, but I set it up to build using JDK 25
+   - Minimum version: JDK 25
 
 2. **Install Clojure CLI tools**
    - Windows: https://clojure.org/guides/install_clojure#_windows
@@ -13,16 +13,27 @@
 
 ## Running the Applications
 
+### Platform Selection
+
+JavaFX requires platform-specific native libraries. Add your platform alias:
+- **`:win`** - Windows
+- **`:mac`** - macOS
+- **`:linux`** - Linux
+
 ### Option 1: Laser Show (GUI Application)
 
 ```bash
-clj -M:laser-show
+# Windows
+clj -M:win:laser-show
+
+# macOS
+clj -M:mac:laser-show
+
+# Linux
+clj -M:linux:laser-show
 ```
 
-This launches a graphical interface with:
-- 8x4 grid of animation cells
-- Real-time preview window
-- Preset palette on the right
+This launches a graphical interface.
 
 **Usage:**
 1. Click a preset from the palette (right side)
@@ -31,35 +42,76 @@ This launches a graphical interface with:
 4. Right-click a cell to clear it
 5. Use "Connect IDN" to connect to laser hardware
 
-If you use VS Code with Calva starting a repl should automatically launch the app and give you a repl in the `user.clj` namespace 
+If you use VS Code with Calva, starting a REPL should automatically launch the app and give you a REPL in the `user.clj` namespace.
 
 ## Development Workflow
 
 ### Start a REPL for Interactive Development
 
+The aliases are composable - combine them as needed:
+
 ```bash
-clj -M:repl
+# Basic development (Windows)
+clj -M:dev:laser-show:win
+
+# Development (macOS)
+clj -M:dev:laser-show:mac
+
+# Development (Linux)
+clj -M:dev:laser-show:linux
+
+# Development with JFR profiling enabled
+clj -M:dev:laser-show:win:jfr
+
+# REPL-only (no app, just nREPL server - needs platform)
+clj -M:win:repl
 ```
 
-The REPL will start and show a port number. Connect your editor:
+**What each alias provides:**
+- **`:win`** / **`:mac`** / **`:linux`** - Platform-specific JavaFX natives (required)
+- **`:laser-show`** - JVM opts (ZGC, native-access) + main entry point
+- **`:dev`** - Dev mode flag, async-profiler support, extra dev dependencies
+- **`:jfr`** - Java Flight Recorder continuous recording (5min rolling buffer)
 
-- **VS Code with Calva**: 
-  1. Ctrl+Shift+P → "Calva: Start a Project REPL and Connect (Jack-In)"
-  With this repo's configuration calva should automatically choose "deps.edn" and select the right port
+### VS Code with Calva
 
+1. Ctrl+Shift+P → "Calva: Start a Project REPL and Connect (Jack-In)"
+2. With this repo's configuration, Calva should automatically choose "deps.edn" and select the right aliases
 
 ### Test Laser Show in REPL
 
 ```clojure
 ;; Load and start the application
-(require '[laser-show.app :as app])
-(app/start!)
-
+(start)
 ```
 
+### Profiling
+
+For performance analysis, see [docs/PROFILING.md](docs/PROFILING.md).
+
+**Quick JFR profiling:**
+1. Start with `:jfr` alias: `clj -M:dev:laser-show:jfr`
+2. Open JDK Mission Control and connect to the running JVM
+3. The "continuous" recording is already running with 5-minute history
+4. Dump recordings from REPL:
+   ```clojure
+   (require '[laser-show.profiling.jfr-profiler :as jfr])
+   (jfr/dump-recording "my-recording.jfr")
+   ```
+
+### Building Uber JARs
+
+```bash
+# Build platform-specific JAR (combines :build + platform alias)
+clj -T:build:win uber      # Windows JAR
+clj -T:build:mac uber      # macOS JAR
+clj -T:build:linux uber    # Linux JAR
+```
+
+The JAR will be created at `target/laser-show-X.X.X-standalone.jar`
 
 ## Troubleshooting
-btw, i've only tested on Windows, if you're not on it maybe it'll cause issues
+btw, i've mostly tested on Windows, if you're not on it maybe it'll cause issues
 
 ### "clj: command not found"
 - Clojure CLI tools are not installed
@@ -68,21 +120,6 @@ btw, i've only tested on Windows, if you're not on it maybe it'll cause issues
 ### "Unable to resolve symbol"
 - Dependencies not downloaded
 - Run: `clj -P` to download all dependencies
-
-### Laser Show window doesn't appear
-- Check Java version: `java -version` (should be 25+ briefly tested 21, but not 100% sure it'll still work)
-- Try running with: `clj -M:laser-show` from project directory
-
-### IDN-Hello can't find devices
-- Check your network broadcast address
-- Verify UDP port 7255 is not blocked by firewall
-- Ensure you're on the same network as the devices
-
-## Next Steps
-
-- Read the full [README.md](README.md) for detailed documentation
-- Explore the source code in `src/laser_show/`
-- Integrate with your laser hardware using the IDN protocol
 
 
 ## Support

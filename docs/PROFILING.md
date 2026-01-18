@@ -272,8 +272,101 @@ Files are named with timestamps and profile type:
 - `YYYYMMDD_HHMMSS-01-cpu-flamegraph.html`
 - `YYYYMMDD_HHMMSS-02-alloc-flamegraph.html`
 
+## JFR (Java Flight Recorder) Profiling
+
+JFR provides low-overhead continuous profiling with real-time spike detection.
+Unlike clj-async-profiler which provides aggregate views, JFR excels at:
+
+- **Identifying WHEN performance issues occur** (timeline view)
+- **Correlating with JVM events** (GC pauses, JIT compilation)
+- **Real-time spike detection** with configurable thresholds
+- **Near-zero overhead** (<1%) for continuous use
+
+### Quick Start
+
+1. **Compile JFR event classes first** (one-time setup):
+   ```bash
+   clj -T:build compile-java
+   ```
+
+2. **Start your REPL with the `:dev-jfr` alias** (or regular `:dev`):
+   ```bash
+   clj -M:dev-jfr
+   ```
+
+3. **Start the application and JFR recording**:
+   ```clojure
+   (start)
+   (jfr-start)
+   ```
+
+4. **Enable spike detection**:
+   ```clojure
+   (jfr-spikes 5000)  ; Alert on frames >5ms
+   ```
+
+5. **Use the app normally**. When you see spikes, dump the recording:
+   ```clojure
+   (jfr-dump)
+   ```
+
+6. **Open the .jfr file in JDK Mission Control** for analysis.
+
+### JFR Commands
+
+```clojure
+;; Recording management
+(jfr-start)                     ; Start continuous recording
+(jfr-start {:max-age "10m"})    ; With custom options
+(jfr-stop)                      ; Stop recording
+(jfr-dump)                      ; Save to timestamped file
+(jfr-dump "my-recording.jfr")   ; Save with custom name
+
+;; Spike detection
+(jfr-spikes 5000)               ; Alert on frames >5ms
+(jfr-spikes-stop)               ; Stop spike detection
+(jfr-auto-dump 10000)           ; Auto-save on frames >10ms
+
+;; Status
+(jfr-status)                    ; Show recording status
+(jfr-recordings)                ; List saved recordings
+```
+
+### Spike Thresholds Guide
+
+| Threshold | Use Case |
+|-----------|----------|
+| 5000 µs (5ms) | Detecting any noticeable frame slowdown |
+| 10000 µs (10ms) | Major frame delays |
+| 16667 µs (16.7ms) | Exceeds 60 FPS frame budget |
+| 33333 µs (33.3ms) | Exceeds 30 FPS frame budget |
+
+### Analyzing Results in JDK Mission Control
+
+1. Download [JDK Mission Control](https://jdk.java.net/jmc/)
+2. Open the `.jfr` file from `./profiling-results/jfr/`
+3. Navigate to "Event Browser" → "Laser Show" category
+4. View the timeline to see frame timing over time
+5. Correlate with "JVM Internals" → "Garbage Collection" events
+6. Check thread states during slow frames
+
+### When to Use JFR vs Other Tools
+
+| Tool | Best For |
+|------|----------|
+| Frame Profiler | Quick stats, always-on monitoring, REPL inspection |
+| clj-async-profiler | Finding WHERE time is spent (flamegraphs) |
+| JFR | Finding WHEN issues occur, GC correlation, production monitoring |
+
+**Typical workflow:**
+1. Use frame profiler (`(fp/print-stats 100)`) to detect slow frames
+2. Use JFR to capture timeline and correlate with GC/JIT
+3. Use async-profiler flamegraphs to find specific hot code paths
+
 ## Further Reading
 
 - [clj-async-profiler documentation](https://github.com/clojure-goes-fast/clj-async-profiler)
 - [Clojure Goes Fast knowledge base](http://clojure-goes-fast.com/kb/profiling/clj-async-profiler/)
 - [Understanding Flamegraphs](http://www.brendangregg.com/flamegraphs.html)
+- [JDK Mission Control User Guide](https://docs.oracle.com/javacomponents/jmc-5-5/jmc-user-guide/)
+- [JFR Event Streaming](https://docs.oracle.com/en/java/javase/17/jfapi/flight-recorder-api-programmers-guide.html)

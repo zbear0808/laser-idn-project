@@ -72,7 +72,12 @@ jobs:
             Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
             sleep 3
           fi
-          clojure -T:build-${{ matrix.platform }} uber
+          # Platform alias mapping: windows->win, mac->mac, linux->linux
+          PLATFORM_ALIAS="${{ matrix.platform }}"
+          if [ "$PLATFORM_ALIAS" == "windows" ]; then
+            PLATFORM_ALIAS="win"
+          fi
+          clojure -T:build:$PLATFORM_ALIAS uber
           echo "Built JAR for ${{ matrix.platform }}"
           ls -lh target/
       

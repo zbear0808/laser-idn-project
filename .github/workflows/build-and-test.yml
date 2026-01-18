@@ -39,19 +39,19 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-clojure-
     
-    # Run tests
+    # Run tests (need :linux for JavaFX deps on ubuntu)
     - name: Run unit tests
-      run: clojure -M:test
+      run: clojure -M:linux:test
     
     - name: Run integration tests
-      run: clojure -M:test-integration
+      run: clojure -M:linux:test-integration
     
     - name: Run all tests
-      run: clojure -M:test-all
+      run: clojure -M:linux:test-all
     
-    # Build application
+    # Build application (platform-specific JAR)
     - name: Build JAR
-      run: clojure -T:build uber
+      run: clojure -T:build:linux uber
     
     # Upload JAR artifact
     - name: Upload JAR artifact

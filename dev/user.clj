@@ -14,12 +14,20 @@
      (help-ui)         - Open interactive reference browser
      (explain-desc desc) - Validate a cljfx description
      
-   Profiling:
-     (profile-cpu 10)  - Profile CPU for 10 seconds
-     (profile-alloc 10) - Profile allocations for 10 seconds
-     (profile-section! #(...)) - Profile a code section
-     (view-flamegraph) - Open latest flamegraph
-     (profiler-ui 8080) - Start profiler web UI")
+   Profiling (clj-async-profiler - CPU/allocation flamegraphs):
+      (profile-cpu 10)  - Profile CPU for 10 seconds
+      (profile-alloc 10) - Profile allocations for 10 seconds
+      (profile-section! #(...)) - Profile a code section
+      (view-flamegraph) - Open latest flamegraph
+      (profiler-ui 8080) - Start profiler web UI
+      
+   JFR Profiling (low-overhead continuous profiling):
+      (jfr-start)       - Start continuous JFR recording
+      (jfr-stop)        - Stop JFR recording
+      (jfr-dump)        - Dump recording to file
+      (jfr-spikes 5000) - Alert on frames >5ms
+      (jfr-auto-dump 10000) - Auto-dump on frames >10ms
+      (jfr-status)      - Show JFR status")
 
 
 ;; State
@@ -255,6 +263,99 @@
   ((resolve 'laser-show.profiling.async-profiler/print-status)))
 
 
+;; JFR (Java Flight Recorder) Profiling
+;; Low-overhead continuous profiling for identifying frame spikes
+
+
+(defn jfr-start
+  "Start continuous JFR recording for frame profiling.
+   
+   JFR runs with <1% overhead, suitable for continuous use.
+   Records custom frame events and correlates with GC/JIT activity.
+   
+   Options:
+   - :max-age - How long to keep events (default \"5m\")
+   - :max-size - Maximum recording size (default \"100m\")
+   - :settings - :default, :profile, or path to .jfc file
+   
+   Example:
+     (jfr-start)
+     (jfr-start {:max-age \"10m\" :settings :profile})"
+  ([]
+   (require 'laser-show.profiling.jfr-profiler)
+   ((resolve 'laser-show.profiling.jfr-profiler/start-recording!)))
+  ([opts]
+   (require 'laser-show.profiling.jfr-profiler)
+   ((resolve 'laser-show.profiling.jfr-profiler/start-recording!) opts)))
+
+(defn jfr-stop
+  "Stop JFR recording."
+  []
+  (require 'laser-show.profiling.jfr-profiler)
+  ((resolve 'laser-show.profiling.jfr-profiler/stop-recording!)))
+
+(defn jfr-dump
+  "Dump current JFR recording to file.
+   Recording continues after dump.
+   
+   Example:
+     (jfr-dump)
+     (jfr-dump \"spike-investigation.jfr\")"
+  ([]
+   (require 'laser-show.profiling.jfr-profiler)
+   ((resolve 'laser-show.profiling.jfr-profiler/dump-recording!)))
+  ([filename]
+   (require 'laser-show.profiling.jfr-profiler)
+   ((resolve 'laser-show.profiling.jfr-profiler/dump-recording!) filename)))
+
+(defn jfr-spikes
+  "Start real-time spike detection (threshold in microseconds).
+   Alerts when frame generation exceeds threshold.
+   
+   Example:
+     (jfr-spikes 5000)   ; Alert on frames >5ms
+     (jfr-spikes 16000)  ; Alert on frames >16ms (60 FPS budget)"
+  [threshold-us]
+  (require 'laser-show.profiling.jfr-profiler)
+  ((resolve 'laser-show.profiling.jfr-profiler/start-spike-detection!) threshold-us))
+
+(defn jfr-spikes-stop
+  "Stop spike detection."
+  []
+  (require 'laser-show.profiling.jfr-profiler)
+  ((resolve 'laser-show.profiling.jfr-profiler/stop-spike-detection!)))
+
+(defn jfr-auto-dump
+  "Auto-dump recording on spikes.
+   Automatically saves JFR when frame exceeds threshold.
+   
+   Parameters:
+   - threshold-us: Microseconds threshold for auto-dump
+   - cooldown-sec: (optional) Minimum seconds between dumps (default 30)
+   
+   Example:
+     (jfr-start)            ; Must start recording first
+     (jfr-auto-dump 10000)  ; Dump on frames >10ms"
+  ([threshold-us]
+   (require 'laser-show.profiling.jfr-profiler)
+   ((resolve 'laser-show.profiling.jfr-profiler/spike-auto-dump!) threshold-us))
+  ([threshold-us cooldown-sec]
+   (require 'laser-show.profiling.jfr-profiler)
+   ((resolve 'laser-show.profiling.jfr-profiler/spike-auto-dump!) threshold-us cooldown-sec)))
+
+(defn jfr-status
+  "Print JFR profiler status."
+  []
+  (require 'laser-show.profiling.jfr-profiler)
+  ((resolve 'laser-show.profiling.jfr-profiler/print-status)))
+
+(defn jfr-recordings
+  "List all JFR recordings in the output directory."
+  []
+  (require 'laser-show.profiling.jfr-profiler)
+  ((resolve 'laser-show.profiling.jfr-profiler/print-recordings)))
+
+
 ;; REPL Quick Reference
 
 
@@ -275,11 +376,22 @@
   (help-ui)                         ;; Open interactive browser
   (explain-desc {:fx/type :label :text "Hello"})  ;; Validate description
   
-  ;; Profiling
+  ;; Profiling (async-profiler - flamegraphs)
   (profile-cpu 30)                  ;; Profile CPU for 30 seconds
   (profile-alloc 30)                ;; Profile allocations for 30 seconds
   (profile-section! prn #_(your-code))   ;; Profile specific code
   (view-flamegraph)                 ;; Open latest flamegraph
   (profiler-ui 8080)                ;; Start web UI
   (profiler-status)                 ;; Check profiler status
+  
+  ;; JFR Profiling (low-overhead continuous profiling)
+  (jfr-start)                       ;; Start continuous recording
+  (jfr-start {:max-age "10m"})      ;; With custom options
+  (jfr-spikes 5000)                 ;; Alert on frames >5ms
+  (jfr-auto-dump 10000)             ;; Auto-save on frames >10ms
+  (jfr-dump)                        ;; Save recording to file
+  (jfr-dump "my-recording.jfr")     ;; Save with custom name
+  (jfr-stop)                        ;; Stop recording
+  (jfr-status)                      ;; Check JFR status
+  (jfr-recordings)                  ;; List saved recordings
   )
