@@ -20,15 +20,19 @@ jobs:
         include:
           - os: windows-latest
             platform: windows
+            platform-alias: win
             artifact-name: jar-windows
           - os: macos-latest
-            platform: mac
+            platform: mac-arm
+            platform-alias: mac-arm
             artifact-name: jar-macos-arm64
-          - os: macos-15-intel
+          - os: macos-13
             platform: mac
+            platform-alias: mac
             artifact-name: jar-macos-intel
           - os: ubuntu-latest
             platform: linux
+            platform-alias: linux
             artifact-name: jar-linux
     
     runs-on: ${{ matrix.os }}
@@ -72,14 +76,9 @@ jobs:
             Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
             sleep 3
           fi
-          # Platform alias mapping: windows->win, mac->mac, linux->linux
-          PLATFORM_ALIAS="${{ matrix.platform }}"
-          if [ "$PLATFORM_ALIAS" == "windows" ]; then
-            PLATFORM_ALIAS="win"
-          fi
-          # Pass platform as argument to uber task (not as alias)
-          clojure -T:build uber :platform :$PLATFORM_ALIAS
-          echo "Built JAR for ${{ matrix.platform }}"
+          # Use the platform-alias from matrix
+          clojure -T:build uber :platform :${{ matrix.platform-alias }}
+          echo "Built JAR for ${{ matrix.platform }} (alias: ${{ matrix.platform-alias }})"
           ls -lh target/
       
       - name: Upload platform JAR artifact

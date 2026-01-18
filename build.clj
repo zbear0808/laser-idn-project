@@ -52,17 +52,18 @@
   "Build an uberjar with platform-specific JavaFX dependencies.
    
    Usage:
-     clj -T:build uber :platform :win    ; Windows
-     clj -T:build uber :platform :mac    ; macOS  
-     clj -T:build uber :platform :linux  ; Linux
+     clj -T:build uber :platform :win      ; Windows
+     clj -T:build uber :platform :mac      ; macOS Intel (x86_64)
+     clj -T:build uber :platform :mac-arm  ; macOS Apple Silicon (ARM64)
+     clj -T:build uber :platform :linux    ; Linux
    
    The :platform parameter is REQUIRED because JavaFX is platform-specific.
    This builds a standalone JAR with all dependencies including JavaFX 26."
   [{:keys [platform]}]
   (when-not platform
-    (throw (ex-info "Platform is required. Use :platform :win, :mac, or :linux" {})))
-  (when-not (#{:win :mac :linux} platform)
-    (throw (ex-info (str "Invalid platform: " platform ". Must be :win, :mac, or :linux") {})))
+    (throw (ex-info "Platform is required. Use :platform :win, :mac, :mac-arm, or :linux" {})))
+  (when-not (#{:win :mac :mac-arm :linux} platform)
+    (throw (ex-info (str "Invalid platform: " platform ". Must be :win, :mac, :mac-arm, or :linux") {})))
   
   (println (str "Building uberjar for platform: " (name platform)))
   (clean nil)

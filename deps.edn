@@ -3,8 +3,12 @@
  ;; Java source path for JFR custom events (compiled separately)
  :java-src-paths ["java"]
  
- ;; NOTE: JavaFX is platform-specific. Add :win, :mac, or :linux alias when running.
- ;; Example: clj -M:dev:laser-show:win
+ ;; NOTE: JavaFX is platform-specific. Add the appropriate platform alias when running:
+ ;;   :win      - Windows
+ ;;   :mac      - macOS Intel (x86_64)
+ ;;   :mac-arm  - macOS Apple Silicon (ARM64)
+ ;;   :linux    - Linux
+ ;; Example: clj -M:dev:laser-show:mac-arm
  :deps {org.clojure/clojure {:mvn/version "1.12.4"}
         cljfx/cljfx {:mvn/version "1.10.6"}
         cljfx/css {:mvn/version "1.1.0"}
@@ -79,6 +83,7 @@
                 org.openjfx/javafx-swing$win {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-web$win {:mvn/version "26-ea+19"}}}
   
+  ;; macOS Intel (x86_64)
   :mac
   {:extra-deps {org.openjfx/javafx-base$mac {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-controls$mac {:mvn/version "26-ea+19"}
@@ -86,6 +91,15 @@
                 org.openjfx/javafx-media$mac {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-swing$mac {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-web$mac {:mvn/version "26-ea+19"}}}
+  
+  ;; macOS Apple Silicon (ARM64)
+  :mac-arm
+  {:extra-deps {org.openjfx/javafx-base$mac-aarch64 {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-controls$mac-aarch64 {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-graphics$mac-aarch64 {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-media$mac-aarch64 {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-swing$mac-aarch64 {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-web$mac-aarch64 {:mvn/version "26-ea+19"}}}
   
   :linux
   {:extra-deps {org.openjfx/javafx-base$linux {:mvn/version "26-ea+19"}
@@ -130,9 +144,10 @@
   ;; ============================================================================
   ;; Build alias - builds platform-specific uberjars
   ;; Usage:
-  ;;   clj -T:build uber :platform :win    ; Windows
-  ;;   clj -T:build uber :platform :mac    ; macOS
-  ;;   clj -T:build uber :platform :linux  ; Linux
+  ;;   clj -T:build uber :platform :win      ; Windows
+  ;;   clj -T:build uber :platform :mac      ; macOS Intel (x86_64)
+  ;;   clj -T:build uber :platform :mac-arm  ; macOS Apple Silicon (ARM64)
+  ;;   clj -T:build uber :platform :linux    ; Linux
   ;; ============================================================================
   :build
   {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
