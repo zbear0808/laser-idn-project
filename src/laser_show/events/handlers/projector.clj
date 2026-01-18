@@ -141,14 +141,14 @@
    should be applied at the ZONE level, not the projector level.
    
    Projectors handle color calibration:
-   - RGB curves for color balancing
+   - RGB curves for color balancing (using normalized 0.0-1.0 values)
    - (future: white balance, intensity curves, etc.)"
   [{:effect-id :rgb-curves
     :id (random-uuid)
     :enabled? true
-    :params {:r-curve-points [[0 0] [255 255]]
-             :g-curve-points [[0 0] [255 255]]
-             :b-curve-points [[0 0] [255 255]]}}])
+    :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
+             :g-curve-points [[0.0 0.0] [1.0 1.0]]
+             :b-curve-points [[0.0 0.0] [1.0 1.0]]}}])
 
 
 (defn- make-projector-config

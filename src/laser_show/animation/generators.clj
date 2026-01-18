@@ -217,55 +217,61 @@
 
 
 
-;; Animation-Ready Generators
+;; Frame Generators
+;; These take a params map and return a LaserFrame.
+;; Shape generators above handle the actual point generation.
+;; These functions serve as the preset entry points.
 
-(defn circle-animation
-  "Circle animation generator function.
-   Takes [time-ms params] and returns LaserFrame."
-  [time-ms params]
-  (let [{:keys [radius color]
-         :or {radius 0.5 color [1.0 1.0 1.0]}} params
-        points (generate-circle :radius radius :color color)]
-    (t/make-frame points)))
+(defn- shape-generator->frame-generator
+  "Wraps a shape generator (that returns points) into a frame generator (that returns LaserFrame).
+   The returned fn takes a params map and returns a LaserFrame."
+  [generator-fn]
+  (fn [params]
+    (->> (apply generator-fn (mapcat identity params))
+         (t/make-frame))))
 
-(defn square-animation
-  "Square animation generator function."
-  [time-ms params]
-  (let [{:keys [size color]
-         :or {size 0.5 color [1.0 1.0 1.0]}} params
-        points (generate-square :size size :color color)]
-    (t/make-frame points)))
+(def circle-frame
+  "Generate a circle frame. Params: :radius, :color, :center, :num-points"
+  (shape-generator->frame-generator generate-circle))
 
-(defn triangle-animation
-  "Triangle animation generator function."
-  [time-ms params]
-  (let [{:keys [size color]
-         :or {size 0.5 color [1.0 1.0 1.0]}} params
-        points (generate-triangle :size size :color color)]
-    (t/make-frame points)))
+(def square-frame
+  "Generate a square frame. Params: :size, :color, :center, :num-points"
+  (shape-generator->frame-generator generate-square))
 
-(defn spiral-animation
-  "Spiral animation generator function."
-  [time-ms params]
-  (let [{:keys [turns start-radius end-radius color]
-         :or {turns 3 start-radius 0.1 end-radius 0.5 color [1.0 1.0 1.0]}} params
-        points (generate-spiral :turns turns :start-radius start-radius :end-radius end-radius :color color)]
-    (t/make-frame points)))
+(def triangle-frame
+  "Generate a triangle frame. Params: :size, :color, :center, :num-points"
+  (shape-generator->frame-generator generate-triangle))
 
-(defn star-animation
-  "Star animation generator function."
-  [time-ms params]
-  (let [{:keys [spikes outer-radius inner-radius color]
-         :or {spikes 5 outer-radius 0.5 inner-radius 0.25 color [1.0 1.0 1.0]}} params
-        points (generate-star :spikes spikes :outer-radius outer-radius :inner-radius inner-radius :color color)]
-    (t/make-frame points)))
+(def spiral-frame
+  "Generate a spiral frame. Params: :turns, :start-radius, :end-radius, :color, :center, :num-points"
+  (shape-generator->frame-generator generate-spiral))
 
-(defn wave-animation
-  "Wave animation generator function."
-  [time-ms params]
-  (let [{:keys [amplitude frequency color]
-         :or {amplitude 0.3 frequency 2 color [1.0 1.0 1.0]}} params
-        [r g b] color]
+(def star-frame
+  "Generate a star frame. Params: :spikes, :outer-radius, :inner-radius, :color, :center, :num-points"
+  (shape-generator->frame-generator generate-star))
+
+(def line-frame
+  "Generate a line frame. Params: :start, :end, :color, :num-points"
+  (shape-generator->frame-generator generate-line))
+
+(defn horizontal-line-frame
+  "Generate a horizontal line spanning the projection area.
+   Params: :length (default 1.0), :color"
+  [{:keys [length color]
+    :or {length 1.0 color [1.0 1.0 1.0]}}]
+  (let [half-length (/ length 2)]
+    (->> (generate-line :num-points 64
+                        :start [(- half-length) 0]
+                        :end [half-length 0]
+                        :color color)
+         (t/make-frame))))
+
+(defn wave-frame
+  "Generate a sine wave frame.
+   Params: :amplitude (default 0.3), :frequency (default 2), :color"
+  [{:keys [amplitude frequency color]
+    :or {amplitude 0.3 frequency 2 color [1.0 1.0 1.0]}}]
+  (let [[r g b] color]
     (->> (range 64)
          (mapv (fn [i]
                  (let [t (/ (double i) 63.0)
@@ -274,62 +280,38 @@
                    (t/make-point x y r g b))))
          (t/make-frame))))
 
-(defn beam-fan-animation
-  "Beam fan animation generator function.
-   Creates a horizontal line at y=0 with discrete blanked points that snake back for seamless looping.
-   Each point consists of: blanked, visible, visible, blanked at the same X coordinate.
-   Points go from left to right, then back from right to left for perfect looping.
-   Per IDN-Stream spec Section 6.2: Blanking points separate each beam point."
-  [time-ms params]
-  (let [{:keys [num-points color]
-         :or {num-points 8 color [1.0 1.0 1.0]}} params
-        [r g b] color
+(defn beam-fan-frame
+  "Generate discrete beam points in a horizontal fan pattern.
+   Points snake left-to-right then back for seamless looping.
+   Per IDN-Stream spec Section 6.2: Blanking points separate each beam.
+   Params: :num-points (default 8), :color"
+  [{:keys [num-points color]
+    :or {num-points 8 color [1.0 1.0 1.0]}}]
+  (let [[r g b] color
         x-min -0.99
         x-max 0.99
         y 0.0
-        ;; Calculate X positions evenly spaced, always including endpoints
         forward-positions (if (= num-points 1)
                             [0.0]
-                            (mapv (fn [i]
-                                    (let [t (/ (double i) (dec num-points))]
-                                      (lerp x-min x-max t)))
+                            (mapv #(lerp x-min x-max (/ (double %) (dec num-points)))
                                   (range num-points)))
-        ;; Snake back: reverse without duplicating endpoints
-        backward-positions (if (<= num-points 2)
-                             []
+        backward-positions (when (> num-points 2)
                              (vec (reverse (subvec forward-positions 1 (dec num-points)))))
-        ;; Combine forward and backward for seamless loop
         all-positions (into forward-positions backward-positions)]
     (->> all-positions
          (u/mapcatv (fn [x]
-                      ;; Each point: blanked, visible, visible, blanked
                       [(t/blanked-point x y)
                        (t/make-point x y r g b)
                        (t/make-point x y r g b)
                        (t/blanked-point x y)]))
          (t/make-frame))))
 
-(defn horizontal-line-animation
-  "Horizontal line animation generator function.
-   Line spans horizontally across the projection area."
-  [time-ms params]
-  (let [{:keys [length color]
-         :or {length 1.0 color [1.0 1.0 1.0]}} params
-        half-length (/ length 2)
-        points (generate-line :num-points 64
-                             :start [(- half-length) 0]
-                             :end [half-length 0]
-                             :color color)]
-    (t/make-frame points)))
-
-(defn rainbow-circle-animation
-  "Rainbow-colored circle animation generator function.
-   Uses normalized rainbow colors for full precision."
-  [time-ms params]
-  (let [{:keys [radius]
-         :or {radius 0.5}} params
-        num-points 64
-        num-segments (dec num-points)]  ; Divide by (n-1) to reach full circle at last point
+(defn rainbow-circle-frame
+  "Generate a circle with rainbow gradient colors.
+   Params: :radius (default 0.5)"
+  [{:keys [radius] :or {radius 0.5}}]
+  (let [num-points 64
+        num-segments (dec num-points)]
     (->> (range num-points)
          (mapv (fn [i]
                  (let [t (/ (double i) num-segments)

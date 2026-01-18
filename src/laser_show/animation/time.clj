@@ -108,7 +108,7 @@
   "Generate a triangle wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0).
    Starts at peak (1.0) when phase=0 for intuitive visual behavior."
   ^double [^double phase]
-  (let [p (mod (+ phase 0.25) 1.0)]  ;; Shift by 0.25 to start at peak
+  (let [p (mod (+ phase 0.5) 1.0)]  ;; Shift by 0.5 to start at peak
     (if (< p 0.5)
       (- (* 4.0 p) 1.0)
       (- 3.0 (* 4.0 p)))))

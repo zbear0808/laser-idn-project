@@ -21,14 +21,14 @@
    - state: Application state
    - params-path: Full path to the effect's :params map
    - channel: Channel keyword (:r, :g, or :b)
-   - x, y: Point coordinates (will be converted to integers)
+   - x, y: Point coordinates (normalized 0.0-1.0)
    
    Returns: Updated state with new point added and sorted"
   [state params-path channel x y]
   (let [param-key (keyword (str (name channel) "-curve-points"))
         curve-path (conj params-path param-key)
-        current-points (get-in state curve-path [[0 0] [255 255]])
-        new-point [(int x) (int y)]
+        current-points (get-in state curve-path [[0.0 0.0] [1.0 1.0]])
+        new-point [(double x) (double y)]
         new-points (->> (conj current-points new-point)
                         (sort-by first)
                         vec)]
@@ -44,20 +44,20 @@
    - params-path: Full path to the effect's :params map
    - channel: Channel keyword (:r, :g, or :b)
    - point-idx: Index of point to update
-   - x, y: New coordinates (will be converted to integers)
+   - x, y: New coordinates (normalized 0.0-1.0)
    
    Returns: Updated state with point modified and re-sorted"
   [state params-path channel point-idx x y]
   (let [param-key (keyword (str (name channel) "-curve-points"))
         curve-path (conj params-path param-key)
-        current-points (get-in state curve-path [[0 0] [255 255]])
+        current-points (get-in state curve-path [[0.0 0.0] [1.0 1.0]])
         num-points (count current-points)
         ;; Corner points (first and last) can only move in Y
         is-corner? (or (= point-idx 0) (= point-idx (dec num-points)))
-        current-point (nth current-points point-idx [0 0])
+        current-point (nth current-points point-idx [0.0 0.0])
         updated-point (if is-corner?
-                        [(first current-point) (int y)]  ; Keep original X for corners
-                        [(int x) (int y)])
+                        [(first current-point) (double y)]  ; Keep original X for corners
+                        [(double x) (double y)])
         updated-points (assoc current-points point-idx updated-point)
         sorted-points (->> updated-points
                           (sort-by first)
@@ -78,7 +78,7 @@
   [state params-path channel point-idx]
   (let [param-key (keyword (str (name channel) "-curve-points"))
         curve-path (conj params-path param-key)
-        current-points (get-in state curve-path [[0 0] [255 255]])
+        current-points (get-in state curve-path [[0.0 0.0] [1.0 1.0]])
         num-points (count current-points)
         ;; Cannot remove corner points (first and last)
         is-corner? (or (= point-idx 0) (= point-idx (dec num-points)))]

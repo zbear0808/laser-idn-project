@@ -288,56 +288,8 @@
    This enables generic handlers and simplified subscriptions."
   {:effect-chains {:default {}
                    :doc "Map of [col row] -> {:items [...] :active? bool}"}
-   :cue-chains {:default {;; Row 0: Basic shapes - initial default cues
-                          [0 0] {:items [{:type :preset
-                                          :id #uuid "00000000-0000-0000-0000-000000000001"
-                                          :preset-id :circle
-                                          :params {}
-                                          :effects []
-                                          :enabled? true}]}
-                          [1 0] {:items [{:type :preset
-                                          :id #uuid "00000000-0000-0000-0000-000000000002"
-                                          :preset-id :square
-                                          :params {}
-                                          :effects []
-                                          :enabled? true}]}
-                          [2 0] {:items [{:type :preset
-                                          :id #uuid "00000000-0000-0000-0000-000000000003"
-                                          :preset-id :triangle
-                                          :params {}
-                                          :effects []
-                                          :enabled? true}]}
-                          [3 0] {:items [{:type :preset
-                                          :id #uuid "00000000-0000-0000-0000-000000000004"
-                                          :preset-id :star
-                                          :params {}
-                                          :effects []
-                                          :enabled? true}]}
-                          [4 0] {:items [{:type :preset
-                                          :id #uuid "00000000-0000-0000-0000-000000000005"
-                                          :preset-id :spiral
-                                          :params {}
-                                          :effects []
-                                          :enabled? true}]}
-                          [5 0] {:items [{:type :preset
-                                          :id #uuid "00000000-0000-0000-0000-000000000006"
-                                          :preset-id :wave
-                                          :params {}
-                                          :effects []
-                                          :enabled? true}]}
-                          [6 0] {:items [{:type :preset
-                                          :id #uuid "00000000-0000-0000-0000-000000000007"
-                                          :preset-id :beam-fan
-                                          :params {}
-                                          :effects []
-                                          :enabled? true}]}
-                          [7 0] {:items [{:type :preset
-                                          :id #uuid "00000000-0000-0000-0000-000000000008"
-                                          :preset-id :rainbow-circle
-                                          :params {}
-                                          :effects []
-                                          :enabled? true}]}}
-                :doc "Map of [col row] -> {:items [...]}"}
+   :cue-chains {:default {}
+                :doc "Map of [col row] -> {:items [...]}. Starter content is applied via laser-show.state.templates/apply-starter-cue-chains"}
    :projector-effects {:default {}
                        :doc "Map of projector-id -> {:items [...]}"}
    :zone-effects {:default {}

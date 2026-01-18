@@ -38,9 +38,9 @@
                           :effects [{:id (java.util.UUID/fromString "123e4567-e89b-12d3-a456-426614174000")
                                      :effect-id :rgb-curves
                                      :enabled? true
-                                     :params {:r-curve-points [[0 0] [255 255]]
-                                              :g-curve-points [[0 0] [255 255]]
-                                              :b-curve-points [[0 0] [255 255]]}}]}]})
+                                     :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
+                                              :g-curve-points [[0.0 0.0] [1.0 1.0]]
+                                              :b-curve-points [[0.0 0.0] [1.0 1.0]]}}]}]})
       (assoc-in [:ui :dialogs :cue-chain-editor :data] {:col 0 :row 0})
       (assoc-in [:cue-chain-editor :cell] [0 0])))
 
@@ -70,15 +70,15 @@
                  :entity-key [0 0]
                  :effect-path [0 :effects 0]
                  :channel :r
-                 :x 128
-                 :y 64
+                 :x 0.5
+                 :y 0.25
                  :state sample-state-with-effect}
           result (chain/handle event)
           new-points (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points])]
       (is (= 3 (count new-points)))
-      (is (= [0 0] (first new-points)))
-      (is (= [128 64] (second new-points)))
-      (is (= [255 255] (last new-points)))
+      (is (= [0.0 0.0] (first new-points)))
+      (is (= [0.5 0.25] (second new-points)))
+      (is (= [1.0 1.0] (last new-points)))
       ;; Should maintain sort order
       (is (= new-points (sort-by first new-points))))))
 
@@ -89,12 +89,12 @@
                  :entity-key [0 0]
                  :effect-path [0 :effects 0]
                  :channel :g
-                 :x 200
-                 :y 100
+                 :x 0.8
+                 :y 0.4
                  :state sample-state-with-effect}
           result (chain/handle event)
           new-points (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects 0 :params :g-curve-points])]
-      (is (= [[0 0] [200 100] [255 255]] new-points)))))
+      (is (= [[0.0 0.0] [0.8 0.4] [1.0 1.0]] new-points)))))
 
 (deftest handle-add-curve-point-multiple
   (testing "Adding multiple curve points maintains sort order"
@@ -102,16 +102,16 @@
                                 :domain :cue-chains
                                 :entity-key [0 0]
                                 :effect-path [0 :effects 0]
-                                :channel :b :x 100 :y 50
+                                :channel :b :x 0.4 :y 0.2
                                 :state sample-state-with-effect})
           state2 (chain/handle {:event/type :chain/add-curve-point
                                 :domain :cue-chains
                                 :entity-key [0 0]
                                 :effect-path [0 :effects 0]
-                                :channel :b :x 50 :y 100
+                                :channel :b :x 0.2 :y 0.4
                                 :state (:state state1)})
           final-points (get-in state2 [:state :chains :cue-chains [0 0] :items 0 :effects 0 :params :b-curve-points])]
-      (is (= [[0 0] [50 100] [100 50] [255 255]] final-points)))))
+      (is (= [[0.0 0.0] [0.2 0.4] [0.4 0.2] [1.0 1.0]] final-points)))))
 
 
 ;; Curve Point Update Tests
@@ -121,64 +121,64 @@
   (testing "Updating middle curve point"
     (let [initial-state (assoc-in sample-state-with-effect
                                   [:chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points]
-                                  [[0 0] [128 128] [255 255]])
+                                  [[0.0 0.0] [0.5 0.5] [1.0 1.0]])
           event {:event/type :chain/update-curve-point
                  :domain :cue-chains
                  :entity-key [0 0]
                  :effect-path [0 :effects 0]
-                 :channel :r :point-idx 1 :x 140 :y 100
+                 :channel :r :point-idx 1 :x 0.55 :y 0.4
                  :state initial-state}
           result (chain/handle event)
           new-points (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points])]
-      (is (= [[0 0] [140 100] [255 255]] new-points)))))
+      (is (= [[0.0 0.0] [0.55 0.4] [1.0 1.0]] new-points)))))
 
 (deftest handle-update-curve-point-corner-left
   (testing "Updating left corner point only changes Y"
     (let [initial-state (assoc-in sample-state-with-effect
                                   [:chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points]
-                                  [[0 0] [128 128] [255 255]])
+                                  [[0.0 0.0] [0.5 0.5] [1.0 1.0]])
           event {:event/type :chain/update-curve-point
                  :domain :cue-chains
                  :entity-key [0 0]
                  :effect-path [0 :effects 0]
-                 :channel :r :point-idx 0 :x 50 :y 100
+                 :channel :r :point-idx 0 :x 0.2 :y 0.4
                  :state initial-state}
           result (chain/handle event)
           new-points (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points])]
-      ;; X should remain 0, only Y changes
-      (is (= [0 100] (first new-points))))))
+      ;; X should remain 0.0, only Y changes
+      (is (= [0.0 0.4] (first new-points))))))
 
 (deftest handle-update-curve-point-corner-right
   (testing "Updating right corner point only changes Y"
     (let [initial-state (assoc-in sample-state-with-effect
                                   [:chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points]
-                                  [[0 0] [128 128] [255 255]])
+                                  [[0.0 0.0] [0.5 0.5] [1.0 1.0]])
           event {:event/type :chain/update-curve-point
                  :domain :cue-chains
                  :entity-key [0 0]
                  :effect-path [0 :effects 0]
-                 :channel :r :point-idx 2 :x 200 :y 150
+                 :channel :r :point-idx 2 :x 0.8 :y 0.6
                  :state initial-state}
           result (chain/handle event)
           new-points (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points])]
-      ;; X should remain 255, only Y changes
-      (is (= [255 150] (last new-points))))))
+      ;; X should remain 1.0, only Y changes
+      (is (= [1.0 0.6] (last new-points))))))
 
 (deftest handle-update-curve-point-resorting
   (testing "Updating point X maintains sorted order"
     (let [initial-state (assoc-in sample-state-with-effect
                                   [:chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points]
-                                  [[0 0] [64 64] [128 128] [192 192] [255 255]])
+                                  [[0.0 0.0] [0.25 0.25] [0.5 0.5] [0.75 0.75] [1.0 1.0]])
           event {:event/type :chain/update-curve-point
                  :domain :cue-chains
                  :entity-key [0 0]
                  :effect-path [0 :effects 0]
-                 :channel :r :point-idx 1 :x 150 :y 64
+                 :channel :r :point-idx 1 :x 0.6 :y 0.25
                  :state initial-state}
           result (chain/handle event)
           new-points (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points])]
       ;; Point should move to maintain sort order
-      (is (= [[0 0] [128 128] [150 64] [192 192] [255 255]] new-points)))))
+      (is (= [[0.0 0.0] [0.5 0.5] [0.6 0.25] [0.75 0.75] [1.0 1.0]] new-points)))))
 
 
 ;; Curve Point Removal Tests
@@ -188,7 +188,7 @@
   (testing "Removing middle curve point"
     (let [initial-state (assoc-in sample-state-with-effect
                                   [:chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points]
-                                  [[0 0] [64 64] [128 128] [192 192] [255 255]])
+                                  [[0.0 0.0] [0.25 0.25] [0.5 0.5] [0.75 0.75] [1.0 1.0]])
           event {:event/type :chain/remove-curve-point
                  :domain :cue-chains
                  :entity-key [0 0]
@@ -197,13 +197,13 @@
                  :state initial-state}
           result (chain/handle event)
           new-points (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points])]
-      (is (= [[0 0] [64 64] [192 192] [255 255]] new-points)))))
+      (is (= [[0.0 0.0] [0.25 0.25] [0.75 0.75] [1.0 1.0]] new-points)))))
 
 (deftest handle-remove-curve-point-corner-left
   (testing "Cannot remove left corner point"
     (let [initial-state (assoc-in sample-state-with-effect
                                   [:chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points]
-                                  [[0 0] [128 128] [255 255]])
+                                  [[0.0 0.0] [0.5 0.5] [1.0 1.0]])
           event {:event/type :chain/remove-curve-point
                  :domain :cue-chains
                  :entity-key [0 0]
@@ -213,13 +213,13 @@
           result (chain/handle event)
           new-points (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points])]
       ;; Points should remain unchanged
-      (is (= [[0 0] [128 128] [255 255]] new-points)))))
+      (is (= [[0.0 0.0] [0.5 0.5] [1.0 1.0]] new-points)))))
 
 (deftest handle-remove-curve-point-corner-right
   (testing "Cannot remove right corner point"
     (let [initial-state (assoc-in sample-state-with-effect
                                   [:chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points]
-                                  [[0 0] [128 128] [255 255]])
+                                  [[0.0 0.0] [0.5 0.5] [1.0 1.0]])
           event {:event/type :chain/remove-curve-point
                  :domain :cue-chains
                  :entity-key [0 0]
@@ -229,7 +229,7 @@
           result (chain/handle event)
           new-points (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects 0 :params :r-curve-points])]
       ;; Points should remain unchanged
-      (is (= [[0 0] [128 128] [255 255]] new-points)))))
+      (is (= [[0.0 0.0] [0.5 0.5] [1.0 1.0]] new-points)))))
 
 
 ;; Spatial Parameter Update Tests

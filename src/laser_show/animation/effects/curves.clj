@@ -4,10 +4,12 @@
    Implements Catmull-Rom spline interpolation for smooth curve rendering
    and lookup table (LUT) generation for efficient color transformation.
    
+   All control points use NORMALIZED values (0.0-1.0):
+   
    Usage:
-   (def points [[0 0] [64 80] [192 220] [255 255]])
+   (def points [[0.0 0.0] [0.25 0.31] [0.75 0.86] [1.0 1.0]])
    (def lut (generate-curve-lut points))
-   ;; => [0 1 2 ... 255] with smooth interpolation through control points
+   ;; => 256-entry vector with smooth interpolation through control points
    
    The Catmull-Rom spline is chosen because:
    - It passes through all control points (interpolating spline)
@@ -108,29 +110,27 @@
 
 
 (defn generate-curve-lut
-  "Generate 256-entry lookup table from control points.
+  "Generate 256-entry lookup table from NORMALIZED control points.
    
    Takes a vector of control points [[x0 y0] [x1 y1] ...] sorted by X,
-   and returns a vector of 256 integer values representing the output
-   for each input value 0-255.
-   
-   Control points must have X and Y in [0, 255] range.
-   The first point should be at x=0 and last at x=255 for full coverage.
+   where X and Y are normalized values in [0.0, 1.0] range.
+   Returns a vector of 256 normalized float values (0.0-1.0).
    
    Parameters:
-   - control-points: Vector of [x y] pairs, sorted by X
+   - control-points: Vector of [x y] pairs with normalized values, sorted by X
    
-   Returns vector of 256 integers in [0, 255] range."
+   Returns vector of 256 floats in [0.0, 1.0] range."
   [control-points]
   (if (or (nil? control-points) (empty? control-points))
-    ;; Default: identity mapping
-    (vec (range 256))
+    ;; Default: identity mapping (normalized)
+    (vec (for [i (range 256)] (/ i 255.0)))
     (let [;; Ensure we have valid endpoints
           sorted-points (vec (sort-by first control-points))
-          ;; Generate LUT
+          ;; Generate LUT - input is normalized 0.0-1.0, output is normalized
           lut (vec (for [input (range 256)]
-                     (let [y (interpolate-y-at-x sorted-points (double input))]
-                       (int (clamp (Math/round y) 0 255)))))]
+                     (let [normalized-input (/ input 255.0)
+                           y (interpolate-y-at-x sorted-points normalized-input)]
+                       (clamp y 0.0 1.0))))]
       lut)))
 
 
@@ -141,26 +141,27 @@
   "Sample the curve at regular intervals for smooth rendering.
    
    Returns a sequence of [x y] points suitable for drawing a path.
+   All values are normalized (0.0-1.0).
    Samples at higher resolution (typically 256 points) for smooth appearance.
    
    Parameters:
-   - control-points: Vector of [x y] control points
+   - control-points: Vector of [x y] control points (normalized 0.0-1.0)
    - num-samples: Number of sample points (default 256)
    
-   Returns vector of [x y] pairs for drawing."
+   Returns vector of [x y] pairs for drawing (normalized 0.0-1.0)."
   ([control-points]
    (sample-curve-for-display control-points 256))
   ([control-points num-samples]
    (if (or (nil? control-points) (empty? control-points))
-     ;; Default: diagonal line
-     [[0 0] [255 255]]
+     ;; Default: diagonal line (normalized)
+     [[0.0 0.0] [1.0 1.0]]
      (let [sorted-points (vec (sort-by first control-points))
-           step (/ 255.0 (dec num-samples))]
+           step (/ 1.0 (dec num-samples))]
        (vec (for [i (range num-samples)]
               (let [x (* i step)
                     y (interpolate-y-at-x sorted-points x)]
-                [(clamp x 0.0 255.0)
-                 (clamp y 0.0 255.0)])))))))
+                [(clamp x 0.0 1.0)
+                 (clamp y 0.0 1.0)])))))))
 
 
 ;; Utility Functions
@@ -168,50 +169,51 @@
 
 (defn identity-curve-points
   "Returns the default identity curve control points.
-   This is a straight diagonal line that maps each input to itself."
+   This is a straight diagonal line that maps each input to itself.
+   Uses normalized values (0.0-1.0)."
   []
-  [[0 0] [255 255]])
+  [[0.0 0.0] [1.0 1.0]])
 
 (defn validate-control-points
   "Validate and normalize control points.
    
-   - Ensures all points have X and Y in [0, 255] range
+   - Ensures all points have X and Y in [0.0, 1.0] range
    - Sorts by X coordinate
-   - Ensures first point has X=0 and last has X=255
+   - Ensures first point has X=0.0 and last has X=1.0
    
-   Returns normalized vector of control points."
+   Returns validated vector of control points."
   [points]
   (if (or (nil? points) (empty? points))
     (identity-curve-points)
     (let [;; Clamp and sort
           normalized (->> points
                           (map (fn [[x y]]
-                                 [(clamp x 0 255) (clamp y 0 255)]))
+                                 [(clamp (double x) 0.0 1.0) (clamp (double y) 0.0 1.0)]))
                           (sort-by first)
                           vec)
-          ;; Ensure first point has X=0
+          ;; Ensure first point has X=0.0
           first-pt (first normalized)
-          with-start (if (= 0 (first first-pt))
+          with-start (if (< (first first-pt) 0.001)
                        normalized
-                       (into [[0 (second first-pt)]] normalized))
-          ;; Ensure last point has X=255
+                       (into [[0.0 (second first-pt)]] normalized))
+          ;; Ensure last point has X=1.0
           last-pt (last with-start)
-          with-end (if (= 255 (first last-pt))
+          with-end (if (> (first last-pt) 0.999)
                      with-start
-                     (conj with-start [255 (second last-pt)]))]
+                     (conj with-start [1.0 (second last-pt)]))]
       with-end)))
 
 (defn add-point
   "Add a new control point and return sorted points.
    
    Parameters:
-   - points: Current control points
-   - x, y: New point coordinates
+   - points: Current control points (normalized)
+   - x, y: New point coordinates (normalized 0.0-1.0)
    
    Returns sorted vector with new point added."
   [points x y]
-  (let [clamped-x (clamp x 0 255)
-        clamped-y (clamp y 0 255)
+  (let [clamped-x (clamp (double x) 0.0 1.0)
+        clamped-y (clamp (double y) 0.0 1.0)
         new-point [clamped-x clamped-y]
         updated (conj (vec points) new-point)]
     (vec (sort-by first updated))))
@@ -222,17 +224,17 @@
    For corner points (first and last), only Y can be modified.
    
    Parameters:
-   - points: Current control points
+   - points: Current control points (normalized)
    - idx: Index of point to update
-   - x, y: New coordinates
+   - x, y: New coordinates (normalized 0.0-1.0)
    
    Returns sorted vector with updated point."
   [points idx x y]
   (let [n (count points)
         is-corner? (or (= idx 0) (= idx (dec n)))
         current-point (nth points idx)
-        new-x (if is-corner? (first current-point) (clamp x 0 255))
-        new-y (clamp y 0 255)
+        new-x (if is-corner? (first current-point) (clamp (double x) 0.0 1.0))
+        new-y (clamp (double y) 0.0 1.0)
         updated (assoc points idx [new-x new-y])]
     (vec (sort-by first updated))))
 

@@ -3,10 +3,10 @@
    
    Features:
    - 280x280 pixel canvas with grid display
-   - 0-255 input (X) and output (Y) axes
+   - NORMALIZED 0.0-1.0 input (X) and output (Y) axes
    - Diagonal reference line (identity mapping)
    - Draggable control points with constraints:
-     - Corner points (x=0, x=255): Y-axis only, cannot be deleted
+     - Corner points (x=0.0, x=1.0): Y-axis only, cannot be deleted
      - Middle points: fully draggable, can be added/removed
    - Click empty space to add new point
    - Right-click to remove points
@@ -20,7 +20,7 @@
     :width 280
     :height 280
     :color \"#FF5555\"  ; channel color
-    :control-points [[0 0] [64 80] [255 255]]  ; sorted [x y] pairs
+    :control-points [[0.0 0.0] [0.25 0.31] [1.0 1.0]]  ; sorted [x y] pairs (normalized)
     :on-add-point {:event/type :effects/add-curve-point ...}
     :on-update-point {:event/type :effects/update-curve-point ...}
     :on-remove-point {:event/type :effects/remove-curve-point ...}}"
@@ -37,21 +37,21 @@
 
 
 (defn- value-to-canvas
-  "Convert curve value (0-255) to canvas pixel coordinate.
-   Note: Y is inverted (0 at bottom, 255 at top)."
+  "Convert normalized curve value (0.0-1.0) to canvas pixel coordinate.
+   Note: Y is inverted (0 at bottom, 1 at top)."
   [value canvas-size padding]
   (let [usable-size (- canvas-size (* 2 padding))
-        normalized (/ value 255.0)]
-    (+ padding (* normalized usable-size))))
+        clamped-value (max 0.0 (min 1.0 (double value)))]
+    (+ padding (* clamped-value usable-size))))
 
 (defn- canvas-to-value
-  "Convert canvas pixel coordinate to curve value (0-255).
-   Note: Y is inverted (0 at bottom, 255 at top)."
+  "Convert canvas pixel coordinate to normalized curve value (0.0-1.0).
+   Note: Y is inverted (0 at bottom, 1 at top)."
   [pixel canvas-size padding]
   (let [usable-size (- canvas-size (* 2 padding))
         clamped (max padding (min (- canvas-size padding) pixel))
         normalized (/ (- clamped padding) usable-size)]
-    (* normalized 255.0)))
+    (max 0.0 (min 1.0 normalized))))
 
 (defn- point-to-canvas
   "Convert a curve control point [x y] to canvas coordinates [cx cy].
@@ -63,12 +63,13 @@
 
 (defn- canvas-to-point
   "Convert canvas coordinates [cx cy] to curve control point [x y].
-   Y is inverted from display (0 at bottom)."
+   Y is inverted from display (0 at bottom).
+   Returns normalized values (0.0-1.0)."
   [cx cy width height padding]
   (let [x (canvas-to-value cx width padding)
         y (canvas-to-value (- height cy) height padding)]
-    [(curves/clamp x 0.0 255.0)
-     (curves/clamp y 0.0 255.0)]))
+    [(curves/clamp (double x) 0.0 1.0)
+     (curves/clamp (double y) 0.0 1.0)]))
 
 
 ;; Drawing Functions
@@ -110,16 +111,16 @@
   (.setLineDashes gc nil))
 
 (defn- draw-axis-labels
-  "Draw the axis labels (0, 255)."
+  "Draw the axis labels (0.0, 1.0) for normalized values."
   [^GraphicsContext gc width height padding]
   (.setFill gc (Color/web "#606060"))
   (.setFont gc (Font/font "System" 9.0))
   ;; X-axis labels
-  (.fillText gc "0" (- padding 5) (+ (- height padding) 12))
-  (.fillText gc "255" (- width padding 10) (+ (- height padding) 12))
+  (.fillText gc "0.0" (- padding 8) (+ (- height padding) 12))
+  (.fillText gc "1.0" (- width padding 10) (+ (- height padding) 12))
   ;; Y-axis labels
-  (.fillText gc "0" (- padding 15) (- height padding))
-  (.fillText gc "255" (- padding 20) (+ padding 4)))
+  (.fillText gc "0.0" (- padding 20) (- height padding))
+  (.fillText gc "1.0" (- padding 20) (+ padding 4)))
 
 (defn- draw-curve
   "Draw the smooth curve through control points."
@@ -167,17 +168,18 @@
       (draw-control-point gc cx cy 5 color hover? is-corner?))))
 
 (defn- draw-coordinate-tooltip
-  "Draw coordinate tooltip near hover point."
+  "Draw coordinate tooltip near hover point (showing normalized values)."
   [^GraphicsContext gc width height padding control-points hover-idx]
   (when hover-idx
     (when-let [[x y] (nth control-points hover-idx nil)]
       (let [[cx cy] (point-to-canvas [x y] width height padding)
-            text (format "(%d, %d)" (int x) (int y))
+            ;; Display as normalized floats with 3 decimal places
+            text (format "(%.3f, %.3f)" (double x) (double y))
             ;; Position tooltip above and right of point
             tx (+ cx 10)
             ty (- cy 10)]
         (.setFill gc (Color/web "#000000" 0.8))
-        (.fillRoundRect gc (- tx 4) (- ty 12) 60 16 4 4)
+        (.fillRoundRect gc (- tx 4) (- ty 12) 80 16 4 4)
         (.setFill gc (Color/web "#FFFFFF"))
         (.setFont gc (Font/font "Consolas" FontWeight/NORMAL 10.0))
         (.fillText gc text tx ty)))))
@@ -229,7 +231,7 @@
              drag-state (atom {:dragging? false
                                :point-idx nil
                                :hover-idx nil})
-             points-atom (atom (or control-points [[0 0] [255 255]]))]
+             points-atom (atom (or control-points [[0.0 0.0] [1.0 1.0]]))]
          
          ;; Render function
          (letfn [(render! []
@@ -275,9 +277,10 @@
                     (and (= button MouseButton/PRIMARY) (nil? hit-idx))
                     (let [[x y] (canvas-to-point mx my width height padding)]
                       (when on-add-point
+                        ;; Dispatch normalized values (0.0-1.0)
                         (events/dispatch! (assoc on-add-point
-                                                 :x (int x)
-                                                 :y (int y)))
+                                                 :x (double x)
+                                                 :y (double y)))
                         (swap! points-atom curves/add-point x y)
                         (render!))))))))
            
@@ -299,12 +302,12 @@
                     ;; Update local state for immediate feedback
                     (swap! points-atom curves/update-point point-idx final-x y)
                     (render!)
-                    ;; Dispatch event for state update
+                    ;; Dispatch event for state update with normalized values
                     (when on-update-point
                       (events/dispatch! (assoc on-update-point
                                                :point-idx point-idx
-                                               :x (int final-x)
-                                               :y (int y)))))))))
+                                               :x (double final-x)
+                                               :y (double y)))))))))
            
            ;; Mouse released - end drag
            (.setOnMouseReleased

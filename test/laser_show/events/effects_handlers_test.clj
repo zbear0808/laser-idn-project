@@ -111,66 +111,66 @@
   (testing "Corner points can only move in Y axis"
     (let [state-with-curve (assoc-in sample-state
                                      [:chains :effect-chains [0 0] :items 0 :params :r-curve-points]
-                                     [[0 0] [128 128] [255 255]])
-          ;; Try to move first point (corner) to [50, 100]
+                                     [[0.0 0.0] [0.5 0.5] [1.0 1.0]])
+          ;; Try to move first point (corner) to [0.2, 0.4]
           event {:event/type :chain/update-curve-point
                  :domain :effect-chains
                  :entity-key [0 0]
                  :effect-path [0]
                  :channel :r
                  :point-idx 0
-                 :x 50   ;; Should be ignored
-                 :y 100  ;; Should be applied
+                 :x 0.2   ;; Should be ignored
+                 :y 0.4  ;; Should be applied
                  :state state-with-curve}
           result (chain/handle event)
           updated-points (get-in result [:state :chains :effect-chains [0 0] :items 0 :params :r-curve-points])]
-      ;; First point should keep X=0 but get Y=100
-      (is (= [0 100] (first updated-points)))))
+      ;; First point should keep X=0.0 but get Y=0.4
+      (is (= [0.0 0.4] (first updated-points)))))
   
   (testing "Middle points can move in both X and Y"
     (let [state-with-curve (assoc-in sample-state
                                      [:chains :effect-chains [0 0] :items 0 :params :r-curve-points]
-                                     [[0 0] [128 128] [255 255]])
-          ;; Move middle point to [150, 180]
+                                     [[0.0 0.0] [0.5 0.5] [1.0 1.0]])
+          ;; Move middle point to [0.6, 0.7]
           event {:event/type :chain/update-curve-point
                  :domain :effect-chains
                  :entity-key [0 0]
                  :effect-path [0]
                  :channel :r
                  :point-idx 1
-                 :x 150
-                 :y 180
+                 :x 0.6
+                 :y 0.7
                  :state state-with-curve}
           result (chain/handle event)
           updated-points (get-in result [:state :chains :effect-chains [0 0] :items 0 :params :r-curve-points])]
-      ;; Middle point should move to [150, 180]
-      (is (= [150 180] (second updated-points)))))
+      ;; Middle point should move to [0.6, 0.7]
+      (is (= [0.6 0.7] (second updated-points)))))
   
   (testing "Points are sorted by X coordinate after update"
     (let [state-with-curve (assoc-in sample-state
                                      [:chains :effect-chains [0 0] :items 0 :params :r-curve-points]
-                                     [[0 0] [100 100] [200 200] [255 255]])
-          ;; Move point at idx 1 to X=150 (between idx 2 and 3)
+                                     [[0.0 0.0] [0.4 0.4] [0.8 0.8] [1.0 1.0]])
+          ;; Move point at idx 1 to X=0.6 (between idx 2 and 3)
           event {:event/type :chain/update-curve-point
                  :domain :effect-chains
                  :entity-key [0 0]
                  :effect-path [0]
                  :channel :r
                  :point-idx 1
-                 :x 150
-                 :y 100
+                 :x 0.6
+                 :y 0.4
                  :state state-with-curve}
           result (chain/handle event)
           updated-points (get-in result [:state :chains :effect-chains [0 0] :items 0 :params :r-curve-points])]
-      ;; Points should be sorted: [0,0], [150,100], [200,200], [255,255]
-      (is (= [[0 0] [150 100] [200 200] [255 255]] updated-points)))))
+      ;; Points should be sorted: [0.0,0.0], [0.6,0.4], [0.8,0.8], [1.0,1.0]
+      (is (= [[0.0 0.0] [0.6 0.4] [0.8 0.8] [1.0 1.0]] updated-points)))))
 
 
 (deftest handle-effects-remove-curve-point-test
   (testing "Cannot remove corner points"
     (let [state-with-curve (assoc-in sample-state
                                      [:chains :effect-chains [0 0] :items 0 :params :r-curve-points]
-                                     [[0 0] [128 128] [255 255]])
+                                     [[0.0 0.0] [0.5 0.5] [1.0 1.0]])
           ;; Try to remove first point (corner)
           event {:event/type :chain/remove-curve-point
                  :domain :effect-chains
@@ -187,7 +187,7 @@
   (testing "Can remove middle points"
     (let [state-with-curve (assoc-in sample-state
                                      [:chains :effect-chains [0 0] :items 0 :params :r-curve-points]
-                                     [[0 0] [64 64] [128 128] [192 192] [255 255]])
+                                     [[0.0 0.0] [0.25 0.25] [0.5 0.5] [0.75 0.75] [1.0 1.0]])
           ;; Remove middle point at idx 2
           event {:event/type :chain/remove-curve-point
                  :domain :effect-chains
@@ -200,28 +200,28 @@
           points (get-in result [:state :chains :effect-chains [0 0] :items 0 :params :r-curve-points])]
       ;; Should have 4 points now
       (is (= 4 (count points)))
-      ;; [128 128] should be gone
-      (is (= [[0 0] [64 64] [192 192] [255 255]] points)))))
+      ;; [0.5 0.5] should be gone
+      (is (= [[0.0 0.0] [0.25 0.25] [0.75 0.75] [1.0 1.0]] points)))))
 
 
 (deftest handle-effects-add-curve-point-test
   (testing "New point is inserted and sorted by X"
     (let [state-with-curve (assoc-in sample-state
                                      [:chains :effect-chains [0 0] :items 0 :params :r-curve-points]
-                                     [[0 0] [255 255]])
-          ;; Add point at [128, 64]
+                                     [[0.0 0.0] [1.0 1.0]])
+          ;; Add point at [0.5, 0.25]
           event {:event/type :chain/add-curve-point
                  :domain :effect-chains
                  :entity-key [0 0]
                  :effect-path [0]
                  :channel :r
-                 :x 128
-                 :y 64
+                 :x 0.5
+                 :y 0.25
                  :state state-with-curve}
           result (chain/handle event)
           points (get-in result [:state :chains :effect-chains [0 0] :items 0 :params :r-curve-points])]
       ;; Should have 3 points, sorted
-      (is (= [[0 0] [128 64] [255 255]] points)))))
+      (is (= [[0.0 0.0] [0.5 0.25] [1.0 1.0]] points)))))
 
 
 ;; Cell Operations Tests (still using effects/handle)

@@ -44,17 +44,17 @@
 
 (deftest position-based-modulator-detection-test
   (testing "pos-x modulator is detected as per-point"
-    (let [params {:red {:type :pos-x :min 0 :max 255}}]
+    (let [params {:red {:type :pos-x :min 0.0 :max 1.0}}]
       (is (mod/any-param-requires-per-point? params)
           "pos-x should be detected as per-point modulator")))
   
   (testing "static value is not detected as per-point"
-    (let [params {:red 128}]
+    (let [params {:red 0.5}]
       (is (not (mod/any-param-requires-per-point? params))
           "static value should not be detected as per-point")))
   
   (testing "sine modulator is not detected as per-point"
-    (let [params {:red {:type :sine :min 0 :max 255 :period 1.0}}]
+    (let [params {:red {:type :sine :min 0.0 :max 1.0 :period 1.0}}]
       (is (not (mod/any-param-requires-per-point? params))
           "sine should not be detected as per-point modulator"))))
 
@@ -64,11 +64,12 @@
           frame (make-test-frame [-1.0 0.0 1.0])
           
           ;; Apply set-color effect with red modulated by x position
+          ;; Using normalized 0.0-1.0 range for color values
           effect-chain {:effects [{:effect-id :set-color
                                    :enabled? true
-                                   :params {:red {:type :pos-x :min 0 :max 255}
-                                            :green 0
-                                            :blue 0}}]}
+                                   :params {:red {:type :pos-x :min 0.0 :max 1.0}
+                                            :green 0.0
+                                            :blue 0.0}}]}
           
           result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)]
       
@@ -79,9 +80,9 @@
             p2 (nth points 2)]  ;; x = 1.0
         
         ;; Points should have different red values based on x position
-        ;; x=-1.0 -> t=0.0 -> red=0/255=0.0
-        ;; x=0.0  -> t=0.5 -> red=127.5/255≈0.5
-        ;; x=1.0  -> t=1.0 -> red=255/255=1.0
+        ;; x=-1.0 -> t=0.0 -> red=0.0
+        ;; x=0.0  -> t=0.5 -> red=0.5
+        ;; x=1.0  -> t=1.0 -> red=1.0
         
         (is (< (:r p0) 0.1)
             (str "Point at x=-1.0 should have low red, got " (:r p0)))
@@ -182,17 +183,17 @@
       (let [frame (t/make-frame [point-left point-right])]
         
         ;; Step 3: Create effect with pos-x modulator on red
-        ;; min=0, max=255 means: at x=-1 -> red=0, at x=+1 -> red=255
+        ;; min=0.0, max=1.0 means: at x=-1 -> red=0.0, at x=+1 -> red=1.0
         (let [effect-chain {:effects [{:effect-id :set-color
                                        :enabled? true
-                                       :params {:red {:type :pos-x :min 0 :max 255}
-                                                :green 0
-                                                :blue 0}}]}]
+                                       :params {:red {:type :pos-x :min 0.0 :max 1.0}
+                                                :green 0.0
+                                                :blue 0.0}}]}]
           
           (println "\n--- EFFECT CONFIG ---")
           (println "Effect: set-color")
-          (println "Params: {:red {:type :pos-x :min 0 :max 255} :green 0 :blue 0}")
-          (println "Expected: left point (x=-1) gets red=0, right point (x=+1) gets red=255")
+          (println "Params: {:red {:type :pos-x :min 0.0 :max 1.0} :green 0.0 :blue 0.0}")
+          (println "Expected: left point (x=-1) gets red=0.0, right point (x=+1) gets red=1.0")
           
           ;; Step 4: Check if params require per-point
           (let [params (:params (first (:effects effect-chain)))]
@@ -214,10 +215,8 @@
                      " r=" (:r result-right) " g=" (:g result-right) " b=" (:b result-right))
             
             ;; Expected behavior:
-            ;; Left point (x=-1): pos-x normalizes -1 to t=0.0, so red = 0 + 0*(255-0) = 0
-            ;; Normalized red for output: 0/255 = 0.0
-            ;; Right point (x=+1): pos-x normalizes +1 to t=1.0, so red = 0 + 1*(255-0) = 255
-            ;; Normalized red for output: 255/255 = 1.0
+            ;; Left point (x=-1): pos-x normalizes -1 to t=0.0, so red = 0.0 + 0*(1.0-0.0) = 0.0
+            ;; Right point (x=+1): pos-x normalizes +1 to t=1.0, so red = 0.0 + 1*(1.0-0.0) = 1.0
             
             (println "\n--- ASSERTIONS ---")
             (println "Left red expected: ~0.0, actual:" (:r result-left))
@@ -235,7 +234,7 @@
   (testing "trace raw modulator evaluation with x values"
     (println "\n=== RAW MODULATOR EVALUATION TEST ===")
     
-    (let [modulator {:type :pos-x :min 0 :max 255}]
+    (let [modulator {:type :pos-x :min 0.0 :max 1.0}]
       (println "Modulator config:" modulator)
       
       ;; Test at x=-1
@@ -244,7 +243,7 @@
         (println "Context:" (select-keys context-left [:x :y :point-index :point-count]))
         (let [result (mod/evaluate-modulator modulator context-left)]
           (println "Modulator result:" result)
-          (is (< result 1) (str "At x=-1, modulator should return ~0, got " result))))
+          (is (< result 0.01) (str "At x=-1, modulator should return ~0.0, got " result))))
       
       ;; Test at x=+1
       (let [context-right (mod/make-context {:time-ms 0 :bpm 120 :x 1.0 :y 0.0 :point-index 1 :point-count 2})]
@@ -252,7 +251,7 @@
         (println "Context:" (select-keys context-right [:x :y :point-index :point-count]))
         (let [result (mod/evaluate-modulator modulator context-right)]
           (println "Modulator result:" result)
-          (is (> result 250) (str "At x=+1, modulator should return ~255, got " result)))))))
+          (is (> result 0.99) (str "At x=+1, modulator should return ~1.0, got " result)))))))
 
 ;; Comprehensive tests for ALL position-based modulators
 
@@ -337,10 +336,10 @@
                   (t/make-point 1.0 1.0 1.0 1.0 1.0)]    ;; top-right
           frame (t/make-frame points)]
       
-      ;; Test pos-y
+      ;; Test pos-y (now using normalized 0.0-1.0 range)
       (let [effect-chain {:effects [{:effect-id :set-color
                                      :enabled? true
-                                     :params {:red 0 :green {:type :pos-y :min 0 :max 255} :blue 0}}]}
+                                     :params {:red 0.0 :green {:type :pos-y :min 0.0 :max 1.0} :blue 0.0}}]}
             result (effects/apply-effect-chain frame effect-chain 0 120.0)
             result-points (:points result)]
         (println "\n--- pos-y test ---")
@@ -350,10 +349,10 @@
         (is (< (:g (first result-points)) 0.1) "Bottom point should have low green")
         (is (> (:g (nth result-points 2)) 0.9) "Top point should have high green"))
       
-      ;; Test radial
+      ;; Test radial (now using normalized 0.0-1.0 range)
       (let [effect-chain {:effects [{:effect-id :set-color
                                      :enabled? true
-                                     :params {:red 0 :green 0 :blue {:type :radial :min 0 :max 255}}}]}
+                                     :params {:red 0.0 :green 0.0 :blue {:type :radial :min 0.0 :max 1.0}}}]}
             result (effects/apply-effect-chain frame effect-chain 0 120.0)
             result-points (:points result)]
         (println "\n--- radial test ---")

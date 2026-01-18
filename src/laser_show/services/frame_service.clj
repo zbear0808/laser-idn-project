@@ -160,13 +160,12 @@
 
 (defn- render-preset-instance
   "Render a single preset instance with its parameters.
-   Creates an animation from the preset-id and applies preset-specific params."
-  [preset-instance elapsed-ms]
+   Generates a frame directly from the preset generator."
+  [preset-instance _elapsed-ms]
   (let [{:keys [preset-id params]} preset-instance]
-    (when-let [anim (if (seq params)
-                      (presets/create-animation-with-params preset-id params)
-                      (presets/create-animation-from-preset preset-id))]
-      (t/get-frame anim elapsed-ms))))
+    (if (seq params)
+      (presets/generate-frame-with-params preset-id params)
+      (presets/generate-frame preset-id))))
 
 (defn- apply-item-effects
   "Apply an item's (preset or group) effect chain to a frame."

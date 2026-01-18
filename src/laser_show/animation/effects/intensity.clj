@@ -99,16 +99,16 @@
     ;; Per-point path
     (map (fn [{:keys [x y r g b idx count] :as pt}]
            (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                 ;; Convert threshold from 0-255 to 0.0-1.0
-                 threshold (/ (:threshold resolved) 255.0)
+                 ;; Threshold already normalized 0.0-1.0
+                 threshold (:threshold resolved)
                  max-val (max r g b)]
              (if (< max-val threshold)
                (assoc pt :r 0.0 :g 0.0 :b 0.0)
                pt))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          ;; Convert threshold from 0-255 to 0.0-1.0
-          threshold (/ (:threshold resolved) 255.0)]
+          ;; Threshold already normalized 0.0-1.0
+          threshold (:threshold resolved)]
       (map (fn [{:keys [r g b] :as pt}]
              (let [max-val (max r g b)]
                (if (< max-val threshold)
@@ -122,8 +122,8 @@
   :timing :static
   :parameters [{:key :threshold
                 :label "Threshold"
-                :type :int
-                :default 10
-                :min 0
-                :max 255}]
+                :type :float
+                :default 0.04
+                :min 0.0
+                :max 1.0}]
   :apply-transducer threshold-xf})

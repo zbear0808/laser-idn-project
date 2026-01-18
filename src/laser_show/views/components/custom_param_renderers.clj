@@ -269,7 +269,7 @@
    - :current-points - Control points for this channel"
  [{:keys [domain entity-key effect-path channel current-points]}]
  (let [color (curve-channel-color channel)
-       points (or current-points [[0 0] [255 255]])
+       points (or current-points [[0.0 0.0] [1.0 1.0]])
        add-event {:event/type :chain/add-curve-point
                   :domain domain
                   :entity-key entity-key
@@ -317,10 +317,10 @@
        ;; Get active channel from dialog state
        active-channel (get-in dialog-data [:ui-modes effect-path :active-curve-channel] :r)
        
-       ;; Get control points for each channel
-       r-points (get current-params :r-curve-points [[0 0] [255 255]])
-       g-points (get current-params :g-curve-points [[0 0] [255 255]])
-       b-points (get current-params :b-curve-points [[0 0] [255 255]])
+       ;; Get control points for each channel (normalized 0.0-1.0)
+       r-points (get current-params :r-curve-points [[0.0 0.0] [1.0 1.0]])
+       g-points (get current-params :g-curve-points [[0.0 0.0] [1.0 1.0]])
+       b-points (get current-params :b-curve-points [[0.0 0.0] [1.0 1.0]])
        
        ;; Get points for active channel
        active-points (case active-channel

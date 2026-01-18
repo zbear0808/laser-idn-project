@@ -141,27 +141,31 @@
 (defn param-color-picker
   "Color picker for RGB color parameters.
    
-   Expects color values as [r g b] vectors with 0-255 integer components.
+   Expects color values as [r g b] vectors with NORMALIZED 0.0-1.0 components.
+   The color picker displays/edits using the native JavaFX color picker.
    
    Props:
    - :param-key - Parameter key
    - :param-spec - Parameter specification with optional :label and :default [r g b]
-   - :current-value - Current color value [r g b]
+   - :current-value - Current color value [r g b] normalized 0.0-1.0
    - :on-change-event - Event template with :param-key added
    - :label-width - Optional label width (default 80)"
   [{:keys [param-key param-spec current-value on-change-event label-width]}]
   (let [{:keys [label]} param-spec
-        ;; Ensure we have valid color vector
+        ;; Ensure we have valid color vector (normalized 0.0-1.0)
         color-vec (if (and (vector? current-value) (= 3 (count current-value)))
                     current-value
                     (if (and (vector? (:default param-spec)) (= 3 (count (:default param-spec))))
                       (:default param-spec)
-                      [255 255 255]))
+                      [1.0 1.0 1.0]))
         [r g b] color-vec
         display-label (or label (name param-key))
         label-w (or label-width 80)
-        ;; Create JavaFX Color object for color-picker
-        color-value (javafx.scene.paint.Color/rgb (int r) (int g) (int b))]
+        ;; Create JavaFX Color object from normalized values
+        color-value (javafx.scene.paint.Color/color
+                     (max 0.0 (min 1.0 (double r)))
+                     (max 0.0 (min 1.0 (double g)))
+                     (max 0.0 (min 1.0 (double b))))]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left

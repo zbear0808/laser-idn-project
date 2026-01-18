@@ -233,11 +233,16 @@
     (let [num-cycles (double (or once-periods 1.0))
           total-duration (* (double period) num-cycles)
           progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
-          ;; Phase goes from 0 to num-cycles over the duration
-          p (+ (* progress num-cycles) (double phase))
-          ;; Clamp phase to num-cycles (+ phase) to hold at final position
-          clamped-p (clojure.core/min p (+ num-cycles (double phase)))]
-      (time/oscillate (double min) (double max) clamped-p :sine))
+          ;; Calculate total phase progression (0 to num-cycles)
+          total-phase (+ (* progress num-cycles) (double phase))
+          ;; Extract cycle position (0.0-1.0) for oscillate
+          cycle-phase (mod total-phase 1.0)
+          ;; If we've completed all cycles, hold at the final position
+          ;; For sine, final position at end of last cycle is at phase 0.0 (which is max)
+          final-phase (if (>= progress 1.0)
+                        (mod (+ num-cycles (double phase)) 1.0)
+                        cycle-phase)]
+      (time/oscillate (double min) (double max) final-phase :sine))
     ;; Loop mode: use standard phase calculation
     (let [p (calculate-modulator-phase context period phase :loop period (or time-unit :beats))]
       (time/oscillate (double min) (double max) p :sine))))
@@ -253,9 +258,15 @@
     (let [num-cycles (double (or once-periods 1.0))
           total-duration (* (double period) num-cycles)
           progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
-          p (+ (* progress num-cycles) (double phase))
-          clamped-p (clojure.core/min p (+ num-cycles (double phase)))]
-      (time/oscillate (double min) (double max) clamped-p :triangle))
+          ;; Calculate total phase progression (0 to num-cycles)
+          total-phase (+ (* progress num-cycles) (double phase))
+          ;; Extract cycle position (0.0-1.0) for oscillate
+          cycle-phase (mod total-phase 1.0)
+          ;; If we've completed all cycles, hold at the final position
+          final-phase (if (>= progress 1.0)
+                        (mod (+ num-cycles (double phase)) 1.0)
+                        cycle-phase)]
+      (time/oscillate (double min) (double max) final-phase :triangle))
     (let [p (calculate-modulator-phase context period phase :loop period (or time-unit :beats))]
       (time/oscillate (double min) (double max) p :triangle))))
 
@@ -271,9 +282,21 @@
     (let [num-cycles (double (or once-periods 1.0))
           total-duration (* (double period) num-cycles)
           progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
-          p (+ (* progress num-cycles) (double phase))
-          clamped-p (clojure.core/min p (+ num-cycles (double phase)))]
-      (time/oscillate (double min) (double max) clamped-p :sawtooth))
+          ;; Calculate total phase progression (0 to num-cycles)
+          total-phase (+ (* progress num-cycles) (double phase))
+          ;; Extract cycle position (0.0-1.0) for oscillate
+          ;; If we're at the end of a cycle (phase close to integer > 0), use 0.9999
+          cycle-phase (let [raw-phase (mod total-phase 1.0)]
+                        (if (and (< raw-phase 0.001) (>= total-phase 0.999))
+                          0.9999
+                          raw-phase))
+          ;; If we've completed all cycles, hold at the final position
+          final-phase (if (>= progress 1.0)
+                        ;; Calculate exact final phase, use 0.9999 if it wraps to 0
+                        (let [end-phase (mod (+ num-cycles (double phase)) 1.0)]
+                          (if (< end-phase 0.001) 0.9999 end-phase))
+                        cycle-phase)]
+      (time/oscillate (double min) (double max) final-phase :sawtooth))
     (let [p (calculate-modulator-phase context period phase :loop period (or time-unit :beats))]
       (time/oscillate (double min) (double max) p :sawtooth))))
 
@@ -294,9 +317,16 @@
       (let [num-cycles (double (or once-periods 1.0))
             total-duration (* (double period) num-cycles)
             progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
-            p (+ (* progress num-cycles) (double phase))
-            clamped-p (clojure.core/min p (+ num-cycles (double phase)))]
-        (square-fn clamped-p))
+            ;; Calculate total phase progression (0 to num-cycles)
+            total-phase (+ (* progress num-cycles) (double phase))
+            ;; If we've completed all cycles, hold at the final position
+            final-phase (if (>= progress 1.0)
+                          ;; Calculate exact final phase, use 0.9999 if it wraps to 0
+                          (let [end-phase (mod (+ num-cycles (double phase)) 1.0)]
+                            (if (< end-phase 0.001) 0.9999 end-phase))
+                          ;; During animation, use total_phase directly (square-fn will mod it)
+                          total-phase)]
+        (square-fn final-phase))
       (let [p (calculate-modulator-phase context period phase :loop period (or time-unit :beats))]
         (square-fn p)))))
 
@@ -380,11 +410,13 @@
       (let [num-cycles (double (or once-periods 1.0))
             total-duration (* (double period) num-cycles)
             progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
-            ;; Phase goes from 0 to num-cycles over the duration
-            p (* progress num-cycles)
-            ;; Clamp to num-cycles to hold at final position
-            clamped-p (clojure.core/min p num-cycles)]
-        (random-fn clamped-p))
+            ;; Calculate total phase progression (0 to num-cycles)
+            total-phase (* progress num-cycles)
+            ;; If we've completed all cycles, hold at the final position
+            final-phase (if (>= progress 1.0)
+                          num-cycles
+                          total-phase)]
+        (random-fn final-phase))
       ;; Loop mode: use standard phase calculation
       (let [p (calculate-modulator-phase context period 0.0 :loop period (or time-unit :beats))]
         (random-fn p)))))
@@ -410,18 +442,20 @@
   (let [parsed-values (parse-step-values values)
         num-values (count parsed-values)
         step-fn (fn [p]
-                  (let [idx (mod (long (* p (double steps-per-beat) num-values)) num-values)]
+                  (let [idx (mod (long (* p (double steps-per-beat))) num-values)]
                     (nth parsed-values idx)))]
     (if (= loop-mode :once)
       ;; Once mode: complete once-periods cycles then hold at final position
       (let [num-cycles (double (or once-periods 1.0))
             total-duration (* (double period) num-cycles)
-            progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
-            ;; Phase goes from 0 to num-cycles over the duration
-            p (* progress num-cycles)
-            ;; Clamp to num-cycles to hold at final position
-            clamped-p (clojure.core/min p num-cycles)]
-        (step-fn clamped-p))
+            progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))]
+        (if (>= progress 1.0)
+          ;; Completed: return the last value
+          (last parsed-values)
+          ;; In progress: calculate step based on phase
+          (let [total-phase (* progress num-cycles)
+                idx (mod (long (* total-phase (double steps-per-beat))) num-values)]
+            (nth parsed-values idx))))
       ;; Loop mode: use standard phase calculation
       (let [p (calculate-modulator-phase context period 0.0 :loop period (or time-unit :beats))]
         (step-fn p)))))

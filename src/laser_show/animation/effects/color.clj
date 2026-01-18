@@ -216,15 +216,15 @@
 
 (defn- color-replace-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        ;; Convert 0-255 params to normalized 0.0-1.0
-        from-r (/ (:from-r resolved) 255.0)
-        from-g (/ (:from-g resolved) 255.0)
-        from-b (/ (:from-b resolved) 255.0)
-        to-r (/ (:to-r resolved) 255.0)
-        to-g (/ (:to-g resolved) 255.0)
-        to-b (/ (:to-b resolved) 255.0)
-        ;; Tolerance is now in normalized space (0-1 = sqrt(3))
-        tolerance (/ (:tolerance resolved) 255.0)]
+        ;; All values are already normalized 0.0-1.0
+        from-r (:from-r resolved)
+        from-g (:from-g resolved)
+        from-b (:from-b resolved)
+        to-r (:to-r resolved)
+        to-g (:to-g resolved)
+        to-b (:to-b resolved)
+        ;; Tolerance in normalized space (max ~1.73 for full RGB distance)
+        tolerance (:tolerance resolved)]
     (map (fn [{:keys [r g b] :as pt}]
            (if (<= (color-distance-normalized r g b from-r from-g from-b) tolerance)
              (assoc pt :r to-r :g to-g :b to-b)
@@ -237,46 +237,46 @@
   :timing :static
   :parameters [{:key :from-r
                 :label "From Red"
-                :type :int
-                :default 255
-                :min 0
-                :max 255}
+                :type :float
+                :default 1.0
+                :min 0.0
+                :max 1.0}
                {:key :from-g
                 :label "From Green"
-                :type :int
-                :default 0
-                :min 0
-                :max 255}
+                :type :float
+                :default 0.0
+                :min 0.0
+                :max 1.0}
                {:key :from-b
                 :label "From Blue"
-                :type :int
-                :default 0
-                :min 0
-                :max 255}
+                :type :float
+                :default 0.0
+                :min 0.0
+                :max 1.0}
                {:key :to-r
                 :label "To Red"
-                :type :int
-                :default 0
-                :min 0
-                :max 255}
+                :type :float
+                :default 0.0
+                :min 0.0
+                :max 1.0}
                {:key :to-g
                 :label "To Green"
-                :type :int
-                :default 255
-                :min 0
-                :max 255}
+                :type :float
+                :default 1.0
+                :min 0.0
+                :max 1.0}
                {:key :to-b
                 :label "To Blue"
-                :type :int
-                :default 0
-                :min 0
-                :max 255}
+                :type :float
+                :default 0.0
+                :min 0.0
+                :max 1.0}
                {:key :tolerance
                 :label "Tolerance"
                 :type :float
-                :default 30.0
+                :default 0.12
                 :min 0.0
-                :max 255.0}]
+                :max 1.73}]
   :apply-transducer color-replace-xf})
 
 
@@ -291,17 +291,17 @@
            (if (common/blanked? pt)
              pt  ;; Skip blanked points
              (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                   ;; Convert 0-255 params to normalized 0.0-1.0
-                   red (/ (:red resolved) 255.0)
-                   green (/ (:green resolved) 255.0)
-                   blue (/ (:blue resolved) 255.0)]
+                   ;; All values are already normalized 0.0-1.0
+                   red (:red resolved)
+                   green (:green resolved)
+                   blue (:blue resolved)]
                (assoc pt :r red :g green :b blue)))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          ;; Convert 0-255 params to normalized 0.0-1.0
-          red (/ (:red resolved) 255.0)
-          green (/ (:green resolved) 255.0)
-          blue (/ (:blue resolved) 255.0)]
+          ;; All values are already normalized 0.0-1.0
+          red (:red resolved)
+          green (:green resolved)
+          blue (:blue resolved)]
       (map (fn [pt]
              (if (common/blanked? pt)
                pt  ;; Skip blanked points
@@ -314,22 +314,22 @@
   :timing :static
   :parameters [{:key :red
                 :label "Red"
-                :type :int
-                :default 255
-                :min 0
-                :max 255}
+                :type :float
+                :default 1.0
+                :min 0.0
+                :max 1.0}
                {:key :green
                 :label "Green"
-                :type :int
-                :default 255
-                :min 0
-                :max 255}
+                :type :float
+                :default 1.0
+                :min 0.0
+                :max 1.0}
                {:key :blue
                 :label "Blue"
-                :type :int
-                :default 255
-                :min 0
-                :max 255}]
+                :type :float
+                :default 1.0
+                :min 0.0
+                :max 1.0}]
   :apply-transducer set-color-xf})
 
 

@@ -16,6 +16,7 @@
             [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
+            [laser-show.state.templates :as templates]
             [laser-show.events.core :as events]
             [laser-show.views.root :as root]
             [laser-show.services.frame-service :as frame-service]
@@ -100,7 +101,9 @@
   []
   (log/info "Starting Laser Show application...")
   
-  (state/init-state! (domains/build-initial-state))
+  ;; Initialize with base state, then apply starter templates for fresh projects
+  (state/init-state! (-> (domains/build-initial-state)
+                         (templates/apply-starter-cue-chains)))
   
   (init-styles!)
   

@@ -1,8 +1,7 @@
 (ns laser-show.animation.presets
-  "Pre-built animation presets for the laser show application.
-   Each preset is a map containing name, category, parameters spec, and generator."
-  (:require [laser-show.animation.types :as t]
-            [laser-show.animation.generators :as gen]
+  "Pre-built shape presets for the laser show application.
+   Each preset has a name, category, parameters spec, and frame generator."
+  (:require [laser-show.animation.generators :as gen]
             [laser-show.common.util :as u]))
 
 ;; Parameter Types
@@ -24,8 +23,13 @@
   {:key key :label label :type :color :default default})
 
 
-
 ;; Built-in Presets
+;; Each preset defines:
+;;   :id - unique identifier
+;;   :name - display name
+;;   :category - grouping category
+;;   :parameters - parameter definitions with defaults
+;;   :generator - function that takes params map and returns LaserFrame
 
 
 (def preset-circle
@@ -33,24 +37,24 @@
    :name "Circle"
    :category :geometric
    :parameters [(float-param :radius "Radius" 0.5 0.1 1.0)
-                (color-param :color "Color" [255 255 255])]
-   :generator gen/circle-animation})
+                (color-param :color "Color" [1.0 1.0 1.0])]
+   :generator gen/circle-frame})
 
 (def preset-square
   {:id :square
    :name "Square"
    :category :geometric
    :parameters [(float-param :size "Size" 0.5 0.1 1.0)
-                (color-param :color "Color" [255 255 255])]
-   :generator gen/square-animation})
+                (color-param :color "Color" [1.0 1.0 1.0])]
+   :generator gen/square-frame})
 
 (def preset-triangle
   {:id :triangle
    :name "Triangle"
    :category :geometric
    :parameters [(float-param :size "Size" 0.5 0.1 1.0)
-                (color-param :color "Color" [255 255 255])]
-   :generator gen/triangle-animation})
+                (color-param :color "Color" [1.0 1.0 1.0])]
+   :generator gen/triangle-frame})
 
 (def preset-spiral
   {:id :spiral
@@ -59,8 +63,8 @@
    :parameters [(int-param :turns "Turns" 3 1 10)
                 (float-param :start-radius "Inner Radius" 0.1 0.0 0.5)
                 (float-param :end-radius "Outer Radius" 0.5 0.2 1.0)
-                (color-param :color "Color" [255 255 255])]
-   :generator gen/spiral-animation})
+                (color-param :color "Color" [1.0 1.0 1.0])]
+   :generator gen/spiral-frame})
 
 (def preset-star
   {:id :star
@@ -69,8 +73,8 @@
    :parameters [(int-param :spikes "Spikes" 5 3 12)
                 (float-param :outer-radius "Outer Radius" 0.5 0.2 1.0)
                 (float-param :inner-radius "Inner Radius" 0.25 0.1 0.5)
-                (color-param :color "Color" [255 255 255])]
-   :generator gen/star-animation})
+                (color-param :color "Color" [1.0 1.0 1.0])]
+   :generator gen/star-frame})
 
 (def preset-wave
   {:id :wave
@@ -78,31 +82,31 @@
    :category :wave
    :parameters [(float-param :amplitude "Amplitude" 0.3 0.1 0.8)
                 (int-param :frequency "Frequency" 2 1 8)
-                (color-param :color "Color" [0 255 255])]
-   :generator gen/wave-animation})
+                (color-param :color "Color" [0.0 1.0 1.0])]
+   :generator gen/wave-frame})
 
 (def preset-beam-fan
   {:id :beam-fan
    :name "Beam Fan"
    :category :beam
    :parameters [(int-param :num-points "Points" 8 2 32)
-                (color-param :color "Color" [255 100 0])]
-   :generator gen/beam-fan-animation})
+                (color-param :color "Color" [1.0 0.392 0.0])]
+   :generator gen/beam-fan-frame})
 
 (def preset-horizontal-line
   {:id :horizontal-line
    :name "Horizontal Line"
    :category :beam
    :parameters [(float-param :length "Length" 1.0 0.1 2.0)
-                (color-param :color "Color" [255 255 255])]
-   :generator gen/horizontal-line-animation})
+                (color-param :color "Color" [1.0 1.0 1.0])]
+   :generator gen/horizontal-line-frame})
 
 (def preset-rainbow-circle
   {:id :rainbow-circle
    :name "Rainbow Circle"
    :category :abstract
    :parameters [(float-param :radius "Radius" 0.5 0.1 1.0)]
-   :generator gen/rainbow-circle-animation})
+   :generator gen/rainbow-circle-frame})
 
 
 ;; Preset Registry
@@ -129,24 +133,23 @@
   [preset-id]
   (get presets-by-id preset-id))
 
-
-(defn create-animation-from-preset
-  "Create an Animation instance from a preset with default parameters."
+(defn get-default-params
+  "Get the default parameters for a preset as a map."
   [preset-id]
   (when-let [preset (get-preset preset-id)]
-    (let [default-params (u/map-into :key :default (:parameters preset))]
-      (t/make-animation (:name preset)
-                        (:generator preset)
-                        default-params
-                        nil))))
+    (u/map-into :key :default (:parameters preset))))
 
-(defn create-animation-with-params
-  "Create an Animation instance from a preset with custom parameters."
+(defn generate-frame
+  "Generate a frame from a preset with default parameters."
+  [preset-id]
+  (when-let [preset (get-preset preset-id)]
+    (let [params (get-default-params preset-id)]
+      ((:generator preset) params))))
+
+(defn generate-frame-with-params
+  "Generate a frame from a preset with custom parameters merged over defaults."
   [preset-id params]
   (when-let [preset (get-preset preset-id)]
-    (let [default-params (u/map-into :key :default (:parameters preset))
+    (let [default-params (get-default-params preset-id)
           merged-params (merge default-params params)]
-      (t/make-animation (:name preset)
-                        (:generator preset)
-                        merged-params
-                        nil))))
+      ((:generator preset) merged-params))))

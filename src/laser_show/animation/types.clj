@@ -1,6 +1,6 @@
 (ns laser-show.animation.types
   "Core types for laser animation system.
-   Defines LaserPoint, LaserFrame, and Animation abstractions.
+   Defines LaserPoint and LaserFrame.
    
    Internal Data Format
    ====================
@@ -55,16 +55,7 @@
    - First point is the start position (should be blanked for repositioning)
    - Last point is the end position
    - Consumer handles movement between frames
-   - Empty frame (no points) voids the frame buffer
-   
-   Animation -> IDN-Stream Channel (Section 2.1)
-   ---------------------------------------------
-   Our Animation abstraction generates frames over time. Each frame is
-   converted to an IDN-Stream channel message for transmission:
-   
-   - Animation runs on a single IDN channel
-   - Frames are sent in Discrete Graphic Mode (Service Mode 0x02)
-   - Channel configuration is sent every 200ms per spec requirement"
+   - Empty frame (no points) voids the frame buffer"
   (:require [laser-show.common.util :as u]))
 
 
@@ -171,46 +162,3 @@
   (make-frame []))
 
 
-;; Animation Protocol
-
-
-(defprotocol IAnimation
-  "Protocol for laser animations."
-  (get-frame [this time-ms]
-    "Get the frame at the given time in milliseconds.")
-  (get-duration [this]
-    "Get the total duration of the animation in milliseconds, or nil for infinite.")
-  (get-name [this]
-    "Get the name of the animation.")
-  (get-parameters [this]
-    "Get the current parameters of the animation."))
-
-
-;; Animation Record
-
-
-(defrecord Animation
-  [name              ; Display name
-   generator-fn      ; Function (time-ms, params) -> LaserFrame
-   parameters        ; Map of parameter values
-   duration]         ; Duration in ms, nil for infinite
-  
-  IAnimation
-  (get-frame [this time-ms]
-    (generator-fn time-ms parameters))
-  (get-duration [this]
-    duration)
-  (get-name [this]
-    name)
-  (get-parameters [this]
-    parameters))
-
-(defn make-animation
-  "Create an Animation with the given generator function.
-   generator-fn takes (time-ms, params) and returns a LaserFrame."
-  ([name generator-fn]
-   (make-animation name generator-fn {} nil))
-  ([name generator-fn parameters]
-   (make-animation name generator-fn parameters nil))
-  ([name generator-fn parameters duration]
-   (->Animation name generator-fn parameters duration)))
