@@ -1,0 +1,12 @@
+{:name "Desaturated Oscillator"
+ :description "Oscillates saturation from grayscale to full color"
+ :category :color
+ :effects [{:effect-id :saturation
+            :enabled true
+            :params {:amount {:type :sine
+                             :min 0.0
+                             :max 1.0
+                             :period 2.0
+                             :phase 0.0
+                             :loop-mode :loop
+                             :time-unit :beats}}}]}

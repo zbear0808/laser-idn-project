@@ -1,0 +1,12 @@
+{:name "Rainbow Time Oscillation"
+ :description "Animated rainbow that cycles through hues over time"
+ :category :color
+ :effects [{:effect-id :hue-shift
+            :enabled true
+            :params {:degrees {:type :sawtooth
+                              :min 0.0
+                              :max 360.0
+                              :period 4.0
+                              :phase 0.0
+                              :loop-mode :loop
+                              :time-unit :beats}}}]}
