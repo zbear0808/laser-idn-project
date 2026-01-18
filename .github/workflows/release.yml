@@ -186,6 +186,10 @@ jobs:
             --description "Laser Show Control Application with bundled JRE"
             --java-options "-Xmx2048m"
             --java-options "-Djavafx.enablePreview=true"
+            --java-options "-Djavafx.suppressPreviewWarning=true"
+            --java-options "--enable-native-access=ALL-UNNAMED"
+            --java-options "-XX:+UseZGC"
+            --java-options "-XX:NewRatio=1"
             --verbose
           )
           
