@@ -42,6 +42,12 @@
 
 (defn uber [_]
   (clean nil)
+  ;; Compile Java JFR event classes first (required before Clojure compilation)
+  (println "Compiling Java JFR event classes...")
+  (b/javac {:src-dirs ["java"]
+            :class-dir class-dir
+            :basis @basis
+            :javac-opts ["--release" "17"]})
   (b/copy-dir {:src-dirs ["src" "resources"]
                :target-dir class-dir})
   (b/compile-clj {:basis @basis
