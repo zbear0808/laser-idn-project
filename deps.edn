@@ -69,30 +69,31 @@
   ;; ============================================================================
   ;; Platform-specific JavaFX dependencies
   ;; Add ONE of these when running: clj -M:dev:laser-show:win
+  ;; Note: $classifier syntax required by newer Clojure CLI versions
   ;; ============================================================================
   :win
-  {:extra-deps {org.openjfx/javafx-base {:mvn/version "26-ea+19" :classifier "win"}
-                org.openjfx/javafx-controls {:mvn/version "26-ea+19" :classifier "win"}
-                org.openjfx/javafx-graphics {:mvn/version "26-ea+19" :classifier "win"}
-                org.openjfx/javafx-media {:mvn/version "26-ea+19" :classifier "win"}
-                org.openjfx/javafx-swing {:mvn/version "26-ea+19" :classifier "win"}
-                org.openjfx/javafx-web {:mvn/version "26-ea+19" :classifier "win"}}}
+  {:extra-deps {org.openjfx/javafx-base$win {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-controls$win {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-graphics$win {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-media$win {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-swing$win {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-web$win {:mvn/version "26-ea+19"}}}
   
   :mac
-  {:extra-deps {org.openjfx/javafx-base {:mvn/version "26-ea+19" :classifier "mac"}
-                org.openjfx/javafx-controls {:mvn/version "26-ea+19" :classifier "mac"}
-                org.openjfx/javafx-graphics {:mvn/version "26-ea+19" :classifier "mac"}
-                org.openjfx/javafx-media {:mvn/version "26-ea+19" :classifier "mac"}
-                org.openjfx/javafx-swing {:mvn/version "26-ea+19" :classifier "mac"}
-                org.openjfx/javafx-web {:mvn/version "26-ea+19" :classifier "mac"}}}
+  {:extra-deps {org.openjfx/javafx-base$mac {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-controls$mac {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-graphics$mac {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-media$mac {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-swing$mac {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-web$mac {:mvn/version "26-ea+19"}}}
   
   :linux
-  {:extra-deps {org.openjfx/javafx-base {:mvn/version "26-ea+19" :classifier "linux"}
-                org.openjfx/javafx-controls {:mvn/version "26-ea+19" :classifier "linux"}
-                org.openjfx/javafx-graphics {:mvn/version "26-ea+19" :classifier "linux"}
-                org.openjfx/javafx-media {:mvn/version "26-ea+19" :classifier "linux"}
-                org.openjfx/javafx-swing {:mvn/version "26-ea+19" :classifier "linux"}
-                org.openjfx/javafx-web {:mvn/version "26-ea+19" :classifier "linux"}}}
+  {:extra-deps {org.openjfx/javafx-base$linux {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-controls$linux {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-graphics$linux {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-media$linux {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-swing$linux {:mvn/version "26-ea+19"}
+                org.openjfx/javafx-web$linux {:mvn/version "26-ea+19"}}}
   
   :test
   {:extra-paths ["test"]
