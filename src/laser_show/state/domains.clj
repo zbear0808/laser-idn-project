@@ -315,15 +315,20 @@
                          :current-frame nil}
                :doc "Streaming engine state for IDN output"}
    :input {:default {:midi {:enabled true
-                            :connected-devices #{}
-                            :learn-mode nil
-                            :device nil
-                            :receiver nil}
+                            :devices {}                ; Map of device-name -> device instance
+                            :connected-devices #{}     ; Set of connected device names
+                            :handlers {}               ; Map of device-name -> handler fn
+                            :channel-filter nil        ; nil = all channels, or set of channel numbers (0-15)
+                            :learn-mode nil            ; Promise when learning, nil otherwise
+                            :note-mappings {}          ; Optional note remapping
+                            :cc-mappings {}}           ; Optional CC remapping
                      :osc {:enabled false
-                           :server-running false
-                           :learn-mode nil
-                           :server nil
-                           :port default-osc-port}
+                           :server nil                 ; OSC server instance
+                           :server-running? false
+                           :port 9000
+                           :address-mappings {}        ; Map of OSC address -> event config
+                           :handlers {}                ; Map of handler-id -> {:pattern :handler}
+                           :learn-mode nil}            ; Promise when learning, nil otherwise
                      :keyboard {:enabled true
                                 :attached-components #{}}
                      :router {:handlers {}

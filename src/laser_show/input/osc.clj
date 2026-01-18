@@ -1,21 +1,13 @@
 (ns laser-show.input.osc
   "OSC input handler using overtone/osc-clj.
-   Converts OSC messages to standardized input events."
+   Converts OSC messages to standardized input events.
+   
+   This module provides pure functions for OSC state management.
+   State is passed as a parameter and returned as output.
+   Actual state storage is managed by the application state in domains.clj."
   (:require [clojure.tools.logging :as log]
             [overtone.osc :as o]
-            [laser-show.input.events :as events]
-            [laser-show.input.router :as router]))
-
-
-;; OSC State
-
-
-(defonce osc-state
-  (atom {:enabled true
-         :server nil           ; OSC server instance
-         :port 9000            ; Default OSC port
-         :address-mappings {}  ; Map of OSC address -> event config
-         :handlers {}}))       ; Registered OSC handlers
+            [laser-show.input.events :as events]))
 
 
 ;; Default Address Mappings
@@ -67,7 +59,7 @@
    "/1/stop" {:type :trigger :id :stop}})
 
 
-;; OSC Message Conversion
+;; OSC Message Conversion (pure functions)
 
 
 (defn- parse-osc-value
@@ -81,24 +73,25 @@
 
 (defn osc-msg->events
   "Converts an OSC message to unified input events based on address mappings.
-   Returns a sequence of events (may be empty)."
-  [msg]
+   Returns a sequence of events (may be empty).
+   
+   This is a pure function - mappings are passed as parameter."
+  [msg address-mappings]
   (let [address (:path msg)
         args (:args msg)
-        mappings (:address-mappings @osc-state)
-        mapping (get mappings address)]
+        mapping (get address-mappings address)]
     (when mapping
       (let [value (parse-osc-value (first args))
             channel 0]
         (case (:type mapping)
           :control-change
-          (let [events [(events/control-change :osc channel (:control mapping) value)]]
+          (let [evts [(events/control-change :osc channel (:control mapping) value)]]
             ;; Handle XY pads with second control
             (if (and (:second-control mapping) (second args))
-              (conj events (events/control-change :osc channel 
-                                                   (:second-control mapping) 
-                                                   (parse-osc-value (second args))))
-              events))
+              (conj evts (events/control-change :osc channel 
+                                                 (:second-control mapping) 
+                                                 (parse-osc-value (second args))))
+              evts))
           
           :note
           (if (pos? value)
@@ -112,191 +105,256 @@
           [])))))
 
 
-;; OSC Handler
+;; OSC Handler Creation
 
 
-(defn- handle-osc-message
-  "Handler function for incoming OSC messages."
-  [msg]
-  (when (:enabled @osc-state)
-    (doseq [event (osc-msg->events msg)]
-      (router/dispatch! event))))
-
-(defn- create-catch-all-handler
-  "Creates an OSC handler that catches all messages."
-  []
+(defn create-osc-handler
+  "Creates a handler function for incoming OSC messages.
+   
+   Args:
+   - dispatch-fn: Function to call with converted events
+   - get-state-fn: Function that returns current OSC state
+   
+   Returns: handler function that processes raw OSC messages"
+  [dispatch-fn get-state-fn]
   (fn [msg]
-    (handle-osc-message msg)))
+    (let [osc-state (get-state-fn)]
+      (when (:enabled osc-state)
+        (let [evts (osc-msg->events msg (:address-mappings osc-state))]
+          (doseq [event evts]
+            (dispatch-fn event)))))))
 
 
-;; Server Management
+;; Server Management (state transformations with side effects)
 
 
-(defn start-server!
+(defn start-server
   "Starts the OSC server on the specified port.
-   Returns the server if successful, nil otherwise."
-  ([]
-   (start-server! (:port @osc-state)))
-  ([port]
+   Returns updated state map.
+   
+   Note: This function performs side effects (opens network socket)."
+  ([osc-state dispatch-fn get-state-fn]
+   (start-server osc-state (:port osc-state 9000) dispatch-fn get-state-fn))
+  ([osc-state port dispatch-fn get-state-fn]
    (try
-     (when-let [existing (:server @osc-state)]
-       (o/osc-close existing))
+     ;; Close existing server if any
+     (when-let [existing (:server osc-state)]
+       (try
+         (o/osc-close existing)
+         (catch Exception _)))
      
-     (let [server (o/osc-server port)]
-       ;; Register catch-all handler for all messages
-       (o/osc-handle server "/*" (create-catch-all-handler))
+     (let [server (o/osc-server port)
+           handler (create-osc-handler dispatch-fn get-state-fn)]
+       ;; Use osc-listen to catch ALL messages (no pattern matching)
+       ;; This avoids the issue with wildcard patterns not being allowed
+       (o/osc-listen server handler :laser-show-handler)
        
-       (swap! osc-state assoc :server server :port port)
        (log/info "OSC server started on port" port)
-       server)
+       (-> osc-state
+           (assoc :server server)
+           (assoc :port port)
+           (assoc :server-running? true)))
      (catch Exception e
        (log/error "Error starting OSC server:" (.getMessage e))
-       nil))))
+       (assoc osc-state :server-running? false)))))
 
-(defn stop-server!
-  "Stops the OSC server."
-  []
-  (when-let [server (:server @osc-state)]
+(defn stop-server
+  "Stops the OSC server.
+   Returns updated state map."
+  [osc-state]
+  (when-let [server (:server osc-state)]
+    (try
+      ;; Remove the listener before closing
+      (o/osc-rm-listener server :laser-show-handler)
+      (catch Exception _))
     (try
       (o/osc-close server)
       (catch Exception _))
-    (swap! osc-state assoc :server nil)
-    (log/info "OSC server stopped")))
+    (log/info "OSC server stopped"))
+  (-> osc-state
+      (assoc :server nil)
+      (assoc :server-running? false)))
 
 (defn server-running?
   "Returns true if OSC server is running."
-  []
-  (boolean (:server @osc-state)))
+  [osc-state]
+  (:server-running? osc-state false))
 
 (defn get-port
   "Returns the current OSC port."
-  []
-  (:port @osc-state))
+  [osc-state]
+  (:port osc-state 9000))
 
 
-;; Address Mapping
+;; Address Mapping (pure functions)
 
 
-(defn set-address-mapping!
+(defn set-address-mapping
   "Sets the mapping for a specific OSC address.
    - address: OSC address string (e.g., '/fader1')
-   - mapping: {:type :control-change/:note/:trigger, :control/:note/:id value}"
-  [address mapping]
-  (swap! osc-state assoc-in [:address-mappings address] mapping))
+   - mapping: {:type :control-change/:note/:trigger, :control/:note/:id value}
+   Returns updated state."
+  [osc-state address mapping]
+  (assoc-in osc-state [:address-mappings address] mapping))
 
-(defn remove-address-mapping!
-  "Removes the mapping for a specific OSC address."
-  [address]
-  (swap! osc-state update :address-mappings dissoc address))
+(defn remove-address-mapping
+  "Removes the mapping for a specific OSC address.
+   Returns updated state."
+  [osc-state address]
+  (update osc-state :address-mappings dissoc address))
 
-(defn set-mappings!
-  "Sets all address mappings at once."
-  [mappings]
-  (swap! osc-state assoc :address-mappings mappings))
+(defn set-mappings
+  "Sets all address mappings at once.
+   Returns updated state."
+  [osc-state mappings]
+  (assoc osc-state :address-mappings mappings))
 
-(defn load-default-mappings!
-  "Loads the default address mappings."
-  []
-  (set-mappings! default-mappings))
+(defn load-default-mappings
+  "Loads the default address mappings.
+   Returns updated state."
+  [osc-state]
+  (set-mappings osc-state default-mappings))
 
 (defn get-mappings
   "Returns current address mappings."
-  []
-  (:address-mappings @osc-state))
+  [osc-state]
+  (:address-mappings osc-state {}))
 
 
 ;; Dynamic Handler Registration
 
 
-(defn register-handler!
+(defn register-handler
   "Registers a specific OSC handler for an address pattern.
-   The handler receives the raw OSC message."
-  [handler-id address-pattern handler-fn]
-  (when-let [server (:server @osc-state)]
-    (o/osc-handle server address-pattern handler-fn)
-    (swap! osc-state assoc-in [:handlers handler-id] 
-           {:pattern address-pattern :handler handler-fn})
-    handler-id))
+   The handler receives the raw OSC message.
+   Returns updated state."
+  [osc-state handler-id address-pattern handler-fn]
+  (when-let [server (:server osc-state)]
+    (o/osc-handle server address-pattern handler-fn))
+  (assoc-in osc-state [:handlers handler-id] 
+            {:pattern address-pattern :handler handler-fn}))
 
-(defn unregister-handler!
-  "Removes a registered OSC handler."
-  [handler-id]
-  (when-let [server (:server @osc-state)]
-    (when-let [{:keys [pattern]} (get-in @osc-state [:handlers handler-id])]
-      (o/osc-rm-handler server pattern)
-      (swap! osc-state update :handlers dissoc handler-id))))
-
-
-;; OSC Learn
+(defn unregister-handler
+  "Removes a registered OSC handler.
+   Returns updated state."
+  [osc-state handler-id]
+  (when-let [server (:server osc-state)]
+    (when-let [{:keys [pattern]} (get-in osc-state [:handlers handler-id])]
+      (o/osc-rm-handler server pattern)))
+  (update osc-state :handlers dissoc handler-id))
 
 
-(defonce learn-state (atom nil))
+;; OSC Learn (pure functions for state)
 
-(defn start-learn!
-  "Starts OSC learn mode. Returns a promise that will be delivered
-   with the OSC address of the next received message."
-  []
+
+(defn start-learn
+  "Starts OSC learn mode.
+   Returns updated state with promise in :learn-mode.
+   
+   The caller should:
+   1. Store the returned state  
+   2. Register a global handler to listen for OSC events
+   3. When event received, deliver to the promise and call cancel-learn"
+  [osc-state]
   (let [p (promise)]
-    (reset! learn-state p)
-    ;; Register a temporary global handler to catch OSC events
-    (router/register-global-handler! ::osc-learn
-      (fn [event]
-        (when (and @learn-state (events/osc-event? event))
-          (deliver @learn-state (events/event-id event))
-          (router/unregister-handler! ::osc-learn)
-          (reset! learn-state nil))))
-    p))
+    (assoc osc-state :learn-mode p)))
 
-(defn cancel-learn!
-  "Cancels OSC learn mode."
-  []
-  (when @learn-state
-    (router/unregister-handler! ::osc-learn)
-    (reset! learn-state nil)))
+(defn cancel-learn
+  "Cancels OSC learn mode.
+   Returns updated state with :learn-mode set to nil."
+  [osc-state]
+  (assoc osc-state :learn-mode nil))
 
 (defn learning?
   "Returns true if OSC learn mode is active."
-  []
-  (boolean @learn-state))
+  [osc-state]
+  (boolean (:learn-mode osc-state)))
+
+(defn get-learn-promise
+  "Returns the learn mode promise, or nil if not learning."
+  [osc-state]
+  (:learn-mode osc-state))
 
 
-;; Enable/Disable
+;; Enable/Disable (pure functions)
 
 
-(defn enable!
-  "Enables OSC input processing."
-  []
-  (swap! osc-state assoc :enabled true))
+(defn enable
+  "Enables OSC input processing.
+   Returns updated state."
+  [osc-state]
+  (assoc osc-state :enabled true))
 
-(defn disable!
-  "Disables OSC input processing."
-  []
-  (swap! osc-state assoc :enabled false))
+(defn disable
+  "Disables OSC input processing.
+   Returns updated state."
+  [osc-state]
+  (assoc osc-state :enabled false))
 
 (defn enabled?
   "Returns true if OSC input is enabled."
-  []
-  (:enabled @osc-state))
+  [osc-state]
+  (:enabled osc-state true))
 
 
-;; Initialization
+;; Initialization (pure functions)
 
 
-(defn init!
-  "Initializes OSC system with default mappings.
-   Optionally starts the server."
-  ([]
-   (init! false))
-  ([start-server?]
-   (init! start-server? 9000))
-  ([start-server? port]
-   (load-default-mappings!)
-   (enable!)
-   (when start-server?
-     (start-server! port))))
+(def initial-state
+  "Default OSC state structure."
+  {:enabled false
+   :server nil
+   :server-running? false
+   :port 9000
+   :address-mappings {}
+   :handlers {}
+   :learn-mode nil})
 
-(defn shutdown!
-  "Shuts down OSC system."
-  []
-  (stop-server!)
-  (disable!))
+(defn init
+  "Initializes OSC state with default mappings.
+   Optionally starts the server.
+   Returns initialized state."
+  ([osc-state]
+   (init osc-state false 9000 nil nil))
+  ([osc-state start-server?]
+   (init osc-state start-server? 9000 nil nil))
+  ([osc-state start-server? port dispatch-fn get-state-fn]
+   (let [state (-> osc-state
+                   load-default-mappings
+                   enable)]
+     (if start-server?
+       (start-server state port dispatch-fn get-state-fn)
+       state))))
+
+(defn shutdown
+  "Shuts down OSC system.
+   Returns cleaned up state."
+  [osc-state]
+  (-> osc-state
+      stop-server
+      disable))
+
+
+;; Utility Functions
+
+
+(defn format-address-mapping
+  "Formats an address mapping for display."
+  [address mapping]
+  (str address " -> " 
+       (case (:type mapping)
+         :control-change (str "CC " (:control mapping)
+                              (when (:second-control mapping)
+                                (str "/" (:second-control mapping))))
+         :note (str "Note " (:note mapping))
+         :trigger (str "Trigger " (name (:id mapping)))
+         "Unknown")))
+
+(defn mapping-summary
+  "Returns a summary of all mappings."
+  [osc-state]
+  (let [mappings (get-mappings osc-state)]
+    {:total (count mappings)
+     :control-changes (count (filter #(= :control-change (:type (val %))) mappings))
+     :notes (count (filter #(= :note (:type (val %))) mappings))
+     :triggers (count (filter #(= :trigger (:type (val %))) mappings))}))

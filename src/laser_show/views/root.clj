@@ -10,9 +10,9 @@
    Component Hierarchy:
    root-view
    ├── toolbar
-   ├── tab-bar  
+   ├── tab-bar
    ├── main-content (split-pane)
-   │   ├── tab-content (grid/effects/projectors/settings)
+   │   ├── tab-content (grid/effects/projectors/zones/settings)
    │   └── preview-panel
    ├── status-bar
    └── dialogs (via refs)"
@@ -32,6 +32,7 @@
    [laser-show.views.tabs.grid :as grid-tab]
    [laser-show.views.tabs.projectors :as projectors-tab]
    [laser-show.views.tabs.zones :as zones-tab]
+   [laser-show.views.tabs.settings :as settings-tab]
    [laser-show.views.toolbar :as toolbar]))
 
 
@@ -57,14 +58,7 @@
       :effects {:fx/type effects-tab/effects-tab}
       :projectors {:fx/type projectors-tab/projectors-tab}
       :zones {:fx/type zones-tab/zones-tab}
-      :settings {:fx/type :v-box
-                 :padding 20
-                 :children [{:fx/type :label
-                             :text "Settings"
-                             :style (str "-fx-font-size: 18; -fx-text-fill: " (css/text-primary) ";")}
-                            {:fx/type :label
-                             :text "Coming soon..."
-                             :style (str "-fx-text-fill: " (css/text-muted) ";")}]}
+      :settings {:fx/type settings-tab/settings-tab}
       ;; Default
       {:fx/type :label :text "Unknown tab"})))
 
@@ -95,10 +89,10 @@
 
 (defn main-content
   "Main content area with tab content and optional preview panel.
-   Preview is hidden when on the projectors or zones tab."
+   Preview is hidden when on the projectors, zones, or settings tabs."
   [{:keys [fx/context]}]
   (let [active-tab (fx/sub-ctx context subs/active-tab)
-        show-preview? (not (#{:projectors :zones} active-tab))
+        show-preview? (not (#{:projectors :zones :settings} active-tab))
         bg-primary (css/bg-primary)
         bg-elevated (css/bg-elevated)]
     (if show-preview?

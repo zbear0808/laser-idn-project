@@ -540,6 +540,82 @@
      :zones zones}))
 
 
+;; Level 2: Input Device Subscriptions (MIDI, OSC)
+
+
+(defn midi-config
+  "Get the complete MIDI configuration.
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :input :midi]))
+
+(defn midi-enabled?
+  "Check if MIDI input is enabled.
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :input :midi :enabled]))
+
+(defn midi-connected-devices
+  "Get set of connected MIDI device names.
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :input :midi :connected-devices]))
+
+(defn midi-available-devices
+  "Get list of available MIDI device names.
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :input :midi :available-devices]))
+
+(defn midi-channel-filter
+  "Get the current MIDI channel filter (nil = all channels).
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :input :midi :channel-filter]))
+
+(defn midi-learning?
+  "Check if MIDI learn mode is active.
+   Depends on: backend domain"
+  [context]
+  (boolean (fx/sub-val context get-in [:backend :input :midi :learn-mode])))
+
+(defn osc-config
+  "Get the complete OSC configuration.
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :input :osc]))
+
+(defn osc-enabled?
+  "Check if OSC input is enabled.
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :input :osc :enabled]))
+
+(defn osc-server-running?
+  "Check if the OSC server is running.
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :input :osc :server-running?]))
+
+(defn osc-port
+  "Get the OSC server port.
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :input :osc :port]))
+
+(defn osc-address-mappings
+  "Get the OSC address mappings.
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :input :osc :address-mappings]))
+
+(defn osc-learning?
+  "Check if OSC learn mode is active.
+   Depends on: backend domain"
+  [context]
+  (boolean (fx/sub-val context get-in [:backend :input :osc :learn-mode])))
+
+
 ;; Stylesheet Subscriptions (CSS Hot-Reload)
 
 

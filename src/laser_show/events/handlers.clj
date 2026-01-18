@@ -17,7 +17,8 @@
    - project-handlers: Project state management
    - connection-handlers: IDN connection and configuration
    - menu-handlers: Menu commands (File/Edit/View/Help)
-   - chain-handlers: Generic chain operations (shared)"
+   - chain-handlers: Generic chain operations (shared)
+   - input-handlers: MIDI and OSC input device management"
   (:require
    [clojure.tools.logging :as log]
    [laser-show.events.handlers.grid :as grid]
@@ -34,7 +35,8 @@
    [laser-show.events.handlers.chain :as chain]
    [laser-show.events.handlers.list :as list]
    [laser-show.events.handlers.modulator :as modulator]
-   [laser-show.events.handlers.keyframe :as keyframe]))
+   [laser-show.events.handlers.keyframe :as keyframe]
+   [laser-show.events.handlers.input :as input]))
 
 (defn handle-event
   "Main event dispatcher - PURE FUNCTION.
@@ -71,6 +73,7 @@
       "list" (list/handle event)
       "modulator" (modulator/handle event)
       "keyframe" (keyframe/handle event)
+      "input" (input/handle event)  ; MIDI and OSC input management
       ;; Unknown domain
       (do
         (log/error "Unknown event domain:" domain "type:" type)
