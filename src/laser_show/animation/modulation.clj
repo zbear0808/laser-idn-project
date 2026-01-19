@@ -70,6 +70,33 @@
    :phase-offset (or phase-offset 0.0)
    :effective-beats (+ (or accumulated-beats 0.0) (or phase-offset 0.0))})
 
+(defn make-base-context
+  "Create a base context for global (non-per-point) parameters.
+   This is used once before a point loop for efficiency."
+  [{:keys [time-ms bpm trigger-time midi-state osc-state
+           accumulated-beats accumulated-ms phase-offset point-count]
+    :or {midi-state {} osc-state {}
+         accumulated-beats 0.0 accumulated-ms 0.0 phase-offset 0.0 point-count 0}}]
+  {:time-ms time-ms
+   :bpm bpm
+   :trigger-time trigger-time
+   :midi-state midi-state
+   :osc-state osc-state
+   :point-count point-count
+   :accumulated-beats (or accumulated-beats 0.0)
+   :accumulated-ms (or accumulated-ms 0.0)
+   :phase-offset (or phase-offset 0.0)
+   :effective-beats (+ (or accumulated-beats 0.0) (or phase-offset 0.0))})
+
+(defn with-point-context
+  "Update a base context with per-point values efficiently.
+   Uses assoc to update only the point-specific keys."
+  [base-context x y point-index]
+  (-> base-context
+      (assoc :x x)
+      (assoc :y y)
+      (assoc :point-index point-index)))
+
 
 
 ;; Period/Frequency Conversion

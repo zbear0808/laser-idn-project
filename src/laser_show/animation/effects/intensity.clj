@@ -1,6 +1,7 @@
 (ns laser-show.animation.effects.intensity
   "Intensity effects for laser frames.
    Includes intensity control, blackout, and threshold effects.
+   These effects mutate frames in place for maximum performance.
    
    NOTE: All color values are NORMALIZED (0.0-1.0), not 8-bit (0-255).
    This provides full precision for intensity calculations.
@@ -26,32 +27,43 @@
    {:effect-id :intensity :params {:amount (mod/position-radial-mod 1.0 0.3)}}  ; Radial fade
    {:effect-id :intensity :params {:amount (mod/position-wave 0.5 1.0 :x 4.0)}}  ; Wave pattern"
   (:require [laser-show.animation.effects :as effects]
-            [laser-show.animation.effects.common :as common]
-            [laser-show.animation.modulation :as mod]))
+            [laser-show.animation.modulation :as mod]
+            [laser-show.animation.types :as t]))
+
+(set! *unchecked-math* :warn-on-boxed)
 
 
-;; Intensity Effect (replaces dim/brighten)
+;; ========== Intensity Effect ==========
 
-
-(defn- intensity-xf [time-ms bpm params ctx]
-  ;; Check if any params use per-point modulators
+(defn- intensity-fn!
+  "Scale brightness of all points in place."
+  [^"[[D" frame time-ms bpm params ctx]
   (if (mod/any-param-requires-per-point? params)
     ;; Per-point path - enables spatial brightness patterns!
-    (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                 amount (:amount resolved)]
-             (assoc pt
-               :r (common/clamp-normalized (* r amount))
-               :g (common/clamp-normalized (* g amount))
-               :b (common/clamp-normalized (* b amount))))))
+    (let [n (alength frame)]
+      (dotimes [i n]
+        (let [x (double (aget frame i t/X))
+              y (double (aget frame i t/Y))
+              resolved (effects/resolve-params-for-point params time-ms bpm x y i n (:timing-ctx ctx))
+              amount (double (:amount resolved))
+              r (double (aget frame i t/R))
+              g (double (aget frame i t/G))
+              b (double (aget frame i t/B))]
+          (aset-double frame i t/R (Math/max 0.0 (Math/min 1.0 (* r amount))))
+          (aset-double frame i t/G (Math/max 0.0 (Math/min 1.0 (* g amount))))
+          (aset-double frame i t/B (Math/max 0.0 (Math/min 1.0 (* b amount)))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          amount (:amount resolved)]
-      (map (fn [{:keys [r g b] :as pt}]
-             (assoc pt
-               :r (common/clamp-normalized (* r amount))
-               :g (common/clamp-normalized (* g amount))
-               :b (common/clamp-normalized (* b amount))))))))
+          amount (double (:amount resolved))
+          n (alength frame)]
+      (dotimes [i n]
+        (let [r (double (aget frame i t/R))
+              g (double (aget frame i t/G))
+              b (double (aget frame i t/B))]
+          (aset-double frame i t/R (Math/max 0.0 (Math/min 1.0 (* r amount))))
+          (aset-double frame i t/G (Math/max 0.0 (Math/min 1.0 (* g amount))))
+          (aset-double frame i t/B (Math/max 0.0 (Math/min 1.0 (* b amount))))))))
+  frame)
 
 (effects/register-effect!
  {:id :intensity
@@ -64,19 +76,23 @@
                 :default 1.0
                 :min 0.0
                 :max 3.0}]
-  :apply-transducer intensity-xf})
+  :apply-fn! intensity-fn!})
 
 
-;; Blackout Effect
+;; ========== Blackout Effect ==========
 
-
-(defn- blackout-xf [time-ms bpm params ctx]
+(defn- blackout-fn!
+  "Set all colors to zero when enabled, in place."
+  [^"[[D" frame time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         enabled (:enabled resolved)]
-    (if enabled
-      (map (fn [pt]
-             (assoc pt :r 0.0 :g 0.0 :b 0.0)))
-      (map identity))))
+    (when enabled
+      (let [n (alength frame)]
+        (dotimes [i n]
+          (aset-double frame i t/R (double 0.0))
+          (aset-double frame i t/G (double 0.0))
+          (aset-double frame i t/B (double 0.0))))))
+  frame)
 
 (effects/register-effect!
  {:id :blackout
@@ -87,33 +103,44 @@
                 :label "Enabled"
                 :type :bool
                 :default false}]
-  :apply-transducer blackout-xf})
+  :apply-fn! blackout-fn!})
 
 
-;; Threshold Effect (cut low intensities)
+;; ========== Threshold Effect ==========
 
-
-(defn- threshold-xf [time-ms bpm params ctx]
-  ;; Check if any params use per-point modulators
+(defn- threshold-fn!
+  "Cut colors below threshold to black, in place."
+  [^"[[D" frame time-ms bpm params ctx]
   (if (mod/any-param-requires-per-point? params)
     ;; Per-point path
-    (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                 ;; Threshold already normalized 0.0-1.0
-                 threshold (:threshold resolved)
-                 max-val (max r g b)]
-             (if (< max-val threshold)
-               (assoc pt :r 0.0 :g 0.0 :b 0.0)
-               pt))))
+    (let [n (alength frame)]
+      (dotimes [i n]
+        (let [x (double (aget frame i t/X))
+              y (double (aget frame i t/Y))
+              resolved (effects/resolve-params-for-point params time-ms bpm x y i n (:timing-ctx ctx))
+              threshold (double (:threshold resolved))
+              r (double (aget frame i t/R))
+              g (double (aget frame i t/G))
+              b (double (aget frame i t/B))
+              max-val (Math/max r (Math/max g b))]
+          (when (< max-val threshold)
+            (aset-double frame i t/R (double 0.0))
+            (aset-double frame i t/G (double 0.0))
+            (aset-double frame i t/B (double 0.0))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          ;; Threshold already normalized 0.0-1.0
-          threshold (:threshold resolved)]
-      (map (fn [{:keys [r g b] :as pt}]
-             (let [max-val (max r g b)]
-               (if (< max-val threshold)
-                 (assoc pt :r 0.0 :g 0.0 :b 0.0)
-                 pt)))))))
+          threshold (double (:threshold resolved))
+          n (alength frame)]
+      (dotimes [i n]
+        (let [r (double (aget frame i t/R))
+              g (double (aget frame i t/G))
+              b (double (aget frame i t/B))
+              max-val (Math/max r (Math/max g b))]
+          (when (< max-val threshold)
+            (aset-double frame i t/R (double 0.0))
+            (aset-double frame i t/G (double 0.0))
+            (aset-double frame i t/B (double 0.0)))))))
+  frame)
 
 (effects/register-effect!
  {:id :threshold
@@ -126,4 +153,4 @@
                 :default 0.04
                 :min 0.0
                 :max 1.0}]
-  :apply-transducer threshold-xf})
+  :apply-fn! threshold-fn!})

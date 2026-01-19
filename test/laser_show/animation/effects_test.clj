@@ -42,11 +42,12 @@
   (t/make-frame
    (mapv (fn [x] (t/make-point x 0.0 1.0 1.0 1.0)) x-positions)))
 
-(defn point-r [point] (point t/R))
-(defn point-g [point] (point t/G))
-(defn point-b [point] (point t/B))
-(defn point-x [point] (point t/X))
-(defn point-y [point] (point t/Y))
+;; Helper functions for accessing point values from float arrays
+(defn point-r [^doubles point] (aget point t/R))
+(defn point-g [^doubles point] (aget point t/G))
+(defn point-b [^doubles point] (aget point t/B))
+(defn point-x [^doubles point] (aget point t/X))
+(defn point-y [^doubles point] (aget point t/Y))
 
 (deftest position-based-modulator-detection-test
   (testing "pos-x modulator is detected as per-point"
@@ -79,10 +80,10 @@
           
           result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)]
       
-      ;; Get the resulting points (frame IS the points now)
-      (let [p0 (first result-frame)    ;; x = -1.0
-            p1 (second result-frame)   ;; x = 0.0
-            p2 (nth result-frame 2)]   ;; x = 1.0
+      ;; Get the resulting points using aget for 2D float arrays
+      (let [p0 (aget ^"[[D" result-frame 0)    ;; x = -1.0
+            p1 (aget ^"[[D" result-frame 1)    ;; x = 0.0
+            p2 (aget ^"[[D" result-frame 2)]   ;; x = 1.0
         
         ;; Points should have different red values based on x position
         ;; x=-1.0 -> t=0.0 -> red=0.0
@@ -116,10 +117,10 @@
           
           result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)]
       
-      ;; Get the resulting points (frame IS the points now)
-      (let [p0 (first result-frame)    ;; x = -1.0, hue = 0 (red)
-            p1 (second result-frame)   ;; x = 0.0, hue = 120 (green)
-            p2 (nth result-frame 2)]   ;; x = 1.0, hue = 240 (blue)
+      ;; Get the resulting points using aget
+      (let [p0 (aget ^"[[D" result-frame 0)    ;; x = -1.0, hue = 0 (red)
+            p1 (aget ^"[[D" result-frame 1)    ;; x = 0.0, hue = 120 (green)
+            p2 (aget ^"[[D" result-frame 2)]   ;; x = 1.0, hue = 240 (blue)
         
         (println "\n--- SET-HUE TEST ---")
         (println "Left (x=-1, hue=0/red):    r=" (point-r p0) " g=" (point-g p0) " b=" (point-b p0))
@@ -153,9 +154,9 @@
           
           result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)]
       
-      ;; Get the resulting points (frame IS the points now)
-      (let [p0 (first result-frame)    ;; x = -1.0, shift=0° -> still red
-            p2 (nth result-frame 2)]   ;; x = 1.0, shift=180° -> cyan
+      ;; Get the resulting points using aget
+      (let [p0 (aget ^"[[D" result-frame 0)    ;; x = -1.0, shift=0° -> still red
+            p2 (aget ^"[[D" result-frame 2)]   ;; x = 1.0, shift=180° -> cyan
         
         ;; First point (x=-1.0) should stay mostly red (hue shift 0°)
         (is (> (point-r p0) 0.9)
@@ -205,10 +206,10 @@
             (println "Red param is modulator?:" (mod/modulator-config? (:red params)))
             (println "Red param config-requires-per-point?:" (mod/config-requires-per-point? (:red params))))
           
-          ;; Step 5: Apply the effect (frame IS the points now)
+          ;; Step 5: Apply the effect - result is the same frame (mutated) or a new frame
           (let [result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)
-                result-left (first result-frame)
-                result-right (second result-frame)]
+                result-left (aget ^"[[D" result-frame 0)
+                result-right (aget ^"[[D" result-frame 1)]
             
             (println "\n--- OUTPUT POINTS ---")
             (println "Left result:  x=" (point-x result-left) " y=" (point-y result-left)
@@ -344,11 +345,11 @@
                                      :params {:red 0.0 :green {:type :pos-y :min 0.0 :max 1.0} :blue 0.0}}]}
             result (effects/apply-effect-chain frame effect-chain 0 120.0)]
         (println "\n--- pos-y test ---")
-        (println "Bottom (y=-1):" (point-g (first result)))
-        (println "Center (y=0):" (point-g (second result)))
-        (println "Top (y=+1):" (point-g (nth result 2)))
-        (is (< (point-g (first result)) 0.1) "Bottom point should have low green")
-        (is (> (point-g (nth result 2)) 0.9) "Top point should have high green"))
+        (println "Bottom (y=-1):" (point-g (aget ^"[[D" result 0)))
+        (println "Center (y=0):" (point-g (aget ^"[[D" result 1)))
+        (println "Top (y=+1):" (point-g (aget ^"[[D" result 2)))
+        (is (< (point-g (aget ^"[[D" result 0)) 0.1) "Bottom point should have low green")
+        (is (> (point-g (aget ^"[[D" result 2)) 0.9) "Top point should have high green"))
       
       ;; Test radial (now using normalized 0.0-1.0 range)
       (let [effect-chain {:effects [{:effect-id :set-color
@@ -356,8 +357,7 @@
                                      :params {:red 0.0 :green 0.0 :blue {:type :radial :min 0.0 :max 1.0}}}]}
             result (effects/apply-effect-chain frame effect-chain 0 120.0)]
         (println "\n--- radial test ---")
-        (println "Center:" (point-b (second result)))
-        (println "Corner:" (point-b (nth result 2)))
-        (is (< (point-b (second result)) 0.1) "Center point should have low blue (near origin)")
-        (is (> (point-b (nth result 2)) 0.9) "Corner point should have high blue (far from origin)")))))
-
+        (println "Center:" (point-b (aget ^"[[D" result 1)))
+        (println "Corner:" (point-b (aget ^"[[D" result 2)))
+        (is (< (point-b (aget ^"[[D" result 1)) 0.1) "Center point should have low blue (near origin)")
+        (is (> (point-b (aget ^"[[D" result 2)) 0.9) "Corner point should have high blue (far from origin)")))))

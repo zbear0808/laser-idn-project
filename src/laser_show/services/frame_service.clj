@@ -13,8 +13,9 @@
    - Presets render one after another in time
    
    Performance Note:
-   - All collection operations use eager evaluation (vec, mapv, filterv, keepv)
-   - Lazy sequences avoided in frame generation hot paths"
+   - All frames are 2D float arrays for maximum performance
+   - Effects mutate frames in place
+   - Concatenation creates new arrays with blanking points"
   (:require [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
             [laser-show.state.queries :as queries]
@@ -145,9 +146,6 @@
                                        (mapcat :items))
                                  (vals effect-chains))]
         (when (seq active-effects)
-          ;; Debug logging - uncomment to trace effect chain construction
-          ;; (println "[DEBUG get-active-effects] Found" (count active-effects) "effects:"
-          ;;          (mapv :effect-id active-effects))
           {:effects active-effects})))))
 
 ;; Cue Chain Rendering
@@ -166,89 +164,50 @@
 
 (defn- render-preset-instance
   "Render a single preset instance with its parameters.
-   Generates a frame directly from the preset generator."
-  [preset-instance _elapsed-ms]
+   Returns a 2D float array frame."
+  ^"[[D" [preset-instance _elapsed-ms]
   (let [{:keys [preset-id params]} preset-instance]
     (if (seq params)
       (presets/generate-frame-with-params preset-id params)
       (presets/generate-frame preset-id))))
 
-(defn- apply-item-effects
-  "Apply an item's (preset or group) effect chain to a frame."
-  [frame item elapsed-ms bpm trigger-time timing-ctx]
+(defn- apply-item-effects!
+  "Apply an item's (preset or group) effect chain to a frame IN PLACE.
+   Returns the same frame (mutated)."
+  [^"[[D" frame item elapsed-ms bpm trigger-time timing-ctx]
   (let [item-effects (:effects item [])]
-    (if (seq item-effects)
+    (when (seq item-effects)
       (try
-        (effects/apply-effect-chain frame {:effects item-effects} elapsed-ms bpm trigger-time timing-ctx)
+        (effects/apply-effect-chain! frame {:effects item-effects} elapsed-ms bpm trigger-time timing-ctx)
         (catch Exception e
-          (log/error "apply-item-effects: Effect chain failed for" (:type item) ":" (.getMessage e))
-          frame))
-      frame)))
-
-(defn- create-blanking-jump
-  "Create blanking points to safely jump from one position to another.
-   Returns a vector of blanking points that:
-   1. Turn off laser at current position (source)
-   2. Move to new position with laser off (destination)
-   
-   This prevents visible lines when galvos travel between shapes."
-  [from-point to-point]
-  (let [;; First: blanking point at source (turn off laser at current position)
-        blank-at-source (when from-point
-                          [(from-point t/X) (from-point t/Y) 0.0 0.0 0.0])
-        ;; Second: blanking point at destination (move to new position with laser off)
-        blank-at-dest (when to-point
-                        [(to-point t/X) (to-point t/Y) 0.0 0.0 0.0])]
-    (filterv some? [blank-at-source blank-at-dest])))
-
-(defn- concatenate-frames
-  "Concatenate multiple frames with blanking points between them.
-   Returns a frame (vector of points) or nil."
-  [frames _elapsed-ms]
-  (when (seq frames)
-    (let [combined-points (reduce
-                            (fn [acc frame]
-                              (if (empty? frame)
-                                acc
-                                (if (empty? acc)
-                                  ;; First frame - just add points
-                                  (vec frame)
-                                  ;; Subsequent frames - add blanking jump then points
-                                  (let [last-point (peek acc)
-                                        first-new-point (first frame)
-                                        blanking (create-blanking-jump last-point first-new-point)]
-                                    (-> acc
-                                        (into blanking)
-                                        (into frame))))))
-                            []
-                            frames)]
-      (when (seq combined-points)
-        combined-points))))
+          (log/error "apply-item-effects!: Effect chain failed for" (:type item) ":" (.getMessage e))))))
+  frame)
 
 (defn- render-item-with-effects
   "Recursively render a cue chain item (preset or group) applying effects at each level.
    
-   Effect Pipeline:
-   - For presets: render → apply preset effects
-   - For groups: render children → concatenate → apply group effects
+   For presets: generate NEW frame → apply effects IN PLACE
+   For groups: render children → CONCAT into NEW frame → apply effects IN PLACE
    
-   Returns a frame (vector of points) or nil if disabled/empty."
-  [item elapsed-ms bpm trigger-time timing-ctx]
+   Returns: A frame (2D float array) or nil if disabled/empty."
+  ^"[[D" [item elapsed-ms bpm trigger-time timing-ctx]
   (when (:enabled? item true)
     (cond
       ;; Preset: render and apply its effects
       (= :preset (:type item))
       (when-let [frame (render-preset-instance item elapsed-ms)]
-        (apply-item-effects frame item elapsed-ms bpm trigger-time timing-ctx))
+        (apply-item-effects! frame item elapsed-ms bpm trigger-time timing-ctx))
       
       ;; Group: render children, concatenate, then apply group effects
       (chains/group? item)
       (let [;; Use eager u/keepv to avoid lazy evaluation in frame rendering hot path
             child-frames (u/keepv #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx)
                                   (:items item []))
-            concatenated (concatenate-frames child-frames elapsed-ms)]
-        (when concatenated
-          (apply-item-effects concatenated item elapsed-ms bpm trigger-time timing-ctx)))
+            ;; Concatenate creates a NEW combined frame with blanking points
+            concatenated (t/concat-frames-with-blanking child-frames)]
+        (when (pos? (t/frame-point-count concatenated))
+          ;; Apply group effects IN PLACE to the concatenated frame
+          (apply-item-effects! concatenated item elapsed-ms bpm trigger-time timing-ctx)))
       
       :else nil)))
 
@@ -262,20 +221,21 @@
    
    This creates the effect of all shapes being displayed at once via persistence of vision.
    
-   Performance: Uses eager u/keepv to avoid lazy evaluation overhead in hot path."
-  [cue-chain elapsed-ms bpm trigger-time timing-ctx]
+   Returns: A 2D float array frame."
+  ^"[[D" [cue-chain elapsed-ms bpm trigger-time timing-ctx]
   (let [items (:items cue-chain [])
         ;; Use eager u/keepv instead of lazy keep for frame rendering hot path
         rendered-frames (u/keepv #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx) items)]
-    (concatenate-frames rendered-frames elapsed-ms)))
+    ;; Concatenate all top-level results with blanking
+    (t/concat-frames-with-blanking rendered-frames)))
 
 (defn generate-current-frame
   "Generate the current animation frame based on state.
    Applies active effects from the effects grid to the base frame.
-   Returns a LaserFrame or nil if nothing to render.
+   Returns a 2D float array LaserFrame or nil if nothing to render.
    
    Frame generation is profiled to track performance."
-  []
+  ^"[[D" []
   (when (is-playing?)
     (when-let [cell-data (get-active-cell-data)]
       (let [trigger-time (get-trigger-time)
@@ -290,14 +250,15 @@
                          (generate-frame-from-cue-chain cue-chain elapsed bpm trigger-time timing-ctx))
             base-end (timing/nanotime)]
         
-        (when base-frame
+        (when (and base-frame (pos? (t/frame-point-count base-frame)))
           (let [effect-chain (get-active-effects)
                 
                 ;; Measure effect chain application (from effects grid)
                 effects-start (timing/nanotime)
+                ;; Effects mutate base-frame in place, so we use it directly
                 final-frame (if effect-chain
                               (try
-                                (effects/apply-effect-chain base-frame effect-chain elapsed bpm trigger-time timing-ctx)
+                                (effects/apply-effect-chain! base-frame effect-chain elapsed bpm trigger-time timing-ctx)
                                 (catch Exception e
                                   (log/error "generate-current-frame: Effect chain failed:" (.getMessage e))
                                   (log/debug "  effect-chain:" effect-chain)
@@ -311,7 +272,7 @@
                                     (timing/nanos->micros (- effects-end effects-start))
                                     0)
                   effect-count (if effect-chain (count (:effects effect-chain)) 0)
-                  point-count (count final-frame)]
+                  point-count (t/frame-point-count final-frame)]
               
               ;; Frame profiler (always-on stats)
               (profiler/record-frame-timing!
@@ -332,27 +293,12 @@
 ;; Frame Conversion for Preview
 
 
-(defn laser-point->preview-point
-  "Convert a LaserPoint vector to a map suitable for preview rendering.
-   
-   LaserPoints are 5-element vectors [x y r g b] with normalized values:
-   - x, y: -1.0 to 1.0 (already normalized)
-   - r, g, b: 0.0 to 1.0 (already normalized)
-   
-   Preview uses the same format, so we just pass through the values."
-  [point]
-  {:x (point t/X)           ;; Already normalized (-1.0 to 1.0)
-   :y (point t/Y)           ;; Already normalized (-1.0 to 1.0)
-   :r (point t/R)           ;; Already normalized (0.0 to 1.0)
-   :g (point t/G)           ;; Already normalized (0.0 to 1.0)
-   :b (point t/B)           ;; Already normalized (0.0 to 1.0)
-   :blanked? (t/blanked? point)})
-
 (defn frame->preview-data
-  "Convert a frame (vector of points) to preview-friendly data."
-  [frame]
-  (when (seq frame)
-    {:points (mapv laser-point->preview-point frame)}))
+  "Convert a 2D float array frame to preview-friendly data (maps for cljfx).
+   Returns {:points [{:x :y :r :g :b :blanked?} ...]} or nil."
+  [^"[[D" frame]
+  (when (and frame (pos? (t/frame-point-count frame)))
+    {:points (t/frame->preview-points frame)}))
 
 (defn get-preview-frame
   "Get the current frame in preview-friendly format."
@@ -365,7 +311,7 @@
 
 (defn create-frame-provider
   "Create a frame provider function for IDN streaming.
-   Returns a zero-arity function that returns the current LaserFrame."
+   Returns a zero-arity function that returns the current LaserFrame (2D float array)."
   []
   (fn []
     (generate-current-frame)))

@@ -2,13 +2,21 @@
   "Calibration effects for projector-specific corrections.
    These are static effects applied at the projector level to compensate
    for hardware differences between laser projectors.
+   These effects mutate frames in place for maximum performance.
    
    NOTE: All curve points use NORMALIZED values (0.0-1.0)."
   (:require [laser-show.animation.effects :as effects]
-            [laser-show.animation.effects.common :as common]
-            [laser-show.animation.effects.curves :as curves]))
+            [laser-show.animation.effects.curves :as curves]
+            [laser-show.animation.types :as t]))
 
-(defn- rgb-curves-xf [time-ms bpm params ctx]
+(set! *unchecked-math* :warn-on-boxed)
+
+
+;; ========== RGB Curves Effect ==========
+
+(defn- rgb-curves-fn!
+  "Apply RGB curve correction in place using LUTs."
+  [^"[[D" frame time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         ;; Get control points with defaults (normalized 0.0-1.0)
         r-points (or (:r-curve-points resolved) [[0.0 0.0] [1.0 1.0]])
@@ -17,16 +25,23 @@
         ;; Generate LUTs (returns 256-entry vector of normalized values)
         r-lut (curves/generate-curve-lut r-points)
         g-lut (curves/generate-curve-lut g-points)
-        b-lut (curves/generate-curve-lut b-points)]
-    (map (fn [{:keys [r g b] :as pt}]
-           ;; r, g, b are normalized 0.0-1.0, convert to LUT index
-           (let [r-idx (min 255 (max 0 (int (* r 255))))
-                 g-idx (min 255 (max 0 (int (* g 255))))
-                 b-idx (min 255 (max 0 (int (* b 255))))]
-             (assoc pt
-               :r (common/clamp-normalized (nth r-lut r-idx))
-               :g (common/clamp-normalized (nth g-lut g-idx))
-               :b (common/clamp-normalized (nth b-lut b-idx))))))))
+        b-lut (curves/generate-curve-lut b-points)
+        n (alength frame)]
+    (dotimes [i n]
+      (let [r (double (aget frame i t/R))
+            g (double (aget frame i t/G))
+            b (double (aget frame i t/B))
+            ;; r, g, b are normalized 0.0-1.0, convert to LUT index
+            r-idx (min 255 (max 0 (int (* r 255.0))))
+            g-idx (min 255 (max 0 (int (* g 255.0))))
+            b-idx (min 255 (max 0 (int (* b 255.0))))
+            new-r (double (max 0.0 (min 1.0 (double (nth r-lut r-idx)))))
+            new-g (double (max 0.0 (min 1.0 (double (nth g-lut g-idx)))))
+            new-b (double (max 0.0 (min 1.0 (double (nth b-lut b-idx)))))]
+        (aset-double frame i t/R new-r)
+        (aset-double frame i t/G new-g)
+        (aset-double frame i t/B new-b))))
+  frame)
 
 (effects/register-effect!
  {:id :rgb-curves
@@ -47,24 +62,30 @@
                 :label "Blue Curve"
                 :type :curve-points
                 :default [[0.0 0.0] [1.0 1.0]]}]
-  :apply-transducer rgb-curves-xf})
+  :apply-fn! rgb-curves-fn!})
 
 
-;; Axis Transform Effect (mirror and swap axes)
+;; ========== Axis Transform Effect ==========
 
-
-(defn- axis-transform-xf [time-ms bpm params ctx]
- (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-       mirror-x? (:mirror-x? resolved)
-       mirror-y? (:mirror-y? resolved)
-       swap-axes? (:swap-axes? resolved)]
-   (map (fn [{:keys [x y] :as pt}]
-          (let [;; Apply mirroring first
-                x' (if mirror-x? (- x) x)
-                y' (if mirror-y? (- y) y)
-                ;; Then swap if needed
-                [final-x final-y] (if swap-axes? [y' x'] [x' y'])]
-            (assoc pt :x final-x :y final-y))))))
+(defn- axis-transform-fn!
+  "Apply axis mirroring and swap in place."
+  [^"[[D" frame time-ms bpm params ctx]
+  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
+        mirror-x? (:mirror-x? resolved)
+        mirror-y? (:mirror-y? resolved)
+        swap-axes? (:swap-axes? resolved)
+        n (alength frame)]
+    (dotimes [i n]
+      (let [x (double (aget frame i t/X))
+            y (double (aget frame i t/Y))
+            ;; Apply mirroring first
+            x' (if mirror-x? (- x) x)
+            y' (if mirror-y? (- y) y)
+            ;; Then swap if needed
+            [final-x final-y] (if swap-axes? [y' x'] [x' y'])]
+        (aset-double frame i t/X (double final-x))
+        (aset-double frame i t/Y (double final-y)))))
+  frame)
 
 (effects/register-effect!
  {:id :axis-transform
@@ -83,4 +104,4 @@
                 :label "Swap Axes"
                 :type :bool
                 :default false}]
-  :apply-transducer axis-transform-xf})
+  :apply-fn! axis-transform-fn!})

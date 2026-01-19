@@ -21,14 +21,14 @@
 ;; Zone Reroute Effect
 ;;
 ;; This effect stores routing parameters that are read by the routing layer.
-;; The transducer is identity because zone effects don't transform frame data.
+;; The apply-fn! is identity because zone effects don't transform frame data.
 
 
-(defn- zone-reroute-xf
-  "Identity transducer - zone routing effects don't modify frame data.
+(defn- zone-reroute-fn!
+  "Identity function - zone routing effects don't modify frame data.
    The routing parameters are read by routing/core.clj."
-  [_time-ms _bpm _params _ctx]
-  (map identity))
+  [frame _time-ms _bpm _params _ctx]
+  frame)
 
 (effects/register-effect!
  {:id :zone-reroute
@@ -47,7 +47,7 @@
   :ui-hints {:renderer :zone-reroute
              :params [:mode :target-zone-groups]
              :show-routing-preview? true}
-  :apply-transducer zone-reroute-xf})
+  :apply-fn! zone-reroute-fn!})
 
 
 ;; Zone Broadcast Effect
@@ -55,10 +55,10 @@
 ;; Convenience effect to send to all projectors.
 
 
-(defn- zone-broadcast-xf
-  "Identity transducer - just marks this cue as broadcast."
-  [_time-ms _bpm _params _ctx]
-  (map identity))
+(defn- zone-broadcast-fn!
+  "Identity function - just marks this cue as broadcast."
+  [frame _time-ms _bpm _params _ctx]
+  frame)
 
 (effects/register-effect!
  {:id :zone-broadcast
@@ -67,7 +67,7 @@
   :timing :static
   :parameters []
   :ui-hints {:info "Sends this cue to ALL projectors. Equivalent to zone-reroute with mode :replace and target :all."}
-  :apply-transducer zone-broadcast-xf})
+  :apply-fn! zone-broadcast-fn!})
 
 
 ;; Zone Mirror Effect
@@ -75,10 +75,10 @@
 ;; Send to opposite side (left <-> right).
 
 
-(defn- zone-mirror-xf
-  "Identity transducer - routing logic handles the mirror mapping."
-  [_time-ms _bpm _params _ctx]
-  (map identity))
+(defn- zone-mirror-fn!
+  "Identity function - routing logic handles the mirror mapping."
+  [frame _time-ms _bpm _params _ctx]
+  frame)
 
 (effects/register-effect!
  {:id :zone-mirror
@@ -95,4 +95,4 @@
                 :type :bool
                 :default false}]
   :ui-hints {:info "Sends to the opposite side. :left becomes :right and vice versa."}
-  :apply-transducer zone-mirror-xf})
+  :apply-fn! zone-mirror-fn!})

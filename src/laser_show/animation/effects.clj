@@ -1,32 +1,27 @@
 (ns laser-show.animation.effects
-  "Core effect system for laser animations using transducers.
+  "Core effect system for laser animations using in-place array mutation.
    
-   Effects are registered with an `apply-transducer` function that returns
-   a transducer to transform normalized points. When applying an effect chain,
-   all transducers are composed together and applied in a single pass,
-   avoiding intermediate sequence allocations.
+   Effects mutate 2D float array frames in place for maximum performance.
+   This avoids intermediate allocations and enables SIMD-friendly access patterns.
+   
+   Effect functions follow the pattern:
+   (defn effect-name!
+     \"Description. Mutates frame in place.\"
+     [^\"[[D\" frame params...]
+     (dotimes [i (alength frame)]
+       ;; Access: (aget frame i t/X)
+       ;; Mutate: (aset-double frame i t/X new-value)
+       )
+     frame)
+   
+   Effects return the frame for chaining convenience, but mutation is in place.
    
    Supports both static parameters and modulated parameters:
    ;; Static
    {:effect-id :scale :params {:x-scale 1.5}}
    
    ;; Modulated (using modulation.clj)
-   {:effect-id :scale :params {:x-scale (mod/sine-mod 0.8 1.2 2.0)}}
-   
-   Transducer signature:
-   (fn [time-ms bpm resolved-params frame-context]
-     ;; Returns a transducer that transforms normalized points
-     (map (fn [pt] ...)))
-   
-   Normalized point format (ALL VALUES ARE NORMALIZED FLOATS):
-   {:x double (-1.0 to 1.0)
-    :y double (-1.0 to 1.0)
-    :r double (0.0 to 1.0) - normalized red
-    :g double (0.0 to 1.0) - normalized green
-    :b double (0.0 to 1.0) - normalized blue
-    :idx int (point index)
-    :count int (total points)
-    :raw map (original LaserPoint for pass-through)}"
+   {:effect-id :scale :params {:x-scale (mod/sine-mod 0.8 1.2 2.0)}}"
   (:require
    [clojure.tools.logging :as log]
    [laser-show.animation.chains :as chains]
@@ -35,6 +30,7 @@
    [laser-show.common.util :as u]
    [laser-show.state.queries :as queries]))
 
+(set! *unchecked-math* :warn-on-boxed)
 
 ;; Timing Modes
 
@@ -87,14 +83,14 @@
                        :min min-value (optional)
                        :max max-value (optional)
                        :choices [...] (for :choice type)}]
-    :apply-transducer (fn [time-ms bpm params frame-ctx] transducer)}"
+    :apply-fn!       (fn [frame time-ms bpm params frame-ctx] frame)}"
   [effect-def]
   {:pre [(keyword? (:id effect-def))
          (string? (:name effect-def))
          (valid-category? (:category effect-def))
          (contains? timing-modes (:timing effect-def))
          (vector? (:parameters effect-def))
-         (fn? (:apply-transducer effect-def))]}
+         (fn? (:apply-fn! effect-def))]}
   (swap! !effect-registry assoc (:id effect-def) effect-def)
   effect-def)
 
@@ -159,182 +155,6 @@
   chains/item-enabled?)
 
 
-;; Point Normalization Transducers
-;;
-;; Since LaserPoint is now a 5-element vector [x y r g b] with normalized values
-;; (x, y: -1.0 to 1.0, r, g, b: 0.0 to 1.0), normalization is simple -
-;; we just extract the values by index and add the :raw reference.
-
-
-(defn normalize-point
-  "Convert a LaserPoint vector to normalized working format for effects.
-   
-   LaserPoint format (5-element vector, already normalized):
-   [x y r g b] where x,y in [-1.0, 1.0] and r,g,b in [0.0, 1.0]
-   
-   Working format adds :raw reference:
-   {:x double, :y double, :r double, :g double, :b double, :raw point-vector}"
-  [point]
-  {:x (point t/X)
-   :y (point t/Y)
-   :r (point t/R)
-   :g (point t/G)
-   :b (point t/B)
-   :raw point})
-
-(defn denormalize-point
-  "Convert a normalized working point back to LaserPoint.
-   Returns nil if input is nil (supports point filtering).
-   
-   Clamps coordinates to [-1.0, 1.0] and colors to [0.0, 1.0]."
-  [pt]
-  (when pt
-    (t/make-point
-     (:x pt)
-     (:y pt)
-     (:r pt)
-     (:g pt)
-     (:b pt))))
-
-(def normalize-xf
-  "Transducer that converts LaserPoints to normalized working format."
-  (map normalize-point))
-
-(def denormalize-xf
-  "Transducer that converts normalized working points back to LaserPoints.
-   Uses `keep` to support point deletion (nil -> filtered out)."
-  (keep denormalize-point))
-
-(defn add-index-xf
-  "Returns a transducer that adds :idx and :count to each point.
-   Uses volatile for efficient stateful transformation."
-  [point-count]
-  (let [idx (volatile! -1)]
-    (map (fn [pt]
-           (assoc pt
-             :idx (vswap! idx inc)
-             :count point-count)))))
-
-
-;; Effect Transducer Composition
-
-
-(defn make-effect-transducer
-  "Create a transducer for a single effect instance.
-   
-   Parameters:
-   - effect-instance: {:effect-id :scale :enabled true :params {...} :keyframe-modulator {...}}
-   - time-ms: Current time in milliseconds
-   - bpm: Current BPM
-   - trigger-time: When the effect was triggered (for once-mode modulators)
-   - frame-ctx: {:point-count n :timing-ctx {...}}
-   
-   Supports keyframe modulation: if :keyframe-modulator is present and enabled,
-   the keyframe modulator's interpolated params are used instead of per-param modulators.
-   
-   Returns: A transducer, or nil if effect is disabled or unknown."
-  [effect-instance time-ms bpm trigger-time frame-ctx]
-  (when (effect-instance-enabled? effect-instance)
-    (let [effect-id (:effect-id effect-instance)]
-      (when-let [effect-def (get-effect effect-id)]
-        (let [xf-fn (:apply-transducer effect-def)
-              
-              ;; Check for keyframe modulator FIRST
-              keyframe-mod (:keyframe-modulator effect-instance)
-              keyframe-enabled? (and keyframe-mod (:enabled? keyframe-mod))
-              
-              ;; Resolve params based on modulation mode
-              user-params (if keyframe-enabled?
-                            ;; Keyframe mode: evaluate keyframe modulator to get params
-                            (let [timing-ctx (:timing-ctx frame-ctx)
-                                  context (mod/make-context (merge {:time-ms time-ms
-                                                                    :bpm bpm
-                                                                    :trigger-time trigger-time}
-                                                                   timing-ctx))]
-                              (mod/eval-keyframe keyframe-mod context))
-                            ;; Normal mode: use per-param modulators
-                            (:params effect-instance))
-              
-              merged-params (merge-with-defaults effect-id user-params)]
-          ;; Note: We pass merged-params (may contain modulators) to the transducer factory
-          ;; The transducer is responsible for resolving them (either globally or per-point)
-          ;; frame-ctx now includes :timing-ctx for modulator beat accumulation
-          ;; When in keyframe mode, params are already resolved (no modulators)
-          (try
-            (xf-fn time-ms bpm merged-params frame-ctx)
-            (catch Exception e
-              (log/error "make-effect-transducer:" effect-id "failed:" (.getMessage e))
-              (log/debug "  params:" merged-params)
-              ;; Return identity transducer on error
-              (map identity))))))))
-
-(defn compose-effect-transducers
-  "Compose transducers from a chain of effects.
-   
-   Supports nested groups - the chain is flattened before processing,
-   respecting enabled? flags at both effect and group level.
-   
-   Parameters:
-   - chain: Effect chain {:effects [...]} - may contain groups
-   - time-ms: Current time in milliseconds
-   - bpm: Current BPM
-   - trigger-time: When effects were triggered
-   - frame-ctx: {:point-count n}
-   
-   Returns: A single composed transducer, or (map identity) for empty chains."
-  [chain time-ms bpm trigger-time frame-ctx]
-  (let [effects (:effects chain)
-        ;; Flatten the chain to handle nested groups
-        flat-effects (chains/flatten-chain effects)
-        transducers (keep #(make-effect-transducer % time-ms bpm trigger-time frame-ctx) flat-effects)]
-    (if (empty? transducers)
-      (map identity)
-      (apply comp transducers))))
-
-
-;; Effect Chain Application
-
-
-(defn apply-effect-chain
-  "Apply an effect chain to a frame using transducer composition.
-   
-   All effect transducers are composed together and applied in a single pass,
-   avoiding intermediate sequence allocations.
-   
-   Parameters:
-   - frame: LaserFrame (vector of points) to transform
-   - chain: Effect chain {:effects [...]} or nil
-   - time-ms: Current time in milliseconds
-   - bpm: Current BPM (from global state if not provided)
-   - trigger-time: (optional) Time when the cue was triggered
-   - timing-ctx: (optional) Timing context for modulator evaluation
-                 {:accumulated-beats :accumulated-ms :phase-offset :effective-beats}
-   
-   Returns: Transformed frame (vector of points)"
-  ([frame chain time-ms]
-   (apply-effect-chain frame chain time-ms (queries/bpm) nil nil))
-  ([frame chain time-ms bpm]
-   (apply-effect-chain frame chain time-ms bpm nil nil))
-  ([frame chain time-ms bpm trigger-time]
-   (apply-effect-chain frame chain time-ms bpm trigger-time nil))
-  ([frame chain time-ms bpm trigger-time timing-ctx]
-   (if (or (nil? chain) (empty? (:effects chain)))
-     frame
-     (let [point-count (count frame)
-           ;; Include timing context in frame-ctx for modulator evaluation
-           frame-ctx {:point-count point-count
-                      :timing-ctx timing-ctx}
-           
-           ;; Compose: normalize -> add-index -> effects... -> denormalize
-           effect-xf (compose-effect-transducers chain time-ms bpm trigger-time frame-ctx)
-           full-xf (comp normalize-xf
-                        (add-index-xf point-count)
-                        effect-xf
-                        denormalize-xf)]
-       (into [] full-xf frame)))))
-
-
-
 ;; Helper for Per-Point Modulation
 
 
@@ -363,6 +183,38 @@
                                           timing-ctx))]
      (mod/resolve-params raw-params context))))
 
+(defn make-base-context-for-frame
+  "Create a base modulation context for a frame.
+   Use with resolve-params-for-point-fast in hot loops.
+   
+   Parameters:
+   - time-ms: Current time
+   - bpm: Current BPM
+   - point-count: Number of points in frame
+   - timing-ctx: Optional map with accumulated-beats, accumulated-ms, phase-offset
+   
+   Returns: Base context that can be updated per-point without allocations."
+  [time-ms bpm point-count timing-ctx]
+  (mod/make-base-context (merge {:time-ms time-ms
+                                 :bpm bpm
+                                 :point-count point-count}
+                                timing-ctx)))
+
+(defn resolve-params-for-point-fast
+  "Resolve parameters with a pre-created base context.
+   More efficient for hot loops - uses assoc instead of creating new maps.
+   
+   Parameters:
+   - raw-params: Parameter map that may contain modulators
+   - base-ctx: Base context created with make-base-context-for-frame
+   - x, y: Normalized point position
+   - idx: Point index
+   
+   Returns: Resolved parameter map."
+  [raw-params base-ctx x y idx]
+  (let [context (mod/with-point-context base-ctx x y idx)]
+    (mod/resolve-params raw-params context)))
+
 (defn resolve-params-global
   "Resolve parameters globally (not per-point).
    Use this when no per-point modulators are present.
@@ -382,6 +234,107 @@
    (let [timing-ctx (if (contains? frame-ctx-or-timing-ctx :timing-ctx)
                       (:timing-ctx frame-ctx-or-timing-ctx)
                       frame-ctx-or-timing-ctx)
-         context (mod/make-context (merge {:time-ms time-ms :bpm bpm} timing-ctx))]
+         context (mod/make-base-context (merge {:time-ms time-ms :bpm bpm} timing-ctx))]
      (mod/resolve-params raw-params context))))
 
+
+;; Effect Application
+
+
+(defn apply-effect!
+  "Apply a single effect to frame IN PLACE.
+   
+   Parameters:
+   - frame: 2D float array to mutate
+   - effect-instance: {:effect-id :scale :enabled true :params {...} :keyframe-modulator {...}}
+   - time-ms: Current time in milliseconds
+   - bpm: Current BPM
+   - trigger-time: When the effect was triggered (for once-mode modulators)
+   - frame-ctx: {:point-count n :timing-ctx {...}}
+   
+   Returns: The frame (mutated in place)"
+  [^"[[D" frame effect-instance time-ms bpm trigger-time frame-ctx]
+  (when (effect-instance-enabled? effect-instance)
+    (let [effect-id (:effect-id effect-instance)]
+      (when-let [effect-def (get-effect effect-id)]
+        (let [apply-fn (:apply-fn! effect-def)
+              
+              ;; Check for keyframe modulator FIRST
+              keyframe-mod (:keyframe-modulator effect-instance)
+              keyframe-enabled? (and keyframe-mod (:enabled? keyframe-mod))
+              
+              ;; Resolve params based on modulation mode
+              user-params (if keyframe-enabled?
+                            ;; Keyframe mode: evaluate keyframe modulator to get params
+                            (let [timing-ctx (:timing-ctx frame-ctx)
+                                  context (mod/make-context (merge {:time-ms time-ms
+                                                                    :bpm bpm
+                                                                    :trigger-time trigger-time}
+                                                                   timing-ctx))]
+                              (mod/eval-keyframe keyframe-mod context))
+                            ;; Normal mode: use per-param modulators
+                            (:params effect-instance))
+              
+              merged-params (merge-with-defaults effect-id user-params)]
+          (try
+            (apply-fn frame time-ms bpm merged-params frame-ctx)
+            (catch Exception e
+              (log/error "apply-effect!:" effect-id "failed:" (.getMessage e))
+              (log/debug "  params:" merged-params)))))))
+  frame)
+
+(defn apply-effect-chain!
+  "Apply an effect chain to a frame IN PLACE.
+   
+   Supports nested groups - the chain is flattened before processing,
+   respecting enabled? flags at both effect and group level.
+   
+   Parameters:
+   - frame: 2D float array to mutate
+   - chain: Effect chain {:effects [...]} - may contain groups
+   - time-ms: Current time in milliseconds
+   - bpm: Current BPM (from global state if not provided)
+   - trigger-time: (optional) Time when the cue was triggered
+   - timing-ctx: (optional) Timing context for modulator evaluation
+   
+   Returns: The frame (mutated in place)"
+  ([^"[[D" frame chain time-ms]
+   (apply-effect-chain! frame chain time-ms (queries/bpm) nil nil))
+  ([^"[[D" frame chain time-ms bpm]
+   (apply-effect-chain! frame chain time-ms bpm nil nil))
+  ([^"[[D" frame chain time-ms bpm trigger-time]
+   (apply-effect-chain! frame chain time-ms bpm trigger-time nil))
+  ([^"[[D" frame chain time-ms bpm trigger-time timing-ctx]
+   (when (and chain (seq (:effects chain)) (pos? (alength frame)))
+     (let [point-count (alength frame)
+           frame-ctx {:point-count point-count
+                      :timing-ctx timing-ctx}
+           effects (:effects chain)
+           ;; Flatten the chain to handle nested groups
+           flat-effects (chains/flatten-chain effects)]
+       (doseq [effect flat-effects]
+         (apply-effect! frame effect time-ms bpm trigger-time frame-ctx))))
+   frame))
+
+
+;; Convenience wrapper for apply-effect-chain! that clones first
+
+
+(defn apply-effect-chain
+  "Apply an effect chain to a frame, returning a modified frame.
+   Clones the frame first to preserve original if needed.
+   
+   For performance-critical paths, use apply-effect-chain! with a frame
+   that can be mutated in place."
+  ([^"[[D" frame chain time-ms]
+   (apply-effect-chain frame chain time-ms (queries/bpm) nil nil))
+  ([^"[[D" frame chain time-ms bpm]
+   (apply-effect-chain frame chain time-ms bpm nil nil))
+  ([^"[[D" frame chain time-ms bpm trigger-time]
+   (apply-effect-chain frame chain time-ms bpm trigger-time nil))
+  ([^"[[D" frame chain time-ms bpm trigger-time timing-ctx]
+   (if (or (nil? chain) (empty? (:effects chain)))
+     frame
+     (let [cloned (t/clone-frame frame)]
+       (apply-effect-chain! cloned chain time-ms bpm trigger-time timing-ctx)
+       cloned))))

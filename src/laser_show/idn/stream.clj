@@ -3,13 +3,15 @@
    Implements ILDA Digital Network Stream Specification (Revision 002, July 2025).
    https://www.ilda.com/resources/StandardsDocs/ILDA-IDN-Stream-rev002.pdf
    
-   Converts LaserFrame objects (with normalized point values) to binary IDN 
-   packet format for transmission. Supports configurable bit depths for both
-   color (8/16-bit) and position (8/16-bit)."
+   Converts LaserFrame objects (2D float arrays with normalized point values) to 
+   binary IDN packet format for transmission. Supports configurable bit depths 
+   for both color (8/16-bit) and position (8/16-bit)."
   (:require [clojure.tools.logging :as log]
             [laser-show.animation.types :as t]
             [laser-show.idn.output-config :as output-config])
   (:import [java.nio ByteBuffer ByteOrder]))
+
+(set! *unchecked-math* :warn-on-boxed)
 
 (def ^:const CONTENT_ID_CHANNEL_MSG_BASE
   "Content identifier base for channel messages (0x8000-0xFFFF)"
@@ -55,7 +57,7 @@
 (defn color-tag
   "Create a color tag for a specific wavelength in nm.
    Wavelength is encoded in 10 bits (0-1023nm range)."
-  [wavelength-nm]
+  ^long [^long wavelength-nm]
   (bit-or 0x5000 (bit-and wavelength-nm 0x3FF)))
 
 ;; Standard ISP-DB25 color wavelengths (Section 3.4.10)
@@ -178,27 +180,30 @@
 
 (defn packet-size-with-config
   "Calculate total IDN message size with channel configuration"
-  [point-count tags output-config]
-  (let [bytes-per-pt (output-config/bytes-per-sample output-config)]
-    (+ channel-message-header-size
-       channel-config-header-size
-       (service-config-size tags)
-       frame-chunk-header-size
+  ^long [point-count tags output-config]
+  (let [bytes-per-pt (long (output-config/bytes-per-sample output-config))
+        point-count (long point-count)]
+    (+ (long channel-message-header-size)
+       (long channel-config-header-size)
+       (long (service-config-size tags))
+       (long frame-chunk-header-size)
        (* bytes-per-pt point-count))))
 
 (defn packet-size-without-config
   "Calculate total IDN message size without channel configuration"
-  [point-count output-config]
-  (let [bytes-per-pt (output-config/bytes-per-sample output-config)]
-    (+ channel-message-header-size
-       frame-chunk-header-size
+  ^long [point-count output-config]
+  (let [bytes-per-pt (long (output-config/bytes-per-sample output-config))
+        point-count (long point-count)]
+    (+ (long channel-message-header-size)
+       (long frame-chunk-header-size)
        (* bytes-per-pt point-count))))
 
 (defn max-points-for-size
   "Calculate maximum points that fit in given packet size (without config)"
-  [max-size output-config]
-  (let [bytes-per-pt (output-config/bytes-per-sample output-config)]
-    (quot (- max-size channel-message-header-size frame-chunk-header-size)
+  ^long [max-size output-config]
+  (let [bytes-per-pt (long (output-config/bytes-per-sample output-config))
+        max-size (long max-size)]
+    (quot (- max-size (long channel-message-header-size) (long frame-chunk-header-size))
           bytes-per-pt)))
 
 ;; Maximum packet size (16-bit XY + 16-bit RGB is largest configuration)
@@ -235,8 +240,10 @@
    - Bit 6: CCLF (config present for first fragment, last fragment flag for sequel)
    - Bits 5-0: Channel ID (0-63)"
   [^ByteBuffer buf total-size channel-id chunk-type timestamp has-config?]
-  (let [channel-msg-bit 0x80               ; Bit 7 ALWAYS 1 for channel messages
-        cclf-bit (if has-config? 0x40 0x00) ; Bit 6 is CCLF
+  (let [channel-id (long channel-id)
+        timestamp (long timestamp)
+        channel-msg-bit (long 0x80)           ; Bit 7 ALWAYS 1 for channel messages
+        cclf-bit (long (if has-config? 0x40 0x00)) ; Bit 6 is CCLF
         cnl-byte (bit-or channel-msg-bit cclf-bit (bit-and channel-id 0x3F))]
     (.putShort buf (short total-size))
     (.put buf (unchecked-byte cnl-byte))
@@ -272,27 +279,34 @@
    - Flags (1 byte): SCM bits and Once flag
    - Duration (3 bytes): Frame duration in microseconds"
   [^ByteBuffer buf flags duration-us]
-  (.put buf (unchecked-byte flags))
-  (.put buf (unchecked-byte (bit-and (bit-shift-right duration-us 16) 0xFF)))
-  (.put buf (unchecked-byte (bit-and (bit-shift-right duration-us 8) 0xFF)))
-  (.put buf (unchecked-byte (bit-and duration-us 0xFF))))
+  (let [duration-us (long duration-us)]
+    (.put buf (unchecked-byte flags))
+    (.put buf (unchecked-byte (bit-and (bit-shift-right duration-us 16) 0xFF)))
+    (.put buf (unchecked-byte (bit-and (bit-shift-right duration-us 8) 0xFF)))
+    (.put buf (unchecked-byte (bit-and duration-us 0xFF)))))
 
 (defn write-point!
-  "Write a single LaserPoint vector to ByteBuffer based on output config.
+  "Write a single point from 2D float array frame to ByteBuffer.
    
-   Point values are normalized:
-   - x, y: -1.0 to 1.0
-   - r, g, b: 0.0 to 1.0
+   Point values are accessed directly from the frame array:
+   - x, y: -1.0 to 1.0 (normalized)
+   - r, g, b: 0.0 to 1.0 (normalized)
    
    Output format depends on config bit depths."
-  [^ByteBuffer buf point output-config]
+  [^ByteBuffer buf ^"[[D" frame ^long point-idx output-config]
   (let [{:keys [color-bit-depth xy-bit-depth]} output-config
+        ;; Get values directly from 2D array
+        x (aget frame point-idx t/X)
+        y (aget frame point-idx t/Y)
+        r (aget frame point-idx t/R)
+        g (aget frame point-idx t/G)
+        b (aget frame point-idx t/B)
         ;; Convert using output-config functions
-        x-out (output-config/normalized->output-xy (point t/X) xy-bit-depth)
-        y-out (output-config/normalized->output-xy (point t/Y) xy-bit-depth)
-        r-out (output-config/normalized->output-color (point t/R) color-bit-depth)
-        g-out (output-config/normalized->output-color (point t/G) color-bit-depth)
-        b-out (output-config/normalized->output-color (point t/B) color-bit-depth)]
+        x-out (output-config/normalized->output-xy x xy-bit-depth)
+        y-out (output-config/normalized->output-xy y xy-bit-depth)
+        r-out (output-config/normalized->output-color r color-bit-depth)
+        g-out (output-config/normalized->output-color g color-bit-depth)
+        b-out (output-config/normalized->output-color b color-bit-depth)]
     ;; Write XY
     (if (= xy-bit-depth 16)
       (do (.putShort buf (short x-out))
@@ -310,17 +324,25 @@
           (.put buf (unchecked-byte g-out))
           (.put buf (unchecked-byte b-out))))))
 
+(defn write-frame-to-buffer!
+  "Write entire frame directly to ByteBuffer for IDN streaming.
+   Uses dotimes for efficient iteration over the 2D array."
+  [^ByteBuffer buf ^"[[D" frame output-config]
+  (let [n (alength frame)]
+    (dotimes [i n]
+      (write-point! buf frame i output-config))))
+
 
 ;; Frame to Packet Conversion
 
 
 (defn frame->packet-with-config
-  "Convert a frame (vector of points) to an IDN packet with channel configuration.
+  "Convert a 2D float array frame to an IDN packet with channel configuration.
    Use this when opening a channel or when configuration needs to be sent.
    
    Parameters:
    - buf: Pre-allocated ByteBuffer to write packet into (will be cleared)
-   - frame: Vector of point vectors (each point is [x y r g b] normalized)
+   - frame: 2D float array where rows are points [x y r g b]
    - channel-id: IDN channel ID (0-63)
    - timestamp-us: Timestamp in microseconds
    - duration-us: Frame duration in microseconds
@@ -332,21 +354,21 @@
      - :single-scan? - Draw frame only once (default false)
    
    Returns: byte array ready to send"
-  [^ByteBuffer buf frame channel-id timestamp-us duration-us & {:keys [service-id service-mode output-config close? single-scan?]
+  [^ByteBuffer buf ^"[[D" frame channel-id timestamp-us duration-us & {:keys [service-id service-mode output-config close? single-scan?]
                                                                 :or {service-id DEFAULT_SERVICE_ID
                                                                      service-mode SERVICE_MODE_GRAPHIC_DISCRETE
                                                                      output-config output-config/default-config
                                                                      close? false
                                                                      single-scan? false}}]
-  (let [points (take MAX_POINTS_PER_PACKET frame)
-        point-count (count points)
+  (let [total-pts (alength frame)
+        point-count (min total-pts MAX_POINTS_PER_PACKET)
         tags (get-tags-for-config output-config)
         [scwc padded-tags] (calculate-scwc tags)
         total-size (packet-size-with-config point-count padded-tags output-config)
         cfl-flags (bit-or CFL_ROUTING (if close? CFL_CLOSE 0))
         chunk-flags (if single-scan? 0x01 0x00)]
-    (when (> point-count MAX_POINTS_PER_PACKET)
-      (log/warn "Frame point count exceeds maximum per packet. Truncating from" point-count "to" MAX_POINTS_PER_PACKET "points."))
+    (when (> total-pts MAX_POINTS_PER_PACKET)
+      (log/warn "Frame point count exceeds maximum per packet. Truncating from" total-pts "to" MAX_POINTS_PER_PACKET "points."))
     
     (.clear buf)
 
@@ -356,8 +378,9 @@
     (write-service-config-tags! buf padded-tags)
     (write-frame-chunk-header! buf chunk-flags duration-us)
 
-    (doseq [point points]
-      (write-point! buf point output-config))
+    ;; Write points directly from 2D array
+    (dotimes [i point-count]
+      (write-point! buf frame i output-config))
 
     (let [result (byte-array total-size)]
       (.position buf 0)
@@ -365,12 +388,12 @@
       result)))
 
 (defn frame->packet
-  "Convert a frame (vector of points) to an IDN packet without channel configuration.
+  "Convert a 2D float array frame to an IDN packet without channel configuration.
    Use this for subsequent frames after channel is already configured.
    
    Parameters:
    - buf: Pre-allocated ByteBuffer to write packet into (will be cleared)
-   - frame: Vector of point vectors (each point is [x y r g b] normalized)
+   - frame: 2D float array where rows are points [x y r g b]
    - channel-id: IDN channel ID (0-63)
    - timestamp-us: Timestamp in microseconds
    - duration-us: Frame duration in microseconds
@@ -379,11 +402,11 @@
      - :single-scan? - Draw frame only once (default false)
    
    Returns: byte array ready to send"
-  [^ByteBuffer buf frame channel-id timestamp-us duration-us & {:keys [output-config single-scan?]
+  [^ByteBuffer buf ^"[[D" frame channel-id timestamp-us duration-us & {:keys [output-config single-scan?]
                                                                 :or {output-config output-config/default-config
                                                                      single-scan? false}}]
-  (let [points (take MAX_POINTS_PER_PACKET frame)
-        point-count (count points)
+  (let [total-pts (alength frame)
+        point-count (min total-pts MAX_POINTS_PER_PACKET)
         total-size (packet-size-without-config point-count output-config)
         chunk-flags (if single-scan? 0x01 0x00)]
 
@@ -393,8 +416,9 @@
                                    CHUNK_TYPE_FRAME_SAMPLES timestamp-us false)
     (write-frame-chunk-header! buf chunk-flags duration-us)
 
-    (doseq [point points]
-      (write-point! buf point output-config))
+    ;; Write points directly from 2D array
+    (dotimes [i point-count]
+      (write-point! buf frame i output-config))
 
     (let [result (byte-array total-size)]
       (.position buf 0)
@@ -414,7 +438,7 @@
   "Create a packet to close a channel.
    Uses Void chunk type with Close flag set."
   [channel-id timestamp-us]
-  (let [total-size (+ channel-message-header-size channel-config-header-size)
+  (let [total-size (long (+ (long channel-message-header-size) (long channel-config-header-size)))
         buf (ByteBuffer/allocate total-size)]
 
     (.order buf ByteOrder/BIG_ENDIAN)
@@ -455,11 +479,11 @@
 (defn parse-channel-config-header
   "Parse channel configuration header from byte array at given offset.
    Returns map with config fields."
-  [^bytes packet offset]
+  [^bytes packet ^long offset]
   (when (>= (alength packet) (+ offset 4))
     (let [buf (ByteBuffer/wrap packet)]
       (.order buf ByteOrder/BIG_ENDIAN)
-      (.position buf offset)
+      (.position buf (int offset))
       {:scwc (bit-and (.get buf) 0xFF)
        :flags (bit-and (.get buf) 0xFF)
        :service-id (bit-and (.get buf) 0xFF)
@@ -509,10 +533,10 @@
 
 (defn microseconds-now
   "Get current time in microseconds (for timestamps)"
-  []
-  (/ (System/nanoTime) 1000))
+  ^long []
+  (quot (System/nanoTime) 1000))
 
 (defn frame-duration-us
   "Calculate frame duration in microseconds for given FPS"
-  [fps]
-  (long (/ 1000000 fps)))
+  ^long [fps]
+  (quot 1000000 (long fps)))

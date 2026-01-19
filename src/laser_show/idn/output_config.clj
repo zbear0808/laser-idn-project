@@ -10,9 +10,9 @@
    
    The default configuration is 16-bit for both color and position (maximum precision).
    Use standard-config for ISP-DB25 compatibility (8-bit color, 16-bit XY)."
-  (:require [laser-show.animation.types :as t]
-            [laser-show.common.util :as u]))
+  (:require [laser-show.animation.types :as t]))
 
+(set! *unchecked-math* :warn-on-boxed)
 
 ;; Bit Depth Constants
 
@@ -72,12 +72,12 @@
 
 (defn bytes-per-color
   "Get the number of bytes per color channel for the given config."
-  [{:keys [color-bit-depth]}]
+  ^long [{:keys [color-bit-depth]}]
   (if (= color-bit-depth BIT_DEPTH_16) 2 1))
 
 (defn bytes-per-xy
   "Get the number of bytes per XY coordinate for the given config."
-  [{:keys [xy-bit-depth]}]
+  ^long [{:keys [xy-bit-depth]}]
   (if (= xy-bit-depth BIT_DEPTH_16) 2 1))
 
 (defn bytes-per-sample
@@ -85,7 +85,7 @@
    
    Sample consists of: X + Y + R + G + B
    Each component can be 1 or 2 bytes depending on bit depth."
-  [{:keys [color-bit-depth xy-bit-depth] :as config}]
+  ^long [{:keys [color-bit-depth xy-bit-depth] :as config}]
   (+ (* 2 (bytes-per-xy config))     ; X + Y
      (* 3 (bytes-per-color config)))) ; R + G + B
 
@@ -99,7 +99,7 @@
    For 16-bit: maps to -32768 to 32767 (signed)
    For 8-bit: maps to 0 to 255 (unsigned, -1.0->0, 0.0->128, 1.0->255)"
   [value bit-depth]
-  (let [clamped (u/clamp (double value) -1.0 1.0)]
+  (let [clamped (max -1.0 (min 1.0 (double value)))]
     (if (= bit-depth BIT_DEPTH_16)
       ;; 16-bit signed: -1.0 -> -32767, 0.0 -> 0, 1.0 -> 32767
       (short (* clamped 32767))
@@ -112,17 +112,21 @@
    For 16-bit: maps to 0 to 65535
    For 8-bit: maps to 0 to 255"
   [value bit-depth]
-  (let [clamped (u/clamp (double value) 0.0 1.0)]
+  (let [clamped (max 0.0 (min 1.0 (double value)))]
     (if (= bit-depth BIT_DEPTH_16)
       (int (* clamped 65535))
       (int (* clamped 255)))))
 
 
-;; Point Conversion
+;; Point Conversion (for float array points and frames)
 
 
 (defn point->output-values
-  "Convert a normalized LaserPoint vector to output values based on config.
+  "Convert a single point (double array [x y r g b]) to output values based on config.
+   
+   Parameters:
+   - point: 1D float array [x y r g b]
+   - config: OutputConfig
    
    Returns a map with:
    - :x - X coordinate in output format
@@ -130,12 +134,33 @@
    - :r - Red in output format
    - :g - Green in output format
    - :b - Blue in output format"
-  [point {:keys [color-bit-depth xy-bit-depth]}]
-  {:x (normalized->output-xy (point t/X) xy-bit-depth)
-   :y (normalized->output-xy (point t/Y) xy-bit-depth)
-   :r (normalized->output-color (point t/R) color-bit-depth)
-   :g (normalized->output-color (point t/G) color-bit-depth)
-   :b (normalized->output-color (point t/B) color-bit-depth)})
+  [^doubles point {:keys [color-bit-depth xy-bit-depth]}]
+  {:x (normalized->output-xy (aget point t/X) xy-bit-depth)
+   :y (normalized->output-xy (aget point t/Y) xy-bit-depth)
+   :r (normalized->output-color (aget point t/R) color-bit-depth)
+   :g (normalized->output-color (aget point t/G) color-bit-depth)
+   :b (normalized->output-color (aget point t/B) color-bit-depth)})
+
+(defn frame-point->output-values
+  "Convert a point from 2D float array frame to output values based on config.
+   
+   Parameters:
+   - frame: 2D float array [[x y r g b] ...]
+   - idx: Point index
+   - config: OutputConfig
+   
+   Returns a map with:
+   - :x - X coordinate in output format
+   - :y - Y coordinate in output format
+   - :r - Red in output format
+   - :g - Green in output format
+   - :b - Blue in output format"
+  [^"[[D" frame ^long idx {:keys [color-bit-depth xy-bit-depth]}]
+  {:x (normalized->output-xy (aget frame idx t/X) xy-bit-depth)
+   :y (normalized->output-xy (aget frame idx t/Y) xy-bit-depth)
+   :r (normalized->output-color (aget frame idx t/R) color-bit-depth)
+   :g (normalized->output-color (aget frame idx t/G) color-bit-depth)
+   :b (normalized->output-color (aget frame idx t/B) color-bit-depth)})
 
 
 ;; Configuration Queries
@@ -144,4 +169,3 @@
   "Get a human-readable name for the configuration."
   [{:keys [color-bit-depth xy-bit-depth]}]
   (str xy-bit-depth "-bit XY, " color-bit-depth "-bit color"))
-

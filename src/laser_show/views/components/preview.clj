@@ -52,24 +52,26 @@
   ;; Vertical center line
   (.strokeLine gc (/ width 2) 0 (/ width 2) height))
 
-(defn- point-blanked?
-  "Check if a point is blanked (preview-friendly format).
-   Preview points already have :blanked? set, or we can check RGB values."
-  [{:keys [blanked? r g b]}]
-  (if (some? blanked?)
-    blanked?
-    (let [epsilon 1e-6]
-      (and (< (or r 0) epsilon)
-           (< (or g 0) epsilon)
-           (< (or b 0) epsilon)))))
+(defn- arr-blanked?
+  "Check if a point array is blanked (all colors near zero)."
+  [^doubles pt]
+  (let [epsilon (double 1e-6)]
+    (and (< (aget pt t/R) epsilon)
+         (< (aget pt t/G) epsilon)
+         (< (aget pt t/B) epsilon))))
 
 (defn- draw-frame-points
   "Draw frame points as dots."
   [^GraphicsContext gc width height frame]
   (when-let [points (:points frame)]
-    (doseq [{:keys [x y r g b] :as pt} points]
-      (when-not (point-blanked? pt)
-        (let [px (normalize-coord x width)
+    (doseq [^doubles pt points]
+      (when-not (arr-blanked? pt)
+        (let [x (aget pt t/X)
+              y (aget pt t/Y)
+              r (aget pt t/R)
+              g (aget pt t/G)
+              b (aget pt t/B)
+              px (normalize-coord x width)
               py (normalize-coord (- y) height)  ;; Flip Y for screen coords
               color (color-from-rgb r g b)]
           (.setFill gc color)
@@ -80,13 +82,13 @@
   [^GraphicsContext gc width height frame]
   (when-let [points (:points frame)]
     (let [point-pairs (partition 2 1 points)]
-      (doseq [[p1 p2] point-pairs]
-        (when (and (not (point-blanked? p1)) (not (point-blanked? p2)))
-          (let [x1 (normalize-coord (:x p1) width)
-                y1 (normalize-coord (- (:y p1)) height)
-                x2 (normalize-coord (:x p2) width)
-                y2 (normalize-coord (- (:y p2)) height)
-                color (color-from-rgb (:r p1) (:g p1) (:b p1))]
+      (doseq [[^doubles p1 ^doubles p2] point-pairs]
+        (when (and (not (arr-blanked? p1)) (not (arr-blanked? p2)))
+          (let [x1 (normalize-coord (aget p1 t/X) width)
+                y1 (normalize-coord (- (aget p1 t/Y)) height)
+                x2 (normalize-coord (aget p2 t/X) width)
+                y2 (normalize-coord (- (aget p2 t/Y)) height)
+                color (color-from-rgb (aget p1 t/R) (aget p1 t/G) (aget p1 t/B))]
             (.setStroke gc color)
             (.setLineWidth gc 2)
             (.strokeLine gc x1 y1 x2 y2)))))))
