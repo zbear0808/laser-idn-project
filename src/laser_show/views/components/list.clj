@@ -750,7 +750,7 @@
 
 (defn- list-item-card
   "A single item in the list with drag-and-drop support."
-  [{:keys [component-id items props item item-label depth selected? dragging? drop-target-id drop-position parent-disabled?]}]
+  [{:keys [component-id items props item item-label depth selected? dragging? drop-target-id drop-position renaming? parent-disabled?]}]
   (let [item-id (:id item)
         enabled? (:enabled? item true)
         effectively-disabled? (or (not enabled?) parent-disabled?)
@@ -770,16 +770,26 @@
      :on-created (fn [node]
                    (setup-drag-source! node item-id component-id)
                    (setup-drag-target! node item-id false component-id items props)
-                   ;; Click handler for selection
+                   ;; Click handler for selection and double-click rename
                     (.setOnMouseClicked node
                       (reify javafx.event.EventHandler
                         (handle [_ event]
-                          (let [ctrl? (.isShortcutDown event)
+                          (let [click-count (.getClickCount event)
+                                ctrl? (.isShortcutDown event)
                                 shift? (.isShiftDown event)]
-                            (handle-selection! component-id item-id ctrl? shift? items props)
-                            ;; Request focus on parent list container so keyboard shortcuts work
-                            (request-list-focus! node)
-                            (.consume event))))))
+                            (cond
+                              ;; Double-click - start rename
+                              (= click-count 2)
+                              (do
+                                (start-rename! component-id item-id)
+                                (.consume event))
+                              ;; Single-click - select
+                              :else
+                              (do
+                                (handle-selection! component-id item-id ctrl? shift? items props)
+                                ;; Request focus on parent list container so keyboard shortcuts work
+                                (request-list-focus! node)
+                                (.consume event))))))))
      :desc {:fx/type :h-box
             :style-class item-classes
             :children [;; Enable/disable checkbox
@@ -788,10 +798,35 @@
                         :on-selected-changed (fn [enabled?]
                                                (set-enabled! component-id items props item-id enabled?))}
                        
-                       ;; Item name
-                       {:fx/type :label
-                        :text (or item-label "Unknown")
-                        :style-class name-classes}]}}))
+                       ;; Item name (editable when renaming)
+                       (if renaming?
+                         {:fx/type fx/ext-on-instance-lifecycle
+                          :on-created (fn [^javafx.scene.control.TextField node]
+                                        ;; Need double runLater: first waits for cljfx to apply :text,
+                                        ;; second ensures focus and selection happen after layout
+                                        (javafx.application.Platform/runLater
+                                          (fn []
+                                            (.requestFocus node)
+                                            (javafx.application.Platform/runLater
+                                              #(.selectAll node)))))
+                          :desc {:fx/type :text-field
+                                 :text (or item-label "Unknown")
+                                 :style-class "list-item-name-input"
+                                 :on-action (fn [^javafx.event.ActionEvent e]
+                                              (let [text-field (.getSource e)
+                                                    new-name (.getText text-field)]
+                                                (commit-rename! component-id items props item-id new-name)))
+                                 :on-key-pressed (fn [^javafx.scene.input.KeyEvent e]
+                                                   (case (.getCode e)
+                                                     javafx.scene.input.KeyCode/ESCAPE
+                                                     (cancel-rename! component-id)
+                                                     nil))
+                                 :on-focused-changed (fn [focused?]
+                                                       (when-not focused?
+                                                         (cancel-rename! component-id)))}}
+                         {:fx/type :label
+                          :text (or item-label "Unknown")
+                          :style-class name-classes})]}}))
 
 
 
@@ -857,6 +892,7 @@
        :dragging? dragging?
        :drop-target-id drop-target-id
        :drop-position drop-position
+       :renaming? (= item-id renaming-id)
        :parent-disabled? parent-disabled?})))
 
 
@@ -1086,6 +1122,7 @@
 
 (defn make-registry-label
   "Create a get-item-label function that looks up names from a registry.
+   Now checks custom :name field first before falling back to registry.
    
    Usage:
    :get-item-label (make-registry-label :effect-id effects/get-effect :name \"Unknown Effect\")
@@ -1097,9 +1134,10 @@
        \"Unknown Effect\"))"
   [id-key lookup-fn name-key fallback]
   (fn [item]
-    (if-let [def-map (lookup-fn (get item id-key))]
-      (get def-map name-key fallback)
-      fallback)))
+    (or (:name item)  ; Check custom name first
+        (when-let [def-map (lookup-fn (get item id-key))]
+          (get def-map name-key fallback))
+        fallback)))
 
 (defn make-case-label
   "Create a get-item-label function from a keyword->string map.
