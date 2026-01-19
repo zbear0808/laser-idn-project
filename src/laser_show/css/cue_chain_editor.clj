@@ -51,7 +51,7 @@
         :-fx-border-width ["1px" "0px" "0px" "0px"]}
        
        ".dialog-section"
-       {:-fx-background-color bg-elevated
+       {:-fx-background-color bg-primary
         :-fx-padding 8
         :-fx-spacing 8
         :-fx-border-color border-subtle
@@ -79,7 +79,7 @@
        
        ".dialog-scroll-pane"
        {:-fx-background-color "transparent"
-        :-fx-background bg-elevated
+        :-fx-background bg-primary
         
         " > .viewport"
         {:-fx-background-color "transparent"}}

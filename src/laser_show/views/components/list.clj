@@ -704,8 +704,14 @@
                        (if renaming?
                          {:fx/type fx/ext-on-instance-lifecycle
                           :on-created (fn [^javafx.scene.control.TextField node]
-                                        (.requestFocus node)
-                                        (.selectAll node))
+                                        ;; Need double runLater: first waits for cljfx to apply :text,
+                                        ;; second ensures focus and selection happen after layout
+                                        ;; this is really stupid and idk if this is actually the best way to do this
+                                        (javafx.application.Platform/runLater
+                                          (fn []
+                                            (.requestFocus node)
+                                            (javafx.application.Platform/runLater
+                                              #(.selectAll node)))))
                           :desc {:fx/type :text-field
                                  :text (or (:name group) "Group")
                                  :style-class "group-name-input"
@@ -739,9 +745,7 @@
                         :on-action (fn [_] (ungroup! component-id items props group-id))}]}}))
 
 
-;; ============================================================================
 ;; List Item Card Component
-;; ============================================================================
 
 
 (defn- list-item-card
@@ -856,9 +860,7 @@
        :parent-disabled? parent-disabled?})))
 
 
-;; ============================================================================
 ;; Group Toolbar
-;; ============================================================================
 
 
 (defn- group-toolbar
@@ -877,9 +879,7 @@
                :on-action (fn [_] (group-selected! component-id items props))}]})
 
 
-;; ============================================================================
 ;; Main Sidebar Component
-;; ============================================================================
 
 
 (defn list-sidebar

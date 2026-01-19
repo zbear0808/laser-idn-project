@@ -91,13 +91,18 @@
        ;; ============================================
        
        ".chain-toolbar-btn"
-       {:-fx-background-color bg-hover
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
         :-fx-font-size 9
         :-fx-padding ["2px" "6px"]
         
         ":hover"
-        {:-fx-background-color bg-active}}
+        {:-fx-background-color bg-hover}
+        
+        ":disabled"
+        {:-fx-opacity 0.4
+         :-fx-text-fill text-muted
+         :-fx-background-color bg-primary}}
        
        ".chain-toolbar-btn-danger"
        {:-fx-background-color "#803030"  ; Dark red - keep as accent
@@ -106,7 +111,12 @@
         :-fx-padding ["2px" "6px"]
         
         ":hover"
-        {:-fx-background-color "#903030"}}  ; Lighter red on hover
+        {:-fx-background-color "#A54040"}  ; More visible red brightening on hover
+        
+        ":disabled"
+        {:-fx-opacity 0.4
+         :-fx-text-fill text-muted
+         :-fx-background-color "#503030"}}  ; Much darker red when disabled
        
        
        ;; ============================================
@@ -192,7 +202,10 @@
         :-fx-text-fill text-muted
         :-fx-font-size 10
         :-fx-padding ["0px" "0px"]
-        :-fx-min-width 8}
+        :-fx-min-width 8
+        
+        ":hover"
+        {:-fx-text-fill text-primary}}
        
        ".group-name-label"
        {:-fx-font-size 12
@@ -231,13 +244,14 @@
         :-fx-font-size 10}
        
        ".group-ungroup-btn"
-       {:-fx-background-color bg-active
+       {:-fx-background-color "transparent"
         :-fx-text-fill text-secondary
         :-fx-padding ["1px" "3px"]
         :-fx-font-size 8
         
         ":hover"
-        {:-fx-background-color bg-hover}}
+        {:-fx-background-color bg-hover
+         :-fx-text-fill text-primary}}
        
        
        ;; ============================================

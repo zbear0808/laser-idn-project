@@ -82,7 +82,7 @@
    :category :wave
    :parameters [(float-param :amplitude "Amplitude" 0.3 0.1 0.8)
                 (int-param :frequency "Frequency" 2 1 8)
-                (color-param :color "Color" [0.0 1.0 1.0])]
+                (color-param :color "Color" [1.0 1.0 1.0])]
    :generator gen/wave-frame})
 
 (def preset-beam-fan
@@ -90,7 +90,7 @@
    :name "Beam Fan"
    :category :beam
    :parameters [(int-param :num-points "Points" 8 2 32)
-                (color-param :color "Color" [1.0 0.392 0.0])]
+                (color-param :color "Color" [1.0 1.0 1.0])]
    :generator gen/beam-fan-frame})
 
 (def preset-horizontal-line
@@ -100,14 +100,6 @@
    :parameters [(float-param :length "Length" 1.0 0.1 2.0)
                 (color-param :color "Color" [1.0 1.0 1.0])]
    :generator gen/horizontal-line-frame})
-
-(def preset-rainbow-circle
-  {:id :rainbow-circle
-   :name "Rainbow Circle"
-   :category :abstract
-   :parameters [(float-param :radius "Radius" 0.5 0.1 1.0)]
-   :generator gen/rainbow-circle-frame})
-
 
 ;; Preset Registry
 
@@ -121,8 +113,7 @@
    preset-star
    preset-wave
    preset-beam-fan
-   preset-horizontal-line
-   preset-rainbow-circle])
+   preset-horizontal-line])
 
 (def presets-by-id
   "Map of preset ID to preset definition."

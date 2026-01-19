@@ -41,7 +41,7 @@
           :destination-zone {:zone-group-id :all}}
    [6 0] {:items [(cue-chains/create-preset-instance :beam-fan)]
           :destination-zone {:zone-group-id :all}}
-   [7 0] {:items [(cue-chains/create-preset-instance :rainbow-circle)]
+   [7 0] {:items [(cue-chains/create-preset-instance :horizontal-line)]
           :destination-zone {:zone-group-id :all}}})
 
 

@@ -71,16 +71,16 @@
                           :effect-path preset-path})]
     {:fx/type :v-box
      :spacing 8
-     :style "-fx-background-color: #2A2A2A; -fx-padding: 8;"
+     :style-class "dialog-section"
      :children [{:fx/type :label
                  :text (if preset-def
                          (str "PRESET: " (:name preset-def))
                          "PRESET PARAMETERS")
-                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                 :style-class "dialog-section-header"}
                 (if preset-def
                   {:fx/type :scroll-pane
                    :fit-to-width true
-                   :style "-fx-background-color: transparent; -fx-background: #2A2A2A;"
+                   :style-class "dialog-scroll-pane"
                    :content {:fx/type :v-box
                              :spacing 8
                              :padding {:top 4}
@@ -99,4 +99,4 @@
                                              :label-width 100})))}}
                   {:fx/type :label
                    :text "Select a preset from the chain"
-                   :style "-fx-text-fill: #606060; -fx-font-style: italic; -fx-font-size: 11;"})]}))
+                   :style-class "dialog-placeholder-text"})]}))
