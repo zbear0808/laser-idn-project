@@ -1,6 +1,5 @@
 (ns laser-show.experiments.dnd-repro
   (:require [cljfx.api :as fx]
-
             [clojure.pprint :as pprint])
   (:import [javafx.scene.input TransferMode ClipboardContent DragEvent MouseEvent]
            [javafx.application Platform]

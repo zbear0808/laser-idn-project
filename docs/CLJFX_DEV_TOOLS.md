@@ -1,14 +1,19 @@
 # Cljfx Dev Tools Integration
 
-This document describes the integration of cljfx/dev tools into the laser show application.
+This document describes the integration of [Cljfx dev tools](https://github.com/cljfx/dev) into the laser show application.
 
-## Overview
+## Rationale
 
-The cljfx/dev tools provide enhanced development experience with:
-- **Better error messages** - Validation errors show exactly which prop is invalid and where in the component tree
-- **Component inspector** - Press F12 to see live component tree and props
-- **Props/types reference** - Documentation browser for all cljfx types and their props
-- **Component stacks in errors** - Error messages show the full component hierarchy
+The default developer experience of cljfx has some issues:
+- what are the allowed props for different JavaFX types is not clear and requires looking it up in the source code;
+- what are the allowed JavaFX type keywords requires looking it up in the source code;
+- errors when using non-existent props are unhelpful;
+- generally, errors that happen during cljfx lifecycle are unhelpful because the stack traces have mostly cljfx internals instead of user code.
+
+Cljfx dev tools solve these issues by providing:
+- reference for cljfx types and props;
+- specs for cljfx descriptions, so they can be validated;
+- dev-time lifecycles that perform validation and add cljfx component stacks to exceptions to help with debugging;
 
 ## Setup
 
@@ -49,109 +54,76 @@ In `laser-show.app/create-renderer`, the lifecycle is conditionally selected:
 
 ### 4. Error Handler Integration
 
-A custom error handler logs errors and integrates with dev tools:
+A custom error handler logs errors and integrates with dev tools. In dev mode, this shows component stacks from cljfx.dev.
+
+## Tools and Usage
+
+The `user` namespace (in `dev/user.clj`) provides convenient wrappers for the cljfx dev tools.
+
+### Props and types reference
+
+If you don't remember the props required by some cljfx type, or if you don't know what are the available types, you can use `help` (wraps `cljfx.dev/help`) to look up this information:
 
 ```clojure
-(defn- error-handler
-  [^Throwable ex]
-  (log/error ex "Error in cljfx renderer:")
-  (.printStackTrace ex *err*))
+(require 'user)
+
+;; look up available types:
+(user/help)
+;; Available cljfx types:
+;; Cljfx type                             Instance class
+;; :accordion                             javafx.scene.control.Accordion
+;; :affine                                javafx.scene.transform.Affine
+;; ...etc
+
+;; look up information about fx type:
+(user/help :label)
+;; Cljfx type:
+;; :label
+;; 
+;; Instance class:
+;; javafx.scene.control.Label
+;; 
+;; Props                            Value type     
+;; :accessible-help                 string
+;; :accessible-role                 either of: :button...
+;; ...etc
+
+;; look up information about a prop:
+(user/help :label :graphic)
+;; Prop of :label - :graphic
+;; 
+;; Cljfx desc, a map with :fx/type key
+;; 
+;; Required instance class:
+;; javafx.scene.Node¹
+;; 
+;; ---
+;; ¹javafx.scene.Node - Fitting cljfx types:
+;;  Cljfx type               Class
+;;  :accordion               javafx.scene.control.Accordion
+;;  :ambient-light           javafx.scene.AmbientLight
+;;  ...etc
 ```
 
-In dev mode, this shows component stacks from cljfx.dev.
-
-## Usage
-
-### Starting the App
-
-Start the REPL with the `:dev` alias:
-
-```bash
-clj -M:dev
-```
-
-Then in the REPL:
+You can also use help in a UI form that shows that same information, but is easier to search for:
 
 ```clojure
-(start)  ; Starts app with dev tools enabled
+(user/help-ui)
 ```
 
-You'll see:
-```
-🔧 Dev mode enabled - cljfx dev tools active (Press F12 for inspector)
-```
+Invoking this fn will open a window with props and types reference.
 
-### Component Inspector
+### Improved error messages with spec
 
-While the app is running, press **F12** to open the component inspector. This shows:
-- Live component tree
-- Props for each component
-- Component hierarchy
+The application is configured to use the validating type->lifecycle opt in dev mode. This validates all cljfx component descriptions using spec and properly describes the errors.
 
-### Props Reference
-
-Use the `help` function to look up cljfx types and props:
-
-```clojure
-;; List all available types
-(help)
-
-;; Show props for a specific type
-(help :label)
-
-;; Show details for a specific prop
-(help :label :text)
-```
-
-### Interactive Reference Browser
-
-Open a searchable UI window with all types and props:
-
-```clojure
-(help-ui)
-```
-
-### Validate Descriptions
-
-Check if a cljfx description is valid before using it:
-
-```clojure
-;; This will show an error: 123 is not a string
-(explain-desc {:fx/type :label :text 123})
-
-;; This will show "Success!"
-(explain-desc {:fx/type :label :text "Hello"})
-```
-
-### CSS Hot-Reload Integration
-
-The dev tools work seamlessly with CSS hot-reload:
-
-```clojure
-;; Enable CSS watching
-(watch-styles!)
-
-;; Now edit src/laser_show/css/title_bar.clj
-;; Eval the (def menu-theme ...) form
-;; UI updates instantly with new styles!
-
-;; Dev tools will validate the new CSS descriptions
-```
-
-## Error Messages
-
-### Without Dev Tools (Production)
+Example of an error in the REPL:
 
 ```
-Exception in thread "JavaFX Application Thread" java.lang.ClassCastException: 
-class java.lang.Integer cannot be cast to class java.lang.String
-```
-
-### With Dev Tools (Development)
-
-```
+;; invalid state change - making text prop of a label not a string
+;; prints to *err*:
 clojure.lang.ExceptionInfo: Invalid cljfx description of :label type:
-123 - failed: string? in [:text]
+:not-a-string - failed: string? in [:text]
 
 Cljfx component stack:
   :label
@@ -161,7 +133,46 @@ Cljfx component stack:
   user/root-view
 ```
 
-Much more helpful! Shows exactly what's wrong and where.
+You can also validate individual descriptions while developing using `explain-desc` (wraps `cljfx.dev/explain-desc`):
+
+```clojure
+(user/explain-desc
+  {:fx/type :stage
+   :showing true
+   :scene {:fx/type :scene
+           :root {:fx/type :text-formatter
+                  :value-converter :int}}})
+;; :int - failed: #{:local-date-time ...} in [:scene :root :value-converter]
+
+(user/explain-desc
+  {:fx/type :stage
+   :showing true
+   :scene {:fx/type :scene
+           :root {:fx/type :text-field
+                  :text-formatter {:fx/type :text-formatter
+                                   :value-converter :integer}}}})
+;; Success!
+```
+
+### Cljfx component inspector
+
+Using the same dev type->lifecycle opt, you also get cljfx component tree inspector that can be opened by pressing **F12** while the application is focused.
+
+Inspector shows a live tree of components and their props.
+
+## CSS Hot-Reload Integration
+
+The dev tools work seamlessly with the project's CSS hot-reload:
+
+```clojure
+;; Enable CSS watching
+(watch-styles!)
+
+;; Now edit src/laser_show/css/title_bar.clj
+;; Eval the (def menu-theme ...) form
+;; UI updates instantly with new styles!
+;; Dev tools will validate the new CSS descriptions
+```
 
 ## Production Builds
 
@@ -171,47 +182,6 @@ Dev tools are automatically disabled in production:
 2. The `laser-show.dev` system property is not set
 3. `dev-config/dev-mode?` returns `false`
 4. Standard cljfx lifecycle is used (no validation overhead)
-
-## Benefits
-
-### Faster Development
-- Instant feedback on prop typos or wrong types
-- No need to dig through JavaFX stack traces
-
-### Better Debugging
-- Component stacks show exactly where errors occur
-- Inspector shows live component state
-
-### Learning Aid
-- Help UI makes it easy to discover available props
-- No need to constantly check documentation
-
-### Catch Errors Early
-- Validation happens before rendering
-- Prevents cryptic JavaFX errors
-
-## Troubleshooting
-
-### "cljfx.dev not available"
-
-If you see this message, you're not running with the `:dev` alias. Start the REPL with:
-
-```bash
-clj -M:dev
-```
-
-### Inspector Not Opening
-
-Make sure:
-1. App is running with `:dev` alias
-2. Dev mode is enabled (check logs for "🔧 Dev mode enabled")
-3. You're pressing F12 while the app window has focus
-
-### Validation Too Strict
-
-If validation is catching false positives, you can temporarily disable it by:
-1. Removing the `-Dlaser-show.dev=true` JVM option
-2. Restarting the REPL
 
 ## References
 

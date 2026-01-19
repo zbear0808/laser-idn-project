@@ -21,7 +21,8 @@
             [laser-show.views.root :as root]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.css.title-bar :as menus]
-            [laser-show.dev-config :as dev-config])
+            [laser-show.dev-config :as dev-config]
+            [clojure.pprint :as pprint])
   (:gen-class))
 
 (defonce ^{:private true :doc "The cljfx app instance."} *app (atom nil))
@@ -30,10 +31,16 @@
   "Error handler for cljfx renderer.
    
    Logs errors and prints stack trace. In dev mode, cljfx.dev provides
-   enhanced error messages with component stacks."
+   enhanced error messages with component stacks, which are stored in ex-data."
   [^Throwable ex]
   (log/error ex "Error in cljfx renderer:")
-  (.printStackTrace ex *err*))
+  (binding [*out* *err*]
+    (println "Error in cljfx renderer:" (.getMessage ex))
+    (when-let [data (ex-data ex)]
+      (println "Exception Data:")
+      (pprint/pprint data))
+    (println "Stack trace:")
+    (.printStackTrace ex *out*)))
 
 (defn- get-type->lifecycle
   "Returns the type->lifecycle function based on dev mode.
@@ -70,12 +77,12 @@
   "Create the cljfx app with async event processing."
   []
   (fx/create-app
-    (state/get-context-atom)
-    :event-handler events/event-handler
-    :desc-fn (fn [_] {:fx/type root/root-view})
-    :opts {:fx.opt/type->lifecycle (get-type->lifecycle)}
-    :error-handler default-error-handler
-    :async-agent-options {:error-handler agent-error-handler}))
+   (state/get-context-atom)
+   :event-handler events/event-handler
+   :desc-fn (fn [_] {:fx/type root/root-view})
+   :opts {:fx.opt/type->lifecycle (get-type->lifecycle)}
+   :error-handler default-error-handler
+   :async-agent-options {:error-handler agent-error-handler}))
 
 
 (defn init-styles!
@@ -100,24 +107,24 @@
    Returns the app instance."
   []
   (log/info "Starting Laser Show application...")
-  
+
   ;; Initialize with base state, then apply starter templates for fresh projects
   (state/init-state! (-> (domains/build-initial-state)
                          (templates/apply-starter-cue-chains)))
-  
+
   (init-styles!)
-  
+
   (frame-service/start-preview-updates! 30)
-  
+
   (let [app (create-app)]
     (reset! *app app)
     ;; Wire dispatch! to use app's handler (wrapped with async agent)
     (events/set-dispatch-fn! (:handler app)))
-  
+
   ;; Auto-scan for IDN devices on startup
   (log/info "Starting automatic device discovery...")
   (events/dispatch! {:event/type :projectors/scan-network})
-  
+
   (log/info "Laser Show application started.")
   @*app)
 
