@@ -67,12 +67,13 @@
         (is (contains? proj-data :corner-pin))
         (is (set? (:tags proj-data))))
       
-      ;; Each projector should have default effects chain (color calibration only)
+      ;; Each projector should have default effects chain (color calibration + corner-pin)
       (doseq [[_projector-id effect-data] effects]
         (is (vector? (:items effect-data)))
-        ;; Should have only RGB curves (color calibration)
-        (is (= 1 (count (:items effect-data))))
-        (is (= :rgb-curves (get-in effect-data [:items 0 :effect-id]))))
+        ;; Should have RGB curves and corner-pin effects
+        (is (= 2 (count (:items effect-data))))
+        (is (= :rgb-curves (get-in effect-data [:items 0 :effect-id])))
+        (is (= :corner-pin (get-in effect-data [:items 1 :effect-id]))))
       
       ;; First projector should be selected
       (is (some? (get-in result [:state :projectors :active-projector])))

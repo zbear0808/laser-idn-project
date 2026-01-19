@@ -3,9 +3,6 @@
    Provides high-resolution timing functions for real-time applications.")
 
 
-;; High-Resolution Time Measurement
-
-
 (defn nanotime
   "Get current time in nanoseconds from an arbitrary starting point.
    This is a monotonic clock that is not affected by system clock changes.
@@ -55,16 +52,13 @@
   [target-time-nanos]
   (let [now (System/nanoTime)
         sleep-nanos (- target-time-nanos now)
-        max-busy-wait-nanos (* 12 1000 1000)] ; 10ms in nanoseconds
+        max-busy-wait-nanos (* 12 1000 1000)]
     (when (pos? sleep-nanos)
-      ;; Phase 1: Thread/sleep for bulk delay (>10ms)
-      ;; Leave 10ms buffer for busy-wait to ensure we don't overshoot
-      (when (> sleep-nanos max-busy-wait-nanos) ; 2ms in nanoseconds
+
+      (when (> sleep-nanos max-busy-wait-nanos)
         (let [coarse-sleep-ms (quot (- sleep-nanos max-busy-wait-nanos) 1000000)]
           (Thread/sleep coarse-sleep-ms)))
       
-      ;; Phase 2: Busy-wait for precise timing (<2ms remaining)
-      ;; Thread/yield() allows other threads to run while spinning
       (while (< (System/nanoTime) target-time-nanos)
         (Thread/yield)))))
 

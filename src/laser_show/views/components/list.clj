@@ -57,7 +57,7 @@
                    :else :single)
         ;; For shift-click, compute range selection here with current state
         event (if shift?
-                (let [current-state (state/get-in-state [:list-ui :components component-id])
+                (let [current-state (state/get-in-state [:list-ui component-id])
                       last-selected-id (:last-selected-id current-state)
                       all-ids (chains/collect-all-ids items)
                       anchor-id (or last-selected-id item-id)
@@ -120,7 +120,7 @@
   "Handle drop operation by dispatching to async handler.
    The actual item reordering computation runs on the event agent thread."
   [component-id target-id drop-position items props]
-  (let [current-state (state/get-in-state [:list-ui :components component-id])
+  (let [current-state (state/get-in-state [:list-ui component-id])
         dragging-ids (:dragging-ids current-state)]
     (log/debug "handle-drop! ENTER - thread:" (.getName (Thread/currentThread))
                "component-id:" component-id
@@ -159,7 +159,7 @@
 (defn- delete-selected!
   "Delete selected items and call :on-items-changed."
   [component-id items props]
-  (let [current-state (state/get-in-state [:list-ui :components component-id])
+  (let [current-state (state/get-in-state [:list-ui component-id])
         selected-ids (:selected-ids current-state #{})]
     (when (seq selected-ids)
       (let [id->path (chains/find-paths-by-ids items selected-ids)
@@ -175,7 +175,7 @@
 (defn- copy-selected!
   "Copy selected items and call :on-copy callback."
   [component-id items props]
-  (let [current-state (state/get-in-state [:list-ui :components component-id])
+  (let [current-state (state/get-in-state [:list-ui component-id])
         selected-ids (:selected-ids current-state #{})]
     (log/debug "copy-selected! component-id:" component-id
                "selected-ids:" selected-ids
@@ -201,7 +201,7 @@
              "clipboard-items in props?" (boolean (:clipboard-items props)))
   (if-let [clipboard-items (:clipboard-items props)]
     (if (seq clipboard-items)
-      (let [current-state (state/get-in-state [:list-ui :components component-id])
+      (let [current-state (state/get-in-state [:list-ui component-id])
             ;; Fresh copy with new IDs
             items-to-paste (chains/deep-copy-items clipboard-items)
             ;; Find insert position
@@ -309,7 +309,7 @@
    When a group AND all its children are selected, this is treated as just
    selecting the group (children are redundant), allowing grouping to succeed."
   [component-id items props]
-  (let [current-state (state/get-in-state [:list-ui :components component-id])
+  (let [current-state (state/get-in-state [:list-ui component-id])
         selected-ids (:selected-ids current-state #{})]
     (log/debug "group-selected! component-id:" component-id
                "selected-ids:" selected-ids

@@ -12,50 +12,50 @@
 
 (deftest select-item-single-test
   (testing "Single click replaces selection"
-    (let [state {:list-ui {:components {:test-list {:selected-ids #{:a :b}
-                                                    :last-selected-id :b}}}}
+    (let [state {:list-ui {:test-list {:selected-ids #{:a :b}
+                                       :last-selected-id :b}}}
           event {:event/type :list/select-item
                  :component-id :test-list
                  :item-id :c
                  :mode :single
                  :state state}
           result (list-handlers/handle event)]
-      (is (= #{:c} (get-in result [:state :list-ui :components :test-list :selected-ids])))
-      (is (= :c (get-in result [:state :list-ui :components :test-list :last-selected-id]))))))
+      (is (= #{:c} (get-in result [:state :list-ui :test-list :selected-ids])))
+      (is (= :c (get-in result [:state :list-ui :test-list :last-selected-id]))))))
 
 
 (deftest select-item-ctrl-toggle-on-test
   (testing "Ctrl+click adds to selection"
-    (let [state {:list-ui {:components {:test-list {:selected-ids #{:a}
-                                                    :last-selected-id :a}}}}
+    (let [state {:list-ui {:test-list {:selected-ids #{:a}
+                                       :last-selected-id :a}}}
           event {:event/type :list/select-item
                  :component-id :test-list
                  :item-id :b
                  :mode :ctrl
                  :state state}
           result (list-handlers/handle event)]
-      (is (= #{:a :b} (get-in result [:state :list-ui :components :test-list :selected-ids])))
-      (is (= :b (get-in result [:state :list-ui :components :test-list :last-selected-id]))))))
+      (is (= #{:a :b} (get-in result [:state :list-ui :test-list :selected-ids])))
+      (is (= :b (get-in result [:state :list-ui :test-list :last-selected-id]))))))
 
 
 (deftest select-item-ctrl-toggle-off-test
   (testing "Ctrl+click removes from selection"
-    (let [state {:list-ui {:components {:test-list {:selected-ids #{:a :b}
-                                                    :last-selected-id :b}}}}
+    (let [state {:list-ui {:test-list {:selected-ids #{:a :b}
+                                       :last-selected-id :b}}}
           event {:event/type :list/select-item
                  :component-id :test-list
                  :item-id :b
                  :mode :ctrl
                  :state state}
           result (list-handlers/handle event)]
-      (is (= #{:a} (get-in result [:state :list-ui :components :test-list :selected-ids])))
-      (is (= :b (get-in result [:state :list-ui :components :test-list :last-selected-id]))))))
+      (is (= #{:a} (get-in result [:state :list-ui :test-list :selected-ids])))
+      (is (= :b (get-in result [:state :list-ui :test-list :last-selected-id]))))))
 
 
 (deftest select-item-shift-range-test
   (testing "Shift+click uses pre-computed range"
-    (let [state {:list-ui {:components {:test-list {:selected-ids #{:a}
-                                                    :last-selected-id :a}}}}
+    (let [state {:list-ui {:test-list {:selected-ids #{:a}
+                                       :last-selected-id :a}}}
           event {:event/type :list/select-item
                  :component-id :test-list
                  :item-id :d
@@ -64,17 +64,17 @@
                  :last-id-override :a
                  :state state}
           result (list-handlers/handle event)]
-      (is (= #{:a :b :c :d} (get-in result [:state :list-ui :components :test-list :selected-ids])))
+      (is (= #{:a :b :c :d} (get-in result [:state :list-ui :test-list :selected-ids])))
       ;; Shift preserves last-selected-id from override
-      (is (= :a (get-in result [:state :list-ui :components :test-list :last-selected-id]))))))
+      (is (= :a (get-in result [:state :list-ui :test-list :last-selected-id]))))))
 
 
 (deftest select-item-cue-chain-clears-item-effects-test
   (testing "Selecting in cue-chain clears item-effects selection"
-    (let [state {:list-ui {:components {[:cue-chain 0 0] {:selected-ids #{:preset-1}
-                                                          :last-selected-id :preset-1}
-                                        [:item-effects 0 0] {:selected-ids #{:effect-1 :effect-2}
-                                                             :last-selected-id :effect-2}}}}
+    (let [state {:list-ui {[:cue-chain 0 0] {:selected-ids #{:preset-1}
+                                              :last-selected-id :preset-1}
+                           [:item-effects 0 0] {:selected-ids #{:effect-1 :effect-2}
+                                                :last-selected-id :effect-2}}}
           event {:event/type :list/select-item
                  :component-id [:cue-chain 0 0]
                  :item-id :preset-2
@@ -82,36 +82,36 @@
                  :state state}
           result (list-handlers/handle event)]
       ;; Cue chain selection updated
-      (is (= #{:preset-2} (get-in result [:state :list-ui :components [:cue-chain 0 0] :selected-ids])))
+      (is (= #{:preset-2} (get-in result [:state :list-ui [:cue-chain 0 0] :selected-ids])))
       ;; Item effects selection cleared
-      (is (= #{} (get-in result [:state :list-ui :components [:item-effects 0 0] :selected-ids])))
-      (is (nil? (get-in result [:state :list-ui :components [:item-effects 0 0] :last-selected-id]))))))
+      (is (= #{} (get-in result [:state :list-ui [:item-effects 0 0] :selected-ids])))
+      (is (nil? (get-in result [:state :list-ui [:item-effects 0 0] :last-selected-id]))))))
 
 
 (deftest select-all-test
   (testing "Select all sets all IDs"
-    (let [state {:list-ui {:components {:test-list {:selected-ids #{}}}}}
+    (let [state {:list-ui {:test-list {:selected-ids #{}}}}
           event {:event/type :list/select-all
                  :component-id :test-list
                  :all-ids [:a :b :c :d]
                  :state state}
           result (list-handlers/handle event)]
-      (is (= #{:a :b :c :d} (get-in result [:state :list-ui :components :test-list :selected-ids])))
-      (is (= :a (get-in result [:state :list-ui :components :test-list :last-selected-id]))))))
+      (is (= #{:a :b :c :d} (get-in result [:state :list-ui :test-list :selected-ids])))
+      (is (= :a (get-in result [:state :list-ui :test-list :last-selected-id]))))))
 
 
 (deftest clear-selection-test
   (testing "Clear selection empties selection and cancels rename"
-    (let [state {:list-ui {:components {:test-list {:selected-ids #{:a :b}
-                                                    :last-selected-id :b
-                                                    :renaming-id :a}}}}
+    (let [state {:list-ui {:test-list {:selected-ids #{:a :b}
+                                       :last-selected-id :b
+                                       :renaming-id :a}}}
           event {:event/type :list/clear-selection
                  :component-id :test-list
                  :state state}
           result (list-handlers/handle event)]
-      (is (= #{} (get-in result [:state :list-ui :components :test-list :selected-ids])))
-      (is (nil? (get-in result [:state :list-ui :components :test-list :last-selected-id])))
-      (is (nil? (get-in result [:state :list-ui :components :test-list :renaming-id]))))))
+      (is (= #{} (get-in result [:state :list-ui :test-list :selected-ids])))
+      (is (nil? (get-in result [:state :list-ui :test-list :last-selected-id])))
+      (is (nil? (get-in result [:state :list-ui :test-list :renaming-id]))))))
 
 
 ;; Drag-Drop Tests
@@ -119,63 +119,63 @@
 
 (deftest start-drag-selected-item-test
   (testing "Dragging selected item drags all selected"
-    (let [state {:list-ui {:components {:test-list {:selected-ids #{:a :b}
-                                                    :last-selected-id :b}}}}
+    (let [state {:list-ui {:test-list {:selected-ids #{:a :b}
+                                       :last-selected-id :b}}}
           event {:event/type :list/start-drag
                  :component-id :test-list
                  :item-id :a
                  :state state}
           result (list-handlers/handle event)]
-      (is (= #{:a :b} (get-in result [:state :list-ui :components :test-list :dragging-ids])))
-      (is (= #{:a :b} (get-in result [:state :list-ui :components :test-list :selected-ids]))))))
+      (is (= #{:a :b} (get-in result [:state :list-ui :test-list :dragging-ids])))
+      (is (= #{:a :b} (get-in result [:state :list-ui :test-list :selected-ids]))))))
 
 
 (deftest start-drag-unselected-item-test
   (testing "Dragging unselected item selects and drags only that item"
-    (let [state {:list-ui {:components {:test-list {:selected-ids #{:a :b}
-                                                    :last-selected-id :b}}}}
+    (let [state {:list-ui {:test-list {:selected-ids #{:a :b}
+                                       :last-selected-id :b}}}
           event {:event/type :list/start-drag
                  :component-id :test-list
                  :item-id :c
                  :state state}
           result (list-handlers/handle event)]
-      (is (= #{:c} (get-in result [:state :list-ui :components :test-list :dragging-ids])))
-      (is (= #{:c} (get-in result [:state :list-ui :components :test-list :selected-ids])))
-      (is (= :c (get-in result [:state :list-ui :components :test-list :last-selected-id]))))))
+      (is (= #{:c} (get-in result [:state :list-ui :test-list :dragging-ids])))
+      (is (= #{:c} (get-in result [:state :list-ui :test-list :selected-ids])))
+      (is (= :c (get-in result [:state :list-ui :test-list :last-selected-id]))))))
 
 
 (deftest update-drop-target-test
   (testing "Update drop target sets target and position"
-    (let [state {:list-ui {:components {:test-list {}}}}
+    (let [state {:list-ui {:test-list {}}}
           event {:event/type :list/update-drop-target
                  :component-id :test-list
                  :target-id :b
                  :drop-position :before
                  :state state}
           result (list-handlers/handle event)]
-      (is (= :b (get-in result [:state :list-ui :components :test-list :drop-target-id])))
-      (is (= :before (get-in result [:state :list-ui :components :test-list :drop-position]))))))
+      (is (= :b (get-in result [:state :list-ui :test-list :drop-target-id])))
+      (is (= :before (get-in result [:state :list-ui :test-list :drop-position]))))))
 
 
 (deftest clear-drag-test
   (testing "Clear drag resets drag state"
-    (let [state {:list-ui {:components {:test-list {:dragging-ids #{:a}
-                                                    :drop-target-id :b
-                                                    :drop-position :before}}}}
+    (let [state {:list-ui {:test-list {:dragging-ids #{:a}
+                                       :drop-target-id :b
+                                       :drop-position :before}}}
           event {:event/type :list/clear-drag
                  :component-id :test-list
                  :state state}
           result (list-handlers/handle event)]
-      (is (nil? (get-in result [:state :list-ui :components :test-list :dragging-ids])))
-      (is (nil? (get-in result [:state :list-ui :components :test-list :drop-target-id])))
-      (is (nil? (get-in result [:state :list-ui :components :test-list :drop-position]))))))
+      (is (nil? (get-in result [:state :list-ui :test-list :dragging-ids])))
+      (is (nil? (get-in result [:state :list-ui :test-list :drop-target-id])))
+      (is (nil? (get-in result [:state :list-ui :test-list :drop-position]))))))
 
 
 (deftest perform-drop-no-items-test
   (testing "Perform drop with no items just clears drag state"
-    (let [state {:list-ui {:components {:test-list {:dragging-ids #{:a}
-                                                    :drop-target-id :b
-                                                    :drop-position :before}}}
+    (let [state {:list-ui {:test-list {:dragging-ids #{:a}
+                                       :drop-target-id :b
+                                       :drop-position :before}}
                  :chains {:effect-chains {[0 0] {:items []}}}}
           event {:event/type :list/perform-drop
                  :component-id :test-list
@@ -188,7 +188,7 @@
                  :state state}
           result (list-handlers/handle event)]
       ;; Drag state cleared
-      (is (nil? (get-in result [:state :list-ui :components :test-list :dragging-ids])))
+      (is (nil? (get-in result [:state :list-ui :test-list :dragging-ids])))
       ;; No dispatch since no items
       (is (nil? (:dispatch result))))))
 
@@ -201,9 +201,9 @@
           item-a {:id id-a :effect-id :test :enabled? true}
           item-b {:id id-b :effect-id :test :enabled? true}
           item-c {:id id-c :effect-id :test :enabled? true}
-          state {:list-ui {:components {:test-list {:dragging-ids #{id-a}
-                                                    :drop-target-id id-c
-                                                    :drop-position :before}}}
+          state {:list-ui {:test-list {:dragging-ids #{id-a}
+                                       :drop-target-id id-c
+                                       :drop-position :before}}
                  :chains {:effect-chains {[0 0] {:items [item-a item-b item-c]}}}}
           event {:event/type :list/perform-drop
                  :component-id :test-list
@@ -216,7 +216,7 @@
                  :state state}
           result (list-handlers/handle event)]
       ;; Drag state cleared
-      (is (nil? (get-in result [:state :list-ui :components :test-list :dragging-ids])))
+      (is (nil? (get-in result [:state :list-ui :test-list :dragging-ids])))
       ;; Dispatch event generated
       (is (= :chain/set-items (get-in result [:dispatch :event/type])))
       (is (= :effect-chains (get-in result [:dispatch :domain])))
@@ -233,23 +233,23 @@
 
 (deftest start-rename-test
   (testing "Start rename sets renaming-id"
-    (let [state {:list-ui {:components {:test-list {}}}}
+    (let [state {:list-ui {:test-list {}}}
           event {:event/type :list/start-rename
                  :component-id :test-list
                  :item-id :a
                  :state state}
           result (list-handlers/handle event)]
-      (is (= :a (get-in result [:state :list-ui :components :test-list :renaming-id]))))))
+      (is (= :a (get-in result [:state :list-ui :test-list :renaming-id]))))))
 
 
 (deftest cancel-rename-test
   (testing "Cancel rename clears renaming-id"
-    (let [state {:list-ui {:components {:test-list {:renaming-id :a}}}}
+    (let [state {:list-ui {:test-list {:renaming-id :a}}}
           event {:event/type :list/cancel-rename
                  :component-id :test-list
                  :state state}
           result (list-handlers/handle event)]
-      (is (nil? (get-in result [:state :list-ui :components :test-list :renaming-id]))))))
+      (is (nil? (get-in result [:state :list-ui :test-list :renaming-id]))))))
 
 
 ;; Edge Cases
@@ -257,14 +257,14 @@
 
 (deftest empty-component-state-test
   (testing "Handlers work with missing component state"
-    (let [state {:list-ui {:components {}}}
+    (let [state {:list-ui {}}
           event {:event/type :list/select-item
                  :component-id :new-list
                  :item-id :a
                  :mode :single
                  :state state}
           result (list-handlers/handle event)]
-      (is (= #{:a} (get-in result [:state :list-ui :components :new-list :selected-ids]))))))
+      (is (= #{:a} (get-in result [:state :list-ui :new-list :selected-ids]))))))
 
 
 (deftest perform-drop-with-explicit-items-path-test
@@ -273,7 +273,7 @@
           id-b (random-uuid)
           item-a {:id id-a :effect-id :test :enabled? true}
           item-b {:id id-b :effect-id :test :enabled? true}
-          state {:list-ui {:components {:test-list {:dragging-ids #{id-a}}}}
+          state {:list-ui {:test-list {:dragging-ids #{id-a}}}
                  :custom {:path {:items [item-a item-b]}}}
           event {:event/type :list/perform-drop
                  :component-id :test-list

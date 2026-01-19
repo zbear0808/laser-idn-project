@@ -428,14 +428,14 @@
    - :drop-position - :before, :after, or :into
    - :renaming-id - UUID of item being renamed"
   [context component-id]
-  (get-in (fx/sub-val context :list-ui)
-          [:components component-id]
-          {:selected-ids #{}
-           :last-selected-id nil
-           :dragging-ids nil
-           :drop-target-id nil
-           :drop-position nil
-           :renaming-id nil}))
+  (get (fx/sub-val context :list-ui)
+       component-id
+       {:selected-ids #{}
+        :last-selected-id nil
+        :dragging-ids nil
+        :drop-target-id nil
+        :drop-position nil
+        :renaming-id nil}))
 
 
 ;; Level 2: Virtual Projector Subscriptions

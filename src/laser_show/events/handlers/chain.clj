@@ -924,7 +924,7 @@
                    (h/mark-dirty))})
      
      ;; NOTE: :chain/update-selection removed - selection state is now managed
-     ;; directly in [:list-ui :components component-id] and read via subs/list-ui-state
+     ;; directly in [:list-ui component-id] and read via subs/list-ui-state
      ;; See list-selection-state-consolidation plan for details.
      
      :chain/select-item
