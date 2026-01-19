@@ -16,7 +16,7 @@
   "Button styles for the application."
   (css/register ::buttons
     (let [;; Use semantic colors from theme
-          {:keys [bg-interactive bg-hover bg-active
+          {:keys [bg-primary bg-interactive bg-hover bg-active
                   text-primary text-muted
                   accent-success accent-info accent-danger]} theme/semantic-colors
           {:keys [accent-success-hover accent-danger-hover]} theme/computed-colors
@@ -67,34 +67,34 @@
         {:-fx-background-color accent-success-hover}}
        
        
-       ;; Tab Buttons (VS Code style - flush tabs with top border indicator)
+       ;; Tab Buttons (VS Code style - flush tabs with right/bottom border)
        
        
        ".tab-btn"
-       {:-fx-background-color bg-interactive
+       {:-fx-background-color bg-primary
         :-fx-text-fill text-primary
         :-fx-background-radius 0
         :-fx-padding ["8px" "16px"]
         :-fx-cursor "hand"
-        ;; Transparent top border + right border for tab separation (keeps same height as active)
-        :-fx-border-color ["transparent" gray-500 "transparent" "transparent"]
-        :-fx-border-width [3 1 0 0]
+        ;; Light grey border on right and bottom
+        :-fx-border-color ["transparent" gray-500 gray-500 "transparent"]
+        :-fx-border-width [0 1 1 0]
         
         ":hover"
         {:-fx-background-color bg-hover}}
        
        ".tab-btn-active"
-       {:-fx-background-color bg-interactive
+       {:-fx-background-color bg-primary
         :-fx-text-fill text-primary
         :-fx-background-radius 0
         :-fx-padding ["8px" "16px"]
         :-fx-cursor "hand"
-        ;; Blue top border indicator for active tab (matches list selection color)
+        ;; Active tab has accent-info top border, light grey right border, no bottom border
         :-fx-border-color [accent-info gray-500 "transparent" "transparent"]
-        :-fx-border-width [3 1 0 0]
+        :-fx-border-width [2 1 0 0]
         
         ":hover"
-        {:-fx-background-color bg-interactive}}
+        {:-fx-background-color bg-primary}}
        
        
        ;; Bank Item Buttons (for effect banks and preset banks)

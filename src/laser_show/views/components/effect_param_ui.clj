@@ -98,7 +98,15 @@
            on-change-event on-text-event on-mode-change-event modulator-event-base
            rgb-domain rgb-entity-key rgb-effect-path
            enable-modulators?]}]
-  (let [ui-hints (:ui-hints effect-def)
+  (let [;; Build canvas fx/key that includes keyframe index when in keyframe mode
+        ;; This ensures the canvas is recreated when switching keyframes
+        effect-path (get spatial-event-keys :effect-path)
+        keyframe-idx (get spatial-event-keys :keyframe-idx)
+        canvas-fx-key (if keyframe-idx
+                        [effect-path :kf keyframe-idx]
+                        effect-path)
+        
+        ui-hints (:ui-hints effect-def)
         renderer-type (:renderer ui-hints)
         ;; Check if any params have active modulators
         has-modulators? (boolean (some (fn [[_k v]] (map? v)) current-params))
@@ -171,18 +179,22 @@
                   ;; Render based on mode
                   (if (= actual-mode :visual)
                     ;; Custom visual renderer
+                    ;; Note: We use BOTH :fx/key (for cljfx component identity) and :fx-key (passed to inner canvas)
+                    ;; The :fx/key on the outer component forces cljfx to recreate the whole tree when keyframe changes
                     (case renderer-type
                       :spatial-2d {:fx/type custom-renderers/translate-visual-editor
+                                  :fx/key canvas-fx-key
                                   :current-params current-params
                                   :param-specs (:parameters effect-def)
                                   :event-template (merge spatial-event-template spatial-event-keys)
-                                  :fx-key (get spatial-event-keys :effect-path)}
+                                  :fx-key canvas-fx-key}
                       
                       :corner-pin-2d {:fx/type custom-renderers/corner-pin-visual-editor
+                                     :fx/key canvas-fx-key
                                      :current-params current-params
                                      :param-specs (:parameters effect-def)
                                      :event-template (merge spatial-event-template spatial-event-keys)
-                                     :fx-key (get spatial-event-keys :effect-path)}
+                                     :fx-key canvas-fx-key}
                       
                       ;; Fallback to standard params (with optional modulator support)
                       {:fx/type param-list-type

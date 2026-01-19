@@ -38,7 +38,10 @@
             [laser-show.backend.multi-engine :as multi-engine]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.common.util :as u]
-            [laser-show.idn.hello :as idn-hello]))
+            [laser-show.idn.hello :as idn-hello])
+  (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
+           [javafx.application Platform]
+           [java.io File]))
 
 ;; Co-effects (inject data INTO events)
 ;; Co-effect functions take NO arguments and return data to inject.
@@ -229,6 +232,78 @@
         (dispatch {:event/type :projectors/scan-failed
                    :error (.getMessage e)})))))
 
+;; File Chooser Effect
+
+(defn- get-primary-stage
+  "Get the primary stage from the JavaFX application.
+   Returns nil if no stage is available."
+  []
+  (try
+    (let [stages (Stage/getWindows)]
+      (first (filter #(instance? Stage %) stages)))
+    (catch Exception e
+      (log/warn "Could not get primary stage:" (.getMessage e))
+      nil)))
+
+(defn- effect-show-file-chooser
+  "Effect that shows a JavaFX FileChooser dialog.
+   
+   Parameters:
+   - :title - Dialog title (string)
+   - :mode - :open or :save (defaults to :open)
+   - :initial-directory - Starting directory path (string)
+   - :initial-file-name - Default filename for save mode (string)
+   - :extension-filters - Vector of {:description string :extensions [\"*.ext\"]}
+   - :on-result - Event map to dispatch with result, will have :file-path added
+   
+   The dialog runs on the JavaFX thread and dispatches the result event
+   with :file-path set to the selected file path (or nil if cancelled)."
+  [{:keys [title mode initial-directory initial-file-name extension-filters on-result]} dispatch]
+  (Platform/runLater
+    (fn []
+      (try
+        (let [chooser (FileChooser.)
+              stage (get-primary-stage)]
+          
+          ;; Set title
+          (when title
+            (.setTitle chooser title))
+          
+          ;; Set initial directory
+          (when initial-directory
+            (let [dir (File. initial-directory)]
+              (when (.exists dir)
+                (.setInitialDirectory chooser dir))))
+          
+          ;; Set initial filename (for save mode)
+          (when initial-file-name
+            (.setInitialFileName chooser initial-file-name))
+          
+          ;; Add extension filters
+          (doseq [{:keys [description extensions]} extension-filters]
+            (let [exts (into-array String extensions)
+                  filter (FileChooser$ExtensionFilter. description exts)]
+              (.add (.getExtensionFilters chooser) filter)))
+          
+          ;; Show dialog based on mode
+          (let [selected-file (case mode
+                                :save (.showSaveDialog chooser stage)
+                                (.showOpenDialog chooser stage))
+                file-path (when selected-file
+                           (.getAbsolutePath selected-file))]
+            
+            (log/debug "File chooser result:" file-path)
+            
+            ;; Dispatch result event with file path
+            (when on-result
+              (dispatch (assoc on-result :file-path file-path)))))
+        
+        (catch Exception e
+          (log/error "Error showing file chooser:" (.getMessage e))
+          ;; Dispatch result with nil to indicate failure/cancellation
+          (when on-result
+            (dispatch (assoc on-result :file-path nil))))))))
+
 ;; Multi-Engine Streaming Effects
 
 (defn- effect-multi-engine-start
@@ -283,6 +358,7 @@
    - :multi-engine/stop - stop multi-engine streaming
    - :project/save - save project to disk
    - :project/load - load project from disk
+   - :fx/show-file-chooser - show file open/save dialog
    - :clipboard/copy-effects - copy effects to clipboard
    - :clipboard/paste-effects - paste effects from clipboard (effects grid)
    - :clipboard/paste-projector-effects - paste effects from clipboard (projector chain)
@@ -309,6 +385,8 @@
          ;; Project persistence
          :project/save effect-save-project
          :project/load effect-load-project
+         ;; File chooser dialog
+         :fx/show-file-chooser effect-show-file-chooser
          ;; Clipboard effects for effect chain editor
          :clipboard/copy-effects effect-clipboard-copy-effects
          :clipboard/paste-effects effect-clipboard-paste-effects

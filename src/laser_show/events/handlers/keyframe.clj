@@ -1,7 +1,7 @@
 (ns laser-show.events.handlers.keyframe
   "Event handlers for keyframe modulator operations.
    
-   Keyframe modulators allow users to define parameter values at specific 
+   Keyframe modulators allow users to define parameter values at specific
    positions within a period, with automatic linear interpolation between
    keyframes. Unlike per-parameter modulators, keyframe modulators control
    all parameters of an effect at once.
@@ -21,7 +21,9 @@
                                      {:position 1.0 :params {...}}]}}
    
    Events use :domain and :entity-key to locate the chain, and :effect-path
-   to locate the effect within that chain."
+   to locate the effect within that chain.
+   
+   DEBUG: Set log level to DEBUG for this namespace to see keyframe operations."
   (:require
    [clojure.tools.logging :as log]
    [laser-show.events.helpers :as h]
@@ -179,8 +181,15 @@
    
    Returns: Updated state"
   [state config effect-path keyframe-idx]
-  (update-keyframe-modulator state config effect-path
-                             assoc :selected-keyframe keyframe-idx))
+  (let [keyframe-mod (get-keyframe-modulator state config effect-path)
+        keyframes (:keyframes keyframe-mod [])
+        selected-kf-params (when (and keyframe-idx (< keyframe-idx (count keyframes)))
+                             (get-in keyframes [keyframe-idx :params]))]
+    (log/info "KEYFRAME SELECT - idx:" keyframe-idx
+              "total-keyframes:" (count keyframes)
+              "selected-kf-params:" selected-kf-params)
+    (update-keyframe-modulator state config effect-path
+                               assoc :selected-keyframe keyframe-idx)))
 
 (defn handle-add-keyframe
   "Add a new keyframe at the specified position.
@@ -318,6 +327,31 @@
           h/mark-dirty)
       state)))
 
+(defn handle-update-spatial-params
+  "Update keyframe params from spatial drag operation (translate, corner-pin).
+   Converts point-id/x/y coordinates to params using param-map.
+   
+   Parameters:
+   - state: Application state
+   - config: Chain config
+   - effect-path: Path to effect
+   - keyframe-idx: Index of keyframe to update
+   - point-id: ID of dragged point (e.g., :center, :tl, :tr, :br, :bl)
+   - x, y: New coordinates in world space
+   - param-map: Map from point IDs to param key pairs
+                Example: {:center {:x :x :y :y}
+                         :tl {:x :tl-x :y :tl-y}}
+   
+   Returns: Updated state with both x and y params set, or unchanged if point-id not found"
+  [state config effect-path keyframe-idx point-id x y param-map]
+  (let [point-params (get param-map point-id)]
+    (if point-params
+      (let [x-key (:x point-params)
+            y-key (:y point-params)
+            params {x-key x y-key y}]
+        (handle-update-keyframe-params state config effect-path keyframe-idx params))
+      state)))
+
 (defn handle-copy-effect-params-to-keyframe
   "Copy the effect's current base params to a keyframe.
    
@@ -389,6 +423,14 @@
       {:state (handle-update-keyframe-params state config effect-path
                                              (:keyframe-idx event)
                                              (:params event))}
+      
+      :keyframe/update-spatial-params
+      {:state (handle-update-spatial-params state config effect-path
+                                            (:keyframe-idx event)
+                                            (:point-id event)
+                                            (:x event)
+                                            (:y event)
+                                            (:param-map event))}
       
       :keyframe/copy-effect-params
       {:state (handle-copy-effect-params-to-keyframe state config effect-path
