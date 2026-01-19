@@ -86,10 +86,13 @@
         learning? (fx/sub-ctx context subs/osc-learning?)]
     {:fx/type :v-box
      :spacing 12
-     :style (str "-fx-background-color: " (css/bg-elevated) "; "
+     :style (str "-fx-background-color: " (css/bg-primary) "; "
                  "-fx-padding: 16; "
-                 "-fx-background-radius: 8;")
-     :children 
+                 "-fx-background-radius: 8; "
+                 "-fx-border-color: " (css/border) "; "
+                 "-fx-border-radius: 8; "
+                 "-fx-border-width: 1;")
+     :children
      [;; Section Header
       {:fx/type :h-box
        :spacing 8
@@ -133,7 +136,7 @@
                                                   nil))))}
                               {:fx/type :button
                                :text (if server-running? "Stop Server" "Start Server")
-                               :style-class [(if server-running? "button-warning" "button-info")]
+                               :style-class [(if server-running? "button-warning" "button-primary")]
                                :on-action {:event/type (if server-running?
                                                          :input/osc-stop-server
                                                          :input/osc-start-server)
@@ -164,7 +167,7 @@
                    :children (filterv some?
                                [{:fx/type :button
                                  :text (if learning? "Cancel Learn" "Start Learn Mode")
-                                 :style-class [(if learning? "button-warning" "button-info")]
+                                 :style-class [(if learning? "button-warning" "button-primary")]
                                  :disable (not server-running?)
                                  :on-action {:event/type (if learning?
                                                           :input/osc-cancel-learn

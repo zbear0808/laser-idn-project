@@ -72,8 +72,8 @@
 (defn- handle-projectors-scan-network
   "Start scanning the network for IDN devices."
   [{:keys [state]}]
-  (let [broadcast-addr (get-in state [:projectors :broadcast-address] "255.255.255.255")]
-    {:state (assoc-in state [:projectors :scanning?] true)
+  (let [broadcast-addr (get-in state [:projector-ui :broadcast-address] "255.255.255.255")]
+    {:state (assoc-in state [:projector-ui :scanning?] true)
      :projectors/scan {:broadcast-address broadcast-addr}}))
 
 
@@ -81,15 +81,15 @@
   "Handle scan completion - update discovered devices list."
   [{:keys [devices state]}]
   {:state (-> state
-              (assoc-in [:projectors :scanning?] false)
-              (assoc-in [:projectors :discovered-devices] (vec devices)))})
+              (assoc-in [:projector-ui :scanning?] false)
+              (assoc-in [:projector-ui :discovered-devices] (vec devices)))})
 
 
 (defn- handle-projectors-scan-failed
   "Handle scan failure."
   [{:keys [error state]}]
   (log/warn "Network scan failed:" error)
-  {:state (assoc-in state [:projectors :scanning?] false)})
+  {:state (assoc-in state [:projector-ui :scanning?] false)})
 
 
 ;; Projector Configuration Factory
@@ -147,9 +147,9 @@
                             :service-name service-name
                             :unit-id unit-id})]
     {:state (-> state
-                (assoc-in [:projectors :items projector-id] projector-config)
+                (assoc-in [:projectors projector-id] projector-config)
                 (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
-                (assoc-in [:projectors :active-projector] projector-id)
+                (assoc-in [:projector-ui :active-projector] projector-id)
                 h/mark-dirty)}))
 
 
@@ -171,9 +171,9 @@
                             :service-name service-name
                             :unit-id unit-id})]
     {:state (-> state
-                (assoc-in [:projectors :items projector-id] projector-config)
+                (assoc-in [:projectors projector-id] projector-config)
                 (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
-                (assoc-in [:projectors :active-projector] projector-id)
+                (assoc-in [:projector-ui :active-projector] projector-id)
                 h/mark-dirty)}))
 
 
@@ -205,9 +205,9 @@
                          (map-indexed vector services))
         first-projector-id (first (keys (:projectors projector-data)))]
     {:state (-> state
-                (update-in [:projectors :items] merge (:projectors projector-data))
+                (update :projectors merge (:projectors projector-data))
                 (update-in [:chains :projector-effects] merge (:effects projector-data))
-                (assoc-in [:projectors :active-projector] first-projector-id)
+                (assoc-in [:projector-ui :active-projector] first-projector-id)
                 h/mark-dirty)}))
 
 
@@ -221,9 +221,9 @@
                             :host host
                             :port (or port 7255)})]
     {:state (-> state
-                (assoc-in [:projectors :items projector-id] projector-config)
+                (assoc-in [:projectors projector-id] projector-config)
                 (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
-                (assoc-in [:projectors :active-projector] projector-id)
+                (assoc-in [:projector-ui :active-projector] projector-id)
                 h/mark-dirty)}))
 
 
@@ -234,18 +234,18 @@
   "Select a projector for editing."
   [{:keys [projector-id state]}]
   {:state (-> state
-              (assoc-in [:projectors :active-projector] projector-id)
-              (assoc-in [:projectors :active-virtual-projector] nil))})
+              (assoc-in [:projector-ui :active-projector] projector-id)
+              (assoc-in [:projector-ui :active-virtual-projector] nil))})
 
 
 (defn- handle-projectors-remove-projector
   "Remove a projector configuration and its virtual projectors."
   [{:keys [projector-id state]}]
-  (let [active (get-in state [:projectors :active-projector])
-        items (get-in state [:projectors :items])
+  (let [active (get-in state [:projector-ui :active-projector])
+        items (get state :projectors {})
         new-items (dissoc items projector-id)
         ;; Remove virtual projectors for this projector
-        vps (get-in state [:projectors :virtual-projectors] {})
+        vps (get state :virtual-projectors {})
         vp-ids-to-remove (keep (fn [[vp-id vp]]
                                  (when (= (:parent-projector-id vp) projector-id)
                                    vp-id))
@@ -256,10 +256,10 @@
                      (first (keys new-items))
                      active)]
     {:state (-> state
-                (assoc-in [:projectors :items] new-items)
-                (assoc-in [:projectors :virtual-projectors] new-vps)
-                (assoc-in [:projectors :active-projector] new-active)
-                (assoc-in [:projectors :active-virtual-projector] nil)
+                (assoc :projectors new-items)
+                (assoc :virtual-projectors new-vps)
+                (assoc-in [:projector-ui :active-projector] new-active)
+                (assoc-in [:projector-ui :active-virtual-projector] nil)
                 (update-in [:chains :projector-effects] dissoc projector-id)
                 h/mark-dirty)}))
 
@@ -268,23 +268,23 @@
   "Update projector settings (name, host, port, enabled, output-config)."
   [{:keys [projector-id updates state]}]
   {:state (-> state
-              (update-in [:projectors :items projector-id] merge updates)
+              (update-in [:projectors projector-id] merge updates)
               h/mark-dirty)})
 
 
 (defn- handle-projectors-toggle-enabled
   "Toggle a projector's enabled state."
   [{:keys [projector-id state]}]
-  (let [current (get-in state [:projectors :items projector-id :enabled?] true)]
+  (let [current (get-in state [:projectors projector-id :enabled?] true)]
     {:state (-> state
-                (assoc-in [:projectors :items projector-id :enabled?] (not current))
+                (assoc-in [:projectors projector-id :enabled?] (not current))
                 h/mark-dirty)}))
 
 
 (defn- handle-projectors-update-connection-status
   "Update a projector's connection status (called by streaming service)."
   [{:keys [projector-id status state]}]
-  {:state (update-in state [:projectors :items projector-id :status] merge status)})
+  {:state (update-in state [:projectors projector-id :status] merge status)})
 
 
 ;; Corner Pin Management
@@ -302,8 +302,8 @@
         [x-key y-key] param-key]
     (if param-key
       {:state (-> state
-                  (assoc-in [:projectors :items projector-id :corner-pin x-key] x)
-                  (assoc-in [:projectors :items projector-id :corner-pin y-key] y)
+                  (assoc-in [:projectors projector-id :corner-pin x-key] x)
+                  (assoc-in [:projectors projector-id :corner-pin y-key] y)
                   h/mark-dirty)}
       {:state state})))
 
@@ -312,7 +312,7 @@
   "Reset corner pin to default values."
   [{:keys [projector-id state]}]
   {:state (-> state
-              (assoc-in [:projectors :items projector-id :corner-pin] DEFAULT_CORNER_PIN)
+              (assoc-in [:projectors projector-id :corner-pin] DEFAULT_CORNER_PIN)
               h/mark-dirty)})
 
 
@@ -322,13 +322,13 @@
 (defn- handle-projectors-toggle-zone-group
   "Toggle a projector's membership in a zone group."
   [{:keys [projector-id zone-group-id state]}]
-  (let [current-groups (get-in state [:projectors :items projector-id :zone-groups] [])
+  (let [current-groups (get-in state [:projectors projector-id :zone-groups] [])
         member? (some #{zone-group-id} current-groups)
         new-groups (if member?
                      (vec (remove #{zone-group-id} current-groups))
                      (conj current-groups zone-group-id))]
     {:state (-> state
-                (assoc-in [:projectors :items projector-id :zone-groups] new-groups)
+                (assoc-in [:projectors projector-id :zone-groups] new-groups)
                 h/mark-dirty)}))
 
 
@@ -336,7 +336,7 @@
   "Set all zone groups for a projector."
   [{:keys [projector-id zone-groups state]}]
   {:state (-> state
-              (assoc-in [:projectors :items projector-id :zone-groups] zone-groups)
+              (assoc-in [:projectors projector-id :zone-groups] zone-groups)
               h/mark-dirty)})
 
 
@@ -356,12 +356,12 @@
   "Add a tag to a projector. Auto-adds to matching zone group if not already member."
   [{:keys [projector-id tag state]}]
   (let [auto-group (tag->auto-zone-group tag)
-        current-groups (get-in state [:projectors :items projector-id :zone-groups] [])]
+        current-groups (get-in state [:projectors projector-id :zone-groups] [])]
     {:state (-> state
-                (update-in [:projectors :items projector-id :tags] (fnil conj #{}) tag)
+                (update-in [:projectors projector-id :tags] (fnil conj #{}) tag)
                 ;; Auto-add to matching zone group if not already member
                 (cond-> (and auto-group (not (some #{auto-group} current-groups)))
-                  (update-in [:projectors :items projector-id :zone-groups] conj auto-group))
+                  (update-in [:projectors projector-id :zone-groups] conj auto-group))
                 h/mark-dirty)}))
 
 
@@ -369,7 +369,7 @@
   "Remove a tag from a projector. Does NOT auto-remove from zone group."
   [{:keys [projector-id tag state]}]
   {:state (-> state
-              (update-in [:projectors :items projector-id :tags] disj tag)
+              (update-in [:projectors projector-id :tags] disj tag)
               h/mark-dirty)})
 
 
@@ -381,7 +381,7 @@
    The VP starts with a copy of the parent's corner-pin."
   [{:keys [parent-projector-id name state]}]
   (let [vp-id (random-uuid)
-        parent (get-in state [:projectors :items parent-projector-id])
+        parent (get-in state [:projectors parent-projector-id])
         parent-name (:name parent "Unknown")
         vp-name (or name (str parent-name " - Virtual"))
         parent-corner-pin (or (:corner-pin parent) DEFAULT_CORNER_PIN)
@@ -392,8 +392,8 @@
                    :corner-pin parent-corner-pin
                    :enabled? true}]
     {:state (-> state
-                (assoc-in [:projectors :virtual-projectors vp-id] vp-config)
-                (assoc-in [:projectors :active-virtual-projector] vp-id)
+                (assoc-in [:virtual-projectors vp-id] vp-config)
+                (assoc-in [:projector-ui :active-virtual-projector] vp-id)
                 h/mark-dirty)}))
 
 
@@ -401,18 +401,18 @@
   "Select a virtual projector for editing."
   [{:keys [vp-id state]}]
   {:state (-> state
-              (assoc-in [:projectors :active-virtual-projector] vp-id)
-              (assoc-in [:projectors :active-projector] nil))})
+              (assoc-in [:projector-ui :active-virtual-projector] vp-id)
+              (assoc-in [:projector-ui :active-projector] nil))})
 
 
 (defn- handle-projectors-remove-virtual-projector
   "Remove a virtual projector."
   [{:keys [vp-id state]}]
-  (let [active (get-in state [:projectors :active-virtual-projector])]
+  (let [active (get-in state [:projector-ui :active-virtual-projector])]
     {:state (-> state
-                (update-in [:projectors :virtual-projectors] dissoc vp-id)
+                (update :virtual-projectors dissoc vp-id)
                 (cond-> (= active vp-id)
-                  (assoc-in [:projectors :active-virtual-projector] nil))
+                  (assoc-in [:projector-ui :active-virtual-projector] nil))
                 h/mark-dirty)}))
 
 
@@ -420,16 +420,16 @@
   "Update virtual projector settings (name, enabled)."
   [{:keys [vp-id updates state]}]
   {:state (-> state
-              (update-in [:projectors :virtual-projectors vp-id] merge updates)
+              (update-in [:virtual-projectors vp-id] merge updates)
               h/mark-dirty)})
 
 
 (defn- handle-vp-toggle-enabled
   "Toggle a virtual projector's enabled state."
   [{:keys [vp-id state]}]
-  (let [current (get-in state [:projectors :virtual-projectors vp-id :enabled?] true)]
+  (let [current (get-in state [:virtual-projectors vp-id :enabled?] true)]
     {:state (-> state
-                (assoc-in [:projectors :virtual-projectors vp-id :enabled?] (not current))
+                (assoc-in [:virtual-projectors vp-id :enabled?] (not current))
                 h/mark-dirty)}))
 
 
@@ -445,8 +445,8 @@
         [x-key y-key] param-key]
     (if param-key
       {:state (-> state
-                  (assoc-in [:projectors :virtual-projectors vp-id :corner-pin x-key] x)
-                  (assoc-in [:projectors :virtual-projectors vp-id :corner-pin y-key] y)
+                  (assoc-in [:virtual-projectors vp-id :corner-pin x-key] x)
+                  (assoc-in [:virtual-projectors vp-id :corner-pin y-key] y)
                   h/mark-dirty)}
       {:state state})))
 
@@ -454,24 +454,24 @@
 (defn- handle-vp-reset-corner-pin
   "Reset virtual projector corner pin to parent's values."
   [{:keys [vp-id state]}]
-  (let [vp (get-in state [:projectors :virtual-projectors vp-id])
+  (let [vp (get-in state [:virtual-projectors vp-id])
         parent-id (:parent-projector-id vp)
-        parent-corner-pin (get-in state [:projectors :items parent-id :corner-pin] DEFAULT_CORNER_PIN)]
+        parent-corner-pin (get-in state [:projectors parent-id :corner-pin] DEFAULT_CORNER_PIN)]
     {:state (-> state
-                (assoc-in [:projectors :virtual-projectors vp-id :corner-pin] parent-corner-pin)
+                (assoc-in [:virtual-projectors vp-id :corner-pin] parent-corner-pin)
                 h/mark-dirty)}))
 
 
 (defn- handle-vp-toggle-zone-group
   "Toggle a virtual projector's membership in a zone group."
   [{:keys [vp-id zone-group-id state]}]
-  (let [current-groups (get-in state [:projectors :virtual-projectors vp-id :zone-groups] [])
+  (let [current-groups (get-in state [:virtual-projectors vp-id :zone-groups] [])
         member? (some #{zone-group-id} current-groups)
         new-groups (if member?
                      (vec (remove #{zone-group-id} current-groups))
                      (conj current-groups zone-group-id))]
     {:state (-> state
-                (assoc-in [:projectors :virtual-projectors vp-id :zone-groups] new-groups)
+                (assoc-in [:virtual-projectors vp-id :zone-groups] new-groups)
                 h/mark-dirty)}))
 
 
@@ -479,7 +479,7 @@
   "Set all zone groups for a virtual projector."
   [{:keys [vp-id zone-groups state]}]
   {:state (-> state
-              (assoc-in [:projectors :virtual-projectors vp-id :zone-groups] zone-groups)
+              (assoc-in [:virtual-projectors vp-id :zone-groups] zone-groups)
               h/mark-dirty)})
 
 
@@ -487,11 +487,11 @@
   "Add a tag to a virtual projector."
   [{:keys [vp-id tag state]}]
   (let [auto-group (tag->auto-zone-group tag)
-        current-groups (get-in state [:projectors :virtual-projectors vp-id :zone-groups] [])]
+        current-groups (get-in state [:virtual-projectors vp-id :zone-groups] [])]
     {:state (-> state
-                (update-in [:projectors :virtual-projectors vp-id :tags] (fnil conj #{}) tag)
+                (update-in [:virtual-projectors vp-id :tags] (fnil conj #{}) tag)
                 (cond-> (and auto-group (not (some #{auto-group} current-groups)))
-                  (update-in [:projectors :virtual-projectors vp-id :zone-groups] conj auto-group))
+                  (update-in [:virtual-projectors vp-id :zone-groups] conj auto-group))
                 h/mark-dirty)}))
 
 
@@ -499,7 +499,7 @@
   "Remove a tag from a virtual projector."
   [{:keys [vp-id tag state]}]
   {:state (-> state
-              (update-in [:projectors :virtual-projectors vp-id :tags] disj tag)
+              (update-in [:virtual-projectors vp-id :tags] disj tag)
               h/mark-dirty)})
 
 
@@ -538,20 +538,20 @@
 (defn- handle-projectors-set-test-pattern
   "Set or clear the test pattern mode."
   [{:keys [pattern state]}]
-  {:state (assoc-in state [:projectors :test-pattern-mode] pattern)})
+  {:state (assoc-in state [:projector-ui :test-pattern-mode] pattern)})
 
 
 (defn- handle-projectors-set-broadcast-address
   "Set the broadcast address for network scanning."
   [{:keys [address state]}]
-  {:state (assoc-in state [:projectors :broadcast-address] address)})
+  {:state (assoc-in state [:projector-ui :broadcast-address] address)})
 
 
 (defn- handle-projectors-toggle-device-expand
   "Toggle the expanded state of a device in the discovery panel."
   [{:keys [address state]}]
-  (let [current-expanded (get-in state [:projectors :expanded-devices] #{})]
-    {:state (assoc-in state [:projectors :expanded-devices]
+  (let [current-expanded (get-in state [:projector-ui :expanded-devices] #{})]
+    {:state (assoc-in state [:projector-ui :expanded-devices]
                       (if (contains? current-expanded address)
                         (disj current-expanded address)
                         (conj current-expanded address)))}))

@@ -19,8 +19,8 @@
   {:state (-> state
               (assoc-in [:zone-group-ui :selected-group] group-id)
               ;; Clear projector/VP selection when zone group is selected
-              (assoc-in [:projectors :active-projector] nil)
-              (assoc-in [:projectors :active-virtual-projector] nil))})
+              (assoc-in [:projector-ui :active-projector] nil)
+              (assoc-in [:projector-ui :active-virtual-projector] nil))})
 
 
 ;; Zone Group CRUD
@@ -59,7 +59,7 @@
   (let [;; Remove group from zone-groups domain
         new-zone-groups (dissoc (get state :zone-groups) group-id)
         ;; Remove group from all projectors that have it
-        projectors (get-in state [:projectors :items] {})
+        projectors (get state :projectors {})
         updated-projectors (reduce-kv
                              (fn [m proj-id proj]
                                (let [current-groups (:zone-groups proj [])
@@ -68,7 +68,7 @@
                              {}
                              projectors)
         ;; Remove group from all virtual projectors that have it
-        vps (get-in state [:projectors :virtual-projectors] {})
+        vps (get state :virtual-projectors {})
         updated-vps (reduce-kv
                       (fn [m vp-id vp]
                         (let [current-groups (:zone-groups vp [])
@@ -82,8 +82,8 @@
     {:state (-> state
                 (assoc :zone-groups new-zone-groups)
                 (assoc-in [:zone-group-ui :selected-group] new-selected)
-                (assoc-in [:projectors :items] updated-projectors)
-                (assoc-in [:projectors :virtual-projectors] updated-vps)
+                (assoc :projectors updated-projectors)
+                (assoc :virtual-projectors updated-vps)
                 h/mark-dirty)}))
 
 (defn- handle-zone-groups-update

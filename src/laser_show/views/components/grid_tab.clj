@@ -12,7 +12,8 @@
     :hint-text \"Click to trigger • Right-click to select\"}
    ```"
   (:require [cljfx.api :as fx]
-            [laser-show.subs :as subs]))
+            [laser-show.subs :as subs]
+            [laser-show.css.core :as css]))
 
 
 ;; Grid Row Component
@@ -116,7 +117,7 @@
    - :hint-text - Hint text below the header"
   [{:keys [fx/context cell-component header-text hint-text]}]
   {:fx/type :v-box
-   :style "-fx-background-color: #1E1E1E;"
+   :style (str "-fx-background-color: " (css/bg-primary) ";")
    :padding 16
    :spacing 8
    :children [{:fx/type :label
@@ -124,7 +125,7 @@
                :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}
               {:fx/type :label
                :text hint-text
-               :style "-fx-text-fill: #808080; -fx-font-size: 11;"}
+               :style (str "-fx-text-fill: " (css/text-muted) "; -fx-font-size: 11;")}
               {:fx/type grid-header}
               {:fx/type grid-with-labels
                :cell-component cell-component}]})

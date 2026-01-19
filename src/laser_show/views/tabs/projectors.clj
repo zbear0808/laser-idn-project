@@ -25,12 +25,12 @@
   [{:keys [status size]
     :or {size 8}}]
   (let [color (case status
-                :online "#4CAF50"       ;; Green
-                :occupied "#FFC107"     ;; Yellow 
-                :offline "#F44336"      ;; Red
-                :connected "#4CAF50"    ;; Green
-                :connecting "#2196F3"   ;; Blue
-                "#808080")]             ;; Gray - unknown
+                :online (css/green)
+                :occupied (css/orange)
+                :offline (css/red)
+                :connected (css/green)
+                :connecting (css/blue)
+                (css/text-muted))]
     {:fx/type :circle
      :radius (/ size 2)
      :fill color}))
@@ -91,11 +91,11 @@
         address-info-children (filterv some?
                                        [{:fx/type :label
                                          :text address
-                                         :style "-fx-text-fill: #808080; -fx-font-size: 10;"}
+                                         :style (str "-fx-text-fill: " (css/text-muted) "; -fx-font-size: 10;")}
                                         (when (pos? service-count)
                                           {:fx/type :label
                                            :text (str "(" service-count " output" (when (> service-count 1) "s") ")")
-                                           :style "-fx-text-fill: #606060; -fx-font-size: 10;"})])
+                                           :style (str "-fx-text-fill: " (css/text-muted) "; -fx-font-size: 10;")})])
         ;; Build header children (filter out nil)
         header-children (filterv some?
                                  (concat
@@ -103,7 +103,7 @@
                                    (when has-multiple-services?
                                      [{:fx/type :label
                                        :text (if expanded? "▼" "▶")
-                                       :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-padding: 2 4; -fx-min-width: 20;"}])
+                                       :style (str "-fx-text-fill: " (css/text-muted) "; -fx-font-size: 10; -fx-padding: 2 4; -fx-min-width: 20;")}])
                                    ;; Status indicator and device info
                                    [{:fx/type status-indicator
                                      :status device-status}
@@ -120,8 +120,8 @@
                                      [{:fx/type :button
                                        :text (if all-services-configured? "✓ All" "+ All")
                                        :disable all-services-configured?
-                                       :style (str "-fx-background-color: " (if all-services-configured? "#404040" "#4CAF50")
-                                                  "; -fx-text-fill: " (if all-services-configured? "#606060" "white")
+                                       :style (str "-fx-background-color: " (if all-services-configured? (css/interactive) (css/green))
+                                                  "; -fx-text-fill: " (if all-services-configured? (css/text-muted) "white")
                                                   "; -fx-font-size: 11; -fx-font-weight: bold; -fx-padding: 4 10;")
                                        :on-action {:event/type :projectors/add-all-services
                                                    :device device}}])
@@ -133,8 +133,8 @@
                                                no-service-configured? "✓"
                                                :else "+")
                                        :disable (or single-service-configured? no-service-configured?)
-                                       :style (str "-fx-background-color: " (if (or single-service-configured? no-service-configured?) "#404040" "#4CAF50")
-                                                  "; -fx-text-fill: " (if (or single-service-configured? no-service-configured?) "#606060" "white")
+                                       :style (str "-fx-background-color: " (if (or single-service-configured? no-service-configured?) (css/interactive) (css/green))
+                                                  "; -fx-text-fill: " (if (or single-service-configured? no-service-configured?) (css/text-muted) "white")
                                                   "; -fx-font-size: 16; -fx-font-weight: bold; -fx-padding: 4 12; -fx-min-width: 32;")
                                        :on-action {:event/type :projectors/add-device
                                                    :device device}}])))]
@@ -181,7 +181,7 @@
                  :children [{:fx/type :button
                              :text (if scanning? "Scanning..." "Scan Network")
                              :disable scanning?
-                             :style-class ["button-info"]
+                             :style-class ["button-primary"]
                              :on-action {:event/type :projectors/scan-network}}
                             {:fx/type :button
                              :text "Add Manual..."
@@ -706,7 +706,7 @@
   "Complete projectors tab with discovery and configuration."
   [{:keys [fx/context]}]
   {:fx/type :v-box
-   :style "-fx-background-color: #1E1E1E;"
+   :style (str "-fx-background-color: " (css/bg-primary) ";")
    :padding 16
    :spacing 8
    :children [{:fx/type :label

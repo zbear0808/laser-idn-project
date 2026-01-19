@@ -152,7 +152,6 @@
     {:fx/type :h-box
      :alignment :center-left
      :padding {:left 8 :right 8 :top 4 :bottom 4}
-     :style "-fx-background-color: #252525;"
      :children [{:fx/type :label
                  :text "Preview"
                  :style "-fx-text-fill: white; -fx-font-size: 12; -fx-font-weight: bold;"}
@@ -168,7 +167,7 @@
         width (:width preview-cfg 400)
         height (:height preview-cfg 400)]
     {:fx/type :v-box
-     :style "-fx-background-color: #2D2D2D;"
+     :style "-fx-background-color: #121212;"
      :children [{:fx/type preview-header}
                 {:fx/type :border-pane
                  :padding 8

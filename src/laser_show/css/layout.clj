@@ -69,9 +69,9 @@
        ".status-indicator-connecting"
        {:-fx-background-color accent-warning}
        
-       ;; =========================================================================
+       
        ;; Container Classes
-       ;; =========================================================================
+       
        
        ;; Primary container (darkest background)
        ".container-primary"
@@ -85,9 +85,9 @@
        ".container-elevated"
        {:-fx-background-color bg-elevated}
        
-       ;; =========================================================================
+       
        ;; Scroll Pane Variants
-       ;; =========================================================================
+       
        
        ;; Dark scroll pane (for content areas)
        ".scroll-pane-dark"

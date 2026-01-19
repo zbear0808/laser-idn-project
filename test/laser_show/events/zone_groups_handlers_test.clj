@@ -19,7 +19,7 @@
 (def base-state
   "Base state with default zone groups and a test projector."
   (-> (build-initial-state)
-      (assoc-in [:projectors :items test-projector-id]
+      (assoc-in [:projectors test-projector-id]
                 {:name "Test Projector"
                  :host "192.168.1.10"
                  :port 7255
@@ -37,14 +37,14 @@
 
 (deftest handle-zone-groups-select-test
   (testing "Selecting a zone group sets selected-group and clears projector selection"
-    (let [state-with-projector (assoc-in base-state [:projectors :active-projector] test-projector-id)
+    (let [state-with-projector (assoc-in base-state [:projector-ui :active-projector] test-projector-id)
           event {:event/type :zone-groups/select
                  :group-id :left
                  :state state-with-projector}
           result (zone-groups/handle event)]
       (is (= :left (get-in result [:state :zone-group-ui :selected-group])))
-      (is (nil? (get-in result [:state :projectors :active-projector])))
-      (is (nil? (get-in result [:state :projectors :active-virtual-projector]))))))
+      (is (nil? (get-in result [:state :projector-ui :active-projector])))
+      (is (nil? (get-in result [:state :projector-ui :active-virtual-projector]))))))
 
 
 ;; Add/Create Tests
@@ -111,9 +111,9 @@
                                            :name "Custom"
                                            :description ""
                                            :color "#FF0000"})
-                                (assoc-in [:projectors :items test-projector-id :zone-groups]
+                                (assoc-in [:projectors test-projector-id :zone-groups]
                                           [:all :left custom-group-id])
-                                (assoc-in [:projectors :virtual-projectors vp-id]
+                                (assoc-in [:virtual-projectors vp-id]
                                           {:name "Test VP"
                                            :parent-projector-id test-projector-id
                                            :zone-groups [:all custom-group-id]
@@ -127,10 +127,10 @@
       (is (nil? (get-in result [:state :zone-groups custom-group-id])))
       ;; Projector should no longer reference the group
       (is (not (some #{custom-group-id}
-                     (get-in result [:state :projectors :items test-projector-id :zone-groups]))))
+                     (get-in result [:state :projectors test-projector-id :zone-groups]))))
       ;; Virtual projector should no longer reference the group
       (is (not (some #{custom-group-id}
-                     (get-in result [:state :projectors :virtual-projectors vp-id :zone-groups]))))
+                     (get-in result [:state :virtual-projectors vp-id :zone-groups]))))
       ;; Selection should be cleared
       (is (nil? (get-in result [:state :zone-group-ui :selected-group])))
       ;; Project should be dirty

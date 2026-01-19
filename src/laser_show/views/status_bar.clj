@@ -26,25 +26,14 @@
 
 
 (defn cell-status
-  "Status showing active/selected cell."
+  "Status showing active cell."
   [{:keys [fx/context]}]
-  (let [active-cell (fx/sub-ctx context subs/active-cell)
-        selected-cell (fx/sub-ctx context subs/selected-cell)
-        children (cond-> []
-                   active-cell 
-                   (conj {:fx/type status-item
-                          :label "Active"
-                          :value (str "[" (first active-cell) "," (second active-cell) "]")})
-                   selected-cell
-                   (conj {:fx/type status-item
-                          :label "Selected"
-                          :value (str "[" (first selected-cell) "," (second selected-cell) "]")}))]
-    {:fx/type :h-box
-     :spacing 16
-     :alignment :center-left
-     :children (if (empty? children)
-                 [{:fx/type :label :text "" :pref-width 0}]
-                 children)}))
+  (let [active-cell (fx/sub-ctx context subs/active-cell)]
+    (if active-cell
+      {:fx/type status-item
+       :label "Active"
+       :value (str "[" (first active-cell) "," (second active-cell) "]")}
+      {:fx/type :label :text "" :pref-width 0})))
 
 
 ;; Preset Status

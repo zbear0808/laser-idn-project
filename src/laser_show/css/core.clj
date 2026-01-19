@@ -27,9 +27,9 @@
             [laser-show.css.visual-editors :as visual-editors]))
 
 
-;; =============================================================================
+
 ;; Stylesheet URL Functions
-;; =============================================================================
+
 
 (defn all-stylesheet-urls
   "Returns a vector of all CSS stylesheet URLs.
@@ -90,9 +90,9 @@
 
 
 
-;; =============================================================================
+
 ;; Text Color Accessors
-;; =============================================================================
+
 
 (defn text-primary
   "Primary text color for main content."
@@ -109,9 +109,9 @@
 
 
 
-;; =============================================================================
+
 ;; Border Color Accessors
-;; =============================================================================
+
 
 
 
@@ -120,9 +120,9 @@
   [] (:border-default theme/semantic-colors))
 
 
-;; =============================================================================
+
 ;; Accent Color Accessors (Semantic)
-;; =============================================================================
+
 
 (defn accent-success
   "Success/positive action color (green)."
@@ -132,10 +132,38 @@
   "Warning color (orange)."
   [] (:accent-warning theme/semantic-colors))
 
-;; =============================================================================
+
 ;; Selection Color Accessors
-;; =============================================================================
+
 
 (defn selection-bg
   "Selected item background color."
   [] (:selection-bg theme/semantic-colors))
+
+
+;; Base Color Accessors (for inline styles)
+
+
+(defn interactive
+  "Interactive element background (buttons, inputs)."
+  [] (:interactive theme/base-colors))
+
+(defn green
+  "Success/action color."
+  [] (:green theme/base-colors))
+
+(defn blue
+  "Selection/active state color."
+  [] (:blue theme/base-colors))
+
+(defn border
+  "Border and hover state color."
+  [] (:border theme/base-colors))
+
+(defn orange
+  "Warning accent color."
+  [] (:orange theme/base-colors))
+
+(defn red
+  "Danger/error color."
+  [] (:red theme/base-colors))

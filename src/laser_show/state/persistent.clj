@@ -43,8 +43,8 @@
             {:path [:grid] :keys [:size]}]}
    
    :hardware
-   {:paths [{:path [:projectors :items]}
-            {:path [:projectors :virtual-projectors]}
+   {:paths [{:path [:projectors]}
+            {:path [:virtual-projectors]}
             {:path [:zone-groups]}]}
    
    :content

@@ -19,11 +19,11 @@
                   text-primary text-secondary text-muted
                   accent-success accent-info accent-warning accent-danger
                   selection-bg]} theme/semantic-colors
-          {:keys [gray-600]} theme/base-colors]
+          {:keys [interactive]} theme/base-colors]
       
-      {;; =========================================================================
+      {
        ;; Badge - Small colored labels
-       ;; =========================================================================
+       
        
        ;; Base badge style
        ".badge"
@@ -54,9 +54,9 @@
        ".badge-orange"
        {:-fx-background-color "#E67E22"}
        
-       ;; =========================================================================
+       
        ;; Chip - Clickable colored tags
-       ;; =========================================================================
+       
        
        ;; Base chip style
        ".chip"
@@ -79,13 +79,13 @@
         :-fx-cursor "hand"
         :-fx-opacity 1.0}
        
-       ;; =========================================================================
+       
        ;; List Items - Selectable rows
-       ;; =========================================================================
+       
        
        ;; Base list item
        ".list-item"
-       {:-fx-background-color gray-600
+       {:-fx-background-color interactive
         :-fx-background-radius 4
         :-fx-padding 8
         :-fx-cursor "hand"
@@ -105,14 +105,14 @@
        
        ;; Disabled list item (via opacity)
        ".list-item-disabled"
-       {:-fx-background-color gray-600
+       {:-fx-background-color interactive
         :-fx-background-radius 4
         :-fx-padding 8
         :-fx-opacity 0.5}
        
-       ;; =========================================================================
+       
        ;; Cards and Panels
-       ;; =========================================================================
+       
        
        ;; Card container - slightly elevated surface
        ".card"
@@ -124,9 +124,9 @@
        {:-fx-background-color bg-elevated
         :-fx-background-radius 4}
        
-       ;; =========================================================================
+       
        ;; Scroll Pane Variants
-       ;; =========================================================================
+       
        
        ;; Dark scroll pane (matches surface bg)
        ".scroll-pane-dark"
@@ -136,9 +136,9 @@
         " > .viewport"
         {:-fx-background-color bg-surface}}
        
-       ;; =========================================================================
+       
        ;; Status Indicators
-       ;; =========================================================================
+       
        
        ;; Status dot base
        ".status-dot"

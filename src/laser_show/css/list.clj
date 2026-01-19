@@ -30,7 +30,7 @@
                   selection-bg border-subtle border-default]} theme/semantic-colors
           {:keys [selection-hover drop-target-bg drop-target-border
                   drop-target-glow]} theme/computed-colors
-          {:keys [blue-600 gray-500]} theme/base-colors
+          {:keys [blue text-muted]} theme/base-colors
           
           ;; Category colors for depth
           {:keys [depth-0 depth-1 depth-2 depth-3]} theme/category-colors
@@ -40,9 +40,9 @@
           depth-indent 18]
       
       {
-       ;; ============================================
+       
        ;; Sidebar Container
-       ;; ============================================
+       
        
        ".chain-sidebar"
        {:-fx-background-color bg-primary
@@ -54,9 +54,9 @@
         :-fx-border-width ["0px" "1px" "0px" "0px"]}
        
        
-       ;; ============================================
+       
        ;; Header Section
-       ;; ============================================
+       
        
        ".chain-header-label"
        {:-fx-text-fill text-muted
@@ -64,11 +64,11 @@
         :-fx-font-weight "bold"}
        
        ".chain-selection-count"
-       {:-fx-text-fill blue-600
+       {:-fx-text-fill blue
         :-fx-font-size 9}
        
        ".chain-hint-text"
-       {:-fx-text-fill gray-500
+       {:-fx-text-fill text-muted
         :-fx-font-size 8
         :-fx-font-style "italic"}
        
@@ -78,9 +78,9 @@
         :-fx-font-size 11}
        
        
-       ;; ============================================
+       
        ;; Toolbar Buttons
-       ;; ============================================
+       
        
        ".chain-toolbar-btn"
        {:-fx-background-color bg-interactive
@@ -111,10 +111,10 @@
          :-fx-background-color "#503030"}}  ; Much darker red when disabled
        
        
-       ;; ============================================
+       
        ;; Group Header - Base with compound state selectors
        ;; Using compound selectors for higher specificity
-       ;; ============================================
+       
        
        ".group-header"
        {:-fx-spacing 6
@@ -151,9 +151,9 @@
         {:-fx-opacity 0.6}}
        
        
-       ;; ============================================
+       
        ;; Group Depth Border Colors (compound with .group-header)
-       ;; ============================================
+       
        
        ".group-header.group-depth-0"
        {:-fx-border-color depth-0}
@@ -168,9 +168,9 @@
        {:-fx-border-color depth-3}
        
        
-       ;; ============================================
+       
        ;; Group Indentation (compound with .group-header)
-       ;; ============================================
+       
        
        ".group-header.group-indent-0"
        {:-fx-padding ["6px" "8px" "6px" (str base-padding "px")]}
@@ -185,9 +185,9 @@
        {:-fx-padding ["6px" "8px" "6px" (str (+ base-padding (* 3 depth-indent)) "px")]}
        
        
-       ;; ============================================
+       
        ;; Group Header Sub-elements
-       ;; ============================================
+       
        
        ".group-collapse-btn"
        {:-fx-background-color "transparent"
@@ -246,9 +246,9 @@
          :-fx-text-fill text-primary}}
        
        
-       ;; ============================================
+       
        ;; Chain Item Card - Base
-       ;; ============================================
+       
        
        ".chain-item"
        {:-fx-spacing 6
@@ -256,9 +256,9 @@
         :-fx-background-color bg-interactive
         :-fx-background-radius 4}
        
-       ;; ============================================
+       
        ;; Chain Item State Variants (compound selectors)
-       ;; ============================================
+       
        
        ".chain-item.chain-item-selected"
        {:-fx-background-color selection-bg}
@@ -290,9 +290,9 @@
        {:-fx-opacity 0.6}
        
        
-       ;; ============================================
+       
        ;; Chain Item Indentation (compound with .chain-item)
-       ;; ============================================
+       
        
        ".chain-item.item-indent-0"
        {:-fx-padding ["6px" "8px" "6px" (str base-padding "px")]}
@@ -307,9 +307,9 @@
        {:-fx-padding ["6px" "8px" "6px" (str (+ base-padding (* 3 depth-indent)) "px")]}
        
        
-       ;; ============================================
+       
        ;; Chain Item Sub-elements
-       ;; ============================================
+       
        
        ".chain-item-name"
        {:-fx-font-size 12
@@ -323,9 +323,9 @@
         {:-fx-text-fill text-muted}}
        
        
-       ;; ============================================
+       
        ;; Scroll Pane
-       ;; ============================================
+       
        
        ".chain-scroll-pane"
        {:-fx-background-color "transparent"

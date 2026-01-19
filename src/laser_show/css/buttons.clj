@@ -17,10 +17,10 @@
   (css/register ::buttons
     (let [;; Use semantic colors from theme
           {:keys [bg-primary bg-interactive bg-hover bg-active
-                  text-primary text-muted
+                  text-primary text-muted border-default
                   accent-success accent-info accent-danger]} theme/semantic-colors
           {:keys [accent-success-hover accent-danger-hover]} theme/computed-colors
-          {:keys [gray-500]} theme/base-colors]
+          {:keys [border]} theme/base-colors]
       
       {
        ;; Small button variant (used in toolbar)
@@ -72,16 +72,17 @@
        
        ".tab-btn"
        {:-fx-background-color bg-primary
-        :-fx-text-fill text-primary
+        :-fx-text-fill text-muted
         :-fx-background-radius 0
         :-fx-padding ["8px" "16px"]
         :-fx-cursor "hand"
-        ;; Light grey border on right and bottom
-        :-fx-border-color ["transparent" gray-500 gray-500 "transparent"]
+        ;; Grey border on right and bottom
+        :-fx-border-color ["transparent" border border "transparent"]
         :-fx-border-width [0 1 1 0]
         
         ":hover"
-        {:-fx-background-color bg-hover}}
+        {:-fx-background-color bg-hover
+         :-fx-text-fill text-primary}}
        
        ".tab-btn-active"
        {:-fx-background-color bg-primary
@@ -89,8 +90,8 @@
         :-fx-background-radius 0
         :-fx-padding ["8px" "16px"]
         :-fx-cursor "hand"
-        ;; Active tab has accent-info top border, light grey right border, no bottom border
-        :-fx-border-color [accent-info gray-500 "transparent" "transparent"]
+        ;; Active tab has blue top border, grey right border, no bottom border
+        :-fx-border-color [accent-info border "transparent" "transparent"]
         :-fx-border-width [2 1 0 0]
         
         ":hover"
@@ -174,9 +175,9 @@
         {:-fx-background-color accent-success-hover}}
        
        
-       ;; =========================================================================
+       
        ;; Action Buttons (Primary, Secondary, Danger)
-       ;; =========================================================================
+       
        
        ;; Primary action button (green, for main actions like Save, Add)
        ".button-primary"
@@ -196,7 +197,7 @@
        
        ;; Secondary action button (gray, for secondary actions)
        ".button-secondary"
-       {:-fx-background-color gray-500
+       {:-fx-background-color border
         :-fx-text-fill text-primary
         :-fx-padding ["6px" "12px"]
         :-fx-cursor "hand"
@@ -243,9 +244,9 @@
          :-fx-cursor "default"}}
        
        
-       ;; =========================================================================
+       
        ;; Icon Buttons
-       ;; =========================================================================
+       
        
        ;; Icon-only button (transparent background, for inline actions)
        ".button-icon"
@@ -261,7 +262,7 @@
        
        ;; Add/Plus button (compact gray button)
        ".button-add"
-       {:-fx-background-color gray-500
+       {:-fx-background-color border
         :-fx-text-fill text-primary
         :-fx-font-size 12
         :-fx-padding ["2px" "8px"]

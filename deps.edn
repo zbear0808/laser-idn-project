@@ -70,11 +70,11 @@
   :jfr
   {:jvm-opts ["-XX:StartFlightRecording=name=continuous,settings=profile,maxage=5m"]}
   
-  ;; ============================================================================
+  
   ;; Platform-specific JavaFX dependencies
   ;; Add ONE of these when running: clj -M:dev:laser-show:win
   ;; Note: $classifier syntax required by newer Clojure CLI versions
-  ;; ============================================================================
+  
   :win
   {:extra-deps {org.openjfx/javafx-base$win {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-controls$win {:mvn/version "26-ea+19"}
@@ -141,14 +141,14 @@
    :main-opts ["-m" "cognitect.test-runner"]
    :exec-fn cognitect.test-runner.api/test}
   
-  ;; ============================================================================
+  
   ;; Build alias - builds platform-specific uberjars
   ;; Usage:
   ;;   clj -T:build uber :platform :win      ; Windows
   ;;   clj -T:build uber :platform :mac      ; macOS Intel (x86_64)
   ;;   clj -T:build uber :platform :mac-arm  ; macOS Apple Silicon (ARM64)
   ;;   clj -T:build uber :platform :linux    ; Linux
-  ;; ============================================================================
+  
   :build
   {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
    :ns-default build}

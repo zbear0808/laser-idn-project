@@ -6,9 +6,9 @@
            [javafx.application Platform]
            [javafx.stage Stage]))
 
-;; ============================================================================
+
 ;; State
-;; ============================================================================
+
 
 (defonce state (atom {:source-items ["Item A" "Item B" "Item C" "Item D"]
                       :target-items ["Target 1" "Target 2" "Target 3"]
@@ -18,9 +18,9 @@
   (let [thread-name (.getName (Thread/currentThread))]
     (println (format "[%s] %s %s" thread-name msg (if (seq args) (apply str args) "")))))
 
-;; ============================================================================
+
 ;; Components
-;; ============================================================================
+
 
 (defn draggable-item [{:keys [text color]}]
   {:fx/type :label
@@ -73,9 +73,9 @@
                            :color "#4CAF50"})
                         items))})
 
-;; ============================================================================
+
 ;; Views
-;; ============================================================================
+
 
 (defn dnd-view [{:keys [source-items target-items title bg-color]}]
   {:fx/type :h-box
@@ -150,9 +150,9 @@
                       :source-items (:source-items current-state)
                       :target-items (:target-items current-state)})])})
 
-;; ============================================================================
+
 ;; Entry Point
-;; ============================================================================
+
 
 (def renderer
   (fx/create-renderer

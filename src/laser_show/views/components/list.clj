@@ -43,9 +43,9 @@
 
 
 
-;; ============================================================================
+
 ;; Selection Logic (Event Dispatching)
-;; ============================================================================
+
 
 
 (defn- handle-selection!
@@ -95,9 +95,9 @@
                      :component-id component-id}))
 
 
-;; ============================================================================
+
 ;; Drag-and-Drop Logic (Event Dispatching)
-;; ============================================================================
+
 
 
 (defn- start-drag!
@@ -151,9 +151,9 @@
                      :component-id component-id}))
 
 
-;; ============================================================================
+
 ;; Item Operations (Callbacks Only - No State Mutation)
-;; ============================================================================
+
 
 
 (defn- delete-selected!
@@ -238,9 +238,9 @@
     (log/debug "paste-items! no clipboard in props")))
 
 
-;; ============================================================================
+
 ;; Group Operations (Callbacks Only)
-;; ============================================================================
+
 
 
 (defn- normalize-selected-ids
@@ -386,9 +386,9 @@
         (callback new-items)))))
 
 
-;; ============================================================================
+
 ;; Rename Operations (Event Dispatching)
-;; ============================================================================
+
 
 
 (defn- start-rename!
@@ -416,9 +416,9 @@
         (callback new-items)))))
 
 
-;; ============================================================================
+
 ;; Enable/Disable Operations (Internal)
-;; ============================================================================
+
 
 
 (defn- set-enabled!
@@ -430,9 +430,9 @@
         (callback new-items)))))
 
 
-;; ============================================================================
+
 ;; Helper Functions
-;; ============================================================================
+
 
 
 (defn- depth-class
@@ -451,9 +451,9 @@
         (recur (.getParent current))))))
 
 
-;; ============================================================================
+
 ;; Style Class Builders
-;; ============================================================================
+
 
 
 (defn- group-header-style-classes
@@ -497,9 +497,9 @@
     effectively-disabled? (conj "chain-item-name-disabled")))
 
 
-;; ============================================================================
+
 ;; Drag-and-Drop Handlers Setup
-;; ============================================================================
+
 
 ;; Track the current visual drop target node globally so we can clear it
 (defonce ^:private current-drop-target-node (atom nil))
@@ -634,9 +634,9 @@
             (.consume event)))))))
 
 
-;; ============================================================================
+
 ;; Group Header Component
-;; ============================================================================
+
 
 
 (defn- group-header
@@ -794,9 +794,9 @@
                         :style-class name-classes}]}}))
 
 
-;; ============================================================================
+
 ;; Recursive List Item Renderer
-;; ============================================================================
+
 
 
 (defn- render-list-item
@@ -991,9 +991,9 @@
                                         items)}})]}))
 
 
-;; ============================================================================
+
 ;; Public API for External Keyboard Handlers
-;; ============================================================================
+
 ;; These functions allow external code (like dialog keyboard handlers) to trigger
 ;; the same operations as the internal buttons, ensuring consistent behavior.
 ;;
@@ -1039,9 +1039,9 @@
   (clear-selection! component-id props))
 
 
-;; ============================================================================
+
 ;; Callback Factory Functions
-;; ============================================================================
+
 ;; These helpers reduce boilerplate when configuring hierarchical list components.
 
 
@@ -1078,9 +1078,9 @@
                               selection-key selected-ids)))))
 
 
-;; ============================================================================
+
 ;; Label Function Factories
-;; ============================================================================
+
 ;; These helpers create :get-item-label functions for common patterns.
 
 
@@ -1121,9 +1121,9 @@
     (get label-map (get item id-key) fallback)))
 
 
-;; ============================================================================
+
 ;; Keyboard Handler Setup for Parent Components
-;; ============================================================================
+
 
 
 (defn setup-keyboard-handlers-for-component!
@@ -1200,9 +1200,9 @@
               (.consume event))))))))
 
 
-;; ============================================================================
+
 ;; Keyboard Handler Atoms Registry
-;; ============================================================================
+
 ;; Atoms are stored per component-id so keyboard handlers can access current
 ;; items and props without stale closures.
 
@@ -1227,9 +1227,9 @@
     (reset! props-atom props)))
 
 
-;; ============================================================================
+
 ;; All-in-One Wrapper Component
-;; ============================================================================
+
 
 
 (defn list-editor

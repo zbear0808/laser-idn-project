@@ -91,8 +91,8 @@
             timing-ctx (frame-service/get-timing-context)
             
             ;; Get projectors and virtual projectors for routing
-            projectors-items (get-in raw-state [:projectors :items] {})
-            virtual-projectors (get-in raw-state [:projectors :virtual-projectors] {})
+            projectors-items (get raw-state :projectors {})
+            virtual-projectors (get raw-state :virtual-projectors {})
             
             ;; For now, treat the whole cue chain as "the cue" for routing
             ;; In future, each item in the chain could have its own destination-zone

@@ -33,10 +33,9 @@
    Base class 'grid-cell' is always included.
    Cell type adds 'grid-cell-<type>' (e.g., grid-cell-effects).
    State classes are added based on display-data."
-  [cell-type {:keys [active? has-content? selected?]}]
+  [cell-type {:keys [active? has-content?]}]
   (cond-> ["grid-cell" (str "grid-cell-" (name cell-type))]
     active? (conj "grid-cell-active")
-    selected? (conj "grid-cell-selected")
     has-content? (conj "grid-cell-content")
     (not has-content?) (conj "grid-cell-empty")))
 

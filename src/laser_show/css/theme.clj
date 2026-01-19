@@ -5,7 +5,6 @@
    - Base color palette (raw hex values)
    - Semantic colors (meaningful names mapped to base colors)
    - Computed color variants (hover, active, disabled states)
-   - Special purpose colors (status indicators, categories, channels)
    - Base CSS classes for typography, containers, and common elements
    - Theme URL for stylesheet loading
    
@@ -21,52 +20,29 @@
             [laser-show.css.colors :as colors]))
 
 
-;; =============================================================================
+
 ;; Base Colors - Raw hex values (single source of truth)
-;; =============================================================================
+
 ;;
-;; Color Architecture:
-;; - Backgrounds: 4 levels (base → surface → elevated → interactive)
-;; - Interactive states: hover, active/pressed
-;; - Text: 3 levels (primary, secondary, muted)
-;; - Accents: semantic colors (success, info, warning, danger)
-;; - Special: categories, channels, status indicators
+;; SIMPLIFIED Color Palette:
+;; - 4 grays: background, interactive, border, text-muted
+;; - 4 accents: green (success), blue (selection), orange (warning), red (danger)
+;; - 4 category colors for visual grouping
 
 (def base-colors
-  "Foundation color palette - these are the only raw hex values.
-   Use semantic-colors for actual UI usage.
+  "Foundation color palette - raw hex values only.
+   Use semantic-colors for actual UI usage."
+  {;; Grayscale - 4 functional levels
+   :bg-base      "#121212"   ; Main background (darkest)
+   :interactive  "#3D3D3D"   ; Buttons, inputs, cell content
+   :border       "#505050"   ; Borders, hover states
+   :text-muted   "#808080"   ; Muted/secondary text
    
-   CONSOLIDATED from 11 grays to 7 for cleaner visual hierarchy."
-  {;; Grayscale ramp (darkest to lightest) - 7 levels
-   :gray-900 "#1E1E1E"   ; Base - main window background (darkest)
-   :gray-800 "#282828"   ; Surface - panel backgrounds
-   :gray-700 "#303030"   ; Elevated - cards, dialogs, menus
-   :gray-600 "#3D3D3D"   ; Interactive - buttons, inputs (default state)
-   :gray-500 "#505050"   ; Hover state / active borders
-   :gray-300 "#808080"   ; Muted text, disabled text, subtle borders
-   :gray-100 "#E0E0E0"   ; Primary text (lightest)
-   
-   ;; Brand/accent colors - SUCCESS (green)
-   :green-500 "#4CAF50"  ; Success, primary action, active state
-   :green-400 "#5CBF60"  ; Success hover
-   :green-600 "#388E3C"  ; Success pressed
-   
-   ;; Brand/accent colors - INFO (blue)
-   :blue-500  "#2196F3"  ; Info, links
-   :blue-600  "#4A6FA5"  ; Selection background, active tabs
-   :blue-400  "#5A8FCF"  ; Drop target background
-   :blue-300  "#7AB8FF"  ; Focus ring, drop indicator border
-   
-   ;; Brand/accent colors - WARNING (orange)
-   :orange-500 "#FF9800" ; Warning
-   
-   ;; Brand/accent colors - DANGER (red)
-   :red-500   "#D32F2F"  ; Danger, error, delete
-   :red-600   "#B71C1C"  ; Danger hover/pressed
-   
-   ;; Effects/special content (purple)
-   :purple-500 "#7E57C2" ; Effects cells
-   :purple-400 "#8E67D2" ; Effects hover
+   ;; Accent colors
+   :green   "#4CAF50"   ; Success, primary action buttons
+   :blue    "#2196F3"   ; Selection, active state, info
+   :orange  "#FF9800"   ; Warning
+   :red     "#fd3636"   ; Danger, error
    
    ;; Category accent colors (for visual grouping in hierarchies)
    :cat-blue   "#4A7B9D"
@@ -75,62 +51,50 @@
    :cat-brown  "#8C7B5B"})
 
 
-;; =============================================================================
+
 ;; Semantic Colors - Meaningful names mapped to base colors
-;; =============================================================================
+
 
 (def semantic-colors
   "Colors with semantic meaning - use these in your code.
-   Maps meaningful UI concepts to base color values.
-   
-   SIMPLIFIED color hierarchy:
-   - Backgrounds: 4 levels (primary → surface → elevated → interactive)
-   - Text: 3 levels (primary → secondary/muted → disabled uses alpha)
-   - Borders: 2 levels (subtle, default)"
-  (let [{:keys [gray-900 gray-800 gray-700 gray-600 gray-500 gray-300 gray-100
-                green-500 blue-500 blue-600 orange-500 red-500]} base-colors]
-    {;; Background hierarchy (darkest to lightest)
-     :bg-primary     gray-900    ; Root/window background (darkest)
-     :bg-surface     gray-800    ; Panel backgrounds
-     :bg-elevated    gray-700    ; Cards, dialogs, menus, group headers
-     :bg-interactive gray-600    ; Buttons, inputs (default state)
-     :bg-hover       gray-500    ; Hover state
-     :bg-active      gray-500    ; Active/pressed state (same as hover, use opacity for difference)
+   Maps meaningful UI concepts to base color values."
+  (let [{:keys [bg-base interactive border text-muted green blue orange red]} base-colors]
+    {;; Background hierarchy
+     :bg-primary     bg-base      ; Root/window background (darkest)
+     :bg-surface     bg-base      ; Panel backgrounds (same as primary for flat look)
+     :bg-elevated    bg-base      ; Cards, dialogs, menus (same for flat look)
+     :bg-interactive interactive  ; Buttons, inputs (default state)
+     :bg-hover       border       ; Hover state
+     :bg-active      border       ; Active/pressed state
      
-     ;; Text hierarchy (3 levels, use alpha for disabled)
-     :text-primary   gray-100    ; Main text, headings
-     :text-secondary "#B0B0B0"   ; Secondary text (computed between gray-300 and gray-100)
-     :text-muted     gray-300    ; Hints, disabled text, less important
-     :text-disabled  gray-300    ; Disabled text (same as muted)
+     :text-primary   "#ffffff"    ; Main text, headings (white)
+     :text-secondary "#B0B0B0"    ; Secondary text
+     :text-muted     text-muted   ; Hints, disabled text
      
-     ;; Borders (2 levels)
-     :border-subtle  gray-700    ; Subtle borders (matches elevated bg)
-     :border-default gray-500    ; Standard borders
+     ;; Borders
+     :border-subtle  interactive  ; Subtle borders
+     :border-default border       ; Standard borders
      
      ;; Accent colors (semantic meanings)
-     :accent-success green-500   ; Positive actions, active states, online
-     :accent-info    blue-500    ; Information, help, connecting
-     :accent-warning orange-500  ; Warnings, attention needed
-     :accent-danger  red-500     ; Destructive actions, errors, offline
+     :accent-success green        ; Positive actions, service buttons
+     :accent-info    blue         ; Information, help, connecting
+     :accent-warning orange       ; Warnings, attention needed
+     :accent-danger  red          ; Destructive actions, errors
      
-     ;; Selection colors
-     :selection-bg     blue-600  ; Selected item background
-     :selection-border blue-600})) ; Selected item border
+     ;; Selection/Active state - unified blue
+     :selection-bg   blue}))
 
 
-;; =============================================================================
+
 ;; Computed Colors - Auto-derived state variants
-;; =============================================================================
+
 
 (def computed-colors
   "Automatically derived color variants for different UI states.
-   Generated using the color utility functions.
-   
-   These are computed from base/semantic colors - no hardcoded hex here."
-  (let [{:keys [bg-interactive bg-hover accent-success accent-danger selection-bg
-                text-muted]} semantic-colors
-        {:keys [blue-400 blue-300 purple-500 gray-600 gray-500]} base-colors]
-    {;; Interactive element states (derived from semantic)
+   Generated using the color utility functions."
+  (let [{:keys [bg-interactive accent-success accent-danger selection-bg text-muted border]} semantic-colors
+        {:keys [blue interactive]} base-colors]
+    {;; Interactive element states
      :bg-interactive-hover  (colors/lighten bg-interactive 0.10)
      :bg-interactive-active (colors/darken bg-interactive 0.10)
      
@@ -142,31 +106,26 @@
      :accent-danger-hover   (colors/darken accent-danger 0.15)
      :accent-danger-active  (colors/darken accent-danger 0.25)
      
-     ;; Selection states
+     ;; Selection states (used for active cells, effects cells)
      :selection-hover       (colors/lighten selection-bg 0.10)
      :selection-focus       (colors/lighten selection-bg 0.15)
      
-     ;; Drop target colors (use base colors)
-     :drop-target-bg        blue-400
-     :drop-target-border    blue-300
-     :drop-target-glow      (colors/with-alpha blue-300 0.6)
+     ;; Drop target colors
+     :drop-target-bg        blue
+     :drop-target-border    blue
+     :drop-target-glow      (colors/with-alpha blue 0.6)
      
      ;; Disabled variants
      :text-disabled-muted   (colors/with-alpha text-muted 0.6)
-     :bg-disabled           (colors/desaturate gray-600 0.5)
+     :bg-disabled           (colors/desaturate interactive 0.5)
      
-     ;; Effects cells (purple variants)
-     :effects-content       purple-500
-     :effects-content-hover (colors/lighten purple-500 0.10)
-     
-     ;; Cell content (derived from gray-500 hover)
-     :cell-content          gray-500
-     :cell-content-hover    (colors/lighten gray-500 0.12)}))
+     ;; Cell content (used for cells with content but not active)
+     :cell-content          border
+     :cell-content-hover    (colors/lighten border 0.12)}))
 
 
-;; =============================================================================
+
 ;; Special Purpose Colors - Domain-specific
-;; =============================================================================
 
 
 (def category-colors
@@ -184,31 +143,31 @@
      :abstract  cat-brown}))
 
 
+
+;; Theme CSS Registration
+
+
 (def theme
   "Main application theme with colors and base styles.
    
    Access colors via keyword keys:
-   (::bg-primary theme) => \"#1E1E1E\"
+   (::bg-primary theme) => \"#121212\"
    
    Load CSS via URL:
    (::css/url theme)"
   (css/register ::theme
-    (let [;; Pull all colors we need
-          {:keys [bg-primary bg-surface bg-elevated bg-interactive bg-hover bg-active
-                  text-primary text-secondary text-muted text-disabled
+    (let [{:keys [bg-primary bg-surface bg-elevated bg-interactive bg-hover bg-active
+                  text-primary text-secondary text-muted
                   border-subtle border-default
                   accent-success accent-info accent-warning accent-danger
                   selection-bg]} semantic-colors
-          {:keys [accent-success-hover accent-danger-hover]} computed-colors
-          {:keys [green-500 blue-500 blue-600 orange-500 red-500]} base-colors]
+          {:keys [accent-success-hover accent-danger-hover]} computed-colors]
       
       {
-       ;; =========================================================================
        ;; Color Constants (accessible from code)
-       ;; For backward compatibility, keeping old key names but using new values
-       ;; =========================================================================
        
-       ;; Background colors (semantic names - preferred)
+       
+       ;; Background colors
        ::bg-primary bg-primary
        ::bg-surface bg-surface
        ::bg-elevated bg-elevated
@@ -216,25 +175,16 @@
        ::bg-hover bg-hover
        ::bg-active bg-active
        
-       ;; Background colors (legacy names - for compatibility)
-       ::bg-darkest bg-primary
-       ::bg-dark bg-surface
-       ::bg-medium bg-elevated
-       ::bg-light bg-interactive
-       
        ;; Text colors
        ::text-primary text-primary
        ::text-secondary text-secondary
        ::text-muted text-muted
-       ::text-disabled text-disabled
        
        ;; Border colors
-       ::border-dark border-subtle
-       ::border-medium border-default
        ::border-subtle border-subtle
        ::border-default border-default
        
-       ;; Accent colors (semantic names - preferred)
+       ;; Accent colors
        ::accent-success accent-success
        ::accent-info accent-info
        ::accent-warning accent-warning
@@ -242,49 +192,39 @@
        ::accent-success-hover accent-success-hover
        ::accent-danger-hover accent-danger-hover
        
-       ;; Accent colors (legacy names - for compatibility)
-       ::accent-primary accent-success
-       ::accent-hover accent-success-hover
-       ::accent-blue accent-info
-       ::accent-blue-dark blue-600
-       ::accent-orange accent-warning
-       ::accent-red accent-danger
-       
-       ;; Selection colors
+       ;; Selection color
        ::selection-bg selection-bg
        
        
-       ;; =========================================================================
+       
        ;; Root Styles
-       ;; =========================================================================
+       
        
        ".root"
        {:-fx-base bg-primary
         :-fx-background bg-primary
-        ;; Set default text color for dark theme (prevents black text on labels)
+        ;; Set default text color for dark theme
         :-fx-text-background-color text-primary
         :-fx-text-fill text-primary}
        
        
-       ;; =========================================================================
-       ;; Container/Panel Classes (only keep used classes)
-       ;; =========================================================================
+       
+       ;; Container/Panel Classes
+       
        
        ".panel-primary"
        {:-fx-background-color bg-primary}
        
-       ;; Text muted class (used by tabbed_bank for empty message)
        ".text-muted"
        {:-fx-text-fill text-muted}
        
-       ;; Label primary class (used in effect_chain_editor checkbox)
        ".label-primary"
        {:-fx-text-fill text-primary}
        
        
-       ;; =========================================================================
+       
        ;; Scroll Pane Styles
-       ;; =========================================================================
+       
        
        ".scroll-pane-transparent"
        {:-fx-background-color "transparent"

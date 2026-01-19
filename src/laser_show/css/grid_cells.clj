@@ -4,7 +4,7 @@
    Provides CSS classes for:
    - Cue grid cells with various states (empty, content, active)
    - Effect grid cells
-   - Selection and active states
+   - Active state (blue)
    - State-based background colors (no inline styles needed!)
    
    CSS Best Practices:
@@ -21,10 +21,10 @@
   "Grid cell styles for the application."
   (css/register ::grid-cells
     (let [{:keys [bg-interactive bg-hover text-primary text-muted
-                  accent-success accent-info border-default]} theme/semantic-colors
+                  selection-bg border-default]} theme/semantic-colors
           {:keys [cell-content cell-content-hover
-                  effects-content effects-content-hover]} theme/computed-colors
-          {:keys [green-500]} theme/base-colors]
+                  selection-hover]} theme/computed-colors
+          {:keys [blue]} theme/base-colors]
       
       {;; Base Grid Cell
        ;; Structural styles that apply to all cells
@@ -44,24 +44,19 @@
        ".grid-cell-content"
        {:-fx-background-color cell-content}
        
-       ;; Active/playing cell (green)
+       ;; Active/playing cell (blue)
        ".grid-cell-active"
-       {:-fx-background-color accent-success
-        :-fx-effect (str "dropshadow(gaussian, " green-500 ", 10, 0.5, 0, 0)")}
-       
-       ;; Selected cell (blue border)
-       ".grid-cell-selected"
-       {:-fx-border-color accent-info
-        :-fx-border-width 2
-        :-fx-border-radius 4}
+       {:-fx-background-color selection-bg
+        :-fx-effect (str "dropshadow(gaussian, " blue ", 10, 0.5, 0, 0)")}
        
        
        ;; Cell Type Variants
        
        
-       ;; Effects cells with content use purple
+       ;; Effects cells with content also use blue (same as active state, but dimmer)
        ".grid-cell-effects.grid-cell-content"
-       {:-fx-background-color effects-content}
+       {:-fx-background-color selection-bg
+        :-fx-opacity 0.7}
        
        
        ;; Hover States
@@ -71,18 +66,19 @@
        {:-fx-background-color bg-hover
         :-fx-border-color text-muted}
        
-       ;; Active cells stay green on hover, just reduce opacity slightly
+       ;; Active cells stay blue on hover, just reduce opacity slightly
        ".grid-cell-active:hover"
-       {:-fx-background-color accent-success
+       {:-fx-background-color selection-bg
         :-fx-opacity 0.9}
        
        ;; Content cells get lighter on hover
        ".grid-cell-content:hover"
        {:-fx-background-color cell-content-hover}
        
-       ;; Effects content cells get lighter purple
+       ;; Effects content cells get lighter blue on hover
        ".grid-cell-effects.grid-cell-content:hover"
-       {:-fx-background-color effects-content-hover}
+       {:-fx-background-color selection-hover
+        :-fx-opacity 0.85}
        
        
        ;; Grid Cell Labels

@@ -20,9 +20,9 @@
                   text-primary text-secondary text-muted
                   selection-bg]} theme/semantic-colors]
       
-      {;; =========================================================================
+      {
        ;; Visual Editor Container
-       ;; =========================================================================
+       
        
        ;; Base container for all visual editors (corner pin, translate, curves)
        ".visual-editor"
@@ -35,9 +35,9 @@
         :-fx-background-radius 4
         :-fx-padding 8}
        
-       ;; =========================================================================
+       
        ;; Hint Labels
-       ;; =========================================================================
+       
        
        ;; Hint text shown above visual editors
        ".visual-editor-hint"
@@ -45,9 +45,9 @@
         :-fx-font-size 10
         :-fx-font-style "italic"}
        
-       ;; =========================================================================
+       
        ;; Coordinate Display
-       ;; =========================================================================
+       
        
        ;; Monospace coordinate labels (e.g., "TL: (0.50, 0.75)")
        ".visual-editor-coord"
@@ -75,9 +75,9 @@
         :-fx-font-size 10
         :-fx-font-family "'Consolas', monospace"}
        
-       ;; =========================================================================
+       
        ;; Mode Selector Buttons
-       ;; =========================================================================
+       
        
        ;; Base mode button (inactive)
        ".visual-editor-mode-btn"
@@ -93,9 +93,9 @@
         :-fx-background-color selection-bg
         :-fx-text-fill "white"}
        
-       ;; =========================================================================
+       
        ;; Reset Button
-       ;; =========================================================================
+       
        
        ".visual-editor-reset-btn"
        {:-fx-background-color bg-hover
@@ -103,18 +103,18 @@
         :-fx-font-size 10
         :-fx-padding ["4px" "12px"]}
        
-       ;; =========================================================================
+       
        ;; Section Labels (e.g., "ROUTING MODE", "TARGET ZONE GROUPS")
-       ;; =========================================================================
+       
        
        ".visual-editor-section-label"
        {:-fx-text-fill text-muted
         :-fx-font-size 10
         :-fx-font-weight "bold"}
        
-       ;; =========================================================================
+       
        ;; Description Text
-       ;; =========================================================================
+       
        
        ".visual-editor-description"
        {:-fx-text-fill "#606060"
@@ -125,9 +125,9 @@
        {:-fx-text-fill "#606060"
         :-fx-font-size 9}
        
-       ;; =========================================================================
+       
        ;; Info Panel
-       ;; =========================================================================
+       
        
        ".visual-editor-info-panel"
        {:-fx-background-color bg-elevated

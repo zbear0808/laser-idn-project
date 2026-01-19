@@ -103,7 +103,6 @@
    Depends on:
    - chains domain (for cue chain content)
    - active-cell (for active state)
-   - selected-cell (for selection state)
    
    Returns map with:
    - :col, :row - position
@@ -111,7 +110,6 @@
    - :preset-count - number of presets in the cue chain
    - :first-preset-id - id of first preset (for display)
    - :active? - is this cell playing?
-   - :selected? - is this cell selected?
    - :has-content? - does cell have any presets?"
   [context col row]
   (let [;; Read cue chain from unified :chains domain
@@ -119,7 +117,6 @@
         cue-chain-data (get-in chains-data [:cue-chains [col row]] {:items []})
         items (:items cue-chain-data [])
         active (fx/sub-ctx context active-cell)
-        selected (fx/sub-ctx context selected-cell)
         ;; Flatten to get all presets (excluding groups)
         flat-items (filter #(= :preset (:type %))
                           (tree-seq #(= :group (:type %))
@@ -133,7 +130,6 @@
      :preset-count preset-count
      :first-preset-id (:preset-id first-preset)
      :active? (= [col row] active)
-     :selected? (= [col row] selected)
      :has-content? (pos? preset-count)}))
 
 (defn active-cell-preset
@@ -294,55 +290,54 @@
 (defn projectors-list
   "Get list of configured projectors as [{:id :proj-1 :name ...} ...].
    Sorted by service-id (projectors with no service-id or 0 first).
-   Depends on: projectors domain"
+   Depends on: projectors domain (which IS the map of projector-id -> config)"
   [context]
-  (let [data (fx/sub-val context :projectors)
-        items (:items data {})]
+  (let [items (fx/sub-val context :projectors)]
     (->> items
          (mapv (fn [[id config]] (assoc config :id id)))
          (sort-by (fn [proj] [(or (:service-id proj) 0)])))))
 
 (defn active-projector-id
   "Get the ID of the currently selected projector.
-   Depends on: projectors domain"
+   Depends on: projector-ui domain"
   [context]
-  (:active-projector (fx/sub-val context :projectors)))
+  (:active-projector (fx/sub-val context :projector-ui)))
 
 (defn active-projector
   "Get the full config of the currently selected projector.
-   Depends on: projectors domain"
+   Depends on: projector-ui domain and projectors domain"
   [context]
-  (let [data (fx/sub-val context :projectors)
-        active-id (:active-projector data)]
+  (let [active-id (:active-projector (fx/sub-val context :projector-ui))
+        projectors (fx/sub-val context :projectors)]
     (when active-id
-      (assoc (get-in data [:items active-id]) :id active-id))))
+      (assoc (get projectors active-id) :id active-id))))
 
 (defn discovered-devices
   "Get list of devices from the last network scan.
-   Depends on: projectors domain"
+   Depends on: projector-ui domain"
   [context]
-  (:discovered-devices (fx/sub-val context :projectors) []))
+  (:discovered-devices (fx/sub-val context :projector-ui) []))
 
 (defn projector-scanning?
   "Check if a network scan is in progress.
-   Depends on: projectors domain"
+   Depends on: projector-ui domain"
   [context]
-  (:scanning? (fx/sub-val context :projectors) false))
+  (:scanning? (fx/sub-val context :projector-ui) false))
 
 (defn configured-projector-hosts
   "Get set of already-configured projector hosts.
    Useful for indicating which discovered devices are already configured.
-   Depends on: projectors domain"
+   Depends on: projectors domain (which IS the map of projector-id -> config)"
   [context]
-  (let [items (:items (fx/sub-val context :projectors) {})]
+  (let [items (fx/sub-val context :projectors)]
     (into #{} (map :host (vals items)))))
 
 (defn configured-projector-services
   "Get set of [host service-id] pairs for already-configured projectors.
    Allows checking if a specific service/output is already configured.
-   Depends on: projectors domain"
+   Depends on: projectors domain (which IS the map of projector-id -> config)"
   [context]
-  (let [items (:items (fx/sub-val context :projectors) {})]
+  (let [items (fx/sub-val context :projectors)]
     (into #{}
           (map (fn [proj]
                  [(:host proj) (or (:service-id proj) 0)])
@@ -351,15 +346,15 @@
 (defn expanded-discovered-devices
   "Get set of device addresses that are expanded in the discovery panel.
    Used for showing/hiding service lists on multi-output devices.
-   Depends on: projectors domain"
+   Depends on: projector-ui domain"
   [context]
-  (:expanded-devices (fx/sub-val context :projectors) #{}))
+  (:expanded-devices (fx/sub-val context :projector-ui) #{}))
 
 (defn test-pattern-mode
   "Get the current test pattern mode (:grid, :corners, or nil).
-   Depends on: projectors domain"
+   Depends on: projector-ui domain"
   [context]
-  (:test-pattern-mode (fx/sub-val context :projectors)))
+  (:test-pattern-mode (fx/sub-val context :projector-ui)))
 
 (defn enabled-projectors
   "Get list of enabled projectors.
@@ -445,9 +440,9 @@
 
 (defn virtual-projectors-list
   "Get all virtual projectors as a flat list.
-   Depends on: projectors domain"
+   Depends on: virtual-projectors domain (which IS the map of vp-id -> config)"
   [context]
-  (let [items (:virtual-projectors (fx/sub-val context :projectors) {})]
+  (let [items (fx/sub-val context :virtual-projectors)]
     (mapv (fn [[id config]] (assoc config :id id)) items)))
 
 (defn virtual-projectors-for-projector
@@ -459,18 +454,17 @@
 
 (defn virtual-projector
   "Get a single virtual projector by ID.
-   Depends on: projectors domain"
+   Depends on: virtual-projectors domain"
   [context vp-id]
   (when vp-id
-    (let [data (fx/sub-val context :projectors)]
-      (when-let [vp (get-in data [:virtual-projectors vp-id])]
-        (assoc vp :id vp-id)))))
+    (when-let [vp (get (fx/sub-val context :virtual-projectors) vp-id)]
+      (assoc vp :id vp-id))))
 
 (defn active-virtual-projector-id
   "Get the ID of the currently selected virtual projector.
-   Depends on: projectors domain"
+   Depends on: projector-ui domain"
   [context]
-  (:active-virtual-projector (fx/sub-val context :projectors)))
+  (:active-virtual-projector (fx/sub-val context :projector-ui)))
 
 (defn active-virtual-projector
   "Get the full config of the currently selected virtual projector.
@@ -481,25 +475,25 @@
 
 (defn projector-corner-pin
   "Get the corner-pin geometry for a projector.
-   Depends on: projectors domain"
+   Depends on: projectors domain (which IS the map of projector-id -> config)"
   [context projector-id]
   (get-in (fx/sub-val context :projectors)
-          [:items projector-id :corner-pin]))
+          [projector-id :corner-pin]))
 
 (defn projector-zone-groups
   "Get the zone groups a projector belongs to.
-   Depends on: projectors domain"
+   Depends on: projectors domain (which IS the map of projector-id -> config)"
   [context projector-id]
   (get-in (fx/sub-val context :projectors)
-          [:items projector-id :zone-groups]
+          [projector-id :zone-groups]
           []))
 
 (defn projector-tags
   "Get the tags for a projector.
-   Depends on: projectors domain"
+   Depends on: projectors domain (which IS the map of projector-id -> config)"
   [context projector-id]
   (get-in (fx/sub-val context :projectors)
-          [:items projector-id :tags]
+          [projector-id :tags]
           #{}))
 
 

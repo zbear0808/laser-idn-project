@@ -61,7 +61,8 @@
                            :enabled? true}])
   
   ;; Add a test projector (with zone-groups directly assigned)
-  (state/assoc-in-state! [:projectors :items :test-proj]
+  ;; After flattening: :projectors IS the map of projector-id -> config
+  (state/assoc-in-state! [:projectors :test-proj]
                          {:name "Test Projector"
                           :host "192.168.1.100"
                           :port 7255
@@ -91,8 +92,9 @@
       
       (testing "hardware includes projectors, virtual-projectors, and zone-groups"
         (let [paths (get-in mapping [:hardware :paths])]
-          (is (some #(= (:path %) [:projectors :items]) paths))
-          (is (some #(= (:path %) [:projectors :virtual-projectors]) paths))
+          ;; After flattening: :projectors and :virtual-projectors are separate top-level domains
+          (is (some #(= (:path %) [:projectors]) paths))
+          (is (some #(= (:path %) [:virtual-projectors]) paths))
           (is (some #(= (:path %) [:zone-groups]) paths))))
       
       (testing "content includes all chain types"
@@ -129,8 +131,9 @@
       (let [zip-contents (ser/load-from-zip test-project-file)
             data (get zip-contents "hardware.edn")]
         (is (contains? data :projectors))
-        (is (contains? (get-in data [:projectors :items]) :test-proj))
-        (is (= [:all] (get-in data [:projectors :items :test-proj :zone-groups])))))
+        ;; After flattening: :projectors IS the map directly (no :items wrapper)
+        (is (contains? (:projectors data) :test-proj))
+        (is (= [:all] (get-in data [:projectors :test-proj :zone-groups])))))
     
     (testing "content.edn contains expected data"
       (let [zip-contents (ser/load-from-zip test-project-file)
@@ -175,7 +178,8 @@
         (is (= :test-effect (get-in effect-chain [0 :effect-id])))))
     
     (testing "Projectors are restored with zone groups"
-      (let [projector (state/get-in-state [:projectors :items :test-proj])]
+      ;; After flattening: :projectors IS the map directly (no :items wrapper)
+      (let [projector (state/get-in-state [:projectors :test-proj])]
         (is (= "Test Projector" (:name projector)))
         (is (= "192.168.1.100" (:host projector)))
         (is (= [:all] (:zone-groups projector)))))))
@@ -185,10 +189,11 @@
     (init-test-state!)
     
     ;; Capture original state
+    ;; After flattening: :projectors IS the map directly (no :items wrapper)
     (let [original-bpm (state/get-in-state [:timing :bpm])
           original-cues (state/get-in-state [:chains :cue-chains [0 0] :items])
           original-effects (state/get-in-state [:chains :effect-chains [0 0] :items])
-          original-projector (state/get-in-state [:projectors :items :test-proj])]
+          original-projector (state/get-in-state [:projectors :test-proj])]
       
       ;; Save and reload
       (persistent/save-project! test-project-file)
@@ -199,7 +204,7 @@
       (is (= original-bpm (state/get-in-state [:timing :bpm])))
       (is (= original-cues (state/get-in-state [:chains :cue-chains [0 0] :items])))
       (is (= original-effects (state/get-in-state [:chains :effect-chains [0 0] :items])))
-      (is (= original-projector (state/get-in-state [:projectors :items :test-proj]))))))
+      (is (= original-projector (state/get-in-state [:projectors :test-proj]))))))
 
 (deftest test-obsolete-domains-removed
   (testing "Obsolete domains are not in registered domains"

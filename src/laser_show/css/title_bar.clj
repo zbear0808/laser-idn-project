@@ -18,7 +18,7 @@
   (css/register ::menu-theme
     (let [;; Use semantic colors from theme
           {:keys [bg-elevated bg-hover bg-interactive
-                  text-primary text-disabled
+                  text-primary text-muted
                   border-default bg-primary]} theme/semantic-colors]
       
       {;; Store colors as keywords for code access (legacy support)
@@ -100,7 +100,7 @@
         :-fx-cursor "default"
 
         " .label"
-        {:-fx-text-fill text-disabled}}
+        {:-fx-text-fill text-muted}}
 
        
        ".separator-menu-item"

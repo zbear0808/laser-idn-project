@@ -31,9 +31,9 @@
     (is (= 0 (oc/normalized->output-xy -2.0 8)))))
 
 
-;;; ============================================================
+
 ;;; Color Conversion Tests
-;;; ============================================================
+
 
 
 (deftest test-normalized-to-output-color-16bit
@@ -56,9 +56,9 @@
     (is (= 0 (oc/normalized->output-color -0.5 8)))))
 
 
-;;; ============================================================
+
 ;;; Point Conversion Tests
-;;; ============================================================
+
 
 
 (deftest test-point-to-output-values
