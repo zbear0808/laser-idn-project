@@ -20,11 +20,11 @@
       
       {;; Toolbar
        ".toolbar"
-       {:-fx-background-color bg-elevated
+       {:-fx-background-color bg-primary
         :-fx-padding ["8px" "16px"]
         :-fx-spacing 24
         :-fx-border-color border-subtle
-        :-fx-border-width ["0px" "0px" "1px" "0px"]}
+        :-fx-border-width ["1px" "0px" "1px" "0px"]}
        
        ;; Panel containers
        ".panel-primary"

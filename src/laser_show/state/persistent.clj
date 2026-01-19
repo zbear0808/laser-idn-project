@@ -45,7 +45,7 @@
    :hardware
    {:paths [{:path [:projectors :items]}
             {:path [:projectors :virtual-projectors]}
-            {:path [:zone-groups :items]}]}
+            {:path [:zone-groups]}]}
    
    :content
    {:paths [{:path [:chains :cue-chains]}

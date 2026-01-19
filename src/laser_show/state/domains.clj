@@ -229,6 +229,9 @@
    Users assign projectors to zone groups, then target cues to zone groups.
    Zone groups have metadata: name, description, color for UI.
    
+   This domain IS the map of zone-group-id -> group config.
+   UI selection state is stored in :zone-group-ui domain.
+   
    Default zone groups are provided:
    - :all - All projectors
    - :left - Left side projectors
@@ -236,32 +239,42 @@
    - :center - Center projectors
    - :graphics - Graphics-specific projectors (for smaller scan areas)
    - :crowd - Audience scanning projectors"
-  {:items {:default {:all {:id :all
-                           :name "All"
-                           :description "All projectors"
-                           :color "#808080"}
-                     :left {:id :left
-                            :name "Left"
-                            :description "Left side projectors"
-                            :color "#4A90D9"}
-                     :right {:id :right
-                             :name "Right"
-                             :description "Right side projectors"
-                             :color "#D94A4A"}
-                     :center {:id :center
-                              :name "Center"
-                              :description "Center projectors"
-                              :color "#4AD94A"}
-                     :graphics {:id :graphics
-                                :name "Graphics"
-                                :description "Graphics-specific projectors"
-                                :color "#9B59B6"}
-                     :crowd {:id :crowd
-                             :name "Crowd Scanning"
-                             :description "Audience scanning projectors"
-                             :color "#E67E22"}}
-           :doc "Map of zone-group-id (keyword) -> {:id :name :description :color}"}
-   :selected-group {:default nil
+  {:all {:default {:id :all
+                   :name "All"
+                   :description "All projectors"
+                   :color "#808080"}
+         :doc "All projectors group"}
+   :left {:default {:id :left
+                    :name "Left"
+                    :description "Left side projectors"
+                    :color "#4A90D9"}
+          :doc "Left side projectors group"}
+   :right {:default {:id :right
+                     :name "Right"
+                     :description "Right side projectors"
+                     :color "#D94A4A"}
+           :doc "Right side projectors group"}
+   :center {:default {:id :center
+                      :name "Center"
+                      :description "Center projectors"
+                      :color "#4AD94A"}
+            :doc "Center projectors group"}
+   :graphics {:default {:id :graphics
+                        :name "Graphics"
+                        :description "Graphics-specific projectors"
+                        :color "#9B59B6"}
+              :doc "Graphics-specific projectors group"}
+   :crowd {:default {:id :crowd
+                     :name "Crowd Scanning"
+                     :description "Audience scanning projectors"
+                     :color "#E67E22"}
+           :doc "Audience scanning projectors group"}})
+
+(defstate zone-group-ui
+  "UI state for zone group selection.
+   
+   Stores transient UI selection state separately from persisted zone group data."
+  {:selected-group {:default nil
                     :doc "Currently selected zone group ID for editing"}})
 
 ;; Unified Chain Storage Domain

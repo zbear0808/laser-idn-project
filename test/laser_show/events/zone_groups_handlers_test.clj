@@ -42,7 +42,7 @@
                  :group-id :left
                  :state state-with-projector}
           result (zone-groups/handle event)]
-      (is (= :left (get-in result [:state :zone-groups :selected-group])))
+      (is (= :left (get-in result [:state :zone-group-ui :selected-group])))
       (is (nil? (get-in result [:state :projectors :active-projector])))
       (is (nil? (get-in result [:state :projectors :active-virtual-projector]))))))
 
@@ -70,7 +70,7 @@
                  :color "#FF5500"
                  :state state-with-dialog}
           result (zone-groups/handle event)
-          groups (get-in result [:state :zone-groups :items])
+          groups (get-in result [:state :zone-groups])
           new-group (first (filter #(= "My New Group" (:name (second %))) groups))]
       ;; Should have created a new group
       (is (some? new-group))
@@ -80,7 +80,7 @@
       ;; Dialog should be closed
       (is (false? (get-in result [:state :ui :dialogs :zone-group-editor :open?])))
       ;; New group should be selected
-      (is (= (first new-group) (get-in result [:state :zone-groups :selected-group])))
+      (is (= (first new-group) (get-in result [:state :zone-group-ui :selected-group])))
       ;; Project should be dirty
       (is (true? (get-in result [:state :project :dirty?])))))
   
@@ -89,7 +89,7 @@
                  :name "Minimal Group"
                  :state base-state}
           result (zone-groups/handle event)
-          groups (get-in result [:state :zone-groups :items])
+          groups (get-in result [:state :zone-groups])
           new-group (first (filter #(= "Minimal Group" (:name (second %))) groups))]
       (is (some? new-group))
       (is (= "" (:description (second new-group))))
@@ -105,7 +105,7 @@
     (let [custom-group-id :custom-group
           vp-id #uuid "22222222-2222-2222-2222-222222222222"
           state-with-custom (-> base-state
-                                (assoc-in [:zone-groups :items custom-group-id]
+                                (assoc-in [:zone-groups custom-group-id]
                                           {:id custom-group-id
                                            :name "Custom"
                                            :description ""
@@ -117,13 +117,13 @@
                                            :parent-projector-id test-projector-id
                                            :zone-groups [:all custom-group-id]
                                            :enabled? true})
-                                (assoc-in [:zone-groups :selected-group] custom-group-id))
+                                (assoc-in [:zone-group-ui :selected-group] custom-group-id))
           event {:event/type :zone-groups/remove
                  :group-id custom-group-id
                  :state state-with-custom}
           result (zone-groups/handle event)]
       ;; Group should be removed
-      (is (nil? (get-in result [:state :zone-groups :items custom-group-id])))
+      (is (nil? (get-in result [:state :zone-groups custom-group-id])))
       ;; Projector should no longer reference the group
       (is (not (some #{custom-group-id}
                      (get-in result [:state :projectors :items test-projector-id :zone-groups]))))
@@ -131,7 +131,7 @@
       (is (not (some #{custom-group-id}
                      (get-in result [:state :projectors :virtual-projectors vp-id :zone-groups]))))
       ;; Selection should be cleared
-      (is (nil? (get-in result [:state :zone-groups :selected-group])))
+      (is (nil? (get-in result [:state :zone-group-ui :selected-group])))
       ;; Project should be dirty
       (is (true? (get-in result [:state :project :dirty?]))))))
 
@@ -146,7 +146,7 @@
                  :updates {:name "Left Side" :color "#0000FF"}
                  :state base-state}
           result (zone-groups/handle event)
-          group (get-in result [:state :zone-groups :items :left])]
+          group (get-in result [:state :zone-groups :left])]
       (is (= "Left Side" (:name group)))
       (is (= "#0000FF" (:color group)))
       (is (true? (get-in result [:state :project :dirty?]))))))
@@ -161,13 +161,13 @@
                  :group-id :left
                  :state base-state}
           result (zone-groups/handle event)
-          groups (get-in result [:state :zone-groups :items])
+          groups (get-in result [:state :zone-groups])
           ;; Find the duplicate (has " (copy)" suffix)
           duplicate (first (filter #(str/includes? (:name (second %)) "(copy)")
                                    groups))]
       (is (some? duplicate))
       ;; Should be selected
-      (is (= (first duplicate) (get-in result [:state :zone-groups :selected-group])))
+      (is (= (first duplicate) (get-in result [:state :zone-group-ui :selected-group])))
       (is (true? (get-in result [:state :project :dirty?]))))))
 
 
@@ -204,7 +204,7 @@
                  :color "#00FF00"
                  :state state-with-dialog}
           result (zone-groups/handle event)
-          group (get-in result [:state :zone-groups :items :left])]
+          group (get-in result [:state :zone-groups :left])]
       (is (= "Left Updated" (:name group)))
       (is (= "New desc" (:description group)))
       (is (= "#00FF00" (:color group)))

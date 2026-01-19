@@ -17,7 +17,7 @@
   "Select a zone group for viewing/editing."
   [{:keys [group-id state]}]
   {:state (-> state
-              (assoc-in [:zone-groups :selected-group] group-id)
+              (assoc-in [:zone-group-ui :selected-group] group-id)
               ;; Clear projector/VP selection when zone group is selected
               (assoc-in [:projectors :active-projector] nil)
               (assoc-in [:projectors :active-virtual-projector] nil))})
@@ -48,8 +48,8 @@
                    :description description
                    :color color}]
     {:state (-> state
-                (assoc-in [:zone-groups :items group-id] new-group)
-                (assoc-in [:zone-groups :selected-group] group-id)
+                (assoc-in [:zone-groups group-id] new-group)
+                (assoc-in [:zone-group-ui :selected-group] group-id)
                 (assoc-in [:ui :dialogs :zone-group-editor :open?] false)
                 h/mark-dirty)}))
 
@@ -57,7 +57,7 @@
   "Remove a zone group. Also removes this group from all projectors and virtual projectors."
   [{:keys [group-id state]}]
   (let [;; Remove group from zone-groups domain
-        new-items (dissoc (get-in state [:zone-groups :items]) group-id)
+        new-zone-groups (dissoc (get state :zone-groups) group-id)
         ;; Remove group from all projectors that have it
         projectors (get-in state [:projectors :items] {})
         updated-projectors (reduce-kv
@@ -77,11 +77,11 @@
                       {}
                       vps)
         ;; Clear selection if this was selected
-        selected (get-in state [:zone-groups :selected-group])
+        selected (get-in state [:zone-group-ui :selected-group])
         new-selected (if (= selected group-id) nil selected)]
     {:state (-> state
-                (assoc-in [:zone-groups :items] new-items)
-                (assoc-in [:zone-groups :selected-group] new-selected)
+                (assoc :zone-groups new-zone-groups)
+                (assoc-in [:zone-group-ui :selected-group] new-selected)
                 (assoc-in [:projectors :items] updated-projectors)
                 (assoc-in [:projectors :virtual-projectors] updated-vps)
                 h/mark-dirty)}))
@@ -90,20 +90,20 @@
   "Update zone group properties (name, description, color)."
   [{:keys [group-id updates state]}]
   {:state (-> state
-              (update-in [:zone-groups :items group-id] merge updates)
+              (update-in [:zone-groups group-id] merge updates)
               h/mark-dirty)})
 
 (defn- handle-zone-groups-duplicate
   "Duplicate a zone group with a new name."
   [{:keys [group-id state]}]
-  (let [original (get-in state [:zone-groups :items group-id])
+  (let [original (get-in state [:zone-groups group-id])
         new-id (keyword (str "group-" (System/currentTimeMillis)))
         new-group (-> original
                       (assoc :id new-id)
                       (update :name str " (copy)"))]
     {:state (-> state
-                (assoc-in [:zone-groups :items new-id] new-group)
-                (assoc-in [:zone-groups :selected-group] new-id)
+                (assoc-in [:zone-groups new-id] new-group)
+                (assoc-in [:zone-group-ui :selected-group] new-id)
                 h/mark-dirty)}))
 
 
@@ -113,7 +113,7 @@
 (defn- handle-zone-groups-edit
   "Open dialog to edit an existing zone group."
   [{:keys [group-id state]}]
-  (let [group (get-in state [:zone-groups :items group-id])]
+  (let [group (get-in state [:zone-groups group-id])]
     {:state (-> state
                 (assoc-in [:ui :dialogs :zone-group-editor :open?] true)
                 (assoc-in [:ui :dialogs :zone-group-editor :data]
@@ -127,7 +127,7 @@
   "Save changes to an existing zone group from dialog."
   [{:keys [group-id name description color state]}]
   {:state (-> state
-              (update-in [:zone-groups :items group-id] merge
+              (update-in [:zone-groups group-id] merge
                          {:name name
                           :description description
                           :color color})

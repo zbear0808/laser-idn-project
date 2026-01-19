@@ -506,9 +506,9 @@
 
 (defn zone-groups-list
   "Get all zone groups as a flat list.
-   Depends on: zone-groups domain"
+   Depends on: zone-groups domain (which IS the map of group-id -> config)"
   [context]
-  (let [items (:items (fx/sub-val context :zone-groups) {})]
+  (let [items (fx/sub-val context :zone-groups)]
     (mapv (fn [[id config]] (assoc config :id id)) items)))
 
 (defn zone-group
@@ -516,15 +516,14 @@
    Depends on: zone-groups domain"
   [context group-id]
   (when group-id
-    (let [data (fx/sub-val context :zone-groups)]
-      (when-let [g (get-in data [:items group-id])]
-        (assoc g :id group-id)))))
+    (when-let [g (get (fx/sub-val context :zone-groups) group-id)]
+      (assoc g :id group-id))))
 
 (defn selected-zone-group-id
   "Get the currently selected zone group ID.
-   Depends on: zone-groups domain"
+   Depends on: zone-group-ui domain"
   [context]
-  (:selected-group (fx/sub-val context :zone-groups)))
+  (:selected-group (fx/sub-val context :zone-group-ui)))
 
 (defn selected-zone-group
   "Get the currently selected zone group.

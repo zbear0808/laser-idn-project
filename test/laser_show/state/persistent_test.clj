@@ -93,7 +93,7 @@
         (let [paths (get-in mapping [:hardware :paths])]
           (is (some #(= (:path %) [:projectors :items]) paths))
           (is (some #(= (:path %) [:projectors :virtual-projectors]) paths))
-          (is (some #(= (:path %) [:zone-groups :items]) paths))))
+          (is (some #(= (:path %) [:zone-groups]) paths))))
       
       (testing "content includes all chain types"
         (let [paths (get-in mapping [:content :paths])]
