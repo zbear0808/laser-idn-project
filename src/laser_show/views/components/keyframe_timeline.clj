@@ -32,7 +32,8 @@
     :on-move {:event/type :keyframe/move ...}
     :on-delete {:event/type :keyframe/delete ...}}"
   (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events])
+            [laser-show.events.core :as events]
+            [laser-show.css.theme :as theme])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.input MouseButton MouseEvent]
            [javafx.scene.paint Color]
@@ -79,7 +80,7 @@
 (defn- draw-background
   "Draw the canvas background."
   [^GraphicsContext gc ^double width ^double height]
-  (.setFill gc (Color/web "#1E1E1E"))
+  (.setFill gc (Color/web (:bg-base theme/base-colors)))
   (.fillRect gc 0 0 width height))
 
 (defn- draw-timeline-bar

@@ -15,10 +15,10 @@
 (def components
   "Component styles for the application."
   (css/register ::components
-    (let [{:keys [bg-surface bg-elevated bg-interactive bg-hover
+    (let [{:keys [bg-primary bg-surface bg-elevated bg-interactive bg-hover
                   text-primary text-secondary text-muted
                   accent-success accent-info accent-warning accent-danger
-                  selection-bg]} theme/semantic-colors
+                  selection-bg border-default]} theme/semantic-colors
           {:keys [interactive]} theme/base-colors]
       
       {
@@ -114,10 +114,13 @@
        ;; Cards and Panels
        
        
-       ;; Card container - slightly elevated surface
+       ;; Card container - matches standard background
        ".card"
-       {:-fx-background-color "#2A2A2A"
-        :-fx-background-radius 4}
+       {:-fx-background-color bg-primary
+        :-fx-background-radius 4
+        :-fx-border-color border-default
+        :-fx-border-width 1
+        :-fx-border-radius 4}
        
        ;; Elevated panel - for editor sections, dialogs
        ".panel-content"
