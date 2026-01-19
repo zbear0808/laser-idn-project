@@ -21,8 +21,8 @@
   "Map of config type to file path.
    
    - project-metadata.edn: Settings, grid config, BPM
-   - hardware.edn: Projectors, zones, zone-groups
-   - content.edn: All chains (cue-chains, effect-chains, projector-effects, zone-effects)
+   - hardware.edn: Projectors, zone-groups, virtual-projectors
+   - content.edn: All chains (cue-chains, effect-chains, projector-effects)
    - mappings.edn: Input router handlers (future)"
   {:project-metadata "config/project-metadata.edn"
    :hardware        "config/hardware.edn"
@@ -54,14 +54,13 @@
    
    :hardware
    {:paths [{:path [:projectors :items]}
-            {:path [:zones :items]}
+            {:path [:projectors :virtual-projectors]}
             {:path [:zone-groups :items]}]}
    
    :content
    {:paths [{:path [:chains :cue-chains]}
             {:path [:chains :effect-chains]}
-            {:path [:chains :projector-effects]}
-            {:path [:chains :zone-effects]}]}})
+            {:path [:chains :projector-effects]}]}})
 
 
 ;; Load Functions

@@ -75,10 +75,13 @@
   [{:keys [col row preset-id item-id state]}]
   (let [;; Support both old :preset-id and new :item-id (from data-driven banks)
         pid (or preset-id item-id)
+        ;; Ensure cell exists with default destination-zone routing to 'All'
         ensure-cell (fn [s]
                       (if (get-in s [:chains :cue-chains [col row]])
                         s
-                        (assoc-in s [:chains :cue-chains [col row]] {:items []})))
+                        (assoc-in s [:chains :cue-chains [col row]]
+                                  {:items []
+                                   :destination-zone {:zone-group-id :all}})))
         new-preset (h/ensure-item-fields (cue-chains/create-preset-instance pid {}))
         state-with-cell (ensure-cell state)
         current-items (get-in state-with-cell (cue-chain-path col row) [])
@@ -103,10 +106,13 @@
                            (:parameters item []))
         new-effect (h/ensure-item-fields {:effect-id effect-id
                                           :params params-map})
+        ;; Ensure cell exists with default destination-zone routing to 'All'
         ensure-cell (fn [s]
                       (if (get-in s [:chains :cue-chains [col row]])
                         s
-                        (assoc-in s [:chains :cue-chains [col row]] {:items []})))
+                        (assoc-in s [:chains :cue-chains [col row]]
+                                  {:items []
+                                   :destination-zone {:zone-group-id :all}})))
         state-with-cell (ensure-cell state)
         ;; parent-path should be something like [0 :effects]
         target-path (vec (concat [:chains :cue-chains [col row] :items] parent-path))
@@ -192,32 +198,19 @@
 
 
 (defn- handle-cue-chain-set-destination-zone-group
-  "Set the destination zone group for a cue chain item.
+  "Set the destination zone group for the entire cue chain.
    
-   Updates the item at item-path with the specified zone group ID.
-   This is the recommended way to configure routing - target zone groups
-   rather than individual zones."
-  [{:keys [col row item-path group-id state]}]
-  (let [items-path (cue-chain-path col row)
-        dest-zone-path (vec (concat items-path item-path [:destination-zone]))]
-    {:state (-> state
-                (assoc-in (conj dest-zone-path :mode) :zone-group)
-                (assoc-in (conj dest-zone-path :zone-group-id) group-id)
-                h/mark-dirty)}))
-
-(defn- handle-cue-chain-set-preferred-zone-type
-  "Set the preferred zone type when multiple zones match.
+   Updates the cue chain at [col row] with the specified zone group ID.
+   Accepts either :group-id directly or extracts :id from the fx/event
+   (when triggered from a combo-box selection).
    
-   When a cue targets a zone group that contains multiple zones for the same
-   projector, the preferred zone type determines which zone wins:
-   - :default - Standard laser graphics zone
-   - :graphics - Specialized graphics content zone
-   - :crowd-scanning - Audience scanning zone (with safety restrictions)"
-  [{:keys [col row item-path fx/event state]}]
-  (let [items-path (cue-chain-path col row)
-        dest-zone-path (vec (concat items-path item-path [:destination-zone :preferred-zone-type]))]
+   This applies to all presets in the cue chain."
+  [{:keys [col row group-id fx/event state]}]
+  (let [;; Support both direct group-id and combo-box event (which passes the group map)
+        actual-group-id (or group-id (:id event))
+        dest-zone-path [:chains :cue-chains [col row] :destination-zone :zone-group-id]]
     {:state (-> state
-                (assoc-in dest-zone-path event)
+                (assoc-in dest-zone-path actual-group-id)
                 h/mark-dirty)}))
 
 
@@ -269,7 +262,6 @@
     
     ;; Destination zone routing
     :cue-chain/set-destination-zone-group (handle-cue-chain-set-destination-zone-group event)
-    :cue-chain/set-preferred-zone-type (handle-cue-chain-set-preferred-zone-type event)
     
     ;; Unknown event in this domain
     {}))

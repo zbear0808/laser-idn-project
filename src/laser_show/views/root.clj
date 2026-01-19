@@ -12,7 +12,7 @@
    ├── toolbar
    ├── tab-bar
    ├── main-content (split-pane)
-   │   ├── tab-content (grid/effects/projectors/zones/settings)
+   │   ├── tab-content (grid/effects/projectors/zone-groups/settings)
    │   └── preview-panel
    ├── status-bar
    └── dialogs (via refs)"
@@ -71,7 +71,7 @@
   [{:id :grid :label "Grid"}
    {:id :effects :label "Effects"}
    {:id :projectors :label "Projectors"}
-   {:id :zones :label "Zones"}
+   {:id :zones :label "Zone Groups"}
    {:id :settings :label "Settings"}])
 
 (defn tab-bar

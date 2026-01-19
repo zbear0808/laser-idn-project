@@ -55,28 +55,6 @@
   (ex/trigger-time (raw-state)))
 
 
-;; Zones Queries
-
-
-(defn zones-items []
-  (ex/zones-items (raw-state)))
-
-(defn zone [zone-id]
-  (ex/zone (raw-state) zone-id))
-
-(defn zones-by-projector [projector-id]
-  (ex/zones-by-projector (raw-state) projector-id))
-
-(defn zones-by-zone-group [zone-group-id]
-  (ex/zones-by-zone-group (raw-state) zone-group-id))
-
-(defn zones-by-type [zone-type]
-  (ex/zones-by-type (raw-state) zone-type))
-
-(defn enabled-zones []
-  (ex/enabled-zones (raw-state)))
-
-
 ;; Zone Groups Queries
 
 
@@ -96,6 +74,53 @@
 (defn projector [projector-id]
   (ex/projector (raw-state) projector-id))
 
-(defn projector-zone-ids [projector-id]
-  (ex/projector-zone-ids (raw-state) projector-id))
+(defn projector-zone-groups [projector-id]
+  (ex/projector-zone-groups (raw-state) projector-id))
+
+(defn projector-corner-pin [projector-id]
+  (ex/projector-corner-pin (raw-state) projector-id))
+
+(defn projector-tags [projector-id]
+  (ex/projector-tags (raw-state) projector-id))
+
+(defn enabled-projectors []
+  (ex/enabled-projectors (raw-state)))
+
+(defn projectors-by-zone-group [zone-group-id]
+  (ex/projectors-by-zone-group (raw-state) zone-group-id))
+
+(defn projectors-by-tag [tag]
+  (ex/projectors-by-tag (raw-state) tag))
+
+
+;; Virtual Projector Queries
+
+
+(defn virtual-projectors []
+  (ex/virtual-projectors (raw-state)))
+
+(defn virtual-projector [vp-id]
+  (ex/virtual-projector (raw-state) vp-id))
+
+(defn virtual-projectors-for-projector [parent-projector-id]
+  (ex/virtual-projectors-for-projector (raw-state) parent-projector-id))
+
+(defn enabled-virtual-projectors []
+  (ex/enabled-virtual-projectors (raw-state)))
+
+(defn virtual-projectors-by-zone-group [zone-group-id]
+  (ex/virtual-projectors-by-zone-group (raw-state) zone-group-id))
+
+(defn virtual-projector-corner-pin [vp-id]
+  (ex/virtual-projector-corner-pin (raw-state) vp-id))
+
+(defn virtual-projector-parent [vp-id]
+  (ex/virtual-projector-parent (raw-state) vp-id))
+
+
+;; Routing Queries
+
+
+(defn all-outputs-for-zone-group [zone-group-id]
+  (ex/all-outputs-for-zone-group (raw-state) zone-group-id))
 

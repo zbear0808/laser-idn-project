@@ -1,22 +1,21 @@
 (ns laser-show.backend.multi-engine
   "Multi-engine management for streaming to multiple projectors.
    
-   Each projector gets its own streaming engine with a zone-specific
+   Each projector gets its own streaming engine with a projector-specific
    frame provider. The frame provider uses the routing system to determine
-   which cues should be sent to each projector's zones.
+   which cues should be sent to each projector.
    
-   Architecture:
-   - One streaming engine per enabled projector
+   SIMPLIFIED ARCHITECTURE (v2):
+   - One streaming engine per enabled projector (and virtual projector)
    - Each engine has a frame provider that:
-     1. Gets active cues
-     2. Uses routing/core to determine which zone matches for this projector
-     3. Generates frame for the matched zone
-     4. Applies zone effects (from [:chains :zone-effects zone-id :items])
-     5. Applies projector calibration effects
+     1. Gets active cues and their destination zone groups
+     2. Uses routing/core to determine if this projector/VP matches
+     3. Generates frame if matched
+     4. Applies projector calibration effects (color curves + corner-pin)
    
-   Zone effects use the same effects system as projector and cue effects,
-   allowing any calibration effect (corner-pin, flip, scale, etc.) to be
-   applied at the zone level.
+   Corner-pin is now directly on projectors/VPs, eliminating zones.
+   Virtual projectors inherit color curves from parent but have
+   independent corner-pin for things like graphics/crowd scanning.
    
    The multi-engine state is stored in [:backend :streaming :multi-engine-state]"
   (:require [clojure.tools.logging :as log]
@@ -24,7 +23,6 @@
             [laser-show.state.core :as state]
             [laser-show.state.queries :as queries]
             [laser-show.routing.core :as routing]
-            [laser-show.animation.types :as t]
             [laser-show.animation.effects :as effects]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.idn.output-config :as output-config]))
@@ -40,30 +38,6 @@
 
 ;; Frame Provider Creation
 
-
-(defn- apply-zone-effects
-  "Apply zone effects to a frame using the standard effects system.
-   
-   Zone effects are stored in [:chains :zone-effects zone-id :items]
-   and are processed identically to projector effects. Recommended
-   zone effects include: corner-pin, flip, scale, offset, rotation.
-   
-   This uses the same effects/apply-effect-chain function as projector
-   effects, ensuring consistent behavior and allowing all calibration
-   effects to be used on zones."
-  [frame zone-id elapsed-ms bpm trigger-time timing-ctx]
-  (if-not frame
-    frame
-    (let [raw-state (state/get-raw-state)
-          zone-effects (get-in raw-state [:chains :zone-effects zone-id :items] [])]
-      (if (seq zone-effects)
-        (try
-          (effects/apply-effect-chain frame {:effects zone-effects}
-                                      elapsed-ms bpm trigger-time timing-ctx)
-          (catch Exception e
-            (log/error "Error applying zone effects:" (.getMessage e))
-            frame))
-        frame))))
 
 (defn- apply-projector-effects
   "Apply projector-level calibration effects to a frame.
@@ -83,14 +57,13 @@
       frame)))
 
 (defn- create-projector-frame-provider
-  "Create a frame provider function for a specific projector.
+  "Create a frame provider function for a specific projector or virtual projector.
    
    The frame provider:
-   1. Gets the current active cue
-   2. Uses routing to determine which zone (if any) matches for this projector
-   3. Generates the frame for that zone
-   4. Applies zone effects (using standard effects system)
-   5. Applies projector calibration effects
+   1. Gets the current active cue and its destination zone group
+   2. Checks if this projector/VP belongs to the target zone group
+   3. Generates the frame if matched
+   4. Applies projector calibration effects (color curves + corner-pin)
    
    Returns a zero-arity function that returns a LaserFrame."
   [projector-id]
@@ -117,8 +90,9 @@
             bpm (get-in raw-state [:timing :bpm] 120.0)
             timing-ctx (frame-service/get-timing-context)
             
-            ;; Get zones for routing
-            zones-items (get-in raw-state [:zones :items] {})
+            ;; Get projectors and virtual projectors for routing
+            projectors-items (get-in raw-state [:projectors :items] {})
+            virtual-projectors (get-in raw-state [:projectors :virtual-projectors] {})
             
             ;; For now, treat the whole cue chain as "the cue" for routing
             ;; In future, each item in the chain could have its own destination-zone
@@ -129,25 +103,18 @@
                              :effects []}
             
             ;; Build routing map for this cue
-            ;; Returns: {projector-id zone-id, ...}
-            routing-map (routing/build-routing-map cue-for-routing zones-items)
-            
-            ;; Check if this projector is in the routing
-            zone-id (get routing-map projector-id)]
+            ;; Returns: #{projector-id-or-vp-id ...}
+            matching-outputs (routing/build-routing-map cue-for-routing
+                                                        projectors-items
+                                                        virtual-projectors)]
         
-        (if zone-id
-          ;; This projector receives the cue - generate frame
-          (let [;; Generate base frame from cue chain (same as current logic)
-                base-frame (frame-service/generate-current-frame)]
+        (if (contains? matching-outputs projector-id)
+          ;; This projector/VP receives the cue - generate frame
+          (let [base-frame (frame-service/generate-current-frame)]
             (when base-frame
-              ;; Apply zone effects (using standard effects system)
-              ;; Zone effects are stored in [:chains :zone-effects zone-id :items]
-              (let [frame-with-zone-effects (apply-zone-effects base-frame zone-id
-                                                                 elapsed bpm trigger-time timing-ctx)
-                    ;; Apply projector effects
-                    final-frame (apply-projector-effects frame-with-zone-effects projector-id
-                                                         elapsed bpm trigger-time timing-ctx)]
-                final-frame)))
+              ;; Apply projector effects (color curves + corner-pin)
+              (apply-projector-effects base-frame projector-id
+                                       elapsed bpm trigger-time timing-ctx)))
           ;; This projector doesn't receive the cue - empty frame
           nil))
       

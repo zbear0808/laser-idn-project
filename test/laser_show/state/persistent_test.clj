@@ -62,20 +62,13 @@
                            :params {:amount 0.5}
                            :enabled? true}])
   
-  ;; Add a test projector
+  ;; Add a test projector (with zone-groups directly assigned)
   (state/assoc-in-state! [:projectors :items :test-proj]
                          {:name "Test Projector"
                           :host "192.168.1.100"
                           :port 7255
-                          :enabled? true})
-  
-  ;; Add a test zone
-  (state/assoc-in-state! [:zones :items #uuid "33333333-3333-3333-3333-333333333333"]
-                         {:id #uuid "33333333-3333-3333-3333-333333333333"
-                          :name "Test Zone"
-                          :projector-id :test-proj
-                          :type :default
-                          :enabled? true}))
+                          :enabled? true
+                          :zone-groups [:all]}))
 
 
 ;; Tests
@@ -98,18 +91,17 @@
           (is (some #(= (:path %) [:timing]) paths))
           (is (some #(= (:path %) [:grid]) paths))))
       
-      (testing "hardware includes projectors, zones, and zone-groups"
+      (testing "hardware includes projectors, virtual-projectors, and zone-groups"
         (let [paths (get-in mapping [:hardware :paths])]
           (is (some #(= (:path %) [:projectors :items]) paths))
-          (is (some #(= (:path %) [:zones :items]) paths))
+          (is (some #(= (:path %) [:projectors :virtual-projectors]) paths))
           (is (some #(= (:path %) [:zone-groups :items]) paths))))
       
       (testing "content includes all chain types"
         (let [paths (get-in mapping [:content :paths])]
           (is (some #(= (:path %) [:chains :cue-chains]) paths))
           (is (some #(= (:path %) [:chains :effect-chains]) paths))
-          (is (some #(= (:path %) [:chains :projector-effects]) paths))
-          (is (some #(= (:path %) [:chains :zone-effects]) paths)))))))
+          (is (some #(= (:path %) [:chains :projector-effects]) paths)))))))
 
 (deftest test-save-project
   (testing "Save project creates zip file with correct contents"
@@ -140,8 +132,7 @@
             data (get zip-contents "hardware.edn")]
         (is (contains? data :projectors))
         (is (contains? (get-in data [:projectors :items]) :test-proj))
-        (is (contains? data :zones))
-        (is (contains? (get-in data [:zones :items]) #uuid "33333333-3333-3333-3333-333333333333"))))
+        (is (= [:all] (get-in data [:projectors :items :test-proj :zone-groups])))))
     
     (testing "content.edn contains expected data"
       (let [zip-contents (ser/load-from-zip test-project-file)
@@ -185,15 +176,11 @@
         (is (= 1 (count effect-chain)))
         (is (= :test-effect (get-in effect-chain [0 :effect-id])))))
     
-    (testing "Projectors are restored"
+    (testing "Projectors are restored with zone groups"
       (let [projector (state/get-in-state [:projectors :items :test-proj])]
         (is (= "Test Projector" (:name projector)))
-        (is (= "192.168.1.100" (:host projector)))))
-    
-    (testing "Zones are restored"
-      (let [zone (state/get-in-state [:zones :items #uuid "33333333-3333-3333-3333-333333333333"])]
-        (is (= "Test Zone" (:name zone)))
-        (is (= :test-proj (:projector-id zone)))))))
+        (is (= "192.168.1.100" (:host projector)))
+        (is (= [:all] (:zone-groups projector)))))))
 
 (deftest test-round-trip
   (testing "Save and load preserves all data with zip format"

@@ -1,20 +1,20 @@
 (ns laser-show.events.handlers.projector
   "Event handlers for projector configuration and effects.
    
-   This file handles projector-specific operations:
+   SIMPLIFIED ARCHITECTURE (v2):
+   - Projectors have corner-pin geometry directly (no separate zones)
+   - Projectors are assigned to zone groups directly
+   - Virtual projectors provide alternate corner-pin with inherited color curves
+   - Tags (:graphics, :crowd-scanning) auto-add to matching zone groups
+   
+   This file handles:
    - Network device discovery (scan, add devices/services)
-   - Projector configuration (settings, enabled state)
+   - Projector configuration (settings, enabled state, corner-pin)
+   - Zone group assignment
+   - Tag management
+   - Virtual projector creation and management
    - Connection status updates
-   - Test patterns and broadcast address configuration
-   - Legacy effect operations (for backward compatibility)
-   
-   Effect-level operations have moved to chain.clj:
-   - Parameter updates (update-param, update-param-from-text)
-   - Spatial and curve editing
-   - UI mode switching
-   
-   UI components should use :chain/* events with {:domain :projector-effects}
-   for parameter and curve operations."
+   - Test patterns"
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
             [laser-show.events.handlers.chain :as chain-handlers]
@@ -22,21 +22,40 @@
             [laser-show.common.util :as u]))
 
 
+;; Constants
+
+
+(def DEFAULT_CORNER_PIN
+  "Default corner-pin with no transformation (identity mapping)."
+  {:tl-x -1.0 :tl-y 1.0
+   :tr-x 1.0 :tr-y 1.0
+   :bl-x -1.0 :bl-y -1.0
+   :br-x 1.0 :br-y -1.0})
+
+
+(def DEFAULT_PROJECTOR_EFFECTS
+  "Default effects for all projectors - color calibration only.
+   Uses normalized 0.0-1.0 color values."
+  [{:effect-id :rgb-curves
+    :id (random-uuid)
+    :enabled? true
+    :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
+             :g-curve-points [[0.0 0.0] [1.0 1.0]]
+             :b-curve-points [[0.0 0.0] [1.0 1.0]]}}])
+
+
 ;; Path Helpers
 
 
 (defn- projector-effects-path
   "Get the path to a projector's effects in state.
-   Uses new unified :chains domain structure."
+   Uses unified :chains domain structure."
   [projector-id]
   [:chains :projector-effects projector-id :items])
 
+
 (defn- projector-ui-state-path
-  "Get the path to projector effect chain UI state.
-   
-   UI state is stored in :ui domain (not :projectors) to avoid
-   subscription cascade - changes to drag state won't invalidate
-   all projector-related subscriptions."
+  "Get the path to projector effect chain UI state."
   [projector-id]
   [:ui :projector-effect-ui-state projector-id])
 
@@ -51,12 +70,14 @@
     {:state (assoc-in state [:projectors :scanning?] true)
      :projectors/scan {:broadcast-address broadcast-addr}}))
 
+
 (defn- handle-projectors-scan-complete
   "Handle scan completion - update discovered devices list."
   [{:keys [devices state]}]
   {:state (-> state
               (assoc-in [:projectors :scanning?] false)
               (assoc-in [:projectors :discovered-devices] (vec devices)))})
+
 
 (defn- handle-projectors-scan-failed
   "Handle scan failure."
@@ -65,111 +86,25 @@
   {:state (assoc-in state [:projectors :scanning?] false)})
 
 
-;; Zone Creation Helpers
-
-
-(defn- zone-type->default-groups
-  "Return default zone groups for a zone type."
-  [zone-type]
-  (case zone-type
-    :default [:all]
-    :graphics [:all :graphics]
-    :crowd-scanning [:all :crowd]
-    [:all]))
-
-(defn- zone-type->name-suffix
-  "Return name suffix for a zone type."
-  [zone-type]
-  (case zone-type
-    :default "Default"
-    :graphics "Graphics"
-    :crowd-scanning "Crowd Scanning"
-    "Unknown"))
-
-(defn- create-zone
-  "Create a zone configuration for a projector.
-   
-   Args:
-   - projector-id: keyword ID of the parent projector
-   - projector-name: name of the projector (for zone naming)
-   - zone-type: :default, :graphics, or :crowd-scanning
-   
-   NOTE: Zone effects (geometry, etc.) are stored separately in :chains :zone-effects.
-   This function only creates the zone metadata."
-  [projector-id projector-name zone-type]
-  (let [zone-id (random-uuid)]
-    {:id zone-id
-     :name (str projector-name " - " (zone-type->name-suffix zone-type))
-     :projector-id projector-id
-     :type zone-type
-     :enabled? true
-     :zone-groups (zone-type->default-groups zone-type)}))
-
-(defn- make-default-zone-effects
-  "Create default effects chain for a zone.
-   Zones typically need basic geometry effects like corner-pin for calibration."
-  []
-  [{:effect-id :corner-pin
-    :id (random-uuid)
-    :enabled? true
-    :params {:tl-x -1.0 :tl-y 1.0
-             :tr-x 1.0 :tr-y 1.0
-             :bl-x -1.0 :bl-y -1.0
-             :br-x 1.0 :br-y -1.0}}])
-
-(defn- create-projector-zones
-  "Create all 3 zones for a new projector.
-   Returns:
-   - :zones-map - Map of {zone-id zone-config}
-   - :zone-ids - Vector of zone UUIDs
-   - :zone-effects-map - Map of {zone-id {:items [effects]}} for chains storage"
-  [projector-id projector-name]
-  (let [zone-types [:default :graphics :crowd-scanning]
-        zones (mapv #(create-zone projector-id projector-name %) zone-types)]
-    {:zones-map (into {} (map (fn [z] [(:id z) z]) zones))
-     :zone-ids (mapv :id zones)
-     :zone-effects-map (into {} (map (fn [z] [(:id z) {:items (make-default-zone-effects)}]) zones))}))
-
-
-;; Device/Service Addition
-
-
-(def DEFAULT_PROJECTOR_EFFECTS
-  "Default effects for all projectors - color calibration only.
-   
-   Spatial/geometry calibration (corner-pin, flip, scale, offset, rotation)
-   should be applied at the ZONE level, not the projector level.
-   
-   Projectors handle color calibration:
-   - RGB curves for color balancing (using normalized 0.0-1.0 values)
-   - (future: white balance, intensity curves, etc.)"
-  [{:effect-id :rgb-curves
-    :id (random-uuid)
-    :enabled? true
-    :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
-             :g-curve-points [[0.0 0.0] [1.0 1.0]]
-             :b-curve-points [[0.0 0.0] [1.0 1.0]]}}])
+;; Projector Configuration Factory
 
 
 (defn- make-projector-config
   "Create a projector configuration map with defaults.
    
    Required keys: :name, :host
-   Optional keys: :port, :service-id, :service-name, :unit-id, :zone-ids, :scan-rate
-   
-   :scan-rate is in points per second (pps). Default is 30,000 pps which is common
-   for entry-level galvo systems. Higher-end systems may support 40-60k+ pps.
-   
-   TODO: Use scan-rate to calculate point limits for projected images (max points = scan-rate / fps)"
-  [{:keys [name host port service-id service-name unit-id zone-ids scan-rate]
-    :or {port 7255 zone-ids [] scan-rate 30000}}]
+   Optional keys: :port, :service-id, :service-name, :unit-id, :zone-groups, :tags, :scan-rate, :corner-pin"
+  [{:keys [name host port service-id service-name unit-id zone-groups tags scan-rate corner-pin]
+    :or {port 7255 zone-groups [:all] tags #{} scan-rate 30000 corner-pin DEFAULT_CORNER_PIN}}]
   {:name name
    :host host
    :port port
    :service-id service-id
    :service-name service-name
    :unit-id unit-id
-   :zone-ids zone-ids
+   :zone-groups zone-groups
+   :tags tags
+   :corner-pin corner-pin
    :enabled? true
    :scan-rate scan-rate
    :output-config {:color-bit-depth 8
@@ -177,13 +112,13 @@
    :status {:connected? false}})
 
 
+;; Device/Service Addition
+
+
 (defn- handle-projectors-add-device
   "Add a discovered device as a configured projector.
    If device has services, adds the default service (or first one).
-   For multi-output devices, use :projectors/add-service instead.
-   
-   Also creates 3 zones for the projector: default, graphics, crowd-scanning.
-   Zone effects are stored in [:chains :zone-effects zone-id :items]."
+   For multi-output devices, use :projectors/add-service instead."
   [{:keys [device state]}]
   (let [{:keys [address host-name unit-id]
          device-services :services
@@ -198,31 +133,23 @@
                  (when host-name (str host-name "." service-id))
                  address)
         projector-id (keyword (str "projector-" (System/currentTimeMillis)))
-        ;; Create zones for this projector (includes zone effects)
-        {:keys [zones-map zone-ids zone-effects-map]} (create-projector-zones projector-id name)
         projector-config (make-projector-config
                            {:name name
                             :host address
                             :port (or device-port 7255)
                             :service-id service-id
                             :service-name service-name
-                            :unit-id unit-id
-                            :zone-ids zone-ids})]
+                            :unit-id unit-id})]
     {:state (-> state
                 (assoc-in [:projectors :items projector-id] projector-config)
-                (assoc-in [:chains :projector-effects projector-id :items] DEFAULT_PROJECTOR_EFFECTS)
-                (update-in [:zones :items] merge zones-map)
-                (update-in [:chains :zone-effects] merge zone-effects-map)
+                (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
                 (assoc-in [:projectors :active-projector] projector-id)
-                (h/mark-dirty))}))
+                h/mark-dirty)}))
 
 
 (defn- handle-projectors-add-service
   "Add a specific service/output from a discovered device as a projector.
-   Used when a device has multiple outputs and user wants to add a specific one.
-   
-   Also creates 3 zones for the projector: default, graphics, crowd-scanning.
-   Zone effects are stored in [:chains :zone-effects zone-id :items]."
+   Used when a device has multiple outputs and user wants to add a specific one."
   [{:keys [device service state]}]
   (let [{:keys [address host-name unit-id]
          device-port :port} device
@@ -230,30 +157,22 @@
          service-name :name} service
         name (or service-name host-name address)
         projector-id (keyword (str "projector-" (System/currentTimeMillis) "-" service-id))
-        ;; Create zones for this projector (includes zone effects)
-        {:keys [zones-map zone-ids zone-effects-map]} (create-projector-zones projector-id name)
         projector-config (make-projector-config
                            {:name name
                             :host address
                             :port (or device-port 7255)
                             :service-id service-id
                             :service-name service-name
-                            :unit-id unit-id
-                            :zone-ids zone-ids})]
+                            :unit-id unit-id})]
     {:state (-> state
                 (assoc-in [:projectors :items projector-id] projector-config)
-                (assoc-in [:chains :projector-effects projector-id :items] DEFAULT_PROJECTOR_EFFECTS)
-                (update-in [:zones :items] merge zones-map)
-                (update-in [:chains :zone-effects] merge zone-effects-map)
+                (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
                 (assoc-in [:projectors :active-projector] projector-id)
-                (h/mark-dirty))}))
+                h/mark-dirty)}))
 
 
 (defn- handle-projectors-add-all-services
-  "Add all services from a discovered device as configured projectors.
-   
-   Also creates 3 zones per projector: default, graphics, crowd-scanning.
-   Zone effects are stored in [:chains :zone-effects zone-id :items]."
+  "Add all services from a discovered device as configured projectors."
   [{:keys [device state]}]
   (let [{:keys [address host-name unit-id]
          device-services :services
@@ -266,55 +185,40 @@
                                   service-name :name} service
                                  name (or service-name host-name address)
                                  projector-id (keyword (str "projector-" now "-" service-id "-" idx))
-                                 ;; Create zones for this projector (includes zone effects)
-                                 {:keys [zones-map zone-ids zone-effects-map]} (create-projector-zones projector-id name)
                                  projector-config (make-projector-config
                                                     {:name name
                                                      :host address
                                                      :port (or device-port 7255)
                                                      :service-id service-id
                                                      :service-name service-name
-                                                     :unit-id unit-id
-                                                     :zone-ids zone-ids})]
+                                                     :unit-id unit-id})]
                              (-> acc
                                  (assoc-in [:projectors projector-id] projector-config)
-                                 (assoc-in [:effects projector-id] {:items DEFAULT_PROJECTOR_EFFECTS})
-                                 (update :zones merge zones-map)
-                                 (update :zone-effects merge zone-effects-map))))
-                         {:projectors {} :effects {} :zones {} :zone-effects {}}
+                                 (assoc-in [:effects projector-id] {:items (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS)}))))
+                         {:projectors {} :effects {}}
                          (map-indexed vector services))
         first-projector-id (first (keys (:projectors projector-data)))]
     {:state (-> state
                 (update-in [:projectors :items] merge (:projectors projector-data))
                 (update-in [:chains :projector-effects] merge (:effects projector-data))
-                (update-in [:zones :items] merge (:zones projector-data))
-                (update-in [:chains :zone-effects] merge (:zone-effects projector-data))
                 (assoc-in [:projectors :active-projector] first-projector-id)
                 h/mark-dirty)}))
 
 
 (defn- handle-projectors-add-manual
-  "Add a projector manually (not from discovery).
-   
-   Also creates 3 zones for the projector: default, graphics, crowd-scanning.
-   Zone effects are stored in [:chains :zone-effects zone-id :items]."
+  "Add a projector manually (not from discovery)."
   [{:keys [name host port state]}]
   (let [projector-id (keyword (str "projector-" (System/currentTimeMillis)))
         proj-name (or name host)
-        ;; Create zones for this projector (includes zone effects)
-        {:keys [zones-map zone-ids zone-effects-map]} (create-projector-zones projector-id proj-name)
         projector-config (make-projector-config
                            {:name proj-name
                             :host host
-                            :port (or port 7255)
-                            :zone-ids zone-ids})]
+                            :port (or port 7255)})]
     {:state (-> state
                 (assoc-in [:projectors :items projector-id] projector-config)
-                (assoc-in [:chains :projector-effects projector-id :items] DEFAULT_PROJECTOR_EFFECTS)
-                (update-in [:zones :items] merge zones-map)
-                (update-in [:chains :zone-effects] merge zone-effects-map)
+                (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
                 (assoc-in [:projectors :active-projector] projector-id)
-                (h/mark-dirty))}))
+                h/mark-dirty)}))
 
 
 ;; Projector Management
@@ -323,32 +227,36 @@
 (defn- handle-projectors-select-projector
   "Select a projector for editing."
   [{:keys [projector-id state]}]
-  {:state (assoc-in state [:projectors :active-projector] projector-id)})
+  {:state (-> state
+              (assoc-in [:projectors :active-projector] projector-id)
+              (assoc-in [:projectors :active-virtual-projector] nil))})
+
 
 (defn- handle-projectors-remove-projector
-  "Remove a projector configuration and its associated zones and zone effects."
+  "Remove a projector configuration and its virtual projectors."
   [{:keys [projector-id state]}]
   (let [active (get-in state [:projectors :active-projector])
         items (get-in state [:projectors :items])
-        ;; Get zone IDs to delete
-        zone-ids-to-remove (get-in items [projector-id :zone-ids] [])
         new-items (dissoc items projector-id)
+        ;; Remove virtual projectors for this projector
+        vps (get-in state [:projectors :virtual-projectors] {})
+        vp-ids-to-remove (keep (fn [[vp-id vp]]
+                                 (when (= (:parent-projector-id vp) projector-id)
+                                   vp-id))
+                               vps)
+        new-vps (apply dissoc vps vp-ids-to-remove)
         ;; If removing active projector, select first remaining
         new-active (if (= active projector-id)
                      (first (keys new-items))
-                     active)
-        ;; Remove zones from zones domain
-        zones-items (get-in state [:zones :items] {})
-        new-zones-items (apply dissoc zones-items zone-ids-to-remove)
-        ;; Remove zone effects from chains domain
-        zone-effects (get-in state [:chains :zone-effects] {})
-        new-zone-effects (apply dissoc zone-effects zone-ids-to-remove)]
+                     active)]
     {:state (-> state
                 (assoc-in [:projectors :items] new-items)
+                (assoc-in [:projectors :virtual-projectors] new-vps)
                 (assoc-in [:projectors :active-projector] new-active)
-                (assoc-in [:zones :items] new-zones-items)
-                (assoc-in [:chains :zone-effects] new-zone-effects)
+                (assoc-in [:projectors :active-virtual-projector] nil)
+                (update-in [:chains :projector-effects] dissoc projector-id)
                 h/mark-dirty)}))
+
 
 (defn- handle-projectors-update-settings
   "Update projector settings (name, host, port, enabled, output-config)."
@@ -356,6 +264,7 @@
   {:state (-> state
               (update-in [:projectors :items projector-id] merge updates)
               h/mark-dirty)})
+
 
 (defn- handle-projectors-toggle-enabled
   "Toggle a projector's enabled state."
@@ -365,27 +274,243 @@
                 (assoc-in [:projectors :items projector-id :enabled?] (not current))
                 h/mark-dirty)}))
 
+
 (defn- handle-projectors-update-connection-status
   "Update a projector's connection status (called by streaming service)."
   [{:keys [projector-id status state]}]
   {:state (update-in state [:projectors :items projector-id :status] merge status)})
 
 
-;; Legacy Effect Chain Management (kept for backward compatibility)
+;; Corner Pin Management
+
+
+(defn- handle-projectors-update-corner-pin
+  "Update corner pin parameters from spatial drag."
+  [{:keys [projector-id point-id x y state]}]
+  (let [param-key (case point-id
+                    :tl [:tl-x :tl-y]
+                    :tr [:tr-x :tr-y]
+                    :bl [:bl-x :bl-y]
+                    :br [:br-x :br-y]
+                    nil)
+        [x-key y-key] param-key]
+    (if param-key
+      {:state (-> state
+                  (assoc-in [:projectors :items projector-id :corner-pin x-key] x)
+                  (assoc-in [:projectors :items projector-id :corner-pin y-key] y)
+                  h/mark-dirty)}
+      {:state state})))
+
+
+(defn- handle-projectors-reset-corner-pin
+  "Reset corner pin to default values."
+  [{:keys [projector-id state]}]
+  {:state (-> state
+              (assoc-in [:projectors :items projector-id :corner-pin] DEFAULT_CORNER_PIN)
+              h/mark-dirty)})
+
+
+;; Zone Group Assignment
+
+
+(defn- handle-projectors-toggle-zone-group
+  "Toggle a projector's membership in a zone group."
+  [{:keys [projector-id zone-group-id state]}]
+  (let [current-groups (get-in state [:projectors :items projector-id :zone-groups] [])
+        member? (some #{zone-group-id} current-groups)
+        new-groups (if member?
+                     (vec (remove #{zone-group-id} current-groups))
+                     (conj current-groups zone-group-id))]
+    {:state (-> state
+                (assoc-in [:projectors :items projector-id :zone-groups] new-groups)
+                h/mark-dirty)}))
+
+
+(defn- handle-projectors-set-zone-groups
+  "Set all zone groups for a projector."
+  [{:keys [projector-id zone-groups state]}]
+  {:state (-> state
+              (assoc-in [:projectors :items projector-id :zone-groups] zone-groups)
+              h/mark-dirty)})
+
+
+;; Tag Management
+
+
+(defn- tag->auto-zone-group
+  "Get the zone group that a tag auto-assigns to."
+  [tag]
+  (case tag
+    :graphics :graphics
+    :crowd-scanning :crowd
+    nil))
+
+
+(defn- handle-projectors-add-tag
+  "Add a tag to a projector. Auto-adds to matching zone group if not already member."
+  [{:keys [projector-id tag state]}]
+  (let [auto-group (tag->auto-zone-group tag)
+        current-groups (get-in state [:projectors :items projector-id :zone-groups] [])]
+    {:state (-> state
+                (update-in [:projectors :items projector-id :tags] (fnil conj #{}) tag)
+                ;; Auto-add to matching zone group if not already member
+                (cond-> (and auto-group (not (some #{auto-group} current-groups)))
+                  (update-in [:projectors :items projector-id :zone-groups] conj auto-group))
+                h/mark-dirty)}))
+
+
+(defn- handle-projectors-remove-tag
+  "Remove a tag from a projector. Does NOT auto-remove from zone group."
+  [{:keys [projector-id tag state]}]
+  {:state (-> state
+              (update-in [:projectors :items projector-id :tags] disj tag)
+              h/mark-dirty)})
+
+
+;; Virtual Projector Management
+
+
+(defn- handle-projectors-add-virtual-projector
+  "Add a virtual projector for an existing physical projector.
+   The VP starts with a copy of the parent's corner-pin."
+  [{:keys [parent-projector-id name state]}]
+  (let [vp-id (random-uuid)
+        parent (get-in state [:projectors :items parent-projector-id])
+        parent-name (:name parent "Unknown")
+        vp-name (or name (str parent-name " - Virtual"))
+        parent-corner-pin (or (:corner-pin parent) DEFAULT_CORNER_PIN)
+        vp-config {:name vp-name
+                   :parent-projector-id parent-projector-id
+                   :zone-groups [:all]
+                   :tags #{}
+                   :corner-pin parent-corner-pin
+                   :enabled? true}]
+    {:state (-> state
+                (assoc-in [:projectors :virtual-projectors vp-id] vp-config)
+                (assoc-in [:projectors :active-virtual-projector] vp-id)
+                h/mark-dirty)}))
+
+
+(defn- handle-projectors-select-virtual-projector
+  "Select a virtual projector for editing."
+  [{:keys [vp-id state]}]
+  {:state (-> state
+              (assoc-in [:projectors :active-virtual-projector] vp-id)
+              (assoc-in [:projectors :active-projector] nil))})
+
+
+(defn- handle-projectors-remove-virtual-projector
+  "Remove a virtual projector."
+  [{:keys [vp-id state]}]
+  (let [active (get-in state [:projectors :active-virtual-projector])]
+    {:state (-> state
+                (update-in [:projectors :virtual-projectors] dissoc vp-id)
+                (cond-> (= active vp-id)
+                  (assoc-in [:projectors :active-virtual-projector] nil))
+                h/mark-dirty)}))
+
+
+(defn- handle-projectors-update-virtual-projector
+  "Update virtual projector settings (name, enabled)."
+  [{:keys [vp-id updates state]}]
+  {:state (-> state
+              (update-in [:projectors :virtual-projectors vp-id] merge updates)
+              h/mark-dirty)})
+
+
+(defn- handle-vp-toggle-enabled
+  "Toggle a virtual projector's enabled state."
+  [{:keys [vp-id state]}]
+  (let [current (get-in state [:projectors :virtual-projectors vp-id :enabled?] true)]
+    {:state (-> state
+                (assoc-in [:projectors :virtual-projectors vp-id :enabled?] (not current))
+                h/mark-dirty)}))
+
+
+(defn- handle-vp-update-corner-pin
+  "Update corner pin for a virtual projector."
+  [{:keys [vp-id point-id x y state]}]
+  (let [param-key (case point-id
+                    :tl [:tl-x :tl-y]
+                    :tr [:tr-x :tr-y]
+                    :bl [:bl-x :bl-y]
+                    :br [:br-x :br-y]
+                    nil)
+        [x-key y-key] param-key]
+    (if param-key
+      {:state (-> state
+                  (assoc-in [:projectors :virtual-projectors vp-id :corner-pin x-key] x)
+                  (assoc-in [:projectors :virtual-projectors vp-id :corner-pin y-key] y)
+                  h/mark-dirty)}
+      {:state state})))
+
+
+(defn- handle-vp-reset-corner-pin
+  "Reset virtual projector corner pin to parent's values."
+  [{:keys [vp-id state]}]
+  (let [vp (get-in state [:projectors :virtual-projectors vp-id])
+        parent-id (:parent-projector-id vp)
+        parent-corner-pin (get-in state [:projectors :items parent-id :corner-pin] DEFAULT_CORNER_PIN)]
+    {:state (-> state
+                (assoc-in [:projectors :virtual-projectors vp-id :corner-pin] parent-corner-pin)
+                h/mark-dirty)}))
+
+
+(defn- handle-vp-toggle-zone-group
+  "Toggle a virtual projector's membership in a zone group."
+  [{:keys [vp-id zone-group-id state]}]
+  (let [current-groups (get-in state [:projectors :virtual-projectors vp-id :zone-groups] [])
+        member? (some #{zone-group-id} current-groups)
+        new-groups (if member?
+                     (vec (remove #{zone-group-id} current-groups))
+                     (conj current-groups zone-group-id))]
+    {:state (-> state
+                (assoc-in [:projectors :virtual-projectors vp-id :zone-groups] new-groups)
+                h/mark-dirty)}))
+
+
+(defn- handle-vp-set-zone-groups
+  "Set all zone groups for a virtual projector."
+  [{:keys [vp-id zone-groups state]}]
+  {:state (-> state
+              (assoc-in [:projectors :virtual-projectors vp-id :zone-groups] zone-groups)
+              h/mark-dirty)})
+
+
+(defn- handle-vp-add-tag
+  "Add a tag to a virtual projector."
+  [{:keys [vp-id tag state]}]
+  (let [auto-group (tag->auto-zone-group tag)
+        current-groups (get-in state [:projectors :virtual-projectors vp-id :zone-groups] [])]
+    {:state (-> state
+                (update-in [:projectors :virtual-projectors vp-id :tags] (fnil conj #{}) tag)
+                (cond-> (and auto-group (not (some #{auto-group} current-groups)))
+                  (update-in [:projectors :virtual-projectors vp-id :zone-groups] conj auto-group))
+                h/mark-dirty)}))
+
+
+(defn- handle-vp-remove-tag
+  "Remove a tag from a virtual projector."
+  [{:keys [vp-id tag state]}]
+  {:state (-> state
+              (update-in [:projectors :virtual-projectors vp-id :tags] disj tag)
+              h/mark-dirty)})
+
+
+;; Effect Chain Management (for color curves)
 
 
 (defn- handle-projectors-add-effect
-  "Add an effect to a projector's chain.
-   DEPRECATED: Use :chain/add-item with {:domain :projector-effects} instead."
+  "Add an effect to a projector's chain."
   [{:keys [projector-id effect state]}]
   (let [effect-with-fields (h/ensure-item-fields effect)]
     {:state (-> state
                 (update-in [:chains :projector-effects projector-id :items] conj effect-with-fields)
                 h/mark-dirty)}))
 
+
 (defn- handle-projectors-remove-effect
-  "Remove an effect from a projector's chain.
-   DEPRECATED: Use :chain/remove-item-at-path with {:domain :projector-effects} instead."
+  "Remove an effect from a projector's chain."
   [{:keys [projector-id effect-idx state]}]
   (let [effects-vec (get-in state [:chains :projector-effects projector-id :items] [])
         new-effects (u/removev-indexed (fn [i _] (= i effect-idx)) effects-vec)]
@@ -394,176 +519,11 @@
                 h/mark-dirty)}))
 
 
-(defn- handle-projectors-reorder-effects
-  "Reorder effects in a projector's chain.
-   DEPRECATED: Use :chain/reorder-items with {:domain :projector-effects} instead."
-  [{:keys [projector-id from-idx to-idx state]}]
-  (let [effects-vec (get-in state [:chains :projector-effects projector-id :items] [])
-        effect (nth effects-vec from-idx)
-        without (u/removev-indexed (fn [i _] (= i from-idx)) effects-vec)
-        reordered (u/concatv (subvec without 0 to-idx)
-                             [effect]
-                             (subvec without to-idx))]
-    {:state (-> state
-                (assoc-in [:chains :projector-effects projector-id :items] reordered)
-                h/mark-dirty)}))
-
-
-;; Effect Selection
-
-
 (defn- handle-projectors-select-effect
-  "Select an effect in the projector's chain for editing.
-   Uses path-based selection with :ctrl? and :shift? modifiers."
+  "Select an effect in the projector's chain for editing."
   [{:keys [projector-id path ctrl? shift? state]}]
   (let [config (chain-handlers/chain-config :projector-effects projector-id)]
     {:state (chain-handlers/handle-select-item state config path ctrl? shift?)}))
-
-
-;; Calibration Effects
-
-
-(defn- handle-projectors-add-calibration-effect
-  "Add a calibration effect to projector chain with auto-selection."
-  [{:keys [projector-id effect state]}]
-  (let [effect-with-fields (h/ensure-item-fields effect)
-        current-effects (get-in state (projector-effects-path projector-id) [])
-        new-effect-idx (count current-effects)
-        new-effect-path [new-effect-idx]
-        ui-path (projector-ui-state-path projector-id)]
-    {:state (-> state
-                (update-in (projector-effects-path projector-id) conj effect-with-fields)
-                (assoc-in (conj ui-path :selected-paths) #{new-effect-path})
-                (assoc-in (conj ui-path :last-selected-path) new-effect-path)
-                (h/mark-dirty))}))
-
-
-;; Corner Pin (projector-specific calibration)
-
-
-(defn- handle-projectors-update-corner-pin
-  "Update corner pin parameters from spatial drag.
-   Note: This uses effect-idx for legacy compatibility.
-   For path-based updates, use :chain/update-spatial-params."
-  [{:keys [projector-id effect-idx point-id x y param-map state]}]
-  (let [params-path [:chains :projector-effects projector-id :items effect-idx :params]]
-    {:state (effect-params/update-spatial-params state params-path point-id x y param-map)}))
-
-(defn- handle-projectors-reset-corner-pin
-  "Reset corner pin effect to default values."
-  [{:keys [projector-id effect-idx state]}]
-  {:state (assoc-in state [:chains :projector-effects projector-id :items effect-idx :params]
-                    {:tl-x -1.0 :tl-y 1.0
-                     :tr-x 1.0 :tr-y 1.0
-                     :bl-x -1.0 :bl-y -1.0
-                     :br-x 1.0 :br-y -1.0})})
-
-
-;; Chain-Handler Delegated Operations
-
-
-(defn- handle-projectors-select-all-effects
-  "Select all effects in a projector's chain."
-  [{:keys [projector-id state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-select-all state config)}))
-
-(defn- handle-projectors-clear-effect-selection
-  "Clear effect selection for a projector."
-  [{:keys [projector-id state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-clear-selection state config)}))
-
-(defn- handle-projectors-delete-effects
-  "Delete selected effects from projector chain."
-  [{:keys [projector-id state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-delete-selected state config)}))
-
-(defn- handle-projectors-start-effect-drag
-  "Start a multi-drag operation for projector effects."
-  [{:keys [projector-id initiating-path state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-start-drag state config initiating-path)}))
-
-(defn- handle-projectors-move-effects
-  "Move multiple effects to a new position in projector chain."
-  [{:keys [projector-id target-id drop-position state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-move-items state config target-id drop-position)}))
-
-
-;; Clipboard Operations
-
-
-(defn- handle-projectors-copy-effects
-  "Copy selected effects to clipboard."
-  [{:keys [projector-id state]}]
-  (let [ui-path (projector-ui-state-path projector-id)
-        selected-paths (get-in state (conj ui-path :selected-paths) #{})
-        effects-vec (get-in state (projector-effects-path projector-id) [])
-        valid-effects (when (seq selected-paths)
-                        (vec (keep #(get-in effects-vec %) selected-paths)))]
-    (cond-> {:state state}
-      (seq valid-effects)
-      (assoc :clipboard/copy-effects valid-effects))))
-
-(defn- handle-projectors-paste-effects
-  "Paste effects from clipboard into projector chain."
-  [{:keys [projector-id state]}]
-  (let [ui-path (projector-ui-state-path projector-id)
-        selected-paths (get-in state (conj ui-path :selected-paths) #{})
-        effects-vec (get-in state (projector-effects-path projector-id) [])
-        insert-pos (if (seq selected-paths)
-                     (let [top-level-indices (map first selected-paths)]
-                       (inc (apply max top-level-indices)))
-                     (count effects-vec))]
-    {:state state
-     :clipboard/paste-projector-effects {:projector-id projector-id
-                                         :insert-pos insert-pos}}))
-
-(defn- handle-projectors-insert-pasted-effects
-  "Actually insert pasted effects into projector chain (called by effect handler)."
-  [{:keys [projector-id insert-pos effects state]}]
-  (let [effects-with-new-ids (mapv h/regenerate-ids effects)
-        current-effects (vec (get-in state (projector-effects-path projector-id) []))
-        safe-pos (min insert-pos (count current-effects))
-        new-effects (vec (concat (subvec current-effects 0 safe-pos)
-                                 effects-with-new-ids
-                                 (subvec current-effects safe-pos)))
-        ui-path (projector-ui-state-path projector-id)
-        new-paths (into #{} (map (fn [i] [(+ safe-pos i)]) (range (count effects-with-new-ids))))]
-    {:state (-> state
-                (assoc-in (projector-effects-path projector-id) new-effects)
-                (assoc-in (conj ui-path :selected-paths) new-paths)
-                h/mark-dirty)}))
-
-
-;; UI State
-
-
-(defn- handle-projectors-update-effect-ui-state
-  "Update projector effect UI state (for drag-and-drop feedback)."
-  [{:keys [projector-id updates state]}]
-  (let [ui-path (projector-ui-state-path projector-id)]
-    {:state (update-in state ui-path merge updates)}))
-
-
-;; Hierarchical List Integration
-
-
-(defn- handle-projectors-set-effects
-  "Set the entire effects chain for a projector (simple persistence callback)."
-  [{:keys [projector-id effects state]}]
-  {:state (-> state
-              (assoc-in (projector-effects-path projector-id) effects)
-              h/mark-dirty)})
-
-(defn- handle-projectors-update-effect-selection
-  "Update the selection state for projector effects."
-  [{:keys [projector-id selected-ids state]}]
-  (let [ui-path (projector-ui-state-path projector-id)]
-    {:state (assoc-in state (conj ui-path :selected-ids) selected-ids)}))
 
 
 ;; Configuration
@@ -574,10 +534,12 @@
   [{:keys [pattern state]}]
   {:state (assoc-in state [:projectors :test-pattern-mode] pattern)})
 
+
 (defn- handle-projectors-set-broadcast-address
   "Set the broadcast address for network scanning."
   [{:keys [address state]}]
   {:state (assoc-in state [:projectors :broadcast-address] address)})
+
 
 (defn- handle-projectors-toggle-device-expand
   "Toggle the expanded state of a device in the discovery panel."
@@ -595,16 +557,7 @@
 (defn handle
   "Dispatch projector events to their handlers.
    
-   Accepts events with :event/type in the :projectors/* namespace.
-   
-   Note: Parameter, curve, and UI mode operations should use :chain/* events:
-   - :chain/update-param, :chain/update-param-from-text
-   - :chain/add-curve-point, :chain/update-curve-point, :chain/remove-curve-point
-   - :chain/set-active-curve-channel
-   - :chain/update-spatial-params
-   - :chain/set-ui-mode
-   
-   Pass {:domain :projector-effects :entity-key projector-id} to these events."
+   Accepts events with :event/type in the :projectors/* namespace."
   [{:keys [event/type] :as event}]
   (case type
     ;; Network discovery
@@ -625,37 +578,35 @@
     :projectors/toggle-enabled (handle-projectors-toggle-enabled event)
     :projectors/update-connection-status (handle-projectors-update-connection-status event)
     
-    ;; Legacy effect chain management (kept for backward compatibility)
-    :projectors/add-effect (handle-projectors-add-effect event)
-    :projectors/remove-effect (handle-projectors-remove-effect event)
-    :projectors/reorder-effects (handle-projectors-reorder-effects event)
-    
-    ;; Legacy selection
-    :projectors/select-effect (handle-projectors-select-effect event)
-    
-    ;; Calibration
-    :projectors/add-calibration-effect (handle-projectors-add-calibration-effect event)
+    ;; Corner pin
     :projectors/update-corner-pin (handle-projectors-update-corner-pin event)
     :projectors/reset-corner-pin (handle-projectors-reset-corner-pin event)
     
-    ;; Path-based selection (delegated to chain-handlers)
-    :projectors/select-all-effects (handle-projectors-select-all-effects event)
-    :projectors/clear-effect-selection (handle-projectors-clear-effect-selection event)
+    ;; Zone group assignment
+    :projectors/toggle-zone-group (handle-projectors-toggle-zone-group event)
+    :projectors/set-zone-groups (handle-projectors-set-zone-groups event)
     
-    ;; Clipboard
-    :projectors/copy-effects (handle-projectors-copy-effects event)
-    :projectors/paste-effects (handle-projectors-paste-effects event)
-    :projectors/insert-pasted-effects (handle-projectors-insert-pasted-effects event)
-    :projectors/delete-effects (handle-projectors-delete-effects event)
+    ;; Tags
+    :projectors/add-tag (handle-projectors-add-tag event)
+    :projectors/remove-tag (handle-projectors-remove-tag event)
     
-    ;; Drag and drop (delegated to chain-handlers)
-    :projectors/start-effect-drag (handle-projectors-start-effect-drag event)
-    :projectors/move-effects (handle-projectors-move-effects event)
-    :projectors/update-effect-ui-state (handle-projectors-update-effect-ui-state event)
+    ;; Virtual projector management
+    :projectors/add-virtual-projector (handle-projectors-add-virtual-projector event)
+    :projectors/select-virtual-projector (handle-projectors-select-virtual-projector event)
+    :projectors/remove-virtual-projector (handle-projectors-remove-virtual-projector event)
+    :projectors/update-virtual-projector (handle-projectors-update-virtual-projector event)
+    :projectors/vp-toggle-enabled (handle-vp-toggle-enabled event)
+    :projectors/vp-update-corner-pin (handle-vp-update-corner-pin event)
+    :projectors/vp-reset-corner-pin (handle-vp-reset-corner-pin event)
+    :projectors/vp-toggle-zone-group (handle-vp-toggle-zone-group event)
+    :projectors/vp-set-zone-groups (handle-vp-set-zone-groups event)
+    :projectors/vp-add-tag (handle-vp-add-tag event)
+    :projectors/vp-remove-tag (handle-vp-remove-tag event)
     
-    ;; Hierarchical list integration
-    :projectors/set-effects (handle-projectors-set-effects event)
-    :projectors/update-effect-selection (handle-projectors-update-effect-selection event)
+    ;; Effect chain management (for color curves)
+    :projectors/add-effect (handle-projectors-add-effect event)
+    :projectors/remove-effect (handle-projectors-remove-effect event)
+    :projectors/select-effect (handle-projectors-select-effect event)
     
     ;; Configuration
     :projectors/set-test-pattern (handle-projectors-set-test-pattern event)

@@ -104,21 +104,21 @@
                     :source-key nil
                     :data nil}
           :doc "current drag operation state"}
-   :dialogs {:default {:zone-editor {:open? false :zone-id nil}
-                        :projector-config {:open? false}
-                        :cue-chain-editor {:open? false
-                                           :data {:col nil
-                                                  :row nil
-                                                  :selected-paths #{}
-                                                  :last-selected-path nil
-                                                  :clipboard nil
-                                                  :active-preset-tab :geometric
-                                                  :selected-effect-id nil
-                                                  :item-effects-ui {}}}
-                        :effect-chain-editor {:open? false :data nil}
-                        :add-projector-manual {:open? false :data nil}
-                        :settings {:open? false}}
-              :doc "dialog visibility and data states"}
+   :dialogs {:default {:projector-config {:open? false}
+                         :cue-chain-editor {:open? false
+                                            :data {:col nil
+                                                   :row nil
+                                                   :selected-paths #{}
+                                                   :last-selected-path nil
+                                                   :clipboard nil
+                                                   :active-preset-tab :geometric
+                                                   :selected-effect-id nil
+                                                   :item-effects-ui {}}}
+                         :effect-chain-editor {:open? false :data nil}
+                         :add-projector-manual {:open? false :data nil}
+                         :add-virtual-projector {:open? false :data nil}
+                         :settings {:open? false}}
+               :doc "dialog visibility and data states"}
    :preview {:default {:frame nil
                        :last-render-time 0}
              :doc "preview panel state"}
@@ -175,9 +175,11 @@
           :doc "MIDI input settings"}})
 
 (defstate projectors
-  "Projector configurations for color calibration and safety zoning.
+  "Projector configurations for geometry calibration, color calibration, and routing.
    
-   NOTE: Projector effect chains are stored in [:chains :projector-effects projector-id :items]
+   SIMPLIFIED ARCHITECTURE (v2):
+   Projectors are directly assigned to zone groups - no intermediate 'zone' abstraction.
+   Corner-pin and color curves are configured directly on the projector.
    
    Each projector entry contains:
    - :name - User-friendly name
@@ -186,15 +188,23 @@
    - :unit-id - Hardware unit ID from discovery
    - :enabled? - Whether to send output to this projector
    - :output-config - Bit depth settings
-   - :zone-ids - Vector of zone UUIDs created for this projector (3 zones: default, graphics, crowd)
+   - :scan-rate - Points per second (pps) for this projector
+   - :zone-groups - Vector of zone group IDs this projector belongs to (e.g., [:all :left])
+   - :tags - Set of optional tags (:graphics, :crowd-scanning) for categorization
+   - :corner-pin - Geometry calibration {:tl-x :tl-y :tr-x :tr-y :bl-x :bl-y :br-x :br-y}
+   - :color-curves - RGB color calibration curves (stored in :chains :projector-effects)
    - :status - Runtime connection status (not persisted)
    
-   See also: defstate chains for effect chain storage.
-   See also: defstate zones for zone definitions."
+   Virtual projectors are stored separately and inherit color curves from parent.
+   See also: :virtual-projectors key for alternate geometry configurations."
   {:items {:default {}
-           :doc "Map of projector-id -> projector configuration (includes :zone-ids refs)"}
+           :doc "Map of projector-id -> projector configuration"}
+   :virtual-projectors {:default {}
+                        :doc "Map of virtual-projector-id (UUID) -> {:name :parent-projector-id :zone-groups :tags :corner-pin :enabled?}"}
    :active-projector {:default nil
                       :doc "Currently selected projector ID for editing"}
+   :active-virtual-projector {:default nil
+                              :doc "Currently selected virtual projector ID for editing"}
    :test-pattern-mode {:default nil
                        :doc "Active test pattern: nil, :grid, or :corners"}
    :discovered-devices {:default []
@@ -204,69 +214,47 @@
    :broadcast-address {:default "255.255.255.255"
                        :doc "Broadcast address for device discovery"}})
 
-(defstate zones
-  "Zone definitions - output destinations with effect chains.
-   
-   Each projector automatically creates 3 zones: default, graphics, crowd-scanning.
-   Zones are first-class entities referenced by UUID.
-   
-   Zone effects are stored in [:chains :zone-effects zone-id :items] just like
-   projector effects. This allows using the same UI and effect system for zones.
-   
-   Recommended zone effects: corner-pin, flip, scale, offset, rotation
-   (These are the same calibration effects available for projectors)
-   
-   Zone structure:
-   {:id zone-id                          ; UUID
-    :name \"Projector 1 - Default\"       ; User-friendly name
-    :projector-id projector-id           ; Parent projector keyword
-    :type :default                       ; :default, :graphics, or :crowd-scanning
-    :enabled? true                       ; Whether this zone is active
-    :zone-groups [:all :left]}           ; Zone groups this zone belongs to (ordered by priority)
-   
-   NOTE: Zone effects (geometry, etc.) are stored in :chains :zone-effects, NOT inline.
-   See also: defstate chains for zone effect chain storage."
-  {:items {:default {}
-           :doc "Map of zone-id (UUID) -> zone configuration"}
-   :selected-zone {:default nil
-                   :doc "Currently selected zone ID for editing"}})
 
 (defstate zone-groups
-  "Zone group definitions - category tags for organizing zones.
+  "Zone group definitions - routing targets for cues.
    
-   Users assign zones to zone groups, then target cues to zone groups.
+   SIMPLIFIED ARCHITECTURE (v2):
+   Projectors and virtual projectors are directly assigned to zone groups.
+   No intermediate 'zone' abstraction.
+   
+   Users assign projectors to zone groups, then target cues to zone groups.
    Zone groups have metadata: name, description, color for UI.
    
    Default zone groups are provided:
-   - :all - All zones
-   - :left - Left side zones
-   - :right - Right side zones
-   - :center - Center zones
-   - :graphics - Graphics-specific zones
-   - :crowd - Audience scanning zones"
+   - :all - All projectors
+   - :left - Left side projectors
+   - :right - Right side projectors
+   - :center - Center projectors
+   - :graphics - Graphics-specific projectors (for smaller scan areas)
+   - :crowd - Audience scanning projectors"
   {:items {:default {:all {:id :all
                            :name "All"
-                           :description "All zones"
+                           :description "All projectors"
                            :color "#808080"}
                      :left {:id :left
                             :name "Left"
-                            :description "Left side zones"
+                            :description "Left side projectors"
                             :color "#4A90D9"}
                      :right {:id :right
                              :name "Right"
-                             :description "Right side zones"
+                             :description "Right side projectors"
                              :color "#D94A4A"}
                      :center {:id :center
                               :name "Center"
-                              :description "Center zones"
+                              :description "Center projectors"
                               :color "#4AD94A"}
                      :graphics {:id :graphics
                                 :name "Graphics"
-                                :description "Graphics-specific zones"
+                                :description "Graphics-specific projectors"
                                 :color "#9B59B6"}
                      :crowd {:id :crowd
                              :name "Crowd Scanning"
-                             :description "Audience scanning zones"
+                             :description "Audience scanning projectors"
                              :color "#E67E22"}}
            :doc "Map of zone-group-id (keyword) -> {:id :name :description :color}"}
    :selected-group {:default nil
@@ -278,11 +266,14 @@
 (defstate chains
   "Unified chain storage for all hierarchical lists.
    
-   Four chain types with consistent structure:
+   SIMPLIFIED ARCHITECTURE (v2):
+   Three chain types with consistent structure:
    - :effect-chains - Effect modifiers for grid cells
    - :cue-chains - Cue presets/groups for grid cells
-   - :projector-effects - Output effects for projectors
-   - :zone-effects - Geometry/calibration effects for zones
+   - :projector-effects - Color calibration effects for projectors (RGB curves)
+   
+   Note: Geometry calibration (corner-pin) is now stored directly on projectors
+   in [:projectors :items projector-id :corner-pin], NOT as an effect chain.
    
    All chains use the same structure: {:items [...] :active? bool (optional)}
    This enables generic handlers and simplified subscriptions."
@@ -291,9 +282,7 @@
    :cue-chains {:default {}
                 :doc "Map of [col row] -> {:items [...]}. Starter content is applied via laser-show.state.templates/apply-starter-cue-chains"}
    :projector-effects {:default {}
-                       :doc "Map of projector-id -> {:items [...]}"}
-   :zone-effects {:default {}
-                  :doc "Map of zone-id (UUID) -> {:items [...]}"}})
+                       :doc "Map of projector-id -> {:items [...]} - RGB curves for color calibration"}})
 
 
 ;; Backend State Domain

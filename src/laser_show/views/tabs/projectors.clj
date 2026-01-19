@@ -345,7 +345,61 @@
                                   {:fx/type :label
                                    :text (str "Service #" service-id
                                              (when service-name (str " - " service-name)))
-                                   :style (str "-fx-text-fill: " (css/selection-bg) "; -fx-font-size: 11;")}]}])))}))
+                             :style (str "-fx-text-fill: " (css/selection-bg) "; -fx-font-size: 11;")}]}])))}))
+
+
+;; Zone Group Assignment UI
+
+
+(defn- zone-group-chip
+"A chip showing a zone group with toggle functionality."
+[{:keys [group selected? on-toggle]}]
+(let [{:keys [id name color]} group]
+{:fx/type :h-box
+:spacing 4
+:alignment :center-left
+:padding {:left 6 :right 6 :top 3 :bottom 3}
+:style (str "-fx-background-color: " (if selected? (str color "80") "#404040")
+          "; -fx-background-radius: 12; -fx-border-color: " color
+          "; -fx-border-radius: 12; -fx-cursor: hand;")
+:on-mouse-clicked on-toggle
+:children [{:fx/type :circle
+           :radius 4
+           :fill color}
+          {:fx/type :label
+           :text name
+           :style (str "-fx-text-fill: " (if selected? "white" "#B0B0B0") "; -fx-font-size: 10;")}]}))
+
+(defn- zone-group-assignment-section
+"Section for assigning a projector to zone groups."
+[{:keys [fx/context projector-id]}]
+(let [all-groups (fx/sub-ctx context subs/zone-groups-list)
+  current-groups (fx/sub-ctx context subs/projector-zone-groups projector-id)]
+{:fx/type :v-box
+:spacing 8
+:children [{:fx/type :h-box
+           :alignment :center-left
+           :children [{:fx/type :label
+                       :text "ZONE GROUPS"
+                       :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                      {:fx/type :region :h-box/hgrow :always}
+                      {:fx/type :label
+                       :text (str (count current-groups) " assigned")
+                       :style "-fx-text-fill: #606060; -fx-font-size: 10;"}]}
+          {:fx/type :flow-pane
+           :hgap 6
+           :vgap 6
+           :children (vec (for [group all-groups]
+                            {:fx/type zone-group-chip
+                             :fx/key (:id group)
+                             :group group
+                             :selected? (some #{(:id group)} current-groups)
+                             :on-toggle {:event/type :projectors/toggle-zone-group
+                                         :projector-id projector-id
+                                         :zone-group-id (:id group)}}))}
+          {:fx/type :label
+           :text "Click to toggle membership"
+           :style "-fx-text-fill: #505050; -fx-font-size: 9; -fx-font-style: italic;"}]}))
 
 
 ;; Calibration effect helpers
@@ -590,12 +644,17 @@
                              :children [;; Left: Effect chain sidebar
                                         {:fx/type :v-box
                                          :spacing 8
-                                         :pref-width 250
+                                         :pref-width 280
                                          :children [{:fx/type :label
                                                      :text (str "CONFIGURE: " (:name projector))
                                                      :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
                                                     {:fx/type projector-basic-settings
                                                      :projector projector}
+                                                    {:fx/type :separator}
+                                                    ;; Zone Group Assignment
+                                                    {:fx/type zone-group-assignment-section
+                                                     :fx/context context
+                                                     :projector-id projector-id}
                                                     {:fx/type :separator}
                                                     {:fx/type :h-box
                                                      :alignment :center-left

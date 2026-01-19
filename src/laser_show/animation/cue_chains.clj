@@ -39,7 +39,10 @@
    - preset-id: Keyword identifying the preset (e.g., :circle, :wave)
    - opts: (optional) Map with :params, :effects, :enabled?
    
-   Returns: Preset instance map"
+   Returns: Preset instance map
+   
+   Note: Destination zone routing is configured at the cue chain level,
+   not per-preset. See [:chains :cue-chains [col row] :destination-zone]."
   ([preset-id] (create-preset-instance preset-id {}))
   ([preset-id {:keys [params effects enabled?]
                :or {params {} effects [] enabled? true}}]

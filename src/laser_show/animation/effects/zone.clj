@@ -1,20 +1,20 @@
 (ns laser-show.animation.effects.zone
-  "Zone routing effects - modify where cues are sent.
+  "Zone group routing effects - modify where cues are sent.
    
    Unlike regular effects that transform frame data (points, colors),
-   zone effects modify ROUTING before frame generation occurs.
-   
-   Zone effects are processed by routing/zone_effects.clj during the
-   routing phase, not during frame generation. The effect transducer
-   here is an identity function since no frame transformation occurs.
+   zone routing effects modify ROUTING before frame generation occurs.
    
    These effects appear in the cue-chain editor under the 'Zone' tab
    and allow dynamic routing based on effect parameters.
    
+   SIMPLIFIED ARCHITECTURE (v2):
+   Only zone groups exist now - zones have been eliminated.
+   Projectors are assigned directly to zone groups.
+   
    Modes:
-   - :replace - Completely override the cue's destination zone
-   - :add     - Add zones to the cue's destination (union)
-   - :filter  - Restrict to zones matching both original AND effect target"
+   - :replace - Completely override the cue's destination zone group
+   - :add     - Add zone groups to the cue's destination (union)
+   - :filter  - Restrict to zone groups matching both original AND effect target"
   (:require [laser-show.animation.effects :as effects]))
 
 
@@ -25,14 +25,14 @@
 
 
 (defn- zone-reroute-xf
-  "Identity transducer - zone effects don't modify frame data.
-   The routing parameters are read by routing/zone_effects.clj."
+  "Identity transducer - zone routing effects don't modify frame data.
+   The routing parameters are read by routing/core.clj."
   [_time-ms _bpm _params _ctx]
   (map identity))
 
 (effects/register-effect!
  {:id :zone-reroute
-  :name "Zone Reroute"
+  :name "Zone Group Reroute"
   :category :zone
   :timing :static
   :parameters [{:key :mode
@@ -40,28 +40,19 @@
                 :type :choice
                 :default :replace
                 :choices [:replace :add :filter]}
-               {:key :target-mode
-                :label "Target Mode"
-                :type :choice
-                :default :zone-groups
-                :choices [:zone-groups :zones]}
                {:key :target-zone-groups
                 :label "Target Zone Groups"
                 :type :zone-groups
-                :default [:all]}
-               {:key :target-zones
-                :label "Target Zones"
-                :type :zones
-                :default []}]
+                :default [:all]}]
   :ui-hints {:renderer :zone-reroute
-             :params [:mode :target-mode :target-zone-groups :target-zones]
+             :params [:mode :target-zone-groups]
              :show-routing-preview? true}
   :apply-transducer zone-reroute-xf})
 
 
 ;; Zone Broadcast Effect
 ;;
-;; Convenience effect to send to all zones.
+;; Convenience effect to send to all projectors.
 
 
 (defn- zone-broadcast-xf
@@ -75,7 +66,7 @@
   :category :zone
   :timing :static
   :parameters []
-  :ui-hints {:info "Sends this cue to ALL zones. Equivalent to zone-reroute with mode :replace and target :all."}
+  :ui-hints {:info "Sends this cue to ALL projectors. Equivalent to zone-reroute with mode :replace and target :all."}
   :apply-transducer zone-broadcast-xf})
 
 

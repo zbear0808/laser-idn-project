@@ -435,59 +435,67 @@
            :renaming-id nil}))
 
 
-;; Level 2: Zone Subscriptions
+;; Level 2: Virtual Projector Subscriptions
 
 
-(defn zones-list
-  "Get all zones as a flat list.
-   Depends on: zones domain"
+(defn virtual-projectors-list
+  "Get all virtual projectors as a flat list.
+   Depends on: projectors domain"
   [context]
-  (let [items (:items (fx/sub-val context :zones) {})]
+  (let [items (:virtual-projectors (fx/sub-val context :projectors) {})]
     (mapv (fn [[id config]] (assoc config :id id)) items)))
 
-(defn zones-by-projector
-  "Get zones grouped by projector ID.
-   Depends on: zones domain
-   Returns: {projector-id [zone1 zone2 zone3] ...}"
-  [context]
-  (let [zones (fx/sub-ctx context zones-list)]
-    (group-by :projector-id zones)))
+(defn virtual-projectors-for-projector
+  "Get virtual projectors for a specific parent projector.
+   Depends on: virtual-projectors-list"
+  [context parent-projector-id]
+  (filterv #(= parent-projector-id (:parent-projector-id %))
+           (fx/sub-ctx context virtual-projectors-list)))
 
-(defn zones-for-projector
-  "Get zones for a specific projector.
-   Depends on: zones-by-projector"
+(defn virtual-projector
+  "Get a single virtual projector by ID.
+   Depends on: projectors domain"
+  [context vp-id]
+  (when vp-id
+    (let [data (fx/sub-val context :projectors)]
+      (when-let [vp (get-in data [:virtual-projectors vp-id])]
+        (assoc vp :id vp-id)))))
+
+(defn active-virtual-projector-id
+  "Get the ID of the currently selected virtual projector.
+   Depends on: projectors domain"
+  [context]
+  (:active-virtual-projector (fx/sub-val context :projectors)))
+
+(defn active-virtual-projector
+  "Get the full config of the currently selected virtual projector.
+   Depends on: active-virtual-projector-id, virtual-projector"
+  [context]
+  (when-let [id (fx/sub-ctx context active-virtual-projector-id)]
+    (fx/sub-ctx context virtual-projector id)))
+
+(defn projector-corner-pin
+  "Get the corner-pin geometry for a projector.
+   Depends on: projectors domain"
   [context projector-id]
-  (get (fx/sub-ctx context zones-by-projector) projector-id []))
+  (get-in (fx/sub-val context :projectors)
+          [:items projector-id :corner-pin]))
 
-(defn zone
-  "Get a single zone by ID.
-   Depends on: zones domain"
-  [context zone-id]
-  (when zone-id
-    (let [data (fx/sub-val context :zones)]
-      (when-let [z (get-in data [:items zone-id])]
-        (assoc z :id zone-id)))))
-
-(defn selected-zone-id
-  "Get the currently selected zone ID.
-   Depends on: zones domain"
-  [context]
-  (:selected-zone (fx/sub-val context :zones)))
-
-(defn selected-zone
-  "Get the currently selected zone.
-   Depends on: selected-zone-id, zone"
-  [context]
-  (when-let [id (fx/sub-ctx context selected-zone-id)]
-    (fx/sub-ctx context zone id)))
-
-(defn zone-effect-chain
-  "Get the effects chain for a specific zone.
-   Depends on: chains domain"
-  [context zone-id]
-  (get-in (fx/sub-val context :chains)
-          [:zone-effects zone-id :items]
+(defn projector-zone-groups
+  "Get the zone groups a projector belongs to.
+   Depends on: projectors domain"
+  [context projector-id]
+  (get-in (fx/sub-val context :projectors)
+          [:items projector-id :zone-groups]
           []))
+
+(defn projector-tags
+  "Get the tags for a projector.
+   Depends on: projectors domain"
+  [context projector-id]
+  (get-in (fx/sub-val context :projectors)
+          [:items projector-id :tags]
+          #{}))
 
 
 ;; Level 2: Zone Group Subscriptions
@@ -522,22 +530,41 @@
   (when-let [id (fx/sub-ctx context selected-zone-group-id)]
     (fx/sub-ctx context zone-group id)))
 
-(defn zones-in-group
-  "Get all zones that belong to a specific zone group.
-   Depends on: zones-list"
+(defn projectors-in-zone-group
+  "Get all projectors that belong to a specific zone group.
+   Depends on: projectors-list"
   [context group-id]
   (filterv #(some #{group-id} (:zone-groups %))
-           (fx/sub-ctx context zones-list)))
+           (fx/sub-ctx context projectors-list)))
+
+(defn virtual-projectors-in-zone-group
+  "Get all virtual projectors that belong to a specific zone group.
+   Depends on: virtual-projectors-list"
+  [context group-id]
+  (filterv #(some #{group-id} (:zone-groups %))
+           (fx/sub-ctx context virtual-projectors-list)))
 
 (defn zone-group-usage
-  "Get usage info for a zone group: which zones and how many cues use it.
-   Depends on: zones-list
-   Returns: {:zone-count n :cue-count n :zones [...]}"
+  "Get usage info for a zone group: which projectors and VPs use it.
+   Returns: {:projector-count n :vp-count n :cue-count n :projectors [...] :virtual-projectors [...]}"
   [context group-id]
-  (let [zones (fx/sub-ctx context zones-in-group group-id)]
-    {:zone-count (count zones)
+  (let [projectors (fx/sub-ctx context projectors-in-zone-group group-id)
+        vps (fx/sub-ctx context virtual-projectors-in-zone-group group-id)]
+    {:projector-count (count projectors)
+     :vp-count (count vps)
      :cue-count 0 ;; TODO: Count cues targeting this group
-     :zones zones}))
+     :projectors projectors
+     :virtual-projectors vps}))
+
+(defn all-outputs-for-zone-group
+  "Get all outputs (projectors + VPs) for a zone group.
+   Returns unified list for routing preview."
+  [context group-id]
+  (let [projectors (fx/sub-ctx context projectors-in-zone-group group-id)
+        vps (fx/sub-ctx context virtual-projectors-in-zone-group group-id)]
+    (into
+      (mapv #(assoc % :output-type :projector) projectors)
+      (mapv #(assoc % :output-type :virtual-projector) vps))))
 
 
 ;; Level 2: Input Device Subscriptions (MIDI, OSC)

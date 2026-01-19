@@ -92,80 +92,39 @@
 ;; Destination Zone Picker
 
 
-(defn- zone-group-chip
-  "Small colored chip for a zone group selection."
-  [{:keys [group selected? on-click]}]
-  (let [{:keys [id name color]} group]
-    {:fx/type :label
-     :text name
-     :style (str "-fx-background-color: " (if selected? color (str color "60")) "; "
-                "-fx-text-fill: white; "
-                "-fx-padding: 3 8; "
-                "-fx-background-radius: 10; "
-                "-fx-font-size: 10;"
-                (when on-click " -fx-cursor: hand;"))
-     :on-mouse-clicked on-click}))
-
-(defn- destination-zone-picker
-  "UI for selecting destination zone group for a cue item.
+(defn- destination-zone-dropdown
+  "Dropdown for selecting destination zone group for the entire cue chain.
+   Renders as a horizontal row: 'Destination Zone:' label + dropdown.
+   
+   The destination zone applies to all presets in this cue chain cell.
    
    Props:
    - :col, :row - Grid coordinates
-   - :item-path - Path to the item
-   - :destination-zone - Current destination-zone config
+   - :destination-zone - Current destination-zone config at cue chain level
    - :zone-groups - List of available zone groups"
-  [{:keys [col row item-path destination-zone zone-groups]}]
-  (let [current-mode (or (:mode destination-zone) :zone-group)
-        current-group-id (:zone-group-id destination-zone :all)
-        preferred-type (or (:preferred-zone-type destination-zone) :default)]
-    {:fx/type :v-box
-     :spacing 6
-     :style-class "zone-picker"
+  [{:keys [col row destination-zone zone-groups]}]
+  (let [current-group-id (:zone-group-id destination-zone :all)
+        ;; Find the currently selected group for display
+        current-group (or (first (filter #(= (:id %) current-group-id) zone-groups))
+                          {:id :all :name "All"})]
+    {:fx/type :h-box
+     :spacing 8
+     :alignment :center-left
      :children [{:fx/type :label
-                 :text "DESTINATION ZONE"
-                 :style-class "zone-picker-header"}
-                ;; Zone group selection
-                {:fx/type :flow-pane
-                 :hgap 4
-                 :vgap 4
-                 :children (vec (for [group zone-groups]
-                                  {:fx/type zone-group-chip
-                                   :fx/key (:id group)
-                                   :group group
-                                   :selected? (= (:id group) current-group-id)
-                                   :on-click {:event/type :cue-chain/set-destination-zone-group
-                                              :col col
-                                              :row row
-                                              :item-path item-path
-                                              :group-id (:id group)}}))}
-                ;; Preferred zone type selector
-                {:fx/type :h-box
-                 :spacing 6
-                 :alignment :center-left
-                 :children [{:fx/type :label
-                             :text "Prefer:"
-                             :style-class "zone-picker-label"}
-                            {:fx/type :combo-box
-                             :value preferred-type
-                             :pref-width 100
-                             :items [:default :graphics :crowd-scanning]
-                             :button-cell (fn [type]
-                                            {:text (case type
-                                                     :default "Default"
-                                                     :graphics "Graphics"
-                                                     :crowd-scanning "Crowd"
-                                                     "Default")})
-                             :cell-factory {:fx/cell-type :list-cell
-                                            :describe (fn [type]
-                                                        {:text (case type
-                                                                 :default "Default"
-                                                                 :graphics "Graphics"
-                                                                 :crowd-scanning "Crowd"
-                                                                 "Default")})}
-                             :on-value-changed {:event/type :cue-chain/set-preferred-zone-type
-                                                :col col
-                                                :row row
-                                                :item-path item-path}}]}]}))
+                 :text "Destination Zone:"
+                 :style-class "zone-picker-label"}
+                {:fx/type :combo-box
+                 :value current-group
+                 :pref-width 150
+                 :items zone-groups
+                 :button-cell (fn [group]
+                                {:text (or (:name group) "All")})
+                 :cell-factory {:fx/cell-type :list-cell
+                                :describe (fn [group]
+                                            {:text (or (:name group) "All")})}
+                 :on-value-changed {:event/type :cue-chain/set-destination-zone-group
+                                    :col col
+                                    :row row}}]}))
 
 
 ;; Middle Section (Preset Config)
@@ -178,9 +137,7 @@
         selected-item (when selected-item-path
                         (chains/get-item-at-path (:items cue-chain) selected-item-path))
         is-preset? (and selected-item (= :preset (:type selected-item)))
-        is-group? (and selected-item (chains/group? selected-item))
-        ;; Get zone groups for destination picker
-        zone-groups (fx/sub-ctx context subs/zone-groups-list)]
+        is-group? (and selected-item (chains/group? selected-item))]
     {:fx/type :v-box
      :spacing 0
      :children (filterv
@@ -193,19 +150,10 @@
                   
                   ;; Preset/Group parameter editor (bottom)
                   (if is-preset?
-                    {:fx/type :v-box
-                     :spacing 8
-                     :children [{:fx/type preset-param-editor/preset-param-editor
-                                 :cell [col row]
-                                 :preset-path selected-item-path
-                                 :preset-instance selected-item}
-                                ;; Destination zone picker for presets
-                                {:fx/type destination-zone-picker
-                                 :col col
-                                 :row row
-                                 :item-path selected-item-path
-                                 :destination-zone (:destination-zone selected-item)
-                                 :zone-groups zone-groups}]}
+                    {:fx/type preset-param-editor/preset-param-editor
+                     :cell [col row]
+                     :preset-path selected-item-path
+                     :preset-instance selected-item}
                     (when is-group?
                       {:fx/type :v-box
                        :style-class "dialog-section"
@@ -219,14 +167,7 @@
                                    :style-class "group-properties-label"}
                                   {:fx/type :label
                                    :text (str "Items: " (count (:items selected-item [])))
-                                   :style-class "group-properties-label"}
-                                  ;; Destination zone picker for groups
-                                  {:fx/type destination-zone-picker
-                                   :col col
-                                   :row row
-                                   :item-path selected-item-path
-                                   :destination-zone (:destination-zone selected-item)
-                                   :zone-groups zone-groups}]}))
+                                   :style-class "group-properties-label"}]}))
                   
                   (when (not selected-item)
                     {:fx/type :v-box
@@ -296,7 +237,10 @@
         
         ;; Dialog data for custom renderers (UI modes, etc.)
         ;; Merge ui-modes and item-effects-ui together so effects can access both
-        effect-dialog-data (merge dialog-data item-effects-ui {:item-effects-ui item-effects-ui})]
+        effect-dialog-data (merge dialog-data item-effects-ui {:item-effects-ui item-effects-ui})
+        
+        ;; Get zone groups for destination picker in footer
+        zone-groups (fx/sub-ctx context subs/zone-groups-list)]
   {:fx/type :v-box
    :spacing 0
    :style-class "dialog-content"
@@ -401,11 +345,19 @@
                                           :selected-effect-ids selected-effect-ids
                                           :dialog-data effect-dialog-data})])}]}
               
-              ;; Footer with close button
+              ;; Footer with destination zone dropdown (left) and close button (right)
               {:fx/type :h-box
-               :alignment :center-right
+               :alignment :center-left
+               :spacing 12
                :style-class "dialog-footer"
-               :children [{:fx/type :button
+               :children [{:fx/type destination-zone-dropdown
+                           :col col
+                           :row row
+                           :destination-zone (:destination-zone cue-chain)
+                           :zone-groups zone-groups}
+                          {:fx/type :region
+                           :h-box/hgrow :always}
+                          {:fx/type :button
                            :text "Close"
                            :style-class "btn-primary"
                            :on-action {:event/type :ui/close-dialog
