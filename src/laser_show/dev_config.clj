@@ -20,13 +20,4 @@
   []
   (= "true" (System/getProperty "laser-show.dev")))
 
-(defn dev-tools-available?
-  "Returns true if cljfx dev tools are available on the classpath.
-   
-   This allows graceful degradation if the dev dependency isn't present."
-  []
-  (try
-    (Class/forName "cljfx.dev$type__GT_lifecycle")
-    true
-    (catch ClassNotFoundException _
-      false)))
+

@@ -319,11 +319,6 @@
   (require 'laser-show.profiling.jfr-profiler)
   ((resolve 'laser-show.profiling.jfr-profiler/start-spike-detection!) threshold-us))
 
-(defn jfr-spikes-stop
-  "Stop spike detection."
-  []
-  (require 'laser-show.profiling.jfr-profiler)
-  ((resolve 'laser-show.profiling.jfr-profiler/stop-spike-detection!)))
 
 (defn jfr-auto-dump
   "Auto-dump recording on spikes.

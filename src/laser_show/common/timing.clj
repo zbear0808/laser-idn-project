@@ -154,41 +154,10 @@
      :ms (quot nanos 1000000)}))
 
 
-;; Time Conversion
-
-
 (defn nanos->micros
   "Convert nanoseconds to microseconds."
   ^long [nanos]
   (quot nanos 1000))
-
-(defn nanos->millis
-  "Convert nanoseconds to milliseconds."
-  ^long [nanos]
-  (quot nanos 1000000))
-
-(defn micros->nanos
-  "Convert microseconds to nanoseconds."
-  ^long [micros]
-  (* micros 1000))
-
-(defn micros->millis
-  "Convert microseconds to milliseconds."
-  ^long [micros]
-  (quot micros 1000))
-
-(defn millis->nanos
-  "Convert milliseconds to nanoseconds."
-  ^long [millis]
-  (* millis 1000000))
-
-(defn millis->micros
-  "Convert milliseconds to microseconds."
-  ^long [millis]
-  (* millis 1000))
-
-
-;; FPS/Interval Calculations
 
 
 (defn fps->interval-nanos

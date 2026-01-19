@@ -1001,10 +1001,6 @@
 ;; since we no longer store them in component state.
 
 
-(defn get-component-state
-  "Get the current UI state for a component. Returns map with :selected-ids, :dragging-ids, etc."
-  [component-id]
-  (state/get-in-state [:list-ui :components component-id]))
 
 (defn copy-selected-from-component!
   "Copy selected items from a component (for external keyboard handlers).
@@ -1080,17 +1076,6 @@
      (events/dispatch! (assoc base-params
                               :event/type event-type
                               selection-key selected-ids)))))
-
-(defn make-copy-callback
-  "Create an on-copy callback that dispatches an event or calls a function.
-   
-   Usage:
-   :on-copy (make-copy-callback :effects/set-clipboard {:col col :row row} :items)"
-  [event-type base-params items-key]
-  (fn [copied-items]
-    (events/dispatch! (assoc base-params
-                             :event/type event-type
-                             items-key copied-items))))
 
 
 ;; ============================================================================

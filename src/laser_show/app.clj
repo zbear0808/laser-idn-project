@@ -26,7 +26,7 @@
 
 (defonce ^{:private true :doc "The cljfx app instance."} *app (atom nil))
 
-(defn- error-handler
+(defn- default-error-handler
   "Error handler for cljfx renderer.
    
    Logs errors and prints stack trace. In dev mode, cljfx.dev provides
@@ -74,7 +74,7 @@
     :event-handler events/event-handler
     :desc-fn (fn [_] {:fx/type root/root-view})
     :opts {:fx.opt/type->lifecycle (get-type->lifecycle)}
-    :error-handler error-handler
+    :error-handler default-error-handler
     :async-agent-options {:error-handler agent-error-handler}))
 
 

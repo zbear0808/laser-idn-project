@@ -12,12 +12,11 @@
    - Keyboard shortcuts: Ctrl+C (copy), Ctrl+V (paste), Ctrl+A (select all), Delete
    - Drag-and-drop reordering
    - Copy/paste across cells"
-(:require [cljfx.api :as fx]
+  (:require [cljfx.api :as fx]
             [clojure.tools.logging :as log]
             [laser-show.subs :as subs]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
-            [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.css.core :as css]
             [laser-show.views.components.effect-bank :as effect-bank]
@@ -101,7 +100,7 @@
     {:fx/type :v-box
      :spacing 0
      :style-class "dialog-content"
-     :pref-width 600
+     :pref-width 800
      :pref-height 550
      :children [;; Main content area
                {:fx/type :h-box

@@ -20,14 +20,6 @@
             [laser-show.css.theme :as theme]))
 
 
-;; Group depth colors (exported for use in components that need programmatic access)
-
-(def group-colors
-  "Colors for different group nesting depths.
-   Alias to theme/category-colors for backward compatibility."
-  theme/category-colors)
-
-
 #_{:clj-kondo/ignore [:redefined-var]}
 (def list
   "Hierarchical list styles."

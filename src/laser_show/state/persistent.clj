@@ -17,16 +17,6 @@
   "Default directory for saving projects."
   (str (System/getProperty "user.home") "/LaserShowProjects"))
 
-(def config-files
-  "Map of config type to file path.
-   
-   - project-metadata.edn: Settings, grid config, BPM
-   - hardware.edn: Projectors, zone-groups, virtual-projectors
-   - content.edn: All chains (cue-chains, effect-chains, projector-effects)
-   - mappings.edn: Input router handlers (future)"
-  {:project-metadata "config/project-metadata.edn"
-   :hardware        "config/hardware.edn"
-   :content         "config/content.edn"})
 
 (def zip-filenames
   "Filenames used inside the project zip file."
@@ -96,21 +86,6 @@
         true)
     false))
 
-(defn load-single!
-  "Load a single config file and merge into state.
-   Returns true if loaded successfully, false otherwise."
-  [file-key]
-  (let [filepath (get config-files file-key)
-        {:keys [paths]} (get persistent-state-mapping file-key)]
-    (when (and filepath paths)
-      (load-and-merge-paths! filepath paths))))
-
-(defn load-from-disk!
-  "Load all persistent state from disk. Called once at app startup.
-   Loads each config file and merges into the state."
-  []
-  (doseq [file-key (keys persistent-state-mapping)]
-    (load-single! file-key)))
 
 
 ;; Save Functions
@@ -141,15 +116,6 @@
     {}
     path-specs))
 
-(defn save-single!
-  "Save a single config file from state.
-   Returns true if saved successfully, false otherwise."
-  [file-key]
-  (let [filepath (get config-files file-key)
-        {:keys [paths]} (get persistent-state-mapping file-key)]
-    (when (and filepath paths)
-      (let [data (collect-data-for-paths paths)]
-        (ser/save-to-file! filepath data)))))
 
 
 

@@ -17,19 +17,6 @@
   (u/clamp (double v) 0.0 1.0))
 
 
-;; Legacy Byte Clamping (deprecated, use clamp-normalized)
-
-
-(defn clamp-byte
-  "Clamp a value to valid byte range (0-255).
-   DEPRECATED: Colors are now normalized. Use clamp-normalized.
-   This function is kept for backward compatibility only."
-  [v]
-  (int (u/clamp (int v) 0 255)))
-
-
-
-
 (defn blanked?
   "Check if a point is blanked (all colors near zero).
    Works with normalized colors (0.0-1.0)."

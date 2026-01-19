@@ -1,6 +1,4 @@
-(ns laser-show.common.util 
-  (:require
-    [laser-show.common.util :as u]))
+(ns laser-show.common.util)
 
 (defn clamp
   "Clamps numeric values (inclusive).

@@ -5,9 +5,9 @@
    that can be triggered to play a preset animation.
    
    Uses the generic grid-tab component for consistent grid layout."
-  (:require [cljfx.api :as fx]
-            [laser-show.views.components.grid-tab :as grid-tab]
-            [laser-show.views.components.grid-cell :as grid-cell]))
+  (:require
+   [laser-show.views.components.grid-tab :as grid-tab]
+   [laser-show.views.components.grid-cell :as grid-cell]))
 
 
 ;; Grid Tab

@@ -163,46 +163,6 @@
                 [(clamp x 0.0 1.0)
                  (clamp y 0.0 1.0)])))))))
 
-
-;; Utility Functions
-
-
-(defn identity-curve-points
-  "Returns the default identity curve control points.
-   This is a straight diagonal line that maps each input to itself.
-   Uses normalized values (0.0-1.0)."
-  []
-  [[0.0 0.0] [1.0 1.0]])
-
-(defn validate-control-points
-  "Validate and normalize control points.
-   
-   - Ensures all points have X and Y in [0.0, 1.0] range
-   - Sorts by X coordinate
-   - Ensures first point has X=0.0 and last has X=1.0
-   
-   Returns validated vector of control points."
-  [points]
-  (if (or (nil? points) (empty? points))
-    (identity-curve-points)
-    (let [;; Clamp and sort
-          normalized (->> points
-                          (map (fn [[x y]]
-                                 [(clamp (double x) 0.0 1.0) (clamp (double y) 0.0 1.0)]))
-                          (sort-by first)
-                          vec)
-          ;; Ensure first point has X=0.0
-          first-pt (first normalized)
-          with-start (if (< (first first-pt) 0.001)
-                       normalized
-                       (into [[0.0 (second first-pt)]] normalized))
-          ;; Ensure last point has X=1.0
-          last-pt (last with-start)
-          with-end (if (> (first last-pt) 0.999)
-                     with-start
-                     (conj with-start [1.0 (second last-pt)]))]
-      with-end)))
-
 (defn add-point
   "Add a new control point and return sorted points.
    

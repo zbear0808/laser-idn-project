@@ -2,7 +2,7 @@
   "Tests for modulator event handlers.
    
    Tests the modulator toggle, type selection, and sub-parameter update handlers."
-  (:require [clojure.test :refer :all]
+  (:require [clojure.test :refer [deftest is testing]]
             [laser-show.events.handlers.modulator :as modulator]))
 
 

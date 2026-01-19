@@ -3,8 +3,7 @@
             [laser-show.state.core :as state]
             [laser-show.state.clipboard :as clipboard]))
 
-(defn init-state-fixture [f]
-  "Initialize state before each test"
+(defn init-state-fixture [f] 
   (state/init-state! {:ui {:clipboard nil}})
   (f))
 

@@ -26,11 +26,6 @@
   [item]
   (= :group (:type item)))
 
-(defn item?
-  "Check if an item is a leaf item (not a group).
-   Items without :type or with any :type other than :group are leaf items."
-  [item]
-  (not= :group (:type item)))
 
 (defn item-enabled?
   "Check if an item is enabled.
@@ -192,22 +187,6 @@
       {}
       (collect-path-item-pairs items))))
 
-(defn collect-all-ids-set
- "Collect all item IDs in a chain as a set, recursively including groups.
-  
-  Parameters:
-  - items: Vector of items (the chain)
-  
-  Returns: Set of UUIDs"
- [items]
- (reduce
-   (fn [ids item]
-     (let [with-current (if (:id item) (conj ids (:id item)) ids)]
-       (if (group? item)
-         (into with-current (collect-all-ids-set (:items item [])))
-         with-current)))
-   #{}
-   items))
 
 (defn collect-all-ids
  "Collect all item IDs in a chain in document order, recursively including groups.
@@ -268,34 +247,6 @@
     items))
 
 
-;; ID Management
-
-
-(defn ensure-item-id
-  "Ensure an item has an :id field. Returns item with ID.
-   If item already has an ID, returns it unchanged.
-   Otherwise, adds a random UUID as the ID."
-  [item]
-  (if (:id item)
-    item
-    (assoc item :id (random-uuid))))
-
-(defn ensure-all-ids
-  "Ensure all items in a chain have IDs, recursively.
-   Returns a new chain with IDs added where missing."
-  [items]
-  (mapv
-    (fn [item]
-      (let [with-id (ensure-item-id item)]
-        (if (group? with-id)
-          (update with-id :items ensure-all-ids)
-          with-id)))
-    items))
-
-
-;; Item Manipulation
-
-
 (defn remove-at-path
   "Remove an item at the given path from a chain.
    
@@ -351,27 +302,6 @@
    Returns: Updated chain"
   [items path f]
   (update-in (vec items) (vec path) f))
-
-(defn move-item
-  "Move an item from one path to another in a chain.
-   
-   Parameters:
-   - items: Vector of items (the chain)
-   - from-path: Path vector of item to move
-   - to-path: Path vector of destination (item will be inserted here)
-   
-   Returns: Updated chain with item moved"
-  [items from-path to-path]
-  (let [item (get-item-at-path items from-path)
-        ;; Remove first
-        after-remove (remove-at-path items from-path)
-        ;; Adjust to-path if it was affected by the removal
-        ;; (This is a simplified version - more complex adjustment may be needed)
-        adjusted-to-path to-path]
-    (insert-at-path after-remove adjusted-to-path item)))
-
-
-;; Group Operations
 
 
 (defn create-group
@@ -443,28 +373,6 @@
       (let [start (min idx1 idx2)
             end (max idx1 idx2)]
         (subvec all-paths start (inc end))))))
-
-(defn select-range-by-ids
- "Select range between two IDs in document order.
-  Returns set of all IDs between from-id and to-id (inclusive).
-  
-  Parameters:
-  - items: Vector of items (the chain)
-  - from-id: Starting ID
-  - to-id: Ending ID
-  
-  Returns: Set of IDs in range"
- [items from-id to-id]
- (let [from-path (find-path-by-id items from-id)
-       to-path (find-path-by-id items to-id)]
-   (if (and from-path to-path)
-     (let [path-range (select-range items from-path to-path)]
-       (set (keep #(:id (get-item-at-path items %)) path-range)))
-     ;; Fallback if IDs not found
-     #{from-id to-id})))
-
-
-;; Deep Copy Operations
 
 
 (defn deep-copy-item

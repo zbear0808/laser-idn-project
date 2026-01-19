@@ -19,9 +19,8 @@
    │ └─────────────────────────────────────────────────────────────┘│
    │ Selected: Keyframe 1 @ 0%      [+ Add] [- Delete] [Copy Params]│
    └─────────────────────────────────────────────────────────────────┘"
-  (:require [cljfx.api :as fx]
-            [laser-show.views.components.keyframe-timeline :as timeline]
-            [laser-show.events.core :as events]))
+  (:require
+   [laser-show.views.components.keyframe-timeline :as timeline]))
 
 
 ;; Helper Functions
@@ -129,13 +128,12 @@
                :on-delete on-delete}]})
 
 (defn- actions-row
-  "Row with keyframe info and action buttons."
-  [{:keys [keyframes selected-idx on-add-event on-delete-event on-copy-params-event enabled?]}]
+  "Row with keyframe info."
+  [{:keys [keyframes selected-idx enabled?]}]
   (let [selected-kf (when (and selected-idx
                                (>= selected-idx 0)
                                (< selected-idx (count keyframes)))
-                      (nth keyframes selected-idx))
-        can-delete? (and selected-kf (> (count keyframes) 1))]
+                      (nth keyframes selected-idx))]
     {:fx/type :h-box
      :alignment :center-left
      :spacing 10
@@ -147,29 +145,7 @@
                          (str "Selected: Keyframe " (inc selected-idx)
                               " @ " (format-position (:position selected-kf)))
                          "Click timeline to select")
-                 :style-class "label-secondary"}
-                
-                {:fx/type :region :h-box/hgrow :always}
-                
-                ;; Add button (at 50% by default)
-                {:fx/type :button
-                 :text "+ Add"
-                 :style-class "btn-secondary"
-                 :on-action (assoc on-add-event :position 0.5)}
-                
-                ;; Delete button
-                {:fx/type :button
-                 :text "- Delete"
-                 :style-class "btn-secondary"
-                 :disable (not can-delete?)
-                 :on-action (assoc on-delete-event :keyframe-idx selected-idx)}
-                
-                ;; Copy params from effect
-                {:fx/type :button
-                 :text "Copy Params"
-                 :style-class "btn-secondary"
-                 :disable (nil? selected-kf)
-                 :on-action (assoc on-copy-params-event :keyframe-idx selected-idx)}]}))
+                 :style-class "label-secondary"}]}))
 
 
 ;; Main Panel Component
@@ -239,10 +215,4 @@
                                {:fx/type actions-row
                                 :keyframes keyframes
                                 :selected-idx selected-idx
-                                :enabled? enabled?
-                                :on-add-event (assoc base-event
-                                                     :event/type :keyframe/add)
-                                :on-delete-event (assoc base-event
-                                                        :event/type :keyframe/delete)
-                                :on-copy-params-event (assoc base-event
-                                                             :event/type :keyframe/copy-effect-params)}]})])}))
+                                :enabled? enabled?}]})])}))

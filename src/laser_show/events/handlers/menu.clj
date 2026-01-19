@@ -10,10 +10,6 @@
             [laser-show.state.persistent :as persistent]))
 
 
-;; Forward declarations for helper handlers
-(declare handle-grid-copy-cell handle-grid-paste-cell handle-grid-clear-cell)
-(declare handle-effects-copy-cell handle-effects-paste-cell handle-effects-clear-cell)
-
 
 ;; File Menu Events
 

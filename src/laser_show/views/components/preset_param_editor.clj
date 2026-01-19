@@ -12,17 +12,6 @@
   (:require [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.animation.presets :as presets]))
 
-
-;; Re-export params-vector->map for backwards compatibility
-(def params-vector->map
-  "Convert preset parameters from vector format (registry) to map format (UI).
-   See parameter-controls/params-vector->map for full docs."
-  param-controls/params-vector->map)
-
-
-;; Main Preset Parameter Editor
-
-
 (defn preset-param-editor
   "Parameter editor for the selected preset instance.
    Shows controls for all parameters defined in the preset's spec.

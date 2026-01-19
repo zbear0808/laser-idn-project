@@ -113,39 +113,6 @@
          (< (:b point) epsilon))))
 
 
-;; Point Value Extraction (for output conversion)
-
-
-(defn point->8bit-color
-  "Extract color from a LaserPoint as 8-bit values [r g b]."
-  [point]
-  [(int (* (:r point) 255))
-   (int (* (:g point) 255))
-   (int (* (:b point) 255))])
-
-(defn point->16bit-color
-  "Extract color from a LaserPoint as 16-bit values [r g b]."
-  [point]
-  [(int (* (:r point) 65535))
-   (int (* (:g point) 65535))
-   (int (* (:b point) 65535))])
-
-(defn point->16bit-xy
-  "Extract coordinates from a LaserPoint as 16-bit signed values [x y]."
-  [point]
-  [(short (* (:x point) 32767))
-   (short (* (:y point) 32767))])
-
-(defn point->8bit-xy
-  "Extract coordinates from a LaserPoint as 8-bit unsigned values [x y].
-   Maps -1.0 to 0, 0.0 to 128, 1.0 to 255."
-  [point]
-  [(int (* (+ (:x point) 1.0) 127.5))
-   (int (* (+ (:y point) 1.0) 127.5))])
-
-
-;; Frame Construction
-
 
 (defn make-frame
   "Create a LaserFrame from a sequence of points."

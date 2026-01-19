@@ -9,7 +9,6 @@
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.css.core :as css]
-            [laser-show.input.midi :as midi]
             [clojure.string :as str]))
 
 

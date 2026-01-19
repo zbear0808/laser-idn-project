@@ -10,7 +10,6 @@
             [laser-show.subs :as subs]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
-            [laser-show.events.core :as events]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.css.core :as css]
             [laser-show.views.components.custom-param-renderers :as custom-renderers]

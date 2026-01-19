@@ -46,10 +46,7 @@
    Smallest packet size, but reduced position precision."
   (->OutputConfig BIT_DEPTH_8 BIT_DEPTH_8))
 
-(def high-color-config
-  "High color configuration: 16-bit color, 8-bit XY.
-   Maximum color precision with reduced position precision."
-  (->OutputConfig BIT_DEPTH_16 BIT_DEPTH_8))
+
 
 
 ;; Configuration Factory Functions
@@ -141,17 +138,6 @@
 
 
 ;; Configuration Queries
-
-
-(defn high-precision-color?
-  "Check if config uses 16-bit color precision."
-  [{:keys [color-bit-depth]}]
-  (= color-bit-depth BIT_DEPTH_16))
-
-(defn high-precision-xy?
-  "Check if config uses 16-bit XY precision."
-  [{:keys [xy-bit-depth]}]
-  (= xy-bit-depth BIT_DEPTH_16))
 
 (defn config-name
   "Get a human-readable name for the configuration."

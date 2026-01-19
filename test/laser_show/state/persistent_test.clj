@@ -19,7 +19,6 @@
 (def test-project-file "test-output/test-project.zip")
 
 (defn cleanup-test-files [f]
-  "Remove test project file before and after tests."
   (let [file (io/file test-project-file)
         dir (io/file "test-output")]
     (when (.exists file)
@@ -38,7 +37,6 @@
 
 
 (defn init-test-state! []
-  "Initialize state with test data."
   (state/init-state! (domains/build-initial-state))
   
   ;; Add some test data

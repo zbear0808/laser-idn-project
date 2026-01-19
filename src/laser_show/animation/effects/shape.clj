@@ -16,8 +16,7 @@
    
    For animated rotation, use modulators:
    {:effect-id :rotation :params {:angle (mod/sawtooth-mod 0 360 1.0)}}"
-  (:require [laser-show.animation.effects :as effects]
-            [laser-show.animation.modulation :as mod]))
+  (:require [laser-show.animation.effects :as effects]))
 
 
 ;; Scale Effect

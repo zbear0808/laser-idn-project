@@ -3,9 +3,9 @@
    
    Similar to the cue grid but for effect modifiers.
    Uses the generic grid-tab component for consistent grid layout."
-  (:require [cljfx.api :as fx]
-            [laser-show.views.components.grid-tab :as grid-tab]
-            [laser-show.views.components.grid-cell :as cell]))
+  (:require
+   [laser-show.views.components.grid-tab :as grid-tab]
+   [laser-show.views.components.grid-cell :as cell]))
 
 
 ;; Effects Tab

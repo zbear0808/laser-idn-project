@@ -168,16 +168,6 @@
 ;; Special Purpose Colors - Domain-specific
 ;; =============================================================================
 
-(def status-colors
-  "Colors for connection/device status indicators."
-  (let [{:keys [accent-success accent-info accent-warning accent-danger
-                text-muted]} semantic-colors]
-    {:online     accent-success    ; Connected, healthy
-     :connected  accent-success    ; Same as online
-     :offline    accent-danger     ; Disconnected, error
-     :connecting accent-info       ; In progress
-     :occupied   accent-warning    ; In use by another
-     :unknown    text-muted}))     ; Unknown state
 
 (def category-colors
   "Colors for visual differentiation of categories/types.
@@ -193,30 +183,6 @@
      :beam      cat-green
      :abstract  cat-brown}))
 
-(def channel-colors
-  "Colors for RGB channel visualization."
-  {:r "#FF5555"
-   :g "#55FF55"
-   :b "#5555FF"})
-
-
-;; =============================================================================
-;; All Colors Combined (for easy access)
-;; =============================================================================
-
-(def all-colors
-  "All color definitions merged into a single map for easy access."
-  (merge base-colors
-         semantic-colors
-         computed-colors
-         status-colors
-         category-colors
-         channel-colors))
-
-
-;; =============================================================================
-;; Theme Registration (cljfx/css)
-;; =============================================================================
 
 (def theme
   "Main application theme with colors and base styles.

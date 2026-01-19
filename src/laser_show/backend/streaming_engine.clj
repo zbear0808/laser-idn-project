@@ -233,15 +233,3 @@
   "Get current streaming statistics."
   [engine]
   @(:stats engine))
-
-(defn get-output-config
-  "Get the current output configuration."
-  [engine]
-  (:output-config engine))
-
-(defn set-output-config!
-  "Update the output configuration.
-   Note: This only takes effect on the next packet, not mid-stream.
-   For a clean transition, stop and restart the engine."
-  [engine new-config]
-  (assoc engine :output-config new-config))

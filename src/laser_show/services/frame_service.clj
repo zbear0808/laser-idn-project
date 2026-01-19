@@ -18,11 +18,9 @@
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.types :as t]
-            [laser-show.animation.time :as anim-time]
             [laser-show.common.timing :as timing]
             [laser-show.profiling.frame-profiler :as profiler]
             [laser-show.profiling.jfr-profiler :as jfr]
-            ;; Require effect implementations to register them
             [laser-show.animation.effects.shape]
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]

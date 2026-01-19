@@ -223,22 +223,21 @@
     :or {width 300 height 300
          show-grid true show-axes true show-labels true}}]
 
-  (do
-    (log/info "SPATIAL-CANVAS CREATED - points:" points)
-    {:fx/type fx/ext-on-instance-lifecycle
-     :on-created
-     (fn [^Canvas canvas]
-       (log/info "SPATIAL-CANVAS on-created callback - points:" points)
-       (let [gc (.getGraphicsContext2D canvas)
-             drag-state (atom {:dragging? false
-                               :point-id nil
-                               :hover-id nil
-                               :drag-type nil
-                               :drag-start-world nil
-                               :initial-points nil
-                               :keyboard-selected-id nil
-                               :mouse-over? false})
-             points-map (atom (u/map-into :id points))
+  (log/info "SPATIAL-CANVAS CREATED - points:" points)
+  {:fx/type fx/ext-on-instance-lifecycle
+   :on-created
+   (fn [^Canvas canvas]
+     (log/info "SPATIAL-CANVAS on-created callback - points:" points)
+     (let [gc (.getGraphicsContext2D canvas)
+           drag-state (atom {:dragging? false
+                             :point-id nil
+                             :hover-id nil
+                             :drag-type nil
+                             :drag-start-world nil
+                             :initial-points nil
+                             :keyboard-selected-id nil
+                             :mouse-over? false})
+           points-map (atom (u/map-into :id points))
            fine-step 0.005
            coarse-step 0.02
            scene-filter (atom nil)
@@ -439,7 +438,7 @@
          (swap! drag-state assoc :keyboard-selected-id (:id first-point)))
        (.setFocusTraversable canvas true)))
 
-     :desc {:fx/type :canvas
-            :width width
-            :height height
-            :style "-fx-cursor: hand;"}}))
+   :desc {:fx/type :canvas
+          :width width
+          :height height
+          :style "-fx-cursor: hand;"}})

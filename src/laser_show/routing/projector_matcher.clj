@@ -9,8 +9,7 @@
    Key concepts:
    - Projectors have corner-pin geometry and color curves
    - Virtual projectors have alternate corner-pin but inherit parent's color curves
-   - Both can be assigned to multiple zone groups"
-  (:require [laser-show.common.util :as u]))
+   - Both can be assigned to multiple zone groups")
 
 
 ;; Output Config Building
@@ -139,15 +138,6 @@
       (filter-outputs-by-zone-group enabled-outputs :all))))
 
 
-(defn group-outputs-by-physical-projector
-  "Group outputs by their physical projector ID.
-   Virtual projectors group with their parent.
-   
-   Returns: Map of projector-id -> vector of output configs"
-  [outputs]
-  (group-by :projector-id outputs))
-
-
 ;; Routing Map Building
 
 
@@ -165,24 +155,6 @@
         destination (or (:destination-zone cue) {:zone-group-id :all})
         target {:zone-groups [(or (:zone-group-id destination) :all)]}]
     (find-outputs-for-target all-outputs target)))
-
-
-(defn build-routing-map-multi-target
-  "Build a routing map for multiple zone group targets.
-   Used when a cue targets multiple zone groups.
-   
-   Args:
-   - target-zone-groups: Vector of zone group IDs
-   - projectors-items: Map of projector-id -> projector config
-   - virtual-projectors: Map of vp-id -> virtual projector config
-   
-   Returns: Vector of output configs (deduplicated by output id)"
-  [target-zone-groups projectors-items virtual-projectors]
-  (let [all-outputs (build-all-outputs projectors-items virtual-projectors)
-        target {:zone-groups target-zone-groups}
-        matching-outputs (find-outputs-for-target all-outputs target)]
-    ;; Deduplicate by output id (in case an output belongs to multiple target groups)
-    (vec (vals (into {} (map (fn [o] [(:id o) o]) matching-outputs))))))
 
 
 ;; Diagnostic Functions

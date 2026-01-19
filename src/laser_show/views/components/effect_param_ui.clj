@@ -26,34 +26,6 @@
    See parameter-controls/params-vector->map for full docs."
   param-controls/params-vector->map)
 
-(def param-slider
-  "Slider control for numeric parameters with editable text field.
-   See parameter-controls/param-slider for full docs."
-  param-controls/param-slider)
-
-(def param-choice
-  "Combo-box for choice parameters.
-   See parameter-controls/param-choice for full docs."
-  param-controls/param-choice)
-
-(def param-checkbox
-  "Checkbox for boolean parameters.
-   See parameter-controls/param-checkbox for full docs."
-  param-controls/param-checkbox)
-
-(def param-control
-  "Render appropriate control based on parameter type.
-   See parameter-controls/param-control for full docs."
-  param-controls/param-control)
-
-
-;; Re-export modulator-aware controls
-
-(def modulatable-param-control
-  "Parameter control with modulator support for numeric types.
-   See modulator-param-control/modulatable-param-control for full docs."
-  mod-param/modulatable-param-control)
-
 (def modulatable-param-controls-list
   "Parameter controls list with modulator support.
    See modulator-param-control/modulatable-param-controls-list for full docs."

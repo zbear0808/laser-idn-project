@@ -144,19 +144,6 @@
   [path value]
   (swap-state! assoc-in path value))
 
-(defn update-in-state!
-  "Update a value at a path using a function.
-   
-   Parameters:
-   - path: Vector path into state
-   - f: Update function
-   - args: Additional args to f
-   
-   Example:
-   (update-in-state! [:timing :tap-times] conj timestamp)"
-  [path f & args]
-  (apply swap-state! update-in path f args))
-
 
 ;; Section 4: Initialization & Lifecycle
 

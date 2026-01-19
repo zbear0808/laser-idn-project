@@ -13,20 +13,18 @@
    - Effect grouping within items
    - Custom parameter renderers (RGB curves, spatial editors)"
   (:require [cljfx.api :as fx]
-              [laser-show.subs :as subs]
-              [laser-show.animation.presets :as presets]
-              [laser-show.animation.effects :as effects]
-              [laser-show.animation.chains :as chains]
-              [laser-show.events.core :as events]
-              [laser-show.css.core :as css]
-              [laser-show.views.components.list :as list]
-              [laser-show.views.components.preset-bank :as preset-bank]
-              [laser-show.views.components.preset-param-editor :as preset-param-editor]
-              [laser-show.views.components.effect-parameter-editor :as effect-param-editor]
-              [laser-show.views.components.effect-bank :as effect-bank]
-              [laser-show.common.util :as u]
-              [clojure.tools.logging :as log])
-    (:import [javafx.scene.input KeyCode KeyEvent]))
+            [laser-show.subs :as subs]
+            [laser-show.animation.presets :as presets]
+            [laser-show.animation.effects :as effects]
+            [laser-show.animation.chains :as chains]
+            [laser-show.events.core :as events]
+            [laser-show.css.core :as css]
+            [laser-show.views.components.list :as list]
+            [laser-show.views.components.preset-bank :as preset-bank]
+            [laser-show.views.components.preset-param-editor :as preset-param-editor]
+            [laser-show.views.components.effect-parameter-editor :as effect-param-editor]
+            [laser-show.views.components.effect-bank :as effect-bank])
+  (:import [javafx.scene.input KeyCode KeyEvent]))
 
 
 ;; Effect Bank (using data-driven component)

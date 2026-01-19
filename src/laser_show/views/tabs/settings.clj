@@ -5,10 +5,10 @@
    - MIDI input configuration
    - OSC input configuration
    - (Future: Keyboard shortcuts, general preferences, etc.)"
-  (:require [cljfx.api :as fx]
-            [laser-show.css.core :as css]
-            [laser-show.views.components.midi-settings :as midi-settings]
-            [laser-show.views.components.osc-settings :as osc-settings]))
+  (:require
+   [laser-show.css.core :as css]
+   [laser-show.views.components.midi-settings :as midi-settings]
+   [laser-show.views.components.osc-settings :as osc-settings]))
 
 
 ;; Placeholder for future keyboard settings

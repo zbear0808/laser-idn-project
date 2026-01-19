@@ -130,11 +130,6 @@
          :captured-frames [])
   (println (str "📊 Diagnostic capture enabled for " num-frames " frame(s).")))
 
-(defn disable-capture!
-  "Disable diagnostic capture."
-  []
-  (swap! !diagnostic-state assoc :enabled? false)
-  (println "🛑 Diagnostic capture disabled."))
 
 (defn get-captured-data
   "Get the captured diagnostic data from recent frames."
@@ -152,25 +147,6 @@
         (pp/pprint frame)
         (println)))))
 
-(defn capture-frame-info!
-  "Called by effects system to capture diagnostic info.
-   Only captures if enabled and frames remaining.
-   Returns true if captured, false otherwise."
-  [info-map]
-  (let [{:keys [enabled? frames-to-capture]} @!diagnostic-state]
-    (when (and enabled? (pos? frames-to-capture))
-      (swap! !diagnostic-state 
-             (fn [state]
-               (-> state
-                   (update :captured-frames conj (assoc info-map :timestamp (System/currentTimeMillis)))
-                   (update :frames-to-capture dec)
-                   (assoc :enabled? (> (dec (:frames-to-capture state)) 0)))))
-      true)))
-
-(defn capturing?
-  "Check if diagnostic capture is currently enabled."
-  []
-  (:enabled? @!diagnostic-state))
 
 ;; Example usage comment
 (comment

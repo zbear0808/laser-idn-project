@@ -18,7 +18,6 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
             [laser-show.events.handlers.chain :as chain-handlers]
-            [laser-show.events.handlers.effect-params :as effect-params]
             [laser-show.common.util :as u]))
 
 

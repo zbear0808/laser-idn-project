@@ -9,13 +9,10 @@
    - Conversion functions between normalized, 8-bit, and 16-bit formats (for IDN output)
    - HSV color space conversions (using normalized values)
    - Color manipulation functions for laser points
-   - Rainbow and gradient generators"
-  (:require [laser-show.common.util :as u]))
+   - Rainbow and gradient generators")
 
 
 
-(def ^:const bit-depth-8 8)
-(def ^:const bit-depth-16 16)
 (def ^:const max-8bit 255)
 (def ^:const max-16bit 65535)
 

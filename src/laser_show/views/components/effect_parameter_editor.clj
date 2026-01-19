@@ -30,13 +30,10 @@
     :effect effect-instance
     :effect-def effect-definition
     :dialog-data dialog-data}"
-  (:require [cljfx.api :as fx]
-            [clojure.tools.logging :as log]
-            [laser-show.views.components.keyframe-modulator-panel :as keyframe-panel]
-            [laser-show.views.components.effect-param-ui :as effect-param-ui]
-            [laser-show.views.components.modulator-param-control :as mod-param]
-            [laser-show.views.components.custom-param-renderers :as custom-renderers]
-            [laser-show.views.components.parameter-controls :as param-controls]))
+  (:require
+   [clojure.tools.logging :as log]
+   [laser-show.views.components.keyframe-modulator-panel :as keyframe-panel]
+   [laser-show.views.components.effect-param-ui :as effect-param-ui]))
 
 
 ;; Helper Functions

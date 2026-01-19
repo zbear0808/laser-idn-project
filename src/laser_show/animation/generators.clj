@@ -3,8 +3,7 @@
    Each generator produces a sequence of LaserPoints that form a shape.
    
    All colors use NORMALIZED VALUES (0.0 to 1.0) for maximum precision."
-  (:require [laser-show.animation.types :as t]
-            [laser-show.animation.colors :as colors]
+  (:require [laser-show.animation.types :as t] 
             [laser-show.common.util :as u]))
 
 
@@ -250,9 +249,6 @@
   "Generate a star frame. Params: :spikes, :outer-radius, :inner-radius, :color, :center, :num-points"
   (shape-generator->frame-generator generate-star))
 
-(def line-frame
-  "Generate a line frame. Params: :start, :end, :color, :num-points"
-  (shape-generator->frame-generator generate-line))
 
 (defn horizontal-line-frame
   "Generate a horizontal line spanning the projection area.
@@ -304,20 +300,4 @@
                        (t/make-point x y r g b)
                        (t/make-point x y r g b)
                        (t/blanked-point x y)]))
-         (t/make-frame))))
-
-(defn rainbow-circle-frame
-  "Generate a circle with rainbow gradient colors.
-   Params: :radius (default 0.5)"
-  [{:keys [radius] :or {radius 0.5}}]
-  (let [num-points 64
-        num-segments (dec num-points)]
-    (->> (range num-points)
-         (mapv (fn [i]
-                 (let [t (/ (double i) num-segments)
-                       angle (* TWO-PI t)
-                       x (* radius (Math/cos angle))
-                       y (* radius (Math/sin angle))
-                       [r g b] (colors/rainbow-normalized t)]
-                   (t/make-point x y r g b))))
          (t/make-frame))))

@@ -223,14 +223,7 @@
 
 
 
-;; Smart Effect Paste - handles both single effects and chains
 
-
-(defn can-paste-effects?
-  "Check if clipboard contains effects (single or chain) that can be pasted."
-  []
-  (or (clipboard-has-type? :effect)
-      (clipboard-has-type? :effect-chain)))
 
 (defn get-effects-to-paste
   "Get effects from clipboard as a vector.
@@ -261,20 +254,6 @@
       (copy-to-system-clipboard! clip-data)
       true)))
 
-(defn can-paste-cue-chain?
-  "Check if clipboard contains a cue chain that can be pasted."
-  []
-  (clipboard-has-type? :cue-chain))
-
-(defn get-cue-chain-to-paste
-  "Get cue chain data from clipboard for pasting.
-   Returns the cue-chain data, or nil if clipboard doesn't contain a cue chain."
-  []
-  (when (clipboard-has-type? :cue-chain)
-    (:data (get-clipboard))))
-
-
-;; Effects Cell Copy/Paste (for effects grid cells)
 
 
 (defn copy-effects-cell!
@@ -291,21 +270,6 @@
       (copy-to-system-clipboard! clip-data)
       true)))
 
-(defn can-paste-effects-cell?
-  "Check if clipboard contains an effects cell that can be pasted."
-  []
-  (clipboard-has-type? :effects-cell))
-
-(defn get-effects-cell-to-paste
-  "Get effects cell data from clipboard for pasting.
-   Returns the cell data, or nil if clipboard doesn't contain an effects cell."
-  []
-  (when (clipboard-has-type? :effects-cell)
-    (:data (get-clipboard))))
-
-
-;; Cue Chain Items Copy/Paste (for cue chain editor items)
-
 
 (defn copy-cue-chain-items!
   "Copy cue chain items (presets/groups) to clipboard.
@@ -320,18 +284,6 @@
       (set-internal-clipboard! clip-data)
       (copy-to-system-clipboard! clip-data)
       true)))
-
-(defn can-paste-cue-chain-items?
-  "Check if clipboard contains cue chain items that can be pasted."
-  []
-  (clipboard-has-type? :cue-chain-items))
-
-(defn get-cue-chain-items-to-paste
-  "Get cue chain items from clipboard for pasting.
-   Returns the items vector, or nil if clipboard doesn't contain cue chain items."
-  []
-  (when (clipboard-has-type? :cue-chain-items)
-    (:items (get-clipboard))))
 
 
 ;; Item Effects Copy/Paste (for effects within cue chain items)
@@ -351,20 +303,6 @@
       (copy-to-system-clipboard! clip-data)
       true)))
 
-(defn can-paste-item-effects?
-  "Check if clipboard contains item effects that can be pasted."
-  []
-  (clipboard-has-type? :item-effects))
-
-(defn get-item-effects-to-paste
-  "Get item effects from clipboard for pasting.
-   Returns the effects vector, or nil if clipboard doesn't contain item effects."
-  []
-  (when (clipboard-has-type? :item-effects)
-    (:effects (get-clipboard))))
-
-
-;; Clipboard Info
 
 
 (defn get-clipboard-description
