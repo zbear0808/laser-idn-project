@@ -69,22 +69,34 @@
 ;; Projectors Extractors
 
 
-(defn projectors [state]
+(defn projectors
+  "Get the projectors map (projector-id -> config).
+   The :projectors domain IS the map directly (no :items nesting)."
+  [state]
   (:projectors state))
 
+;; Alias for backwards compatibility - projectors domain IS the items map now
 (defn projectors-items [state]
-  (:items (projectors state)))
+  (projectors state))
 
 
 (defn enabled-projectors
   "Get all enabled projectors."
   [state]
-  (->> (projectors-items state)
+  (->> (projectors state)
        (filter (fn [[_id proj]] (:enabled? proj true)))
        (into {})))
 
-(defn virtual-projectors [state]
-  (:virtual-projectors (projectors state)))
+(defn virtual-projectors
+  "Get the virtual-projectors map (vp-id -> config).
+   This is now its own domain at :virtual-projectors."
+  [state]
+  (:virtual-projectors state))
+
+(defn projector-ui
+  "Get the projector UI state domain."
+  [state]
+  (:projector-ui state))
 
 
 ;; Backend Extractors

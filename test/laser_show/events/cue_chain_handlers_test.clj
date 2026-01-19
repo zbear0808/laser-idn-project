@@ -19,18 +19,20 @@
 
 (def sample-state-with-item
   "State with a single cue chain item."
+  ;; FLATTENED: Dialog fields live alongside :open?, not under :data
   (-> base-state
       (assoc-in [:chains :cue-chains [0 0]]
                 {:items [{:preset-id :circle
                           :params {:size 100}
                           :effects []}]})
-      (assoc-in [:ui :dialogs :cue-chain-editor :data] {:col 0 :row 0 :selected-paths #{}})
+      (assoc-in [:ui :dialogs :cue-chain-editor] {:open? false :col 0 :row 0 :selected-paths #{}})
       (assoc-in [:cue-chain-editor :cell] [0 0])
       (assoc-in [:cue-chain-editor :selected-paths] #{})
       (assoc-in [:cue-chain-editor :clipboard] nil)))
 
 (def sample-state-with-effect
   "State with a cue chain item that has an RGB curves effect."
+  ;; FLATTENED: Dialog fields live alongside :open?, not under :data
   (-> base-state
       (assoc-in [:chains :cue-chains [0 0]]
                 {:items [{:preset-id :circle
@@ -41,11 +43,12 @@
                                      :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
                                               :g-curve-points [[0.0 0.0] [1.0 1.0]]
                                               :b-curve-points [[0.0 0.0] [1.0 1.0]]}}]}]})
-      (assoc-in [:ui :dialogs :cue-chain-editor :data] {:col 0 :row 0})
+      (assoc-in [:ui :dialogs :cue-chain-editor] {:open? false :col 0 :row 0})
       (assoc-in [:cue-chain-editor :cell] [0 0])))
 
 (def sample-state-with-spatial-effect
   "State with a cue chain item that has a spatial effect."
+  ;; FLATTENED: Dialog fields live alongside :open?, not under :data
   (-> base-state
       (assoc-in [:chains :cue-chains [0 0]]
                 {:items [{:preset-id :circle
@@ -53,7 +56,7 @@
                                      :effect-id :translate
                                      :enabled? true
                                      :params {:x 0.0 :y 0.0}}]}]})
-      (assoc-in [:ui :dialogs :cue-chain-editor :data] {:col 0 :row 0})
+      (assoc-in [:ui :dialogs :cue-chain-editor] {:open? false :col 0 :row 0})
       (assoc-in [:cue-chain-editor :cell] [0 0])))
 
 
@@ -298,12 +301,13 @@
 
 (deftest handle-add-preset-to-empty-cell
   (testing "Adding preset to empty cell creates cell"
+    ;; FLATTENED: Dialog fields live alongside :open?, not under :data
     (let [event {:event/type :cue-chain/add-preset
                  :col 0
                  :row 0
                  :preset-id :circle
                  :state {:chains {:cue-chains {}}
-                         :ui {:dialogs {:cue-chain-editor {:data {}}}}
+                         :ui {:dialogs {:cue-chain-editor {:open? false}}}
                          :project {:dirty? false}}}
           result (cue-chain/handle event)
           items (get-in result [:state :chains :cue-chains [0 0] :items])]
@@ -311,7 +315,7 @@
       (is (= :circle (:preset-id (first items))))
       (is (true? (get-in result [:state :project :dirty?])))
       ;; Should auto-select the new preset
-      (is (= #{[0]} (get-in result [:state :ui :dialogs :cue-chain-editor :data :selected-paths]))))))
+      (is (= #{[0]} (get-in result [:state :ui :dialogs :cue-chain-editor :selected-paths]))))))
 
 (deftest handle-add-preset-to-existing-cell
   (testing "Adding preset to cell with content appends to list"
@@ -326,7 +330,7 @@
       (is (= :circle (:preset-id (first items))))
       (is (= :wave (:preset-id (second items))))
       ;; Should auto-select the newly added preset at index 1
-      (is (= #{[1]} (get-in result [:state :ui :dialogs :cue-chain-editor :data :selected-paths]))))))
+      (is (= #{[1]} (get-in result [:state :ui :dialogs :cue-chain-editor :selected-paths]))))))
 
 
 ;; Remove Item Tests (using cue-chain/handle with :cue-chain/set-item-effects)

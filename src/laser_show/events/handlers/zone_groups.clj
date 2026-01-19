@@ -30,13 +30,13 @@
   "Open dialog to add a new zone group."
   [{:keys [state]}]
   {:state (-> state
-              (assoc-in [:ui :dialogs :zone-group-editor :open?] true)
-              (assoc-in [:ui :dialogs :zone-group-editor :data]
-                        {:editing? false
-                         :group-id nil
-                         :name ""
-                         :description ""
-                         :color "#808080"}))})
+              (update-in [:ui :dialogs :zone-group-editor] merge
+                         {:open? true
+                          :editing? false
+                          :group-id nil
+                          :name ""
+                          :description ""
+                          :color "#808080"}))})
 
 (defn- handle-zone-groups-create-new
   "Create a new zone group from dialog data."
@@ -115,13 +115,13 @@
   [{:keys [group-id state]}]
   (let [group (get-in state [:zone-groups group-id])]
     {:state (-> state
-                (assoc-in [:ui :dialogs :zone-group-editor :open?] true)
-                (assoc-in [:ui :dialogs :zone-group-editor :data]
-                          {:editing? true
-                           :group-id group-id
-                           :name (:name group "")
-                           :description (:description group "")
-                           :color (:color group "#808080")}))}))
+                (update-in [:ui :dialogs :zone-group-editor] merge
+                           {:open? true
+                            :editing? true
+                            :group-id group-id
+                            :name (:name group "")
+                            :description (:description group "")
+                            :color (:color group "#808080")}))}))
 
 (defn- handle-zone-groups-save-edit
   "Save changes to an existing zone group from dialog."
@@ -137,7 +137,7 @@
 (defn- handle-zone-groups-set-editor-color
   "Set color in the zone group editor dialog (from color swatch click)."
   [{:keys [color state]}]
-  {:state (assoc-in state [:ui :dialogs :zone-group-editor :data :color] color)})
+  {:state (assoc-in state [:ui :dialogs :zone-group-editor :color] color)})
 
 
 ;; Public API

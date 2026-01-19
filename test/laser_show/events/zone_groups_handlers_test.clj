@@ -56,9 +56,10 @@
                  :state base-state}
           result (zone-groups/handle event)]
       (is (true? (get-in result [:state :ui :dialogs :zone-group-editor :open?])))
-      (is (false? (get-in result [:state :ui :dialogs :zone-group-editor :data :editing?])))
-      (is (nil? (get-in result [:state :ui :dialogs :zone-group-editor :data :group-id])))
-      (is (= "" (get-in result [:state :ui :dialogs :zone-group-editor :data :name]))))))
+      ;; FLATTENED: Dialog fields live alongside :open?, not under :data
+      (is (false? (get-in result [:state :ui :dialogs :zone-group-editor :editing?])))
+      (is (nil? (get-in result [:state :ui :dialogs :zone-group-editor :group-id])))
+      (is (= "" (get-in result [:state :ui :dialogs :zone-group-editor :name]))))))
 
 
 (deftest handle-zone-groups-create-new-test
@@ -180,19 +181,21 @@
                  :group-id :left
                  :state base-state}
           result (zone-groups/handle event)
-          dialog-data (get-in result [:state :ui :dialogs :zone-group-editor :data])]
-      (is (true? (get-in result [:state :ui :dialogs :zone-group-editor :open?])))
-      (is (true? (:editing? dialog-data)))
-      (is (= :left (:group-id dialog-data)))
-      (is (= "Left" (:name dialog-data))))))
+          ;; FLATTENED: Dialog fields live alongside :open?, not under :data
+          dialog (get-in result [:state :ui :dialogs :zone-group-editor])]
+      (is (true? (:open? dialog)))
+      (is (true? (:editing? dialog)))
+      (is (= :left (:group-id dialog)))
+      (is (= "Left" (:name dialog))))))
 
 
 (deftest handle-zone-groups-save-edit-test
   (testing "Save edit updates group and closes dialog"
+    ;; FLATTENED: Dialog fields live alongside :open?, not under :data
     (let [state-with-dialog (-> base-state
-                                (assoc-in [:ui :dialogs :zone-group-editor :open?] true)
-                                (assoc-in [:ui :dialogs :zone-group-editor :data]
-                                          {:editing? true
+                                (assoc-in [:ui :dialogs :zone-group-editor]
+                                          {:open? true
+                                           :editing? true
                                            :group-id :left
                                            :name "Left Updated"
                                            :description "New desc"
@@ -213,14 +216,15 @@
 
 (deftest handle-zone-groups-set-editor-color-test
   (testing "Set editor color updates dialog data"
+    ;; FLATTENED: Dialog fields live alongside :open?, not under :data
     (let [state-with-dialog (assoc-in base-state
-                                      [:ui :dialogs :zone-group-editor :data :color]
+                                      [:ui :dialogs :zone-group-editor :color]
                                       "#808080")
           event {:event/type :zone-groups/set-editor-color
                  :color "#FF5500"
                  :state state-with-dialog}
           result (zone-groups/handle event)]
-      (is (= "#FF5500" (get-in result [:state :ui :dialogs :zone-group-editor :data :color]))))))
+      (is (= "#FF5500" (get-in result [:state :ui :dialogs :zone-group-editor :color]))))))
 
 
 ;; Unknown Event Test

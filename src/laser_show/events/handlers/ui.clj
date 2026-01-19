@@ -20,16 +20,18 @@
   {:state (assoc-in state [:ui :selected-preset] preset-id)})
 
 (defn- handle-ui-open-dialog
-  "Open a dialog."
+  "Open a dialog.
+   
+   FLATTENED STRUCTURE: Dialog fields are stored directly alongside :open?
+   Data map is merged into [:ui :dialogs dialog-id] (not into a nested :data key)."
   [{:keys [dialog-id data state]}]
   (log/debug "Opening dialog via ui/open-dialog"
              {:dialog-id dialog-id
               :data data
-              :current-open? (get-in state [:ui :dialogs dialog-id :open?])
-              :current-data (get-in state [:ui :dialogs dialog-id :data])})
+              :current-open? (get-in state [:ui :dialogs dialog-id :open?])})
   {:state (-> state
-              (assoc-in [:ui :dialogs dialog-id :open?] true)
-              (assoc-in [:ui :dialogs dialog-id :data] data))})
+              (update-in [:ui :dialogs dialog-id] merge data)
+              (assoc-in [:ui :dialogs dialog-id :open?] true))})
 
 (defn- handle-ui-close-dialog
   "Close a dialog."
@@ -38,8 +40,12 @@
 
 (defn- handle-ui-update-dialog-data
   "Update data associated with a dialog (e.g., selected item within dialog).
+   
+   FLATTENED STRUCTURE: Updates are merged directly into [:ui :dialogs dialog-id]
+   (not into a nested :data key).
+   
    Supports:
-   - :updates - A map of keys to merge into dialog data
+   - :updates - A map of keys to merge into dialog state
    - :tab-id - If present without :updates, sets :active-bank-tab to this value
                (used by styled-tab-bar in dialogs)"
   [{:keys [dialog-id updates tab-id state]}]
@@ -49,7 +55,7 @@
                          :else {})]
     (when tab-id
       (log/debug "Tab clicked:" {:dialog-id dialog-id :tab-id tab-id}))
-    {:state (update-in state [:ui :dialogs dialog-id :data] merge actual-updates)}))
+    {:state (update-in state [:ui :dialogs dialog-id] merge actual-updates)}))
 
 (defn- handle-ui-start-drag
   "Start a drag operation."

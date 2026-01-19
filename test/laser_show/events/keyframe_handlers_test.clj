@@ -37,8 +37,9 @@
 (defn make-test-state
   "Create a test state with effects at [0 0] cell."
   [effects]
+  ;; FLATTENED: Dialog fields live alongside :open?, not under :data
   {:chains {:effect-chains {[0 0] {:items effects}}}
-   :ui {:dialogs {:effect-chain-editor {:data {}}}}
+   :ui {:dialogs {:effect-chain-editor {:open? false}}}
    :project {:dirty? false}})
 
 (def sample-config

@@ -35,29 +35,31 @@
 
 (defn- item-effects-ui-path
   "Get the path to item effects UI state.
-   Stored separately per item to track selection, UI modes, etc."
+   Stored separately per item to track selection, UI modes, etc.
+   FLATTENED: No :data nesting - fields directly in dialog map."
   [col row item-path]
-  [:ui :dialogs :cue-chain-editor :data :item-effects-ui (vec item-path)])
+  [:ui :dialogs :cue-chain-editor :item-effects-ui (vec item-path)])
 
 
 ;; Editor Lifecycle
 
 
 (defn- handle-cue-chain-open-editor
-  "Open the cue chain editor for a specific cell."
+  "Open the cue chain editor for a specific cell.
+   FLATTENED: No :data nesting - fields directly in dialog map."
   [{:keys [col row state]}]
   (log/debug "Opening cue chain editor" {:col col :row row})
   {:state (-> state
-              (assoc-in [:ui :dialogs :cue-chain-editor :open?] true)
-              (assoc-in [:ui :dialogs :cue-chain-editor :data]
-                        {:col col
-                         :row row
-                         :selected-paths #{}
-                         :last-selected-path nil
-                         :clipboard nil
-                         :active-preset-tab :geometric
-                         :selected-effect-id nil
-                         :item-effects-ui {}}))})
+              (update-in [:ui :dialogs :cue-chain-editor] merge
+                         {:open? true
+                          :col col
+                          :row row
+                          :selected-paths #{}
+                          :last-selected-path nil
+                          :clipboard nil
+                          :active-preset-tab :geometric
+                          :selected-effect-id nil
+                          :item-effects-ui {}}))})
 
 (defn- handle-cue-chain-close-editor
   "Close the cue chain editor."
@@ -89,8 +91,8 @@
         new-path [new-idx]]
     {:state (-> state-with-cell
                 (update-in (cue-chain-path col row) conj new-preset)
-                (assoc-in [:ui :dialogs :cue-chain-editor :data :selected-paths] #{new-path})
-                (assoc-in [:ui :dialogs :cue-chain-editor :data :last-selected-path] new-path)
+                (assoc-in [:ui :dialogs :cue-chain-editor :selected-paths] #{new-path})
+                (assoc-in [:ui :dialogs :cue-chain-editor :last-selected-path] new-path)
                 h/mark-dirty)}))
 
 (defn- handle-cue-chain-add-effect-from-bank
@@ -130,23 +132,26 @@
 
 
 (defn- handle-cue-chain-set-preset-tab
-  "Set the active preset bank tab."
+  "Set the active preset bank tab.
+   FLATTENED: No :data nesting."
   [{:keys [tab-id state]}]
-  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :data :active-preset-tab] tab-id)})
+  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :active-preset-tab] tab-id)})
 
 (defn- handle-cue-chain-set-effect-tab
-  "Set the active effect bank tab."
+  "Set the active effect bank tab.
+   FLATTENED: No :data nesting."
   [{:keys [tab-id state]}]
-  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :data :active-effect-tab] (or tab-id :shape))})
+  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :active-effect-tab] (or tab-id :shape))})
 
 
 ;; Item Effect Selection
 
 
 (defn- handle-cue-chain-select-item-effect
-  "Select an effect within an item for editing."
+  "Select an effect within an item for editing.
+   FLATTENED: No :data nesting."
   [{:keys [effect-id state]}]
-  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :data :selected-effect-id] effect-id)})
+  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :selected-effect-id] effect-id)})
 
 
 ;; Hierarchical List Integration (Item Effects)
@@ -187,11 +192,12 @@
 
 (defn- handle-cue-chain-set-clipboard
   "Set the clipboard for cue chain items (presets and groups).
-   Also copies to system clipboard as serialized EDN."
+   Also copies to system clipboard as serialized EDN.
+   FLATTENED: No :data nesting."
   [{:keys [items state]}]
   (when (seq items)
     (clipboard/copy-cue-chain-items! items))
-  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :data :clipboard :items] items)})
+  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :clipboard :items] items)})
 
 
 ;; Destination Zone Operations

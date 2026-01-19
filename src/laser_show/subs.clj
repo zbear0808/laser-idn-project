@@ -261,9 +261,11 @@
 (defn dialog-data
   "Get data associated with a dialog.
    
-   Depends on: dialogs from ui domain"
+   Depends on: dialogs from ui domain
+   
+   Returns the dialog map without :open? - all fields are at the same level as :open?."
   [context dialog-id]
-  (get-in (fx/sub-val context ex/dialogs) [dialog-id :data]))
+  (dissoc (get (fx/sub-val context ex/dialogs) dialog-id) :open?))
 
 
 ;; Frame/Preview Subscriptions

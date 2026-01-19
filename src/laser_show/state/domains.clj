@@ -106,19 +106,29 @@
           :doc "current drag operation state"}
    :dialogs {:default {:projector-config {:open? false}
                          :cue-chain-editor {:open? false
-                                            :data {:col nil
-                                                   :row nil
-                                                   :selected-paths #{}
-                                                   :last-selected-path nil
-                                                   :clipboard nil
-                                                   :active-preset-tab :geometric
-                                                   :selected-effect-id nil
-                                                   :item-effects-ui {}}}
-                         :effect-chain-editor {:open? false :data nil}
-                         :add-projector-manual {:open? false :data nil}
-                         :add-virtual-projector {:open? false :data nil}
+                                            :col nil
+                                            :row nil
+                                            :selected-paths #{}
+                                            :last-selected-path nil
+                                            :clipboard nil
+                                            :active-preset-tab :geometric
+                                            :selected-effect-id nil
+                                            :item-effects-ui {}}
+                         :effect-chain-editor {:open? false
+                                               :col nil
+                                               :row nil
+                                               :active-bank-tab :shape}
+                         :add-projector-manual {:open? false}
+                         :add-virtual-projector {:open? false}
+                         :zone-group-editor {:open? false
+                                             :editing? false
+                                             :group-id nil
+                                             :name ""
+                                             :description ""
+                                             :color "#808080"}
+                         :about {:open? false}
                          :settings {:open? false}}
-               :doc "dialog visibility and data states"}
+               :doc "dialog visibility and data states (fields alongside :open?, no nested :data key)"}
    :preview {:default {:frame nil
                        :last-render-time 0}
              :doc "preview panel state"}
@@ -185,6 +195,9 @@
    Projectors are directly assigned to zone groups - no intermediate 'zone' abstraction.
    Corner-pin and color curves are configured directly on the projector.
    
+   This domain IS the map of projector-id -> projector config.
+   UI selection state is stored in :projector-ui domain.
+   
    Each projector entry contains:
    - :name - User-friendly name
    - :host - IP address
@@ -197,15 +210,29 @@
    - :tags - Set of optional tags (:graphics, :crowd-scanning) for categorization
    - :corner-pin - Geometry calibration {:tl-x :tl-y :tr-x :tr-y :bl-x :bl-y :br-x :br-y}
    - :color-curves - RGB color calibration curves (stored in :chains :projector-effects)
-   - :status - Runtime connection status (not persisted)
+   - :status - Runtime connection status (not persisted)"
+  {})
+
+(defstate virtual-projectors
+  "Virtual projector configurations - alternate geometry for physical projectors.
    
-   Virtual projectors are stored separately and inherit color curves from parent.
-   See also: :virtual-projectors key for alternate geometry configurations."
-  {:items {:default {}
-           :doc "Map of projector-id -> projector configuration"}
-   :virtual-projectors {:default {}
-                        :doc "Map of virtual-projector-id (UUID) -> {:name :parent-projector-id :zone-groups :tags :corner-pin :enabled?}"}
-   :active-projector {:default nil
+   This domain IS the map of virtual-projector-id (UUID) -> virtual projector config.
+   Virtual projectors inherit color curves from their parent projector.
+   
+   Each virtual projector entry contains:
+   - :name - User-friendly name
+   - :parent-projector-id - ID of the parent physical projector
+   - :zone-groups - Vector of zone group IDs
+   - :tags - Set of optional tags
+   - :corner-pin - Geometry calibration (overrides parent)
+   - :enabled? - Whether to send output to this virtual projector"
+  {})
+
+(defstate projector-ui
+  "UI state for projector management.
+   
+   Stores transient UI state separately from persisted projector data."
+  {:active-projector {:default nil
                       :doc "Currently selected projector ID for editing"}
    :active-virtual-projector {:default nil
                               :doc "Currently selected virtual projector ID for editing"}
@@ -216,7 +243,9 @@
    :scanning? {:default false
                :doc "Whether a network scan is in progress"}
    :broadcast-address {:default "255.255.255.255"
-                       :doc "Broadcast address for device discovery"}})
+                       :doc "Broadcast address for device discovery"}
+   :expanded-devices {:default #{}
+                      :doc "Set of device addresses expanded in discovery panel"}})
 
 
 (defstate zone-groups
@@ -290,7 +319,7 @@
    - :projector-effects - Color calibration effects for projectors (RGB curves)
    
    Note: Geometry calibration (corner-pin) is now stored directly on projectors
-   in [:projectors :items projector-id :corner-pin], NOT as an effect chain.
+   in [:projectors projector-id :corner-pin], NOT as an effect chain.
    
    All chains use the same structure: {:items [...] :active? bool (optional)}
    This enables generic handlers and simplified subscriptions."

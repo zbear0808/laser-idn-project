@@ -32,10 +32,11 @@
 
 (def sample-state
   "State with effect chain for testing."
+  ;; FLATTENED: Dialog fields live alongside :open?, not under :data
   (-> base-state
       (assoc-in [:chains :effect-chains [0 0]] {:items sample-effects :active true})
-      (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-effect-indices] #{})
-      (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{})))
+      (assoc-in [:ui :dialogs :effect-chain-editor :selected-effect-indices] #{})
+      (assoc-in [:ui :dialogs :effect-chain-editor :selected-paths] #{})))
 
 
 ;; Reordering Tests (using chain/handle with :chain/reorder-items)

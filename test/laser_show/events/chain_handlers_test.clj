@@ -43,11 +43,13 @@
 (def base-state (build-initial-state))
 
 ;; Sample state with effects chain
+;; FLATTENED: Dialog fields live alongside :open?, not under :data
 (def sample-state
   (-> base-state
       (assoc-in [:chains :effect-chains [0 0]] {:items sample-chain :active true})
-      (assoc-in [:ui :dialogs :effect-chain-editor :data]
-                {:selected-paths #{}
+      (assoc-in [:ui :dialogs :effect-chain-editor]
+                {:open? false
+                 :selected-paths #{}
                  :last-selected-path nil
                  :dragging-paths nil
                  :renaming-path nil})))
@@ -61,38 +63,38 @@
 (deftest handle-select-item-test
   (testing "Single item selection"
     (let [result (ch/handle-select-item sample-state effects-config [0] false false)]
-      (is (= #{[0]} (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths])))
-      (is (= [0] (get-in result [:ui :dialogs :effect-chain-editor :data :last-selected-path])))))
+      (is (= #{[0]} (get-in result [:ui :dialogs :effect-chain-editor :selected-paths])))
+      (is (= [0] (get-in result [:ui :dialogs :effect-chain-editor :last-selected-path])))))
   
   (testing "Ctrl+click adds to selection"
     (let [state-with-selection (assoc-in sample-state 
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths] 
+                                         [:ui :dialogs :effect-chain-editor :selected-paths] 
                                          #{[0]})
           result (ch/handle-select-item state-with-selection effects-config [1] true false)]
-      (is (= #{[0] [1]} (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths])))))
+      (is (= #{[0] [1]} (get-in result [:ui :dialogs :effect-chain-editor :selected-paths])))))
   
   (testing "Ctrl+click toggles selection off"
     (let [state-with-selection (assoc-in sample-state 
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths] 
+                                         [:ui :dialogs :effect-chain-editor :selected-paths] 
                                          #{[0] [1]})
           result (ch/handle-select-item state-with-selection effects-config [0] true false)]
-      (is (= #{[1]} (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths])))))
+      (is (= #{[1]} (get-in result [:ui :dialogs :effect-chain-editor :selected-paths])))))
   
   (testing "Shift+click range selection"
     (let [state-with-anchor (-> sample-state
-                                (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{[0]})
-                                (assoc-in [:ui :dialogs :effect-chain-editor :data :last-selected-path] [0]))
+                                (assoc-in [:ui :dialogs :effect-chain-editor :selected-paths] #{[0]})
+                                (assoc-in [:ui :dialogs :effect-chain-editor :last-selected-path] [0]))
           result (ch/handle-select-item state-with-anchor effects-config [3] false true)]
       ;; Should select paths [0], [1], [1 :items 0], [1 :items 1], [2], [2 :items 0], [3]
-      (is (contains? (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths]) [0]))
-      (is (contains? (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths]) [3]))
+      (is (contains? (get-in result [:ui :dialogs :effect-chain-editor :selected-paths]) [0]))
+      (is (contains? (get-in result [:ui :dialogs :effect-chain-editor :selected-paths]) [3]))
       ;; Anchor should NOT be updated on shift+click
-      (is (= [0] (get-in result [:ui :dialogs :effect-chain-editor :data :last-selected-path]))))))
+      (is (= [0] (get-in result [:ui :dialogs :effect-chain-editor :last-selected-path]))))))
 
 (deftest handle-select-all-test
   (testing "Select all items including nested"
     (let [result (ch/handle-select-all sample-state effects-config)
-          selected (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths])]
+          selected (get-in result [:ui :dialogs :effect-chain-editor :selected-paths])]
       ;; Should have paths for: effect-1[0], group-a[1], effect-2[1 :items 0], effect-3[1 :items 1], 
       ;;                        group-b[2], effect-4[2 :items 0], effect-5[3]
       (is (= 7 (count selected)))
@@ -107,11 +109,11 @@
 (deftest handle-clear-selection-test
   (testing "Clear selection"
     (let [state-with-selection (-> sample-state
-                                   (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{[0] [1]})
-                                   (assoc-in [:ui :dialogs :effect-chain-editor :data :last-selected-path] [0]))
+                                   (assoc-in [:ui :dialogs :effect-chain-editor :selected-paths] #{[0] [1]})
+                                   (assoc-in [:ui :dialogs :effect-chain-editor :last-selected-path] [0]))
           result (ch/handle-clear-selection state-with-selection effects-config)]
-      (is (= #{} (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths])))
-      (is (nil? (get-in result [:ui :dialogs :effect-chain-editor :data :last-selected-path]))))))
+      (is (= #{} (get-in result [:ui :dialogs :effect-chain-editor :selected-paths])))
+      (is (nil? (get-in result [:ui :dialogs :effect-chain-editor :last-selected-path]))))))
 
 
 ;; Copy/Paste Tests
@@ -120,7 +122,7 @@
 (deftest handle-copy-selected-test
   (testing "Copy single item"
     (let [state-with-selection (assoc-in sample-state 
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths] 
+                                         [:ui :dialogs :effect-chain-editor :selected-paths] 
                                          #{[0]})
           {:keys [state items]} (ch/handle-copy-selected state-with-selection effects-config)]
       (is (= 1 (count items)))
@@ -128,14 +130,14 @@
   
   (testing "Copy multiple items"
     (let [state-with-selection (assoc-in sample-state 
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths] 
+                                         [:ui :dialogs :effect-chain-editor :selected-paths] 
                                          #{[0] [3]})
           {:keys [state items]} (ch/handle-copy-selected state-with-selection effects-config)]
       (is (= 2 (count items)))))
   
   (testing "Copy group includes children"
     (let [state-with-selection (assoc-in sample-state 
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths] 
+                                         [:ui :dialogs :effect-chain-editor :selected-paths] 
                                          #{[1]})
           {:keys [state items]} (ch/handle-copy-selected state-with-selection effects-config)]
       (is (= 1 (count items)))
@@ -163,7 +165,7 @@
   (testing "Paste selects pasted items"
     (let [items-to-paste [(make-effect "9") (make-effect "c")]
           result (ch/handle-paste-items sample-state effects-config items-to-paste)
-          selected (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths])]
+          selected (get-in result [:ui :dialogs :effect-chain-editor :selected-paths])]
       (is (= 2 (count selected)))
       (is (contains? selected [4]))
       (is (contains? selected [5])))))
@@ -175,7 +177,7 @@
 (deftest handle-delete-selected-test
   (testing "Delete single item"
     (let [state-with-selection (assoc-in sample-state
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths]
+                                         [:ui :dialogs :effect-chain-editor :selected-paths]
                                          #{[0]})
           result (ch/handle-delete-selected state-with-selection effects-config)
           effects (get-in result [:chains :effect-chains [0 0] :items])]
@@ -184,7 +186,7 @@
   
   (testing "Delete group removes children"
     (let [state-with-selection (assoc-in sample-state
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths]
+                                         [:ui :dialogs :effect-chain-editor :selected-paths]
                                          #{[1]})
           result (ch/handle-delete-selected state-with-selection effects-config)
           effects (get-in result [:chains :effect-chains [0 0] :items])]
@@ -194,14 +196,14 @@
   
   (testing "Delete clears selection"
     (let [state-with-selection (assoc-in sample-state
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths]
+                                         [:ui :dialogs :effect-chain-editor :selected-paths]
                                          #{[0]})
           result (ch/handle-delete-selected state-with-selection effects-config)]
-      (is (= #{} (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths])))))
+      (is (= #{} (get-in result [:ui :dialogs :effect-chain-editor :selected-paths])))))
   
   (testing "Delete marks project dirty"
     (let [state-with-selection (assoc-in sample-state
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths]
+                                         [:ui :dialogs :effect-chain-editor :selected-paths]
                                          #{[0]})
           result (ch/handle-delete-selected state-with-selection effects-config)]
       (is (true? (get-in result [:project :dirty?]))))))
@@ -228,7 +230,7 @@
 (deftest handle-group-selected-test
   (testing "Group multiple items"
     (let [state-with-selection (assoc-in sample-state
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths]
+                                         [:ui :dialogs :effect-chain-editor :selected-paths]
                                          #{[0] [3]})
           result (ch/handle-group-selected state-with-selection effects-config "My Group")
           effects (get-in result [:chains :effect-chains [0 0] :items])]
@@ -240,10 +242,10 @@
   
   (testing "Group selects the new group"
     (let [state-with-selection (assoc-in sample-state
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths]
+                                         [:ui :dialogs :effect-chain-editor :selected-paths]
                                          #{[0] [3]})
           result (ch/handle-group-selected state-with-selection effects-config "My Group")
-          selected (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths])]
+          selected (get-in result [:ui :dialogs :effect-chain-editor :selected-paths])]
       (is (= 1 (count selected)))
       (is (contains? selected [0]))))
   
@@ -262,7 +264,7 @@
           test-chain [empty-group group-with-child]
           test-state (-> base-state
                          (assoc-in [:chains :effect-chains [0 0]] {:items test-chain :active true})
-                         (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths]
+                         (assoc-in [:ui :dialogs :effect-chain-editor :selected-paths]
                                    #{[0] [1] [1 :items 0]}))
           result (ch/handle-group-selected test-state effects-config "Combined Group")
           effects (get-in result [:chains :effect-chains [0 0] :items])]
@@ -279,7 +281,7 @@
 (deftest handle-ungroup-test
   (testing "Ungroup inserts children at group position"
     (let [state-with-selection (assoc-in sample-state 
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths] 
+                                         [:ui :dialogs :effect-chain-editor :selected-paths] 
                                          #{[1]})
           result (ch/handle-ungroup state-with-selection effects-config [1])
           effects (get-in result [:chains :effect-chains [0 0] :items])]
@@ -291,7 +293,7 @@
   
   (testing "Ungroup clears selection"
     (let [result (ch/handle-ungroup sample-state effects-config [1])]
-      (is (= #{} (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths]))))))
+      (is (= #{} (get-in result [:ui :dialogs :effect-chain-editor :selected-paths]))))))
 
 (deftest handle-toggle-collapse-test
   (testing "Toggle collapse on group"
@@ -312,15 +314,15 @@
 (deftest handle-start-rename-test
   (testing "Sets renaming path"
     (let [result (ch/handle-start-rename sample-state effects-config [1])]
-      (is (= [1] (get-in result [:ui :dialogs :effect-chain-editor :data :renaming-path]))))))
+      (is (= [1] (get-in result [:ui :dialogs :effect-chain-editor :renaming-path]))))))
 
 (deftest handle-cancel-rename-test
   (testing "Clears renaming path"
     (let [state-renaming (assoc-in sample-state 
-                                   [:ui :dialogs :effect-chain-editor :data :renaming-path] 
+                                   [:ui :dialogs :effect-chain-editor :renaming-path] 
                                    [1])
           result (ch/handle-cancel-rename state-renaming effects-config)]
-      (is (nil? (get-in result [:ui :dialogs :effect-chain-editor :data :renaming-path]))))))
+      (is (nil? (get-in result [:ui :dialogs :effect-chain-editor :renaming-path]))))))
 
 (deftest handle-rename-item-test
   (testing "Renames group"
@@ -330,10 +332,10 @@
   
   (testing "Clears renaming path after rename"
     (let [state-renaming (assoc-in sample-state 
-                                   [:ui :dialogs :effect-chain-editor :data :renaming-path] 
+                                   [:ui :dialogs :effect-chain-editor :renaming-path] 
                                    [1])
           result (ch/handle-rename-item state-renaming effects-config [1] "Renamed Group")]
-      (is (nil? (get-in result [:ui :dialogs :effect-chain-editor :data :renaming-path])))))
+      (is (nil? (get-in result [:ui :dialogs :effect-chain-editor :renaming-path])))))
   
   (testing "Marks project dirty"
     (let [result (ch/handle-rename-item sample-state effects-config [1] "Renamed Group")]
@@ -346,24 +348,24 @@
 (deftest handle-start-drag-test
   (testing "Drag selected item drags all selected"
     (let [state-with-selection (assoc-in sample-state 
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths] 
+                                         [:ui :dialogs :effect-chain-editor :selected-paths] 
                                          #{[0] [3]})
           result (ch/handle-start-drag state-with-selection effects-config [0])]
-      (is (= #{[0] [3]} (get-in result [:ui :dialogs :effect-chain-editor :data :dragging-paths])))))
+      (is (= #{[0] [3]} (get-in result [:ui :dialogs :effect-chain-editor :dragging-paths])))))
   
   (testing "Drag unselected item selects and drags just that item"
     (let [state-with-selection (assoc-in sample-state 
-                                         [:ui :dialogs :effect-chain-editor :data :selected-paths] 
+                                         [:ui :dialogs :effect-chain-editor :selected-paths] 
                                          #{[0]})
           result (ch/handle-start-drag state-with-selection effects-config [3])]
-      (is (= #{[3]} (get-in result [:ui :dialogs :effect-chain-editor :data :dragging-paths])))
-      (is (= #{[3]} (get-in result [:ui :dialogs :effect-chain-editor :data :selected-paths]))))))
+      (is (= #{[3]} (get-in result [:ui :dialogs :effect-chain-editor :dragging-paths])))
+      (is (= #{[3]} (get-in result [:ui :dialogs :effect-chain-editor :selected-paths]))))))
 
 (deftest handle-move-items-test
   (testing "Move item to new position"
     (let [state-dragging (-> sample-state
-                             (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{[0]})
-                             (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-paths] #{[0]}))
+                             (assoc-in [:ui :dialogs :effect-chain-editor :selected-paths] #{[0]})
+                             (assoc-in [:ui :dialogs :effect-chain-editor :dragging-paths] #{[0]}))
           result (ch/handle-move-items state-dragging effects-config (:id effect-5) :before)
           effects (get-in result [:chains :effect-chains [0 0] :items])]
       ;; effect-1 should be moved before effect-5
@@ -373,15 +375,15 @@
   
   (testing "Move clears dragging state"
     (let [state-dragging (-> sample-state
-                             (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{[0]})
-                             (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-paths] #{[0]}))
+                             (assoc-in [:ui :dialogs :effect-chain-editor :selected-paths] #{[0]})
+                             (assoc-in [:ui :dialogs :effect-chain-editor :dragging-paths] #{[0]}))
           result (ch/handle-move-items state-dragging effects-config (:id effect-5) :before)]
-      (is (nil? (get-in result [:ui :dialogs :effect-chain-editor :data :dragging-paths])))))
+      (is (nil? (get-in result [:ui :dialogs :effect-chain-editor :dragging-paths])))))
   
   (testing "Move into group"
     (let [state-dragging (-> sample-state
-                             (assoc-in [:ui :dialogs :effect-chain-editor :data :selected-paths] #{[0]})
-                             (assoc-in [:ui :dialogs :effect-chain-editor :data :dragging-paths] #{[0]}))
+                             (assoc-in [:ui :dialogs :effect-chain-editor :selected-paths] #{[0]})
+                             (assoc-in [:ui :dialogs :effect-chain-editor :dragging-paths] #{[0]}))
           result (ch/handle-move-items state-dragging effects-config (:id group-b) :into)
           effects (get-in result [:chains :effect-chains [0 0] :items])
           group-b-new (nth effects 1)]
@@ -392,10 +394,10 @@
 (deftest handle-clear-drag-state-test
   (testing "Clears dragging paths"
     (let [state-dragging (assoc-in sample-state 
-                                   [:ui :dialogs :effect-chain-editor :data :dragging-paths] 
+                                   [:ui :dialogs :effect-chain-editor :dragging-paths] 
                                    #{[0] [1]})
           result (ch/handle-clear-drag-state state-dragging effects-config)]
-      (is (nil? (get-in result [:ui :dialogs :effect-chain-editor :data :dragging-paths]))))))
+      (is (nil? (get-in result [:ui :dialogs :effect-chain-editor :dragging-paths]))))))
 
 
 ;; Enabled State Tests

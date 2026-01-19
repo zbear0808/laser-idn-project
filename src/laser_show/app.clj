@@ -131,8 +131,4 @@
    
    Starts the GUI application."
   [& _args]
-  (log/info "╔══════════════════════════════════════╗")
-  (log/info "║       Laser Show Application         ║")
-  (log/info "╚══════════════════════════════════════╝")
-
   (start!))

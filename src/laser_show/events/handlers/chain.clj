@@ -6,7 +6,7 @@
    
    Configuration map structure:
    {:items-path [:effects :cells [col row] :effects]  ; Path to items vector in state
-    :ui-path [:ui :dialogs :effect-chain-editor :data] ; Path to UI state
+    :ui-path [:ui :dialogs :effect-chain-editor]      ; Path to UI state (FLATTENED - no :data)
     :clipboard-key :effects-clipboard}                 ; Optional clipboard key
    
    All helpers are pure functions that take state and config, and return
@@ -894,9 +894,10 @@
   (let [base-path [:chains domain entity-key]]
     {:items-path (conj base-path :items)
      :metadata-path base-path
+     ;; FLATTENED: Dialog fields live alongside :open?, not under :data
      :ui-path (case domain
-                :effect-chains [:ui :dialogs :effect-chain-editor :data]
-                :cue-chains [:ui :dialogs :cue-chain-editor :data]
+                :effect-chains [:ui :dialogs :effect-chain-editor]
+                :cue-chains [:ui :dialogs :cue-chain-editor]
                 :projector-effects [:ui :projector-effect-ui-state entity-key])
      :domain domain
      :entity-key entity-key}))
