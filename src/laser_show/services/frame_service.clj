@@ -10,7 +10,11 @@
    Cue Chain Support:
    - Cue chains are sequential lists of presets
    - Each preset can have its own parameters and effect chain
-   - Presets render one after another in time"
+   - Presets render one after another in time
+   
+   Performance Note:
+   - All collection operations use eager evaluation (vec, mapv, filterv, keepv)
+   - Lazy sequences avoided in frame generation hot paths"
   (:require [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
             [laser-show.state.queries :as queries]
@@ -19,6 +23,7 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.types :as t]
             [laser-show.common.timing :as timing]
+            [laser-show.common.util :as u]
             [laser-show.profiling.frame-profiler :as profiler]
             [laser-show.profiling.jfr-profiler :as jfr]
             [laser-show.animation.effects.shape]
@@ -127,16 +132,18 @@
 
 (defn get-active-effects
   "Get all active effect instances from the effects grid.
-   Returns an effect chain or nil if no active effects."
+   Returns an effect chain or nil if no active effects.
+   
+   Performance: Uses eager collection operations to avoid lazy evaluation overhead."
   []
   (let [s (state/get-raw-state)
         effect-chains (get-in s [:chains :effect-chains] {})]
     (when (seq effect-chains)
-      (let [active-effects (->> effect-chains
-                                (vals)
-                                (filter :active)
-                                (mapcat :items)
-                                (vec))]
+      ;; Use eager operations: into with transducer (comp filter mapcat)
+      (let [active-effects (into []
+                                 (comp (filter :active)
+                                       (mapcat :items))
+                                 (vals effect-chains))]
         (when (seq active-effects)
           ;; Debug logging - uncomment to trace effect chain construction
           ;; (println "[DEBUG get-active-effects] Found" (count active-effects) "effects:"
@@ -237,8 +244,9 @@
       
       ;; Group: render children, concatenate, then apply group effects
       (chains/group? item)
-      (let [child-frames (keep #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx)
-                               (:items item []))
+      (let [;; Use eager u/keepv to avoid lazy evaluation in frame rendering hot path
+            child-frames (u/keepv #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx)
+                                  (:items item []))
             concatenated (concatenate-frames child-frames elapsed-ms)]
         (when concatenated
           (apply-item-effects concatenated item elapsed-ms bpm trigger-time timing-ctx)))
@@ -253,10 +261,13 @@
    2. Group-level effects on concatenated group contents
    3. Final concatenation of all top-level items
    
-   This creates the effect of all shapes being displayed at once via persistence of vision."
+   This creates the effect of all shapes being displayed at once via persistence of vision.
+   
+   Performance: Uses eager u/keepv to avoid lazy evaluation overhead in hot path."
   [cue-chain elapsed-ms bpm trigger-time timing-ctx]
   (let [items (:items cue-chain [])
-        rendered-frames (keep #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx) items)]
+        ;; Use eager u/keepv instead of lazy keep for frame rendering hot path
+        rendered-frames (u/keepv #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx) items)]
     (concatenate-frames rendered-frames elapsed-ms)))
 
 (defn generate-current-frame
