@@ -53,9 +53,15 @@
   (.strokeLine gc (/ width 2) 0 (/ width 2) height))
 
 (defn- point-blanked?
-  "Check if a point is blanked."
-  [{:keys [r g b]}]
-  (t/blanked? {:r (or r 0) :g (or g 0) :b (or b 0)}))
+  "Check if a point is blanked (preview-friendly format).
+   Preview points already have :blanked? set, or we can check RGB values."
+  [{:keys [blanked? r g b]}]
+  (if (some? blanked?)
+    blanked?
+    (let [epsilon 1e-6]
+      (and (< (or r 0) epsilon)
+           (< (or g 0) epsilon)
+           (< (or b 0) epsilon)))))
 
 (defn- draw-frame-points
   "Draw frame points as dots."

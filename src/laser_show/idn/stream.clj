@@ -278,7 +278,7 @@
   (.put buf (unchecked-byte (bit-and duration-us 0xFF))))
 
 (defn write-point!
-  "Write a single LaserPoint to ByteBuffer based on output config.
+  "Write a single LaserPoint vector to ByteBuffer based on output config.
    
    Point values are normalized:
    - x, y: -1.0 to 1.0
@@ -288,11 +288,11 @@
   [^ByteBuffer buf point output-config]
   (let [{:keys [color-bit-depth xy-bit-depth]} output-config
         ;; Convert using output-config functions
-        x-out (output-config/normalized->output-xy (:x point) xy-bit-depth)
-        y-out (output-config/normalized->output-xy (:y point) xy-bit-depth)
-        r-out (output-config/normalized->output-color (:r point) color-bit-depth)
-        g-out (output-config/normalized->output-color (:g point) color-bit-depth)
-        b-out (output-config/normalized->output-color (:b point) color-bit-depth)]
+        x-out (output-config/normalized->output-xy (point t/X) xy-bit-depth)
+        y-out (output-config/normalized->output-xy (point t/Y) xy-bit-depth)
+        r-out (output-config/normalized->output-color (point t/R) color-bit-depth)
+        g-out (output-config/normalized->output-color (point t/G) color-bit-depth)
+        b-out (output-config/normalized->output-color (point t/B) color-bit-depth)]
     ;; Write XY
     (if (= xy-bit-depth 16)
       (do (.putShort buf (short x-out))
@@ -315,12 +315,12 @@
 
 
 (defn frame->packet-with-config
-  "Convert a LaserFrame to an IDN packet with channel configuration.
+  "Convert a frame (vector of points) to an IDN packet with channel configuration.
    Use this when opening a channel or when configuration needs to be sent.
    
    Parameters:
    - buf: Pre-allocated ByteBuffer to write packet into (will be cleared)
-   - frame: LaserFrame record with :points vector (normalized values)
+   - frame: Vector of point vectors (each point is [x y r g b] normalized)
    - channel-id: IDN channel ID (0-63)
    - timestamp-us: Timestamp in microseconds
    - duration-us: Frame duration in microseconds
@@ -338,7 +338,7 @@
                                                                      output-config output-config/default-config
                                                                      close? false
                                                                      single-scan? false}}]
-  (let [points (take MAX_POINTS_PER_PACKET (:points frame))
+  (let [points (take MAX_POINTS_PER_PACKET frame)
         point-count (count points)
         tags (get-tags-for-config output-config)
         [scwc padded-tags] (calculate-scwc tags)
@@ -365,12 +365,12 @@
       result)))
 
 (defn frame->packet
-  "Convert a LaserFrame to an IDN packet without channel configuration.
+  "Convert a frame (vector of points) to an IDN packet without channel configuration.
    Use this for subsequent frames after channel is already configured.
    
    Parameters:
    - buf: Pre-allocated ByteBuffer to write packet into (will be cleared)
-   - frame: LaserFrame record with :points vector (normalized values)
+   - frame: Vector of point vectors (each point is [x y r g b] normalized)
    - channel-id: IDN channel ID (0-63)
    - timestamp-us: Timestamp in microseconds
    - duration-us: Frame duration in microseconds
@@ -382,7 +382,7 @@
   [^ByteBuffer buf frame channel-id timestamp-us duration-us & {:keys [output-config single-scan?]
                                                                 :or {output-config output-config/default-config
                                                                      single-scan? false}}]
-  (let [points (take MAX_POINTS_PER_PACKET (:points frame))
+  (let [points (take MAX_POINTS_PER_PACKET frame)
         point-count (count points)
         total-size (packet-size-without-config point-count output-config)
         chunk-flags (if single-scan? 0x01 0x00)]

@@ -1,13 +1,15 @@
 (ns laser-show.animation.types
   "Core types for laser animation system.
-   Defines LaserPoint and LaserFrame.
+   Defines LaserPoint (5-element vector) and LaserFrame (vector of points).
    
    Internal Data Format
    ====================
    
-   LaserPoint uses NORMALIZED VALUES internally for maximum precision:
+   LaserPoint is a 5-element vector [x y r g b] using NORMALIZED VALUES:
    - Coordinates (x, y): -1.0 to 1.0 (normalized)
    - Colors (r, g, b): 0.0 to 1.0 (normalized)
+   
+   LaserFrame is simply a vector of points - no wrapper needed!
    
    This allows effects and calculations to work with full floating-point
    precision. Conversion to hardware-specific formats (8-bit or 16-bit)
@@ -18,13 +20,13 @@
    
    At output time, LaserPoint values are converted to IDN-Stream format:
    
-   | LaserPoint Field | IDN-Stream Range    | Configurable |
+   | LaserPoint Index | IDN-Stream Range    | Configurable |
    |------------------|---------------------|--------------|
-   | :x (-1.0 to 1.0) | 8-bit or 16-bit     | Yes          |
-   | :y (-1.0 to 1.0) | 8-bit or 16-bit     | Yes          |
-   | :r (0.0 to 1.0)  | 8-bit or 16-bit     | Yes          |
-   | :g (0.0 to 1.0)  | 8-bit or 16-bit     | Yes          |
-   | :b (0.0 to 1.0)  | 8-bit or 16-bit     | Yes          |
+   | X (0)            | 8-bit or 16-bit     | Yes          |
+   | Y (1)            | 8-bit or 16-bit     | Yes          |
+   | R (2)            | 8-bit or 16-bit     | Yes          |
+   | G (3)            | 8-bit or 16-bit     | Yes          |
+   | B (4)            | 8-bit or 16-bit     | Yes          |
    
    Coordinate System (Section 3.4.7):
    - X: Positive = right, Negative = left (front projection)
@@ -43,13 +45,7 @@
    
    LaserFrame -> IDN-Stream Frame Samples Chunk (Section 6.2)
    ----------------------------------------------------------
-   Our LaserFrame record maps to IDN-Stream frame samples data chunk:
-   
-   | LaserFrame Field | IDN-Stream Usage                              |
-   |------------------|-----------------------------------------------|
-   | :points          | Sample array in Frame Samples chunk           |
-   | :timestamp       | Used for timing (not directly in packet)      |
-   | :metadata        | Application-specific, not sent to hardware    |
+   LaserFrame (vector of points) maps to IDN-Stream frame samples data chunk.
    
    Frame Structure Notes:
    - First point is the start position (should be blanked for repositioning)
@@ -59,28 +55,19 @@
   (:require [laser-show.common.util :as u]))
 
 
-;; Core Types
-
-
-(defrecord LaserPoint
-  [^double x    ; X coordinate, normalized (-1.0 to 1.0)
-   ^double y    ; Y coordinate, normalized (-1.0 to 1.0)
-   ^double r    ; Red, normalized (0.0 to 1.0)
-   ^double g    ; Green, normalized (0.0 to 1.0)
-   ^double b])  ; Blue, normalized (0.0 to 1.0)
-               ; Note: Blanking is indicated by r=g=b=0.0 per IDN-Stream spec
-
-(defrecord LaserFrame
-  [points            ; Vector of LaserPoint
-   timestamp         ; Frame timestamp in milliseconds
-   metadata])        ; Additional frame metadata (duration, etc.)
+;; Point index constants for readability and performance
+(def ^:const X 0)
+(def ^:const Y 1)
+(def ^:const R 2)
+(def ^:const G 3)
+(def ^:const B 4)
 
 
 ;; Point Construction Helpers
 
 
 (defn make-point
-  "Create a LaserPoint with normalized coordinates and colors.
+  "Create a LaserPoint vector with normalized coordinates and colors.
    
    All values must be normalized:
    - x, y: range [-1.0, 1.0], clamped if outside
@@ -90,42 +77,39 @@
   ([x y]
    (make-point x y 1.0 1.0 1.0))
   ([x y r g b]
-   (->LaserPoint
-    (u/clamp (double x) -1.0 1.0)
+   [(u/clamp (double x) -1.0 1.0)
     (u/clamp (double y) -1.0 1.0)
     (u/clamp (double r) 0.0 1.0)
     (u/clamp (double g) 0.0 1.0)
-    (u/clamp (double b) 0.0 1.0))))
+    (u/clamp (double b) 0.0 1.0)]))
 
 (defn blanked-point
   "Create a blanked (invisible) point for beam repositioning.
    Per IDN-Stream spec Section 3.4.11, blanking is done by setting all color intensities to 0."
   [x y]
-  (make-point x y 0.0 0.0 0.0))
+  [(u/clamp (double x) -1.0 1.0)
+   (u/clamp (double y) -1.0 1.0)
+   0.0 0.0 0.0])
 
 (defn blanked?
   "Check if a point is blanked (invisible).
    A point is blanked when all color channels are zero (or very close to zero)."
   [point]
   (let [epsilon 1e-6]
-    (and (< (:r point) epsilon)
-         (< (:g point) epsilon)
-         (< (:b point) epsilon))))
+    (and (< (point R) epsilon)
+         (< (point G) epsilon)
+         (< (point B) epsilon))))
 
+
+;; Frame Construction Helpers
 
 
 (defn make-frame
-  "Create a LaserFrame from a sequence of points."
-  ([points]
-   (make-frame points (System/currentTimeMillis) {}))
-  ([points timestamp]
-   (make-frame points timestamp {}))
-  ([points timestamp metadata]
-   (->LaserFrame (vec points) timestamp metadata)))
+  "Create a LaserFrame (vector of points) from a sequence of points."
+  [points]
+  (vec points))
 
 (defn empty-frame
   "Create an empty frame."
   []
-  (make-frame []))
-
-
+  [])

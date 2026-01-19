@@ -28,8 +28,8 @@
         y-scale (:y-scale resolved)]
     (map (fn [{:keys [x y] :as pt}]
            (assoc pt
-             :x (* x x-scale)
-             :y (* y y-scale))))))
+                  :x (* x x-scale)
+                  :y (* y y-scale))))))
 
 (effects/register-effect!
  {:id :scale
@@ -60,8 +60,8 @@
         dy (:y resolved)]
     (map (fn [{px :x py :y :as pt}]
            (assoc pt
-             :x (+ px dx)
-             :y (+ py dy))))))
+                  :x (+ px dx)
+                  :y (+ py dy))))))
 
 (effects/register-effect!
  {:id :translate
@@ -97,8 +97,8 @@
         sin-a (Math/sin radians)]
     (map (fn [{:keys [x y] :as pt}]
            (assoc pt
-             :x (- (* x cos-a) (* y sin-a))
-             :y (+ (* x sin-a) (* y cos-a)))))))
+                  :x (- (* x cos-a) (* y sin-a))
+                  :y (+ (* x sin-a) (* y cos-a)))))))
 
 (effects/register-effect!
  {:id :rotation
@@ -127,8 +127,8 @@
                           1.0
                           (Math/pow distance amount))]
              (assoc pt
-               :x (* x factor)
-               :y (* y factor)))))))
+                    :x (* x factor)
+                    :y (* y factor)))))))
 
 (effects/register-effect!
  {:id :pinch-bulge
@@ -235,9 +235,9 @@
                 :max 2.0}]
   :ui-hints {:renderer :corner-pin-2d
              :corners {:tl [:tl-x :tl-y]
-                      :tr [:tr-x :tr-y]
-                      :bl [:bl-x :bl-y]
-                      :br [:br-x :br-y]}
+                       :tr [:tr-x :tr-y]
+                       :bl [:bl-x :bl-y]
+                       :br [:br-x :br-y]}
              :default-mode :visual}
   :apply-transducer corner-pin-xf})
 
@@ -253,8 +253,8 @@
            (let [r-sq (+ (* x x) (* y y))
                  factor (+ 1.0 (* k1 r-sq) (* k2 r-sq r-sq))]
              (assoc pt
-               :x (* x factor)
-               :y (* y factor)))))))
+                    :x (* x factor)
+                    :y (* y factor)))))))
 
 (effects/register-effect!
  {:id :lens-distortion

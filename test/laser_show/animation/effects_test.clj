@@ -42,6 +42,12 @@
   (t/make-frame
    (mapv (fn [x] (t/make-point x 0.0 1.0 1.0 1.0)) x-positions)))
 
+(defn point-r [point] (point t/R))
+(defn point-g [point] (point t/G))
+(defn point-b [point] (point t/B))
+(defn point-x [point] (point t/X))
+(defn point-y [point] (point t/Y))
+
 (deftest position-based-modulator-detection-test
   (testing "pos-x modulator is detected as per-point"
     (let [params {:red {:type :pos-x :min 0.0 :max 1.0}}]
@@ -73,27 +79,26 @@
           
           result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)]
       
-      ;; Get the resulting points
-      (let [points (:points result-frame)
-            p0 (first points)   ;; x = -1.0
-            p1 (second points)  ;; x = 0.0
-            p2 (nth points 2)]  ;; x = 1.0
+      ;; Get the resulting points (frame IS the points now)
+      (let [p0 (first result-frame)    ;; x = -1.0
+            p1 (second result-frame)   ;; x = 0.0
+            p2 (nth result-frame 2)]   ;; x = 1.0
         
         ;; Points should have different red values based on x position
         ;; x=-1.0 -> t=0.0 -> red=0.0
         ;; x=0.0  -> t=0.5 -> red=0.5
         ;; x=1.0  -> t=1.0 -> red=1.0
         
-        (is (< (:r p0) 0.1)
-            (str "Point at x=-1.0 should have low red, got " (:r p0)))
-        (is (< 0.4 (:r p1) 0.6)
-            (str "Point at x=0.0 should have mid red, got " (:r p1)))
-        (is (> (:r p2) 0.9)
-            (str "Point at x=1.0 should have high red, got " (:r p2)))
+        (is (< (point-r p0) 0.1)
+            (str "Point at x=-1.0 should have low red, got " (point-r p0)))
+        (is (< 0.4 (point-r p1) 0.6)
+            (str "Point at x=0.0 should have mid red, got " (point-r p1)))
+        (is (> (point-r p2) 0.9)
+            (str "Point at x=1.0 should have high red, got " (point-r p2)))
         
         ;; All points should have zero green and blue
-        (is (< (:g p0) 0.01))
-        (is (< (:b p0) 0.01))))))
+        (is (< (point-g p0) 0.01))
+        (is (< (point-b p0) 0.01))))))
 
 (deftest set-hue-with-position-modulator-test
   (testing "set-hue with rainbow-hue modulator produces different hues"
@@ -111,28 +116,27 @@
           
           result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)]
       
-      ;; Get the resulting points
-      (let [points (:points result-frame)
-            p0 (first points)   ;; x = -1.0, hue = 0 (red)
-            p1 (second points)  ;; x = 0.0, hue = 120 (green)
-            p2 (nth points 2)]  ;; x = 1.0, hue = 240 (blue)
+      ;; Get the resulting points (frame IS the points now)
+      (let [p0 (first result-frame)    ;; x = -1.0, hue = 0 (red)
+            p1 (second result-frame)   ;; x = 0.0, hue = 120 (green)
+            p2 (nth result-frame 2)]   ;; x = 1.0, hue = 240 (blue)
         
         (println "\n--- SET-HUE TEST ---")
-        (println "Left (x=-1, hue=0/red):    r=" (:r p0) " g=" (:g p0) " b=" (:b p0))
-        (println "Center (x=0, hue=120/green): r=" (:r p1) " g=" (:g p1) " b=" (:b p1))
-        (println "Right (x=1, hue=240/blue):  r=" (:r p2) " g=" (:g p2) " b=" (:b p2))
+        (println "Left (x=-1, hue=0/red):    r=" (point-r p0) " g=" (point-g p0) " b=" (point-b p0))
+        (println "Center (x=0, hue=120/green): r=" (point-r p1) " g=" (point-g p1) " b=" (point-b p1))
+        (println "Right (x=1, hue=240/blue):  r=" (point-r p2) " g=" (point-g p2) " b=" (point-b p2))
         
         ;; Left should be reddish (hue 0)
-        (is (> (:r p0) 0.5) "Left point should have high red")
+        (is (> (point-r p0) 0.5) "Left point should have high red")
         ;; Center should be greenish (hue 120)
-        (is (> (:g p1) 0.5) "Center point should have high green")
+        (is (> (point-g p1) 0.5) "Center point should have high green")
         ;; Right should be blueish (hue 240)
-        (is (> (:b p2) 0.5) "Right point should have high blue")
+        (is (> (point-b p2) 0.5) "Right point should have high blue")
         
         ;; Points should have different colors
-        (is (not (and (= (:r p0) (:r p1) (:r p2))
-                      (= (:g p0) (:g p1) (:g p2))
-                      (= (:b p0) (:b p1) (:b p2))))
+        (is (not (and (= (point-r p0) (point-r p1) (point-r p2))
+                      (= (point-g p0) (point-g p1) (point-g p2))
+                      (= (point-b p0) (point-b p1) (point-b p2))))
             "Points at different x positions should have different colors")))))
 
 (deftest hue-shift-with-position-modulator-test
@@ -149,19 +153,18 @@
           
           result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)]
       
-      ;; Get the resulting points
-      (let [points (:points result-frame)
-            p0 (first points)   ;; x = -1.0, shift=0° -> still red
-            p2 (nth points 2)]  ;; x = 1.0, shift=180° -> cyan
+      ;; Get the resulting points (frame IS the points now)
+      (let [p0 (first result-frame)    ;; x = -1.0, shift=0° -> still red
+            p2 (nth result-frame 2)]   ;; x = 1.0, shift=180° -> cyan
         
         ;; First point (x=-1.0) should stay mostly red (hue shift 0°)
-        (is (> (:r p0) 0.9)
-            (str "Point at x=-1.0 should still be red, got r=" (:r p0)))
+        (is (> (point-r p0) 0.9)
+            (str "Point at x=-1.0 should still be red, got r=" (point-r p0)))
         
         ;; Last point (x=1.0) should be cyan (hue shift 180°)
         ;; Cyan has high green and blue, low red
-        (is (< (:r p2) 0.1)
-            (str "Point at x=1.0 should have low red (cyan), got r=" (:r p2)))))))
+        (is (< (point-r p2) 0.1)
+            (str "Point at x=1.0 should have low red (cyan), got r=" (point-r p2)))))))
 
 ;; Detailed Debug Test - Let's trace EXACTLY what happens
 
@@ -174,10 +177,10 @@
           point-right (t/make-point 1.0 0.0 1.0 1.0 1.0)]  ;; white point on right
       
       (println "\n--- INPUT POINTS ---")
-      (println "Left point:  x=" (:x point-left) " y=" (:y point-left)
-               " r=" (:r point-left) " g=" (:g point-left) " b=" (:b point-left))
-      (println "Right point: x=" (:x point-right) " y=" (:y point-right)
-               " r=" (:r point-right) " g=" (:g point-right) " b=" (:b point-right))
+      (println "Left point:  x=" (point-x point-left) " y=" (point-y point-left)
+               " r=" (point-r point-left) " g=" (point-g point-left) " b=" (point-b point-left))
+      (println "Right point: x=" (point-x point-right) " y=" (point-y point-right)
+               " r=" (point-r point-right) " g=" (point-g point-right) " b=" (point-b point-right))
       
       ;; Step 2: Create a frame with these two points
       (let [frame (t/make-frame [point-left point-right])]
@@ -202,32 +205,31 @@
             (println "Red param is modulator?:" (mod/modulator-config? (:red params)))
             (println "Red param config-requires-per-point?:" (mod/config-requires-per-point? (:red params))))
           
-          ;; Step 5: Apply the effect
+          ;; Step 5: Apply the effect (frame IS the points now)
           (let [result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)
-                result-points (:points result-frame)
-                result-left (first result-points)
-                result-right (second result-points)]
+                result-left (first result-frame)
+                result-right (second result-frame)]
             
             (println "\n--- OUTPUT POINTS ---")
-            (println "Left result:  x=" (:x result-left) " y=" (:y result-left)
-                     " r=" (:r result-left) " g=" (:g result-left) " b=" (:b result-left))
-            (println "Right result: x=" (:x result-right) " y=" (:y result-right)
-                     " r=" (:r result-right) " g=" (:g result-right) " b=" (:b result-right))
+            (println "Left result:  x=" (point-x result-left) " y=" (point-y result-left)
+                     " r=" (point-r result-left) " g=" (point-g result-left) " b=" (point-b result-left))
+            (println "Right result: x=" (point-x result-right) " y=" (point-y result-right)
+                     " r=" (point-r result-right) " g=" (point-g result-right) " b=" (point-b result-right))
             
             ;; Expected behavior:
             ;; Left point (x=-1): pos-x normalizes -1 to t=0.0, so red = 0.0 + 0*(1.0-0.0) = 0.0
             ;; Right point (x=+1): pos-x normalizes +1 to t=1.0, so red = 0.0 + 1*(1.0-0.0) = 1.0
             
             (println "\n--- ASSERTIONS ---")
-            (println "Left red expected: ~0.0, actual:" (:r result-left))
-            (println "Right red expected: ~1.0, actual:" (:r result-right))
+            (println "Left red expected: ~0.0, actual:" (point-r result-left))
+            (println "Right red expected: ~1.0, actual:" (point-r result-right))
             
             ;; The actual test assertions
-            (is (< (:r result-left) 0.1)
-                (str "Left point (x=-1) should have red ~0, got " (:r result-left)))
-            (is (> (:r result-right) 0.9)
-                (str "Right point (x=+1) should have red ~1.0, got " (:r result-right)))
-            (is (not= (:r result-left) (:r result-right))
+            (is (< (point-r result-left) 0.1)
+                (str "Left point (x=-1) should have red ~0, got " (point-r result-left)))
+            (is (> (point-r result-right) 0.9)
+                (str "Right point (x=+1) should have red ~1.0, got " (point-r result-right)))
+            (is (not= (point-r result-left) (point-r result-right))
                 "Left and right points should have different red values")))))))
 
 (deftest trace-modulator-evaluation-test
@@ -340,24 +342,22 @@
       (let [effect-chain {:effects [{:effect-id :set-color
                                      :enabled? true
                                      :params {:red 0.0 :green {:type :pos-y :min 0.0 :max 1.0} :blue 0.0}}]}
-            result (effects/apply-effect-chain frame effect-chain 0 120.0)
-            result-points (:points result)]
+            result (effects/apply-effect-chain frame effect-chain 0 120.0)]
         (println "\n--- pos-y test ---")
-        (println "Bottom (y=-1):" (:g (first result-points)))
-        (println "Center (y=0):" (:g (second result-points)))
-        (println "Top (y=+1):" (:g (nth result-points 2)))
-        (is (< (:g (first result-points)) 0.1) "Bottom point should have low green")
-        (is (> (:g (nth result-points 2)) 0.9) "Top point should have high green"))
+        (println "Bottom (y=-1):" (point-g (first result)))
+        (println "Center (y=0):" (point-g (second result)))
+        (println "Top (y=+1):" (point-g (nth result 2)))
+        (is (< (point-g (first result)) 0.1) "Bottom point should have low green")
+        (is (> (point-g (nth result 2)) 0.9) "Top point should have high green"))
       
       ;; Test radial (now using normalized 0.0-1.0 range)
       (let [effect-chain {:effects [{:effect-id :set-color
                                      :enabled? true
                                      :params {:red 0.0 :green 0.0 :blue {:type :radial :min 0.0 :max 1.0}}}]}
-            result (effects/apply-effect-chain frame effect-chain 0 120.0)
-            result-points (:points result)]
+            result (effects/apply-effect-chain frame effect-chain 0 120.0)]
         (println "\n--- radial test ---")
-        (println "Center:" (:b (second result-points)))
-        (println "Corner:" (:b (nth result-points 2)))
-        (is (< (:b (second result-points)) 0.1) "Center point should have low blue (near origin)")
-        (is (> (:b (nth result-points 2)) 0.9) "Corner point should have high blue (far from origin)")))))
+        (println "Center:" (point-b (second result)))
+        (println "Corner:" (point-b (nth result 2)))
+        (is (< (point-b (second result)) 0.1) "Center point should have low blue (near origin)")
+        (is (> (point-b (nth result 2)) 0.9) "Corner point should have high blue (far from origin)")))))
 

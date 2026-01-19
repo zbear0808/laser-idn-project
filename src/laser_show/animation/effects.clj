@@ -161,26 +161,25 @@
 
 ;; Point Normalization Transducers
 ;;
-;; Since LaserPoint now uses normalized values internally (x, y: -1.0 to 1.0,
-;; r, g, b: 0.0 to 1.0), normalization is simpler - we just copy the values
-;; and add the :raw reference for reconstruction.
+;; Since LaserPoint is now a 5-element vector [x y r g b] with normalized values
+;; (x, y: -1.0 to 1.0, r, g, b: 0.0 to 1.0), normalization is simple -
+;; we just extract the values by index and add the :raw reference.
 
 
 (defn normalize-point
-  "Convert a LaserPoint to normalized working format for effects.
+  "Convert a LaserPoint vector to normalized working format for effects.
    
-   LaserPoint format (already normalized):
-   {:x double (-1.0 to 1.0), :y double (-1.0 to 1.0),
-    :r double (0.0-1.0), :g double (0.0-1.0), :b double (0.0-1.0)}
+   LaserPoint format (5-element vector, already normalized):
+   [x y r g b] where x,y in [-1.0, 1.0] and r,g,b in [0.0, 1.0]
    
    Working format adds :raw reference:
-   {:x double, :y double, :r double, :g double, :b double, :raw LaserPoint}"
+   {:x double, :y double, :r double, :g double, :b double, :raw point-vector}"
   [point]
-  {:x (:x point)
-   :y (:y point)
-   :r (:r point)
-   :g (:g point)
-   :b (:b point)
+  {:x (point t/X)
+   :y (point t/Y)
+   :r (point t/R)
+   :g (point t/G)
+   :b (point t/B)
    :raw point})
 
 (defn denormalize-point
@@ -303,7 +302,7 @@
    avoiding intermediate sequence allocations.
    
    Parameters:
-   - frame: LaserFrame to transform
+   - frame: LaserFrame (vector of points) to transform
    - chain: Effect chain {:effects [...]} or nil
    - time-ms: Current time in milliseconds
    - bpm: Current BPM (from global state if not provided)
@@ -311,7 +310,7 @@
    - timing-ctx: (optional) Timing context for modulator evaluation
                  {:accumulated-beats :accumulated-ms :phase-offset :effective-beats}
    
-   Returns: Transformed frame"
+   Returns: Transformed frame (vector of points)"
   ([frame chain time-ms]
    (apply-effect-chain frame chain time-ms (queries/bpm) nil nil))
   ([frame chain time-ms bpm]
@@ -321,8 +320,7 @@
   ([frame chain time-ms bpm trigger-time timing-ctx]
    (if (or (nil? chain) (empty? (:effects chain)))
      frame
-     (let [points (:points frame)
-           point-count (count points)
+     (let [point-count (count frame)
            ;; Include timing context in frame-ctx for modulator evaluation
            frame-ctx {:point-count point-count
                       :timing-ctx timing-ctx}
@@ -333,7 +331,7 @@
                         (add-index-xf point-count)
                         effect-xf
                         denormalize-xf)]
-       (assoc frame :points (into [] full-xf points))))))
+       (into [] full-xf frame)))))
 
 
 

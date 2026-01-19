@@ -195,36 +195,35 @@
   [from-point to-point]
   (let [;; First: blanking point at source (turn off laser at current position)
         blank-at-source (when from-point
-                          (t/->LaserPoint (:x from-point) (:y from-point) 0.0 0.0 0.0))
+                          [(from-point t/X) (from-point t/Y) 0.0 0.0 0.0])
         ;; Second: blanking point at destination (move to new position with laser off)
         blank-at-dest (when to-point
-                        (t/->LaserPoint (:x to-point) (:y to-point) 0.0 0.0 0.0))]
+                        [(to-point t/X) (to-point t/Y) 0.0 0.0 0.0])]
     (filterv some? [blank-at-source blank-at-dest])))
 
 (defn- concatenate-frames
   "Concatenate multiple frames with blanking points between them.
-   Returns a new LaserFrame with all points combined."
-  [frames elapsed-ms]
+   Returns a frame (vector of points) or nil."
+  [frames _elapsed-ms]
   (when (seq frames)
     (let [combined-points (reduce
                             (fn [acc frame]
-                              (let [points (:points frame)]
-                                (if (empty? points)
-                                  acc
-                                  (if (empty? acc)
-                                    ;; First frame - just add points
-                                    (vec points)
-                                    ;; Subsequent frames - add blanking jump then points
-                                    (let [last-point (peek acc)
-                                          first-new-point (first points)
-                                          blanking (create-blanking-jump last-point first-new-point)]
-                                      (-> acc
-                                          (into blanking)
-                                          (into points)))))))
+                              (if (empty? frame)
+                                acc
+                                (if (empty? acc)
+                                  ;; First frame - just add points
+                                  (vec frame)
+                                  ;; Subsequent frames - add blanking jump then points
+                                  (let [last-point (peek acc)
+                                        first-new-point (first frame)
+                                        blanking (create-blanking-jump last-point first-new-point)]
+                                    (-> acc
+                                        (into blanking)
+                                        (into frame))))))
                             []
                             frames)]
       (when (seq combined-points)
-        (t/->LaserFrame combined-points elapsed-ms {})))))
+        combined-points))))
 
 (defn- render-item-with-effects
   "Recursively render a cue chain item (preset or group) applying effects at each level.
@@ -233,7 +232,7 @@
    - For presets: render → apply preset effects
    - For groups: render children → concatenate → apply group effects
    
-   Returns a LaserFrame or nil if disabled/empty."
+   Returns a frame (vector of points) or nil if disabled/empty."
   [item elapsed-ms bpm trigger-time timing-ctx]
   (when (:enabled? item true)
     (cond
@@ -312,7 +311,7 @@
                                     (timing/nanos->micros (- effects-end effects-start))
                                     0)
                   effect-count (if effect-chain (count (:effects effect-chain)) 0)
-                  point-count (count (:points final-frame))]
+                  point-count (count final-frame)]
               
               ;; Frame profiler (always-on stats)
               (profiler/record-frame-timing!
@@ -334,28 +333,26 @@
 
 
 (defn laser-point->preview-point
-  "Convert a LaserPoint to a map suitable for preview rendering.
+  "Convert a LaserPoint vector to a map suitable for preview rendering.
    
-   LaserPoints now use normalized values:
+   LaserPoints are 5-element vectors [x y r g b] with normalized values:
    - x, y: -1.0 to 1.0 (already normalized)
    - r, g, b: 0.0 to 1.0 (already normalized)
    
    Preview uses the same format, so we just pass through the values."
-  [^laser_show.animation.types.LaserPoint point]
-  {:x (:x point)           ;; Already normalized (-1.0 to 1.0)
-   :y (:y point)           ;; Already normalized (-1.0 to 1.0)
-   :r (:r point)           ;; Already normalized (0.0 to 1.0)
-   :g (:g point)           ;; Already normalized (0.0 to 1.0)
-   :b (:b point)           ;; Already normalized (0.0 to 1.0)
+  [point]
+  {:x (point t/X)           ;; Already normalized (-1.0 to 1.0)
+   :y (point t/Y)           ;; Already normalized (-1.0 to 1.0)
+   :r (point t/R)           ;; Already normalized (0.0 to 1.0)
+   :g (point t/G)           ;; Already normalized (0.0 to 1.0)
+   :b (point t/B)           ;; Already normalized (0.0 to 1.0)
    :blanked? (t/blanked? point)})
 
 (defn frame->preview-data
-  "Convert a LaserFrame to preview-friendly data."
+  "Convert a frame (vector of points) to preview-friendly data."
   [frame]
-  (when frame
-    {:points (mapv laser-point->preview-point (:points frame))
-     :timestamp (:timestamp frame)
-     :metadata (:metadata frame)}))
+  (when (seq frame)
+    {:points (mapv laser-point->preview-point frame)}))
 
 (defn get-preview-frame
   "Get the current frame in preview-friendly format."

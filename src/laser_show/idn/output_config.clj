@@ -10,7 +10,8 @@
    
    The default configuration is 16-bit for both color and position (maximum precision).
    Use standard-config for ISP-DB25 compatibility (8-bit color, 16-bit XY)."
-  (:require [laser-show.common.util :as u]))
+  (:require [laser-show.animation.types :as t]
+            [laser-show.common.util :as u]))
 
 
 ;; Bit Depth Constants
@@ -121,7 +122,7 @@
 
 
 (defn point->output-values
-  "Convert a normalized LaserPoint to output values based on config.
+  "Convert a normalized LaserPoint vector to output values based on config.
    
    Returns a map with:
    - :x - X coordinate in output format
@@ -130,11 +131,11 @@
    - :g - Green in output format
    - :b - Blue in output format"
   [point {:keys [color-bit-depth xy-bit-depth]}]
-  {:x (normalized->output-xy (:x point) xy-bit-depth)
-   :y (normalized->output-xy (:y point) xy-bit-depth)
-   :r (normalized->output-color (:r point) color-bit-depth)
-   :g (normalized->output-color (:g point) color-bit-depth)
-   :b (normalized->output-color (:b point) color-bit-depth)})
+  {:x (normalized->output-xy (point t/X) xy-bit-depth)
+   :y (normalized->output-xy (point t/Y) xy-bit-depth)
+   :r (normalized->output-color (point t/R) color-bit-depth)
+   :g (normalized->output-color (point t/G) color-bit-depth)
+   :b (normalized->output-color (point t/B) color-bit-depth)})
 
 
 ;; Configuration Queries

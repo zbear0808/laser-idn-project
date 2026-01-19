@@ -3,7 +3,7 @@
    Each generator produces a sequence of LaserPoints that form a shape.
    
    All colors use NORMALIZED VALUES (0.0 to 1.0) for maximum precision."
-  (:require [laser-show.animation.types :as t] 
+  (:require [laser-show.animation.types :as t]
             [laser-show.common.util :as u]))
 
 

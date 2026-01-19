@@ -1,6 +1,7 @@
 (ns laser-show.idn.output-config-test
   "Tests for IDN output configuration."
   (:require [clojure.test :refer [deftest testing is]]
+            [laser-show.animation.types :as t]
             [laser-show.idn.output-config :as oc]))
 
 (deftest test-normalized-to-output-xy-16bit
@@ -63,7 +64,7 @@
 
 (deftest test-point-to-output-values
   (testing "Full point conversion with default config (16-bit color and XY)"
-    (let [point {:x 0.5 :y -0.5 :r 1.0 :g 0.5 :b 0.0}
+    (let [point (t/make-point 0.5 -0.5 1.0 0.5 0.0)
           output (oc/point->output-values point oc/default-config)]
       ;; 16-bit XY
       (is (> (:x output) 16000))
@@ -74,7 +75,7 @@
       (is (= 0 (:b output)))))
   
   (testing "Full point conversion with standard config (8-bit color, 16-bit XY)"
-    (let [point {:x 0.5 :y -0.5 :r 1.0 :g 0.5 :b 0.0}
+    (let [point (t/make-point 0.5 -0.5 1.0 0.5 0.0)
           output (oc/point->output-values point oc/standard-config)]
       ;; 16-bit XY
       (is (> (:x output) 16000))
