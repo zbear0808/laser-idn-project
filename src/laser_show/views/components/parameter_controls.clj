@@ -135,7 +135,6 @@
      :children [{:fx/type :check-box
                  :text display-label
                  :selected value
-                 :style-class ["label-secondary"]
                  :on-selected-changed (assoc on-change-event :param-key param-key)}]}))
 
 (defn param-color-picker
@@ -209,11 +208,11 @@
              :current-value (:current-value props)
              :on-change-event (:on-change-event props)
              :label-width (:label-width props)}
-    :bool {:fx/type param-checkbox
-           :param-key (:param-key props)
-           :param-spec param-spec
-           :current-value (:current-value props)
-           :on-change-event (:on-change-event props)}
+    (:bool :boolean) {:fx/type param-checkbox
+                      :param-key (:param-key props)
+                      :param-spec param-spec
+                      :current-value (:current-value props)
+                      :on-change-event (:on-change-event props)}
     ;; Default: numeric slider (:float, :int, or unspecified)
     {:fx/type param-slider
      :param-key (:param-key props)

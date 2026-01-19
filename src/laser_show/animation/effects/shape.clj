@@ -183,7 +183,7 @@
 (effects/register-effect!
  {:id :corner-pin
   :name "Corner Pin"
-  :category :shape
+  :category #{:shape :calibration}  ;; Available in both shape effects and projector calibration
   :timing :static
   :parameters [{:key :tl-x
                 :label "Top-Left X"

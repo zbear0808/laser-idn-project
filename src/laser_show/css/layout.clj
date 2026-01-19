@@ -48,7 +48,6 @@
         :-fx-border-radius 4
         :-fx-background-radius 4}
        
-       ;; Scroll pane transparent variant
        ".scroll-pane-transparent"
        {:-fx-background-color "transparent"
         :-fx-background "transparent"
@@ -69,27 +68,15 @@
        ".status-indicator-connecting"
        {:-fx-background-color accent-warning}
        
-       
-       ;; Container Classes
-       
-       
-       ;; Primary container (darkest background)
        ".container-primary"
        {:-fx-background-color bg-primary}
        
-       ;; Surface container (panel background) - now uses primary for consistency
        ".container-surface"
        {:-fx-background-color bg-primary}
        
-       ;; Elevated container (cards, dialogs)
        ".container-elevated"
        {:-fx-background-color bg-elevated}
        
-       
-       ;; Scroll Pane Variants
-       
-       
-       ;; Dark scroll pane (for content areas)
        ".scroll-pane-dark"
        {:-fx-background-color bg-primary
         :-fx-background bg-primary

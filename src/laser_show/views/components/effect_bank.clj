@@ -36,14 +36,21 @@
 
 (defn- build-effects-by-category
   "Build a map of category -> effects vector.
-   Excludes :calibration category (projector-only effects)."
+   Handles both single keyword categories and set categories.
+   Effects with set categories appear in all relevant tabs."
   []
   (let [all-effects (effects/list-effects)]
     (reduce (fn [acc effect-def]
-              (let [cat (:category effect-def)]
-                (if (= :calibration cat)
-                  acc  ;; Skip calibration effects
-                  (update acc cat (fnil conj []) effect-def))))
+              (let [cat (:category effect-def)
+                    ;; Normalize to a set of categories
+                    cats (if (set? cat) cat #{cat})
+                    ;; Filter out :calibration (projector-only) from effect bank
+                    display-cats (disj cats :calibration)]
+                ;; Add effect to each non-calibration category it belongs to
+                (reduce (fn [inner-acc display-cat]
+                          (update inner-acc display-cat (fnil conj []) effect-def))
+                        acc
+                        display-cats)))
             {}
             all-effects)))
 

@@ -40,7 +40,7 @@
    
    ;; Accent colors
    :green   "#4CAF50"   ; Success, primary action buttons
-   :blue    "#2196F3"   ; Selection, active state, info
+   :blue    "#4992db"   ; Selection, active state, info
    :orange  "#FF9800"   ; Warning
    :red     "#fd3636"   ; Danger, error
    

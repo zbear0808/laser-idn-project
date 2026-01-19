@@ -454,9 +454,11 @@
    - :ui-state - UI state for this projector (from projector-effect-ui-state sub)"
   [{:keys [projector-id effect-idx effect ui-state]}]
   (let [{:keys [effect-id params]} effect
-       effect-def (effects/get-effect effect-id)
-       effect-name (or (:name effect-def) (name effect-id))
-       renderer-type (get-in effect-def [:ui-hints :renderer])]
+        effect-def (when effect-id (effects/get-effect effect-id))
+        effect-name (or (:name effect-def)
+                        (when effect-id (name effect-id))
+                        "Unknown Effect")
+        renderer-type (get-in effect-def [:ui-hints :renderer])]
     {:fx/type :v-box
      :spacing 8
      :padding 8
@@ -526,14 +528,16 @@
    - :clipboard-items - Items available for pasting"
   [{:keys [fx/context projector-id selected-ids clipboard-items]}]
   (let [;; Read effects from chains domain, not from projector config
-        effects (fx/sub-ctx context subs/projector-effect-chain projector-id)]
+        effects (fx/sub-ctx context subs/projector-effect-chain projector-id)
+        ;; Build label map from calibration effects
+        labels (calibration-effect-labels)]
     {:fx/type list/list-editor
      :fx/context context  ;; Required for list-sidebar to subscribe to list-ui-state
      :items (or effects [])
      :component-id [:projector-effects projector-id]
-     :item-id-key :effect-id
-     :label-map (calibration-effect-labels)  ;; Now a function call
-     :fallback-label "Unknown Effect"
+     ;; Custom label function that looks up effect-id in calibration-effect-labels
+     :get-item-label (fn [item]
+                       (get labels (:effect-id item) "Unknown Effect"))
      :on-change-event :chain/set-items
      :on-change-params {:domain :projector-effects :entity-key projector-id}
      :on-selection-event :chain/update-selection
@@ -556,7 +560,7 @@
                                 default-params (effects/get-default-params effect-id)]
                             {:fx/type :menu-item
                              :text effect-name
-                             :on-action {:event/type :projectors/add-calibration-effect
+                             :on-action {:event/type :projectors/add-effect
                                          :projector-id projector-id
                                          :effect {:effect-id effect-id
                                                   :params default-params}}})))]

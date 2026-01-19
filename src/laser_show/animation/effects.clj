@@ -65,13 +65,20 @@
 
 (defonce !effect-registry (atom {}))
 
+(defn- valid-category?
+  "Check if category is valid. Can be a single keyword or a set of keywords."
+  [category]
+  (or (contains? effect-categories category)
+      (and (set? category)
+           (every? #(contains? effect-categories %) category))))
+
 (defn register-effect!
   "Register an effect definition in the global registry.
    
    Effect definition structure:
    {:id              :effect-id
     :name            \"Display Name\"
-    :category        :shape/:color/:intensity/:calibration
+    :category        :shape/:color/:intensity/:calibration OR #{:shape :calibration} (set for multiple)
     :timing          :static/:bpm/:seconds
     :parameters      [{:key :param-name
                        :label \"Param Label\"
@@ -84,7 +91,7 @@
   [effect-def]
   {:pre [(keyword? (:id effect-def))
          (string? (:name effect-def))
-         (contains? effect-categories (:category effect-def))
+         (valid-category? (:category effect-def))
          (contains? timing-modes (:timing effect-def))
          (vector? (:parameters effect-def))
          (fn? (:apply-transducer effect-def))]}
@@ -101,10 +108,20 @@
   []
   (vals @!effect-registry))
 
+(defn- effect-in-category?
+  "Check if an effect belongs to a category.
+   Handles both single category keywords and category sets."
+  [effect category]
+  (let [effect-category (:category effect)]
+    (if (set? effect-category)
+      (contains? effect-category category)
+      (= effect-category category))))
+
 (defn list-effects-by-category
-  "List effects filtered by category."
+  "List effects filtered by category.
+   Works with effects that have a single category keyword or a set of categories."
   [category]
-  (filter #(= category (:category %)) (list-effects)))
+  (filterv #(effect-in-category? % category) (list-effects)))
 
 
 

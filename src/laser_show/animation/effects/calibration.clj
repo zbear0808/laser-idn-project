@@ -48,3 +48,39 @@
                 :type :curve-points
                 :default [[0.0 0.0] [1.0 1.0]]}]
   :apply-transducer rgb-curves-xf})
+
+
+;; Axis Transform Effect (mirror and swap axes)
+
+
+(defn- axis-transform-xf [time-ms bpm params ctx]
+ (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
+       mirror-x? (:mirror-x? resolved)
+       mirror-y? (:mirror-y? resolved)
+       swap-axes? (:swap-axes? resolved)]
+   (map (fn [{:keys [x y] :as pt}]
+          (let [;; Apply mirroring first
+                x' (if mirror-x? (- x) x)
+                y' (if mirror-y? (- y) y)
+                ;; Then swap if needed
+                [final-x final-y] (if swap-axes? [y' x'] [x' y'])]
+            (assoc pt :x final-x :y final-y))))))
+
+(effects/register-effect!
+ {:id :axis-transform
+  :name "Axis Transform"
+  :category :calibration
+  :timing :static
+  :parameters [{:key :mirror-x?
+                :label "Mirror X"
+                :type :bool
+                :default false}
+               {:key :mirror-y?
+                :label "Mirror Y"
+                :type :bool
+                :default false}
+               {:key :swap-axes?
+                :label "Swap Axes"
+                :type :bool
+                :default false}]
+  :apply-transducer axis-transform-xf})

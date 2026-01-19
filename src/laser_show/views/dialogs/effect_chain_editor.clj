@@ -149,7 +149,6 @@
                 :children [{:fx/type :check-box
                             :text "Active"
                             :selected active?
-                            :style-class "label-primary"
                             :on-selected-changed {:event/type :effects/toggle-cell
                                                   :col col :row row}}
                            {:fx/type :region :h-box/hgrow :always}

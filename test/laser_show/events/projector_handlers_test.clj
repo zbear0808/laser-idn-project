@@ -491,3 +491,51 @@
           vps (get-in result [:state :virtual-projectors])]
       ;; Virtual projector should be removed since parent is gone
       (is (nil? (get vps vp-id))))))
+
+
+;; Effect Chain Addition Tests
+
+
+(deftest handle-projectors-add-effect-test
+  (testing "Adds calibration effect to projector's chain"
+    (let [;; Add axis-transform effect
+          event {:event/type :projectors/add-effect
+                 :projector-id test-projector-id
+                 :effect {:effect-id :axis-transform
+                          :params {:mirror-x? false
+                                   :mirror-y? true
+                                   :swap-axes? false}}
+                 :state state-with-projector}
+          result (projectors/handle event)
+          effects (get-in result [:state :chains :projector-effects test-projector-id :items])]
+      ;; Should have added the effect (original had 1 effect)
+      (is (= 2 (count effects)))
+      
+      ;; New effect should be last
+      (let [new-effect (last effects)]
+        (is (= :axis-transform (:effect-id new-effect)))
+        (is (= false (get-in new-effect [:params :mirror-x?])))
+        (is (= true (get-in new-effect [:params :mirror-y?])))
+        (is (= false (get-in new-effect [:params :swap-axes?])))
+        ;; Effect should have unique ID assigned
+        (is (uuid? (:id new-effect)))
+        ;; Effect should be enabled by default
+        (is (true? (:enabled? new-effect))))
+      
+      ;; Project should be marked dirty
+      (is (true? (get-in result [:state :project :dirty?])))))
+  
+  (testing "Adds corner-pin calibration effect"
+    (let [event {:event/type :projectors/add-effect
+                 :projector-id test-projector-id
+                 :effect {:effect-id :corner-pin
+                          :params {:tl-x -0.9 :tl-y 0.9
+                                   :tr-x 0.9 :tr-y 0.9
+                                   :bl-x -0.9 :bl-y -0.9
+                                   :br-x 0.9 :br-y -0.9}}
+                 :state state-with-projector}
+          result (projectors/handle event)
+          effects (get-in result [:state :chains :projector-effects test-projector-id :items])
+          new-effect (last effects)]
+      (is (= :corner-pin (:effect-id new-effect)))
+      (is (= -0.9 (get-in new-effect [:params :tl-x]))))))
