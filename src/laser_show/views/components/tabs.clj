@@ -44,20 +44,20 @@
 
 
 (defn styled-tab-bar
-  "A horizontal tab bar with consistent styling.
+  "A horizontal tab bar with consistent styling (VS Code style).
    
    Props:
    - :tabs - Vector of tab definitions [{:id :tab-id :label \"Label\"} ...]
    - :active-tab - The currently active tab id
    - :on-tab-change - Event map for when a tab is clicked. Will receive :tab-id key.
-   - :spacing (optional) - Spacing between tabs, default 4
+   - :spacing (optional) - Spacing between tabs, default 0 (flush tabs)
    
    Uses CSS class: .tab-header from layout.clj"
   [{:keys [tabs active-tab on-tab-change spacing]}]
   {:fx/type :h-box
    ;; Use CSS class from layout.clj
    :style-class "tab-header"
-   :spacing (or spacing 4)
+   :spacing (or spacing 0)
    :children (vec
                (for [{:keys [id label]} tabs]
                  {:fx/type styled-tab-button

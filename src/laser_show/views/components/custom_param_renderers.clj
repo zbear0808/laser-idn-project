@@ -184,12 +184,12 @@
     {:fx/type :v-box
      :spacing 8
      :padding 8
-     :style "-fx-background-color: #2A2A2A; -fx-background-radius: 4;"
+     :style-class ["visual-editor-padded"]
      :children (vec
                 (concat
                   [{:fx/type :label
                     :text actual-hint
-                    :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-style: italic;"}
+                    :style-class ["visual-editor-hint"]}
                    
                    {:fx/type spatial-canvas/spatial-canvas
                     :fx/key canvas-key
@@ -218,25 +218,25 @@
                                :alignment :center
                                :children [{:fx/type :label
                                           :text (format "TL: (%.2f, %.2f)" tl-x tl-y)
-                                          :style "-fx-text-fill: #FF5722; -fx-font-size: 10; -fx-font-family: 'Consolas', monospace;"}
+                                          :style-class ["visual-editor-coord-tl"]}
                                          {:fx/type :label
                                           :text (format "TR: (%.2f, %.2f)" tr-x tr-y)
-                                          :style "-fx-text-fill: #4CAF50; -fx-font-size: 10; -fx-font-family: 'Consolas', monospace;"}]}
+                                          :style-class ["visual-editor-coord-tr"]}]}
                               {:fx/type :h-box
                                :spacing 12
                                :alignment :center
                                :children [{:fx/type :label
                                           :text (format "BL: (%.2f, %.2f)" bl-x bl-y)
-                                          :style "-fx-text-fill: #2196F3; -fx-font-size: 10; -fx-font-family: 'Consolas', monospace;"}
+                                          :style-class ["visual-editor-coord-bl"]}
                                          {:fx/type :label
                                           :text (format "BR: (%.2f, %.2f)" br-x br-y)
-                                          :style "-fx-text-fill: #FFC107; -fx-font-size: 10; -fx-font-family: 'Consolas', monospace;"}]}]}]
+                                          :style-class ["visual-editor-coord-br"]}]}]}]
                  
                  ;; Optional reset button when reset-event is provided
                  (when reset-event
                    [{:fx/type :button
                      :text "Reset to Defaults"
-                     :style "-fx-background-color: #505050; -fx-text-fill: #B0B0B0; -fx-font-size: 10; -fx-padding: 4 12;"
+                     :style-class ["visual-editor-reset-btn"]
                      :on-action reset-event}])))}))
 
 
@@ -300,7 +300,7 @@
                 :on-remove-point remove-event}
                {:fx/type :label
                 :text "Click to add point • Drag to move • Right-click to delete"
-                :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-style: italic;"}]}))
+                :style-class ["visual-editor-hint"]}]}))
 
 (defn rgb-curves-visual-editor
  "Visual editor for RGB curves effect with tabbed R/G/B interface.
@@ -335,7 +335,7 @@
                          :effect-path effect-path}]
   {:fx/type :v-box
    :spacing 0
-   :style "-fx-background-color: #2A2A2A; -fx-background-radius: 4;"
+   :style-class ["visual-editor"]
    :children [{:fx/type tabs/styled-tab-bar
                :tabs curve-tab-definitions
                :active-tab active-channel
@@ -399,22 +399,21 @@
        mode-button (fn [m]
                      {:fx/type :button
                       :text (get mode-labels m (name m))
-                      :style (str "-fx-font-size: 10; -fx-padding: 4 10; "
-                                 (if (= mode m)
-                                   "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
-                                   "-fx-background-color: #404040; -fx-text-fill: #B0B0B0;"))
+                      :style-class [(if (= mode m)
+                                      "visual-editor-mode-btn-active"
+                                      "visual-editor-mode-btn")]
                       :on-action (assoc on-change-event :param-key :mode :value m)})]
    
    {:fx/type :v-box
     :spacing 12
     :padding 12
-    :style "-fx-background-color: #2A2A2A; -fx-background-radius: 4;"
+    :style-class ["visual-editor"]
     :children [;; Mode selector
                {:fx/type :v-box
                 :spacing 6
                 :children [{:fx/type :label
                             :text "ROUTING MODE"
-                            :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-weight: bold;"}
+                            :style-class ["visual-editor-section-label"]}
                            {:fx/type :h-box
                             :spacing 4
                             :children [(mode-button :replace)
@@ -422,14 +421,14 @@
                                       (mode-button :filter)]}
                            {:fx/type :label
                             :text (get mode-descriptions mode "")
-                            :style "-fx-text-fill: #606060; -fx-font-size: 9; -fx-font-style: italic;"}]}
+                            :style-class ["visual-editor-description"]}]}
                
                ;; Zone group selector
                {:fx/type :v-box
                 :spacing 6
                 :children [{:fx/type :label
                             :text "TARGET ZONE GROUPS"
-                            :style "-fx-text-fill: #808080; -fx-font-size: 10; -fx-font-weight: bold;"}
+                            :style-class ["visual-editor-section-label"]}
                            {:fx/type :flow-pane
                             :hgap 6
                             :vgap 6
@@ -449,19 +448,19 @@
                             :text (str "Selected: " (if (empty? target-zone-groups)
                                                      "none"
                                                      (str/join ", " (map name target-zone-groups))))
-                            :style "-fx-text-fill: #606060; -fx-font-size: 9;"}]}
+                            :style-class ["visual-editor-selected-text"]}]}
                
                ;; Info about current routing
                {:fx/type :v-box
                 :spacing 4
-                :style "-fx-background-color: #353535; -fx-padding: 8; -fx-background-radius: 4;"
+                :style-class ["visual-editor-info-panel"]
                 :children [{:fx/type :label
                             :text "ℹ️ Zone effects modify routing BEFORE frame generation"
-                            :style "-fx-text-fill: #7A9EC2; -fx-font-size: 10;"}
+                            :style-class ["visual-editor-info-title"]}
                            {:fx/type :label
                             :text (case mode
                                    :replace "This will completely override the cue's destination"
                                    :add "This will add to the cue's existing destination"
                                    :filter "This will restrict to zones matching both destinations"
                                    "")
-                            :style "-fx-text-fill: #909090; -fx-font-size: 9;"}]}]}))
+                            :style-class ["visual-editor-info-text"]}]}]}))

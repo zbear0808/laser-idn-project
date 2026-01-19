@@ -67,28 +67,34 @@
         {:-fx-background-color accent-success-hover}}
        
        
-       ;; Tab Buttons
+       ;; Tab Buttons (VS Code style - flush tabs with top border indicator)
        
        
        ".tab-btn"
        {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
-        :-fx-background-radius ["4px" "4px" "0px" "0px"]
+        :-fx-background-radius 0
         :-fx-padding ["8px" "16px"]
         :-fx-cursor "hand"
+        ;; Transparent top border + right border for tab separation (keeps same height as active)
+        :-fx-border-color ["transparent" gray-500 "transparent" "transparent"]
+        :-fx-border-width [3 1 0 0]
         
         ":hover"
-        {:-fx-background-color accent-success-hover}}
+        {:-fx-background-color bg-hover}}
        
        ".tab-btn-active"
-       {:-fx-background-color accent-success
+       {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
-        :-fx-background-radius ["4px" "4px" "0px" "0px"]
+        :-fx-background-radius 0
         :-fx-padding ["8px" "16px"]
         :-fx-cursor "hand"
+        ;; Blue top border indicator for active tab (matches list selection color)
+        :-fx-border-color [accent-info gray-500 "transparent" "transparent"]
+        :-fx-border-width [3 1 0 0]
         
         ":hover"
-        {:-fx-background-color accent-success}}
+        {:-fx-background-color bg-interactive}}
        
        
        ;; Bank Item Buttons (for effect banks and preset banks)

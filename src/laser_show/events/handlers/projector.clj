@@ -34,14 +34,21 @@
 
 
 (def DEFAULT_PROJECTOR_EFFECTS
-  "Default effects for all projectors - color calibration only.
-   Uses normalized 0.0-1.0 color values."
+  "Default effects for all projectors - color calibration and corner pin.
+   Uses normalized 0.0-1.0 color values and -1.0 to 1.0 corner pin bounds."
   [{:effect-id :rgb-curves
     :id (random-uuid)
     :enabled? true
     :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
              :g-curve-points [[0.0 0.0] [1.0 1.0]]
-             :b-curve-points [[0.0 0.0] [1.0 1.0]]}}])
+             :b-curve-points [[0.0 0.0] [1.0 1.0]]}}
+   {:effect-id :corner-pin
+    :id (random-uuid)
+    :enabled? true
+    :params {:tl-x -1.0 :tl-y 1.0
+             :tr-x 1.0 :tr-y 1.0
+             :bl-x -1.0 :bl-y -1.0
+             :br-x 1.0 :br-y -1.0}}])
 
 
 ;; Path Helpers

@@ -291,11 +291,14 @@
 
 (defn projectors-list
   "Get list of configured projectors as [{:id :proj-1 :name ...} ...].
+   Sorted by service-id (projectors with no service-id or 0 first).
    Depends on: projectors domain"
   [context]
   (let [data (fx/sub-val context :projectors)
         items (:items data {})]
-    (mapv (fn [[id config]] (assoc config :id id)) items)))
+    (->> items
+         (mapv (fn [[id config]] (assoc config :id id)))
+         (sort-by (fn [proj] [(or (:service-id proj) 0)])))))
 
 (defn active-projector-id
   "Get the ID of the currently selected projector.

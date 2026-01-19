@@ -23,7 +23,8 @@
             [laser-show.css.layout :as layout]
             [laser-show.css.title-bar :as title-bar]
             [laser-show.css.cue-chain-editor :as cue-chain-editor]
-            [laser-show.css.list :as list]))
+            [laser-show.css.list :as list]
+            [laser-show.css.visual-editors :as visual-editors]))
 
 
 ;; =============================================================================
@@ -48,12 +49,13 @@
    (::css/url layout/layout)
    (::css/url title-bar/menu-theme)
    (::css/url cue-chain-editor/cue-chain-editor)
-   (::css/url list/list)])
+   (::css/url list/list)
+   (::css/url visual-editors/visual-editors)])
 
 (defn dialog-stylesheet-urls
   "Returns stylesheet URLs appropriate for dialogs.
    Includes theme, typography, components, buttons, forms, grid-cells,
-   layout, menus, cue-chain-editor, and list.
+   layout, menus, cue-chain-editor, list, and visual-editors.
    
    Example:
    {:fx/type :scene
@@ -69,7 +71,8 @@
    (::css/url layout/layout)
    (::css/url title-bar/menu-theme)
    (::css/url cue-chain-editor/cue-chain-editor)
-   (::css/url list/list)])
+   (::css/url list/list)
+   (::css/url visual-editors/visual-editors)])
 
 
 ;; =============================================================================
