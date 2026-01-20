@@ -165,3 +165,24 @@
    :cause (when-let [cause (.getCause e)]
             (exception->map cause))
    :stacktrace (mapv str (.getStackTrace e))})
+
+
+(defn sliding
+  "Transducer that returns a sliding window of size n with step.
+   Similar to partition but as a transducer for better composition.
+   Avoids intermediate allocations when composed with other transducers."
+  ([^long n]
+   (sliding n 1))
+  ([^long n ^long step]
+   (fn [rf]
+     (let [a (java.util.ArrayDeque. n)]
+       (fn
+         ([] (rf))
+         ([result] (rf result))
+         ([result input]
+          (.add a input)
+          (if (= n (.size a))
+            (let [v (vec (.toArray a))]
+              (dotimes [_ step] (.removeFirst a))
+              (rf result v))
+            result)))))))
