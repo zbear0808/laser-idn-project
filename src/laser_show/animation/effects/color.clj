@@ -32,9 +32,9 @@
   "Check if point at index is blanked (all colors near zero)."
   [^"[[D" frame ^long idx]
   (let [epsilon (double 1e-6)
-        r (double (aget frame idx t/R))
-        g (double (aget frame idx t/G))
-        b (double (aget frame idx t/B))]
+        r (double (t/aget2d frame idx t/R))
+        g (double (t/aget2d frame idx t/G))
+        b (double (t/aget2d frame idx t/B))]
     (and (< r epsilon)
          (< g epsilon)
          (< b epsilon))))
@@ -52,33 +52,33 @@
       (let [base-ctx (effects/make-base-context-for-frame time-ms bpm n timing-ctx)]
         (dotimes [i n]
           (when-not (point-blanked? frame i)
-            (let [x (aget frame i t/X)
-                  y (aget frame i t/Y)
-                  r (aget frame i t/R)
-                  g (aget frame i t/G)
-                  b (aget frame i t/B)
+            (let [x (t/aget2d frame i t/X)
+                  y (t/aget2d frame i t/Y)
+                  r (t/aget2d frame i t/R)
+                  g (t/aget2d frame i t/G)
+                  b (t/aget2d frame i t/B)
                   resolved (effects/resolve-params-for-point-fast params base-ctx x y i)
                   degrees (double (:degrees resolved))
                   [h s v] (colors/normalized->hsv r g b)
                   new-h (mod (+ (double h) degrees) 360.0)
                   [nr ng nb] (colors/hsv->normalized new-h s v)]
-              (aset-double frame i t/R nr)
-              (aset-double frame i t/G ng)
-              (aset-double frame i t/B nb)))))
+              (t/aset2d frame i t/R nr)
+              (t/aset2d frame i t/G ng)
+              (t/aset2d frame i t/B nb)))))
       ;; Global path - resolve params once before loop
       (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
             degrees (double (:degrees resolved))]
         (dotimes [i n]
           (when-not (point-blanked? frame i)
-            (let [r (aget frame i t/R)
-                  g (aget frame i t/G)
-                  b (aget frame i t/B)
+            (let [r (t/aget2d frame i t/R)
+                  g (t/aget2d frame i t/G)
+                  b (t/aget2d frame i t/B)
                   [h s v] (colors/normalized->hsv r g b)
                   new-h (mod (+ (double h) degrees) 360.0)
                   [nr ng nb] (colors/hsv->normalized new-h s v)]
-              (aset-double frame i t/R nr)
-              (aset-double frame i t/G ng)
-              (aset-double frame i t/B nb)))))))
+              (t/aset2d frame i t/R nr)
+              (t/aset2d frame i t/G ng)
+              (t/aset2d frame i t/B nb)))))))
   frame)
 
 (effects/register-effect!
@@ -107,33 +107,33 @@
       (let [base-ctx (effects/make-base-context-for-frame time-ms bpm n timing-ctx)]
         (dotimes [i n]
           (when-not (point-blanked? frame i)
-            (let [x (aget frame i t/X)
-                  y (aget frame i t/Y)
-                  r (aget frame i t/R)
-                  g (aget frame i t/G)
-                  b (aget frame i t/B)
+            (let [x (t/aget2d frame i t/X)
+                  y (t/aget2d frame i t/Y)
+                  r (t/aget2d frame i t/R)
+                  g (t/aget2d frame i t/G)
+                  b (t/aget2d frame i t/B)
                   resolved (effects/resolve-params-for-point-fast params base-ctx x y i)
                   amount (double (:amount resolved))
                   [h s v] (colors/normalized->hsv r g b)
                   new-s (max 0.0 (min 1.0 (* (double s) amount)))
                   [nr ng nb] (colors/hsv->normalized h new-s v)]
-              (aset-double frame i t/R nr)
-              (aset-double frame i t/G ng)
-              (aset-double frame i t/B nb)))))
+              (t/aset2d frame i t/R nr)
+              (t/aset2d frame i t/G ng)
+              (t/aset2d frame i t/B nb)))))
       ;; Global path - resolve params once before loop
       (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
             amount (double (:amount resolved))]
         (dotimes [i n]
           (when-not (point-blanked? frame i)
-            (let [r (aget frame i t/R)
-                  g (aget frame i t/G)
-                  b (aget frame i t/B)
+            (let [r (t/aget2d frame i t/R)
+                  g (t/aget2d frame i t/G)
+                  b (t/aget2d frame i t/B)
                   [h s v] (colors/normalized->hsv r g b)
                   new-s (max 0.0 (min 1.0 (* (double s) amount)))
                   [nr ng nb] (colors/hsv->normalized h new-s v)]
-              (aset-double frame i t/R nr)
-              (aset-double frame i t/G ng)
-              (aset-double frame i t/B nb)))))))
+              (t/aset2d frame i t/R nr)
+              (t/aset2d frame i t/G ng)
+              (t/aset2d frame i t/B nb)))))))
   frame)
 
 (effects/register-effect!
@@ -161,30 +161,30 @@
       ;; Per-point path - create base context once
       (let [base-ctx (effects/make-base-context-for-frame time-ms bpm n timing-ctx)]
         (dotimes [i n]
-          (let [x (aget frame i t/X)
-                y (aget frame i t/Y)
+          (let [x (t/aget2d frame i t/X)
+                y (t/aget2d frame i t/Y)
                 resolved (effects/resolve-params-for-point-fast params base-ctx x y i)
                 r-mult (double (:r-mult resolved))
                 g-mult (double (:g-mult resolved))
                 b-mult (double (:b-mult resolved))
-                r (double (aget frame i t/R))
-                g (double (aget frame i t/G))
-                b (double (aget frame i t/B))]
-            (aset-double frame i t/R (max 0.0 (min 1.0 (* r r-mult))))
-            (aset-double frame i t/G (max 0.0 (min 1.0 (* g g-mult))))
-            (aset-double frame i t/B (max 0.0 (min 1.0 (* b b-mult)))))))
+                r (double (t/aget2d frame i t/R))
+                g (double (t/aget2d frame i t/G))
+                b (double (t/aget2d frame i t/B))]
+            (t/aset2d frame i t/R (max 0.0 (min 1.0 (* r r-mult))))
+            (t/aset2d frame i t/G (max 0.0 (min 1.0 (* g g-mult))))
+            (t/aset2d frame i t/B (max 0.0 (min 1.0 (* b b-mult)))))))
       ;; Global path - resolve params once before loop
       (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
             r-mult (double (:r-mult resolved))
             g-mult (double (:g-mult resolved))
             b-mult (double (:b-mult resolved))]
         (dotimes [i n]
-          (let [r (double (aget frame i t/R))
-                g (double (aget frame i t/G))
-                b (double (aget frame i t/B))]
-            (aset-double frame i t/R (max 0.0 (min 1.0 (* r r-mult))))
-            (aset-double frame i t/G (max 0.0 (min 1.0 (* g g-mult))))
-            (aset-double frame i t/B (max 0.0 (min 1.0 (* b b-mult)))))))))
+          (let [r (double (t/aget2d frame i t/R))
+                g (double (t/aget2d frame i t/G))
+                b (double (t/aget2d frame i t/B))]
+            (t/aset2d frame i t/R (max 0.0 (min 1.0 (* r r-mult))))
+            (t/aset2d frame i t/G (max 0.0 (min 1.0 (* g g-mult))))
+            (t/aset2d frame i t/B (max 0.0 (min 1.0 (* b b-mult)))))))))
   frame)
 
 (effects/register-effect!
@@ -225,35 +225,35 @@
       (let [base-ctx (effects/make-base-context-for-frame time-ms bpm n timing-ctx)]
         (dotimes [i n]
           (when-not (point-blanked? frame i)
-            (let [r (aget frame i t/R)
-                  g (aget frame i t/G)
-                  b (aget frame i t/B)
+            (let [r (t/aget2d frame i t/R)
+                  g (t/aget2d frame i t/G)
+                  b (t/aget2d frame i t/B)
                   [_h s v] (colors/normalized->hsv r g b)]
               ;; Only apply to non-black points with some value
               (when (pos? (double v))
-                (let [x (aget frame i t/X)
-                      y (aget frame i t/Y)
+                (let [x (t/aget2d frame i t/X)
+                      y (t/aget2d frame i t/Y)
                       resolved (effects/resolve-params-for-point-fast params base-ctx x y i)
                       hue (double (:hue resolved))
                       [nr ng nb] (colors/hsv->normalized hue s v)]
-                  (aset-double frame i t/R nr)
-                  (aset-double frame i t/G ng)
-                  (aset-double frame i t/B nb)))))))
+                  (t/aset2d frame i t/R nr)
+                  (t/aset2d frame i t/G ng)
+                  (t/aset2d frame i t/B nb)))))))
       ;; Global path - resolve params once before loop
       (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
             hue (double (:hue resolved))]
         (dotimes [i n]
           (when-not (point-blanked? frame i)
-            (let [r (aget frame i t/R)
-                  g (aget frame i t/G)
-                  b (aget frame i t/B)
+            (let [r (t/aget2d frame i t/R)
+                  g (t/aget2d frame i t/G)
+                  b (t/aget2d frame i t/B)
                   [_h s v] (colors/normalized->hsv r g b)]
               ;; Only apply to non-black points with some value
               (when (pos? (double v))
                 (let [[nr ng nb] (colors/hsv->normalized hue s v)]
-                  (aset-double frame i t/R nr)
-                  (aset-double frame i t/G ng)
-                  (aset-double frame i t/B nb)))))))))
+                  (t/aset2d frame i t/R nr)
+                  (t/aset2d frame i t/G ng)
+                  (t/aset2d frame i t/B nb)))))))))
   frame)
 
 (effects/register-effect!
@@ -294,14 +294,14 @@
         tolerance (double (:tolerance resolved))
         n (alength frame)]
     (dotimes [i n]
-      (let [r (aget frame i t/R)
-            g (aget frame i t/G)
-            b (aget frame i t/B)
+      (let [r (t/aget2d frame i t/R)
+            g (t/aget2d frame i t/G)
+            b (t/aget2d frame i t/B)
             distance (double (color-distance-normalized r g b from-r from-g from-b))]
         (when (<= distance tolerance)
-          (aset-double frame i t/R to-r)
-          (aset-double frame i t/G to-g)
-          (aset-double frame i t/B to-b)))))
+          (t/aset2d frame i t/R to-r)
+          (t/aset2d frame i t/G to-g)
+          (t/aset2d frame i t/B to-b)))))
   frame)
 
 (effects/register-effect!
@@ -366,15 +366,15 @@
       (let [base-ctx (effects/make-base-context-for-frame time-ms bpm n timing-ctx)]
         (dotimes [i n]
           (when-not (point-blanked? frame i)
-            (let [x (aget frame i t/X)
-                  y (aget frame i t/Y)
+            (let [x (t/aget2d frame i t/X)
+                  y (t/aget2d frame i t/Y)
                   resolved (effects/resolve-params-for-point-fast params base-ctx x y i)
                   red (double (:red resolved))
                   green (double (:green resolved))
                   blue (double (:blue resolved))]
-              (aset-double frame i t/R red)
-              (aset-double frame i t/G green)
-              (aset-double frame i t/B blue)))))
+              (t/aset2d frame i t/R red)
+              (t/aset2d frame i t/G green)
+              (t/aset2d frame i t/B blue)))))
       ;; Global path - resolve params once before loop
       (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
             red (double (:red resolved))
@@ -382,9 +382,9 @@
             blue (double (:blue resolved))]
         (dotimes [i n]
           (when-not (point-blanked? frame i)
-            (aset-double frame i t/R red)
-            (aset-double frame i t/G green)
-            (aset-double frame i t/B blue))))))
+            (t/aset2d frame i t/R red)
+            (t/aset2d frame i t/G green)
+            (t/aset2d frame i t/B blue))))))
   frame)
 
 (effects/register-effect!
@@ -431,11 +431,11 @@
         n (alength frame)]
     (dotimes [i n]
       (when-not (point-blanked? frame i)
-        (let [x (double (aget frame i t/X))
-              y (double (aget frame i t/Y))
-              r (double (aget frame i t/R))
-              g (double (aget frame i t/G))
-              b (double (aget frame i t/B))
+        (let [x (double (t/aget2d frame i t/X))
+              y (double (t/aget2d frame i t/Y))
+              r (double (t/aget2d frame i t/R))
+              g (double (t/aget2d frame i t/G))
+              b (double (t/aget2d frame i t/B))
               position (double (case axis
                                  :x (/ (+ x 1.0) 2.0)
                                  :y (/ (+ y 1.0) 2.0)
@@ -446,9 +446,9 @@
               brightness (double (max r (max g b)))
               hue (mod (+ (* position 360.0) time-offset) 360.0)
               [nr ng nb] (colors/hsv->normalized hue 1.0 brightness)]
-          (aset-double frame i t/R nr)
-          (aset-double frame i t/G ng)
-          (aset-double frame i t/B nb)))))
+          (t/aset2d frame i t/R nr)
+          (t/aset2d frame i t/G ng)
+          (t/aset2d frame i t/B nb)))))
   frame)
 
 (effects/register-effect!

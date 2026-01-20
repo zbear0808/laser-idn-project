@@ -156,11 +156,11 @@
    - :g - Green in output format
    - :b - Blue in output format"
   [^"[[D" frame ^long idx {:keys [color-bit-depth xy-bit-depth]}]
-  {:x (normalized->output-xy (aget frame idx t/X) xy-bit-depth)
-   :y (normalized->output-xy (aget frame idx t/Y) xy-bit-depth)
-   :r (normalized->output-color (aget frame idx t/R) color-bit-depth)
-   :g (normalized->output-color (aget frame idx t/G) color-bit-depth)
-   :b (normalized->output-color (aget frame idx t/B) color-bit-depth)})
+  {:x (normalized->output-xy (t/aget2d frame idx t/X) xy-bit-depth)
+   :y (normalized->output-xy (t/aget2d frame idx t/Y) xy-bit-depth)
+   :r (normalized->output-color (t/aget2d frame idx t/R) color-bit-depth)
+   :g (normalized->output-color (t/aget2d frame idx t/G) color-bit-depth)
+   :b (normalized->output-color (t/aget2d frame idx t/B) color-bit-depth)})
 
 
 ;; Configuration Queries

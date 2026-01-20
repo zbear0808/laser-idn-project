@@ -31,8 +31,8 @@
         y-scale (double (:y-scale resolved))
         n (alength frame)]
     (dotimes [i n]
-      (aset-double frame i t/X (* (double (aget frame i t/X)) x-scale))
-      (aset-double frame i t/Y (* (double (aget frame i t/Y)) y-scale))))
+      (t/aset2d frame i t/X (* (double (t/aget2d frame i t/X)) x-scale))
+      (t/aset2d frame i t/Y (* (double (t/aget2d frame i t/Y)) y-scale))))
   frame)
 
 (effects/register-effect!
@@ -65,8 +65,8 @@
         dy (double (:y resolved))
         n (alength frame)]
     (dotimes [i n]
-      (aset-double frame i t/X (+ (double (aget frame i t/X)) dx))
-      (aset-double frame i t/Y (+ (double (aget frame i t/Y)) dy))))
+      (t/aset2d frame i t/X (+ (double (t/aget2d frame i t/X)) dx))
+      (t/aset2d frame i t/Y (+ (double (t/aget2d frame i t/Y)) dy))))
   frame)
 
 (effects/register-effect!
@@ -104,12 +104,12 @@
         sin-a (double (Math/sin radians))
         n (alength frame)]
     (dotimes [i n]
-      (let [x (double (aget frame i t/X))
-            y (double (aget frame i t/Y))
+      (let [x (double (t/aget2d frame i t/X))
+            y (double (t/aget2d frame i t/Y))
             new-x (- (* x cos-a) (* y sin-a))
             new-y (+ (* x sin-a) (* y cos-a))]
-        (aset-double frame i t/X new-x)
-        (aset-double frame i t/Y new-y))))
+        (t/aset2d frame i t/X new-x)
+        (t/aset2d frame i t/Y new-y))))
   frame)
 
 (effects/register-effect!
@@ -135,14 +135,14 @@
         amount (double (:amount resolved))
         n (alength frame)]
     (dotimes [i n]
-      (let [x (double (aget frame i t/X))
-            y (double (aget frame i t/Y))
+      (let [x (double (t/aget2d frame i t/X))
+            y (double (t/aget2d frame i t/Y))
             distance (Math/sqrt (+ (* x x) (* y y)))
             factor (if (zero? distance)
                      1.0
                      (Math/pow distance amount))]
-        (aset-double frame i t/X (double (* x factor)))
-        (aset-double frame i t/Y (double (* y factor))))))
+        (t/aset2d frame i t/X (double (* x factor)))
+        (t/aset2d frame i t/Y (double (* y factor))))))
   frame)
 
 (effects/register-effect!
@@ -178,8 +178,8 @@
         br-x (double (:br-x resolved)) br-y (double (:br-y resolved))
         n (alength frame)]
     (dotimes [i n]
-      (let [x (double (aget frame i t/X))
-            y (double (aget frame i t/Y))
+      (let [x (double (t/aget2d frame i t/X))
+            y (double (t/aget2d frame i t/Y))
             ;; Convert from [-1,1] to [0,1] for interpolation
             u (/ (+ x 1.0) 2.0)  ; 0 at left, 1 at right
             v (/ (+ y 1.0) 2.0)  ; 0 at bottom, 1 at top
@@ -195,8 +195,8 @@
                      (* u one-minus-v br-y)
                      (* one-minus-u v tl-y)
                      (* u v tr-y))]
-        (aset-double frame i t/X new-x)
-        (aset-double frame i t/Y new-y))))
+        (t/aset2d frame i t/X new-x)
+        (t/aset2d frame i t/Y new-y))))
   frame)
 
 (effects/register-effect!
@@ -271,12 +271,12 @@
         k2 (double (:k2 resolved))
         n (alength frame)]
     (dotimes [i n]
-      (let [x (double (aget frame i t/X))
-            y (double (aget frame i t/Y))
+      (let [x (double (t/aget2d frame i t/X))
+            y (double (t/aget2d frame i t/Y))
             r-sq (+ (* x x) (* y y))
             factor (+ 1.0 (* k1 r-sq) (* k2 r-sq r-sq))]
-        (aset-double frame i t/X (double (* x factor)))
-        (aset-double frame i t/Y (double (* y factor))))))
+        (t/aset2d frame i t/X (double (* x factor)))
+        (t/aset2d frame i t/Y (double (* y factor))))))
   frame)
 
 (effects/register-effect!
@@ -319,14 +319,14 @@
         n (alength frame)]
     (dotimes [i n]
       (case axis
-        :x (let [x (double (aget frame i t/X))
-                 y (double (aget frame i t/Y))
+        :x (let [x (double (t/aget2d frame i t/X))
+                 y (double (t/aget2d frame i t/Y))
                  offset (* amplitude (Math/sin (* two-pi (+ (* x frequency) time-offset))))]
-             (aset-double frame i t/Y (+ y offset)))
-        :y (let [x (double (aget frame i t/X))
-                 y (double (aget frame i t/Y))
+             (t/aset2d frame i t/Y (+ y offset)))
+        :y (let [x (double (t/aget2d frame i t/X))
+                 y (double (t/aget2d frame i t/Y))
                  offset (* amplitude (Math/sin (* two-pi (+ (* y frequency) time-offset))))]
-             (aset-double frame i t/X (+ x offset)))
+             (t/aset2d frame i t/X (+ x offset)))
         nil)))
   frame)
 

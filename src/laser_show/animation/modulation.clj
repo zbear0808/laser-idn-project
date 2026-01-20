@@ -18,6 +18,8 @@
    [laser-show.animation.time :as time]
    [laser-show.common.util :as u]))
 
+(set! *unchecked-math* :warn-on-boxed)
+
 ;; Forward declarations for modulator-config? and evaluators
 (declare modulator-config?)
 ;; Forward declarations for beat calculation helpers
@@ -477,8 +479,8 @@
             total-duration (* (double period) num-cycles)
             progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))]
         (if (>= progress 1.0)
-          ;; Completed: return the last value
-          (last parsed-values)
+          ;; Completed: return the last value (peek is O(1) for vectors vs last which is O(n))
+          (peek parsed-values)
           ;; In progress: calculate step based on phase
           (let [total-phase (* progress num-cycles)
                 idx (mod (long (* total-phase (double steps-per-beat))) num-values)]
@@ -721,23 +723,25 @@
    
    Returns: [before-keyframe after-keyframe]"
   [sorted-keyframes phase]
-  (let [n (count sorted-keyframes)]
+  ;; Convert to vector for O(1) peek/nth access (vs O(n) for last on lazy seqs)
+  (let [sorted-kfs (vec sorted-keyframes)
+        n (count sorted-kfs)]
     (cond
-      (= n 1) [(first sorted-keyframes) (first sorted-keyframes)]
+      (= n 1) [(first sorted-kfs) (first sorted-kfs)]
       
       :else
       (let [;; Find first keyframe >= phase
-            after-idx (->> sorted-keyframes
+            after-idx (->> sorted-kfs
                           (map-indexed vector)
                           (filter (fn [[_ kf]] (>= (:position kf) phase)))
                           first
                           first)]
         (if after-idx
           (let [before-idx (if (zero? after-idx) (dec n) (dec after-idx))]
-            [(nth sorted-keyframes before-idx)
-             (nth sorted-keyframes after-idx)])
-          ;; Phase is past all keyframes - wrap to first
-          [(last sorted-keyframes) (first sorted-keyframes)])))))
+            [(nth sorted-kfs before-idx)
+             (nth sorted-kfs after-idx)])
+          ;; Phase is past all keyframes - wrap to first (peek is O(1) for vectors)
+          [(peek sorted-kfs) (first sorted-kfs)])))))
 
 (defn- calculate-interp-factor
   "Calculate linear interpolation factor between two keyframes.

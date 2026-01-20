@@ -52,22 +52,22 @@
         first-y cy
         num-segments (double (dec num-points))]
     ;; First point is blanked for beam positioning
-    (aset-double frame 0 t/X first-x)
-    (aset-double frame 0 t/Y first-y)
-    (aset-double frame 0 t/R (double 0.0))
-    (aset-double frame 0 t/G (double 0.0))
-    (aset-double frame 0 t/B (double 0.0))
+    (t/aset2d frame 0 t/X first-x)
+    (t/aset2d frame 0 t/Y first-y)
+    (t/aset2d frame 0 t/R 0.0)
+    (t/aset2d frame 0 t/G 0.0)
+    (t/aset2d frame 0 t/B 0.0)
     ;; Generate circle points
     (dotimes [i num-points]
       (let [idx (inc i)
             angle (* TWO-PI (/ (double i) num-segments))
             x (+ cx (* radius (double (Math/cos angle))))
             y (+ cy (* radius (double (Math/sin angle))))]
-        (aset-double frame idx t/X x)
-        (aset-double frame idx t/Y y)
-        (aset-double frame idx t/R cr)
-        (aset-double frame idx t/G cg)
-        (aset-double frame idx t/B cb)))
+        (t/aset2d frame idx t/X x)
+        (t/aset2d frame idx t/Y y)
+        (t/aset2d frame idx t/R cr)
+        (t/aset2d frame idx t/G cg)
+        (t/aset2d frame idx t/B cb)))
     frame))
 
 (defn generate-line
@@ -99,22 +99,22 @@
         frame (make-array Double/TYPE total-points t/POINT_SIZE)
         divisor (double (dec num-points))]
     ;; First point is blanked for beam positioning
-    (aset-double frame 0 t/X x1)
-    (aset-double frame 0 t/Y y1)
-    (aset-double frame 0 t/R (double 0.0))
-    (aset-double frame 0 t/G (double 0.0))
-    (aset-double frame 0 t/B (double 0.0))
+    (t/aset2d frame 0 t/X x1)
+    (t/aset2d frame 0 t/Y y1)
+    (t/aset2d frame 0 t/R 0.0)
+    (t/aset2d frame 0 t/G 0.0)
+    (t/aset2d frame 0 t/B 0.0)
     ;; Generate line points
     (dotimes [i num-points]
       (let [idx (inc i)
             t (/ (double i) divisor)
             x (lerp x1 x2 t)
             y (lerp y1 y2 t)]
-        (aset-double frame idx t/X x)
-        (aset-double frame idx t/Y y)
-        (aset-double frame idx t/R cr)
-        (aset-double frame idx t/G cg)
-        (aset-double frame idx t/B cb)))
+        (t/aset2d frame idx t/X x)
+        (t/aset2d frame idx t/Y y)
+        (t/aset2d frame idx t/R cr)
+        (t/aset2d frame idx t/G cg)
+        (t/aset2d frame idx t/B cb)))
     frame))
 
 (defn generate-square
@@ -149,51 +149,51 @@
         frame (make-array Double/TYPE total-points t/POINT_SIZE)
         divisor (double num-points)]
     ;; First point is blanked for beam positioning
-    (aset-double frame 0 t/X bl-x)
-    (aset-double frame 0 t/Y bl-y)
-    (aset-double frame 0 t/R (double 0.0))
-    (aset-double frame 0 t/G (double 0.0))
-    (aset-double frame 0 t/B (double 0.0))
+    (t/aset2d frame 0 t/X bl-x)
+    (t/aset2d frame 0 t/Y bl-y)
+    (t/aset2d frame 0 t/R 0.0)
+    (t/aset2d frame 0 t/G 0.0)
+    (t/aset2d frame 0 t/B 0.0)
     ;; Bottom: left to right
     (dotimes [i num-points]
       (let [idx (+ 1 i)
             t (/ (double i) divisor)
             x (lerp bl-x br-x t)]
-        (aset-double frame idx t/X x)
-        (aset-double frame idx t/Y bl-y)
-        (aset-double frame idx t/R cr)
-        (aset-double frame idx t/G cg)
-        (aset-double frame idx t/B cb)))
+        (t/aset2d frame idx t/X x)
+        (t/aset2d frame idx t/Y bl-y)
+        (t/aset2d frame idx t/R cr)
+        (t/aset2d frame idx t/G cg)
+        (t/aset2d frame idx t/B cb)))
     ;; Right: bottom to top
     (dotimes [i num-points]
       (let [idx (+ 1 num-points i)
             t (/ (double i) divisor)
             y (lerp br-y tr-y t)]
-        (aset-double frame idx t/X br-x)
-        (aset-double frame idx t/Y y)
-        (aset-double frame idx t/R cr)
-        (aset-double frame idx t/G cg)
-        (aset-double frame idx t/B cb)))
+        (t/aset2d frame idx t/X br-x)
+        (t/aset2d frame idx t/Y y)
+        (t/aset2d frame idx t/R cr)
+        (t/aset2d frame idx t/G cg)
+        (t/aset2d frame idx t/B cb)))
     ;; Top: right to left
     (dotimes [i num-points]
       (let [idx (+ 1 (* 2 num-points) i)
             t (/ (double i) divisor)
             x (lerp tr-x tl-x t)]
-        (aset-double frame idx t/X x)
-        (aset-double frame idx t/Y tr-y)
-        (aset-double frame idx t/R cr)
-        (aset-double frame idx t/G cg)
-        (aset-double frame idx t/B cb)))
+        (t/aset2d frame idx t/X x)
+        (t/aset2d frame idx t/Y tr-y)
+        (t/aset2d frame idx t/R cr)
+        (t/aset2d frame idx t/G cg)
+        (t/aset2d frame idx t/B cb)))
     ;; Left: top to bottom
     (dotimes [i num-points]
       (let [idx (+ 1 (* 3 num-points) i)
             t (/ (double i) divisor)
             y (lerp tl-y bl-y t)]
-        (aset-double frame idx t/X tl-x)
-        (aset-double frame idx t/Y y)
-        (aset-double frame idx t/R cr)
-        (aset-double frame idx t/G cg)
-        (aset-double frame idx t/B cb)))
+        (t/aset2d frame idx t/X tl-x)
+        (t/aset2d frame idx t/Y y)
+        (t/aset2d frame idx t/R cr)
+        (t/aset2d frame idx t/G cg)
+        (t/aset2d frame idx t/B cb)))
     frame))
 
 (defn generate-triangle
@@ -230,44 +230,44 @@
         frame (make-array Double/TYPE total-points t/POINT_SIZE)
         divisor (double num-points)]
     ;; First point is blanked for beam positioning
-    (aset-double frame 0 t/X top-x)
-    (aset-double frame 0 t/Y top-y)
-    (aset-double frame 0 t/R (double 0.0))
-    (aset-double frame 0 t/G (double 0.0))
-    (aset-double frame 0 t/B (double 0.0))
+    (t/aset2d frame 0 t/X top-x)
+    (t/aset2d frame 0 t/Y top-y)
+    (t/aset2d frame 0 t/R 0.0)
+    (t/aset2d frame 0 t/G 0.0)
+    (t/aset2d frame 0 t/B 0.0)
     ;; Top to right
     (dotimes [i num-points]
       (let [idx (+ 1 i)
             t (/ (double i) divisor)
             x (lerp top-x right-x t)
             y (lerp top-y right-y t)]
-        (aset-double frame idx t/X x)
-        (aset-double frame idx t/Y y)
-        (aset-double frame idx t/R cr)
-        (aset-double frame idx t/G cg)
-        (aset-double frame idx t/B cb)))
+        (t/aset2d frame idx t/X x)
+        (t/aset2d frame idx t/Y y)
+        (t/aset2d frame idx t/R cr)
+        (t/aset2d frame idx t/G cg)
+        (t/aset2d frame idx t/B cb)))
     ;; Right to left
     (dotimes [i num-points]
       (let [idx (+ 1 num-points i)
             t (/ (double i) divisor)
             x (lerp right-x left-x t)
             y (lerp right-y left-y t)]
-        (aset-double frame idx t/X x)
-        (aset-double frame idx t/Y y)
-        (aset-double frame idx t/R cr)
-        (aset-double frame idx t/G cg)
-        (aset-double frame idx t/B cb)))
+        (t/aset2d frame idx t/X x)
+        (t/aset2d frame idx t/Y y)
+        (t/aset2d frame idx t/R cr)
+        (t/aset2d frame idx t/G cg)
+        (t/aset2d frame idx t/B cb)))
     ;; Left to top
     (dotimes [i num-points]
       (let [idx (+ 1 (* 2 num-points) i)
             t (/ (double i) divisor)
             x (lerp left-x top-x t)
             y (lerp left-y top-y t)]
-        (aset-double frame idx t/X x)
-        (aset-double frame idx t/Y y)
-        (aset-double frame idx t/R cr)
-        (aset-double frame idx t/G cg)
-        (aset-double frame idx t/B cb)))
+        (t/aset2d frame idx t/X x)
+        (t/aset2d frame idx t/Y y)
+        (t/aset2d frame idx t/R cr)
+        (t/aset2d frame idx t/G cg)
+        (t/aset2d frame idx t/B cb)))
     frame))
 
 (defn generate-spiral
@@ -306,11 +306,11 @@
         first-y cy
         divisor (double (dec num-points))]
     ;; First point is blanked for beam positioning
-    (aset-double frame 0 t/X first-x)
-    (aset-double frame 0 t/Y first-y)
-    (aset-double frame 0 t/R (double 0.0))
-    (aset-double frame 0 t/G (double 0.0))
-    (aset-double frame 0 t/B (double 0.0))
+    (t/aset2d frame 0 t/X first-x)
+    (t/aset2d frame 0 t/Y first-y)
+    (t/aset2d frame 0 t/R 0.0)
+    (t/aset2d frame 0 t/G 0.0)
+    (t/aset2d frame 0 t/B 0.0)
     ;; Generate spiral points
     (dotimes [i num-points]
       (let [idx (inc i)
@@ -319,11 +319,11 @@
             radius (double (lerp start-radius end-radius t))
             x (+ cx (* radius (Math/cos angle)))
             y (+ cy (* radius (Math/sin angle)))]
-        (aset-double frame idx t/X x)
-        (aset-double frame idx t/Y y)
-        (aset-double frame idx t/R cr)
-        (aset-double frame idx t/G cg)
-        (aset-double frame idx t/B cb)))
+        (t/aset2d frame idx t/X x)
+        (t/aset2d frame idx t/Y y)
+        (t/aset2d frame idx t/R cr)
+        (t/aset2d frame idx t/G cg)
+        (t/aset2d frame idx t/B cb)))
     frame))
 
 (defn generate-star
@@ -376,11 +376,11 @@
         frame (make-array Double/TYPE total-points t/POINT_SIZE)
         divisor (double num-points)]
     ;; First point is blanked for beam positioning
-    (aset-double frame 0 t/X (aget vertices 0))
-    (aset-double frame 0 t/Y (aget vertices 1))
-    (aset-double frame 0 t/R (double 0.0))
-    (aset-double frame 0 t/G (double 0.0))
-    (aset-double frame 0 t/B (double 0.0))
+    (t/aset2d frame 0 t/X (aget vertices 0))
+    (t/aset2d frame 0 t/Y (aget vertices 1))
+    (t/aset2d frame 0 t/R 0.0)
+    (t/aset2d frame 0 t/G 0.0)
+    (t/aset2d frame 0 t/B 0.0)
     ;; Generate star edges
     (dotimes [edge num-segments]
       (let [edge2 (* edge 2)
@@ -395,11 +395,11 @@
                 t (/ (double i) divisor)
                 x (lerp v1-x v2-x t)
                 y (lerp v1-y v2-y t)]
-            (aset-double frame idx t/X x)
-            (aset-double frame idx t/Y y)
-            (aset-double frame idx t/R cr)
-            (aset-double frame idx t/G cg)
-            (aset-double frame idx t/B cb)))))
+            (t/aset2d frame idx t/X x)
+            (t/aset2d frame idx t/Y y)
+            (t/aset2d frame idx t/R cr)
+            (t/aset2d frame idx t/G cg)
+            (t/aset2d frame idx t/B cb)))))
     frame))
 
 
@@ -457,22 +457,22 @@
         frame (make-array Double/TYPE total-points t/POINT_SIZE)
         divisor (double 63.0)]
     ;; First point is blanked for beam positioning
-    (aset-double frame 0 t/X (double -0.5))
-    (aset-double frame 0 t/Y (double 0.0))
-    (aset-double frame 0 t/R (double 0.0))
-    (aset-double frame 0 t/G (double 0.0))
-    (aset-double frame 0 t/B (double 0.0))
+    (t/aset2d frame 0 t/X -0.5)
+    (t/aset2d frame 0 t/Y 0.0)
+    (t/aset2d frame 0 t/R 0.0)
+    (t/aset2d frame 0 t/G 0.0)
+    (t/aset2d frame 0 t/B 0.0)
     ;; Generate wave points
     (dotimes [i num-points]
       (let [idx (inc i)
             t (/ (double i) divisor)
             x (- t (double 0.5))
             y (* amplitude (double (Math/sin (* TWO-PI frequency t))))]
-        (aset-double frame idx t/X x)
-        (aset-double frame idx t/Y y)
-        (aset-double frame idx t/R cr)
-        (aset-double frame idx t/G cg)
-        (aset-double frame idx t/B cb)))
+        (t/aset2d frame idx t/X x)
+        (t/aset2d frame idx t/Y y)
+        (t/aset2d frame idx t/R cr)
+        (t/aset2d frame idx t/G cg)
+        (t/aset2d frame idx t/B cb)))
     frame))
 
 (defn beam-fan-frame
@@ -504,29 +504,29 @@
                      (lerp x-min x-max (/ (double beam-i) (double (dec num-points)))))
             base-idx (* beam-i 4)]
         ;; Blanked at position
-        (aset-double frame base-idx t/X beam-x)
-        (aset-double frame base-idx t/Y y)
-        (aset-double frame base-idx t/R (double 0.0))
-        (aset-double frame base-idx t/G (double 0.0))
-        (aset-double frame base-idx t/B (double 0.0))
+        (t/aset2d frame base-idx t/X beam-x)
+        (t/aset2d frame base-idx t/Y y)
+        (t/aset2d frame base-idx t/R 0.0)
+        (t/aset2d frame base-idx t/G 0.0)
+        (t/aset2d frame base-idx t/B 0.0)
         ;; Lit point 1
-        (aset-double frame (+ base-idx 1) t/X beam-x)
-        (aset-double frame (+ base-idx 1) t/Y y)
-        (aset-double frame (+ base-idx 1) t/R cr)
-        (aset-double frame (+ base-idx 1) t/G cg)
-        (aset-double frame (+ base-idx 1) t/B cb)
+        (t/aset2d frame (+ base-idx 1) t/X beam-x)
+        (t/aset2d frame (+ base-idx 1) t/Y y)
+        (t/aset2d frame (+ base-idx 1) t/R cr)
+        (t/aset2d frame (+ base-idx 1) t/G cg)
+        (t/aset2d frame (+ base-idx 1) t/B cb)
         ;; Lit point 2
-        (aset-double frame (+ base-idx 2) t/X beam-x)
-        (aset-double frame (+ base-idx 2) t/Y y)
-        (aset-double frame (+ base-idx 2) t/R cr)
-        (aset-double frame (+ base-idx 2) t/G cg)
-        (aset-double frame (+ base-idx 2) t/B cb)
+        (t/aset2d frame (+ base-idx 2) t/X beam-x)
+        (t/aset2d frame (+ base-idx 2) t/Y y)
+        (t/aset2d frame (+ base-idx 2) t/R cr)
+        (t/aset2d frame (+ base-idx 2) t/G cg)
+        (t/aset2d frame (+ base-idx 2) t/B cb)
         ;; Blanked at position
-        (aset-double frame (+ base-idx 3) t/X beam-x)
-        (aset-double frame (+ base-idx 3) t/Y y)
-        (aset-double frame (+ base-idx 3) t/R (double 0.0))
-        (aset-double frame (+ base-idx 3) t/G (double 0.0))
-        (aset-double frame (+ base-idx 3) t/B (double 0.0))))
+        (t/aset2d frame (+ base-idx 3) t/X beam-x)
+        (t/aset2d frame (+ base-idx 3) t/Y y)
+        (t/aset2d frame (+ base-idx 3) t/R 0.0)
+        (t/aset2d frame (+ base-idx 3) t/G 0.0)
+        (t/aset2d frame (+ base-idx 3) t/B 0.0)))
     ;; Backward positions (reverse middle positions)
     (when (> num-points 2)
       (dotimes [beam-i backward-count]
@@ -535,27 +535,27 @@
               beam-x (lerp x-min x-max (/ (double fwd-idx) (double (dec num-points))))
               base-idx (* (+ forward-count beam-i) 4)]
           ;; Blanked at position
-          (aset-double frame base-idx t/X beam-x)
-          (aset-double frame base-idx t/Y y)
-          (aset-double frame base-idx t/R (double 0.0))
-          (aset-double frame base-idx t/G (double 0.0))
-          (aset-double frame base-idx t/B (double 0.0))
+          (t/aset2d frame base-idx t/X beam-x)
+          (t/aset2d frame base-idx t/Y y)
+          (t/aset2d frame base-idx t/R 0.0)
+          (t/aset2d frame base-idx t/G 0.0)
+          (t/aset2d frame base-idx t/B 0.0)
           ;; Lit point 1
-          (aset-double frame (+ base-idx 1) t/X beam-x)
-          (aset-double frame (+ base-idx 1) t/Y y)
-          (aset-double frame (+ base-idx 1) t/R cr)
-          (aset-double frame (+ base-idx 1) t/G cg)
-          (aset-double frame (+ base-idx 1) t/B cb)
+          (t/aset2d frame (+ base-idx 1) t/X beam-x)
+          (t/aset2d frame (+ base-idx 1) t/Y y)
+          (t/aset2d frame (+ base-idx 1) t/R cr)
+          (t/aset2d frame (+ base-idx 1) t/G cg)
+          (t/aset2d frame (+ base-idx 1) t/B cb)
           ;; Lit point 2
-          (aset-double frame (+ base-idx 2) t/X beam-x)
-          (aset-double frame (+ base-idx 2) t/Y y)
-          (aset-double frame (+ base-idx 2) t/R cr)
-          (aset-double frame (+ base-idx 2) t/G cg)
-          (aset-double frame (+ base-idx 2) t/B cb)
+          (t/aset2d frame (+ base-idx 2) t/X beam-x)
+          (t/aset2d frame (+ base-idx 2) t/Y y)
+          (t/aset2d frame (+ base-idx 2) t/R cr)
+          (t/aset2d frame (+ base-idx 2) t/G cg)
+          (t/aset2d frame (+ base-idx 2) t/B cb)
           ;; Blanked at position
-          (aset-double frame (+ base-idx 3) t/X beam-x)
-          (aset-double frame (+ base-idx 3) t/Y y)
-          (aset-double frame (+ base-idx 3) t/R (double 0.0))
-          (aset-double frame (+ base-idx 3) t/G (double 0.0))
-          (aset-double frame (+ base-idx 3) t/B (double 0.0)))))
+          (t/aset2d frame (+ base-idx 3) t/X beam-x)
+          (t/aset2d frame (+ base-idx 3) t/Y y)
+          (t/aset2d frame (+ base-idx 3) t/R 0.0)
+          (t/aset2d frame (+ base-idx 3) t/G 0.0)
+          (t/aset2d frame (+ base-idx 3) t/B 0.0))))
     frame))

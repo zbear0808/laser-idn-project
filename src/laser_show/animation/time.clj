@@ -2,6 +2,7 @@
   "Time utilities for BPM-synchronized effects.
    Handles BPM conversions, phase calculations, and time-based computations.")
 
+(set! *unchecked-math* :warn-on-boxed)
 
 (defn bpm->ms-per-beat
   "Convert BPM to milliseconds per beat."

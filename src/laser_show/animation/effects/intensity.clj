@@ -42,27 +42,27 @@
     ;; Per-point path - enables spatial brightness patterns!
     (let [n (alength frame)]
       (dotimes [i n]
-        (let [x (double (aget frame i t/X))
-              y (double (aget frame i t/Y))
+        (let [x (double (t/aget2d frame i t/X))
+              y (double (t/aget2d frame i t/Y))
               resolved (effects/resolve-params-for-point params time-ms bpm x y i n (:timing-ctx ctx))
               amount (double (:amount resolved))
-              r (double (aget frame i t/R))
-              g (double (aget frame i t/G))
-              b (double (aget frame i t/B))]
-          (aset-double frame i t/R (Math/max 0.0 (Math/min 1.0 (* r amount))))
-          (aset-double frame i t/G (Math/max 0.0 (Math/min 1.0 (* g amount))))
-          (aset-double frame i t/B (Math/max 0.0 (Math/min 1.0 (* b amount)))))))
+              r (double (t/aget2d frame i t/R))
+              g (double (t/aget2d frame i t/G))
+              b (double (t/aget2d frame i t/B))]
+          (t/aset2d frame i t/R (Math/max 0.0 (Math/min 1.0 (* r amount))))
+          (t/aset2d frame i t/G (Math/max 0.0 (Math/min 1.0 (* g amount))))
+          (t/aset2d frame i t/B (Math/max 0.0 (Math/min 1.0 (* b amount)))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           amount (double (:amount resolved))
           n (alength frame)]
       (dotimes [i n]
-        (let [r (double (aget frame i t/R))
-              g (double (aget frame i t/G))
-              b (double (aget frame i t/B))]
-          (aset-double frame i t/R (Math/max 0.0 (Math/min 1.0 (* r amount))))
-          (aset-double frame i t/G (Math/max 0.0 (Math/min 1.0 (* g amount))))
-          (aset-double frame i t/B (Math/max 0.0 (Math/min 1.0 (* b amount))))))))
+        (let [r (double (t/aget2d frame i t/R))
+              g (double (t/aget2d frame i t/G))
+              b (double (t/aget2d frame i t/B))]
+          (t/aset2d frame i t/R (Math/max 0.0 (Math/min 1.0 (* r amount))))
+          (t/aset2d frame i t/G (Math/max 0.0 (Math/min 1.0 (* g amount))))
+          (t/aset2d frame i t/B (Math/max 0.0 (Math/min 1.0 (* b amount))))))))
   frame)
 
 (effects/register-effect!
@@ -89,9 +89,9 @@
     (when enabled
       (let [n (alength frame)]
         (dotimes [i n]
-          (aset-double frame i t/R (double 0.0))
-          (aset-double frame i t/G (double 0.0))
-          (aset-double frame i t/B (double 0.0))))))
+          (t/aset2d frame i t/R (double 0.0))
+          (t/aset2d frame i t/G (double 0.0))
+          (t/aset2d frame i t/B (double 0.0))))))
   frame)
 
 (effects/register-effect!
@@ -115,31 +115,31 @@
     ;; Per-point path
     (let [n (alength frame)]
       (dotimes [i n]
-        (let [x (double (aget frame i t/X))
-              y (double (aget frame i t/Y))
+        (let [x (double (t/aget2d frame i t/X))
+              y (double (t/aget2d frame i t/Y))
               resolved (effects/resolve-params-for-point params time-ms bpm x y i n (:timing-ctx ctx))
               threshold (double (:threshold resolved))
-              r (double (aget frame i t/R))
-              g (double (aget frame i t/G))
-              b (double (aget frame i t/B))
+              r (double (t/aget2d frame i t/R))
+              g (double (t/aget2d frame i t/G))
+              b (double (t/aget2d frame i t/B))
               max-val (Math/max r (Math/max g b))]
           (when (< max-val threshold)
-            (aset-double frame i t/R (double 0.0))
-            (aset-double frame i t/G (double 0.0))
-            (aset-double frame i t/B (double 0.0))))))
+            (t/aset2d frame i t/R (double 0.0))
+            (t/aset2d frame i t/G (double 0.0))
+            (t/aset2d frame i t/B (double 0.0))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           threshold (double (:threshold resolved))
           n (alength frame)]
       (dotimes [i n]
-        (let [r (double (aget frame i t/R))
-              g (double (aget frame i t/G))
-              b (double (aget frame i t/B))
+        (let [r (double (t/aget2d frame i t/R))
+              g (double (t/aget2d frame i t/G))
+              b (double (t/aget2d frame i t/B))
               max-val (Math/max r (Math/max g b))]
           (when (< max-val threshold)
-            (aset-double frame i t/R (double 0.0))
-            (aset-double frame i t/G (double 0.0))
-            (aset-double frame i t/B (double 0.0)))))))
+            (t/aset2d frame i t/R (double 0.0))
+            (t/aset2d frame i t/G (double 0.0))
+            (t/aset2d frame i t/B (double 0.0)))))))
   frame)
 
 (effects/register-effect!

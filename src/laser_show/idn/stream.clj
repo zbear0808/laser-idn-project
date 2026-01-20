@@ -296,11 +296,11 @@
   [^ByteBuffer buf ^"[[D" frame ^long point-idx output-config]
   (let [{:keys [color-bit-depth xy-bit-depth]} output-config
         ;; Get values directly from 2D array
-        x (aget frame point-idx t/X)
-        y (aget frame point-idx t/Y)
-        r (aget frame point-idx t/R)
-        g (aget frame point-idx t/G)
-        b (aget frame point-idx t/B)
+        x (t/aget2d frame point-idx t/X)
+        y (t/aget2d frame point-idx t/Y)
+        r (t/aget2d frame point-idx t/R)
+        g (t/aget2d frame point-idx t/G)
+        b (t/aget2d frame point-idx t/B)
         ;; Convert using output-config functions
         x-out (output-config/normalized->output-xy x xy-bit-depth)
         y-out (output-config/normalized->output-xy y xy-bit-depth)

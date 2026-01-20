@@ -52,6 +52,28 @@
 ;; Blanking constants
 (def ^:const BLANKING_POINTS_PER_JUMP 2)
 
+;; ========== Fast 2D Array Access Macros ==========
+;;
+;; Clojure's built-in aget/aset are terribly slow for 2D arrays (uses reflection).
+;; Multi-dimensional aget is ~1660x slower than single-dimension due to reflection!
+;; These macros provide massive speedup by properly type-hinting the intermediate access.
+;;
+;; Usage:
+;;   (aget2d frame i X)      ; fast read
+;;   (aset2d frame i X val)  ; fast write
+
+(defmacro aget2d
+  "Fast get from 2D double array. frame[i][j]
+   Type-hints the intermediate 1D array access to avoid reflection."
+  [a i j]
+  `(aget ~(with-meta `(aget ~a ~i) {:tag "[D"}) ~j))
+
+(defmacro aset2d
+  "Fast set in 2D double array. frame[i][j] = v
+   Type-hints the intermediate 1D array access to avoid reflection."
+  [a i j v]
+  `(aset ~(with-meta `(aget ~a ~i) {:tag "[D"}) ~j (double ~v)))
+
 ;; ========== Point Operations ==========
 
 (defn make-point
@@ -134,11 +156,11 @@
       (let [frame (make-array Double/TYPE n POINT_SIZE)]
         (dotimes [i n]
           (let [^doubles p (nth pts i)]
-            (aset-double frame i X (aget p X))
-            (aset-double frame i Y (aget p Y))
-            (aset-double frame i R (aget p R))
-            (aset-double frame i G (aget p G))
-            (aset-double frame i B (aget p B))))
+            (aset2d frame i X (aget p X))
+            (aset2d frame i Y (aget p Y))
+            (aset2d frame i R (aget p R))
+            (aset2d frame i G (aget p G))
+            (aset2d frame i B (aget p B))))
         frame))))
 
 (defn empty-frame
@@ -165,11 +187,11 @@
       (let [result (make-array Double/TYPE n POINT_SIZE)]
         (dotimes [i n]
           (let [^doubles src (aget frame i)]
-            (aset-double result i X (aget src X))
-            (aset-double result i Y (aget src Y))
-            (aset-double result i R (aget src R))
-            (aset-double result i G (aget src G))
-            (aset-double result i B (aget src B))))
+            (aset2d result i X (aget src X))
+            (aset2d result i Y (aget src Y))
+            (aset2d result i R (aget src R))
+            (aset2d result i G (aget src G))
+            (aset2d result i B (aget src B))))
         result))))
 
 ;; ========== Frame Field Access ==========
@@ -177,54 +199,54 @@
 (defn frame-get-x
   "Get x coordinate at point index."
   ^double [^"[[D" frame ^long idx]
-  (double (aget frame idx X)))
+  (double (aget2d frame idx X)))
 
 (defn frame-get-y
   "Get y coordinate at point index."
   ^double [^"[[D" frame ^long idx]
-  (double (aget frame idx Y)))
+  (double (aget2d frame idx Y)))
 
 (defn frame-get-r
   "Get red component at point index."
   ^double [^"[[D" frame ^long idx]
-  (double (aget frame idx R)))
+  (double (aget2d frame idx R)))
 
 (defn frame-get-g
   "Get green component at point index."
   ^double [^"[[D" frame ^long idx]
-  (double (aget frame idx G)))
+  (double (aget2d frame idx G)))
 
 (defn frame-get-b
   "Get blue component at point index."
   ^double [^"[[D" frame ^long idx]
-  (double (aget frame idx B)))
+  (double (aget2d frame idx B)))
 
 ;; ========== Frame Mutation Helpers ==========
 
 (defn frame-set-x!
   "Set x coordinate at point index."
   [^"[[D" frame ^long idx val]
-  (aset-double frame idx X (double val)))
+  (aset2d frame idx X val))
 
 (defn frame-set-y!
   "Set y coordinate at point index."
   [^"[[D" frame ^long idx val]
-  (aset-double frame idx Y (double val)))
+  (aset2d frame idx Y val))
 
 (defn frame-set-r!
   "Set red component at point index."
   [^"[[D" frame ^long idx val]
-  (aset-double frame idx R (double val)))
+  (aset2d frame idx R val))
 
 (defn frame-set-g!
   "Set green component at point index."
   [^"[[D" frame ^long idx val]
-  (aset-double frame idx G (double val)))
+  (aset2d frame idx G val))
 
 (defn frame-set-b!
   "Set blue component at point index."
   [^"[[D" frame ^long idx val]
-  (aset-double frame idx B (double val)))
+  (aset2d frame idx B val))
 
 ;; ========== Internal Helpers ==========
 
@@ -232,20 +254,20 @@
   "Copy a point from src frame to dest frame at dest-idx."
   [^"[[D" dest ^long dest-idx ^"[[D" src ^long src-idx]
   (let [^doubles src-pt (aget src src-idx)]
-    (aset-double dest dest-idx X (aget src-pt X))
-    (aset-double dest dest-idx Y (aget src-pt Y))
-    (aset-double dest dest-idx R (aget src-pt R))
-    (aset-double dest dest-idx G (aget src-pt G))
-    (aset-double dest dest-idx B (aget src-pt B))))
+    (aset2d dest dest-idx X (aget src-pt X))
+    (aset2d dest dest-idx Y (aget src-pt Y))
+    (aset2d dest dest-idx R (aget src-pt R))
+    (aset2d dest dest-idx G (aget src-pt G))
+    (aset2d dest dest-idx B (aget src-pt B))))
 
 (defn- write-blanked-point!
   "Write a blanked (invisible) point at position."
   [^"[[D" frame ^long idx x y]
-  (aset-double frame idx X (double x))
-  (aset-double frame idx Y (double y))
-  (aset-double frame idx R (double 0.0))
-  (aset-double frame idx G (double 0.0))
-  (aset-double frame idx B (double 0.0)))
+  (aset2d frame idx X x)
+  (aset2d frame idx Y y)
+  (aset2d frame idx R 0.0)
+  (aset2d frame idx G 0.0)
+  (aset2d frame idx B 0.0))
 
 ;; ========== Frame Concatenation ==========
 

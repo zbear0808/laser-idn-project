@@ -28,9 +28,9 @@
         b-lut (curves/generate-curve-lut b-points)
         n (alength frame)]
     (dotimes [i n]
-      (let [r (double (aget frame i t/R))
-            g (double (aget frame i t/G))
-            b (double (aget frame i t/B))
+      (let [r (double (t/aget2d frame i t/R))
+            g (double (t/aget2d frame i t/G))
+            b (double (t/aget2d frame i t/B))
             ;; r, g, b are normalized 0.0-1.0, convert to LUT index
             r-idx (min 255 (max 0 (int (* r 255.0))))
             g-idx (min 255 (max 0 (int (* g 255.0))))
@@ -38,9 +38,9 @@
             new-r (double (max 0.0 (min 1.0 (double (nth r-lut r-idx)))))
             new-g (double (max 0.0 (min 1.0 (double (nth g-lut g-idx)))))
             new-b (double (max 0.0 (min 1.0 (double (nth b-lut b-idx)))))]
-        (aset-double frame i t/R new-r)
-        (aset-double frame i t/G new-g)
-        (aset-double frame i t/B new-b))))
+        (t/aset2d frame i t/R new-r)
+        (t/aset2d frame i t/G new-g)
+        (t/aset2d frame i t/B new-b))))
   frame)
 
 (effects/register-effect!
@@ -76,15 +76,15 @@
         swap-axes? (:swap-axes? resolved)
         n (alength frame)]
     (dotimes [i n]
-      (let [x (double (aget frame i t/X))
-            y (double (aget frame i t/Y))
+      (let [x (double (t/aget2d frame i t/X))
+            y (double (t/aget2d frame i t/Y))
             ;; Apply mirroring first
             x' (if mirror-x? (- x) x)
             y' (if mirror-y? (- y) y)
             ;; Then swap if needed
             [final-x final-y] (if swap-axes? [y' x'] [x' y'])]
-        (aset-double frame i t/X (double final-x))
-        (aset-double frame i t/Y (double final-y)))))
+        (t/aset2d frame i t/X (double final-x))
+        (t/aset2d frame i t/Y (double final-y)))))
   frame)
 
 (effects/register-effect!
