@@ -1,0 +1,453 @@
+name: Native Build with GluonFX
+
+# Build native executables using GluonFX + GraalVM
+# This workflow creates platform-specific native binaries for:
+# - macOS (ARM64 and Intel)
+# - Windows (x64)
+# - Linux (x64)
+#
+# JavaFX 26-ea Support:
+# - The uber JAR contains JavaFX 26-ea from deps.edn
+# - GluonFX uses the uber JAR directly (no separate JavaFX download)
+# - This bypasses GluonFX's JavaFX 21 limitation
+#
+# Build Profiles:
+# - default: Optimized build with G1 GC
+# - quick: Fast build for development testing
+# - debug: Full debug info, no optimization
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_profile:
+        description: 'Build profile (default, quick, debug, gc-friendly)'
+        required: false
+        default: 'gc-friendly'
+        type: choice
+        options:
+          - default
+          - quick
+          - debug
+          - gc-friendly
+      platforms:
+        description: 'Platforms to build (all, linux, macos, windows)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - linux
+          - macos
+          - windows
+  release:
+    types: [created]
+  push:
+    branches: [main]
+    paths:
+      - 'pom.xml'
+      - 'META-INF/native-image/**'
+      - '.github/workflows/native-build.yml'
+
+env:
+  # GraalVM 25 for Java 25 / JavaFX 26-ea support
+  GRAALVM_VERSION: '25'
+  GRAALVM_DISTRIBUTION: 'graalvm-community'
+  JAVA_VERSION: '25'
+  # JavaFX version in deps.edn (26-ea+19)
+  JAVAFX_VERSION: '26-ea'
+
+jobs:
+  # ==========================================================================
+  # Build Uber JARs for each platform (prerequisite for native build)
+  # ==========================================================================
+  build-uber-jars:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            jar-artifact: uber-jar-linux
+          - os: macos-latest
+            platform: mac
+            jar-artifact: uber-jar-macos-arm64
+          - os: macos-13
+            platform: mac
+            jar-artifact: uber-jar-macos-intel
+          - os: windows-latest
+            platform: windows
+            jar-artifact: uber-jar-windows
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Java (Temurin for JAR build)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+      
+      - name: Setup Clojure
+        uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: '1.12.0.1479'
+      
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: ${{ runner.os }}-clojure-deps-${{ hashFiles('**/deps.edn') }}
+          restore-keys: |
+            ${{ runner.os }}-clojure-deps-
+      
+      - name: Setup Xvfb (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+      
+      - name: Build platform-specific uber JAR
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" == "Linux" ]; then
+            export DISPLAY=:99
+            Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+            sleep 3
+          fi
+          
+          echo "Building uber JAR for platform: ${{ matrix.platform }}"
+          clojure -T:build-${{ matrix.platform }} uber
+          
+          echo "Built JAR:"
+          ls -lh target/*.jar
+      
+      - name: Upload uber JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.jar-artifact }}
+          path: target/*-standalone.jar
+          retention-days: 7
+
+  # ==========================================================================
+  # Build Native Executables with GluonFX
+  # ==========================================================================
+  build-native:
+    needs: build-uber-jars
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x64
+          - os: ubuntu-latest
+            platform: linux
+            gluonfx-target: linux
+            jar-artifact: uber-jar-linux
+            native-artifact: laser-show-native-linux-x64
+            executable-name: laser-show
+            
+          # macOS ARM64 (Apple Silicon)
+          - os: macos-latest
+            platform: mac
+            gluonfx-target: darwin-aarch64
+            jar-artifact: uber-jar-macos-arm64
+            native-artifact: laser-show-native-macos-arm64
+            executable-name: laser-show
+            
+          # macOS Intel
+          - os: macos-13
+            platform: mac
+            gluonfx-target: darwin
+            jar-artifact: uber-jar-macos-intel
+            native-artifact: laser-show-native-macos-intel
+            executable-name: laser-show
+            
+          # Windows x64
+          - os: windows-latest
+            platform: windows
+            gluonfx-target: windows
+            jar-artifact: uber-jar-windows
+            native-artifact: laser-show-native-windows-x64
+            executable-name: laser-show.exe
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download uber JAR
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.jar-artifact }}
+          path: target/
+      
+      - name: Display downloaded JAR
+        shell: bash
+        run: |
+          echo "Downloaded uber JAR:"
+          ls -lh target/
+      
+      # Setup GraalVM with native-image
+      - name: Setup GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.GRAALVM_DISTRIBUTION }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          native-image-job-reports: 'true'
+      
+      - name: Verify GraalVM installation
+        shell: bash
+        run: |
+          echo "JAVA_HOME: $JAVA_HOME"
+          java -version
+          native-image --version
+      
+      # Install platform-specific dependencies
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libavcodec-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libfreetype6-dev \
+            libgl-dev \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libpango1.0-dev \
+            libx11-dev \
+            libxtst-dev \
+            libxxf86vm-dev \
+            xvfb
+      
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          # Xcode command line tools are pre-installed
+          xcode-select --print-path
+          
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          # Visual Studio Build Tools are pre-installed on windows-latest
+          # Verify vcvars64.bat is available
+          $vsPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          Write-Host "Visual Studio path: $vsPath"
+      
+      # Setup Maven for GluonFX
+      - name: Setup Maven
+        uses: stCarolas/setup-maven@v5
+        with:
+          maven-version: 3.9.6
+      
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-gluonfx-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-gluonfx-
+      
+      # Prepare native-image configuration
+      - name: Prepare native-image config
+        shell: bash
+        run: |
+          echo "Native image configuration files:"
+          ls -la META-INF/native-image/laser-show/ || echo "Config dir not found"
+          
+          # Ensure config files are in place
+          mkdir -p target/classes/META-INF/native-image/laser-show
+          cp -r META-INF/native-image/laser-show/* target/classes/META-INF/native-image/laser-show/ || true
+      
+      # Determine build profile
+      - name: Set build profile
+        id: profile
+        shell: bash
+        run: |
+          PROFILE="${{ github.event.inputs.build_profile || 'gc-friendly' }}"
+          echo "Using build profile: $PROFILE"
+          
+          if [ "$PROFILE" != "default" ]; then
+            echo "maven_profile=-P$PROFILE" >> $GITHUB_OUTPUT
+          else
+            echo "maven_profile=" >> $GITHUB_OUTPUT
+          fi
+      
+      # Build native image with GluonFX
+      - name: Build native image (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+          sleep 3
+          
+          echo "Building with profile: ${{ steps.profile.outputs.maven_profile }}"
+          mvn gluonfx:build \
+            ${{ steps.profile.outputs.maven_profile }} \
+            -Dgluonfx.target=${{ matrix.gluonfx-target }} \
+            -Dgluonfx.verbose=true \
+            -X
+        env:
+          GRAALVM_HOME: ${{ env.JAVA_HOME }}
+      
+      - name: Build native image (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          echo "Building with profile: ${{ steps.profile.outputs.maven_profile }}"
+          mvn gluonfx:build \
+            ${{ steps.profile.outputs.maven_profile }} \
+            -Dgluonfx.target=${{ matrix.gluonfx-target }} \
+            -Dgluonfx.verbose=true \
+            -X
+        env:
+          GRAALVM_HOME: ${{ env.JAVA_HOME }}
+      
+      - name: Build native image (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          echo Building with profile: ${{ steps.profile.outputs.maven_profile }}
+          mvn gluonfx:build ${{ steps.profile.outputs.maven_profile }} -Dgluonfx.target=${{ matrix.gluonfx-target }} -Dgluonfx.verbose=true -X
+        env:
+          GRAALVM_HOME: ${{ env.JAVA_HOME }}
+      
+      # Collect and upload native executable
+      - name: Find native executable
+        shell: bash
+        id: find-executable
+        run: |
+          echo "Looking for native executable..."
+          
+          # GluonFX outputs to target/gluonfx/{target}/ directory
+          GLUON_TARGET_DIR="target/gluonfx/${{ matrix.gluonfx-target }}"
+          
+          echo "Checking directory: $GLUON_TARGET_DIR"
+          ls -la "$GLUON_TARGET_DIR" 2>/dev/null || echo "Directory not found"
+          
+          # Find the executable
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            EXEC_PATH=$(find target/gluonfx -name "*.exe" 2>/dev/null | head -1)
+          else
+            EXEC_PATH=$(find target/gluonfx -type f -perm +111 -name "laser*" 2>/dev/null | head -1)
+          fi
+          
+          if [ -n "$EXEC_PATH" ]; then
+            echo "Found executable: $EXEC_PATH"
+            echo "exec_path=$EXEC_PATH" >> $GITHUB_OUTPUT
+            
+            # Get file size
+            ls -lh "$EXEC_PATH"
+          else
+            echo "::error::Native executable not found!"
+            find target/gluonfx -type f 2>/dev/null || echo "No files in target/gluonfx"
+            exit 1
+          fi
+      
+      - name: Upload native executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.native-artifact }}
+          path: ${{ steps.find-executable.outputs.exec_path }}
+          retention-days: 30
+      
+      # Optional: Create app bundle for macOS
+      - name: Create macOS app bundle
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          mvn gluonfx:package \
+            -Dgluonfx.target=${{ matrix.gluonfx-target }} \
+            -Dgluonfx.verbose=true
+          
+          echo "Looking for .app bundle..."
+          find target/gluonfx -name "*.app" -type d 2>/dev/null || echo "No .app bundle found"
+      
+      - name: Upload macOS app bundle
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: ${{ matrix.native-artifact }}-app
+          path: target/gluonfx/**/*.app
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ==========================================================================
+  # Create Release Archives
+  # ==========================================================================
+  package-release:
+    needs: build-native
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    
+    steps:
+      - name: Download all native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+      
+      - name: Display downloaded artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts/ -type f -ls
+      
+      - name: Create release archives
+        run: |
+          cd artifacts
+          
+          # Create zip for each platform
+          for dir in laser-show-native-*; do
+            if [ -d "$dir" ]; then
+              echo "Creating archive for: $dir"
+              
+              # Make executable on Unix
+              find "$dir" -type f ! -name "*.exe" -exec chmod +x {} \; 2>/dev/null || true
+              
+              zip -r "${dir}.zip" "$dir"
+            fi
+          done
+          
+          echo "Created archives:"
+          ls -lh *.zip
+      
+      - name: Upload release archives
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ==========================================================================
+  # Summary Job
+  # ==========================================================================
+  summary:
+    needs: [build-uber-jars, build-native]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Build Summary
+        run: |
+          echo "## Native Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Linux x64 | ${{ needs.build-native.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| macOS ARM64 | ${{ needs.build-native.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| macOS Intel | ${{ needs.build-native.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows x64 | ${{ needs.build-native.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Notes" >> $GITHUB_STEP_SUMMARY
+          echo "- Native builds use GraalVM ${{ env.GRAALVM_VERSION }} with GluonFX" >> $GITHUB_STEP_SUMMARY
+          echo "- JavaFX version: ${{ env.JAVAFX_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifacts are retained for 30 days" >> $GITHUB_STEP_SUMMARY

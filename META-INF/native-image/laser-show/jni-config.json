@@ -1,0 +1,78 @@
+[
+  {
+    "name": "com.sun.glass.ui.gtk.GtkApplication",
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.sun.glass.ui.mac.MacApplication",
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.sun.glass.ui.win.WinApplication",
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.sun.glass.ui.Application",
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.sun.prism.es2.ES2Pipeline",
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.sun.prism.es2.GLFactory",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.sun.prism.sw.SWPipeline",
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.sun.javafx.font.freetype.FTFactory",
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.sun.javafx.font.coretext.CTFactory",
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.sun.javafx.font.directwrite.DWFactory",
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.sun.javafx.iio.ImageStorage",
+    "allDeclaredMethods": true
+  },
+  {
+    "name": "com.sun.javafx.iio.png.PNGImageLoader2",
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.sun.javafx.iio.jpeg.JPEGImageLoader",
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.sun.javafx.iio.gif.GIFImageLoader2",
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  },
+  {
+    "name": "com.sun.javafx.tk.quantum.QuantumToolkit",
+    "allDeclaredMethods": true,
+    "allDeclaredConstructors": true
+  }
+]

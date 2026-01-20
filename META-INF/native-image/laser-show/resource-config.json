@@ -1,0 +1,71 @@
+{
+  "resources": {
+    "includes": [
+      {
+        "pattern": "\\Qlogback.xml\\E"
+      },
+      {
+        "pattern": "\\Qlaser-warning-square.png\\E"
+      },
+      {
+        "pattern": "\\Qlaser-warning-square.ico\\E"
+      },
+      {
+        "pattern": "\\Qlaser-warning-square.icns\\E"
+      },
+      {
+        "pattern": ".*\\.clj$"
+      },
+      {
+        "pattern": ".*\\.cljc$"
+      },
+      {
+        "pattern": ".*\\.edn$"
+      },
+      {
+        "pattern": ".*\\.css$"
+      },
+      {
+        "pattern": ".*\\.fxml$"
+      },
+      {
+        "pattern": ".*\\.png$"
+      },
+      {
+        "pattern": ".*\\.jpg$"
+      },
+      {
+        "pattern": ".*\\.gif$"
+      },
+      {
+        "pattern": ".*\\.svg$"
+      },
+      {
+        "pattern": "com/sun/javafx/.*"
+      },
+      {
+        "pattern": "com/sun/glass/.*"
+      },
+      {
+        "pattern": "com/sun/prism/.*"
+      },
+      {
+        "pattern": "javafx/.*"
+      },
+      {
+        "pattern": "META-INF/services/.*"
+      },
+      {
+        "pattern": "META-INF/native-image/.*"
+      }
+    ]
+  },
+  "bundles": [
+    {
+      "name": "com.sun.javafx.tk.quantum.QuantumMessagesBundle"
+    },
+    {
+      "name": "com.sun.javafx.scene.control.skin.resources.controls"
+    }
+  ]
+}

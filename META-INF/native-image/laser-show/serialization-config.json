@@ -1,0 +1,35 @@
+[
+  {
+    "name": "java.util.HashMap"
+  },
+  {
+    "name": "java.util.ArrayList"
+  },
+  {
+    "name": "java.util.LinkedList"
+  },
+  {
+    "name": "java.util.HashSet"
+  },
+  {
+    "name": "clojure.lang.PersistentHashMap"
+  },
+  {
+    "name": "clojure.lang.PersistentArrayMap"
+  },
+  {
+    "name": "clojure.lang.PersistentVector"
+  },
+  {
+    "name": "clojure.lang.PersistentList"
+  },
+  {
+    "name": "clojure.lang.PersistentHashSet"
+  },
+  {
+    "name": "clojure.lang.Keyword"
+  },
+  {
+    "name": "clojure.lang.Symbol"
+  }
+]
