@@ -63,6 +63,7 @@
       "timing" (timing/handle event)
       "transport" (timing/handle event)  ; Transport grouped with timing
       "ui" (ui/handle event)
+      "preview" (ui/handle event)  ; Preview settings (zone filter) -> UI handler
       "project" (project/handle event)
       "idn" (connection/handle event)
       "config" (connection/handle event)

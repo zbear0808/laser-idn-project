@@ -23,6 +23,7 @@
             [laser-show.state.core :as state]
             [laser-show.state.queries :as queries]
             [laser-show.routing.core :as routing]
+            [laser-show.routing.zone-effects :as ze]
             [laser-show.animation.effects :as effects]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.idn.output-config :as output-config]))
@@ -60,10 +61,11 @@
   "Create a frame provider function for a specific projector or virtual projector.
    
    The frame provider:
-   1. Gets the current active cue and its destination zone group
-   2. Checks if this projector/VP belongs to the target zone group
-   3. Generates the frame if matched
-   4. Applies projector calibration effects (color curves + corner-pin)
+   1. Gets the current active cue chain and its destination zone
+   2. Collects zone effects from all items in the chain
+   3. Checks if this projector matches the FINAL target (after zone effects)
+   4. Generates the frame if matched
+   5. Applies projector calibration effects (color curves + corner-pin)
    
    Returns a zero-arity function that returns a LaserFrame."
   [projector-id]
@@ -94,28 +96,38 @@
             projectors-items (get raw-state :projectors {})
             virtual-projectors (get raw-state :virtual-projectors {})
             
-            ;; For now, treat the whole cue chain as "the cue" for routing
-            ;; In future, each item in the chain could have its own destination-zone
-            ;; For now, default destination is :all zone group
-            cue-for-routing {:id :active-cue
-                             :destination-zone {:mode :zone-group
-                                                :zone-group-id :all}
-                             :effects []}
+            ;; === FIX: Read actual destination zone from cue chain ===
+            ;; Cues default to :all zone group when no destination is specified
+            destination-zone (or (:destination-zone cue-chain-data)
+                                 {:zone-group-id :all})
             
-            ;; Build routing map for this cue
-            ;; Returns: #{projector-id-or-vp-id ...}
+            ;; === FIX: Collect effects from all items in chain ===
+            ;; Zone effects (zone-reroute, zone-broadcast, zone-mirror) modify routing
+            collected-effects (ze/collect-effects-from-cue-chain
+                                (:items cue-chain-data))
+            
+            ;; Build cue for routing with real data
+            cue-for-routing {:id :active-cue
+                             :destination-zone destination-zone
+                             :effects collected-effects}
+            
+            ;; Build routing map for this cue - now with zone effect processing!
+            ;; Returns: Vector of output configs
             matching-outputs (routing/build-routing-map cue-for-routing
                                                         projectors-items
-                                                        virtual-projectors)]
+                                                        virtual-projectors)
+            
+            ;; Check if THIS projector is in the matching outputs
+            matching-output-ids (set (map :projector-id matching-outputs))]
         
-        (if (contains? matching-outputs projector-id)
-          ;; This projector/VP receives the cue - generate frame
+        (if (contains? matching-output-ids projector-id)
+          ;; This projector receives the cue - generate frame
           (let [base-frame (frame-service/generate-current-frame)]
             (when base-frame
               ;; Apply projector effects (color curves + corner-pin)
               (apply-projector-effects base-frame projector-id
                                        elapsed bpm trigger-time timing-ctx)))
-          ;; This projector doesn't receive the cue - empty frame
+          ;; This projector doesn't match - no frame
           nil))
       
       (catch clojure.lang.ExceptionInfo e

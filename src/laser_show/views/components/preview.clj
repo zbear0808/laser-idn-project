@@ -4,6 +4,10 @@
    This component renders the current laser frame to a JavaFX Canvas.
    The :draw prop is a function that receives the Canvas and renders to it.
    
+   Features:
+   - Zone group filtering for preview (dropdown in header)
+   - Shows content based on routing destination
+   
    NOTE: LaserPoints now use NORMALIZED colors (0.0-1.0).
    This module converts normalized values to 8-bit for JavaFX Color display."
   (:require [cljfx.api :as fx]
@@ -11,7 +15,8 @@
             [laser-show.animation.types :as t]
             [laser-show.common.util :as u])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
-           [javafx.scene.paint Color]))
+           [javafx.scene.paint Color]
+           [javafx.util StringConverter]))
 
 
 ;; Drawing Helpers
@@ -148,20 +153,65 @@
      :draw #(draw-preview % frame)}))
 
 
+;; Zone Group Dropdown Helpers
+
+
+(defn- zone-filter-converter
+  "StringConverter for zone filter combo-box items."
+  []
+  (proxy [StringConverter] []
+    (toString [item]
+      (cond
+        (nil? item) "Select Zone"
+        (nil? (:id item)) "All Content"
+        (keyword? (:id item)) (str "Zone: " (name (:id item)))
+        :else (str item)))
+    (fromString [_s] nil)))
+
+(defn- build-zone-filter-items
+  "Build items for zone filter combo-box.
+   Returns vector of maps with :id and :name keys."
+  [zone-groups]
+  (into [{:id nil :name "All Content"}]  ;; nil = master view (show all)
+        (mapv (fn [zg]
+                {:id (:id zg)
+                 :name (str "Zone: " (:name zg))})
+              zone-groups)))
+
+(defn- find-selected-item
+  "Find the selected item in the list based on zone-filter value."
+  [items zone-filter]
+  (or (first (filter #(= (:id %) zone-filter) items))
+      (first items)))
+
+
 ;; Preview Panel (with controls)
 
 
 (defn preview-header
-  "Header for the preview panel."
+  "Header for the preview panel with zone group filter dropdown."
   [{:keys [fx/context]}]
-  (let [stats (fx/sub-ctx context subs/frame-stats)]
+  (let [stats (fx/sub-ctx context subs/frame-stats)
+        zone-filter (fx/sub-ctx context subs/preview-zone-filter)
+        zone-groups (fx/sub-ctx context subs/zone-groups-list)
+        filter-items (build-zone-filter-items zone-groups)
+        selected-item (find-selected-item filter-items zone-filter)]
     {:fx/type :h-box
      :alignment :center-left
+     :spacing 8
      :padding {:left 8 :right 8 :top 4 :bottom 4}
      :children [{:fx/type :label
                  :text "Preview"
                  :style "-fx-text-fill: white; -fx-font-size: 12; -fx-font-weight: bold;"}
                 {:fx/type :region :h-box/hgrow :always}
+                ;; Zone group filter dropdown
+                {:fx/type :combo-box
+                 :value selected-item
+                 :items filter-items
+                 :converter (zone-filter-converter)
+                 :on-value-changed {:event/type :preview/set-zone-filter}
+                 :pref-width 130
+                 :style "-fx-font-size: 10;"}
                 {:fx/type :label
                  :text (str (:fps stats 0) " FPS")
                  :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]}))

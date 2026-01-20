@@ -179,8 +179,8 @@
           :doc "grid dimensions config"}
    :window {:default {:width default-window-width :height default-window-height}
             :doc "window dimensions"}
-   :preview {:default {:width 400 :height 400}
-             :doc "preview panel dimensions"}
+   :preview {:default {:width 400 :height 400 :zone-group-filter :all}
+             :doc "preview panel dimensions and zone group filter (:all, :left, :right, etc., or nil for show all)"}
    :idn {:default {:host nil :port 7255}
          :doc "default IDN connection settings"}
    :osc {:default {:enabled false :port default-osc-port}

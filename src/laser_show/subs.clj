@@ -88,6 +88,15 @@
 (defn preview-config [context]
   (fx/sub-val context ex/preview-config))
 
+(defn preview-zone-filter
+  "Get the current preview zone group filter.
+   Returns:
+   - nil: show all content (master view)
+   - :all: show only content routed to :all zone group
+   - :left, :right, etc.: show only content routed to that zone group"
+  [context]
+  (fx/sub-val context get-in [:config :preview :zone-group-filter]))
+
 
 ;; Level 2: Computed Subscriptions
 ;; These compose multiple Level 1 subscriptions or perform computations.

@@ -8,10 +8,12 @@
    
    ROUTING FLOW:
    1. Cue specifies destination (zone-group)
-   2. Find all projectors/VPs in that zone group
-   3. Return output configs with corner-pin and projector reference
-   4. Frame service applies corner-pin transform and color curves"
+   2. Zone effects can modify the target (reroute, broadcast, mirror)
+   3. Find all projectors/VPs in the final target zone group(s)
+   4. Return output configs with corner-pin and projector reference
+   5. Frame service applies corner-pin transform and color curves"
   (:require [laser-show.routing.projector-matcher :as pm]
+            [laser-show.routing.zone-effects :as ze]
             [laser-show.state.queries :as queries]))
 
 
@@ -23,8 +25,14 @@
    
    This is the main routing function called by frame service.
    
+   NOW processes zone effects to determine final target:
+   1. Read :destination-zone from cue (default to :all)
+   2. Read :effects from cue
+   3. Apply zone effects to get final target zone groups
+   4. Match projectors to final target
+   
    Args:
-   - cue: The cue to route (with :destination-zone)
+   - cue: The cue to route (with :destination-zone and optionally :effects)
    - projectors-items: Map of projector-id -> projector config
    - virtual-projectors: Map of vp-id -> virtual projector config (can be nil)
    
@@ -35,7 +43,16 @@
     :corner-pin geometry config
     :enabled? boolean}"
   [cue projectors-items virtual-projectors]
-  (pm/build-routing-map cue projectors-items virtual-projectors))
+  (let [all-outputs (pm/build-all-outputs projectors-items virtual-projectors)
+        
+        ;; Process zone effects to get final target
+        destination (or (:destination-zone cue) {:zone-group-id :all})
+        effects (or (:effects cue) [])
+        final-target-groups (ze/resolve-final-target destination effects)
+        
+        ;; Match using final target - convert set to vector for find-outputs-for-target
+        target {:zone-groups (vec final-target-groups)}]
+    (pm/find-outputs-for-target all-outputs target)))
 
 
 (defn build-routing-map-with-filter

@@ -75,6 +75,22 @@
                      :source-key nil
                      :data nil})})
 
+(defn- handle-preview-set-zone-filter
+  "Set the preview zone group filter.
+   
+   Filter values:
+   - nil: show all content (master view, ignores routing)
+   - :all: show only content routed to :all zone group
+   - :left, :right, etc.: show only content routed to that zone group"
+  [{:keys [state] :as event}]
+  (let [;; :fx/event is the selected item from combo-box (a map with :id key)
+        evt (:fx/event event)
+        zone-group-id (if (map? evt)
+                        (:id evt)
+                        evt)]
+    (log/debug "Setting preview zone filter:" zone-group-id)
+    {:state (assoc-in state [:config :preview :zone-group-filter] zone-group-id)}))
+
 
 ;; Public API
 
@@ -92,6 +108,7 @@
     :ui/update-dialog-data (handle-ui-update-dialog-data event)
     :ui/start-drag (handle-ui-start-drag event)
     :ui/end-drag (handle-ui-end-drag event)
+    :preview/set-zone-filter (handle-preview-set-zone-filter event)
     
     ;; Unknown event in this domain
     {}))

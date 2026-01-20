@@ -6,11 +6,17 @@
    - Generates frames based on active cell and cue chain
    - Applies effects from the effects grid and per-preset effects
    - Provides frames for preview canvas and IDN streaming
+   - Filters preview based on zone group routing
    
    Cue Chain Support:
    - Cue chains are sequential lists of presets
    - Each preset can have its own parameters and effect chain
    - Presets render one after another in time
+   
+   Zone Group Filtering:
+   - Preview can be filtered by zone group to show only content routed to specific zones
+   - Default filter is :all (shows content routed to :all zone group)
+   - Filter nil means show all content regardless of routing (master view)
    
    Performance Note:
    - All collection operations use eager evaluation (vec, mapv, filterv, keepv)
@@ -26,6 +32,7 @@
             [laser-show.common.util :as u]
             [laser-show.profiling.frame-profiler :as profiler]
             [laser-show.profiling.jfr-profiler :as jfr]
+            [laser-show.routing.zone-effects :as ze]
             [laser-show.animation.effects.shape]
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
@@ -118,6 +125,29 @@
   "Check if playback is active."
   []
   (get-in (state/get-raw-state) [:playback :playing?] false))
+
+(defn get-preview-zone-filter
+  "Get the current preview zone group filter from state.
+   Returns:
+   - :all - show only content routed to :all zone group
+   - :left, :right, etc. - show only content routed to that zone group
+   - nil - show all content regardless of destination (master view)"
+  []
+  (get-in (state/get-raw-state) [:config :preview :zone-group-filter] :all))
+
+(defn- matches-preview-zone?
+  "Check if a cue's final target zones match the preview zone filter.
+   
+   Matching logic:
+   - If preview-zone is nil: show all (master view) -> always true
+   - If final-targets contains preview-zone: direct match -> true
+   - Otherwise: no match -> false
+   
+   Note: Zone groups like :all are just names, not special. Content routed
+   to :all only appears in preview when filter is :all or nil (master view)."
+  [preview-zone final-targets]
+  (or (nil? preview-zone)                    ;; nil = show all (master view)
+      (contains? final-targets preview-zone))) ;; direct match only
 
 (defn get-timing-context
   "Get the timing context for modulator evaluation.
@@ -272,61 +302,77 @@
 (defn generate-current-frame
   "Generate the current animation frame based on state.
    Applies active effects from the effects grid to the base frame.
+   Filters based on preview zone group setting.
    Returns a LaserFrame or nil if nothing to render.
+   
+   Zone filtering:
+   - Gets the cue chain's destination zone and collects all effects
+   - Resolves final target zones after applying zone effects
+   - Only generates frame if targets match the preview zone filter
    
    Frame generation is profiled to track performance."
   []
   (when (is-playing?)
     (when-let [cell-data (get-active-cell-data)]
-      (let [trigger-time (get-trigger-time)
-            elapsed (- (System/currentTimeMillis) trigger-time)
-            bpm (get-bpm)
-            ;; Get timing context for modulator evaluation
-            timing-ctx (get-timing-context)
+      (let [cue-chain (:cue-chain cell-data)]
+        (when cue-chain
+          ;; Check zone filter BEFORE generating frame for efficiency
+          (let [preview-zone (get-preview-zone-filter)
+                raw-destination (:destination-zone cue-chain)
+                destination (or raw-destination {:zone-group-id :all})
+                collected-effects (ze/collect-effects-from-cue-chain (:items cue-chain))
+                final-targets (ze/resolve-final-target destination collected-effects)
+                matches? (matches-preview-zone? preview-zone final-targets)]
             
-            ;; Measure base frame generation
-            base-start (timing/nanotime)
-            base-frame (when-let [cue-chain (:cue-chain cell-data)]
-                         (generate-frame-from-cue-chain cue-chain elapsed bpm trigger-time timing-ctx))
-            base-end (timing/nanotime)]
-        
-        (when base-frame
-          (let [effect-chain (get-active-effects)
+            ;; Only generate frame if preview zone matches
+            (when matches?
+              (let [trigger-time (get-trigger-time)
+                    elapsed (- (System/currentTimeMillis) trigger-time)
+                    bpm (get-bpm)
+                    timing-ctx (get-timing-context)
+                    
+                    ;; Measure base frame generation
+                    base-start (timing/nanotime)
+                    base-frame (generate-frame-from-cue-chain cue-chain elapsed bpm trigger-time timing-ctx)
+                    base-end (timing/nanotime)]
                 
-                ;; Measure effect chain application (from effects grid)
-                effects-start (timing/nanotime)
-                final-frame (if effect-chain
-                              (try
-                                (effects/apply-effect-chain base-frame effect-chain elapsed bpm trigger-time timing-ctx)
-                                (catch Exception e
-                                  (log/error "generate-current-frame: Effect chain failed:" (.getMessage e))
-                                  (log/debug "  effect-chain:" effect-chain)
-                                  base-frame))
-                              base-frame)
-                effects-end (timing/nanotime)]
-            
-            ;; Record timing (profiler adds timestamp and calculates total)
-            (let [base-time-us (timing/nanos->micros (- base-end base-start))
-                  effects-time-us (if effect-chain
-                                    (timing/nanos->micros (- effects-end effects-start))
-                                    0)
-                  effect-count (if effect-chain (count (:effects effect-chain)) 0)
-                  point-count (count final-frame)]
-              
-              ;; Frame profiler (always-on stats)
-              (profiler/record-frame-timing!
-                {:base-time-us base-time-us
-                 :effects-time-us effects-time-us
-                 :effect-count effect-count})
-              
-              ;; JFR event (low-overhead, for continuous recording and spike detection)
-              (jfr/emit-frame-event!
-                {:base-time-us base-time-us
-                 :effects-time-us effects-time-us
-                 :effect-count effect-count
-                 :point-count point-count}))
-            
-            final-frame))))))
+                (when base-frame
+                  (let [effect-chain (get-active-effects)
+                        
+                        ;; Measure effect chain application (from effects grid)
+                        effects-start (timing/nanotime)
+                        final-frame (if effect-chain
+                                      (try
+                                        (effects/apply-effect-chain base-frame effect-chain elapsed bpm trigger-time timing-ctx)
+                                        (catch Exception e
+                                          (log/error "generate-current-frame: Effect chain failed:" (.getMessage e))
+                                          (log/debug "  effect-chain:" effect-chain)
+                                          base-frame))
+                                      base-frame)
+                        effects-end (timing/nanotime)]
+                    
+                    ;; Record timing (profiler adds timestamp and calculates total)
+                    (let [base-time-us (timing/nanos->micros (- base-end base-start))
+                          effects-time-us (if effect-chain
+                                            (timing/nanos->micros (- effects-end effects-start))
+                                            0)
+                          effect-count (if effect-chain (count (:effects effect-chain)) 0)
+                          point-count (count final-frame)]
+                      
+                      ;; Frame profiler (always-on stats)
+                      (profiler/record-frame-timing!
+                        {:base-time-us base-time-us
+                         :effects-time-us effects-time-us
+                         :effect-count effect-count})
+                      
+                      ;; JFR event (low-overhead, for continuous recording and spike detection)
+                      (jfr/emit-frame-event!
+                        {:base-time-us base-time-us
+                         :effects-time-us effects-time-us
+                         :effect-count effect-count
+                         :point-count point-count}))
+                    
+                    final-frame))))))))))
 
 
 ;; Frame Conversion for Preview
