@@ -4,6 +4,8 @@
    Provides visual editors for effects like:
    - Translate: 2D point dragging for X/Y position
    - Corner Pin: 4-corner quadrilateral manipulation
+   - Rotation: Circular dial for angle adjustment
+   - Scale: Rectangle with edge/corner handles for X/Y scaling
    - RGB Curves: Photoshop-style curve editor for color channel adjustment
    - Zone Reroute: Zone group selector for routing effects
    
@@ -14,6 +16,8 @@
             [clojure.string :as str]
             [laser-show.subs :as subs]
             [laser-show.views.components.spatial-canvas :as spatial-canvas]
+            [laser-show.views.components.rotate-canvas :as rotate-canvas]
+            [laser-show.views.components.scale-canvas :as scale-canvas]
             [laser-show.views.components.curve-canvas :as curve-canvas]
             [laser-show.views.components.tabs :as tabs]))
 
@@ -238,6 +242,179 @@
                      :text "Reset to Defaults"
                      :style-class ["visual-editor-reset-btn"]
                      :on-action reset-event}])))}))
+
+
+;; Rotation Effect Visual Editor
+
+
+(defn rotate-visual-editor
+ "Visual editor for rotation effect - circular dial.
+  
+  Supports two usage patterns:
+  
+  1. Effect chain editor props:
+     - :col, :row - Grid cell coordinates
+     - :effect-path - Path to effect
+     - :current-params - Current parameter values {:angle ...}
+     - :param-specs - Parameter specifications from effect definition
+  
+  2. Event template pattern (for generic reuse):
+     - :current-params - Current parameter values (or :params as alias)
+     - :event-template - Base event map for on-angle-change (will add :param-key :value)
+     - :reset-event - Event to dispatch on right-click reset
+     - :fx-key - (optional) Unique key for canvas
+     - :width, :height - (optional) Canvas dimensions, default 280x280
+     - :hint-text - (optional) Hint text shown above canvas"
+ [{:keys [col row effect-path current-params params param-specs
+          event-template reset-event fx-key width height hint-text]
+   :or {width 280 height 280}}]
+ (let [;; Support both :current-params and :params (alias)
+       params-map (or current-params params {})
+       
+       ;; Get angle value
+       angle (get params-map :angle 0.0)
+       
+       ;; Build on-angle-change event
+       on-angle-change-event (if event-template
+                               event-template
+                               {:event/type :chain/update-param
+                                :domain :effect-chains
+                                :entity-key [col row]
+                                :effect-path effect-path})
+       
+       ;; Build reset event
+       actual-reset-event (or reset-event
+                              {:event/type :chain/reset-params
+                               :domain :effect-chains
+                               :entity-key [col row]
+                               :effect-path effect-path})
+       
+       ;; Determine fx/key for canvas
+       canvas-key (or fx-key [col row effect-path])
+       
+       ;; Hint text
+       actual-hint (or hint-text "Drag dial to adjust rotation • Right-click to reset")]
+   
+   {:fx/type :v-box
+    :spacing 8
+    :padding 8
+    :style-class ["visual-editor-padded"]
+    :children [{:fx/type :label
+                :text actual-hint
+                :style-class ["visual-editor-hint"]}
+               
+               {:fx/type rotate-canvas/rotate-canvas
+                :fx/key canvas-key
+                :width width
+                :height height
+                :angle angle
+                :on-angle-change on-angle-change-event
+                :on-reset actual-reset-event}
+               
+               {:fx/type :h-box
+                :spacing 12
+                :alignment :center
+                :children [{:fx/type :label
+                           :text (format "Angle: %.1f°" angle)
+                           :style-class ["text-monospace"]}]}]}))
+
+
+;; Scale Effect Visual Editor
+
+
+(defn scale-visual-editor
+ "Visual editor for scale effect - centered rectangle with handles.
+  
+  Supports two usage patterns:
+  
+  1. Effect chain editor props:
+     - :col, :row - Grid cell coordinates
+     - :effect-path - Path to effect
+     - :current-params - Current parameter values {:x-scale :y-scale :uniform? ...}
+     - :param-specs - Parameter specifications from effect definition
+  
+  2. Event template pattern (for generic reuse):
+     - :current-params - Current parameter values (or :params as alias)
+     - :event-template - Base event map for on-scale-change
+     - :reset-event - Event to dispatch on right-click reset
+     - :fx-key - (optional) Unique key for canvas
+     - :width, :height - (optional) Canvas dimensions, default 280x280
+     - :hint-text - (optional) Hint text shown above canvas"
+ [{:keys [col row effect-path current-params params param-specs
+          event-template reset-event fx-key width height hint-text]
+   :or {width 280 height 280}}]
+ (let [;; Support both :current-params and :params (alias)
+       params-map (or current-params params {})
+       
+       ;; Get scale values
+       x-scale (get params-map :x-scale 1.0)
+       y-scale (get params-map :y-scale 1.0)
+       uniform? (get params-map :uniform? false)
+       
+       ;; Build on-scale-change event
+       on-scale-change-event (if event-template
+                               event-template
+                               {:event/type :chain/update-scale-params
+                                :domain :effect-chains
+                                :entity-key [col row]
+                                :effect-path effect-path})
+       
+       ;; Build reset event with defaults for scale
+       actual-reset-event (or reset-event
+                              {:event/type :chain/reset-params
+                               :domain :effect-chains
+                               :entity-key [col row]
+                               :effect-path effect-path
+                               :defaults-map {:x-scale 1.0 :y-scale 1.0}})
+       
+       ;; Build uniform toggle event
+       on-uniform-change-event (if event-template
+                                 (assoc event-template :param-key :uniform?)
+                                 {:event/type :chain/update-param
+                                  :domain :effect-chains
+                                  :entity-key [col row]
+                                  :effect-path effect-path
+                                  :param-key :uniform?})
+       
+       ;; Determine fx/key for canvas
+       canvas-key (or fx-key [col row effect-path])
+       
+       ;; Hint text
+       actual-hint (or hint-text "Drag handles to scale • Right-click to reset")]
+   
+   {:fx/type :v-box
+    :spacing 8
+    :padding 8
+    :style-class ["visual-editor-padded"]
+    :children [{:fx/type :label
+                :text actual-hint
+                :style-class ["visual-editor-hint"]}
+               
+               {:fx/type scale-canvas/scale-canvas
+                :fx/key canvas-key
+                :width width
+                :height height
+                :x-scale x-scale
+                :y-scale y-scale
+                :uniform? uniform?
+                :on-scale-change on-scale-change-event
+                :on-reset actual-reset-event}
+               
+               {:fx/type :h-box
+                :spacing 12
+                :alignment :center
+                :children [{:fx/type :label
+                           :text (format "X: %.2f" x-scale)
+                           :style-class ["visual-editor-coord-tl"]}
+                          {:fx/type :label
+                           :text (format "Y: %.2f" y-scale)
+                           :style-class ["visual-editor-coord-tr"]}]}
+               
+               {:fx/type :check-box
+                :text "Uniform Scale"
+                :selected uniform?
+                :style-class ["scale-uniform-checkbox"]
+                :on-selected-changed (assoc on-uniform-change-event :value (not uniform?))}]}))
 
 
 ;; RGB Curves Visual Editor

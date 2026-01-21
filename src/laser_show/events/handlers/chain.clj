@@ -711,6 +711,30 @@
         params-path (vec (concat items-path effect-path [:params]))]
     (effect-params/update-spatial-params state params-path point-id x y param-map)))
 
+(defn handle-update-scale-params
+  "Thin wrapper that delegates to effect-params.
+   Updates x-scale and y-scale parameters from scale drag operation."
+  [state config {:keys [effect-path x-scale y-scale]}]
+  (let [items-path (:items-path config)
+        params-path (vec (concat items-path effect-path [:params]))]
+    (effect-params/update-scale-params state params-path x-scale y-scale)))
+
+(defn handle-update-rotation-param
+  "Thin wrapper that delegates to effect-params.
+   Updates angle parameter from rotation drag operation."
+  [state config {:keys [effect-path angle]}]
+  (let [items-path (:items-path config)
+        params-path (vec (concat items-path effect-path [:params]))]
+    (effect-params/update-rotation-param state params-path angle)))
+
+(defn handle-reset-params
+  "Thin wrapper that delegates to effect-params.
+   Resets effect parameters to their default values."
+  [state config {:keys [effect-path defaults-map]}]
+  (let [items-path (:items-path config)
+        params-path (vec (concat items-path effect-path [:params]))]
+    (effect-params/reset-params state params-path defaults-map)))
+
 
 ;; Phase 2: Parameter Update Handlers
 
@@ -984,6 +1008,15 @@
      
      :chain/update-spatial-params
      {:state (handle-update-spatial-params state config event)}
+     
+     :chain/update-scale-params
+     {:state (handle-update-scale-params state config event)}
+     
+     :chain/update-rotation-param
+     {:state (handle-update-rotation-param state config event)}
+     
+     :chain/reset-params
+     {:state (handle-reset-params state config event)}
      
      :chain/create-empty-group
      {:state (handle-create-empty-group state config (:name event))}

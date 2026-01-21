@@ -26,13 +26,14 @@
     :lines [{:from :tl :to :tr :color \"#4A6FA5\" :width 2}]
     :polygon {:points [:tl :tr :br :bl] :color \"#4A6FA520\"}
     :on-point-drag {:event/type :effects/update-spatial-params ...}
+    :on-reset {:event/type :chain/reset-params ...}  ; Right-click anywhere to reset
     :show-grid true
     :show-axes true}"
   (:require [cljfx.api :as fx]
             [laser-show.events.core :as events]
             [laser-show.common.util :as u])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
-           [javafx.scene.input MouseEvent KeyEvent KeyCode]
+           [javafx.scene.input MouseEvent MouseButton KeyEvent KeyCode]
            [javafx.scene.paint Color]
            [javafx.scene.text Font FontWeight]
            [javafx.event EventHandler EventType]
@@ -215,10 +216,11 @@
    - :lines - Optional vector of lines [{:from :to :color :line-width}]
    - :polygon - Optional polygon {:points [...ids] :color}
    - :on-point-drag - Event map to dispatch when point is dragged
+   - :on-reset - Event map to dispatch when right-click resets values
    - :show-grid - Show grid background (default true)
    - :show-axes - Show coordinate axes (default true)
    - :show-labels - Show coordinate labels (default true)"
-  [{:keys [width height bounds points lines polygon on-point-drag
+  [{:keys [width height bounds points lines polygon on-point-drag on-reset
            show-grid show-axes show-labels]
     :or {width 300 height 300
          show-grid true show-axes true show-labels true}}]
@@ -303,33 +305,38 @@
                                                                       :y clamped-y)))
                                            (.consume e))))))))]
 
-       ;; Mouse pressed - start drag if over a point or inside polygon
+       ;; Mouse pressed - start drag if over a point or inside polygon, or reset on right-click
        (.setOnMousePressed
         canvas
         (reify EventHandler
           (handle [_ e]
-            (let [mx (.getX e)
-                  my (.getY e)
-                  hit-point (find-closest-point mx my (vals @points-map)
-                                                width height bounds 10)
-                  [wx wy] (canvas-to-world mx my width height bounds)]
-              (cond
-                hit-point
-                (swap! drag-state assoc
-                       :dragging? true
-                       :point-id hit-point
-                       :drag-type :point
-                       :drag-start-world [wx wy]
-                       :initial-points @points-map
-                       :keyboard-selected-id hit-point)
+            (if (= (.getButton e) MouseButton/SECONDARY)
+              ;; Right-click: dispatch reset event
+              (when on-reset
+                (events/dispatch! on-reset))
+              ;; Left-click: normal drag behavior
+              (let [mx (.getX e)
+                    my (.getY e)
+                    hit-point (find-closest-point mx my (vals @points-map)
+                                                  width height bounds 10)
+                    [wx wy] (canvas-to-world mx my width height bounds)]
+                (cond
+                  hit-point
+                  (swap! drag-state assoc
+                         :dragging? true
+                         :point-id hit-point
+                         :drag-type :point
+                         :drag-start-world [wx wy]
+                         :initial-points @points-map
+                         :keyboard-selected-id hit-point)
 
-                (and polygon (check-polygon-hit mx my polygon @points-map width height bounds))
-                (swap! drag-state assoc
-                       :dragging? true
-                       :drag-type :polygon
-                       :drag-start-world [wx wy]
-                       :initial-points @points-map))
-              (render!)))))
+                  (and polygon (check-polygon-hit mx my polygon @points-map width height bounds))
+                  (swap! drag-state assoc
+                         :dragging? true
+                         :drag-type :polygon
+                         :drag-start-world [wx wy]
+                         :initial-points @points-map))
+                (render!))))))
 
        ;; Mouse dragged - update point or polygon position
        (.setOnMouseDragged

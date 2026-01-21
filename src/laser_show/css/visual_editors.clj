@@ -140,4 +140,37 @@
        
        ".visual-editor-info-text"
        {:-fx-text-fill "#909090"
-        :-fx-font-size 9}})))
+        :-fx-font-size 9}
+       
+       
+       ;; Rotation Dial Editor
+       
+       
+       ".rotation-dial-value"
+       {:-fx-text-fill text-primary
+        :-fx-font-size 11
+        :-fx-font-family "'Consolas', monospace"}
+       
+       
+       ;; Scale Editor
+       
+       
+       ".scale-value-label"
+       {:-fx-text-fill text-primary
+        :-fx-font-size 10
+        :-fx-font-family "'Consolas', monospace"}
+       
+       ".scale-uniform-checkbox"
+       {:-fx-text-fill text-secondary
+        :-fx-font-size 10}
+       
+       ;; Checkbox tick mark color
+       ".scale-uniform-checkbox > .box > .mark"
+       {:-fx-background-color "white"}
+       
+       ;; Checkbox box style
+       ".scale-uniform-checkbox > .box"
+       {:-fx-background-color bg-interactive
+        :-fx-border-color "#606060"
+        :-fx-border-radius 2
+        :-fx-background-radius 2}})))

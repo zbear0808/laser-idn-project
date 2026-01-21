@@ -38,10 +38,12 @@
 (defn custom-param-renderer
   "Renders effect parameters with custom UI and mode toggle.
    
-   Supports three types of custom renderers:
+   Supports custom renderers:
    1. RGB Curves - Visual-only curve editor with R/G/B tabs
    2. Translate (spatial-2d) - Drag point to adjust X/Y position
    3. Corner Pin (corner-pin-2d) - Drag 4 corners for perspective mapping
+   4. Rotation (rotation-dial) - Circular dial for angle adjustment
+   5. Scale (scale-2d) - Rectangle with edge/corner handles for X/Y scaling
    
    Props:
    - :effect-def - Effect definition with :ui-hints {:renderer :spatial-2d ...}
@@ -167,6 +169,31 @@
                                      :param-specs (:parameters effect-def)
                                      :event-template (merge spatial-event-template spatial-event-keys)
                                      :fx-key canvas-fx-key}
+                      
+                      :rotation-dial {:fx/type custom-renderers/rotate-visual-editor
+                                     :fx/key canvas-fx-key
+                                     :current-params current-params
+                                     :param-specs (:parameters effect-def)
+                                     :event-template on-change-event
+                                     :reset-event {:event/type :chain/reset-params
+                                                   :domain (get spatial-event-keys :domain)
+                                                   :entity-key (get spatial-event-keys :entity-key)
+                                                   :effect-path effect-path}
+                                     :fx-key canvas-fx-key}
+                      
+                      :scale-2d {:fx/type custom-renderers/scale-visual-editor
+                                :fx/key canvas-fx-key
+                                :current-params current-params
+                                :param-specs (:parameters effect-def)
+                                :event-template {:event/type :chain/update-scale-params
+                                                 :domain (get spatial-event-keys :domain)
+                                                 :entity-key (get spatial-event-keys :entity-key)
+                                                 :effect-path effect-path}
+                                :reset-event {:event/type :chain/reset-params
+                                              :domain (get spatial-event-keys :domain)
+                                              :entity-key (get spatial-event-keys :entity-key)
+                                              :effect-path effect-path}
+                                :fx-key canvas-fx-key}
                       
                       ;; Fallback to standard params (with optional modulator support)
                       {:fx/type param-list-type

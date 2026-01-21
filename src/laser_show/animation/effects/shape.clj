@@ -47,7 +47,14 @@
                 :type :float
                 :default 1.0
                 :min -5.0
-                :max 5.0}]
+                :max 5.0}
+               {:key :uniform?
+                :label "Uniform Scale"
+                :type :boolean
+                :default false}]
+  :ui-hints {:renderer :scale-2d
+             :params [:x-scale :y-scale :uniform?]
+             :default-mode :visual}
   :apply-transducer scale-xf})
 
 
@@ -111,6 +118,9 @@
                 :default 0.0
                 :min -360.0
                 :max 360.0}]
+  :ui-hints {:renderer :rotation-dial
+             :params [:angle]
+             :default-mode :visual}
   :apply-transducer rotation-xf})
 
 
