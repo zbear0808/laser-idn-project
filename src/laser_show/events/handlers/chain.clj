@@ -775,26 +775,47 @@
     state))
 
 (defn handle-update-color-param
-  "Update a color parameter from ColorPicker's ActionEvent.
-   Extracts the color from the ColorPicker source and converts to RGB vector.
+  "Update color parameter(s) from ColorPicker's ActionEvent.
+   Extracts the color from the ColorPicker source and converts to normalized RGB.
+   
+   Two modes:
+   1. If :param-key provided: stores as single RGB vector at that key (legacy)
+   2. If no :param-key: updates :red, :green, :blue separately (for modulator support)
+   
+   NOTE: Uses NORMALIZED values (0.0-1.0), not 8-bit (0-255).
+   All color effects in laser-show use normalized color values internally.
    
    Parameters:
    - state: Application state
    - config: Configuration map with :items-path
-   - event: Map with :effect-path, :param-key, and :fx/event (ActionEvent)
+   - event: Map with :effect-path, optional :param-key, and :fx/event (ActionEvent)
    
    Returns: Updated state"
   [state config {:keys [effect-path param-key] :as event}]
   (let [action-event (:fx/event event)
         color-picker (.getSource action-event)
         color (.getValue color-picker)
-        rgb-value [(int (* 255 (.getRed color)))
-                   (int (* 255 (.getGreen color)))
-                   (int (* 255 (.getBlue color)))]
+        ;; Use normalized values (0.0-1.0) for color effects
+        red (.getRed color)
+        green (.getGreen color)
+        blue (.getBlue color)
         items-path (:items-path config)
         items-vec (vec (get-in state items-path []))
-        updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) rgb-value)]
-    (assoc-in state items-path updated-items)))
+        params-path (conj (vec effect-path) :params)]
+    (log/debug "handle-update-color-param: effect-path=" effect-path
+               "param-key=" param-key
+               "rgb=" [red green blue])
+    (if param-key
+      ;; Legacy mode: single param with RGB vector
+      (let [updated-items (assoc-in items-vec (conj params-path param-key) [red green blue])]
+        (assoc-in state items-path updated-items))
+      ;; New mode: update :red, :green, :blue separately (for modulator support)
+      (let [updated-items (-> items-vec
+                              (assoc-in (conj params-path :red) red)
+                              (assoc-in (conj params-path :green) green)
+                              (assoc-in (conj params-path :blue) blue))]
+        (log/debug "Updated RGB params separately - red:" red "green:" green "blue:" blue)
+        (assoc-in state items-path updated-items)))))
 
 
 ;; Phase 3: Effect CRUD Handlers

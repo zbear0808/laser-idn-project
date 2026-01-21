@@ -354,19 +354,29 @@
    - :current-params - Map of param-key -> current-value (can include modulator configs)
    - :on-change-event - Event template for static value changes
    - :on-text-event - Event template for text field changes
+   - :on-color-event - Event template for color picker changes (optional, auto-derived if not provided)
    - :modulator-event-base - Base event template for modulator events
    - :label-width - Optional label width
    - :spacing - Optional spacing between controls"
-  [{:keys [params-map current-params on-change-event on-text-event modulator-event-base label-width spacing]}]
-  {:fx/type :v-box
-   :spacing (or spacing 6)
-   :children (vec
-              (for [[param-key param-spec] params-map]
-                {:fx/type modulatable-param-control
-                 :param-key param-key
-                 :param-spec param-spec
-                 :current-value (get current-params param-key)
-                 :on-change-event on-change-event
-                 :on-text-event on-text-event
-                 :modulator-event-base modulator-event-base
-                 :label-width label-width}))})
+  [{:keys [params-map current-params on-change-event on-text-event on-color-event modulator-event-base label-width spacing]}]
+  ;; Auto-derive color event from on-change-event if not explicitly provided
+  ;; Color pickers use ActionEvent, so we need :chain/update-color-param handler
+  (let [color-event (or on-color-event
+                        (when on-change-event
+                          (assoc on-change-event :event/type :chain/update-color-param)))]
+    {:fx/type :v-box
+     :spacing (or spacing 6)
+     :children (vec
+                (for [[param-key param-spec] params-map]
+                  ;; Use color event for color params (ColorPicker fires ActionEvent, not color value)
+                  (let [change-evt (if (= :color (:type param-spec))
+                                     color-event
+                                     on-change-event)]
+                    {:fx/type modulatable-param-control
+                     :param-key param-key
+                     :param-spec param-spec
+                     :current-value (get current-params param-key)
+                     :on-change-event change-evt
+                     :on-text-event on-text-event
+                     :modulator-event-base modulator-event-base
+                     :label-width label-width})))}))

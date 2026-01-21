@@ -60,6 +60,8 @@
   :name "Hue Shift"
   :category :color
   :timing :static
+  :ui-hints {:renderer :hue-shift-strip
+             :default-mode :visual}
   :parameters [{:key :degrees
                 :label "Degrees"
                 :type :float
@@ -195,6 +197,8 @@
   :name "Set Hue"
   :category :color
   :timing :static
+  :ui-hints {:renderer :hue-slider
+             :default-mode :visual}
   :parameters [{:key :hue
                 :label "Hue"
                 :type :float
@@ -284,27 +288,25 @@
 
 
 (defn- set-color-xf [time-ms bpm params ctx]
-  ;; Check if any params use per-point modulators
+  ;; Check if any params use per-point modulators (for position-based color gradients)
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - enables position-based color gradients
+    ;; Per-point path - supports position-based modulators on individual color channels
     (map (fn [{:keys [x y idx count] :as pt}]
            (if (common/blanked? pt)
-             pt  ;; Skip blanked points
+             pt
              (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                   ;; All values are already normalized 0.0-1.0
                    red (:red resolved)
                    green (:green resolved)
                    blue (:blue resolved)]
                (assoc pt :r red :g green :b blue)))))
-    ;; Global path
+    ;; Global path - no per-point modulators
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          ;; All values are already normalized 0.0-1.0
           red (:red resolved)
           green (:green resolved)
           blue (:blue resolved)]
       (map (fn [pt]
              (if (common/blanked? pt)
-               pt  ;; Skip blanked points
+               pt
                (assoc pt :r red :g green :b blue)))))))
 
 (effects/register-effect!
@@ -312,6 +314,8 @@
   :name "Set Color"
   :category :color
   :timing :static
+  :ui-hints {:renderer :set-color-picker
+             :default-mode :visual}
   :parameters [{:key :red
                 :label "Red"
                 :type :float

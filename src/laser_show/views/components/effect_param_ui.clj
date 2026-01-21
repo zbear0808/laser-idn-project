@@ -195,6 +195,24 @@
                                               :effect-path effect-path}
                                 :fx-key canvas-fx-key}
                       
+                      :hue-slider {:fx/type custom-renderers/hue-visual-editor
+                                  :fx/key canvas-fx-key
+                                  :current-params current-params
+                                  :event-template on-change-event
+                                  :fx-key canvas-fx-key}
+                      
+                      :hue-shift-strip {:fx/type custom-renderers/hue-shift-strip-visual-editor
+                                       :fx/key canvas-fx-key
+                                       :current-params current-params
+                                       :event-template on-change-event
+                                       :fx-key canvas-fx-key}
+                      
+                      :set-color-picker {:fx/type custom-renderers/set-color-picker-visual-editor
+                                        :fx/key canvas-fx-key
+                                        :current-params current-params
+                                        :event-template on-change-event
+                                        :fx-key canvas-fx-key}
+                      
                       ;; Fallback to standard params (with optional modulator support)
                       {:fx/type param-list-type
                        :params-map params-map
