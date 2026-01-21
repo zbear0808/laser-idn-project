@@ -190,6 +190,7 @@ jobs:
             --java-options "--enable-native-access=ALL-UNNAMED"
             --java-options "-XX:+UseZGC"
             --java-options "-XX:NewRatio=1"
+            --java-options "-XX:CompileThreshold=500"
             --verbose
           )
           

@@ -62,22 +62,25 @@
    v: value/brightness [0, 1]
    Returns: [r g b] with values in [0.0, 1.0]"
   [h s v]
-  (let [h (double (mod h 360))
-        s (double s)
-        v (double v)
-        c (* v s)
-        x (* c (- 1.0 (Math/abs (- (mod (/ h 60.0) 2.0) 1.0))))
-        m (- v c)
+  (let [h' (double (mod (double h) 360.0))
+        s' (double s)
+        v' (double v)
+        c (* v' s')
+        x (* c (- 1.0 (Math/abs (- (double (mod (/ h' 60.0) 2.0)) 1.0))))
+        m (- v' c)
         [r' g' b'] (cond
-                     (< h 60.0)  [c x 0.0]
-                     (< h 120.0) [x c 0.0]
-                     (< h 180.0) [0.0 c x]
-                     (< h 240.0) [0.0 x c]
-                     (< h 300.0) [x 0.0 c]
-                     :else       [c 0.0 x])]
-    [(+ r' m)
-     (+ g' m)
-     (+ b' m)]))
+                     (< h' 60.0)  [c x 0.0]
+                     (< h' 120.0) [x c 0.0]
+                     (< h' 180.0) [0.0 c x]
+                     (< h' 240.0) [0.0 x c]
+                     (< h' 300.0) [x 0.0 c]
+                     :else        [c 0.0 x])
+        r'' (double r')
+        g'' (double g')
+        b'' (double b')]
+    [(+ r'' m)
+     (+ g'' m)
+     (+ b'' m)]))
 
 (defn normalized->hsv
   "Convert normalized RGB to HSV.
@@ -90,14 +93,14 @@
         cmax (max r' g' b')
         cmin (min r' g' b')
         delta (- cmax cmin)
-        h (cond
-            (zero? delta) 0
-            (= cmax r') (* 60 (mod (/ (- g' b') delta) 6))
-            (= cmax g') (* 60 (+ (/ (- b' r') delta) 2))
-            :else (* 60 (+ (/ (- r' g') delta) 4)))
-        s (if (zero? cmax) 0 (/ delta cmax))
+        h (double (cond
+                    (zero? delta) 0.0
+                    (= cmax r') (* 60.0 (double (mod (/ (- g' b') delta) 6.0)))
+                    (= cmax g') (* 60.0 (+ (/ (- b' r') delta) 2.0))
+                    :else (* 60.0 (+ (/ (- r' g') delta) 4.0))))
+        s (if (zero? cmax) 0.0 (/ delta cmax))
         v cmax]
-    [(if (neg? h) (+ h 360) h) s v]))
+    [(if (neg? h) (+ h 360.0) h) s v]))
 
 
 
@@ -110,7 +113,7 @@
   "Get a rainbow color based on position (0.0 to 1.0).
    Returns normalized [r g b] vector (0.0-1.0)."
   [position]
-  (hsv->normalized (* position 360) 1.0 1.0))
+  (hsv->normalized (* (double position) 360.0) 1.0 1.0))
 
 
 ;;; Color Interpolation (Normalized)
@@ -121,6 +124,9 @@
   "Linear interpolation between two normalized colors.
    t should be in [0, 1]."
   [[r1 g1 b1] [r2 g2 b2] t]
-  [(+ r1 (* (- r2 r1) t))
-   (+ g1 (* (- g2 g1) t))
-   (+ b1 (* (- b2 b1) t))])
+  (let [r1' (double r1) g1' (double g1) b1' (double b1)
+        r2' (double r2) g2' (double g2) b2' (double b2)
+        t' (double t)]
+    [(+ r1' (* (- r2' r1') t'))
+     (+ g1' (* (- g2' g1') t'))
+     (+ b1' (* (- b2' b1') t'))]))

@@ -71,7 +71,7 @@
    :accumulated-beats (or accumulated-beats 0.0)
    :accumulated-ms (or accumulated-ms 0.0)
    :phase-offset (or phase-offset 0.0)
-   :effective-beats (+ (or accumulated-beats 0.0) (or phase-offset 0.0))})
+   :effective-beats (+ (double (or accumulated-beats 0.0)) (double (or phase-offset 0.0)))})
 
 
 
@@ -103,10 +103,13 @@
    Returns: Progress value clamped to 0.0-1.0"
   [time-ms trigger-time duration time-unit bpm]
   (let [start-time (double (or trigger-time 0.0))
-        elapsed (- time-ms start-time)
-        duration-ms (if (= time-unit :seconds)
-                      (* duration 1000.0)
-                      (time/beats->ms duration bpm))]
+        time-ms' (double (or time-ms 0))
+        elapsed (- time-ms' start-time)
+        duration' (double (or duration 1.0))
+        bpm' (double (or bpm 120.0))
+        duration-ms (double (if (= time-unit :seconds)
+                              (* duration' 1000.0)
+                              (time/beats->ms duration' bpm')))]
     (if (pos? duration-ms)
       (u/clamp (/ elapsed duration-ms) 0.0 1.0)
       1.0)))
@@ -150,11 +153,11 @@
        ;; Once mode: use raw accumulated-beats (no phase correction)
        ;; for predictable one-shot behavior from trigger
        (let [effective-trigger-time (or (resolve-trigger-time trigger-override) trigger-time)
-             progress (calculate-once-progress (or time-ms 0) effective-trigger-time duration time-unit bpm)]
+             progress (double (calculate-once-progress (or time-ms 0) effective-trigger-time duration time-unit bpm))]
          (+ (* progress frequency) phase-param))
        ;; Loop mode: use effective-beats (with phase correction for tap resync)
        ;; Falls back to calculating from time-ms/bpm for backward compatibility
-       (let [beats (get-beats-from-context context)]
+       (let [beats (double (get-beats-from-context context))]
          (+ (* beats frequency) phase-param))))))
 
 
@@ -206,7 +209,7 @@
   (double
    (or effective-beats
        accumulated-beats
-       (when (and time-ms bpm (pos? bpm))
+       (when (and time-ms bpm (pos? (double bpm)))
          (time/ms->beats time-ms bpm))
        0.0)))
 
@@ -235,7 +238,7 @@
     ;; Once mode: complete once-periods cycles then hold at final position
     (let [num-cycles (double (or once-periods 1.0))
           total-duration (* (double period) num-cycles)
-          progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
+          progress (double (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))
           ;; Calculate total phase progression (0 to num-cycles)
           total-phase (+ (* progress num-cycles) (double phase))
           ;; Extract cycle position (0.0-1.0) for oscillate
@@ -260,7 +263,7 @@
   (if (= loop-mode :once)
     (let [num-cycles (double (or once-periods 1.0))
           total-duration (* (double period) num-cycles)
-          progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
+          progress (double (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))
           ;; Calculate total phase progression (0 to num-cycles)
           total-phase (+ (* progress num-cycles) (double phase))
           ;; Extract cycle position (0.0-1.0) for oscillate
@@ -284,19 +287,19 @@
   (if (= loop-mode :once)
     (let [num-cycles (double (or once-periods 1.0))
           total-duration (* (double period) num-cycles)
-          progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
+          progress (double (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))
           ;; Calculate total phase progression (0 to num-cycles)
           total-phase (+ (* progress num-cycles) (double phase))
           ;; Extract cycle position (0.0-1.0) for oscillate
           ;; If we're at the end of a cycle (phase close to integer > 0), use 0.9999
-          cycle-phase (let [raw-phase (mod total-phase 1.0)]
+          cycle-phase (let [raw-phase (double (mod total-phase 1.0))]
                         (if (and (< raw-phase 0.001) (>= total-phase 0.999))
                           0.9999
                           raw-phase))
           ;; If we've completed all cycles, hold at the final position
           final-phase (if (>= progress 1.0)
                         ;; Calculate exact final phase, use 0.9999 if it wraps to 0
-                        (let [end-phase (mod (+ num-cycles (double phase)) 1.0)]
+                        (let [end-phase (double (mod (+ num-cycles (double phase)) 1.0))]
                           (if (< end-phase 0.001) 0.9999 end-phase))
                         cycle-phase)]
       (time/oscillate (double min) (double max) final-phase :sawtooth))
@@ -311,21 +314,21 @@
     :or {min 0.0 max 1.0 period 1.0 duty-cycle 0.5 phase 0.0 loop-mode :loop once-periods 1.0 time-unit :beats}
     :as config}
    {:keys [time-ms bpm trigger-time] :as context}]
-  (let [square-fn (fn [p]
-                    (let [cycle-phase (mod p 1.0)]
+  (let [square-fn (fn [^double p]
+                    (let [cycle-phase (double (mod p 1.0))]
                       (if (< cycle-phase (double duty-cycle))
                         (double max)
                         (double min))))]
     (if (= loop-mode :once)
       (let [num-cycles (double (or once-periods 1.0))
             total-duration (* (double period) num-cycles)
-            progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
+            progress (double (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))
             ;; Calculate total phase progression (0 to num-cycles)
             total-phase (+ (* progress num-cycles) (double phase))
             ;; If we've completed all cycles, hold at the final position
             final-phase (if (>= progress 1.0)
                           ;; Calculate exact final phase, use 0.9999 if it wraps to 0
-                          (let [end-phase (mod (+ num-cycles (double phase)) 1.0)]
+                          (let [end-phase (double (mod (+ num-cycles (double phase)) 1.0))]
                             (if (< end-phase 0.001) 0.9999 end-phase))
                           ;; During animation, use total_phase directly (square-fn will mod it)
                           total-phase)]
@@ -350,7 +353,7 @@
     :or {min 0.0 max 1.0 frequency-hz 1.0 duty-cycle 0.5}}
    context]
   (let [ms (get-ms-from-context context)
-        p (mod (* ms (double frequency-hz) 0.001) 1.0)]
+        p (double (mod (* ms (double frequency-hz) 0.001) 1.0))]
     (if (< p (double duty-cycle))
       (double max)
       (double min))))
@@ -383,7 +386,7 @@
     :or {min 0.0 max 1.0 decay-type :linear}}
    context]
   (let [beats (get-beats-from-context context)
-        phase (mod beats 1.0)
+        phase (double (mod beats 1.0))
         start-v (double max)
         end-v (double min)]
     (case decay-type
@@ -401,8 +404,8 @@
   [{:keys [min max period changes-per-beat loop-mode once-periods time-unit]
     :or {min 0.0 max 1.0 period 1.0 changes-per-beat 1.0 loop-mode :loop once-periods 1.0 time-unit :beats}}
    {:keys [time-ms bpm trigger-time] :as context}]
-  (let [random-fn (fn [p]
-                    (let [changes-in-period (double (or changes-per-beat (/ 1.0 period)))
+  (let [random-fn (fn [^double p]
+                    (let [changes-in-period (double (or changes-per-beat (/ 1.0 (double period))))
                           seed (long (* p changes-in-period))
                           rng (java.util.Random. seed)
                           t (.nextDouble ^java.util.Random rng)
@@ -412,7 +415,7 @@
       ;; Once mode: complete once-periods cycles then hold at final position
       (let [num-cycles (double (or once-periods 1.0))
             total-duration (* (double period) num-cycles)
-            progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))
+            progress (double (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))
             ;; Calculate total phase progression (0 to num-cycles)
             total-phase (* progress num-cycles)
             ;; If we've completed all cycles, hold at the final position
@@ -444,14 +447,14 @@
    {:keys [time-ms bpm trigger-time] :as context}]
   (let [parsed-values (parse-step-values values)
         num-values (count parsed-values)
-        step-fn (fn [p]
+        step-fn (fn [^double p]
                   (let [idx (mod (long (* p (double steps-per-beat))) num-values)]
                     (nth parsed-values idx)))]
     (if (= loop-mode :once)
       ;; Once mode: complete once-periods cycles then hold at final position
       (let [num-cycles (double (or once-periods 1.0))
             total-duration (* (double period) num-cycles)
-            progress (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0))]
+            progress (double (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))]
         (if (>= progress 1.0)
           ;; Completed: return the last value
           (last parsed-values)
@@ -491,10 +494,10 @@
   [{:keys [min max wrap?]
     :or {min 0.0 max 1.0 wrap? false}}
    {:keys [point-index point-count]}]
-  (if (and point-index point-count (pos? point-count))
+  (if (and point-index point-count (pos? (double point-count)))
     (let [t (/ (double point-index) (clojure.core/max 1.0 (dec (double point-count))))
           range-v (- (double max) (double min))]
-      (+ (double min) (* (if wrap? (mod t 1.0) t) range-v)))
+      (+ (double min) (* (if wrap? (double (mod t 1.0)) t) range-v)))
     (double min)))
 
 (defn- eval-point-wave
@@ -502,7 +505,7 @@
   [{:keys [min max cycles wave-type]
     :or {min 0.0 max 1.0 cycles 1.0 wave-type :sine}}
    {:keys [point-index point-count]}]
-  (if (and point-index point-count (pos? point-count))
+  (if (and point-index point-count (pos? (double point-count)))
     (let [t (/ (double point-index) (clojure.core/max 1.0 (double point-count)))
           phase (* t (double cycles))]
       (time/oscillate (double min) (double max) phase wave-type))
@@ -578,8 +581,8 @@
    {:keys [x y] :as context}]
   (if (and x y)
     (let [pos-val (case axis :x (double x) :y (double y))
-          beats (get-beats-from-context context)
-          time-offset (* (mod beats 1.0) (double speed))
+          beats (double (get-beats-from-context context))
+          time-offset (* (double (mod beats 1.0)) (double speed))
           phase (+ pos-val time-offset)]
       (time/oscillate (double min) (double max) phase wave-type))
     (double min)))
@@ -598,7 +601,7 @@
                                              (* (double y) (double y))))
                        :angle (/ (+ (Math/atan2 (double y) (double x)) Math/PI)
                                  (* 2.0 Math/PI)))
-            time-offset (mod (* (/ ms 1000.0) (double speed)) 360.0)]
+            time-offset (double (mod (* (/ ms 1000.0) (double speed)) 360.0))]
         (mod (+ (* position 360.0) time-offset) 360.0))
       0.0)))
 
@@ -702,14 +705,15 @@
       (= n 1) [(first sorted-keyframes) (first sorted-keyframes)]
       
       :else
-      (let [;; Find first keyframe >= phase
+      (let [phase' (double phase)
+            ;; Find first keyframe >= phase
             after-idx (->> sorted-keyframes
                           (map-indexed vector)
-                          (filter (fn [[_ kf]] (>= (:position kf) phase)))
+                          (filter (fn [[_ kf]] (>= (double (:position kf)) phase')))
                           first
                           first)]
         (if after-idx
-          (let [before-idx (if (zero? after-idx) (dec n) (dec after-idx))]
+          (let [before-idx (if (zero? (long after-idx)) (dec n) (dec (long after-idx)))]
             [(nth sorted-keyframes before-idx)
              (nth sorted-keyframes after-idx)])
           ;; Phase is past all keyframes - wrap to first
@@ -780,10 +784,10 @@
           beats (get-beats-from-context context)
           phase (if (= loop-mode :once)
                   (let [total-duration (double period)
-                        progress (calculate-once-progress (or time-ms 0) trigger-time
-                                                          total-duration (or time-unit :beats)
-                                                          (or bpm 120.0))]
-                    (min progress 1.0))
+                        progress (double (calculate-once-progress (or time-ms 0) trigger-time
+                                                                   total-duration (or time-unit :beats)
+                                                                   (or bpm 120.0)))]
+                    (clojure.core/min progress 1.0))
                   (mod (/ beats (double period)) 1.0))
           
           ;; Find surrounding keyframes

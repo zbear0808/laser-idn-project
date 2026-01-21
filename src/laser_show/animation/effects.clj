@@ -215,7 +215,7 @@
   (let [idx (volatile! -1)]
     (map (fn [pt]
            (assoc pt
-             :idx (vswap! idx inc)
+             :idx (vswap! idx (fn [^long x] (unchecked-inc x)))
              :count point-count)))))
 
 
