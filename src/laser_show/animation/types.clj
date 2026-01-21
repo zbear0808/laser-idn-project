@@ -39,6 +39,8 @@
    - There is no separate 'intensity' or 'blanking' field
    - Use `blanked-point` to create invisible points for beam repositioning")
 
+;; Enable warnings for performance debugging
+(set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
 ;; Point field indices
@@ -64,15 +66,25 @@
 
 (defmacro aget2d
   "Fast get from 2D double array. frame[i][j]
-   Type-hints the intermediate 1D array access to avoid reflection."
+   Type-hints both the 2D array and intermediate 1D array access to avoid reflection.
+   Casts indices to int for primitive array access."
   [a i j]
-  `(aget ~(with-meta `(aget ~a ~i) {:tag "[D"}) ~j))
+  (let [arr-sym (gensym "arr")
+        row-sym (with-meta (gensym "row") {:tag 'doubles})]
+    `(let [~(with-meta arr-sym {:tag "[[D"}) ~a
+           ~row-sym (aget ~arr-sym (int ~i))]
+       (aget ~row-sym (int ~j)))))
 
 (defmacro aset2d
   "Fast set in 2D double array. frame[i][j] = v
-   Type-hints the intermediate 1D array access to avoid reflection."
+   Type-hints both the 2D array and intermediate 1D array access to avoid reflection.
+   Casts indices to int for primitive array access."
   [a i j v]
-  `(aset ~(with-meta `(aget ~a ~i) {:tag "[D"}) ~j (double ~v)))
+  (let [arr-sym (gensym "arr")
+        row-sym (with-meta (gensym "row") {:tag 'doubles})]
+    `(let [~(with-meta arr-sym {:tag "[[D"}) ~a
+           ~row-sym (aget ~arr-sym (int ~i))]
+       (aset ~row-sym (int ~j) (double ~v)))))
 
 ;; ========== Point Operations ==========
 

@@ -39,7 +39,7 @@
   "Generate a triangle wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0).
    Starts at peak (1.0) when phase=0 for intuitive visual behavior."
   ^double [^double phase]
-  (let [p (mod (+ phase 0.5) 1.0)]  ;; Shift by 0.5 to start at peak
+  (let [p (double (mod (+ phase 0.5) 1.0))]  ;; Cast mod result to primitive double
     (if (< p 0.5)
       (- (* 4.0 p) 1.0)
       (- 3.0 (* 4.0 p)))))
@@ -54,14 +54,14 @@
   "Generate a normalized sawtooth wave value (0.0 to 1.0) at the given phase.
    Starts at peak (1.0) when phase=0, ramps down to 0.0."
   ^double [^double phase]
-  (- 1.0 (mod phase 1.0)))
+  (- 1.0 (double (mod phase 1.0))))
 
 (defn square-wave-normalized
   "Generate a normalized square wave value (0.0 or 1.0) at the given phase."
   (^double [^double phase]
    (square-wave-normalized phase 0.5))
   (^double [^double phase ^double duty-cycle]
-   (if (< (mod phase 1.0) duty-cycle) 1.0 0.0)))
+   (if (< (double (mod phase 1.0)) duty-cycle) 1.0 0.0)))
 
 
 ;; Value Oscillation

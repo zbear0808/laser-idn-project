@@ -5,6 +5,8 @@
    All colors use NORMALIZED VALUES (0.0 to 1.0) for maximum precision."
   (:require [laser-show.animation.types :as t]))
 
+;; Enable warnings for performance debugging
+(set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
 ;; Geometry Constants
