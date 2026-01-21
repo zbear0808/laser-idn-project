@@ -36,14 +36,16 @@
 (defn- intensity-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - enables spatial brightness patterns!
-    (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                 amount (:amount resolved)]
-             (assoc pt
-               :r (common/clamp-normalized (* r amount))
-               :g (common/clamp-normalized (* g amount))
-               :b (common/clamp-normalized (* b amount))))))
+    ;; Per-point path - enables spatial brightness patterns! Use map-indexed to get idx
+    (let [point-count (:point-count ctx)]
+      (map-indexed
+       (fn [idx {:keys [x y r g b] :as pt}]
+         (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+               amount (:amount resolved)]
+           (assoc pt
+             :r (common/clamp-normalized (* r amount))
+             :g (common/clamp-normalized (* g amount))
+             :b (common/clamp-normalized (* b amount)))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           amount (:amount resolved)]
@@ -96,15 +98,17 @@
 (defn- threshold-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path
-    (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                 ;; Threshold already normalized 0.0-1.0
-                 threshold (:threshold resolved)
-                 max-val (max r g b)]
-             (if (< max-val threshold)
-               (assoc pt :r 0.0 :g 0.0 :b 0.0)
-               pt))))
+    ;; Per-point path - use map-indexed to get idx
+    (let [point-count (:point-count ctx)]
+      (map-indexed
+       (fn [idx {:keys [x y r g b] :as pt}]
+         (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+               ;; Threshold already normalized 0.0-1.0
+               threshold (:threshold resolved)
+               max-val (max r g b)]
+           (if (< max-val threshold)
+             (assoc pt :r 0.0 :g 0.0 :b 0.0)
+             pt)))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           ;; Threshold already normalized 0.0-1.0

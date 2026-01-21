@@ -24,9 +24,10 @@
     :r double (0.0 to 1.0) - normalized red
     :g double (0.0 to 1.0) - normalized green
     :b double (0.0 to 1.0) - normalized blue
-    :idx int (point index)
-    :count int (total points)
-    :raw map (original LaserPoint for pass-through)}"
+    :raw map (original LaserPoint for pass-through)}
+   
+   Note: Point index is obtained via map-indexed in per-point effect paths,
+   and point-count is available in ctx parameter."
   (:require
    [clojure.tools.logging :as log]
    [laser-show.animation.chains :as chains]
@@ -208,15 +209,6 @@
    Uses `keep` to support point deletion (nil -> filtered out)."
   (keep denormalize-point))
 
-(defn add-index-xf
-  "Returns a transducer that adds :idx and :count to each point.
-   Uses volatile for efficient stateful transformation."
-  [point-count]
-  (let [idx (volatile! -1)]
-    (map (fn [pt]
-           (assoc pt
-             :idx (vswap! idx (fn [^long x] (unchecked-inc x)))
-             :count point-count)))))
 
 
 ;; Effect Transducer Composition
@@ -328,12 +320,11 @@
            frame-ctx {:point-count point-count
                       :timing-ctx timing-ctx}
            
-           ;; Compose: normalize -> add-index -> effects... -> denormalize
+           ;; Compose: normalize -> effects... -> denormalize
            effect-xf (compose-effect-transducers chain time-ms bpm trigger-time frame-ctx)
            full-xf (comp normalize-xf
-                        (add-index-xf point-count)
-                        effect-xf
-                        denormalize-xf)]
+                       effect-xf
+                       denormalize-xf)]
        (into [] full-xf frame)))))
 
 

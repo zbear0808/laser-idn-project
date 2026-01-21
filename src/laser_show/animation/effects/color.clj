@@ -34,16 +34,18 @@
 (defn- hue-shift-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path
-    (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (if (common/blanked? pt)
-             pt  ;; Skip blanked points
-             (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                   degrees (:degrees resolved)
-                   [h s v] (colors/normalized->hsv r g b)
-                   new-h (mod (+ h degrees) 360)
-                   [nr ng nb] (colors/hsv->normalized new-h s v)]
-               (assoc pt :r nr :g ng :b nb)))))
+    ;; Per-point path - use map-indexed to get idx
+    (let [point-count (:point-count ctx)]
+      (map-indexed
+       (fn [idx {:keys [x y r g b] :as pt}]
+         (if (common/blanked? pt)
+           pt  ;; Skip blanked points
+           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+                 degrees (:degrees resolved)
+                 [h s v] (colors/normalized->hsv r g b)
+                 new-h (mod (+ h degrees) 360)
+                 [nr ng nb] (colors/hsv->normalized new-h s v)]
+             (assoc pt :r nr :g ng :b nb))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           degrees (:degrees resolved)]
@@ -77,16 +79,18 @@
 (defn- saturation-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path
-    (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (if (common/blanked? pt)
-             pt  ;; Skip blanked points
-             (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                   amount (:amount resolved)
-                   [h s v] (colors/normalized->hsv r g b)
-                   new-s (common/clamp-normalized (* s amount))
-                   [nr ng nb] (colors/hsv->normalized h new-s v)]
-               (assoc pt :r nr :g ng :b nb)))))
+    ;; Per-point path - use map-indexed to get idx
+    (let [point-count (:point-count ctx)]
+      (map-indexed
+       (fn [idx {:keys [x y r g b] :as pt}]
+         (if (common/blanked? pt)
+           pt  ;; Skip blanked points
+           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+                 amount (:amount resolved)
+                 [h s v] (colors/normalized->hsv r g b)
+                 new-s (common/clamp-normalized (* s amount))
+                 [nr ng nb] (colors/hsv->normalized h new-s v)]
+             (assoc pt :r nr :g ng :b nb))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           amount (:amount resolved)]
@@ -118,16 +122,18 @@
 (defn- color-filter-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path
-    (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                 r-mult (:r-mult resolved)
-                 g-mult (:g-mult resolved)
-                 b-mult (:b-mult resolved)]
-             (assoc pt
-               :r (common/clamp-normalized (* r r-mult))
-               :g (common/clamp-normalized (* g g-mult))
-               :b (common/clamp-normalized (* b b-mult))))))
+    ;; Per-point path - use map-indexed to get idx
+    (let [point-count (:point-count ctx)]
+      (map-indexed
+       (fn [idx {:keys [x y r g b] :as pt}]
+         (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+               r-mult (:r-mult resolved)
+               g-mult (:g-mult resolved)
+               b-mult (:b-mult resolved)]
+           (assoc pt
+             :r (common/clamp-normalized (* r r-mult))
+             :g (common/clamp-normalized (* g g-mult))
+             :b (common/clamp-normalized (* b b-mult)))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           r-mult (:r-mult resolved)
@@ -171,16 +177,18 @@
 (defn- set-hue-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - enables rainbow gradients!
-    (map (fn [{:keys [x y r g b idx count] :as pt}]
-           (let [[_h s v] (colors/normalized->hsv r g b)]
-             ;; Only apply to non-black points with some saturation
-             (if (and (pos? v) (not (common/blanked? pt)))
-               (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                     hue (:hue resolved)
-                     [nr ng nb] (colors/hsv->normalized hue s v)]
-                 (assoc pt :r nr :g ng :b nb))
-               pt))))
+    ;; Per-point path - enables rainbow gradients! Use map-indexed to get idx
+    (let [point-count (:point-count ctx)]
+      (map-indexed
+       (fn [idx {:keys [x y r g b] :as pt}]
+         (let [[_h s v] (colors/normalized->hsv r g b)]
+           ;; Only apply to non-black points with some saturation
+           (if (and (pos? v) (not (common/blanked? pt)))
+             (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+                   hue (:hue resolved)
+                   [nr ng nb] (colors/hsv->normalized hue s v)]
+               (assoc pt :r nr :g ng :b nb))
+             pt)))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           hue (:hue resolved)]
@@ -291,14 +299,17 @@
   ;; Check if any params use per-point modulators (for position-based color gradients)
   (if (mod/any-param-requires-per-point? params)
     ;; Per-point path - supports position-based modulators on individual color channels
-    (map (fn [{:keys [x y idx count] :as pt}]
-           (if (common/blanked? pt)
-             pt
-             (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx count (:timing-ctx ctx))
-                   red (:red resolved)
-                   green (:green resolved)
-                   blue (:blue resolved)]
-               (assoc pt :r red :g green :b blue)))))
+    ;; Use map-indexed to get idx
+    (let [point-count (:point-count ctx)]
+      (map-indexed
+       (fn [idx {:keys [x y] :as pt}]
+         (if (common/blanked? pt)
+           pt
+           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+                 red (:red resolved)
+                 green (:green resolved)
+                 blue (:blue resolved)]
+             (assoc pt :r red :g green :b blue))))))
     ;; Global path - no per-point modulators
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           red (:red resolved)

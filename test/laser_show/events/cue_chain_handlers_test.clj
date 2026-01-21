@@ -7,6 +7,7 @@
    [clojure.test :refer [deftest is testing]]
    [laser-show.events.handlers.cue-chain :as cue-chain]
    [laser-show.events.handlers.chain :as chain]
+   [laser-show.events.handlers.list :as list]
    [laser-show.state.domains :refer [build-initial-state]]))
 
 
@@ -310,12 +311,18 @@
                          :ui {:dialogs {:cue-chain-editor {:open? false}}}
                          :project {:dirty? false}}}
           result (cue-chain/handle event)
-          items (get-in result [:state :chains :cue-chains [0 0] :items])]
+          items (get-in result [:state :chains :cue-chains [0 0] :items])
+          ;; Process the dispatch event to apply selection
+          dispatch-result (when-let [dispatch-event (:dispatch result)]
+                            (list/handle (assoc dispatch-event :state (:state result))))
+          final-state (if dispatch-result (:state dispatch-result) (:state result))
+          new-item-id (:id (first items))
+          selected-ids (get-in final-state [:list-ui [:cue-chain 0 0] :selected-ids])]
       (is (= 1 (count items)))
       (is (= :circle (:preset-id (first items))))
       (is (true? (get-in result [:state :project :dirty?])))
-      ;; Should auto-select the new preset
-      (is (= #{[0]} (get-in result [:state :ui :dialogs :cue-chain-editor :selected-paths]))))))
+      ;; Should auto-select the new preset (ID-based selection in list-ui)
+      (is (= #{new-item-id} selected-ids)))))
 
 (deftest handle-add-preset-to-existing-cell
   (testing "Adding preset to cell with content appends to list"
@@ -325,12 +332,18 @@
                  :preset-id :wave
                  :state sample-state-with-item}
           result (cue-chain/handle event)
-          items (get-in result [:state :chains :cue-chains [0 0] :items])]
+          items (get-in result [:state :chains :cue-chains [0 0] :items])
+          ;; Process the dispatch event to apply selection
+          dispatch-result (when-let [dispatch-event (:dispatch result)]
+                            (list/handle (assoc dispatch-event :state (:state result))))
+          final-state (if dispatch-result (:state dispatch-result) (:state result))
+          new-item-id (:id (second items))
+          selected-ids (get-in final-state [:list-ui [:cue-chain 0 0] :selected-ids])]
       (is (= 2 (count items)))
       (is (= :circle (:preset-id (first items))))
       (is (= :wave (:preset-id (second items))))
-      ;; Should auto-select the newly added preset at index 1
-      (is (= #{[1]} (get-in result [:state :ui :dialogs :cue-chain-editor :selected-paths]))))))
+      ;; Should auto-select the newly added preset (ID-based selection in list-ui)
+      (is (= #{new-item-id} selected-ids)))))
 
 
 ;; Remove Item Tests (using cue-chain/handle with :cue-chain/set-item-effects)
