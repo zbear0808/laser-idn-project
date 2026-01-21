@@ -3,10 +3,14 @@
    These are static effects applied at the projector level to compensate
    for hardware differences between laser projectors.
    
+   Points are 5-element vectors: [x y r g b]
+   - x, y: position in [-1.0, 1.0]
+   - r, g, b: color intensity in [0.0, 1.0]
+   
    NOTE: All curve points use NORMALIZED values (0.0-1.0)."
   (:require [laser-show.animation.effects :as effects]
-            [laser-show.animation.effects.common :as common]
-            [laser-show.animation.effects.curves :as curves]))
+            [laser-show.animation.effects.curves :as curves]
+            [laser-show.animation.types :as t]))
 
 (defn- rgb-curves-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
@@ -18,15 +22,16 @@
         r-lut (curves/generate-curve-lut r-points)
         g-lut (curves/generate-curve-lut g-points)
         b-lut (curves/generate-curve-lut b-points)]
-    (map (fn [{:keys [r g b] :as pt}]
+    (map (fn [pt]
            ;; r, g, b are normalized 0.0-1.0, convert to LUT index
-           (let [r-idx (min 255 (max 0 (int (* r 255))))
+           (let [r (pt t/R) g (pt t/G) b (pt t/B)
+                 r-idx (min 255 (max 0 (int (* r 255))))
                  g-idx (min 255 (max 0 (int (* g 255))))
                  b-idx (min 255 (max 0 (int (* b 255))))]
-             (assoc pt
-               :r (common/clamp-normalized (nth r-lut r-idx))
-               :g (common/clamp-normalized (nth g-lut g-idx))
-               :b (common/clamp-normalized (nth b-lut b-idx))))))))
+             (t/update-point-rgb pt
+               (nth r-lut r-idx)
+               (nth g-lut g-idx)
+               (nth b-lut b-idx)))))))
 
 (effects/register-effect!
  {:id :rgb-curves
@@ -58,13 +63,14 @@
        mirror-x? (:mirror-x? resolved)
        mirror-y? (:mirror-y? resolved)
        swap-axes? (:swap-axes? resolved)]
-   (map (fn [{:keys [x y] :as pt}]
-          (let [;; Apply mirroring first
+   (map (fn [pt]
+          (let [x (pt t/X) y (pt t/Y)
+                ;; Apply mirroring first
                 x' (if mirror-x? (- x) x)
                 y' (if mirror-y? (- y) y)
                 ;; Then swap if needed
                 [final-x final-y] (if swap-axes? [y' x'] [x' y'])]
-            (assoc pt :x final-x :y final-y))))))
+            (t/update-point-xy pt final-x final-y))))))
 
 (effects/register-effect!
  {:id :axis-transform

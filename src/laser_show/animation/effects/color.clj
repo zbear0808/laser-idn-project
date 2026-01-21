@@ -21,11 +21,15 @@
    
    Per-point modulation:
    {:effect-id :set-hue :params {:hue (mod/position-x-mod 0 360)}}  ; Rainbow gradient
-   {:effect-id :set-hue :params {:hue (mod/rainbow-hue :x 60.0)}}  ; Animated rainbow"
+   {:effect-id :set-hue :params {:hue (mod/rainbow-hue :x 60.0)}}  ; Animated rainbow
+   
+   Points are 5-element vectors [x y r g b]. Access via t/X, t/Y, t/R, t/G, t/B.
+   Use t/update-point-rgb for color updates."
   (:require [laser-show.animation.effects :as effects]
             [laser-show.animation.effects.common :as common]
             [laser-show.animation.colors :as colors]
-            [laser-show.animation.modulation :as mod]))
+            [laser-show.animation.modulation :as mod]
+            [laser-show.animation.types :as t]))
 
 
 ;; Hue Shift Effect
@@ -37,25 +41,28 @@
     ;; Per-point path - use map-indexed to get idx
     (let [point-count (:point-count ctx)]
       (map-indexed
-       (fn [idx {:keys [x y r g b] :as pt}]
-         (if (common/blanked? pt)
+       (fn [idx pt]
+         (if (t/blanked? pt)
            pt  ;; Skip blanked points
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+           (let [x (pt t/X) y (pt t/Y)
+                 r (pt t/R) g (pt t/G) b (pt t/B)
+                 resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
                  degrees (:degrees resolved)
                  [h s v] (colors/normalized->hsv r g b)
                  new-h (mod (+ h degrees) 360)
                  [nr ng nb] (colors/hsv->normalized new-h s v)]
-             (assoc pt :r nr :g ng :b nb))))))
+             (t/update-point-rgb pt nr ng nb))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           degrees (:degrees resolved)]
-      (map (fn [{:keys [r g b] :as pt}]
-             (if (common/blanked? pt)
+      (map (fn [pt]
+             (if (t/blanked? pt)
                pt  ;; Skip blanked points
-               (let [[h s v] (colors/normalized->hsv r g b)
+               (let [r (pt t/R) g (pt t/G) b (pt t/B)
+                     [h s v] (colors/normalized->hsv r g b)
                      new-h (mod (+ h degrees) 360)
                      [nr ng nb] (colors/hsv->normalized new-h s v)]
-                 (assoc pt :r nr :g ng :b nb))))))))
+                 (t/update-point-rgb pt nr ng nb))))))))
 
 (effects/register-effect!
  {:id :hue-shift
@@ -82,25 +89,28 @@
     ;; Per-point path - use map-indexed to get idx
     (let [point-count (:point-count ctx)]
       (map-indexed
-       (fn [idx {:keys [x y r g b] :as pt}]
-         (if (common/blanked? pt)
+       (fn [idx pt]
+         (if (t/blanked? pt)
            pt  ;; Skip blanked points
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+           (let [x (pt t/X) y (pt t/Y)
+                 r (pt t/R) g (pt t/G) b (pt t/B)
+                 resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
                  amount (:amount resolved)
                  [h s v] (colors/normalized->hsv r g b)
                  new-s (common/clamp-normalized (* s amount))
                  [nr ng nb] (colors/hsv->normalized h new-s v)]
-             (assoc pt :r nr :g ng :b nb))))))
+             (t/update-point-rgb pt nr ng nb))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           amount (:amount resolved)]
-      (map (fn [{:keys [r g b] :as pt}]
-             (if (common/blanked? pt)
+      (map (fn [pt]
+             (if (t/blanked? pt)
                pt  ;; Skip blanked points
-               (let [[h s v] (colors/normalized->hsv r g b)
+               (let [r (pt t/R) g (pt t/G) b (pt t/B)
+                     [h s v] (colors/normalized->hsv r g b)
                      new-s (common/clamp-normalized (* s amount))
                      [nr ng nb] (colors/hsv->normalized h new-s v)]
-                 (assoc pt :r nr :g ng :b nb))))))))
+                 (t/update-point-rgb pt nr ng nb))))))))
 
 (effects/register-effect!
  {:id :saturation
@@ -125,25 +135,28 @@
     ;; Per-point path - use map-indexed to get idx
     (let [point-count (:point-count ctx)]
       (map-indexed
-       (fn [idx {:keys [x y r g b] :as pt}]
-         (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+       (fn [idx pt]
+         (let [x (pt t/X) y (pt t/Y)
+               r (pt t/R) g (pt t/G) b (pt t/B)
+               resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
                r-mult (:r-mult resolved)
                g-mult (:g-mult resolved)
                b-mult (:b-mult resolved)]
-           (assoc pt
-             :r (common/clamp-normalized (* r r-mult))
-             :g (common/clamp-normalized (* g g-mult))
-             :b (common/clamp-normalized (* b b-mult)))))))
+           (t/update-point-rgb pt
+             (common/clamp-normalized (* r r-mult))
+             (common/clamp-normalized (* g g-mult))
+             (common/clamp-normalized (* b b-mult)))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           r-mult (:r-mult resolved)
           g-mult (:g-mult resolved)
           b-mult (:b-mult resolved)]
-      (map (fn [{:keys [r g b] :as pt}]
-             (assoc pt
-               :r (common/clamp-normalized (* r r-mult))
-               :g (common/clamp-normalized (* g g-mult))
-               :b (common/clamp-normalized (* b b-mult))))))))
+      (map (fn [pt]
+             (let [r (pt t/R) g (pt t/G) b (pt t/B)]
+               (t/update-point-rgb pt
+                 (common/clamp-normalized (* r r-mult))
+                 (common/clamp-normalized (* g g-mult))
+                 (common/clamp-normalized (* b b-mult)))))))))
 
 (effects/register-effect!
  {:id :color-filter
@@ -180,24 +193,27 @@
     ;; Per-point path - enables rainbow gradients! Use map-indexed to get idx
     (let [point-count (:point-count ctx)]
       (map-indexed
-       (fn [idx {:keys [x y r g b] :as pt}]
-         (let [[_h s v] (colors/normalized->hsv r g b)]
+       (fn [idx pt]
+         (let [r (pt t/R) g (pt t/G) b (pt t/B)
+               [_h s v] (colors/normalized->hsv r g b)]
            ;; Only apply to non-black points with some saturation
-           (if (and (pos? v) (not (common/blanked? pt)))
-             (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+           (if (and (pos? v) (not (t/blanked? pt)))
+             (let [x (pt t/X) y (pt t/Y)
+                   resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
                    hue (:hue resolved)
                    [nr ng nb] (colors/hsv->normalized hue s v)]
-               (assoc pt :r nr :g ng :b nb))
+               (t/update-point-rgb pt nr ng nb))
              pt)))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           hue (:hue resolved)]
-      (map (fn [{:keys [r g b] :as pt}]
-             (let [[_h s v] (colors/normalized->hsv r g b)]
+      (map (fn [pt]
+             (let [r (pt t/R) g (pt t/G) b (pt t/B)
+                   [_h s v] (colors/normalized->hsv r g b)]
                ;; Only apply to non-black points with some saturation
-               (if (and (pos? v) (not (common/blanked? pt)))
+               (if (and (pos? v) (not (t/blanked? pt)))
                  (let [[nr ng nb] (colors/hsv->normalized hue s v)]
-                   (assoc pt :r nr :g ng :b nb))
+                   (t/update-point-rgb pt nr ng nb))
                  pt)))))))
 
 (effects/register-effect!
@@ -237,10 +253,11 @@
         to-b (:to-b resolved)
         ;; Tolerance in normalized space (max ~1.73 for full RGB distance)
         tolerance (:tolerance resolved)]
-    (map (fn [{:keys [r g b] :as pt}]
-           (if (<= (color-distance-normalized r g b from-r from-g from-b) tolerance)
-             (assoc pt :r to-r :g to-g :b to-b)
-             pt)))))
+    (map (fn [pt]
+           (let [r (pt t/R) g (pt t/G) b (pt t/B)]
+             (if (<= (color-distance-normalized r g b from-r from-g from-b) tolerance)
+               (t/update-point-rgb pt to-r to-g to-b)
+               pt))))))
 
 (effects/register-effect!
  {:id :color-replace
@@ -302,23 +319,24 @@
     ;; Use map-indexed to get idx
     (let [point-count (:point-count ctx)]
       (map-indexed
-       (fn [idx {:keys [x y] :as pt}]
-         (if (common/blanked? pt)
+       (fn [idx pt]
+         (if (t/blanked? pt)
            pt
-           (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+           (let [x (pt t/X) y (pt t/Y)
+                 resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
                  red (:red resolved)
                  green (:green resolved)
                  blue (:blue resolved)]
-             (assoc pt :r red :g green :b blue))))))
+             (t/update-point-rgb pt red green blue))))))
     ;; Global path - no per-point modulators
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           red (:red resolved)
           green (:green resolved)
           blue (:blue resolved)]
       (map (fn [pt]
-             (if (common/blanked? pt)
+             (if (t/blanked? pt)
                pt
-               (assoc pt :r red :g green :b blue)))))))
+               (t/update-point-rgb pt red green blue)))))))
 
 (effects/register-effect!
  {:id :set-color
@@ -364,10 +382,12 @@
         speed (:speed resolved)
         axis (:axis resolved)
         time-offset (mod (* (/ time-ms 1000.0) speed) 360)]
-    (map (fn [{:keys [x y r g b] :as pt}]
-           (if (common/blanked? pt)
+    (map (fn [pt]
+           (if (t/blanked? pt)
              pt
-             (let [position (case axis
+             (let [x (pt t/X) y (pt t/Y)
+                   r (pt t/R) g (pt t/G) b (pt t/B)
+                   position (case axis
                               :x (/ (+ x 1.0) 2.0)
                               :y (/ (+ y 1.0) 2.0)
                               :radial (Math/sqrt (+ (* x x) (* y y)))
@@ -376,7 +396,7 @@
                    brightness (max r g b)
                    hue (mod (+ (* position 360.0) time-offset) 360.0)
                    [nr ng nb] (colors/hsv->normalized hue 1.0 brightness)]
-               (assoc pt :r nr :g ng :b nb)))))))
+               (t/update-point-rgb pt nr ng nb)))))))
 
 (effects/register-effect!
  {:id :rainbow-position

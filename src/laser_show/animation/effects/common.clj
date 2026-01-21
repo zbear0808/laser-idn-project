@@ -3,7 +3,9 @@
    Extracted to avoid code duplication.
    
    NOTE: Colors are now NORMALIZED (0.0-1.0), not 8-bit (0-255).
-   Use clamp-normalized for color values, not clamp-byte."
+   Use clamp-normalized for color values, not clamp-byte.
+   
+   For blanked? checking, use t/blanked? from laser-show.animation.types."
   (:require [laser-show.common.util :as u]))
 
 
@@ -15,11 +17,3 @@
    Used for color channel values."
   [v]
   (u/clamp (double v) 0.0 1.0))
-
-
-(defn blanked?
-  "Check if a point is blanked (all colors near zero).
-   Works with normalized colors (0.0-1.0)."
-  [{:keys [r g b]}]
-  (let [epsilon 1e-6]
-    (and (< r epsilon) (< g epsilon) (< b epsilon))))

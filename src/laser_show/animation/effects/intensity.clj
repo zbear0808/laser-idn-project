@@ -5,6 +5,10 @@
    NOTE: All color values are NORMALIZED (0.0-1.0), not 8-bit (0-255).
    This provides full precision for intensity calculations.
    
+   Points are 5-element vectors: [x y r g b]
+   - x, y: position in [-1.0, 1.0]
+   - r, g, b: color intensity in [0.0, 1.0]
+   
    All effects support both static values and modulators:
    ;; Static
    {:effect-id :intensity :params {:amount 0.5}}
@@ -26,8 +30,8 @@
    {:effect-id :intensity :params {:amount (mod/position-radial-mod 1.0 0.3)}}  ; Radial fade
    {:effect-id :intensity :params {:amount (mod/position-wave 0.5 1.0 :x 4.0)}}  ; Wave pattern"
   (:require [laser-show.animation.effects :as effects]
-            [laser-show.animation.effects.common :as common]
-            [laser-show.animation.modulation :as mod]))
+            [laser-show.animation.modulation :as mod]
+            [laser-show.animation.types :as t]))
 
 
 ;; Intensity Effect (replaces dim/brighten)
@@ -39,21 +43,24 @@
     ;; Per-point path - enables spatial brightness patterns! Use map-indexed to get idx
     (let [point-count (:point-count ctx)]
       (map-indexed
-       (fn [idx {:keys [x y r g b] :as pt}]
-         (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+       (fn [idx pt]
+         (let [x (pt t/X) y (pt t/Y)
+               r (pt t/R) g (pt t/G) b (pt t/B)
+               resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
                amount (:amount resolved)]
-           (assoc pt
-             :r (common/clamp-normalized (* r amount))
-             :g (common/clamp-normalized (* g amount))
-             :b (common/clamp-normalized (* b amount)))))))
+           (t/update-point-rgb pt
+             (* r amount)
+             (* g amount)
+             (* b amount))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           amount (:amount resolved)]
-      (map (fn [{:keys [r g b] :as pt}]
-             (assoc pt
-               :r (common/clamp-normalized (* r amount))
-               :g (common/clamp-normalized (* g amount))
-               :b (common/clamp-normalized (* b amount))))))))
+      (map (fn [pt]
+             (let [r (pt t/R) g (pt t/G) b (pt t/B)]
+               (t/update-point-rgb pt
+                 (* r amount)
+                 (* g amount)
+                 (* b amount))))))))
 
 (effects/register-effect!
  {:id :intensity
@@ -77,7 +84,7 @@
         enabled (:enabled resolved)]
     (if enabled
       (map (fn [pt]
-             (assoc pt :r 0.0 :g 0.0 :b 0.0)))
+             (t/update-point-rgb pt 0.0 0.0 0.0)))
       (map identity))))
 
 (effects/register-effect!
@@ -101,22 +108,25 @@
     ;; Per-point path - use map-indexed to get idx
     (let [point-count (:point-count ctx)]
       (map-indexed
-       (fn [idx {:keys [x y r g b] :as pt}]
-         (let [resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+       (fn [idx pt]
+         (let [x (pt t/X) y (pt t/Y)
+               r (pt t/R) g (pt t/G) b (pt t/B)
+               resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
                ;; Threshold already normalized 0.0-1.0
                threshold (:threshold resolved)
                max-val (max r g b)]
            (if (< max-val threshold)
-             (assoc pt :r 0.0 :g 0.0 :b 0.0)
+             (t/update-point-rgb pt 0.0 0.0 0.0)
              pt)))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           ;; Threshold already normalized 0.0-1.0
           threshold (:threshold resolved)]
-      (map (fn [{:keys [r g b] :as pt}]
-             (let [max-val (max r g b)]
+      (map (fn [pt]
+             (let [r (pt t/R) g (pt t/G) b (pt t/B)
+                   max-val (max r g b)]
                (if (< max-val threshold)
-                 (assoc pt :r 0.0 :g 0.0 :b 0.0)
+                 (t/update-point-rgb pt 0.0 0.0 0.0)
                  pt)))))))
 
 (effects/register-effect!

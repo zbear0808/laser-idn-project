@@ -15,8 +15,12 @@
                                :y-scale (mod/sine-mod 0.8 1.2 2.0)}}
    
    For animated rotation, use modulators:
-   {:effect-id :rotation :params {:angle (mod/sawtooth-mod 0 360 1.0)}}"
-  (:require [laser-show.animation.effects :as effects]))
+   {:effect-id :rotation :params {:angle (mod/sawtooth-mod 0 360 1.0)}}
+   
+   Points are 5-element vectors [x y r g b]. Access via t/X, t/Y, t/R, t/G, t/B.
+   Use t/update-point-xy for position updates."
+  (:require [laser-show.animation.effects :as effects]
+            [laser-show.animation.types :as t]))
 
 
 ;; Scale Effect
@@ -26,10 +30,10 @@
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         x-scale (:x-scale resolved)
         y-scale (:y-scale resolved)]
-    (map (fn [{:keys [x y] :as pt}]
-           (assoc pt
-                  :x (* x x-scale)
-                  :y (* y y-scale))))))
+    (map (fn [pt]
+           (t/update-point-xy pt
+             (* (pt t/X) x-scale)
+             (* (pt t/Y) y-scale))))))
 
 (effects/register-effect!
  {:id :scale
@@ -65,10 +69,10 @@
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         dx (:x resolved)
         dy (:y resolved)]
-    (map (fn [{px :x py :y :as pt}]
-           (assoc pt
-                  :x (+ px dx)
-                  :y (+ py dy))))))
+    (map (fn [pt]
+           (t/update-point-xy pt
+             (+ (pt t/X) dx)
+             (+ (pt t/Y) dy))))))
 
 (effects/register-effect!
  {:id :translate
@@ -102,10 +106,12 @@
         radians (Math/toRadians angle)
         cos-a (Math/cos radians)
         sin-a (Math/sin radians)]
-    (map (fn [{:keys [x y] :as pt}]
-           (assoc pt
-                  :x (- (* x cos-a) (* y sin-a))
-                  :y (+ (* x sin-a) (* y cos-a)))))))
+    (map (fn [pt]
+           (let [x (pt t/X)
+                 y (pt t/Y)]
+             (t/update-point-xy pt
+               (- (* x cos-a) (* y sin-a))
+               (+ (* x sin-a) (* y cos-a))))))))
 
 (effects/register-effect!
  {:id :rotation
@@ -131,14 +137,14 @@
 (defn- pinch-bulge-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         amount (:amount resolved)]
-    (map (fn [{:keys [x y] :as pt}]
-           (let [distance (Math/sqrt (+ (* x x) (* y y)))
+    (map (fn [pt]
+           (let [x (pt t/X)
+                 y (pt t/Y)
+                 distance (Math/sqrt (+ (* x x) (* y y)))
                  factor (if (zero? distance)
                           1.0
                           (Math/pow distance amount))]
-             (assoc pt
-                    :x (* x factor)
-                    :y (* y factor)))))))
+             (t/update-point-xy pt (* x factor) (* y factor)))))))
 
 (effects/register-effect!
  {:id :pinch-bulge
@@ -172,9 +178,11 @@
         tr-x (:tr-x resolved) tr-y (:tr-y resolved)
         bl-x (:bl-x resolved) bl-y (:bl-y resolved)
         br-x (:br-x resolved) br-y (:br-y resolved)]
-    (map (fn [{:keys [x y] :as pt}]
-           ;; Convert from [-1,1] to [0,1] for interpolation
-           (let [u (/ (+ x 1.0) 2.0)  ; 0 at left, 1 at right
+    (map (fn [pt]
+           (let [x (pt t/X)
+                 y (pt t/Y)
+                 ;; Convert from [-1,1] to [0,1] for interpolation
+                 u (/ (+ x 1.0) 2.0)  ; 0 at left, 1 at right
                  v (/ (+ y 1.0) 2.0)  ; 0 at bottom, 1 at top
                  ;; Bilinear interpolation
                  ;; P = (1-u)(1-v)*BL + u*(1-v)*BR + (1-u)*v*TL + u*v*TR
@@ -188,7 +196,7 @@
                           (* u one-minus-v br-y)
                           (* one-minus-u v tl-y)
                           (* u v tr-y))]
-             (assoc pt :x new-x :y new-y))))))
+             (t/update-point-xy pt new-x new-y))))))
 
 (effects/register-effect!
  {:id :corner-pin
@@ -259,12 +267,12 @@
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         k1 (:k1 resolved)
         k2 (:k2 resolved)]
-    (map (fn [{:keys [x y] :as pt}]
-           (let [r-sq (+ (* x x) (* y y))
+    (map (fn [pt]
+           (let [x (pt t/X)
+                 y (pt t/Y)
+                 r-sq (+ (* x x) (* y y))
                  factor (+ 1.0 (* k1 r-sq) (* k2 r-sq r-sq))]
-             (assoc pt
-                    :x (* x factor)
-                    :y (* y factor)))))))
+             (t/update-point-xy pt (* x factor) (* y factor)))))))
 
 (effects/register-effect!
  {:id :lens-distortion
@@ -302,11 +310,13 @@
         axis (:axis resolved)
         speed (:speed resolved)
         time-offset (* (/ time-ms 1000.0) speed)]
-    (map (fn [{:keys [x y] :as pt}]
-           (case axis
-             :x (assoc pt :y (+ y (* amplitude (Math/sin (* 2.0 Math/PI (+ (* x frequency) time-offset))))))
-             :y (assoc pt :x (+ x (* amplitude (Math/sin (* 2.0 Math/PI (+ (* y frequency) time-offset))))))
-             pt)))))
+    (map (fn [pt]
+           (let [x (pt t/X)
+                 y (pt t/Y)]
+             (case axis
+               :x (t/update-point-xy pt x (+ y (* amplitude (Math/sin (* 2.0 Math/PI (+ (* x frequency) time-offset))))))
+               :y (t/update-point-xy pt (+ x (* amplitude (Math/sin (* 2.0 Math/PI (+ (* y frequency) time-offset))))) y)
+               pt))))))
 
 (effects/register-effect!
  {:id :wave-distort

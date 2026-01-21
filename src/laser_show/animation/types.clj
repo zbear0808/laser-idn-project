@@ -101,6 +101,37 @@
          (< (point B) epsilon))))
 
 
+;; Point Update Helpers (for effects operating on 5-element vectors)
+
+
+(defn update-point-xy
+ "Update x and y of a point, preserving color values.
+  Clamps coordinates to [-1.0, 1.0]."
+ [pt new-x new-y]
+ [(u/clamp (double new-x) -1.0 1.0)
+  (u/clamp (double new-y) -1.0 1.0)
+  (pt R) (pt G) (pt B)])
+
+(defn update-point-rgb
+ "Update r, g, b of a point, preserving position.
+  Clamps colors to [0.0, 1.0]."
+ [pt new-r new-g new-b]
+ [(pt X) (pt Y)
+  (u/clamp (double new-r) 0.0 1.0)
+  (u/clamp (double new-g) 0.0 1.0)
+  (u/clamp (double new-b) 0.0 1.0)])
+
+(defn update-point-all
+ "Update all values of a point with clamping.
+  Coordinates clamped to [-1.0, 1.0], colors to [0.0, 1.0]."
+ [new-x new-y new-r new-g new-b]
+ [(u/clamp (double new-x) -1.0 1.0)
+  (u/clamp (double new-y) -1.0 1.0)
+  (u/clamp (double new-r) 0.0 1.0)
+  (u/clamp (double new-g) 0.0 1.0)
+  (u/clamp (double new-b) 0.0 1.0)])
+
+
 ;; Frame Construction Helpers
 
 

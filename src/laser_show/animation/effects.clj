@@ -2,7 +2,7 @@
   "Core effect system for laser animations using transducers.
    
    Effects are registered with an `apply-transducer` function that returns
-   a transducer to transform normalized points. When applying an effect chain,
+   a transducer to transform points. When applying an effect chain,
    all transducers are composed together and applied in a single pass,
    avoiding intermediate sequence allocations.
    
@@ -15,18 +15,17 @@
    
    Transducer signature:
    (fn [time-ms bpm resolved-params frame-context]
-     ;; Returns a transducer that transforms normalized points
+     ;; Returns a transducer that transforms 5-element point vectors
      (map (fn [pt] ...)))
    
-   Normalized point format (ALL VALUES ARE NORMALIZED FLOATS):
-   {:x double (-1.0 to 1.0)
-    :y double (-1.0 to 1.0)
-    :r double (0.0 to 1.0) - normalized red
-    :g double (0.0 to 1.0) - normalized green
-    :b double (0.0 to 1.0) - normalized blue
-    :raw map (original LaserPoint for pass-through)}
+   Point format: 5-element vector [x y r g b] where:
+   - x, y: coordinates in [-1.0, 1.0]
+   - r, g, b: colors in [0.0, 1.0]
    
-   Note: Point index is obtained via map-indexed in per-point effect paths,
+   Access via index constants: (pt t/X), (pt t/Y), (pt t/R), (pt t/G), (pt t/B)
+   Update via helper functions: t/update-point-xy, t/update-point-rgb, t/update-point-all
+   
+   Point index is obtained via map-indexed in per-point effect paths,
    and point-count is available in ctx parameter."
   (:require
    [clojure.tools.logging :as log]
@@ -163,51 +162,10 @@
   chains/item-enabled?)
 
 
-;; Point Normalization Transducers
-;;
-;; Since LaserPoint is now a 5-element vector [x y r g b] with normalized values
-;; (x, y: -1.0 to 1.0, r, g, b: 0.0 to 1.0), normalization is simple -
-;; we just extract the values by index and add the :raw reference.
-
-
-(defn normalize-point
-  "Convert a LaserPoint vector to normalized working format for effects.
-   
-   LaserPoint format (5-element vector, already normalized):
-   [x y r g b] where x,y in [-1.0, 1.0] and r,g,b in [0.0, 1.0]
-   
-   Working format adds :raw reference:
-   {:x double, :y double, :r double, :g double, :b double, :raw point-vector}"
-  [point]
-  {:x (point t/X)
-   :y (point t/Y)
-   :r (point t/R)
-   :g (point t/G)
-   :b (point t/B)
-   :raw point})
-
-(defn denormalize-point
-  "Convert a normalized working point back to LaserPoint.
-   Returns nil if input is nil (supports point filtering).
-   
-   Clamps coordinates to [-1.0, 1.0] and colors to [0.0, 1.0]."
-  [pt]
-  (when pt
-    (t/make-point
-     (:x pt)
-     (:y pt)
-     (:r pt)
-     (:g pt)
-     (:b pt))))
-
-(def normalize-xf
-  "Transducer that converts LaserPoints to normalized working format."
-  (map normalize-point))
-
-(def denormalize-xf
-  "Transducer that converts normalized working points back to LaserPoints.
-   Uses `keep` to support point deletion (nil -> filtered out)."
-  (keep denormalize-point))
+;; Points stay as 5-element vectors throughout the pipeline!
+;; No normalize/denormalize needed - effects work directly on [x y r g b] vectors.
+;; Use t/X, t/Y, t/R, t/G, t/B constants for indexed access.
+;; Use t/update-point-xy, t/update-point-rgb, t/update-point-all for updates.
 
 
 
@@ -319,13 +277,9 @@
            ;; Include timing context in frame-ctx for modulator evaluation
            frame-ctx {:point-count point-count
                       :timing-ctx timing-ctx}
-           
-           ;; Compose: normalize -> effects... -> denormalize
-           effect-xf (compose-effect-transducers chain time-ms bpm trigger-time frame-ctx)
-           full-xf (comp normalize-xf
-                       effect-xf
-                       denormalize-xf)]
-       (into [] full-xf frame)))))
+           ;; Points stay as 5-element vectors throughout - no conversion needed!
+           effect-xf (compose-effect-transducers chain time-ms bpm trigger-time frame-ctx)]
+       (into [] effect-xf frame)))))
 
 
 
