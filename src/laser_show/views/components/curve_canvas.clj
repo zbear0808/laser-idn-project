@@ -78,7 +78,7 @@
 (defn- draw-background
   "Draw the dark background."
   [^GraphicsContext gc width height]
-  (.setFill gc (Color/web "#1E1E1E"))
+  (.setFill gc Color/BLACK)
   (.fillRect gc 0 0 width height))
 
 (defn- draw-grid

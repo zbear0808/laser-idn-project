@@ -245,7 +245,7 @@
            ;; Render function
            render! (fn []
                      (.clearRect gc 0 0 width height)
-                     (.setFill gc (Color/web "#1E1E1E"))
+                     (.setFill gc Color/BLACK)
                      (.fillRect gc 0 0 width height)
                      (when show-grid
                        (draw-grid gc width height bounds))
