@@ -160,7 +160,7 @@
      :phase-offset (or phase-offset 0.0)
      :effective-beats (+ (or accumulated-beats 0.0) (or phase-offset 0.0))}))
 
-(defn get-active-effects
+(defn get-active-global-effects
   "Get all active effect instances from the effects grid.
    Returns an effect chain or nil if no active effects.
    
@@ -337,7 +337,7 @@
                     base-end (timing/nanotime)]
                 
                 (when base-frame
-                  (let [effect-chain (get-active-effects)
+                  (let [effect-chain (get-active-global-effects)
                         
                         ;; Measure effect chain application (from effects grid)
                         effects-start (timing/nanotime)
@@ -434,7 +434,9 @@
         frame-stats (when recent-stats
                       {:avg-latency-us (:avg-total-us recent-stats)
                        :p95-latency-us (:p95-total-us recent-stats)
-                       :max-latency-us (:max-total-us recent-stats)})]
+                       :max-latency-us (:max-total-us recent-stats)
+                       :avg-base-us (:avg-base-us recent-stats)
+                       :avg-effects-us (:avg-effects-us recent-stats)})]
     (state/swap-state!
       (fn [s]
         (cond-> s

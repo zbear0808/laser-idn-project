@@ -61,7 +61,13 @@
       {:fx/type :h-box
        :spacing 16
        :children [{:fx/type status-item
-                   :label "Latency (avg)"
+                   :label "Base"
+                   :value (str (long (or (:avg-base-us stats) 0)) "µs")}
+                  {:fx/type status-item
+                   :label "Effects"
+                   :value (str (long (or (:avg-effects-us stats) 0)) "µs")}
+                  {:fx/type status-item
+                   :label "Total (avg)"
                    :value (str (long (:avg-latency-us stats)) "µs")}
                   {:fx/type status-item
                    :label "p95"
