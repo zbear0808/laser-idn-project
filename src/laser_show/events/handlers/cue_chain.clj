@@ -46,7 +46,9 @@
 
 (defn- handle-cue-chain-open-editor
   "Open the cue chain editor for a specific cell.
-   FLATTENED: No :data nesting - fields directly in dialog map."
+   FLATTENED: No :data nesting - fields directly in dialog map.
+   
+   Uses :list/auto-select-single-item to auto-select if only 1 item exists."
   [{:keys [col row state]}]
   (log/debug "Opening cue chain editor" {:col col :row row})
   {:state (-> state
@@ -59,7 +61,10 @@
                           :clipboard nil
                           :active-preset-tab :geometric
                           :selected-effect-id nil
-                          :item-effects-ui {}}))})
+                          :item-effects-ui {}}))
+   :dispatch {:event/type :list/auto-select-single-item
+              :component-id [:cue-chain col row]
+              :items-path [:chains :cue-chains [col row] :items]}})
 
 (defn- handle-cue-chain-close-editor
   "Close the cue chain editor."
@@ -73,7 +78,9 @@
 (defn- handle-cue-chain-add-preset
   "Add a preset to the cue chain.
    
-   Supports both legacy format (preset-id) and new data-driven format (item-id from bank)."
+   Supports both legacy format (preset-id) and new data-driven format (item-id from bank).
+   
+   Auto-selects the newly added preset for better UX."
   [{:keys [col row preset-id item-id state]}]
   (let [;; Support both old :preset-id and new :item-id (from data-driven banks)
         pid (or preset-id item-id)
@@ -85,21 +92,23 @@
                                   {:items []
                                    :destination-zone {:zone-group-id :all}})))
         new-preset (h/ensure-item-fields (cue-chains/create-preset-instance pid {}))
-        state-with-cell (ensure-cell state)
-        current-items (get-in state-with-cell (cue-chain-path col row) [])
-        new-idx (count current-items)
-        new-path [new-idx]]
+        new-preset-id (:id new-preset)
+        state-with-cell (ensure-cell state)]
     {:state (-> state-with-cell
                 (update-in (cue-chain-path col row) conj new-preset)
-                (assoc-in [:ui :dialogs :cue-chain-editor :selected-paths] #{new-path})
-                (assoc-in [:ui :dialogs :cue-chain-editor :last-selected-path] new-path)
-                h/mark-dirty)}))
+                h/mark-dirty)
+     :dispatch {:event/type :list/select-item
+                :component-id [:cue-chain col row]
+                :item-id new-preset-id
+                :mode :single}}))
 
 (defn- handle-cue-chain-add-effect-from-bank
   "Add an effect to a cue chain item from the effect bank.
    
    This handles the data-driven event format from effect-bank component,
-   where :item contains the full effect definition and :item-id is the effect-id."
+   where :item contains the full effect definition and :item-id is the effect-id.
+   
+   Auto-selects the newly added effect for better UX."
   [{:keys [col row parent-path item item-id state]}]
   (let [effect-id (or item-id (:id item))
         params-map (reduce (fn [acc {:keys [key default]}]
@@ -108,6 +117,7 @@
                            (:parameters item []))
         new-effect (h/ensure-item-fields {:effect-id effect-id
                                           :params params-map})
+        new-effect-id (:id new-effect)
         ;; Ensure cell exists with default destination-zone routing to 'All'
         ensure-cell (fn [s]
                       (if (get-in s [:chains :cue-chains [col row]])
@@ -121,7 +131,11 @@
         current-effects (get-in state-with-cell target-path [])]
     {:state (-> state-with-cell
                 (assoc-in target-path (conj current-effects new-effect))
-                h/mark-dirty)}))
+                h/mark-dirty)
+     :dispatch {:event/type :list/select-item
+                :component-id [:item-effects col row]
+                :item-id new-effect-id
+                :mode :single}}))
 
 ;; NOTE: Preset parameter handlers have been removed - now using generic :chain/* events
 ;; from chain.clj with {:domain :cue-chains :entity-key [col row] :effect-path preset-path}

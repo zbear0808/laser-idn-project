@@ -69,6 +69,24 @@
   {:state (assoc-in state [:effects :selected-cell] [col row])})
 
 
+;; Effect Chain Editor Lifecycle
+
+
+(defn- handle-effect-chain-open-editor
+  "Open the effect chain editor for a specific cell.
+   
+   Uses :list/auto-select-single-item to auto-select if only 1 effect exists."
+  [{:keys [col row state]}]
+  {:state (-> state
+              (update-in [:ui :dialogs :effect-chain-editor] merge
+                         {:open? true
+                          :col col
+                          :row row}))
+   :dispatch {:event/type :list/auto-select-single-item
+              :component-id [:effect-chain col row]
+              :items-path [:chains :effect-chains [col row] :items]}})
+
+
 ;; Effect Bank (data-driven event from effect-chain editor)
 
 
@@ -76,7 +94,9 @@
   "Add an effect to an effect chain from the effect bank.
    
    This handles the data-driven event format from effect-bank component,
-   where :item contains the full effect definition and :item-id is the effect-id."
+   where :item contains the full effect definition and :item-id is the effect-id.
+   
+   Auto-selects the newly added effect for better UX."
   [{:keys [col row item item-id state]}]
   (let [effect-id (or item-id (:id item))
         params-map (reduce (fn [acc {:keys [key default]}]
@@ -85,6 +105,7 @@
                            (:parameters item []))
         new-effect (h/ensure-item-fields {:effect-id effect-id
                                           :params params-map})
+        new-effect-id (:id new-effect)
         ensure-cell (fn [s]
                       (if (get-in s [:chains :effect-chains [col row]])
                         s
@@ -93,7 +114,11 @@
         current-effects (get-in state-with-cell [:chains :effect-chains [col row] :items] [])]
     {:state (-> state-with-cell
                 (assoc-in [:chains :effect-chains [col row] :items] (conj current-effects new-effect))
-                h/mark-dirty)}))
+                h/mark-dirty)
+     :dispatch {:event/type :list/select-item
+                :component-id [:effect-chain col row]
+                :item-id new-effect-id
+                :mode :single}}))
 
 
 ;; Public API
@@ -119,6 +144,9 @@
     :effects/paste-cell (handle-effects-paste-cell event)
     :effects/move-cell (handle-effects-move-cell event)
     :effects/select-cell (handle-effects-select-cell event)
+    
+    ;; Effect chain editor lifecycle
+    :effect-chain/open-editor (handle-effect-chain-open-editor event)
     
     ;; Effect bank (data-driven) - add effect from bank
     :effect-chain/add-effect-from-bank (handle-effect-chain-add-effect-from-bank event)

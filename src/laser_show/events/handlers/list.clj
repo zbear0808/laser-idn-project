@@ -185,6 +185,32 @@
   {:state (assoc-in state [:list-ui component-id :renaming-id] nil)})
 
 
+;; Auto-Select Helpers
+
+
+(defn- handle-auto-select-single-item
+  "Auto-select an item if the list has exactly 1 item.
+   
+   This is a convenience event for editors that want to auto-select
+   when opening with a single item. It reads items from state and
+   dispatches :list/select-item if there's exactly one item.
+   
+   Event keys:
+   - :component-id - List component identifier (e.g., [:effect-chain 0 0])
+   - :items-path - Path in state to the items vector (e.g., [:chains :effect-chains [0 0] :items])"
+  [{:keys [component-id items-path state]}]
+  (let [items (get-in state items-path [])
+        single-item? (= 1 (count items))
+        first-item-id (when single-item? (:id (first items)))]
+    (if single-item?
+      {:state state
+       :dispatch {:event/type :list/select-item
+                  :component-id component-id
+                  :item-id first-item-id
+                  :mode :single}}
+      {:state state})))
+
+
 ;; Public API
 
 
@@ -203,6 +229,7 @@
     :list/perform-drop (handle-perform-drop event)
     :list/start-rename (handle-start-rename event)
     :list/cancel-rename (handle-cancel-rename event)
+    :list/auto-select-single-item (handle-auto-select-single-item event)
     
     ;; Unknown event in this domain
     {}))

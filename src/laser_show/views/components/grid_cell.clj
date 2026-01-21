@@ -220,9 +220,7 @@
      :cell-type :effects
      :display-data adapted-data
      :on-click {:event/type :effects/toggle-cell}
-     :on-right-click {:event/type :ui/open-dialog
-                      :dialog-id :effect-chain-editor
-                      :data {:col col :row row}}
+     :on-right-click {:event/type :effect-chain/open-editor}
      :drag-config {:drag-type :effects-cell
                    :on-drop {:event/type :effects/move-cell}}
      :label-fn effects-label}))
