@@ -9,6 +9,9 @@
   (:require [laser-show.animation.types :as t]
             [laser-show.common.util :as u]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 
 (def ^:const TWO-PI (* 2 Math/PI))
 
@@ -20,15 +23,18 @@
 (defn- points-along-segment-xf
   "Transducer that generates points along line segments."
   [num-points make-point-fn]
-  (let [num-segments (dec num-points)]
+  (let [num-pts (long num-points)
+        num-segments (double (dec num-pts))]
     (mapcat (fn [[[x1 y1] [x2 y2]]]
-              (into []
-                    (map (fn [i]
-                           (let [t (/ (double i) num-segments)
-                                 x (lerp x1 x2 t)
-                                 y (lerp y1 y2 t)]
-                             (make-point-fn x y))))
-                    (range num-points))))))
+              (let [x1' (double x1) y1' (double y1)
+                    x2' (double x2) y2' (double y2)]
+                (into []
+                      (map (fn [i]
+                             (let [t (/ (double i) num-segments)
+                                   x (lerp x1' x2' t)
+                                   y (lerp y1' y2' t)]
+                               (make-point-fn x y))))
+                      (range num-pts)))))))
 
 
 (defn generate-circle
@@ -41,16 +47,19 @@
            color [1.0 1.0 1.0]}}]
   (let [[cx cy] center
         [r g b] color
-        first-x (+ cx radius)
-        first-y cy
-        num-segments (dec num-points)]
-    (into [(t/blanked-point first-x first-y)]
+        cx' (double cx)
+        cy' (double cy)
+        radius' (double radius)
+        num-pts (long num-points)
+        first-x (+ cx' radius')
+        num-segments (double (dec num-pts))]
+    (into [(t/blanked-point first-x cy')]
           (map (fn [i]
                  (let [angle (* TWO-PI (/ (double i) num-segments))
-                       x (+ cx (* radius (Math/cos angle)))
-                       y (+ cy (* radius (Math/sin angle)))]
+                       x (+ cx' (* radius' (Math/cos angle)))
+                       y (+ cy' (* radius' (Math/sin angle)))]
                    (t/make-point x y r g b))))
-          (range num-points))))
+          (range num-pts))))
 
 (defn generate-line
   "Generate points for a line segment.
@@ -63,14 +72,17 @@
   (let [[x1 y1] start
         [x2 y2] end
         [r g b] color
-        num-segments (dec num-points)]
-    (into [(t/blanked-point x1 y1)]
+        x1' (double x1) y1' (double y1)
+        x2' (double x2) y2' (double y2)
+        num-pts (long num-points)
+        num-segments (double (dec num-pts))]
+    (into [(t/blanked-point x1' y1')]
           (map (fn [i]
                  (let [t (/ (double i) num-segments)
-                       x (lerp x1 x2 t)
-                       y (lerp y1 y2 t)]
+                       x (lerp x1' x2' t)
+                       y (lerp y1' y2' t)]
                    (t/make-point x y r g b))))
-          (range num-points))))
+          (range num-pts))))
 
 (defn generate-square
   "Generate points for a square.
@@ -82,12 +94,14 @@
            color [1.0 1.0 1.0]}}]
   (let [[cx cy] center
         [r g b] color
-        half (/ size 2)
-        corners [[(- cx half) (- cy half)]
-                 [(+ cx half) (- cy half)]
-                 [(+ cx half) (+ cy half)]
-                 [(- cx half) (+ cy half)]
-                 [(- cx half) (- cy half)]]
+        cx' (double cx)
+        cy' (double cy)
+        half (/ (double size) 2.0)
+        corners [[(- cx' half) (- cy' half)]
+                 [(+ cx' half) (- cy' half)]
+                 [(+ cx' half) (+ cy' half)]
+                 [(- cx' half) (+ cy' half)]
+                 [(- cx' half) (- cy' half)]]
         [first-x first-y] (nth corners 0)]
     (into [(t/blanked-point first-x first-y)]
           (comp
@@ -105,9 +119,12 @@
            color [1.0 1.0 1.0]}}]
   (let [[cx cy] center
         [r g b] color
-        top [cx (+ cy (* size 0.577))]
-        left [(- cx (/ size 2)) (- cy (* size 0.289))]
-        right [(+ cx (/ size 2)) (- cy (* size 0.289))]
+        cx' (double cx)
+        cy' (double cy)
+        size' (double size)
+        top [cx' (+ cy' (* size' 0.577))]
+        left [(- cx' (/ size' 2.0)) (- cy' (* size' 0.289))]
+        right [(+ cx' (/ size' 2.0)) (- cy' (* size' 0.289))]
         corners [top right left top]
         [first-x first-y] (nth corners 0)]
     (into [(t/blanked-point first-x first-y)]
@@ -129,18 +146,23 @@
            color [1.0 1.0 1.0]}}]
   (let [[cx cy] center
         [r g b] color
-        first-x (+ cx start-radius)
-        first-y cy
-        num-segments (dec num-points)]
-    (into [(t/blanked-point first-x first-y)]
+        cx' (double cx)
+        cy' (double cy)
+        start-radius' (double start-radius)
+        end-radius' (double end-radius)
+        turns' (double turns)
+        num-pts (long num-points)
+        first-x (+ cx' start-radius')
+        num-segments (double (dec num-pts))]
+    (into [(t/blanked-point first-x cy')]
           (map (fn [i]
                  (let [t (/ (double i) num-segments)
-                       angle (* TWO-PI turns t)
-                       radius (lerp start-radius end-radius t)
-                       x (+ cx (* radius (Math/cos angle)))
-                       y (+ cy (* radius (Math/sin angle)))]
+                       angle (* TWO-PI turns' t)
+                       radius (lerp start-radius' end-radius' t)
+                       x (+ cx' (* radius (Math/cos angle)))
+                       y (+ cy' (* radius (Math/sin angle)))]
                    (t/make-point x y r g b))))
-          (range num-points))))
+          (range num-pts))))
 
 (defn generate-star
   "Generate points for a star.
@@ -155,20 +177,24 @@
            color [1.0 1.0 1.0]}}]
   (let [[cx cy] center
         [r g b] color
-        half-step (/ Math/PI spikes)
-        vertex-count (* 2 spikes)
+        cx' (double cx)
+        cy' (double cy)
+        outer-radius' (double outer-radius)
+        inner-radius' (double inner-radius)
+        spikes' (long spikes)
+        half-step (/ Math/PI (double spikes'))
+        vertex-count (* 2 spikes')
         ;; First vertex at angle 0 with outer-radius
-        first-x (+ cx outer-radius)
-        first-y cy]
-    (into [(t/blanked-point first-x first-y)]
+        first-x (+ cx' outer-radius')]
+    (into [(t/blanked-point first-x cy')]
           (comp
            ;; vertex pairs for star points
            (map (fn [i]
-                  (let [idx (mod i vertex-count)
-                        angle (* idx half-step)
-                        radius (if (even? idx) outer-radius inner-radius)]
-                    [(+ cx (* radius (Math/cos angle)))
-                     (+ cy (* radius (Math/sin angle)))])))
+                  (let [idx (mod (long i) vertex-count)
+                        angle (* (double idx) half-step)
+                        radius (if (even? idx) outer-radius' inner-radius')]
+                    [(+ cx' (* radius (Math/cos angle)))
+                     (+ cy' (* radius (Math/sin angle)))])))
            ;; rest of star
            (u/sliding 2 1)
            (points-along-segment-xf num-points #(t/make-point %1 %2 r g b)))
@@ -217,7 +243,7 @@
    Params: :length (default 1.0), :color"
   [{:keys [length color]
     :or {length 1.0 color [1.0 1.0 1.0]}}]
-  (let [half-length (/ length 2)]
+  (let [half-length (/ (double length) 2.0)]
     (->> (generate-line :num-points 64
                         :start [(- half-length) 0]
                         :end [half-length 0]
@@ -229,12 +255,14 @@
    Params: :amplitude (default 0.3), :frequency (default 2), :color"
   [{:keys [amplitude frequency color]
     :or {amplitude 0.3 frequency 2 color [1.0 1.0 1.0]}}]
-  (let [[r g b] color]
+  (let [[r g b] color
+        amplitude' (double amplitude)
+        frequency' (double frequency)]
     (->> (range 64)
          (into [] (map (fn [i]
                          (let [t (/ (double i) 63.0)
                                x (- t 0.5)
-                               y (* amplitude (Math/sin (* TWO-PI frequency t)))]
+                               y (* amplitude' (Math/sin (* TWO-PI frequency' t)))]
                            (t/make-point x y r g b)))))
          t/make-frame)))
 
@@ -249,12 +277,13 @@
         x-min -0.99
         x-max 0.99
         y 0.0
-        forward-positions (if (= num-points 1)
+        num-pts (long num-points)
+        forward-positions (if (= num-pts 1)
                             [0.0]
-                            (->> (range num-points)
-                                 (into [] (map #(lerp x-min x-max (/ (double %) (dec num-points)))))))
-        backward-positions (when (> num-points 2)
-                             (vec (reverse (subvec forward-positions 1 (dec num-points)))))
+                            (->> (range num-pts)
+                                 (into [] (map #(lerp x-min x-max (/ (double %) (double (dec num-pts))))))))
+        backward-positions (when (> num-pts 2)
+                             (vec (reverse (subvec forward-positions 1 (dec num-pts)))))
         all-positions (into forward-positions backward-positions)]
     (->> all-positions
          (into [] (mapcat (fn [x]

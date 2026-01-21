@@ -18,6 +18,9 @@
    [laser-show.animation.time :as time]
    [laser-show.common.util :as u]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 ;; Forward declarations for modulator-config? and evaluators
 (declare modulator-config?)
 ;; Forward declarations for beat calculation helpers

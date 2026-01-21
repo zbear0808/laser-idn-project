@@ -35,6 +35,9 @@
    [laser-show.common.util :as u]
    [laser-show.state.queries :as queries]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 
 ;; Timing Modes
 

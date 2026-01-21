@@ -11,6 +11,9 @@
    - Color manipulation functions for laser points
    - Rainbow and gradient generators")
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 
 
 (def ^:const max-8bit 255)
