@@ -43,13 +43,13 @@
 (defn- intensity-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - enables spatial brightness patterns! Use map-indexed to get idx
-    (let [point-count (:point-count ctx)]
+    ;; Per-point path - enables spatial brightness patterns! Use optimized resolution
+    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
       (map-indexed
        (fn [idx pt]
          (let [x (double (pt t/X)) y (double (pt t/Y))
                r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-               resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+               resolved (effects/resolve-for-point-optimized prep x y idx)
                amount (double (:amount resolved))]
            (t/update-point-rgb pt
              (* r amount)
@@ -108,13 +108,13 @@
 (defn- threshold-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - use map-indexed to get idx
-    (let [point-count (:point-count ctx)]
+    ;; Per-point path - use optimized resolution
+    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
       (map-indexed
        (fn [idx pt]
          (let [x (double (pt t/X)) y (double (pt t/Y))
                r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-               resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+               resolved (effects/resolve-for-point-optimized prep x y idx)
                ;; Threshold already normalized 0.0-1.0
                threshold (double (:threshold resolved))
                max-val (Math/max (Math/max r g) b)]

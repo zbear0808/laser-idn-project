@@ -41,15 +41,15 @@
 (defn- hue-shift-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - use map-indexed to get idx
-    (let [point-count (:point-count ctx)]
+    ;; Per-point path - use optimized resolution
+    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
       (map-indexed
        (fn [idx pt]
          (if (t/blanked? pt)
            pt  ;; Skip blanked points
            (let [x (double (pt t/X)) y (double (pt t/Y))
                  r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-                 resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+                 resolved (effects/resolve-for-point-optimized prep x y idx)
                  degrees (double (:degrees resolved))
                  [h s v] (colors/normalized->hsv r g b)
                  ;; Use rem for primitive modulo (always positive for hue degrees)
@@ -91,15 +91,15 @@
 (defn- saturation-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - use map-indexed to get idx
-    (let [point-count (:point-count ctx)]
+    ;; Per-point path - use optimized resolution
+    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
       (map-indexed
        (fn [idx pt]
          (if (t/blanked? pt)
            pt  ;; Skip blanked points
            (let [x (double (pt t/X)) y (double (pt t/Y))
                  r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-                 resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+                 resolved (effects/resolve-for-point-optimized prep x y idx)
                  amount (double (:amount resolved))
                  [h s v] (colors/normalized->hsv r g b)
                  new-s (common/clamp-normalized (* (double s) amount))
@@ -137,13 +137,13 @@
 (defn- color-filter-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - use map-indexed to get idx
-    (let [point-count (:point-count ctx)]
+    ;; Per-point path - use optimized resolution
+    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
       (map-indexed
        (fn [idx pt]
          (let [x (double (pt t/X)) y (double (pt t/Y))
                r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-               resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+               resolved (effects/resolve-for-point-optimized prep x y idx)
                r-mult (double (:r-mult resolved))
                g-mult (double (:g-mult resolved))
                b-mult (double (:b-mult resolved))]
@@ -195,8 +195,8 @@
 (defn- set-hue-xf [time-ms bpm params ctx]
   ;; Check if any params use per-point modulators
   (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - enables rainbow gradients! Use map-indexed to get idx
-    (let [point-count (:point-count ctx)]
+    ;; Per-point path - enables rainbow gradients! Use optimized resolution
+    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
       (map-indexed
        (fn [idx pt]
          (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
@@ -205,7 +205,7 @@
            ;; Only apply to non-black points with some saturation
            (if (and (pos? v-dbl) (not (t/blanked? pt)))
              (let [x (double (pt t/X)) y (double (pt t/Y))
-                   resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+                   resolved (effects/resolve-for-point-optimized prep x y idx)
                    hue (:hue resolved)
                    [nr ng nb] (colors/hsv->normalized hue s v)]
                (t/update-point-rgb pt nr ng nb))
@@ -326,14 +326,14 @@
   ;; Check if any params use per-point modulators (for position-based color gradients)
   (if (mod/any-param-requires-per-point? params)
     ;; Per-point path - supports position-based modulators on individual color channels
-    ;; Use map-indexed to get idx
-    (let [point-count (:point-count ctx)]
+    ;; Use optimized resolution
+    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
       (map-indexed
        (fn [idx pt]
          (if (t/blanked? pt)
            pt
            (let [x (double (pt t/X)) y (double (pt t/Y))
-                 resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
+                 resolved (effects/resolve-for-point-optimized prep x y idx)
                  red (double (:red resolved))
                  green (double (:green resolved))
                  blue (double (:blue resolved))]

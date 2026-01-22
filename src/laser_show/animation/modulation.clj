@@ -73,6 +73,55 @@
    :phase-offset (or phase-offset 0.0)
    :effective-beats (+ (double (or accumulated-beats 0.0)) (double (or phase-offset 0.0)))})
 
+(defn make-base-context
+ "Create a base modulation context optimized for per-point iteration.
+  This creates the context once without per-point fields, which can then
+  be efficiently updated with with-point-context for each point.
+  
+  This avoids creating a full new map per point, instead using assoc
+  to update only the per-point fields.
+  
+  Parameters:
+  - time-ms: Current time in milliseconds
+  - bpm: Current BPM
+  - point-count: Total number of points in frame
+  - timing-ctx: Optional map with accumulated-beats, accumulated-ms, phase-offset"
+ [{:keys [time-ms bpm point-count trigger-time midi-state osc-state
+          accumulated-beats accumulated-ms phase-offset]
+   :or {midi-state {} osc-state {}}}]
+ (let [acc-beats (double (or accumulated-beats 0.0))
+       acc-ms (double (or accumulated-ms 0.0))
+       phase-off (double (or phase-offset 0.0))]
+   {:time-ms time-ms
+    :bpm bpm
+    :trigger-time trigger-time
+    :midi-state midi-state
+    :osc-state osc-state
+    :point-count point-count
+    :accumulated-beats acc-beats
+    :accumulated-ms acc-ms
+    :phase-offset phase-off
+    :effective-beats (+ acc-beats phase-off)
+    ;; Pre-set per-point fields to nil - will be updated via assoc
+    :x nil
+    :y nil
+    :point-index nil}))
+
+(defn with-point-context
+ "Efficiently update a base context with per-point data.
+  Uses assoc instead of creating a new map, much faster than make-context.
+  
+  Parameters:
+  - base-ctx: Context created by make-base-context
+  - x: Point x coordinate
+  - y: Point y coordinate
+  - point-index: Index of current point"
+ [base-ctx x y point-index]
+ (-> base-ctx
+     (assoc :x x)
+     (assoc :y y)
+     (assoc :point-index point-index)))
+
 
 
 ;; Period/Frequency Conversion
@@ -685,6 +734,52 @@
   (into {}
         (map (fn [[k v]] [k (resolve-param v context)]))
         params))
+
+
+;; Optimized Per-Point Parameter Resolution
+
+
+(defn partition-params-by-per-point
+  "Partition params into static params and per-point param keys.
+   
+   Static params are those that don't require per-point context.
+   Per-point params are modulator configs that need x, y, point-index.
+   
+   Returns: {:static-params {...} :per-point-keys #{...}}
+   
+   This allows pre-resolving static params once outside the loop,
+   and only evaluating per-point modulators inside the loop."
+  [params]
+  (let [per-point-keys (into #{}
+                             (keep (fn [[k v]]
+                                     (when (config-requires-per-point? v)
+                                       k)))
+                             params)
+        static-params (into {}
+                            (remove (fn [[k _]] (contains? per-point-keys k)))
+                            params)]
+    {:static-params static-params
+     :per-point-keys per-point-keys}))
+
+(defn resolve-per-point-params-only
+  "Resolve only the per-point modulator params from a params map.
+   
+   Parameters:
+   - params: Full params map (may contain modulators)
+   - per-point-keys: Set of keys that have per-point modulators
+   - context: Context with per-point data (x, y, point-index)
+   
+   Returns: Map of resolved per-point param values
+   
+   Use with partition-params-by-per-point for efficient per-point resolution."
+  [params per-point-keys context]
+  (into {}
+        (map (fn [k]
+               (let [v (get params k)]
+                 [k (if (modulator-config? v)
+                      (evaluate-modulator v context)
+                      v)])))
+        per-point-keys))
 
 
 ;; Keyframe Modulator Evaluation

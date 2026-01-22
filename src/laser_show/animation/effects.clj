@@ -298,7 +298,10 @@
    - count: Total point count
    - timing-ctx: Optional map with accumulated-beats, accumulated-ms, phase-offset
    
-   Returns: Resolved parameter map with all modulators evaluated."
+   Returns: Resolved parameter map with all modulators evaluated.
+   
+   NOTE: For better performance with many points, use prepare-per-point-resolution
+   and resolve-for-point-optimized instead."
   ([raw-params time-ms bpm x y idx count]
    (resolve-params-for-point raw-params time-ms bpm x y idx count nil))
   ([raw-params time-ms bpm x y idx count timing-ctx]
@@ -332,4 +335,63 @@
                       frame-ctx-or-timing-ctx)
          context (mod/make-context (merge {:time-ms time-ms :bpm bpm} timing-ctx))]
      (mod/resolve-params raw-params context))))
+
+
+;; Optimized Per-Point Resolution (for performance-critical paths)
+
+
+(defn prepare-per-point-resolution
+  "Prepare optimized data structures for per-point parameter resolution.
+   
+   Call this ONCE before iterating over points. It:
+   1. Creates a base context (reused for all points)
+   2. Partitions params into static (resolved once) and per-point (resolved per point)
+   3. Pre-resolves static params
+   
+   Parameters:
+   - raw-params: Parameter map that may contain modulators
+   - time-ms: Current time
+   - bpm: Current BPM
+   - point-count: Total number of points
+   - frame-ctx: Frame context with :timing-ctx
+   
+   Returns: {:base-ctx context
+             :static-resolved {...}  ; Pre-resolved static params
+             :per-point-keys #{...}  ; Keys that need per-point resolution
+             :raw-params {...}}      ; Original params for per-point lookup"
+  [raw-params time-ms bpm point-count frame-ctx]
+  (let [timing-ctx (:timing-ctx frame-ctx)
+        ;; Create base context ONCE
+        base-ctx (mod/make-base-context (merge {:time-ms time-ms
+                                                :bpm bpm
+                                                :point-count point-count}
+                                               timing-ctx))
+        ;; Partition params
+        {:keys [static-params per-point-keys]} (mod/partition-params-by-per-point raw-params)
+        ;; Pre-resolve static params
+        static-resolved (mod/resolve-params static-params base-ctx)]
+    {:base-ctx base-ctx
+     :static-resolved static-resolved
+     :per-point-keys per-point-keys
+     :raw-params raw-params}))
+
+(defn resolve-for-point-optimized
+  "Resolve params for a single point using pre-computed data.
+   
+   Use with prepare-per-point-resolution for optimal performance.
+   
+   Parameters:
+   - prep: Result from prepare-per-point-resolution
+   - x, y: Point coordinates
+   - point-index: Current point index
+   
+   Returns: Fully resolved params map"
+  [{:keys [base-ctx static-resolved per-point-keys raw-params]} x y point-index]
+  (if (empty? per-point-keys)
+    ;; No per-point modulators, return pre-resolved static params
+    static-resolved
+    ;; Resolve per-point params and merge with static
+    (let [point-ctx (mod/with-point-context base-ctx x y point-index)
+          per-point-resolved (mod/resolve-per-point-params-only raw-params per-point-keys point-ctx)]
+      (merge static-resolved per-point-resolved))))
 
