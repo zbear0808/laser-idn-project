@@ -31,6 +31,9 @@
             [laser-show.animation.modulation :as mod]
             [laser-show.animation.types :as t]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 
 ;; Hue Shift Effect
 
@@ -44,23 +47,25 @@
        (fn [idx pt]
          (if (t/blanked? pt)
            pt  ;; Skip blanked points
-           (let [x (pt t/X) y (pt t/Y)
-                 r (pt t/R) g (pt t/G) b (pt t/B)
+           (let [x (double (pt t/X)) y (double (pt t/Y))
+                 r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
                  resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
-                 degrees (:degrees resolved)
+                 degrees (double (:degrees resolved))
                  [h s v] (colors/normalized->hsv r g b)
-                 new-h (mod (+ h degrees) 360)
+                 ;; Use rem for primitive modulo (always positive for hue degrees)
+                 new-h (rem (+ (double h) degrees) 360.0)
                  [nr ng nb] (colors/hsv->normalized new-h s v)]
              (t/update-point-rgb pt nr ng nb))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          degrees (:degrees resolved)]
+          degrees (double (:degrees resolved))]
       (map (fn [pt]
              (if (t/blanked? pt)
                pt  ;; Skip blanked points
-               (let [r (pt t/R) g (pt t/G) b (pt t/B)
+               (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
                      [h s v] (colors/normalized->hsv r g b)
-                     new-h (mod (+ h degrees) 360)
+                     ;; Use rem for primitive modulo
+                     new-h (rem (+ (double h) degrees) 360.0)
                      [nr ng nb] (colors/hsv->normalized new-h s v)]
                  (t/update-point-rgb pt nr ng nb))))))))
 
@@ -92,23 +97,23 @@
        (fn [idx pt]
          (if (t/blanked? pt)
            pt  ;; Skip blanked points
-           (let [x (pt t/X) y (pt t/Y)
-                 r (pt t/R) g (pt t/G) b (pt t/B)
+           (let [x (double (pt t/X)) y (double (pt t/Y))
+                 r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
                  resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
-                 amount (:amount resolved)
+                 amount (double (:amount resolved))
                  [h s v] (colors/normalized->hsv r g b)
-                 new-s (common/clamp-normalized (* s amount))
+                 new-s (common/clamp-normalized (* (double s) amount))
                  [nr ng nb] (colors/hsv->normalized h new-s v)]
              (t/update-point-rgb pt nr ng nb))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          amount (:amount resolved)]
+          amount (double (:amount resolved))]
       (map (fn [pt]
              (if (t/blanked? pt)
                pt  ;; Skip blanked points
-               (let [r (pt t/R) g (pt t/G) b (pt t/B)
+               (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
                      [h s v] (colors/normalized->hsv r g b)
-                     new-s (common/clamp-normalized (* s amount))
+                     new-s (common/clamp-normalized (* (double s) amount))
                      [nr ng nb] (colors/hsv->normalized h new-s v)]
                  (t/update-point-rgb pt nr ng nb))))))))
 
@@ -136,23 +141,23 @@
     (let [point-count (:point-count ctx)]
       (map-indexed
        (fn [idx pt]
-         (let [x (pt t/X) y (pt t/Y)
-               r (pt t/R) g (pt t/G) b (pt t/B)
+         (let [x (double (pt t/X)) y (double (pt t/Y))
+               r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
                resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
-               r-mult (:r-mult resolved)
-               g-mult (:g-mult resolved)
-               b-mult (:b-mult resolved)]
+               r-mult (double (:r-mult resolved))
+               g-mult (double (:g-mult resolved))
+               b-mult (double (:b-mult resolved))]
            (t/update-point-rgb pt
              (common/clamp-normalized (* r r-mult))
              (common/clamp-normalized (* g g-mult))
              (common/clamp-normalized (* b b-mult)))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          r-mult (:r-mult resolved)
-          g-mult (:g-mult resolved)
-          b-mult (:b-mult resolved)]
+          r-mult (double (:r-mult resolved))
+          g-mult (double (:g-mult resolved))
+          b-mult (double (:b-mult resolved))]
       (map (fn [pt]
-             (let [r (pt t/R) g (pt t/G) b (pt t/B)]
+             (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))]
                (t/update-point-rgb pt
                  (common/clamp-normalized (* r r-mult))
                  (common/clamp-normalized (* g g-mult))
@@ -194,11 +199,12 @@
     (let [point-count (:point-count ctx)]
       (map-indexed
        (fn [idx pt]
-         (let [r (pt t/R) g (pt t/G) b (pt t/B)
-               [_h s v] (colors/normalized->hsv r g b)]
+         (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+               [_h s v] (colors/normalized->hsv r g b)
+               v-dbl (double v)]
            ;; Only apply to non-black points with some saturation
-           (if (and (pos? v) (not (t/blanked? pt)))
-             (let [x (pt t/X) y (pt t/Y)
+           (if (and (pos? v-dbl) (not (t/blanked? pt)))
+             (let [x (double (pt t/X)) y (double (pt t/Y))
                    resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
                    hue (:hue resolved)
                    [nr ng nb] (colors/hsv->normalized hue s v)]
@@ -208,10 +214,11 @@
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           hue (:hue resolved)]
       (map (fn [pt]
-             (let [r (pt t/R) g (pt t/G) b (pt t/B)
-                   [_h s v] (colors/normalized->hsv r g b)]
+             (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+                   [_h s v] (colors/normalized->hsv r g b)
+                   v-dbl (double v)]
                ;; Only apply to non-black points with some saturation
-               (if (and (pos? v) (not (t/blanked? pt)))
+               (if (and (pos? v-dbl) (not (t/blanked? pt)))
                  (let [[nr ng nb] (colors/hsv->normalized hue s v)]
                    (t/update-point-rgb pt nr ng nb))
                  pt)))))))
@@ -236,26 +243,29 @@
 
 
 (defn- color-distance-normalized
-  "Calculate color distance with normalized values (0.0-1.0)."
+  "Calculate color distance with normalized values (0.0-1.0).
+   Note: Can't use primitive type hints for >4 args in Clojure."
   [r1 g1 b1 r2 g2 b2]
-  (Math/sqrt (+ (* (- r1 r2) (- r1 r2))
-                (* (- g1 g2) (- g1 g2))
-                (* (- b1 b2) (- b1 b2)))))
+  (let [dr (- (double r1) (double r2))
+        dg (- (double g1) (double g2))
+        db (- (double b1) (double b2))]
+    (Math/sqrt (+ (* dr dr) (* dg dg) (* db db)))))
 
 (defn- color-replace-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         ;; All values are already normalized 0.0-1.0
-        from-r (:from-r resolved)
-        from-g (:from-g resolved)
-        from-b (:from-b resolved)
-        to-r (:to-r resolved)
-        to-g (:to-g resolved)
-        to-b (:to-b resolved)
+        from-r (double (:from-r resolved))
+        from-g (double (:from-g resolved))
+        from-b (double (:from-b resolved))
+        to-r (double (:to-r resolved))
+        to-g (double (:to-g resolved))
+        to-b (double (:to-b resolved))
         ;; Tolerance in normalized space (max ~1.73 for full RGB distance)
-        tolerance (:tolerance resolved)]
+        tolerance (double (:tolerance resolved))]
     (map (fn [pt]
-           (let [r (pt t/R) g (pt t/G) b (pt t/B)]
-             (if (<= (color-distance-normalized r g b from-r from-g from-b) tolerance)
+           (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+                 dist (double (color-distance-normalized r g b from-r from-g from-b))]
+             (if (<= dist tolerance)
                (t/update-point-rgb pt to-r to-g to-b)
                pt))))))
 
@@ -322,17 +332,17 @@
        (fn [idx pt]
          (if (t/blanked? pt)
            pt
-           (let [x (pt t/X) y (pt t/Y)
+           (let [x (double (pt t/X)) y (double (pt t/Y))
                  resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
-                 red (:red resolved)
-                 green (:green resolved)
-                 blue (:blue resolved)]
+                 red (double (:red resolved))
+                 green (double (:green resolved))
+                 blue (double (:blue resolved))]
              (t/update-point-rgb pt red green blue))))))
     ;; Global path - no per-point modulators
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          red (:red resolved)
-          green (:green resolved)
-          blue (:blue resolved)]
+          red (double (:red resolved))
+          green (double (:green resolved))
+          blue (double (:blue resolved))]
       (map (fn [pt]
              (if (t/blanked? pt)
                pt
@@ -379,22 +389,23 @@
 
 (defn- rainbow-position-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        speed (:speed resolved)
+        speed (double (:speed resolved))
         axis (:axis resolved)
-        time-offset (mod (* (/ time-ms 1000.0) speed) 360)]
+        ;; Use rem for primitive double modulo
+        time-offset (rem (* (/ (double time-ms) 1000.0) speed) 360.0)]
     (map (fn [pt]
            (if (t/blanked? pt)
              pt
-             (let [x (pt t/X) y (pt t/Y)
-                   r (pt t/R) g (pt t/G) b (pt t/B)
-                   position (case axis
-                              :x (/ (+ x 1.0) 2.0)
-                              :y (/ (+ y 1.0) 2.0)
-                              :radial (Math/sqrt (+ (* x x) (* y y)))
-                              :angle (/ (+ (Math/atan2 y x) Math/PI) (* 2.0 Math/PI)))
+             (let [x (double (pt t/X)) y (double (pt t/Y))
+                   r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+                   position (double (case axis
+                                      :x (/ (+ x 1.0) 2.0)
+                                      :y (/ (+ y 1.0) 2.0)
+                                      :radial (Math/sqrt (+ (* x x) (* y y)))
+                                      :angle (/ (+ (Math/atan2 y x) Math/PI) (* 2.0 Math/PI))))
                    ;; Use current brightness (value from HSV)
-                   brightness (max r g b)
-                   hue (mod (+ (* position 360.0) time-offset) 360.0)
+                   brightness (Math/max (Math/max r g) b)
+                   hue (rem (+ (* position 360.0) time-offset) 360.0)
                    [nr ng nb] (colors/hsv->normalized hue 1.0 brightness)]
                (t/update-point-rgb pt nr ng nb)))))))
 

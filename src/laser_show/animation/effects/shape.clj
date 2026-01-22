@@ -22,18 +22,23 @@
   (:require [laser-show.animation.effects :as effects]
             [laser-show.animation.types :as t]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 
 ;; Scale Effect
 
 
 (defn- scale-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        x-scale (:x-scale resolved)
-        y-scale (:y-scale resolved)]
+        x-scale (double (:x-scale resolved))
+        y-scale (double (:y-scale resolved))]
     (map (fn [pt]
-           (t/update-point-xy pt
-             (* (pt t/X) x-scale)
-             (* (pt t/Y) y-scale))))))
+           (let [px (double (pt t/X))
+                 py (double (pt t/Y))]
+             (t/update-point-xy pt
+               (* px x-scale)
+               (* py y-scale)))))))
 
 (effects/register-effect!
  {:id :scale
@@ -67,12 +72,14 @@
 
 (defn- translate-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        dx (:x resolved)
-        dy (:y resolved)]
+        dx (double (:x resolved))
+        dy (double (:y resolved))]
     (map (fn [pt]
-           (t/update-point-xy pt
-             (+ (pt t/X) dx)
-             (+ (pt t/Y) dy))))))
+           (let [px (double (pt t/X))
+                 py (double (pt t/Y))]
+             (t/update-point-xy pt
+               (+ px dx)
+               (+ py dy)))))))
 
 (effects/register-effect!
  {:id :translate
@@ -102,13 +109,13 @@
 
 (defn- rotation-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        angle (:angle resolved)
+        angle (double (:angle resolved))
         radians (Math/toRadians angle)
         cos-a (Math/cos radians)
         sin-a (Math/sin radians)]
     (map (fn [pt]
-           (let [x (pt t/X)
-                 y (pt t/Y)]
+           (let [x (double (pt t/X))
+                 y (double (pt t/Y))]
              (t/update-point-xy pt
                (- (* x cos-a) (* y sin-a))
                (+ (* x sin-a) (* y cos-a))))))))
@@ -136,10 +143,10 @@
 
 (defn- pinch-bulge-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        amount (:amount resolved)]
+        amount (double (:amount resolved))]
     (map (fn [pt]
-           (let [x (pt t/X)
-                 y (pt t/Y)
+           (let [x (double (pt t/X))
+                 y (double (pt t/Y))
                  distance (Math/sqrt (+ (* x x) (* y y)))
                  factor (if (zero? distance)
                           1.0
@@ -174,13 +181,13 @@
    - br (bottom-right): maps from (1, -1)"
   [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        tl-x (:tl-x resolved) tl-y (:tl-y resolved)
-        tr-x (:tr-x resolved) tr-y (:tr-y resolved)
-        bl-x (:bl-x resolved) bl-y (:bl-y resolved)
-        br-x (:br-x resolved) br-y (:br-y resolved)]
+        tl-x (double (:tl-x resolved)) tl-y (double (:tl-y resolved))
+        tr-x (double (:tr-x resolved)) tr-y (double (:tr-y resolved))
+        bl-x (double (:bl-x resolved)) bl-y (double (:bl-y resolved))
+        br-x (double (:br-x resolved)) br-y (double (:br-y resolved))]
     (map (fn [pt]
-           (let [x (pt t/X)
-                 y (pt t/Y)
+           (let [x (double (pt t/X))
+                 y (double (pt t/Y))
                  ;; Convert from [-1,1] to [0,1] for interpolation
                  u (/ (+ x 1.0) 2.0)  ; 0 at left, 1 at right
                  v (/ (+ y 1.0) 2.0)  ; 0 at bottom, 1 at top
@@ -265,11 +272,11 @@
 
 (defn- lens-distortion-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        k1 (:k1 resolved)
-        k2 (:k2 resolved)]
+        k1 (double (:k1 resolved))
+        k2 (double (:k2 resolved))]
     (map (fn [pt]
-           (let [x (pt t/X)
-                 y (pt t/Y)
+           (let [x (double (pt t/X))
+                 y (double (pt t/Y))
                  r-sq (+ (* x x) (* y y))
                  factor (+ 1.0 (* k1 r-sq) (* k2 r-sq r-sq))]
              (t/update-point-xy pt (* x factor) (* y factor)))))))
@@ -305,14 +312,14 @@
 
 (defn- wave-distort-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        amplitude (:amplitude resolved)
-        frequency (:frequency resolved)
+        amplitude (double (:amplitude resolved))
+        frequency (double (:frequency resolved))
         axis (:axis resolved)
-        speed (:speed resolved)
-        time-offset (* (/ time-ms 1000.0) speed)]
+        speed (double (:speed resolved))
+        time-offset (* (/ (double time-ms) 1000.0) speed)]
     (map (fn [pt]
-           (let [x (pt t/X)
-                 y (pt t/Y)]
+           (let [x (double (pt t/X))
+                 y (double (pt t/Y))]
              (case axis
                :x (t/update-point-xy pt x (+ y (* amplitude (Math/sin (* 2.0 Math/PI (+ (* x frequency) time-offset))))))
                :y (t/update-point-xy pt (+ x (* amplitude (Math/sin (* 2.0 Math/PI (+ (* y frequency) time-offset))))) y)

@@ -17,13 +17,16 @@
    - Simple to implement and compute
    - Commonly used in graphics applications (Photoshop, etc.)")
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 ;; Catmull-Rom Spline Implementation
 
 
 (defn clamp
   "Clamp value to [min-val, max-val] range."
-  [value min-val max-val]
-  (-> value (max min-val) (min max-val)))
+  ^double [^double value ^double min-val ^double max-val]
+  (Math/min max-val (Math/max min-val value)))
 
 (defn- catmull-rom-segment
   "Calculate Catmull-Rom spline segment between p1 and p2.
@@ -36,14 +39,20 @@
    - p0, p1, p2, p3: Four points [x y] for the spline segment
    - t: Parameter in [0, 1] representing position between p1 and p2
    
-   Returns [x y] interpolated point."
-  [[x0 y0] [x1 y1] [x2 y2] [x3 y3] t]
-  (let [t2 (* t t)
+   Returns [x y] interpolated point.
+   Note: Cannot use primitive type hints for >4 args in Clojure."
+  [p0 p1 p2 p3 t]
+  (let [t (double t)
+        x0 (double (nth p0 0)) y0 (double (nth p0 1))
+        x1 (double (nth p1 0)) y1 (double (nth p1 1))
+        x2 (double (nth p2 0)) y2 (double (nth p2 1))
+        x3 (double (nth p3 0)) y3 (double (nth p3 1))
+        t2 (* t t)
         t3 (* t2 t)
         ;; Catmull-Rom basis functions
-        b0 (* 0.5 (+ (- t3) (* 2 t2) (- t)))
-        b1 (* 0.5 (+ (* 3 t3) (* -5 t2) 2))
-        b2 (* 0.5 (+ (* -3 t3) (* 4 t2) t))
+        b0 (* 0.5 (+ (- t3) (* 2.0 t2) (- t)))
+        b1 (* 0.5 (+ (* 3.0 t3) (* -5.0 t2) 2.0))
+        b2 (* 0.5 (+ (* -3.0 t3) (* 4.0 t2) t))
         b3 (* 0.5 (+ t3 (- t2)))
         ;; Interpolated values
         x (+ (* b0 x0) (* b1 x1) (* b2 x2) (* b3 x3))
@@ -61,18 +70,20 @@
    - target-x: X coordinate to interpolate at
    
    Returns interpolated Y value."
-  [control-points target-x]
-  (let [n (count control-points)]
+  ^double [control-points ^double target-x]
+  (let [n (long (count control-points))]
     (cond
       ;; Single point - return its Y value
       (= n 1)
-      (second (first control-points))
+      (double (second (first control-points)))
       
       ;; Two points - linear interpolation
       (= n 2)
-      (let [[x0 y0] (first control-points)
-            [x1 y1] (second control-points)]
-        (if (= x0 x1)
+      (let [pt0 (first control-points)
+            pt1 (second control-points)
+            x0 (double (nth pt0 0)) y0 (double (nth pt0 1))
+            x1 (double (nth pt1 0)) y1 (double (nth pt1 1))]
+        (if (== x0 x1)
           y0
           (let [t (/ (- target-x x0) (- x1 x0))
                 t-clamped (clamp t 0.0 1.0)]
@@ -81,29 +92,34 @@
       ;; Three or more points - Catmull-Rom spline
       :else
       (let [;; Find the segment containing target-x
-            segment-idx (loop [i 0]
-                          (if (>= i (dec n))
-                            (- n 2) ;; Clamp to last segment
-                            (let [[x-curr _] (nth control-points i)
-                                  [x-next _] (nth control-points (inc i))]
-                              (if (and (>= target-x x-curr) (< target-x x-next))
-                                i
-                                (recur (inc i))))))
+            segment-idx (long (loop [i (long 0)]
+                                (if (>= i (dec n))
+                                  (- n 2) ;; Clamp to last segment
+                                  (let [pt-curr (nth control-points i)
+                                        pt-next (nth control-points (inc i))
+                                        x-curr (double (nth pt-curr 0))
+                                        x-next (double (nth pt-next 0))]
+                                    (if (and (>= target-x x-curr) (< target-x x-next))
+                                      i
+                                      (recur (inc i)))))))
             ;; Get the four points for Catmull-Rom (p0, p1, p2, p3)
             ;; For boundary segments, duplicate endpoints
-            p0 (nth control-points (max 0 (dec segment-idx)))
+            p0-idx (max 0 (dec segment-idx))
+            p2-idx (min (dec n) (inc segment-idx))
+            p3-idx (min (dec n) (+ segment-idx 2))
+            p0 (nth control-points p0-idx)
             p1 (nth control-points segment-idx)
-            p2 (nth control-points (min (dec n) (inc segment-idx)))
-            p3 (nth control-points (min (dec n) (+ segment-idx 2)))
+            p2 (nth control-points p2-idx)
+            p3 (nth control-points p3-idx)
             ;; Calculate t parameter within segment
-            [x1 _] p1
-            [x2 _] p2
-            t (if (= x1 x2)
+            x1 (double (nth p1 0))
+            x2 (double (nth p2 0))
+            t (if (== x1 x2)
                 0.0
                 (clamp (/ (- target-x x1) (- x2 x1)) 0.0 1.0))
             ;; Interpolate
-            [_ y] (catmull-rom-segment p0 p1 p2 p3 t)]
-        y))))
+            result (catmull-rom-segment p0 p1 p2 p3 t)]
+        (double (nth result 1))))))
 
 
 ;; LUT Generation
@@ -123,15 +139,15 @@
   [control-points]
   (if (or (nil? control-points) (empty? control-points))
     ;; Default: identity mapping (normalized)
-    (vec (for [i (range 256)] (/ i 255.0)))
+    (mapv (fn [i] (/ (double i) 255.0)) (range 256))
     (let [;; Ensure we have valid endpoints
-          sorted-points (vec (sort-by first control-points))
-          ;; Generate LUT - input is normalized 0.0-1.0, output is normalized
-          lut (vec (for [input (range 256)]
-                     (let [normalized-input (/ input 255.0)
-                           y (interpolate-y-at-x sorted-points normalized-input)]
-                       (clamp y 0.0 1.0))))]
-      lut)))
+          sorted-points (vec (sort-by first control-points))]
+      ;; Generate LUT - input is normalized 0.0-1.0, output is normalized
+      (mapv (fn [input]
+              (let [normalized-input (/ (double input) 255.0)
+                    y (interpolate-y-at-x sorted-points normalized-input)]
+                (clamp y 0.0 1.0)))
+            (range 256)))))
 
 
 ;; Curve Sampling for Rendering
@@ -156,12 +172,14 @@
      ;; Default: diagonal line (normalized)
      [[0.0 0.0] [1.0 1.0]]
      (let [sorted-points (vec (sort-by first control-points))
-           step (/ 1.0 (dec num-samples))]
-       (vec (for [i (range num-samples)]
-              (let [x (* i step)
-                    y (interpolate-y-at-x sorted-points x)]
-                [(clamp x 0.0 1.0)
-                 (clamp y 0.0 1.0)])))))))
+           num-samples-long (long num-samples)
+           step (/ 1.0 (double (dec num-samples-long)))]
+       (mapv (fn [i]
+               (let [x (* (double i) step)
+                     y (interpolate-y-at-x sorted-points x)]
+                 [(clamp x 0.0 1.0)
+                  (clamp y 0.0 1.0)]))
+             (range num-samples-long))))))
 
 (defn add-point
   "Add a new control point and return sorted points.
@@ -190,12 +208,13 @@
    
    Returns sorted vector with updated point."
   [points idx x y]
-  (let [n (count points)
-        is-corner? (or (= idx 0) (= idx (dec n)))
-        current-point (nth points idx)
-        new-x (if is-corner? (first current-point) (clamp (double x) 0.0 1.0))
+  (let [n (long (count points))
+        idx-long (long idx)
+        is-corner? (or (== idx-long 0) (== idx-long (dec n)))
+        current-point (nth points idx-long)
+        new-x (if is-corner? (double (first current-point)) (clamp (double x) 0.0 1.0))
         new-y (clamp (double y) 0.0 1.0)
-        updated (assoc points idx [new-x new-y])]
+        updated (assoc points idx-long [new-x new-y])]
     (vec (sort-by first updated))))
 
 (defn remove-point
@@ -209,9 +228,10 @@
    
    Returns vector with point removed, or unchanged if corner."
   [points idx]
-  (let [n (count points)
-        is-corner? (or (= idx 0) (= idx (dec n)))]
+  (let [n (long (count points))
+        idx-long (long idx)
+        is-corner? (or (== idx-long 0) (== idx-long (dec n)))]
     (if is-corner?
       points ;; Cannot remove corners
-      (vec (concat (subvec points 0 idx)
-                   (subvec points (inc idx)))))))
+      (vec (concat (subvec points 0 idx-long)
+                   (subvec points (inc idx-long)))))))

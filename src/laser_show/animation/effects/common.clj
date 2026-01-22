@@ -8,6 +8,9 @@
    For blanked? checking, use t/blanked? from laser-show.animation.types."
   (:require [laser-show.common.util :as u]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 
 ;; Normalized Value Clamping (for colors 0.0-1.0)
 

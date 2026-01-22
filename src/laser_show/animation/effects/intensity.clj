@@ -33,6 +33,9 @@
             [laser-show.animation.modulation :as mod]
             [laser-show.animation.types :as t]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 
 ;; Intensity Effect (replaces dim/brighten)
 
@@ -44,19 +47,19 @@
     (let [point-count (:point-count ctx)]
       (map-indexed
        (fn [idx pt]
-         (let [x (pt t/X) y (pt t/Y)
-               r (pt t/R) g (pt t/G) b (pt t/B)
+         (let [x (double (pt t/X)) y (double (pt t/Y))
+               r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
                resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
-               amount (:amount resolved)]
+               amount (double (:amount resolved))]
            (t/update-point-rgb pt
              (* r amount)
              (* g amount)
              (* b amount))))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          amount (:amount resolved)]
+          amount (double (:amount resolved))]
       (map (fn [pt]
-             (let [r (pt t/R) g (pt t/G) b (pt t/B)]
+             (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))]
                (t/update-point-rgb pt
                  (* r amount)
                  (* g amount)
@@ -109,22 +112,22 @@
     (let [point-count (:point-count ctx)]
       (map-indexed
        (fn [idx pt]
-         (let [x (pt t/X) y (pt t/Y)
-               r (pt t/R) g (pt t/G) b (pt t/B)
+         (let [x (double (pt t/X)) y (double (pt t/Y))
+               r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
                resolved (effects/resolve-params-for-point params time-ms bpm x y idx point-count (:timing-ctx ctx))
                ;; Threshold already normalized 0.0-1.0
-               threshold (:threshold resolved)
-               max-val (max r g b)]
+               threshold (double (:threshold resolved))
+               max-val (Math/max (Math/max r g) b)]
            (if (< max-val threshold)
              (t/update-point-rgb pt 0.0 0.0 0.0)
              pt)))))
     ;; Global path
     (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
           ;; Threshold already normalized 0.0-1.0
-          threshold (:threshold resolved)]
+          threshold (double (:threshold resolved))]
       (map (fn [pt]
-             (let [r (pt t/R) g (pt t/G) b (pt t/B)
-                   max-val (max r g b)]
+             (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+                   max-val (Math/max (Math/max r g) b)]
                (if (< max-val threshold)
                  (t/update-point-rgb pt 0.0 0.0 0.0)
                  pt)))))))

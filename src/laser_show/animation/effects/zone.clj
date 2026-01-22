@@ -17,6 +17,9 @@
    - :filter  - Restrict to zone groups matching both original AND effect target"
   (:require [laser-show.animation.effects :as effects]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 
 ;; Zone Reroute Effect
 ;;

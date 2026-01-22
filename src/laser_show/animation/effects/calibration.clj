@@ -12,6 +12,9 @@
             [laser-show.animation.effects.curves :as curves]
             [laser-show.animation.types :as t]))
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
 (defn- rgb-curves-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         ;; Get control points with defaults (normalized 0.0-1.0)
@@ -24,10 +27,10 @@
         b-lut (curves/generate-curve-lut b-points)]
     (map (fn [pt]
            ;; r, g, b are normalized 0.0-1.0, convert to LUT index
-           (let [r (pt t/R) g (pt t/G) b (pt t/B)
-                 r-idx (min 255 (max 0 (int (* r 255))))
-                 g-idx (min 255 (max 0 (int (* g 255))))
-                 b-idx (min 255 (max 0 (int (* b 255))))]
+           (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+                 r-idx (long (Math/min 255.0 (Math/max 0.0 (* r 255.0))))
+                 g-idx (long (Math/min 255.0 (Math/max 0.0 (* g 255.0))))
+                 b-idx (long (Math/min 255.0 (Math/max 0.0 (* b 255.0))))]
              (t/update-point-rgb pt
                (nth r-lut r-idx)
                (nth g-lut g-idx)
@@ -64,12 +67,13 @@
        mirror-y? (:mirror-y? resolved)
        swap-axes? (:swap-axes? resolved)]
    (map (fn [pt]
-          (let [x (pt t/X) y (pt t/Y)
+          (let [x (double (pt t/X)) y (double (pt t/Y))
                 ;; Apply mirroring first
                 x' (if mirror-x? (- x) x)
                 y' (if mirror-y? (- y) y)
                 ;; Then swap if needed
-                [final-x final-y] (if swap-axes? [y' x'] [x' y'])]
+                final-x (if swap-axes? y' x')
+                final-y (if swap-axes? x' y')]
             (t/update-point-xy pt final-x final-y))))))
 
 (effects/register-effect!
