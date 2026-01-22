@@ -417,3 +417,65 @@
   (testing "Marks project dirty"
     (let [result (ch/handle-set-item-enabled sample-state effects-config [0] false)]
       (is (true? (get-in result [:project :dirty?]))))))
+
+
+;; Zone Group Toggle Tests (Integration)
+
+
+(deftest handle-toggle-zone-group-test
+  (testing "toggles zone group in effect chain"
+    (let [zone-reroute-effect {:id (java.util.UUID/randomUUID)
+                               :effect-id :zone-reroute
+                               :enabled? true
+                               :params {:mode :replace
+                                       :target-zone-groups [:left]}}
+          test-state (assoc-in base-state 
+                               [:chains :effect-chains [0 0]] 
+                               {:items [zone-reroute-effect] :active true})
+          result (ch/handle-toggle-zone-group test-state effects-config 
+                                               {:effect-path [0] :group-id :right})
+          updated-groups (get-in result [:chains :effect-chains [0 0] :items 0 :params :target-zone-groups])]
+      (is (= #{:left :right} (set updated-groups)))))
+  
+  (testing "removes zone group when already present"
+    (let [zone-reroute-effect {:id (java.util.UUID/randomUUID)
+                               :effect-id :zone-reroute
+                               :enabled? true
+                               :params {:mode :replace
+                                       :target-zone-groups [:left :right]}}
+          test-state (assoc-in base-state 
+                               [:chains :effect-chains [0 0]] 
+                               {:items [zone-reroute-effect] :active true})
+          result (ch/handle-toggle-zone-group test-state effects-config 
+                                               {:effect-path [0] :group-id :right})
+          updated-groups (get-in result [:chains :effect-chains [0 0] :items 0 :params :target-zone-groups])]
+      (is (= [:left] updated-groups))))
+  
+  (testing "returns [:all] when removing last group"
+    (let [zone-reroute-effect {:id (java.util.UUID/randomUUID)
+                               :effect-id :zone-reroute
+                               :enabled? true
+                               :params {:mode :replace
+                                       :target-zone-groups [:left]}}
+          test-state (assoc-in base-state 
+                               [:chains :effect-chains [0 0]] 
+                               {:items [zone-reroute-effect] :active true})
+          result (ch/handle-toggle-zone-group test-state effects-config 
+                                               {:effect-path [0] :group-id :left})
+          updated-groups (get-in result [:chains :effect-chains [0 0] :items 0 :params :target-zone-groups])]
+      (is (= [:all] updated-groups))))
+  
+  (testing "works with projector effects"
+    (let [zone-reroute-effect {:id (java.util.UUID/randomUUID)
+                               :effect-id :zone-reroute
+                               :enabled? true
+                               :params {:mode :replace
+                                       :target-zone-groups [:center]}}
+          test-state (assoc-in base-state 
+                               [:chains :projector-effects :proj-1] 
+                               {:items [zone-reroute-effect]})
+          projector-config (ch/chain-config :projector-effects :proj-1)
+          result (ch/handle-toggle-zone-group test-state projector-config 
+                                               {:effect-path [0] :group-id :left})
+          updated-groups (get-in result [:chains :projector-effects :proj-1 :items 0 :params :target-zone-groups])]
+      (is (= #{:center :left} (set updated-groups))))))

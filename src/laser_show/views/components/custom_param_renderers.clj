@@ -568,7 +568,7 @@
   Props:
   - :fx/context - cljfx context (required)
   - :current-params - Current parameter values {:mode :target-zone-groups ...}
-  - :on-change-event - Base event template for param changes (will add :param-key :value)"
+  - :on-change-event - Base event template for param changes (will add :param-key :value or :group-id)"
  [{:keys [fx/context current-params on-change-event]}]
  (let [;; Get zone groups from context
        zone-groups (fx/sub-ctx context subs/zone-groups-list)
@@ -621,12 +621,12 @@
                                           :fx/key (:id group)
                                           :group group
                                           :selected? (contains? target-zone-groups (:id group))
-                                          :on-toggle (let [new-groups (if (contains? target-zone-groups (:id group))
-                                                                       (vec (disj target-zone-groups (:id group)))
-                                                                       (vec (conj target-zone-groups (:id group))))]
-                                                      (assoc on-change-event
-                                                             :param-key :target-zone-groups
-                                                             :value (if (empty? new-groups) [:all] new-groups)))}))}
+                                          ;; Pass event map with group-id, let handler do the toggle logic
+                                          :on-toggle {:event/type :chain/toggle-zone-group
+                                                      :domain (:domain on-change-event)
+                                                      :entity-key (:entity-key on-change-event)
+                                                      :effect-path (:effect-path on-change-event)
+                                                      :group-id (:id group)}}))}
                            {:fx/type :label
                             :text (str "Selected: " (if (empty? target-zone-groups)
                                                      "none"

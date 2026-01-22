@@ -735,6 +735,14 @@
         params-path (vec (concat items-path effect-path [:params]))]
     (effect-params/reset-params state params-path defaults-map)))
 
+(defn handle-toggle-zone-group
+  "Thin wrapper that delegates to effect-params.
+   Toggles a zone group in the target-zone-groups set."
+  [state config {:keys [effect-path group-id]}]
+  (let [items-path (:items-path config)
+        params-path (vec (concat items-path effect-path [:params]))]
+    (effect-params/toggle-zone-group state params-path group-id)))
+
 
 ;; Phase 2: Parameter Update Handlers
 
@@ -1038,6 +1046,9 @@
      
      :chain/reset-params
      {:state (handle-reset-params state config event)}
+     
+     :chain/toggle-zone-group
+     {:state (handle-toggle-zone-group state config event)}
      
      :chain/create-empty-group
      {:state (handle-create-empty-group state config (:name event))}

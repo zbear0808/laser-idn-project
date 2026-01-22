@@ -188,3 +188,28 @@
    Returns: Updated state with active channel set"
   [state ui-path channel]
   (assoc-in state (conj ui-path :active-curve-channel) channel))
+
+
+;; Zone Group Operations
+
+
+(defn toggle-zone-group
+  "Toggle a zone group in the target-zone-groups set.
+   
+   Parameters:
+   - state: Application state
+   - params-path: Full path to the effect's :params map
+   - group-id: Zone group ID to toggle
+   
+   Returns: Updated state with zone group toggled.
+            If result would be empty, returns [:all] instead."
+  [state params-path group-id]
+  (let [current-groups (get-in state (conj params-path :target-zone-groups) [:all])
+        current-set (set current-groups)
+        new-set (if (contains? current-set group-id)
+                  (disj current-set group-id)
+                  (conj current-set group-id))
+        new-groups (if (empty? new-set)
+                     [:all]
+                     (vec new-set))]
+    (assoc-in state (conj params-path :target-zone-groups) new-groups)))
