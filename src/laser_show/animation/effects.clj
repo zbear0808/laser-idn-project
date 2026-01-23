@@ -395,3 +395,89 @@
           per-point-resolved (mod/resolve-per-point-params-only raw-params per-point-keys point-ctx)]
       (merge static-resolved per-point-resolved))))
 
+
+;; Simplified Per-Point Resolution via Resolver Functions
+
+
+(defn make-param-resolver
+  "Create a resolver function for a single parameter.
+   
+   This is the preferred way to handle per-point modulation. It returns a function
+   (fn [x y idx] -> value) that efficiently resolves the parameter value.
+   
+   Optimization:
+   - For static values: returns (constantly value) - no per-point overhead
+   - For global modulators: resolves once, returns (constantly resolved-value)
+   - For per-point modulators: returns fn that evaluates with point context
+   
+   Parameters:
+   - param-key: Keyword key of the parameter to resolve
+   - params: Full params map (may contain modulators)
+   - time-ms: Current time in milliseconds
+   - bpm: Current BPM
+   - ctx: Frame context {:point-count n :timing-ctx {...}}
+   
+   Returns: (fn [x y idx] -> resolved-value)
+   
+   Example usage:
+   ```clojure
+   (let [get-amount (make-param-resolver :amount params time-ms bpm ctx)]
+     (map-indexed
+       (fn [idx pt]
+         (let [amount (get-amount (pt t/X) (pt t/Y) idx)]
+           ...))))
+   ```"
+  [param-key params time-ms bpm ctx]
+  (let [param-val (get params param-key)
+        timing-ctx (:timing-ctx ctx)
+        point-count (:point-count ctx)]
+    (cond
+      ;; Static value (number, keyword, boolean, etc.) - return constant fn
+      (not (mod/modulator-config? param-val))
+      (constantly param-val)
+      
+      ;; Per-point modulator - return fn that evaluates per point
+      (mod/config-requires-per-point? param-val)
+      (let [base-ctx (mod/make-base-context
+                       (merge {:time-ms time-ms
+                               :bpm bpm
+                               :point-count point-count}
+                              timing-ctx))]
+        (fn [x y idx]
+          (let [point-ctx (mod/with-point-context base-ctx x y idx)]
+            (mod/evaluate-modulator param-val point-ctx))))
+      
+      ;; Global modulator - resolve once, return constant fn
+      :else
+      (let [context (mod/make-context (merge {:time-ms time-ms :bpm bpm} timing-ctx))
+            resolved (mod/resolve-param param-val context)]
+        (constantly resolved)))))
+
+(defn make-multi-param-resolver
+  "Create resolver functions for multiple parameters at once.
+   
+   This is a convenience function when you need resolvers for multiple params.
+   Returns a map of {param-key -> resolver-fn}.
+   
+   Parameters:
+   - param-keys: Sequence of parameter keys to create resolvers for
+   - params: Full params map (may contain modulators)
+   - time-ms: Current time in milliseconds
+   - bpm: Current BPM
+   - ctx: Frame context {:point-count n :timing-ctx {...}}
+   
+   Returns: Map of {param-key -> (fn [x y idx] -> value)}
+   
+   Example usage:
+   ```clojure
+   (let [resolvers (make-multi-param-resolver [:red :green :blue] params time-ms bpm ctx)
+         get-red (:red resolvers)
+         get-green (:green resolvers)
+         get-blue (:blue resolvers)]
+     ...)
+   ```"
+  [param-keys params time-ms bpm ctx]
+  (into {}
+        (mapv (fn [k] [k (make-param-resolver k params time-ms bpm ctx)])
+              param-keys)))
+

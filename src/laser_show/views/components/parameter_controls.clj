@@ -19,7 +19,8 @@
     :current-value 1.5
     :on-change-event {:event/type :my/update-param}}
    ```"
-  (:require [laser-show.common.util :as u]))
+  (:require [laser-show.animation.modulator-defs :as mod-defs]
+            [laser-show.common.util :as u]))
 
 
 ;; Parameter Spec Conversion
@@ -46,16 +47,25 @@
    Supports both :float and :int parameter types.
    Int parameters use snap-to-ticks and display as integers.
    
+   Defensively handles modulator config maps by extracting static values.
+   This can happen in edge cases where keyframes/modulation state gets out of sync.
+   
    Props:
    - :param-key - Parameter key (e.g., :x-scale)
    - :param-spec - Parameter specification {:min :max :default :type :label ...}
-   - :current-value - Current parameter value
+   - :current-value - Current parameter value (should be numeric, but handles maps defensively)
    - :on-change-event - Event template with :param-key and :fx/event added for slider changes
    - :on-text-event - Event template with :param-key, :min, :max added for text field
    - :label-width - Optional label width (default 80)"
   [{:keys [param-key param-spec current-value on-change-event on-text-event label-width]}]
   (let [{:keys [min max label]} param-spec
-        value (or current-value (:default param-spec) 0)
+        ;; Defensive: extract static value if passed a modulator config map
+        ;; This shouldn't happen in normal operation (keyframes normalize params),
+        ;; but protects against edge cases that would cause ClassCastException
+        value (cond
+                (number? current-value) current-value
+                (mod-defs/modulated? current-value) (mod-defs/get-static-value current-value (:default param-spec))
+                :else (or (:default param-spec) 0))
         is-int? (= :int (:type param-spec))
         display-label (or label (name param-key))
         label-w (or label-width 80)]

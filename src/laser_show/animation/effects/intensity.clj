@@ -13,47 +13,38 @@
    ;; Static
    {:effect-id :intensity :params {:amount 0.5}}
    
-   ;; Modulated (using modulation.clj)
-   (require '[laser-show.animation.modulation :as mod])
-   {:effect-id :intensity :params {:amount (mod/sine-mod 0.3 1.0 2.0)}}
+   ;; Modulated (modulator config map)
+   {:effect-id :intensity :params {:amount {:type :sine :min 0.3 :max 1.0 :period 2.0}}}
    
-   For strobe effects, use:
-   {:effect-id :intensity :params {:amount (mod/square-mod 0.0 1.0 4.0)}}
+   ;; Strobe:
+   {:effect-id :intensity :params {:amount {:type :square :min 0.0 :max 1.0 :period 0.25}}}
    
-   For fade in/out, use:
-   {:effect-id :intensity :params {:amount (mod/linear-decay 0.0 1.0 2000)}}
+   Per-point modulation (radial fade, wave pattern):
+   {:effect-id :intensity :params {:amount {:type :radial :min 1.0 :max 0.3}}}
+   {:effect-id :intensity :params {:amount {:type :pos-wave :axis :x :min 0.5 :max 1.0 :frequency 4.0}}}
    
-   For beat-synced flash, use:
-   {:effect-id :intensity :params {:amount (mod/beat-decay 2.0 1.0 :exp)}}
-   
-   Per-point modulation:
-   {:effect-id :intensity :params {:amount (mod/position-radial-mod 1.0 0.3)}}  ; Radial fade
-   {:effect-id :intensity :params {:amount (mod/position-wave 0.5 1.0 :x 4.0)}}  ; Wave pattern"
+   Implementation uses make-param-resolver for efficient per-point handling:
+   - Static values: resolved once, no per-point overhead
+   - Global modulators: resolved once, cached
+   - Per-point modulators: evaluated per-point with (fn [x y idx] -> value)"
   (:require [laser-show.animation.effects :as effects]
-            [laser-show.animation.modulation :as mod]
             [laser-show.animation.types :as t]))
-
-(set! *warn-on-reflection* true)
-(set! *unchecked-math* :warn-on-boxed)
-
-
-;; Intensity Effect (replaces dim/brighten)
-
-
-(defn- intensity-xf [time-ms bpm params ctx]
-  (let [per-point? (mod/any-param-requires-per-point? params)
-        prep (when per-point?
-               (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx))
-        global-resolved (when-not per-point?
-                          (effects/resolve-params-global params time-ms bpm ctx))]
-    (map-indexed
-     (fn [idx pt]
-       (let [resolved (if per-point?
-                        (effects/resolve-for-point-optimized prep (pt t/X) (pt t/Y) idx)
-                        global-resolved)
-             amount (double (:amount resolved))
-             r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))]
-         (t/update-point-rgb pt (* r amount) (* g amount) (* b amount)))))))
+  
+  (set! *warn-on-reflection* true)
+  (set! *unchecked-math* :warn-on-boxed)
+  
+  
+  ;; Intensity Effect (replaces dim/brighten)
+  
+  
+  (defn- intensity-xf [time-ms bpm params ctx]
+    (let [get-amount (effects/make-param-resolver :amount params time-ms bpm ctx)]
+      (map-indexed
+       (fn [idx pt]
+         (let [x (pt t/X) y (pt t/Y)
+               amount (double (get-amount x y idx))
+               r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))]
+           (t/update-point-rgb pt (* r amount) (* g amount) (* b amount)))))))
 
 (effects/register-effect!
  {:id :intensity
@@ -96,18 +87,12 @@
 
 
 (defn- threshold-xf [time-ms bpm params ctx]
-  (let [per-point? (mod/any-param-requires-per-point? params)
-        prep (when per-point?
-               (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx))
-        global-resolved (when-not per-point?
-                          (effects/resolve-params-global params time-ms bpm ctx))]
+  (let [get-threshold (effects/make-param-resolver :threshold params time-ms bpm ctx)]
     (map-indexed
      (fn [idx pt]
-       (let [resolved (if per-point?
-                        (effects/resolve-for-point-optimized prep (pt t/X) (pt t/Y) idx)
-                        global-resolved)
+       (let [x (pt t/X) y (pt t/Y)
              r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-             threshold (double (:threshold resolved))
+             threshold (double (get-threshold x y idx))
              max-val (Math/max (Math/max r g) b)]
          (if (< max-val threshold)
            (t/update-point-rgb pt 0.0 0.0 0.0)

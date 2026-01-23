@@ -133,7 +133,7 @@ This is a major architectural addition that requires:
 ## Troubleshooting
 
 ### Laser Show won't start
-- Ensure Java 21+ is installed: `java -version` (JDK 25 recommended)
+- Ensure Java 24+ is installed: `java -version` (JDK 24 recommended for VisualVM compatibility)
 - Download dependencies: `clj -P -M:laser-show`
 
 ### IDN-Hello can't discover devices

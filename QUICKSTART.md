@@ -4,7 +4,7 @@
 
 1. **Install Java** (if not already installed)
    - Download from https://adoptium.net/
-   - Minimum version: JDK 25
+   - JDK 24+ supported, but JDK 24 is recommended (VisualVM external profiling tool is incompatible with JDK 25+)
 
 2. **Install Clojure CLI tools**
    - Windows: https://clojure.org/guides/install_clojure#_windows
@@ -52,16 +52,13 @@ The aliases are composable - combine them as needed:
 
 ```bash
 # Basic development (Windows)
-clj -M:dev:laser-show:win
+clj -M:dev:jfr:laser-show:win
 
 # Development (macOS)
-clj -M:dev:laser-show:mac
+clj -M:dev:jfr:laser-show:mac
 
 # Development (Linux)
-clj -M:dev:laser-show:linux
-
-# Development with JFR profiling enabled
-clj -M:dev:laser-show:win:jfr
+clj -M:dev:jfr:laser-show:linux
 
 # REPL-only (no app, just nREPL server - needs platform)
 clj -M:win:repl

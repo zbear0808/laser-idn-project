@@ -26,6 +26,7 @@
    DEBUG: Set log level to DEBUG for this namespace to see keyframe operations."
   (:require
    [clojure.tools.logging :as log]
+   [laser-show.animation.modulator-defs :as mod-defs]
    [laser-show.events.helpers :as h]
    [laser-show.events.handlers.chain :as chain]))
 
@@ -83,6 +84,44 @@
   ^double [^double pos]
   (max 0.0 (min 1.0 pos)))
 
+(defn- normalize-param-value
+  "Extract static value from a param that may be a modulator config.
+   Keyframes should only contain static numeric values."
+  [value default]
+  (if (mod-defs/modulated? value)
+    (mod-defs/get-static-value value default)
+    (or value default)))
+
+(defn- normalize-params-for-keyframes
+  "Extract static values from any modulator configs in params.
+   Keyframes should only contain static numeric values."
+  [params]
+  (into {}
+        (map (fn [[k v]]
+               [k (normalize-param-value v 0.0)]))
+        params))
+
+(defn- deactivate-all-modulators
+  "Set :active? false on all modulator configs in params.
+   This preserves the modulator settings but prevents them from running."
+  [params]
+  (into {}
+        (map (fn [[k v]]
+               (if (mod-defs/modulated? v)
+                 [k (assoc v :active? false)]
+                 [k v])))
+        params))
+
+(defn- get-effect-path-for-params
+  "Get the full path to effect params."
+  [config effect-path]
+  (into (:items-path config) (conj (vec effect-path) :params)))
+
+(defn- update-effect-params
+  "Update the params of an effect."
+  [state config effect-path f & args]
+  (apply update-in state (get-effect-path-for-params config effect-path) f args))
+
 
 ;; Keyframe Modulator Handlers
 
@@ -90,6 +129,10 @@
 (defn handle-toggle-enabled
   "Toggle the enabled state of the keyframe modulator.
    If enabling and no keyframe modulator exists, initializes one with defaults.
+   
+   When enabling keyframes:
+   - Normalizes params (extracts static values from any modulator configs)
+   - Deactivates all per-param modulators (keyframes and modulators are mutually exclusive)
    
    Parameters:
    - state: Application state
@@ -103,23 +146,35 @@
     (if (and enabled? (nil? current-mod))
       ;; Initialize keyframe modulator with defaults when enabling
       (let [params (get-effect-params state config effect-path)
+            ;; Normalize params: extract static values from any modulator configs
+            normalized-params (normalize-params-for-keyframes params)
             new-mod {:enabled? true
                      :period 4.0
                      :time-unit :beats
                      :loop-mode :loop
                      :selected-keyframe 0
-                     :keyframes (create-default-keyframes params)}]
+                     :keyframes (create-default-keyframes normalized-params)}]
         (-> state
+            ;; Deactivate all per-param modulators
+            (update-effect-params config effect-path deactivate-all-modulators)
             (set-keyframe-modulator config effect-path new-mod)
             h/mark-dirty))
       ;; Just toggle enabled state
-      (-> state
-          (update-keyframe-modulator config effect-path assoc :enabled? enabled?)
-          h/mark-dirty))))
+      (if enabled?
+        ;; Re-enabling existing keyframe modulator - also deactivate modulators
+        (-> state
+            (update-effect-params config effect-path deactivate-all-modulators)
+            (update-keyframe-modulator config effect-path assoc :enabled? enabled?)
+            h/mark-dirty)
+        ;; Disabling keyframes - just toggle
+        (-> state
+            (update-keyframe-modulator config effect-path assoc :enabled? enabled?)
+            h/mark-dirty)))))
 
 (defn handle-initialize
   "Initialize a keyframe modulator with default keyframes.
    Uses the effect's current params as the initial keyframe values.
+   Normalizes params and deactivates any active modulators.
    
    Parameters:
    - state: Application state
@@ -129,13 +184,15 @@
    Returns: Updated state"
   [state config effect-path]
   (let [params (get-effect-params state config effect-path)
+        normalized-params (normalize-params-for-keyframes params)
         new-mod {:enabled? true
                  :period 4.0
                  :time-unit :beats
                  :loop-mode :loop
                  :selected-keyframe 0
-                 :keyframes (create-default-keyframes params)}]
+                 :keyframes (create-default-keyframes normalized-params)}]
     (-> state
+        (update-effect-params config effect-path deactivate-all-modulators)
         (set-keyframe-modulator config effect-path new-mod)
         h/mark-dirty)))
 

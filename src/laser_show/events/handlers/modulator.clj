@@ -24,10 +24,26 @@
 ;; Handler Functions
 
 
+(defn- get-keyframe-enabled?
+  "Check if keyframe modulator is enabled for the given effect.
+   Returns true if the effect has an active keyframe modulator."
+  [state domain entity-key effect-path]
+  (let [;; Build path to effect based on domain
+        base-path (case domain
+                    :effect-chains [:grid :effect-chains entity-key]
+                    :cue-chains [:grid :cue-chains entity-key :items]
+                    :projector-effects [:projectors entity-key :effects]
+                    ;; Fallback - may not work for all domains
+                    [:grid domain entity-key])
+        effect-full-path (into base-path (vec effect-path))
+        effect (get-in state effect-full-path)]
+    (get-in effect [:keyframe-modulator :enabled?] false)))
+
 (defn- handle-toggle
   "Handle toggling between static value and modulator.
    
    When toggling ON (to modulated):
+   - If keyframes are enabled, first disables them (mutual exclusivity)
    - If modulator config exists with :active? false, set :active? true
    - Otherwise create a default sine modulator with :active? true
    
@@ -39,9 +55,10 @@
    - true = user wants modulation enabled
    - false = user wants static value
    
-   Returns a :dispatch effect to update the parameter via :chain/update-param."
-  [{:keys [domain entity-key effect-path param-key param-spec current-value] :as event}]
+   Returns effects to update the parameter (and optionally disable keyframes)."
+  [{:keys [domain entity-key effect-path param-key param-spec current-value state] :as event}]
   (let [want-modulated? (:fx/event event)
+        keyframe-enabled? (and state (get-keyframe-enabled? state domain entity-key effect-path))
         new-value (if want-modulated?
                     ;; User wants modulation enabled
                     (if (mod/modulator-config? current-value)
@@ -64,13 +81,31 @@
                       current-value))]
     (log/debug "modulator/toggle - param-key:" param-key
                "want-modulated?:" want-modulated?
+               "keyframe-enabled?:" keyframe-enabled?
                "has-existing-config?:" (mod/modulator-config? current-value))
-    {:dispatch {:event/type :chain/update-param
-                :domain domain
-                :entity-key entity-key
-                :effect-path effect-path
-                :param-key param-key
-                :value new-value}}))
+    ;; If enabling modulation and keyframes are active, disable keyframes first
+    ;; (keyframes and per-param modulators are mutually exclusive)
+    (if (and want-modulated? keyframe-enabled?)
+      ;; Dispatch keyframe disable, then update param
+      {:dispatch {:event/type :keyframe/toggle-enabled
+                  :domain domain
+                  :entity-key entity-key
+                  :effect-path effect-path
+                  :enabled? false}
+       :dispatch-later {:event {:event/type :chain/update-param
+                                :domain domain
+                                :entity-key entity-key
+                                :effect-path effect-path
+                                :param-key param-key
+                                :value new-value}
+                        :delay-ms 10}}
+      ;; Just update the param
+      {:dispatch {:event/type :chain/update-param
+                  :domain domain
+                  :entity-key entity-key
+                  :effect-path effect-path
+                  :param-key param-key
+                  :value new-value}})))
 
 (defn- handle-set-type
   "Handle changing the modulator type.
