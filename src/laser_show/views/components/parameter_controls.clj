@@ -18,7 +18,8 @@
     :param-spec {:min 0.0 :max 2.0 :default 1.0 :type :float}
     :current-value 1.5
     :on-change-event {:event/type :my/update-param}}
-   ```")
+   ```"
+  (:require [laser-show.common.util :as u]))
 
 
 ;; Parameter Spec Conversion
@@ -28,13 +29,12 @@
   "Convert effect/preset parameters from vector format (registry) to map format (UI).
    
    Registry format: [{:key :x-scale :default 1.0 :min 0.0 :max 2.0} ...]
-   UI format: {:x-scale {:default 1.0 :min 0.0 :max 2.0} ...}
+   UI format: {:x-scale {:key :x-scale :default 1.0 :min 0.0 :max 2.0} ...}
    
-   This makes it easier to look up parameter specs by key in the UI."
+   This makes it easier to look up parameter specs by key in the UI.
+   Note: The :key field is preserved in the spec for convenience."
   [params-vector]
-  (into {}
-        (mapv (fn [p] [(:key p) (dissoc p :key)])
-              params-vector)))
+  (u/map-into :key params-vector))
 
 
 ;; Basic Parameter Controls

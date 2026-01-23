@@ -212,9 +212,7 @@
   (try
     ;; Reset all state to initial values from registered domains
     (let [domains (state/get-registered-domains)]
-      (state/reset-state! (into {}
-                                (map (fn [[k v]] [k (:initial v)]))
-                                domains)))
+      (state/reset-state! (update-vals domains :initial)))
     true
     (catch Exception e
       (log/error "Error creating new project:" (.getMessage e))

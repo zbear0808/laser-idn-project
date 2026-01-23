@@ -11,6 +11,7 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
             [laser-show.state.clipboard :as clipboard]
+            [laser-show.common.util :as u]
             [laser-show.css.core :as css]
             [laser-show.views.components.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.parameter-controls :as param-controls]
@@ -412,9 +413,7 @@
 (defn- calibration-effect-labels
   "Dynamically build map of calibration effect IDs to display labels."
   []
-  (into {} (map (fn [effect]
-                  [(:id effect) (:name effect)])
-                (get-calibration-effects))))
+  (u/map-into :id :name (get-calibration-effects)))
 
 
 ;; Effect Parameter Editors

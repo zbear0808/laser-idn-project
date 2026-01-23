@@ -184,9 +184,7 @@
 (defn build-initial-state-from-domains
   "Build the initial state map from all registered domains."
   []
-  (into {}
-        (map (fn [[k v]] [k (:initial v)]))
-        @*domain-registry))
+  (update-vals @*domain-registry :initial))
 
 
 ;; Section 6: defstate Macro
@@ -230,9 +228,7 @@
   (let [domain-kw (keyword domain-name)
         initial-var-name (symbol (str domain-name "-initial"))
         
-        initial-value (into {}
-                            (map (fn [[k v]] [k (:default v)]))
-                            field-specs)]
+        initial-value (update-vals field-specs :default)]
     
     `(do
        (def ~initial-var-name

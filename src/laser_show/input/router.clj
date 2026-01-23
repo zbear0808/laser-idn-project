@@ -200,15 +200,13 @@
 (defn list-handlers
   "Returns a list of all registered handler IDs and their patterns."
   []
-  (let [state @!router-state]
-    {:handlers (into {} 
-                     (map (fn [[id {:keys [pattern]}]] [id pattern]))
-                     (:handlers state))
-     :global-handlers (keys (:global-handlers state))}))
+  (let [{:keys [handlers global-handlers]} @!router-state]
+    {:handlers (update-vals handlers :pattern)
+     :global-handlers (keys global-handlers)}))
 
 (defn handler-count
   "Returns the total number of registered handlers."
   []
-  (let [state @!router-state]
-    (+ (count (:handlers state))
-       (count (:global-handlers state)))))
+  (let [{:keys [handlers global-handlers]} @!router-state]
+    (+ (count handlers)
+       (count global-handlers))))

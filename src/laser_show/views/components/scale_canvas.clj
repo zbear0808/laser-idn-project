@@ -95,12 +95,13 @@
         ;; Account for negative scales (flip sign)
         x-sign (if (neg? x-scale) -1 1)
         y-sign (if (neg? y-scale) -1 1)]
-    (into {}
-          (map (fn [{:keys [id pos-fn]}]
-                 (let [[wx wy] (pos-fn (* x-sign x-half) (* y-sign y-half))
-                       [px py] (world-to-canvas wx wy cx cy)]
-                   [id {:x px :y py}]))
-               handle-defs))))
+    (u/map-into
+     :id
+     (fn [{:keys [id pos-fn]}]
+       (let [[wx wy] (pos-fn (* x-sign x-half) (* y-sign y-half))
+             [px py] (world-to-canvas wx wy cx cy)]
+         {:x px :y py}))
+     handle-defs)))
 
 
 ;; Drawing Functions
