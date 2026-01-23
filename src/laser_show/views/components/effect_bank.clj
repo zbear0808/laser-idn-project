@@ -116,4 +116,4 @@
      :item-id-key :id
      :button-style-class "bank-item-btn"
      :empty-text "No effects"
-     :pref-height (or pref-height 140)}))
+     :pref-height (or pref-height 80)}))

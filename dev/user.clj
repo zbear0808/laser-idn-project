@@ -123,9 +123,8 @@
                              (println "🎨 Style updated:" var-sym)
                              ;; Trigger a dummy state update to force re-render
                              ;; The actual CSS URLs are computed in subs/stylesheet-urls
-                             ((resolve 'laser-show.state.core/update-in-state!)
-                              [:styles :reload-trigger]
-                              (fnil inc 0)))
+                             ((resolve 'laser-show.state.core/swap-state!)
+                              update-in [:styles :reload-trigger] (fnil inc 0)))
                            (println "⚠️  Warning: No :cljfx.css/url in" var-sym))))))
         (swap! !style-watches conj v))
       (println "⚠️  Warning: Could not resolve" var-sym)))
@@ -177,9 +176,8 @@
   ;; cljfx will call stylesheet-urls which will get the new CSS URLs with updated hashes
   (if @!app-started?
     (do
-      ((resolve 'laser-show.state.core/update-in-state!)
-       [:styles :reload-trigger]
-       (fnil inc 0))
+      ((resolve 'laser-show.state.core/swap-state!)
+       update-in [:styles :reload-trigger] (fnil inc 0))
       (println "✅ All CSS reloaded!"))
     (println "⚠️  App not started. Call (start) first.")))
 

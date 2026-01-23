@@ -43,8 +43,7 @@
                            :row row
                            :parent-path effects-parent-path}
      ;; Include zone effects tab for routing control
-     :include-zone? true
-     :pref-height 140}))
+     :include-zone? true}))
 
 
 ;; Parameter Editor for Effects (using shared component)

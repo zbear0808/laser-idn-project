@@ -39,8 +39,7 @@
    :item-event-template {:event/type :effect-chain/add-effect-from-bank
                          :col col
                          :row row}
-   :include-zone? true
-   :pref-height 150})
+   :include-zone? true})
 
 
 ;; Right Bottom: Parameter Editor (using shared component)
