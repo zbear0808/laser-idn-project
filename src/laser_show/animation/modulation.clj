@@ -219,10 +219,12 @@
 
 (defn config-requires-per-point?
   "Check if a modulator config requires per-point context.
-   Returns true if the config's type is in the per-point-types set."
+   Returns true if the config's type is in the per-point-types set AND :active? is true.
+   Inactive modulators don't need per-point processing - they return a static value."
   [config]
   (and (modulator-config? config)
-       (contains? per-point-types (:type config))))
+       (contains? per-point-types (:type config))
+       (get config :active? true)))
 
 (defn any-param-requires-per-point?
   "Check if any parameter in a params map requires per-point context.
@@ -784,13 +786,24 @@
    
    Returns: Map of resolved per-point param values
    
-   Use with partition-params-by-per-point for efficient per-point resolution."
+   Use with partition-params-by-per-point for efficient per-point resolution.
+   
+   NOTE: This function respects the :active? flag on modulator configs.
+   Inactive modulators return their static :value or midpoint."
   [params per-point-keys context]
   (into {}
         (map (fn [k]
                (let [v (get params k)]
                  [k (if (modulator-config? v)
-                      (evaluate-modulator v context)
+                      ;; Check :active? flag before evaluating
+                      (if (get v :active? true)
+                        (evaluate-modulator v context)
+                        ;; Inactive - return :value or midpoint (same as resolve-param)
+                        (let [{:keys [min max value]} v]
+                          (or value
+                              (when (and min max)
+                                (/ (+ (double min) (double max)) 2.0))
+                              0.0)))
                       v)])))
         per-point-keys))
 

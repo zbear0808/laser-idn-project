@@ -5,6 +5,7 @@
      (start)           - Start the app
      (stop)            - Stop the app
      (watch-styles!)   - Enable CSS hot-reload (eval style def to update UI)
+     (reload-styles!)  - Force reload ALL CSS (edit anything, call this!)
      (unwatch-styles!) - Disable CSS hot-reload
      
    Dev Tools (requires :dev alias):
@@ -139,6 +140,48 @@
     (remove-watch v ::style-reload))
   (reset! !style-watches #{})
   (println "👁️  Stopped watching styles"))
+
+(defn reload-styles!
+  "Force reload all CSS stylesheets.
+   
+   This is useful when:
+   - You edit a color definition or other downstream value
+   - You don't want to hunt for the (def theme ...) form
+   - You just want to see all CSS changes immediately
+   
+   Usage:
+   1. Edit any CSS file or color definition
+   2. Call (reload-styles!)
+   3. All CSS reloads instantly!
+   
+   Note: You don't need to call (watch-styles!) first - this works standalone."
+  []
+  (println "🎨 Reloading all CSS...")
+  
+  ;; Reload all CSS namespace files to pick up any code changes
+  (doseq [ns-sym ['laser-show.css.theme
+                  'laser-show.css.typography
+                  'laser-show.css.components
+                  'laser-show.css.buttons
+                  'laser-show.css.forms
+                  'laser-show.css.grid-cells
+                  'laser-show.css.layout
+                  'laser-show.css.title-bar
+                  'laser-show.css.cue-chain-editor
+                  'laser-show.css.list
+                  'laser-show.css.visual-editors
+                  'laser-show.css.core]]
+    (require ns-sym :reload))
+  
+  ;; Trigger a state update to force UI re-render
+  ;; cljfx will call stylesheet-urls which will get the new CSS URLs with updated hashes
+  (if @!app-started?
+    (do
+      ((resolve 'laser-show.state.core/update-in-state!)
+       [:styles :reload-trigger]
+       (fnil inc 0))
+      (println "✅ All CSS reloaded!"))
+    (println "⚠️  App not started. Call (start) first.")))
 
 
 ;; cljfx Dev Tools
@@ -360,9 +403,10 @@
   (stop)   ;; Stop the app
   
   ;; CSS Hot-Reload
-  (watch-styles!)    ;; Enable style watching
-  (unwatch-styles!)  ;; Disable style watching
-  ;; Then edit css/menus.clj and eval (def menu-theme ...) to see instant updates!
+  (watch-styles!)    ;; Enable automatic watching (eval defs to reload)
+  (reload-styles!)   ;; Force reload ALL CSS at once (edit anything, call this!)
+  (unwatch-styles!)  ;; Disable automatic watching
+  ;; Tip: Edit any CSS file, then call (reload-styles!) - no need to find the def!
   
   ;; cljfx Dev Tools (requires :dev alias)
   (help)                            ;; List all cljfx types
