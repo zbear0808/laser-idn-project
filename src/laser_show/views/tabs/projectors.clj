@@ -15,7 +15,8 @@
             [laser-show.css.core :as css]
             [laser-show.views.components.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.parameter-controls :as param-controls]
-            [laser-show.views.components.list :as list]))
+            [laser-show.views.components.list :as list]
+            [laser-show.views.components.zone-chips :as zone-chips]))
 
 
 ;; Status Indicators
@@ -351,25 +352,6 @@
 ;; Zone Group Assignment UI
 
 
-(defn- zone-group-chip
-"A chip showing a zone group with toggle functionality."
-[{:keys [group selected? on-toggle]}]
-(let [{:keys [id name color]} group]
-{:fx/type :h-box
-:spacing 4
-:alignment :center-left
-:padding {:left 6 :right 6 :top 3 :bottom 3}
-:style (str "-fx-background-color: " (if selected? (str color "80") "#404040")
-          "; -fx-background-radius: 12; -fx-border-color: " color
-          "; -fx-border-radius: 12; -fx-cursor: hand;")
-:on-mouse-clicked on-toggle
-:children [{:fx/type :circle
-           :radius 4
-           :fill color}
-          {:fx/type :label
-           :text name
-           :style (str "-fx-text-fill: " (if selected? "white" "#B0B0B0") "; -fx-font-size: 10;")}]}))
-
 (defn- zone-group-assignment-section
 "Section for assigning a projector to zone groups."
 [{:keys [fx/context projector-id]}]
@@ -390,7 +372,7 @@
            :hgap 6
            :vgap 6
            :children (vec (for [group all-groups]
-                            {:fx/type zone-group-chip
+                            {:fx/type zone-chips/zone-group-chip
                              :fx/key (:id group)
                              :group group
                              :selected? (some #{(:id group)} current-groups)

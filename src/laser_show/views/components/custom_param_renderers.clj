@@ -22,7 +22,8 @@
             [laser-show.views.components.rotate-canvas :as rotate-canvas]
             [laser-show.views.components.scale-canvas :as scale-canvas]
             [laser-show.views.components.curve-canvas :as curve-canvas]
-            [laser-show.views.components.tabs :as tabs])
+            [laser-show.views.components.tabs :as tabs]
+            [laser-show.views.components.zone-chips :as zone-chips])
   (:import [javafx.scene.canvas Canvas]
            [javafx.scene.input MouseEvent MouseButton]
            [javafx.event EventHandler]))
@@ -546,20 +547,6 @@
   :add "Add these zone groups to existing destination"
   :filter "Only keep zones that are in BOTH destinations"})
 
-(defn- zone-group-select-chip
- "Clickable chip for selecting/deselecting a zone group."
- [{:keys [group selected? on-toggle]}]
- (let [{:keys [id name color]} group]
-   {:fx/type :label
-    :text name
-    :style (str "-fx-background-color: " (if selected? color (str color "40")) "; "
-               "-fx-text-fill: " (if selected? "white" "#808080") "; "
-               "-fx-padding: 4 10; "
-               "-fx-background-radius: 12; "
-               "-fx-font-size: 11; "
-               "-fx-cursor: hand;")
-    :on-mouse-clicked on-toggle}))
-
 (defn zone-reroute-visual-editor
  "Visual editor for zone-reroute effect - zone group selector with mode.
   
@@ -617,7 +604,7 @@
                             :vgap 6
                             :children (vec
                                        (for [group zone-groups]
-                                         {:fx/type zone-group-select-chip
+                                         {:fx/type zone-chips/zone-group-chip
                                           :fx/key (:id group)
                                           :group group
                                           :selected? (contains? target-zone-groups (:id group))

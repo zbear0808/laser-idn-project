@@ -21,6 +21,7 @@
     ".nrepl-port": true,
     "**/node_modules": true,
     "**/dist": true,
-    "**/.git": true
+    "**/.git": true,
+    "*.class": true
   }
 }
