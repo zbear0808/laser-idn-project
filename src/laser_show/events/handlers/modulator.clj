@@ -27,8 +27,13 @@
 (defn- handle-toggle
   "Handle toggling between static value and modulator.
    
-   When toggling ON (to modulated): creates a default sine modulator
-   When toggling OFF (to static): extracts the midpoint value
+   When toggling ON (to modulated):
+   - If modulator config exists with :active? false, set :active? true
+   - Otherwise create a default sine modulator with :active? true
+   
+   When toggling OFF (to static):
+   - Set :active? false on existing modulator config (preserves settings)
+   - Set :value to midpoint of min/max (so slider starts at sensible position)
    
    The :fx/event from the toggle-button contains the NEW selected state:
    - true = user wants modulation enabled
@@ -38,11 +43,28 @@
   [{:keys [domain entity-key effect-path param-key param-spec current-value] :as event}]
   (let [want-modulated? (:fx/event event)
         new-value (if want-modulated?
-                    ;; User wants modulation -> create default modulator
-                    (mod-defs/build-default-modulator :sine param-spec)
-                    ;; User wants static -> extract midpoint value
-                    (mod-defs/get-static-value current-value (:default param-spec)))]
-    (log/debug "modulator/toggle - param-key:" param-key "want-modulated?:" want-modulated?)
+                    ;; User wants modulation enabled
+                    (if (mod/modulator-config? current-value)
+                      ;; Existing modulator - just activate it
+                      (assoc current-value :active? true)
+                      ;; No modulator exists - create default
+                      (mod-defs/build-default-modulator :sine param-spec))
+                    ;; User wants static - deactivate modulator (preserves settings)
+                    (if (mod/modulator-config? current-value)
+                      ;; Deactivate and set initial :value for slider
+                      (let [mod-min (get current-value :min 0.0)
+                            mod-max (get current-value :max 1.0)
+                            ;; Use existing :value if present, otherwise compute midpoint
+                            initial-value (or (:value current-value)
+                                             (/ (+ (double mod-min) (double mod-max)) 2.0))]
+                        (assoc current-value
+                               :active? false
+                               :value initial-value))
+                      ;; Already static - no change needed
+                      current-value))]
+    (log/debug "modulator/toggle - param-key:" param-key
+               "want-modulated?:" want-modulated?
+               "has-existing-config?:" (mod/modulator-config? current-value))
     {:dispatch {:event/type :chain/update-param
                 :domain domain
                 :entity-key entity-key
@@ -153,6 +175,35 @@
   ;; Reset the playback accumulators using existing transport/retrigger handler
   {:dispatch {:event/type :transport/retrigger}})
 
+(defn- handle-update-static-value
+  "Handle updating the static value while preserving an inactive modulator config.
+   
+   When modulation is toggled off, we keep the modulator config with :active? false.
+   When the user adjusts the static slider/text field, we need to update the :value
+   field in the config (which is used as the static output) without losing the settings.
+   
+   If the current value is:
+   - A modulator config: update its :value field
+   - A plain number: just use the new value
+   
+   Returns a :dispatch effect to update the parameter via :chain/update-param."
+  [{:keys [domain entity-key effect-path param-key current-value] :as event}]
+  (let [new-static-value (:fx/event event)
+        new-value (if (mod/modulator-config? current-value)
+                    ;; Preserve the modulator config, just update :value
+                    (assoc current-value :value new-static-value)
+                    ;; Plain number - just use new value
+                    new-static-value)]
+    (log/debug "modulator/update-static-value - param-key:" param-key
+               "new-value:" new-static-value
+               "has-config?:" (mod/modulator-config? current-value))
+    {:dispatch {:event/type :chain/update-param
+                :domain domain
+                :entity-key entity-key
+                :effect-path effect-path
+                :param-key param-key
+                :value new-value}}))
+
 
 ;; Main Dispatcher
 
@@ -168,6 +219,7 @@
     :modulator/toggle (handle-toggle event)
     :modulator/set-type (handle-set-type event)
     :modulator/update-param (handle-update-mod-param event)
+    :modulator/update-static-value (handle-update-static-value event)
     :modulator/retrigger (handle-retrigger event)
     ;; Unknown modulator event
     (do

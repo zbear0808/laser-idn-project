@@ -229,8 +229,11 @@
    - :modulator-event-base - Base event template for modulator events (contains :domain, :entity-key, :effect-path)
    - :label-width - Optional label width (default 80)"
   [{:keys [param-key param-spec current-value on-change-event on-text-event modulator-event-base label-width]}]
-   (let [{:keys [min max label]} param-spec
-         is-modulated? (mod-defs/modulated? current-value)
+  (let [{:keys [min max label]} param-spec
+         is-modulated? (mod-defs/active-modulator? current-value)
+         ;; Check if there's an inactive modulator config we need to preserve
+         has-inactive-modulator? (and (mod-defs/modulated? current-value)
+                                      (not (mod-defs/active-modulator? current-value)))
          static-value (mod-defs/get-static-value current-value (:default param-spec))
          display-label (or label (name param-key))
          label-w (or label-width 80)
@@ -252,7 +255,14 @@
                                        :current-value current-value)
          retrigger-event (assoc modulator-event-base
                                 :event/type :modulator/retrigger
-                                :param-key param-key)]
+                                :param-key param-key)
+         ;; When there's an inactive modulator, use the special event that preserves the config
+         static-change-event (if has-inactive-modulator?
+                               (assoc modulator-event-base
+                                      :event/type :modulator/update-static-value
+                                      :param-key param-key
+                                      :current-value current-value)
+                               (assoc on-change-event :param-key param-key))]
      {:fx/type :v-box
       :spacing 4
       ;; Use filterv to remove nil values - the modulator params editor is only shown when modulated
@@ -292,18 +302,25 @@
                                              :pref-width 120
                                              :snap-to-ticks is-int?
                                              :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
-                                             :on-value-changed (assoc on-change-event :param-key param-key)}
+                                             ;; Use static-change-event to preserve inactive modulator config
+                                             :on-value-changed static-change-event}
                                             {:fx/type :text-field
                                              :text (if is-int?
                                                      (str (int static-value))
                                                      (format "%.2f" (double static-value)))
                                              :pref-width 50
                                              :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 2 4;"
-                                             :on-action (assoc on-text-event
-                                                               :param-key param-key
-                                                               :min min
-                                                               :max max
-                                                               :is-int? is-int?)}]})]}
+                                             ;; Text field also needs to preserve inactive modulator config
+                                             :on-action (if has-inactive-modulator?
+                                                          (assoc modulator-event-base
+                                                                 :event/type :modulator/update-static-value
+                                                                 :param-key param-key
+                                                                 :current-value current-value)
+                                                          (assoc on-text-event
+                                                                 :param-key param-key
+                                                                 :min min
+                                                                 :max max
+                                                                 :is-int? is-int?))}]})]}
                   
                   ;; Modulator parameters (only shown when modulated)
                   (when is-modulated?

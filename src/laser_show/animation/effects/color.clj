@@ -39,35 +39,24 @@
 
 
 (defn- hue-shift-xf [time-ms bpm params ctx]
-  ;; Check if any params use per-point modulators
-  (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - use optimized resolution
-    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
-      (map-indexed
-       (fn [idx pt]
-         (if (t/blanked? pt)
-           pt  ;; Skip blanked points
-           (let [x (double (pt t/X)) y (double (pt t/Y))
-                 r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-                 resolved (effects/resolve-for-point-optimized prep x y idx)
-                 degrees (double (:degrees resolved))
-                 [h s v] (colors/normalized->hsv r g b)
-                 ;; Use rem for primitive modulo (always positive for hue degrees)
-                 new-h (rem (+ (double h) degrees) 360.0)
-                 [nr ng nb] (colors/hsv->normalized new-h s v)]
-             (t/update-point-rgb pt nr ng nb))))))
-    ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          degrees (double (:degrees resolved))]
-      (map (fn [pt]
-             (if (t/blanked? pt)
-               pt  ;; Skip blanked points
-               (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-                     [h s v] (colors/normalized->hsv r g b)
-                     ;; Use rem for primitive modulo
-                     new-h (rem (+ (double h) degrees) 360.0)
-                     [nr ng nb] (colors/hsv->normalized new-h s v)]
-                 (t/update-point-rgb pt nr ng nb))))))))
+  (let [per-point? (mod/any-param-requires-per-point? params)
+        prep (when per-point?
+               (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx))
+        global-resolved (when-not per-point?
+                          (effects/resolve-params-global params time-ms bpm ctx))]
+    (map-indexed
+     (fn [idx pt]
+       (if (t/blanked? pt)
+         pt
+         (let [resolved (if per-point?
+                          (effects/resolve-for-point-optimized prep (pt t/X) (pt t/Y) idx)
+                          global-resolved)
+               degrees (double (:degrees resolved))
+               r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+               [h s v] (colors/normalized->hsv r g b)
+               new-h (rem (+ (double h) degrees) 360.0)
+               [nr ng nb] (colors/hsv->normalized new-h s v)]
+           (t/update-point-rgb pt nr ng nb)))))))
 
 (effects/register-effect!
  {:id :hue-shift
@@ -89,33 +78,24 @@
 
 
 (defn- saturation-xf [time-ms bpm params ctx]
-  ;; Check if any params use per-point modulators
-  (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - use optimized resolution
-    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
-      (map-indexed
-       (fn [idx pt]
-         (if (t/blanked? pt)
-           pt  ;; Skip blanked points
-           (let [x (double (pt t/X)) y (double (pt t/Y))
-                 r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-                 resolved (effects/resolve-for-point-optimized prep x y idx)
-                 amount (double (:amount resolved))
-                 [h s v] (colors/normalized->hsv r g b)
-                 new-s (common/clamp-normalized (* (double s) amount))
-                 [nr ng nb] (colors/hsv->normalized h new-s v)]
-             (t/update-point-rgb pt nr ng nb))))))
-    ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          amount (double (:amount resolved))]
-      (map (fn [pt]
-             (if (t/blanked? pt)
-               pt  ;; Skip blanked points
-               (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-                     [h s v] (colors/normalized->hsv r g b)
-                     new-s (common/clamp-normalized (* (double s) amount))
-                     [nr ng nb] (colors/hsv->normalized h new-s v)]
-                 (t/update-point-rgb pt nr ng nb))))))))
+  (let [per-point? (mod/any-param-requires-per-point? params)
+        prep (when per-point?
+               (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx))
+        global-resolved (when-not per-point?
+                          (effects/resolve-params-global params time-ms bpm ctx))]
+    (map-indexed
+     (fn [idx pt]
+       (if (t/blanked? pt)
+         pt
+         (let [resolved (if per-point?
+                          (effects/resolve-for-point-optimized prep (pt t/X) (pt t/Y) idx)
+                          global-resolved)
+               amount (double (:amount resolved))
+               r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+               [h s v] (colors/normalized->hsv r g b)
+               new-s (common/clamp-normalized (* (double s) amount))
+               [nr ng nb] (colors/hsv->normalized h new-s v)]
+           (t/update-point-rgb pt nr ng nb)))))))
 
 (effects/register-effect!
  {:id :saturation
@@ -135,33 +115,24 @@
 
 
 (defn- color-filter-xf [time-ms bpm params ctx]
-  ;; Check if any params use per-point modulators
-  (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - use optimized resolution
-    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
-      (map-indexed
-       (fn [idx pt]
-         (let [x (double (pt t/X)) y (double (pt t/Y))
-               r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-               resolved (effects/resolve-for-point-optimized prep x y idx)
-               r-mult (double (:r-mult resolved))
-               g-mult (double (:g-mult resolved))
-               b-mult (double (:b-mult resolved))]
-           (t/update-point-rgb pt
-             (common/clamp-normalized (* r r-mult))
-             (common/clamp-normalized (* g g-mult))
-             (common/clamp-normalized (* b b-mult)))))))
-    ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          r-mult (double (:r-mult resolved))
-          g-mult (double (:g-mult resolved))
-          b-mult (double (:b-mult resolved))]
-      (map (fn [pt]
-             (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))]
-               (t/update-point-rgb pt
-                 (common/clamp-normalized (* r r-mult))
-                 (common/clamp-normalized (* g g-mult))
-                 (common/clamp-normalized (* b b-mult)))))))))
+  (let [per-point? (mod/any-param-requires-per-point? params)
+        prep (when per-point?
+               (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx))
+        global-resolved (when-not per-point?
+                          (effects/resolve-params-global params time-ms bpm ctx))]
+    (map-indexed
+     (fn [idx pt]
+       (let [resolved (if per-point?
+                        (effects/resolve-for-point-optimized prep (pt t/X) (pt t/Y) idx)
+                        global-resolved)
+             r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+             r-mult (double (:r-mult resolved))
+             g-mult (double (:g-mult resolved))
+             b-mult (double (:b-mult resolved))]
+         (t/update-point-rgb pt
+           (common/clamp-normalized (* r r-mult))
+           (common/clamp-normalized (* g g-mult))
+           (common/clamp-normalized (* b b-mult))))))))
 
 (effects/register-effect!
  {:id :color-filter
@@ -193,35 +164,25 @@
 
 
 (defn- set-hue-xf [time-ms bpm params ctx]
-  ;; Check if any params use per-point modulators
-  (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - enables rainbow gradients! Use optimized resolution
-    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
-      (map-indexed
-       (fn [idx pt]
-         (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-               [_h s v] (colors/normalized->hsv r g b)
-               v-dbl (double v)]
-           ;; Only apply to non-black points with some saturation
-           (if (and (pos? v-dbl) (not (t/blanked? pt)))
-             (let [x (double (pt t/X)) y (double (pt t/Y))
-                   resolved (effects/resolve-for-point-optimized prep x y idx)
-                   hue (:hue resolved)
-                   [nr ng nb] (colors/hsv->normalized hue s v)]
-               (t/update-point-rgb pt nr ng nb))
-             pt)))))
-    ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          hue (:hue resolved)]
-      (map (fn [pt]
-             (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-                   [_h s v] (colors/normalized->hsv r g b)
-                   v-dbl (double v)]
-               ;; Only apply to non-black points with some saturation
-               (if (and (pos? v-dbl) (not (t/blanked? pt)))
-                 (let [[nr ng nb] (colors/hsv->normalized hue s v)]
-                   (t/update-point-rgb pt nr ng nb))
-                 pt)))))))
+  (let [per-point? (mod/any-param-requires-per-point? params)
+        prep (when per-point?
+               (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx))
+        global-resolved (when-not per-point?
+                          (effects/resolve-params-global params time-ms bpm ctx))]
+    (map-indexed
+     (fn [idx pt]
+       (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+             [_h s v] (colors/normalized->hsv r g b)
+             v-dbl (double v)]
+         ;; Only apply to non-black points with some saturation
+         (if (and (pos? v-dbl) (not (t/blanked? pt)))
+           (let [resolved (if per-point?
+                            (effects/resolve-for-point-optimized prep (pt t/X) (pt t/Y) idx)
+                            global-resolved)
+                 hue (:hue resolved)
+                 [nr ng nb] (colors/hsv->normalized hue s v)]
+             (t/update-point-rgb pt nr ng nb))
+           pt))))))
 
 (effects/register-effect!
  {:id :set-hue
@@ -323,30 +284,22 @@
 
 
 (defn- set-color-xf [time-ms bpm params ctx]
-  ;; Check if any params use per-point modulators (for position-based color gradients)
-  (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - supports position-based modulators on individual color channels
-    ;; Use optimized resolution
-    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
-      (map-indexed
-       (fn [idx pt]
-         (if (t/blanked? pt)
-           pt
-           (let [x (double (pt t/X)) y (double (pt t/Y))
-                 resolved (effects/resolve-for-point-optimized prep x y idx)
-                 red (double (:red resolved))
-                 green (double (:green resolved))
-                 blue (double (:blue resolved))]
-             (t/update-point-rgb pt red green blue))))))
-    ;; Global path - no per-point modulators
-    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          red (double (:red resolved))
-          green (double (:green resolved))
-          blue (double (:blue resolved))]
-      (map (fn [pt]
-             (if (t/blanked? pt)
-               pt
-               (t/update-point-rgb pt red green blue)))))))
+  (let [per-point? (mod/any-param-requires-per-point? params)
+        prep (when per-point?
+               (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx))
+        global-resolved (when-not per-point?
+                          (effects/resolve-params-global params time-ms bpm ctx))]
+    (map-indexed
+     (fn [idx pt]
+       (if (t/blanked? pt)
+         pt
+         (let [resolved (if per-point?
+                          (effects/resolve-for-point-optimized prep (pt t/X) (pt t/Y) idx)
+                          global-resolved)
+               red (double (:red resolved))
+               green (double (:green resolved))
+               blue (double (:blue resolved))]
+           (t/update-point-rgb pt red green blue)))))))
 
 (effects/register-effect!
  {:id :set-color

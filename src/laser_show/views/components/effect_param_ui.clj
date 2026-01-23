@@ -13,7 +13,8 @@
    - Optional modulator support for numeric parameters
    
    Uses parameter-controls namespace for basic control components."
-  (:require [laser-show.views.components.parameter-controls :as param-controls]
+  (:require [laser-show.animation.modulator-defs :as mod-defs]
+            [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.modulator-param-control :as mod-param]))
 
@@ -82,8 +83,8 @@
         
         ui-hints (:ui-hints effect-def)
         renderer-type (:renderer ui-hints)
-        ;; Check if any params have active modulators
-        has-modulators? (boolean (some (fn [[_k v]] (map? v)) current-params))
+        ;; Check if any params have ACTIVE modulators
+        has-modulators? (boolean (some (fn [[_k v]] (mod-defs/active-modulator? v)) current-params))
         ;; Force numeric mode if modulators are active
         actual-mode (if has-modulators?
                       :numeric

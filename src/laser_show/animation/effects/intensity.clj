@@ -41,29 +41,19 @@
 
 
 (defn- intensity-xf [time-ms bpm params ctx]
-  ;; Check if any params use per-point modulators
-  (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - enables spatial brightness patterns! Use optimized resolution
-    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
-      (map-indexed
-       (fn [idx pt]
-         (let [x (double (pt t/X)) y (double (pt t/Y))
-               r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-               resolved (effects/resolve-for-point-optimized prep x y idx)
-               amount (double (:amount resolved))]
-           (t/update-point-rgb pt
-             (* r amount)
-             (* g amount)
-             (* b amount))))))
-    ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          amount (double (:amount resolved))]
-      (map (fn [pt]
-             (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))]
-               (t/update-point-rgb pt
-                 (* r amount)
-                 (* g amount)
-                 (* b amount))))))))
+  (let [per-point? (mod/any-param-requires-per-point? params)
+        prep (when per-point?
+               (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx))
+        global-resolved (when-not per-point?
+                          (effects/resolve-params-global params time-ms bpm ctx))]
+    (map-indexed
+     (fn [idx pt]
+       (let [resolved (if per-point?
+                        (effects/resolve-for-point-optimized prep (pt t/X) (pt t/Y) idx)
+                        global-resolved)
+             amount (double (:amount resolved))
+             r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))]
+         (t/update-point-rgb pt (* r amount) (* g amount) (* b amount)))))))
 
 (effects/register-effect!
  {:id :intensity
@@ -106,31 +96,22 @@
 
 
 (defn- threshold-xf [time-ms bpm params ctx]
-  ;; Check if any params use per-point modulators
-  (if (mod/any-param-requires-per-point? params)
-    ;; Per-point path - use optimized resolution
-    (let [prep (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx)]
-      (map-indexed
-       (fn [idx pt]
-         (let [x (double (pt t/X)) y (double (pt t/Y))
-               r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-               resolved (effects/resolve-for-point-optimized prep x y idx)
-               ;; Threshold already normalized 0.0-1.0
-               threshold (double (:threshold resolved))
-               max-val (Math/max (Math/max r g) b)]
-           (if (< max-val threshold)
-             (t/update-point-rgb pt 0.0 0.0 0.0)
-             pt)))))
-    ;; Global path
-    (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-          ;; Threshold already normalized 0.0-1.0
-          threshold (double (:threshold resolved))]
-      (map (fn [pt]
-             (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-                   max-val (Math/max (Math/max r g) b)]
-               (if (< max-val threshold)
-                 (t/update-point-rgb pt 0.0 0.0 0.0)
-                 pt)))))))
+  (let [per-point? (mod/any-param-requires-per-point? params)
+        prep (when per-point?
+               (effects/prepare-per-point-resolution params time-ms bpm (:point-count ctx) ctx))
+        global-resolved (when-not per-point?
+                          (effects/resolve-params-global params time-ms bpm ctx))]
+    (map-indexed
+     (fn [idx pt]
+       (let [resolved (if per-point?
+                        (effects/resolve-for-point-optimized prep (pt t/X) (pt t/Y) idx)
+                        global-resolved)
+             r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+             threshold (double (:threshold resolved))
+             max-val (Math/max (Math/max r g) b)]
+         (if (< max-val threshold)
+           (t/update-point-rgb pt 0.0 0.0 0.0)
+           pt))))))
 
 (effects/register-effect!
  {:id :threshold

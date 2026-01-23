@@ -9,7 +9,7 @@
       "menuSelections": {
         "cljAliases": ["win", "dev", "laser-show", "repl"]
       },
-      //"afterPrimaryReplConnectedCode": "(do (start) (watch-styles!) )"
+      "afterPrimaryReplConnectedCode": "(do (start) )"
     }
   ],
 

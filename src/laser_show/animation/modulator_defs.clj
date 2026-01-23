@@ -141,13 +141,18 @@
 
 (defn get-static-value
   "Extract static value from param (handles both static and modulated).
-   For modulated values, returns the mid-point of min/max."
+   For modulated values:
+   - First checks for :value field (set when slider moved while inactive)
+   - Falls back to mid-point of min/max"
   [value default-value]
   (if (modulated? value)
-    (let [{:keys [min max]} value]
-      (if (and min max)
-        (/ (+ (double min) (double max)) 2.0)
-        (or default-value 0.0)))
+    (let [{:keys [min max value]} value]
+      ;; Check for explicit :value first (set by update-static-value handler)
+      (or value
+          (when (and min max)
+            (/ (+ (double min) (double max)) 2.0))
+          default-value
+          0.0))
     (or value default-value 0.0)))
 
 (defn build-default-modulator
@@ -158,10 +163,12 @@
    - param-spec: Parameter specification map with :min and :max bounds
    
    Returns a modulator config map with default values from modulator-params,
-   optionally overriding min/max with values from param-spec."
+   optionally overriding min/max with values from param-spec.
+   Includes :active? true by default."
   [mod-type param-spec]
   (let [base-params (get modulator-params mod-type [])
-        defaults (into {:type mod-type}
+        defaults (into {:type mod-type
+                        :active? true}  ; Add active flag by default
                        (mapv (fn [p] [(:key p) (:default p)])
                              base-params))]
     ;; Override min/max with param-spec bounds if they have reasonable values
@@ -171,6 +178,13 @@
       
       (and (:max param-spec) (not= (:max param-spec) 10.0))
       (assoc :max (:max param-spec)))))
+
+(defn active-modulator?
+  "Check if a param value is an active modulator config.
+   Returns true only if it's a modulator config AND :active? is true."
+  [value]
+  (and (modulated? value)
+       (get value :active? true)))  ; Default to true for backward compatibility
 
 (def retrigger-modulator-types
   "Set of modulator types that support retriggering."

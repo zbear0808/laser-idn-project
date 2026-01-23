@@ -721,19 +721,32 @@
 
 (defn resolve-param
   "Resolve a parameter value.
-   - If the param is a modulator config map (pure data), evaluate it.
+   - If the param is a modulator config map (pure data), evaluate it if :active? is true
+   - If :active? is false, extract and return the static :value field or midpoint
    - If it's a static value (number, string, etc.), return it as-is."
   [param context]
-  (if (modulator-config? param)
+  (cond
+    (not (modulator-config? param))
+    param
+
+    (get param :active? true)  ; Default to true for backward compatibility
     (evaluate-modulator param context)
-    param))
+
+    :else
+    ;; Inactive modulator - return :value field or fall back to midpoint
+    (let [{:keys [min max value]} param]
+      (or value
+          (when (and min max)
+            (/ (+ (double min) (double max)) 2.0))
+          0.0))))
 
 (defn resolve-params
   "Resolve all parameters in a params map."
   [params context]
-  (into {}
-        (map (fn [[k v]] [k (resolve-param v context)]))
-        params))
+  (update-vals params #(resolve-param % context) )
+  #_(into {}
+          (map (fn [[k v]] [k (resolve-param v context)]))
+          params))
 
 
 ;; Optimized Per-Point Parameter Resolution
