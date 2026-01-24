@@ -12,18 +12,23 @@
    
    These components support both:
    1. Legacy props (:col, :row, :effect-idx, :effect-path) for effect chain editor
-   2. Event template pattern (:event-template) for generic reuse (e.g., projectors)"
+   2. Event template pattern (:event-template) for generic reuse (e.g., projectors)
+   
+   Single-parameter visual editors (rotation, hue, hue-shift) support optional
+   modulator toggle to enable animation without switching to numeric mode."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.subs :as subs]
             [laser-show.animation.colors :as colors]
+            [laser-show.animation.modulator-defs :as mod-defs]
             [laser-show.events.core :as events]
             [laser-show.views.components.spatial-canvas :as spatial-canvas]
             [laser-show.views.components.rotate-canvas :as rotate-canvas]
             [laser-show.views.components.scale-canvas :as scale-canvas]
             [laser-show.views.components.curve-canvas :as curve-canvas]
             [laser-show.views.components.tabs :as tabs]
-            [laser-show.views.components.zone-chips :as zone-chips])
+            [laser-show.views.components.zone-chips :as zone-chips]
+            [laser-show.views.components.modulator-param-control :as mod-param])
   (:import [javafx.scene.canvas Canvas]
            [javafx.scene.input MouseEvent MouseButton]
            [javafx.event EventHandler]))
@@ -271,15 +276,25 @@
      - :reset-event - Event to dispatch on right-click reset
      - :fx-key - (optional) Unique key for canvas
      - :width, :height - (optional) Canvas dimensions, default 280x280
-     - :hint-text - (optional) Hint text shown above canvas"
+     - :hint-text - (optional) Hint text shown above canvas
+  
+  Modulator support (optional):
+     - :enable-modulator? - Show modulator toggle button (default false)
+     - :param-spec - Parameter spec for :angle (used by modulator)
+     - :modulator-event-base - Base event for modulator operations"
  [{:keys [col row effect-path current-params params param-specs
-          event-template reset-event fx-key width height hint-text]
+          event-template reset-event fx-key width height hint-text
+          enable-modulator? param-spec modulator-event-base]
    :or {width 280 height 280}}]
  (let [;; Support both :current-params and :params (alias)
        params-map (or current-params params {})
        
-       ;; Get angle value
-       angle (get params-map :angle 0.0)
+       ;; Get angle value - could be number or modulator config
+       angle-value (get params-map :angle 0.0)
+       is-modulated? (mod-defs/active-modulator? angle-value)
+       ;; Always use get-static-value - handles both plain numbers and modulator configs
+       ;; (including inactive modulators where :active? is false)
+       static-angle (mod-defs/get-static-value angle-value 0.0)
        
        ;; Build on-angle-change event
        on-angle-change-event (if event-template
@@ -300,30 +315,56 @@
        canvas-key (or fx-key [col row effect-path])
        
        ;; Hint text
-       actual-hint (or hint-text "Drag dial to adjust rotation • Right-click to reset")]
+       actual-hint (or hint-text "Drag dial to adjust rotation • Right-click to reset")
+       
+       ;; Default param spec for angle if not provided
+       angle-param-spec (or param-spec {:min -360.0 :max 360.0 :default 0.0 :label "Angle"})]
    
    {:fx/type :v-box
     :spacing 8
     :padding 8
     :style-class ["visual-editor-padded"]
-    :children [{:fx/type :label
-                :text actual-hint
-                :style-class ["visual-editor-hint"]}
-               
-               {:fx/type rotate-canvas/rotate-canvas
-                :fx/key canvas-key
-                :width width
-                :height height
-                :angle angle
-                :on-angle-change on-angle-change-event
-                :on-reset actual-reset-event}
-               
-               {:fx/type :h-box
-                :spacing 12
-                :alignment :center
-                :children [{:fx/type :label
-                           :text (format "Angle: %.1f°" angle)
-                           :style-class ["text-monospace"]}]}]}))
+    :children (filterv some?
+               [;; Modulator header (optional)
+                (when (and enable-modulator? modulator-event-base)
+                  {:fx/type mod-param/visual-editor-modulator-header
+                   :param-key :angle
+                   :param-spec angle-param-spec
+                   :current-value angle-value
+                   :modulator-event-base modulator-event-base})
+                
+                ;; Modulator params editor (shown ABOVE visual when modulated)
+                (when is-modulated?
+                  {:fx/type mod-param/visual-editor-modulator-params
+                   :param-key :angle
+                   :param-spec angle-param-spec
+                   :current-value angle-value
+                   :modulator-event-base modulator-event-base})
+                
+                ;; Hint text (only show when NOT modulated - modulator params replace this)
+                (when-not is-modulated?
+                  {:fx/type :label
+                   :text actual-hint
+                   :style-class ["visual-editor-hint"]})
+                
+                ;; Visual dial editor - always shown but disabled/preview when modulated
+                {:fx/type rotate-canvas/rotate-canvas
+                 :fx/key canvas-key
+                 :width width
+                 :height height
+                 :angle static-angle
+                 :on-angle-change (when-not is-modulated? on-angle-change-event)
+                 :on-reset (when-not is-modulated? actual-reset-event)}
+                
+                ;; Value display
+                {:fx/type :h-box
+                 :spacing 12
+                 :alignment :center
+                 :children [{:fx/type :label
+                            :text (if is-modulated?
+                                    "Angle: (modulated)"
+                                    (format "Angle: %.1f°" (double static-angle)))
+                            :style-class ["text-monospace"]}]}])}))
 
 
 ;; Scale Effect Visual Editor
@@ -764,75 +805,112 @@
    - :event-template - Base event for on-drag (will add :param-key :value)
    - :fx-key - (optional) Unique key for canvas (should NOT include current value)
    - :width, :height - (optional) Canvas dimensions, default 280x60
-   - :hint-text - (optional) Hint text above canvas"
-  [{:keys [current-params event-template fx-key width height hint-text]
+   - :hint-text - (optional) Hint text above canvas
+   
+   Modulator support (optional):
+   - :enable-modulator? - Show modulator toggle button (default false)
+   - :param-spec - Parameter spec for :hue (used by modulator)
+   - :modulator-event-base - Base event for modulator operations"
+  [{:keys [current-params event-template fx-key width height hint-text
+           enable-modulator? param-spec modulator-event-base]
     :or {width 280 height 60}}]
   (let [params-map (or current-params {})
-        hue (get params-map :hue 0.0)
+        ;; Get hue value - could be number or modulator config
+        hue-value (get params-map :hue 0.0)
+        is-modulated? (mod-defs/active-modulator? hue-value)
+        ;; Always use get-static-value - handles both plain numbers and modulator configs
+        ;; (including inactive modulators where :active? is false)
+        static-hue (mod-defs/get-static-value hue-value 0.0)
         actual-hint (or hint-text "Drag to select hue")
         ;; Use a stable key that does NOT change based on current value
         ;; This prevents canvas recreation during dragging
-        canvas-key (or fx-key [:hue-editor])]
+        canvas-key (or fx-key [:hue-editor])
+        ;; Default param spec for hue if not provided
+        hue-param-spec (or param-spec {:min 0.0 :max 360.0 :default 0.0 :label "Hue"})]
     {:fx/type :v-box
      :spacing 8
      :padding 8
      :style-class ["visual-editor-padded"]
-     :children [{:fx/type :label
-                 :text actual-hint
-                 :style-class ["visual-editor-hint"]}
-                
-                ;; Use ext-on-instance-lifecycle to update canvas state without recreating
-                {:fx/type fx/ext-on-instance-lifecycle
-                 :fx/key canvas-key
-                 :on-created (fn [^Canvas canvas]
-                               (let [dragging? (atom false)
-                                     current-hue-atom (atom hue)]
-                                 ;; Initial draw
-                                 (draw-set-hue-gradient! canvas width height hue)
-                                 
-                                 ;; Mouse handlers
-                                 (let [handle-mouse (fn [^MouseEvent event]
-                                                      (let [x (.getX event)
-                                                            w (double width)
-                                                            new-hue (-> (/ x w)
-                                                                        (* 360.0)
-                                                                        (max 0.0)
-                                                                        (min 360.0))]
-                                                        (reset! current-hue-atom new-hue)
-                                                        (draw-set-hue-gradient! canvas width height new-hue)
-                                                        (when event-template
-                                                          (events/dispatch! (assoc event-template
-                                                                                   :param-key :hue
-                                                                                   :value new-hue)))))]
-                                   
-                                   (.setOnMousePressed canvas
-                                                       (reify EventHandler
-                                                         (handle [_ event]
-                                                           (reset! dragging? true)
-                                                           (handle-mouse event))))
-                                   
-                                   (.setOnMouseDragged canvas
-                                                       (reify EventHandler
-                                                         (handle [_ event]
-                                                           (when @dragging?
-                                                             (handle-mouse event)))))
-                                   
-                                   (.setOnMouseReleased canvas
-                                                        (reify EventHandler
-                                                          (handle [_ _]
-                                                            (reset! dragging? false))))
-                                   
-                                   (.setStyle canvas "-fx-cursor: crosshair;"))))
-                 :desc {:fx/type :canvas
-                        :width width
-                        :height height}}
-                
-                {:fx/type :h-box
-                 :spacing 12
-                 :alignment :center
-                 :children [{:fx/type :label
-                            :text (format "Hue: %.1f°" (double hue))
-                            :style-class ["text-monospace"]}]}]}))
+     :children (filterv some?
+                [;; Modulator header (optional)
+                 (when (and enable-modulator? modulator-event-base)
+                   {:fx/type mod-param/visual-editor-modulator-header
+                    :param-key :hue
+                    :param-spec hue-param-spec
+                    :current-value hue-value
+                    :modulator-event-base modulator-event-base})
+                 
+                 ;; Modulator params editor (shown ABOVE visual when modulated)
+                 (when is-modulated?
+                   {:fx/type mod-param/visual-editor-modulator-params
+                    :param-key :hue
+                    :param-spec hue-param-spec
+                    :current-value hue-value
+                    :modulator-event-base modulator-event-base})
+                 
+                 ;; Hint text (only when NOT modulated)
+                 (when-not is-modulated?
+                   {:fx/type :label
+                    :text actual-hint
+                    :style-class ["visual-editor-hint"]})
+                 
+                 ;; Visual hue slider - always shown (disabled when modulated)
+                 {:fx/type fx/ext-on-instance-lifecycle
+                  :fx/key canvas-key
+                  :on-created (fn [^Canvas canvas]
+                                (let [dragging? (atom false)
+                                      current-hue-atom (atom static-hue)]
+                                  ;; Initial draw
+                                  (draw-set-hue-gradient! canvas width height static-hue)
+                                  
+                                  ;; Only add mouse handlers if NOT modulated
+                                  (when-not is-modulated?
+                                    ;; Mouse handlers
+                                    (let [handle-mouse (fn [^MouseEvent event]
+                                                         (let [x (.getX event)
+                                                               w (double width)
+                                                               new-hue (-> (/ x w)
+                                                                           (* 360.0)
+                                                                           (max 0.0)
+                                                                           (min 360.0))]
+                                                           (reset! current-hue-atom new-hue)
+                                                           (draw-set-hue-gradient! canvas width height new-hue)
+                                                           (when event-template
+                                                             (events/dispatch! (assoc event-template
+                                                                                      :param-key :hue
+                                                                                      :value new-hue)))))]
+                                      
+                                      (.setOnMousePressed canvas
+                                                          (reify EventHandler
+                                                            (handle [_ event]
+                                                              (reset! dragging? true)
+                                                              (handle-mouse event))))
+                                      
+                                      (.setOnMouseDragged canvas
+                                                          (reify EventHandler
+                                                            (handle [_ event]
+                                                              (when @dragging?
+                                                                (handle-mouse event)))))
+                                      
+                                      (.setOnMouseReleased canvas
+                                                           (reify EventHandler
+                                                             (handle [_ _]
+                                                               (reset! dragging? false))))
+                                      
+                                      (.setStyle canvas "-fx-cursor: crosshair;")))))
+                  :desc {:fx/type :canvas
+                         :width width
+                         :height height}}
+                 
+                 ;; Value display
+                 {:fx/type :h-box
+                  :spacing 12
+                  :alignment :center
+                  :children [{:fx/type :label
+                             :text (if is-modulated?
+                                     "Hue: (modulated)"
+                                     (format "Hue: %.1f°" (double static-hue)))
+                             :style-class ["text-monospace"]}]}])}))
 
 
 ;; Hue Shift Strip Visual Editor (for Hue Shift effect - shows input/output transformation)
@@ -974,78 +1052,122 @@
    - :event-template - Base event for on-drag (will add :param-key :value)
    - :fx-key - (optional) Unique key for canvas (should NOT include current value)
    - :width, :height - (optional) Canvas dimensions, default 280x100
-   - :hint-text - (optional) Hint text above canvas"
-  [{:keys [current-params event-template fx-key width height hint-text]
+   - :hint-text - (optional) Hint text above canvas
+   
+   Modulator support (optional):
+   - :enable-modulator? - Show modulator toggle button (default false)
+   - :param-spec - Parameter spec for :degrees (used by modulator)
+   - :modulator-event-base - Base event for modulator operations"
+  [{:keys [current-params event-template fx-key width height hint-text
+           enable-modulator? param-spec modulator-event-base]
     :or {width 280 height 100}}]
   (let [params-map (or current-params {})
-        degrees (get params-map :degrees 0.0)
+        ;; Get degrees value - could be number or modulator config
+        degrees-value (get params-map :degrees 0.0)
+        is-modulated? (mod-defs/active-modulator? degrees-value)
+        ;; Always use get-static-value - handles both plain numbers and modulator configs
+        ;; (including inactive modulators where :active? is false)
+        static-degrees (mod-defs/get-static-value degrees-value 0.0)
         actual-hint (or hint-text "Drag left/right to shift hue")
         ;; Use a stable key that does NOT change based on current value
         ;; This prevents canvas recreation during dragging
-        canvas-key (or fx-key [:hue-shift-editor])]
+        canvas-key (or fx-key [:hue-shift-editor])
+        ;; Default param spec for degrees if not provided
+        degrees-param-spec (or param-spec {:min -180.0 :max 180.0 :default 0.0 :label "Degrees"})]
     {:fx/type :v-box
      :spacing 8
      :padding 8
      :style-class ["visual-editor-padded"]
-     :children [{:fx/type :label
-                 :text actual-hint
-                 :style-class ["visual-editor-hint"]}
-                
-                ;; Use ext-on-instance-lifecycle to update canvas state without recreating
-                {:fx/type fx/ext-on-instance-lifecycle
-                 :fx/key canvas-key
-                 :on-created (fn [^Canvas canvas]
-                               (let [dragging? (atom false)
-                                     last-x (atom nil)
-                                     current-shift-atom (atom degrees)]
-                                 ;; Initial draw
-                                 (draw-hue-shift-strips! canvas width height degrees)
-                                 
-                                 ;; Mouse handlers - drag to shift the output strip
-                                 (let [handle-drag-start (fn [^MouseEvent event]
-                                                           (reset! dragging? true)
-                                                           (reset! last-x (.getX event)))
-                                       handle-drag (fn [^MouseEvent event]
-                                                     (when @dragging?
-                                                       (let [x (.getX event)
-                                                             dx (- x (or @last-x x))
-                                                             w (double width)
-                                                             ;; Convert pixel delta to degree delta
-                                                             ;; Full width = 360 degrees
-                                                             ;; Negate so dragging right moves the output colors right
-                                                             degree-delta (- (* (/ dx w) 360.0))
-                                                             ;; No clamping - allow infinite looping
-                                                             new-shift (+ @current-shift-atom degree-delta)]
-                                                         (reset! last-x x)
-                                                         (reset! current-shift-atom new-shift)
-                                                         ;; Redraw with new shift
-                                                         (draw-hue-shift-strips! canvas width height new-shift)
-                                                         ;; Dispatch event with new value
-                                                         (when event-template
-                                                           (events/dispatch! (assoc event-template
-                                                                                    :param-key :degrees
-                                                                                    :value new-shift))))))]
-                                   
-                                   (.setOnMousePressed canvas
-                                                       (reify EventHandler
-                                                         (handle [_ event]
-                                                           (handle-drag-start event))))
-                                   
-                                   (.setOnMouseDragged canvas
-                                                       (reify EventHandler
-                                                         (handle [_ event]
-                                                           (handle-drag event))))
-                                   
-                                   (.setOnMouseReleased canvas
-                                                        (reify EventHandler
-                                                          (handle [_ _]
-                                                            (reset! dragging? false)
-                                                            (reset! last-x nil))))
-                                   
-                                   (.setStyle canvas "-fx-cursor: ew-resize;"))))
-                 :desc {:fx/type :canvas
-                        :width width
-                        :height height}}]}))
+     :children (filterv some?
+                [;; Modulator header (optional)
+                 (when (and enable-modulator? modulator-event-base)
+                   {:fx/type mod-param/visual-editor-modulator-header
+                    :param-key :degrees
+                    :param-spec degrees-param-spec
+                    :current-value degrees-value
+                    :modulator-event-base modulator-event-base})
+                 
+                 ;; Hint text (only when NOT modulated)
+                 (when-not is-modulated?
+                   {:fx/type :label
+                    :text actual-hint
+                    :style-class ["visual-editor-hint"]})
+                 
+                 ;; Visual hue shift strips - always shown (disabled when modulated)
+                 {:fx/type fx/ext-on-instance-lifecycle
+                  :fx/key canvas-key
+                  :on-created (fn [^Canvas canvas]
+                                (let [dragging? (atom false)
+                                      last-x (atom nil)
+                                      current-shift-atom (atom static-degrees)]
+                                  ;; Initial draw
+                                  (draw-hue-shift-strips! canvas width height static-degrees)
+                                  
+                                  ;; Only add mouse handlers if NOT modulated
+                                  (when-not is-modulated?
+                                    ;; Mouse handlers - drag to shift the output strip
+                                    (let [handle-drag-start (fn [^MouseEvent event]
+                                                              (reset! dragging? true)
+                                                              (reset! last-x (.getX event)))
+                                          handle-drag (fn [^MouseEvent event]
+                                                        (when @dragging?
+                                                          (let [x (.getX event)
+                                                                dx (- x (or @last-x x))
+                                                                w (double width)
+                                                                ;; Convert pixel delta to degree delta
+                                                                ;; Full width = 360 degrees
+                                                                ;; Negate so dragging right moves the output colors right
+                                                                degree-delta (- (* (/ dx w) 360.0))
+                                                                ;; No clamping - allow infinite looping
+                                                                new-shift (+ @current-shift-atom degree-delta)]
+                                                            (reset! last-x x)
+                                                            (reset! current-shift-atom new-shift)
+                                                            ;; Redraw with new shift
+                                                            (draw-hue-shift-strips! canvas width height new-shift)
+                                                            ;; Dispatch event with new value
+                                                            (when event-template
+                                                              (events/dispatch! (assoc event-template
+                                                                                       :param-key :degrees
+                                                                                       :value new-shift))))))]
+                                      
+                                      (.setOnMousePressed canvas
+                                                          (reify EventHandler
+                                                            (handle [_ event]
+                                                              (handle-drag-start event))))
+                                      
+                                      (.setOnMouseDragged canvas
+                                                          (reify EventHandler
+                                                            (handle [_ event]
+                                                              (handle-drag event))))
+                                      
+                                      (.setOnMouseReleased canvas
+                                                           (reify EventHandler
+                                                             (handle [_ _]
+                                                               (reset! dragging? false)
+                                                               (reset! last-x nil))))
+                                      
+                                      (.setStyle canvas "-fx-cursor: ew-resize;")))))
+                  :desc {:fx/type :canvas
+                         :width width
+                         :height height}}
+                 
+                 ;; Modulator params editor (shown below visual when modulated)
+                 (when is-modulated?
+                   {:fx/type mod-param/visual-editor-modulator-params
+                    :param-key :degrees
+                    :param-spec degrees-param-spec
+                    :current-value degrees-value
+                    :modulator-event-base modulator-event-base})
+                 
+                 ;; Value display
+                 {:fx/type :h-box
+                  :spacing 12
+                  :alignment :center
+                  :children [{:fx/type :label
+                             :text (if is-modulated?
+                                     "Shift: (modulated)"
+                                     (format "Shift: %.1f°" (double static-degrees)))
+                             :style-class ["text-monospace"]}]}])}))
 
 
 ;; Set Color Picker Visual Editor

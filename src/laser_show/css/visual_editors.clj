@@ -173,4 +173,35 @@
        {:-fx-background-color bg-interactive
         :-fx-border-color "#606060"
         :-fx-border-radius 2
-        :-fx-background-radius 2}})))
+        :-fx-background-radius 2}
+       
+       
+       ;; Visual Editor Modulator Header
+       ;; Container row for modulator toggle and type selector in single-param visual editors
+       
+       
+       ".visual-editor-modulator-header"
+       {:-fx-padding ["4px" "8px"]
+        :-fx-background-color bg-elevated
+        :-fx-border-color "#404040"
+        :-fx-border-width ["0px" "0px" "1px" "0px"]
+        :-fx-border-radius ["4px" "4px" "0px" "0px"]
+        :-fx-background-radius ["4px" "4px" "0px" "0px"]}
+       
+       ;; Modulator toggle button (inactive)
+       ".visual-editor-modulator-toggle"
+       {:-fx-font-size 10
+        :-fx-padding ["3px" "10px"]
+        :-fx-background-color "#404040"
+        :-fx-text-fill "#B0B0B0"
+        :-fx-background-radius 3
+        :-fx-cursor "hand"}
+       
+       ;; Modulator toggle button (active) - highlighted when modulation is enabled
+       ".visual-editor-modulator-active"
+       {:-fx-font-size 10
+        :-fx-padding ["3px" "10px"]
+        :-fx-background-color selection-bg
+        :-fx-text-fill "white"
+        :-fx-background-radius 3
+        :-fx-cursor "hand"}})))

@@ -85,10 +85,20 @@
         renderer-type (:renderer ui-hints)
         ;; Check if any params have ACTIVE modulators
         has-modulators? (boolean (some (fn [[_k v]] (mod-defs/active-modulator? v)) current-params))
-        ;; Force numeric mode if modulators are active
-        actual-mode (if has-modulators?
-                      :numeric
-                      (or ui-mode (:default-mode ui-hints :visual)))
+        ;; Single-param visual editors handle their own modulator UI, so they can
+        ;; display in either mode even when modulators are active
+        single-param-visual-editor? (contains? #{:rotation-dial :hue-slider :hue-shift-strip}
+                                               renderer-type)
+        ;; Determine actual mode: respect user's choice for single-param visual editors,
+        ;; force numeric mode for other editors with modulators
+        actual-mode (cond
+                      ;; For single-param visual editors, always respect the user's requested mode
+                      ;; (they support modulators in both visual and numeric modes)
+                      single-param-visual-editor? (or ui-mode (:default-mode ui-hints :visual))
+                      ;; Other effects with modulators must use numeric mode
+                      has-modulators? :numeric
+                      ;; No modulators - use requested mode or default
+                      :else (or ui-mode (:default-mode ui-hints :visual)))
         ;; Select the appropriate param controls list based on modulator support
         param-list-type (if enable-modulators?
                           mod-param/modulatable-param-controls-list
@@ -124,19 +134,22 @@
                                 :text "Edit Mode:"
                                 :style-class ["label-hint"]
                                 :style "-fx-font-size: 10; -fx-font-style: normal;"}
-                               ;; Visual mode button - conditionally add :on-action only when valid
-                               (cond-> {:fx/type :button
-                                        :text "👁 Visual"
-                                        :disable has-modulators?
-                                        :style-class [(cond
-                                                        has-modulators? "chip"
-                                                        (= actual-mode :visual) "chip-selected"
-                                                        :else "chip")]
-                                        :style (str "-fx-font-size: 9; -fx-padding: 3 10;"
-                                                   (when has-modulators? " -fx-cursor: not-allowed;"))}
-                                 ;; Only add :on-action when we have a valid event and modulators aren't blocking
-                                 (and (not has-modulators?) on-mode-change-event)
-                                 (assoc :on-action (assoc on-mode-change-event :mode :visual)))
+                               ;; Visual mode button
+                               ;; Single-param visual editors support modulators in both modes, so never disable visual
+                               ;; Other editors with modulators must stay in numeric mode
+                               (let [disable-visual? (and has-modulators? (not single-param-visual-editor?))]
+                                 (cond-> {:fx/type :button
+                                          :text "👁 Visual"
+                                          :disable disable-visual?
+                                          :style-class [(cond
+                                                          disable-visual? "chip"
+                                                          (= actual-mode :visual) "chip-selected"
+                                                          :else "chip")]
+                                          :style (str "-fx-font-size: 9; -fx-padding: 3 10;"
+                                                     (when disable-visual? " -fx-cursor: not-allowed;"))}
+                                   ;; Add :on-action when we have a valid event and visual mode isn't blocked
+                                   (and (not disable-visual?) on-mode-change-event)
+                                   (assoc :on-action (assoc on-mode-change-event :mode :visual))))
                                ;; Numeric mode button - conditionally add :on-action only when valid
                                (cond-> {:fx/type :button
                                         :text "🔢 Numeric"
@@ -145,7 +158,8 @@
                                  on-mode-change-event
                                  (assoc :on-action (assoc on-mode-change-event :mode :numeric)))
                                ;; Show tooltip when modulators are blocking visual mode
-                               (when has-modulators?
+                               ;; (but not for single-param visual editors that handle it internally)
+                               (when (and has-modulators? (not single-param-visual-editor?))
                                  {:fx/type :label
                                   :text "(modulators active)"
                                   :style-class ["label-hint"]
@@ -180,7 +194,11 @@
                                                    :domain (get spatial-event-keys :domain)
                                                    :entity-key (get spatial-event-keys :entity-key)
                                                    :effect-path effect-path}
-                                     :fx-key canvas-fx-key}
+                                     :fx-key canvas-fx-key
+                                     ;; Modulator support for single-param visual editor
+                                     :enable-modulator? enable-modulators?
+                                     :param-spec (get params-map :angle)
+                                     :modulator-event-base modulator-event-base}
                       
                       :scale-2d {:fx/type custom-renderers/scale-visual-editor
                                 :fx/key canvas-fx-key
@@ -200,13 +218,21 @@
                                   :fx/key canvas-fx-key
                                   :current-params current-params
                                   :event-template on-change-event
-                                  :fx-key canvas-fx-key}
+                                  :fx-key canvas-fx-key
+                                  ;; Modulator support for single-param visual editor
+                                  :enable-modulator? enable-modulators?
+                                  :param-spec (get params-map :hue)
+                                  :modulator-event-base modulator-event-base}
                       
                       :hue-shift-strip {:fx/type custom-renderers/hue-shift-strip-visual-editor
                                        :fx/key canvas-fx-key
                                        :current-params current-params
                                        :event-template on-change-event
-                                       :fx-key canvas-fx-key}
+                                       :fx-key canvas-fx-key
+                                       ;; Modulator support for single-param visual editor
+                                       :enable-modulator? enable-modulators?
+                                       :param-spec (get params-map :degrees)
+                                       :modulator-event-base modulator-event-base}
                       
                       :set-color-picker {:fx/type custom-renderers/set-color-picker-visual-editor
                                         :fx/key canvas-fx-key

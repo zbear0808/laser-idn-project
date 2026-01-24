@@ -18,7 +18,10 @@
                       :entity-key [0 0]
                       :effect-path [0]}
     :on-text-event {:event/type :chain/update-param-from-text ...}}
-   ```"
+   ```
+   
+   Also provides visual-editor-modulator-header for embedding modulator controls
+   directly in single-parameter visual editors (rotation dial, hue slider, etc)."
   (:require [laser-show.animation.modulator-defs :as mod-defs]
             [laser-show.views.components.parameter-controls :as param-controls]))
 
@@ -209,6 +212,84 @@
                       :current-value (get modulator-config (:key param-def))
                       :on-change-event on-param-change-event
                       :on-text-event on-param-change-event}))))}))
+
+
+;; Visual Editor Modulator Header
+;; Reusable component for embedding modulator controls in single-param visual editors
+
+
+(defn visual-editor-modulator-header
+ "Modulator toggle header for visual editors.
+  
+  This component provides a compact modulator toggle and type selector
+  that can be embedded in visual editors (rotation dial, hue slider, etc)
+  so users don't need to switch to numeric mode to enable modulation.
+  
+  Props:
+  - :param-key - Parameter key (e.g., :angle, :hue, :degrees)
+  - :param-spec - Parameter specification map with :min, :max, :default, :label
+  - :current-value - Current param value (number or modulator config map)
+  - :modulator-event-base - Base event template for modulator operations
+                            (must have :domain, :entity-key, :effect-path)"
+ [{:keys [param-key param-spec current-value modulator-event-base]}]
+ (let [is-modulated? (mod-defs/active-modulator? current-value)
+       display-label (or (:label param-spec) (name param-key))
+       ;; Build modulator event templates
+       toggle-event (assoc modulator-event-base
+                           :event/type :modulator/toggle
+                           :param-key param-key
+                           :param-spec param-spec
+                           :current-value current-value)
+       set-type-event (assoc modulator-event-base
+                             :event/type :modulator/set-type
+                             :param-key param-key
+                             :param-spec param-spec
+                             :current-value current-value)]
+   {:fx/type :h-box
+    :spacing 8
+    :alignment :center-left
+    :style-class ["visual-editor-modulator-header"]
+    :children (filterv some?
+                [;; Modulate toggle button
+                 {:fx/type :toggle-button
+                  :text (if is-modulated? "∿ Modulating" "∿ Modulate")
+                  :selected is-modulated?
+                  :style-class [(if is-modulated?
+                                  "visual-editor-modulator-active"
+                                  "visual-editor-modulator-toggle")]
+                  :on-selected-changed toggle-event}
+                 
+                 ;; Type selector (only shown when modulated)
+                 (when is-modulated?
+                   {:fx/type modulator-type-selector
+                    :current-type (:type current-value)
+                    :on-select-event set-type-event})])}))
+
+
+(defn visual-editor-modulator-params
+ "Modulator parameters editor for visual editors.
+  
+  Shows the modulator-specific parameters (min, max, period, etc) when
+  a visual editor's parameter has an active modulator.
+  
+  Props:
+  - :param-key - Parameter key
+  - :param-spec - Parameter specification map
+  - :current-value - Current modulator config map
+  - :modulator-event-base - Base event template for modulator operations"
+ [{:keys [param-key param-spec current-value modulator-event-base]}]
+ (let [update-mod-param-event (assoc modulator-event-base
+                                     :event/type :modulator/update-param
+                                     :param-key param-key
+                                     :current-value current-value)
+       retrigger-event (assoc modulator-event-base
+                              :event/type :modulator/retrigger
+                              :param-key param-key)]
+   {:fx/type modulator-params-editor
+    :modulator-config current-value
+    :on-param-change-event update-mod-param-event
+    :on-retrigger-event retrigger-event
+    :param-spec param-spec}))
 
 
 ;; Main Component

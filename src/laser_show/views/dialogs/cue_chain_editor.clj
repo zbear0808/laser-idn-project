@@ -356,7 +356,7 @@
                            :h-box/hgrow :always}
                           {:fx/type :button
                            :text "Close"
-                           :style-class "btn-primary"
+                           :style-class "button-primary"
                            :on-action {:event/type :ui/close-dialog
                                        :dialog-id :cue-chain-editor}}]}]}))
 

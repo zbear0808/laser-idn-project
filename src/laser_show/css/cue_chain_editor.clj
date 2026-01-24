@@ -90,16 +90,6 @@
         :-fx-max-width 280
         :-fx-spacing 0}
        
-       ".btn-primary"
-       {:-fx-background-color accent-success
-        :-fx-text-fill text-primary
-        :-fx-padding ["6px" "20px"]
-        :-fx-cursor "hand"
-        :-fx-background-radius 4
-        
-        ":hover"
-        {:-fx-background-color (colors/lighten accent-success 0.20)}}
-       
        
        ;; Zone Picker Section
        
