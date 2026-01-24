@@ -177,7 +177,14 @@
    
    {:fx/type :menu-item
     :text "Check for Updates"
-    :on-action {:event/type :help/check-updates}}])
+    :on-action {:event/type :help/check-updates}}
+   
+   {:fx/type :separator-menu-item}
+   
+   {:fx/type :menu-item
+    :text "Reload Styles"
+    :accelerator [:shortcut :shift :r]
+    :on-action {:event/type :help/reload-styles}}])
 
 
 ;; Menu Components

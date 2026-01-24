@@ -222,6 +222,17 @@
   ;; TODO: Implement update check
   {:state state})
 
+(defn- handle-help-reload-styles
+  "Reload all CSS stylesheets to pick up style changes."
+  [{:keys [state]}]
+  (log/info "Help > Reload Styles")
+  (require 'laser-show.css.reload)
+  (let [result ((resolve 'laser-show.css.reload/reload-all-styles!))]
+    (if (:success? result)
+      (log/info "CSS styles reloaded successfully")
+      (log/error "Failed to reload CSS styles:" (:error result))))
+  {:state state})
+
 
 ;; Public API
 
@@ -257,6 +268,7 @@
     :help/documentation (handle-help-documentation event)
     :help/about (handle-help-about event)
     :help/check-updates (handle-help-check-updates event)
+    :help/reload-styles (handle-help-reload-styles event)
     
     ;; Unknown event in this domain
     {}))

@@ -157,28 +157,13 @@
   []
   (println "🎨 Reloading all CSS...")
   
-  ;; Reload all CSS namespace files to pick up any code changes
-  (doseq [ns-sym ['laser-show.css.theme
-                  'laser-show.css.typography
-                  'laser-show.css.components
-                  'laser-show.css.buttons
-                  'laser-show.css.forms
-                  'laser-show.css.grid-cells
-                  'laser-show.css.layout
-                  'laser-show.css.title-bar
-                  'laser-show.css.cue-chain-editor
-                  'laser-show.css.list
-                  'laser-show.css.visual-editors
-                  'laser-show.css.core]]
-    (require ns-sym :reload))
-  
-  ;; Trigger a state update to force UI re-render
-  ;; cljfx will call stylesheet-urls which will get the new CSS URLs with updated hashes
   (if @!app-started?
     (do
-      ((resolve 'laser-show.state.core/swap-state!)
-       update-in [:styles :reload-trigger] (fnil inc 0))
-      (println "✅ All CSS reloaded!"))
+      (require 'laser-show.css.reload)
+      (let [result ((resolve 'laser-show.css.reload/reload-all-styles!))]
+        (if (:success? result)
+          (println "✅ All CSS reloaded!")
+          (println "⚠️  Error reloading CSS:" (:error result)))))
     (println "⚠️  App not started. Call (start) first.")))
 
 
