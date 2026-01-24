@@ -1,4 +1,4 @@
-t of(ns laser-show.views.tabs.zones
+(ns laser-show.views.tabs.zones
   "Zone Groups tab - for managing zone groups (routing targets).
    
    SIMPLIFIED ARCHITECTURE (v2):
