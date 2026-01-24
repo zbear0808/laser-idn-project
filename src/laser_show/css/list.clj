@@ -195,9 +195,11 @@
         :-fx-font-size 10
         :-fx-padding ["0px" "0px"]
         :-fx-min-width 8
+        :-fx-background-radius 3
         
         ":hover"
-        {:-fx-text-fill text-primary}}
+        {:-fx-text-fill text-primary
+         :-fx-background-color bg-interactive}}
        
        ".group-name-label"
        {:-fx-font-size 12
@@ -240,9 +242,10 @@
         :-fx-text-fill text-secondary
         :-fx-padding ["1px" "3px"]
         :-fx-font-size 8
+        :-fx-background-radius 3
         
         ":hover"
-        {:-fx-background-color bg-hover
+        {:-fx-background-color bg-interactive
          :-fx-text-fill text-primary}}
        
        

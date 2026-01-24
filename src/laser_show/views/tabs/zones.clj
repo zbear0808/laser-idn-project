@@ -1,4 +1,4 @@
-(ns laser-show.views.tabs.zones
+t of(ns laser-show.views.tabs.zones
   "Zone Groups tab - for managing zone groups (routing targets).
    
    SIMPLIFIED ARCHITECTURE (v2):
@@ -97,13 +97,14 @@
      :style (str "-fx-border-color: " (css/border-default) "; -fx-border-width: 0 1px 0 0;")
      :children [{:fx/type :h-box
                  :alignment :center-left
+                 :padding {:right 8}
                  :children [{:fx/type :label
                              :text "ZONE GROUPS"
                              :style-class ["header-section"]}
                             {:fx/type :region :h-box/hgrow :always}
                             {:fx/type :button
                              :text "+"
-                             :style-class ["button-add"]
+                             :style-class ["button-primary"]
                              :on-action {:event/type :zone-groups/add}}]}
                 {:fx/type :scroll-pane
                  :fit-to-width true

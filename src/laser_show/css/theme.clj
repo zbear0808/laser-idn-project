@@ -35,11 +35,12 @@
   {;; Grayscale - 4 functional levels
    :bg-base      "#121212"   ; Main background (darkest)
    :interactive  "#3D3D3D"   ; Buttons, inputs, cell content
-   :border       "#505050"   ; Borders, hover states
+   :border       "#505050"   ; Borders, separators
+   :hover        "#606060"   ; Hover states (more visible than border)
    :text-muted   "#808080"   ; Muted/secondary text
    
    ;; Accent colors
-   :green   "#4CAF50"   ; Success, primary action buttons
+   :green   "#3D8B40"   ; Success, primary action buttons (darker for better hover contrast)
    :blue    "#4992db"   ; Selection, active state, info
    :orange  "#FF9800"   ; Warning
    :red     "#fd3636"   ; Danger, error
@@ -58,13 +59,13 @@
 (def semantic-colors
   "Colors with semantic meaning - use these in your code.
    Maps meaningful UI concepts to base color values."
-  (let [{:keys [bg-base interactive border text-muted green blue orange red]} base-colors]
+  (let [{:keys [bg-base interactive border hover text-muted green blue orange red]} base-colors]
     {;; Background hierarchy
      :bg-primary     bg-base      ; Root/window background (darkest)
      :bg-surface     bg-base      ; Panel backgrounds (same as primary for flat look)
      :bg-elevated    bg-base      ; Cards, dialogs, menus (same for flat look)
      :bg-interactive interactive  ; Buttons, inputs (default state)
-     :bg-hover       border       ; Hover state
+     :bg-hover       hover        ; Hover state (more visible)
      :bg-active      border       ; Active/pressed state
      
      :text-primary   "#ffffff"    ; Main text, headings (white)
@@ -99,7 +100,7 @@
      :bg-interactive-active (colors/darken bg-interactive 0.10)
      
      ;; Success/primary action states
-     :accent-success-hover  (colors/lighten accent-success 0.10)
+     :accent-success-hover  (colors/lighten accent-success 0.20)
      :accent-success-active (colors/darken accent-success 0.15)
      
      ;; Danger states

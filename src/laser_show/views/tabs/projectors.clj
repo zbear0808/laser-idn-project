@@ -122,9 +122,7 @@
                                      [{:fx/type :button
                                        :text (if all-services-configured? "✓ All" "+ All")
                                        :disable all-services-configured?
-                                       :style (str "-fx-background-color: " (if all-services-configured? (css/interactive) (css/green))
-                                                  "; -fx-text-fill: " (if all-services-configured? (css/text-muted) "white")
-                                                  "; -fx-font-size: 11; -fx-font-weight: bold; -fx-padding: 4 10;")
+                                       :style-class [(if all-services-configured? "button-secondary" "button-primary")]
                                        :on-action {:event/type :projectors/add-all-services
                                                    :device device}}])
                                    ;; For single-service or no-service devices, show add button directly
@@ -135,9 +133,7 @@
                                                no-service-configured? "✓"
                                                :else "+")
                                        :disable (or single-service-configured? no-service-configured?)
-                                       :style (str "-fx-background-color: " (if (or single-service-configured? no-service-configured?) (css/interactive) (css/green))
-                                                  "; -fx-text-fill: " (if (or single-service-configured? no-service-configured?) (css/text-muted) "white")
-                                                  "; -fx-font-size: 16; -fx-font-weight: bold; -fx-padding: 4 12; -fx-min-width: 32;")
+                                       :style-class [(if (or single-service-configured? no-service-configured?) "button-secondary" "button-primary")]
                                        :on-action {:event/type :projectors/add-device
                                                    :device device}}])))]
     {:fx/type :v-box

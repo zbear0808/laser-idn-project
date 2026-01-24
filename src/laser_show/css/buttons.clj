@@ -20,7 +20,11 @@
                   text-primary text-muted border-default
                   accent-success accent-info accent-danger]} theme/semantic-colors
           {:keys [accent-success-hover accent-danger-hover]} theme/computed-colors
-          {:keys [border]} theme/base-colors]
+          {:keys [border]} theme/base-colors
+          
+          ;; Button border radius constants
+          radius-standard 2  ; Standard buttons (primary, secondary, transport)
+          radius-small 1]    ; Small buttons (bank items, icon buttons)
       
       {
        ;; Small button variant (used in toolbar)
@@ -28,7 +32,7 @@
        {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary
         :-fx-cursor "hand"
-        :-fx-background-radius 4
+        :-fx-background-radius radius-standard
         :-fx-font-size 11
         :-fx-padding ["2px" "8px"]
         
@@ -45,7 +49,7 @@
         :-fx-font-size 14
         :-fx-min-width 40
         :-fx-min-height 32
-        :-fx-background-radius 4
+        :-fx-background-radius radius-standard
         :-fx-alignment "center"
         :-fx-cursor "hand"
         
@@ -59,7 +63,7 @@
         :-fx-font-size 14
         :-fx-min-width 40
         :-fx-min-height 32
-        :-fx-background-radius 4
+        :-fx-background-radius radius-standard
         :-fx-alignment "center"
         :-fx-cursor "hand"
         
@@ -76,9 +80,9 @@
         :-fx-background-radius 0
         :-fx-padding ["8px" "16px"]
         :-fx-cursor "hand"
-        ;; Grey border on right and bottom
+        ;; Grey border on right and bottom, transparent top border to match active tab height
         :-fx-border-color ["transparent" border border "transparent"]
-        :-fx-border-width [0 1 1 0]
+        :-fx-border-width [2 1 1 0]
         
         ":hover"
         {:-fx-background-color bg-hover
@@ -95,7 +99,7 @@
         :-fx-border-width [2 1 0 0]
         
         ":hover"
-        {:-fx-background-color bg-primary}}
+        {:-fx-background-color bg-interactive}}
        
        
        ;; Bank Item Buttons (for effect banks and preset banks)
@@ -107,7 +111,7 @@
         :-fx-font-size 10
         :-fx-padding ["4px" "8px"]
         :-fx-cursor "hand"
-        :-fx-background-radius 3
+        :-fx-background-radius radius-small
         
         ":hover"
         {:-fx-background-color bg-hover}
@@ -136,7 +140,7 @@
         :-fx-font-size 10
         :-fx-padding ["2px" "8px"]
         :-fx-cursor "hand"
-        :-fx-background-radius 3
+        :-fx-background-radius radius-small
         
         ":hover"
         {:-fx-background-color accent-success
@@ -155,7 +159,7 @@
         :-fx-font-size 10
         :-fx-padding ["2px" "4px"]
         :-fx-cursor "hand"
-        :-fx-background-radius 3
+        :-fx-background-radius radius-small
         :-fx-min-width 28
         
         ":hover"
@@ -168,7 +172,7 @@
         :-fx-font-size 10
         :-fx-padding ["2px" "4px"]
         :-fx-cursor "hand"
-        :-fx-background-radius 3
+        :-fx-background-radius radius-small
         :-fx-min-width 28
         
         ":hover"
@@ -183,9 +187,26 @@
        ".button-primary"
        {:-fx-background-color accent-success
         :-fx-text-fill text-primary
-        :-fx-padding ["8px" "20px"]
+        :-fx-padding ["6px" "16px"]
         :-fx-cursor "hand"
-        :-fx-background-radius 4
+        :-fx-background-radius radius-standard
+        
+        ":hover"
+        {:-fx-background-color accent-success-hover}
+        
+        ":disabled"
+        {:-fx-background-color "#404040"
+         :-fx-text-fill "#606060"
+         :-fx-cursor "default"}}
+       
+       ;; Small primary button (green, compact version)
+       ".button-primary-sm"
+       {:-fx-background-color accent-success
+        :-fx-text-fill text-primary
+        :-fx-padding ["4px" "12px"]
+        :-fx-cursor "hand"
+        :-fx-background-radius radius-standard
+        :-fx-font-size 11
         
         ":hover"
         {:-fx-background-color accent-success-hover}
@@ -199,9 +220,9 @@
        ".button-secondary"
        {:-fx-background-color border
         :-fx-text-fill text-primary
-        :-fx-padding ["6px" "12px"]
+        :-fx-padding ["6px" "16px"]
         :-fx-cursor "hand"
-        :-fx-background-radius 4
+        :-fx-background-radius radius-standard
         
         ":hover"
         {:-fx-background-color bg-hover}
@@ -217,7 +238,7 @@
         :-fx-text-fill text-primary
         :-fx-padding ["6px" "12px"]
         :-fx-cursor "hand"
-        :-fx-background-radius 4
+        :-fx-background-radius radius-standard
         
         ":hover"
         {:-fx-background-color accent-danger-hover}
@@ -233,7 +254,7 @@
         :-fx-text-fill text-primary
         :-fx-padding ["6px" "16px"]
         :-fx-cursor "hand"
-        :-fx-background-radius 4
+        :-fx-background-radius radius-standard
         
         ":hover"
         {:-fx-background-color "#1976D2"}
@@ -255,10 +276,11 @@
         :-fx-font-size 14
         :-fx-padding ["2px" "6px"]
         :-fx-cursor "hand"
+        :-fx-background-radius radius-small
         
         ":hover"
         {:-fx-text-fill text-primary
-         :-fx-background-color bg-interactive}}
+         :-fx-background-color bg-hover}}
        
        ;; Add/Plus button (compact gray button)
        ".button-add"
@@ -267,7 +289,7 @@
         :-fx-font-size 12
         :-fx-padding ["2px" "8px"]
         :-fx-cursor "hand"
-        :-fx-background-radius 3
+        :-fx-background-radius radius-small
         
         ":hover"
         {:-fx-background-color bg-hover}}
@@ -279,6 +301,8 @@
         :-fx-font-size 14
         :-fx-padding ["2px" "6px"]
         :-fx-cursor "hand"
+        :-fx-background-radius radius-small
         
         ":hover"
-        {:-fx-text-fill accent-danger}}})))
+        {:-fx-text-fill accent-danger
+         :-fx-background-color bg-interactive}}})))

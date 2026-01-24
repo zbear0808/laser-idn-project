@@ -10,6 +10,7 @@
    Usage:
    Include (::css/url cue-chain-editor) in your scene's :stylesheets vector."
   (:require [cljfx.css :as css]
+            [laser-show.css.colors :as colors]
             [laser-show.css.theme :as theme]))
 
 
@@ -93,7 +94,11 @@
        {:-fx-background-color accent-success
         :-fx-text-fill text-primary
         :-fx-padding ["6px" "20px"]
-        :-fx-cursor "hand"}
+        :-fx-cursor "hand"
+        :-fx-background-radius 4
+        
+        ":hover"
+        {:-fx-background-color (colors/lighten accent-success 0.20)}}
        
        
        ;; Zone Picker Section
@@ -223,7 +228,10 @@
        ".preset-bank-tab-active"
        {:-fx-background-color blue
         :-fx-text-fill text-primary
-        :-fx-font-weight "bold"}
+        :-fx-font-weight "bold"
+        
+        ":hover"
+        {:-fx-background-color (colors/lighten blue 0.10)}}
        
        ".preset-bank-grid"
        {:-fx-background-color "transparent"
@@ -370,9 +378,11 @@
         :-fx-font-size 12
         :-fx-padding ["0px" "4px"]
         :-fx-cursor "hand"
+        :-fx-background-radius 3
         
         ":hover"
-        {:-fx-text-fill accent-danger-hover}}
+        {:-fx-text-fill accent-danger-hover
+         :-fx-background-color bg-interactive}}
        
        
        

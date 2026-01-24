@@ -142,14 +142,15 @@
                 {:fx/type :h-box
                  :spacing 8
                  :alignment :center-right
+                 :padding {:right 8}
                  :children [{:fx/type :button
                              :text "Cancel"
-                             :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-padding: 8 20;"
+                             :style-class ["button-secondary"]
                              :on-action {:event/type :ui/close-dialog
                                          :dialog-id :zone-group-editor}}
                             {:fx/type :button
                              :text (if editing? "Save Changes" "Create Group")
-                             :style "-fx-background-color: #4CAF50; -fx-text-fill: white; -fx-padding: 8 20;"
+                             :style-class ["button-primary"]
                              :disable (str/blank? name-value)
                              :on-action (if editing?
                                           {:event/type :zone-groups/save-edit

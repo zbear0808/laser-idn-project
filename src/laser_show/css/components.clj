@@ -70,7 +70,7 @@
         :-fx-opacity 0.6
         
         ":hover"
-        {:-fx-opacity 0.8}}
+        {:-fx-opacity 1.0}}
        
        ;; Selected chip - full opacity
        ".chip-selected"
@@ -103,7 +103,7 @@
         :-fx-cursor "hand"
         
         ":hover"
-        {:-fx-background-color selection-bg}}
+        {:-fx-background-color (colors/lighten selection-bg 0.10)}}
        
        ;; Disabled list item (via opacity)
        ".list-item-disabled"
