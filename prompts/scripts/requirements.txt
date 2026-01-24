@@ -1,0 +1,5 @@
+# Requirements for Clojure refactoring script
+# Install with: pip install -r prompts/scripts/requirements.txt
+
+boto3>=1.34.0
+botocore>=1.34.0
