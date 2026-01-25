@@ -52,7 +52,7 @@
   [target-time-nanos]
   (let [now (System/nanoTime)
         sleep-nanos (- target-time-nanos now)
-        max-busy-wait-nanos (* 12 1000 1000)]
+        max-busy-wait-nanos (* 15 1000 1000)]
     (when (pos? sleep-nanos)
 
       (when (> sleep-nanos max-busy-wait-nanos)
@@ -63,48 +63,14 @@
         (Thread/yield)))))
 
 (defn precise-sleep-nanos
-  "Sleep for a precise duration in nanoseconds.
-   
-   Convenience wrapper around precise-sleep-until for relative delays.
-   
-   Parameters:
-   - duration-nanos: Duration to sleep in nanoseconds
-   
-   Example:
-   ```clojure
-   ;; Sleep for exactly 5ms
-   (precise-sleep-nanos 5000000)
-   ```"
   [duration-nanos]
   (precise-sleep-until (+ (System/nanoTime) duration-nanos)))
 
 (defn precise-sleep-us
-  "Sleep for a precise duration in microseconds.
-   
-   Parameters:
-   - duration-us: Duration to sleep in microseconds
-   
-   Example:
-   ```clojure
-   ;; Sleep for exactly 100 microseconds
-   (precise-sleep-us 100)
-   ```"
   [duration-us]
   (precise-sleep-nanos (* duration-us 1000)))
 
 (defn precise-sleep-ms
-  "Sleep for a precise duration in milliseconds.
-   
-   More precise than Thread/sleep() but uses more CPU.
-   
-   Parameters:
-   - duration-ms: Duration to sleep in milliseconds
-   
-   Example:
-   ```clojure
-   ;; Sleep for exactly 10ms
-   (precise-sleep-ms 10)
-   ```"
   [duration-ms]
   (precise-sleep-nanos (* duration-ms 1000000)))
 

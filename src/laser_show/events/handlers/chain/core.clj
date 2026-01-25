@@ -6,14 +6,12 @@
    
    Imports from:
    - helpers: State access, path manipulation, collection operations, config
-   - selection: Selection, rename, UI mode, enabled state
-   - structure: Groups, copy/paste, delete, DnD, item CRUD
-   - params: Parameter operations"
+   - structure: Groups, DnD, item CRUD
+   - params: Parameter operations, UI mode"
   (:require
    [clojure.tools.logging :as log]
    [laser-show.events.helpers :as h]
    [laser-show.events.handlers.chain.helpers :as helpers]
-   [laser-show.events.handlers.chain.selection :as selection]
    [laser-show.events.handlers.chain.structure :as structure]
    [laser-show.events.handlers.chain.params :as params]))
 
@@ -46,55 +44,13 @@
                    (assoc-in (:items-path config) (:items event))
                    (h/mark-dirty))})
      
-     ;; Selection events -> selection module
-     :chain/select-item
-     {:state (selection/handle-select-item state config (:path event) (:ctrl? event) (:shift? event))}
-     
-     :chain/select-all
-     {:state (selection/handle-select-all state config)}
-     
-     :chain/clear-selection
-     {:state (selection/handle-clear-selection state config)}
-     
-     :chain/start-rename
-     {:state (selection/handle-start-rename state config (:path event))}
-     
-     :chain/rename-item
-     {:state (selection/handle-rename-item state config (:path event) (:new-name event))}
-     
-     :chain/cancel-rename
-     {:state (selection/handle-cancel-rename state config)}
-     
-     :chain/set-item-enabled
-     {:state (selection/handle-set-item-enabled state config (:path event) (:enabled? event))}
-     
+     ;; UI mode -> params module
      :chain/set-ui-mode
-     {:state (selection/handle-set-ui-mode state config (:effect-path event) (:mode event))}
+     {:state (params/handle-set-ui-mode state config (:effect-path event) (:mode event))}
      
      ;; Structure events -> structure module
-     :chain/delete-selected
-     {:state (structure/handle-delete-selected state config)}
-     
-     :chain/group-selected
-     {:state (structure/handle-group-selected state config (:name event))}
-     
-     :chain/ungroup
-     {:state (structure/handle-ungroup state config (:path event))}
-     
-     :chain/toggle-collapse
-     {:state (structure/handle-toggle-collapse state config (:path event))}
-     
      :chain/create-empty-group
      {:state (structure/handle-create-empty-group state config (:name event))}
-     
-     :chain/start-drag
-     {:state (structure/handle-start-drag state config (:initiating-path event))}
-     
-     :chain/move-items
-     {:state (structure/handle-move-items state config (:target-id event) (:drop-position event))}
-     
-     :chain/clear-drag-state
-     {:state (structure/handle-clear-drag-state state config)}
      
      :chain/add-item
      {:state (structure/handle-add-item state config event)}

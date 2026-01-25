@@ -374,35 +374,19 @@
 
 (defn projector-effect-ui-state
   "Get the effect chain UI state for a specific projector.
-   Used by the shared effect-chain-sidebar component.
+   Used by visual editors for UI mode state (e.g., active curve channel).
    
-   Depends on: ui domain (NOT projectors-data, to avoid subscription cascade)
+   Depends on: ui domain
    
-   UI state is stored separately from projector config to prevent
-   drag-and-drop updates from invalidating all projector-related subscriptions.
+   NOTE: Selection state is now stored in list-ui domain at
+   [:list-ui [:projector-effects projector-id]] and accessed via list-ui-state.
    
    Returns map with:
-   - :selected-paths - set of selected item paths
-   - :last-selected-path - anchor for shift+click range select
-   - :dragging-paths - paths being dragged (during drag-and-drop)
-   - :drop-target-path - current drop target (for visual feedback)
-   - :drop-position - :before or :into
-   - :renaming-path - path of group being renamed"
+   - :ui-modes - map of effect-path to UI mode settings (e.g., active curve channel)"
   [context projector-id]
   (get-in (fx/sub-val context :ui)
           [:projector-effect-ui-state projector-id]
-          {:selected-paths #{}
-           :last-selected-path nil
-           :dragging-paths nil
-           :drop-target-path nil
-           :drop-position nil
-           :renaming-path nil}))
-
-(defn projector-selected-effect-paths
-  "Get the set of selected effect paths for a projector.
-   Depends on: projector-effect-ui-state"
-  [context projector-id]
-  (:selected-paths (fx/sub-ctx context projector-effect-ui-state projector-id) #{}))
+          {:ui-modes {}}))
 
 (defn projector-effect-chain
   "Get the effects chain for a specific projector.

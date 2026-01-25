@@ -3,7 +3,8 @@
    
    Contains:
    - Effect parameter operations (curve, spatial, scale, rotation, zones)
-   - Parameter update handlers (update-param, update-param-from-text, update-color-param)"
+   - Parameter update handlers (update-param, update-param-from-text, update-color-param)
+   - UI mode operations (set-ui-mode)"
   (:require
    [clojure.tools.logging :as log]
    [laser-show.events.helpers :as h]
@@ -169,3 +170,22 @@
                               (assoc-in (conj params-path :blue) blue))]
         (log/debug "Updated RGB params separately - red:" red "green:" green "blue:" blue)
         (assoc-in state items-path updated-items)))))
+
+
+;; ============================================================================
+;; UI Mode Operations
+;; ============================================================================
+
+
+(defn handle-set-ui-mode
+  "Set visual/numeric mode for effect parameter UI.
+   
+   Parameters:
+   - state: Application state
+   - config: Configuration map with :ui-path
+   - effect-path: Path to the effect
+   - mode: :visual or :numeric
+   
+   Returns: Updated state"
+  [state config effect-path mode]
+  (assoc-in state (conj (:ui-path config) :ui-modes effect-path) mode))

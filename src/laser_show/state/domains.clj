@@ -108,8 +108,6 @@
                          :cue-chain-editor {:open? false
                                             :col nil
                                             :row nil
-                                            :selected-paths #{}
-                                            :last-selected-path nil
                                             :clipboard nil
                                             :active-preset-tab :geometric
                                             :selected-effect-id nil

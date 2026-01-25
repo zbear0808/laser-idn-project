@@ -48,6 +48,7 @@
   "Open the cue chain editor for a specific cell.
    FLATTENED: No :data nesting - fields directly in dialog map.
    
+   Selection state is now stored in list-ui domain at [:list-ui [:cue-chain col row]].
    Uses :list/auto-select-single-item to auto-select if only 1 item exists."
   [{:keys [col row state]}]
   (log/debug "Opening cue chain editor" {:col col :row row})
@@ -56,8 +57,6 @@
                          {:open? true
                           :col col
                           :row row
-                          :selected-paths #{}
-                          :last-selected-path nil
                           :clipboard nil
                           :active-preset-tab :geometric
                           :selected-effect-id nil

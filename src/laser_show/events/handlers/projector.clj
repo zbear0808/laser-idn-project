@@ -525,13 +525,6 @@
                 h/mark-dirty)}))
 
 
-(defn- handle-projectors-select-effect
-  "Select an effect in the projector's chain for editing."
-  [{:keys [projector-id path ctrl? shift? state]}]
-  (let [config (chain-handlers/chain-config :projector-effects projector-id)]
-    {:state (chain-handlers/handle-select-item state config path ctrl? shift?)}))
-
-
 ;; Configuration
 
 
@@ -612,7 +605,6 @@
     ;; Effect chain management (for color curves)
     :projectors/add-effect (handle-projectors-add-effect event)
     :projectors/remove-effect (handle-projectors-remove-effect event)
-    :projectors/select-effect (handle-projectors-select-effect event)
     
     ;; Configuration
     :projectors/set-test-pattern (handle-projectors-set-test-pattern event)

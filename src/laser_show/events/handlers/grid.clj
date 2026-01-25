@@ -46,16 +46,6 @@
                 (assoc-in [:playback :trigger-time] now)
                 reset-timing-accumulators)}))
 
-(defn- handle-grid-select-cell
-  "Select a cell for editing."
-  [{:keys [col row state]}]
-  {:state (assoc-in state [:grid :selected-cell] [col row])})
-
-(defn- handle-grid-deselect-cell
-  "Clear cell selection."
-  [{:keys [state]}]
-  {:state (assoc-in state [:grid :selected-cell] nil)})
-
 (defn- handle-grid-clear-cell
   "Clear a grid cell's cue chain."
   [{:keys [col row state]}]
@@ -110,8 +100,6 @@
   (case type
     :grid/cell-clicked (handle-grid-cell-clicked event)
     :grid/trigger-cell (handle-grid-trigger-cell event)
-    :grid/select-cell (handle-grid-select-cell event)
-    :grid/deselect-cell (handle-grid-deselect-cell event)
     :grid/clear-cell (handle-grid-clear-cell event)
     :grid/move-cell (handle-grid-move-cell event)
     :grid/copy-cell (handle-grid-copy-cell event)
