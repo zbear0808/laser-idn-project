@@ -2,7 +2,7 @@
   "Self-contained hierarchical list component with drag-and-drop reordering and group support.
    
    This component manages its own internal UI state (selection, drag/drop) and
-   communicates changes to parents via callbacks. This eliminates the need for
+   communicates changes to parents via event dispatch. This eliminates the need for
    external event dispatchers and ensures consistent behavior across all usages.
    
    Features:
@@ -14,10 +14,9 @@
    - Renaming items and groups
    - Keyboard shortcuts (Ctrl+C/V/X/A/G, Delete, Escape, F2)
    
-   Callback-based API:
-   - :on-items-changed - Called with new items vector when items are reordered/modified
-   - :on-selection-changed - Called with {:selected-ids #{...} :last-selected-id uuid}
-   - :on-copy - Called with copied items for parent to store in clipboard
+   Event Dispatch API:
+   - :on-change-event + :on-change-params - Dispatches event when items change
+   - :on-copy-fn - Called with copied items for parent to store in clipboard
    
    Public API:
    - list-editor - Complete list editor with keyboard handling, drag-drop,
@@ -48,13 +47,15 @@
   (or (:selected-ids (get-ui-state component-id)) #{}))
 
 
-;; Callback Helpers
+;; Event Dispatch Helpers
 
 (defn- invoke-items-changed!
-  "Call the :on-items-changed callback if present."
+  "Dispatch the on-change-event if present."
   [props new-items]
-  (when-let [callback (:on-items-changed props)]
-    (callback new-items)))
+  (when-let [event-type (:on-change-event props)]
+    (events/dispatch! (assoc (or (:on-change-params props) {})
+                             :event/type event-type
+                             :items new-items))))
 
 (defn- invoke-copy!
   "Call the :on-copy callback if present, with warning if missing."
@@ -148,10 +149,10 @@
                      :component-id component-id}))
 
 
-;; Item Operations (Callbacks Only - No State Mutation)
+;; Item Operations (Event Dispatch - No State Mutation)
 
 (defn- delete-selected!
-  "Delete selected items and call :on-items-changed."
+  "Delete selected items and dispatch on-change-event."
   [component-id items props]
   (when-let [selected-ids (seq (get-selected-ids component-id))]
     (let [id->path (chains/find-paths-by-ids items selected-ids)
@@ -190,12 +191,10 @@
                                   :event/type :list/select-item
                                   :mode :single
                                   :selected-ids-override pasted-ids))
-      (if-let [callback (:on-items-changed props)]
-        (callback new-items)
-        (log/warn "paste-items! no :on-items-changed callback")))))
+      (invoke-items-changed! props new-items))))
 
 
-;; Group Operations (Callbacks Only)
+;; Group Operations (Event Dispatch)
 
 (defn- normalize-selected-ids
   "Remove redundant descendant IDs when a group AND all its descendants are selected."
@@ -712,7 +711,7 @@
   "INTERNAL: Low-level list rendering component.
    External code should use list-editor instead, which wraps this
    with keyboard handling and proper state management."
-  [{:keys [fx/context items get-item-label on-items-changed
+  [{:keys [fx/context items get-item-label
            on-copy clipboard-items header-label empty-text allow-groups?
            component-id on-change-event on-change-params items-path]
     :or {header-label "LIST"
@@ -798,43 +797,17 @@
                                         items)}})]}))
 
 
-;; Callback Factory Functions
-
-(defn- make-dispatch-callback
-  "INTERNAL: Create an on-items-changed callback that dispatches an event."
-  [event-type base-params]
-  (fn [new-items]
-    (events/dispatch! (assoc base-params
-                             :event/type event-type
-                             :items new-items))))
-
-(defn- make-selection-callback
-  "INTERNAL: Create an on-selection-changed callback that dispatches an event."
-  ([event-type base-params]
-   (make-selection-callback event-type base-params :selected-ids))
-  ([event-type base-params selection-key]
-   (fn [{:keys [selected-ids]}]
-     (events/dispatch! (assoc base-params
-                              :event/type event-type
-                              selection-key selected-ids)))))
-
-
 ;; Label Function Factories
 
 (defn- make-registry-label
-  "INTERNAL: Create a get-item-label function that looks up names from a registry."
-  [id-key lookup-fn name-key fallback]
+  "INTERNAL: Create a get-item-label function that looks up names from a registry.
+   Always uses :name key for registry lookup since all registries use :name."
+  [id-key lookup-fn fallback]
   (fn [item]
     (or (:name item)
-        (when-let [def-map (lookup-fn (get item id-key))]
-          (get def-map name-key fallback))
+        (:name (lookup-fn (get item id-key)))
         fallback)))
 
-(defn make-case-label
-  "Create a get-item-label function from a keyword->string map."
-  [id-key label-map fallback]
-  (fn [item]
-    (get label-map (get item id-key) fallback)))
 
 
 ;; Keyboard Handler Setup
@@ -899,6 +872,9 @@
   "Complete hierarchical list editor with keyboard handling and event dispatch.
    This is the recommended component for most use cases.
    
+   Selection state is managed internally in [:list-ui component-id] and can be
+   read via subs/list-ui-state subscription.
+   
    Props:
    - :fx/context - cljfx context (required)
    - :items - Vector of items (required)
@@ -906,17 +882,12 @@
    
    Label configuration (one of):
    - :get-item-label - Custom function item -> string
-   - :item-id-key + :item-registry-fn + :item-name-key - For registry lookup
-   - :item-id-key + :label-map - For case-based labels
+   - :item-id-key + :item-registry-fn - For registry lookup (always uses :name)
    
    Event dispatch:
    - :on-change-event - Event type for items changed
    - :on-change-params - Base params for change event
    - :items-path - Direct path to items in state
-   
-   - :on-selection-event - Event type for selection changed
-   - :on-selection-params - Base params for selection event
-   - :selection-key - Key for selection in event (default :selected-ids)
    
    - :on-copy-fn - Custom copy function
    - :clipboard-items - Items for paste
@@ -927,13 +898,11 @@
    - :allow-groups? - Enable grouping (default true)
    - :fallback-label - Label for unknown items (default \"Unknown\")"
   [{:keys [fx/context items component-id
-           get-item-label item-id-key item-registry-fn item-name-key label-map
+           get-item-label item-id-key item-registry-fn
            on-change-event on-change-params items-path
-           on-selection-event on-selection-params selection-key
            on-copy-fn clipboard-items
            header-label empty-text allow-groups? fallback-label]
-    :or {selection-key :selected-ids
-         header-label "LIST"
+    :or {header-label "LIST"
          empty-text "No items"
          allow-groups? true
          fallback-label "Unknown"}}]
@@ -942,23 +911,13 @@
                    get-item-label
                    
                    (and item-id-key item-registry-fn)
-                   (make-registry-label item-id-key item-registry-fn
-                                        (or item-name-key :name) fallback-label)
-                   
-                   (and item-id-key label-map)
-                   (make-case-label item-id-key label-map fallback-label)
+                   (make-registry-label item-id-key item-registry-fn fallback-label)
                    
                    :else
                    (fn [item] (or (:name item) fallback-label)))
         
-        on-items-changed (when on-change-event
-                           (make-dispatch-callback on-change-event on-change-params))
-        
-        on-selection-changed (when on-selection-event
-                               (make-selection-callback on-selection-event on-selection-params selection-key))
-        
-        handler-props {:on-items-changed on-items-changed
-                       :on-selection-changed on-selection-changed
+        handler-props {:on-change-event on-change-event
+                       :on-change-params on-change-params
                        :clipboard-items clipboard-items
                        :on-copy on-copy-fn}
         
@@ -971,7 +930,7 @@
                    (.requestFocus node))
      :desc {:fx/type :v-box
             :children [(u/->map&
-                        items on-items-changed on-selection-changed clipboard-items header-label
+                        items clipboard-items header-label
                         empty-text allow-groups? component-id on-change-event on-change-params items-path
                         :fx/type list-sidebar
                         :fx/context context

@@ -114,7 +114,6 @@
                             :component-id [:effect-chain col row]
                             :item-id-key :effect-id
                             :item-registry-fn effects/get-effect
-                            :item-name-key :name
                             :fallback-label "Unknown Effect"
                             :on-change-event :chain/set-items
                             :on-change-params {:domain :effect-chains :entity-key [col row]}

@@ -260,7 +260,6 @@
                                                   :component-id [:cue-chain col row]
                                                   :item-id-key :preset-id
                                                   :item-registry-fn presets/get-preset
-                                                  :item-name-key :name
                                                   :fallback-label "Unknown Preset"
                                                   :on-change-event :chain/set-items
                                                   :on-change-params {:domain :cue-chains :entity-key [col row]}
@@ -285,7 +284,6 @@
                                                       :component-id [:item-effects col row]
                                                       :item-id-key :effect-id
                                                       :item-registry-fn effects/get-effect
-                                                      :item-name-key :name
                                                       :fallback-label "Unknown Effect"
                                                       :on-change-event :cue-chain/set-item-effects
                                                       :on-change-params {:col col :row row :item-path first-selected-path}

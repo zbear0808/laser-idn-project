@@ -517,9 +517,6 @@
                        (get labels (:effect-id item) "Unknown Effect"))
      :on-change-event :chain/set-items
      :on-change-params {:domain :projector-effects :entity-key projector-id}
-     :on-selection-event :chain/update-selection
-     :on-selection-params {:domain :projector-effects :entity-key projector-id}
-     :selection-key :selected-ids
      :on-copy-fn (fn [items]
                    (clipboard/copy-effect-chain! {:effects items}))
      :clipboard-items clipboard-items
