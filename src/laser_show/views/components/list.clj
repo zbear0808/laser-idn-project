@@ -164,7 +164,8 @@
 (defn- normalize-selected-ids
   "Remove redundant descendant IDs when a group AND all its descendants are selected."
   [selected-ids items]
-  (let [id->path (chains/find-paths-by-ids items selected-ids)
+  (let [selected-ids (set selected-ids)  ; Ensure it's a set for contains? checks
+        id->path (chains/find-paths-by-ids items selected-ids)
         group-ids (filterv
                     (fn [id]
                       (when-let [path (get id->path id)]
@@ -198,36 +199,59 @@
   "Group selected items into a new folder.
    Items must be at the same nesting level to be grouped together."
   [component-id items props]
-  (if-let [selected-ids (seq (get-selected-ids component-id))]
-    (let [normalized-ids (normalize-selected-ids selected-ids items)
-          id->path (chains/find-paths-by-ids items normalized-ids)
-          all-paths (vals id->path)
-          parent-paths (mapv (fn [path]
-                               (if (= 1 (count path))
-                                 []
-                                 (vec (butlast path))))
-                             all-paths)
-          unique-parents (set parent-paths)
-          same-level? (= 1 (count unique-parents))
-          common-parent (first unique-parents)]
-      (if (and same-level? (seq all-paths))
-        (let [sorted-paths (sort (fn [a b] (compare (vec a) (vec b))) all-paths)
-              items-to-group (mapv #(chains/get-item-at-path items %) sorted-paths)
-              new-group (chains/create-group items-to-group)
-              after-remove (chains/delete-paths-safely items sorted-paths)
-              first-path (first sorted-paths)
-              insert-path (if (empty? common-parent)
-                            [(first first-path)]
-                            (conj common-parent (last first-path)))
-              new-items (chains/insert-at-path after-remove insert-path new-group)
-              group-id (:id new-group)]
-          (events/dispatch! {:event/type :list/select-item
-                             :component-id component-id
-                             :item-id group-id
-                             :mode :single})
-          (invoke-items-changed! props new-items))
-        (log/warn "group-selected! - items not at same level")))
-    (log/warn "group-selected! - no items selected")))
+  (log/debug "group-selected! called"
+             {:component-id component-id
+              :items-count (count items)
+              :props-keys (keys props)})
+  (if (empty? items)
+    (log/warn "group-selected! called with EMPTY items vector!" {:component-id component-id})
+    (if-let [selected-ids (seq (get-selected-ids component-id))]
+      (let [normalized-ids (normalize-selected-ids selected-ids items)
+            _ (log/debug "group-selected! normalized IDs"
+                         {:original-count (count selected-ids)
+                          :normalized-count (count normalized-ids)
+                          :normalized-ids normalized-ids})
+            id->path (chains/find-paths-by-ids items normalized-ids)
+            all-paths (vals id->path)
+            _ (log/debug "group-selected! paths found"
+                         {:paths-count (count all-paths)
+                          :paths all-paths})
+            parent-paths (mapv (fn [path]
+                                 (if (= 1 (count path))
+                                   []
+                                   (vec (butlast path))))
+                               all-paths)
+            unique-parents (set parent-paths)
+            same-level? (= 1 (count unique-parents))
+            common-parent (first unique-parents)]
+        (if (and same-level? (seq all-paths))
+          (let [sorted-paths (sort (fn [a b] (compare (vec a) (vec b))) all-paths)
+                items-to-group (mapv #(chains/get-item-at-path items %) sorted-paths)
+                _ (log/debug "group-selected! items to group"
+                             {:items-to-group-count (count items-to-group)
+                              :items-to-group items-to-group})
+                new-group (chains/create-group items-to-group)
+                after-remove (chains/delete-paths-safely items sorted-paths)
+                _ (log/debug "group-selected! after remove"
+                             {:after-remove-count (count after-remove)})
+                first-path (first sorted-paths)
+                insert-path (if (empty? common-parent)
+                              [(first first-path)]
+                              (conj common-parent (last first-path)))
+                new-items (chains/insert-at-path after-remove insert-path new-group)
+                _ (log/debug "group-selected! new items after insert"
+                             {:new-items-count (count new-items)
+                              :new-items new-items})
+                group-id (:id new-group)]
+            (events/dispatch! {:event/type :list/select-item
+                               :component-id component-id
+                               :item-id group-id
+                               :mode :single})
+            (invoke-items-changed! props new-items))
+          (log/warn "group-selected! - items not at same level or no paths found"
+                    {:same-level? same-level?
+                     :all-paths-count (count all-paths)})))
+      (log/warn "group-selected! - no items selected"))))
 
 (defn- ungroup!
   "Ungroup a folder, splicing its contents into the parent."
@@ -684,6 +708,7 @@
   (or (get @keyboard-handler-atoms component-id)
       (let [new-atoms {:items-atom (atom [])
                        :props-atom (atom {})}]
+        (log/debug "Creating new handler atoms for component" {:component-id component-id})
         (swap! keyboard-handler-atoms assoc component-id new-atoms)
         new-atoms)))
 
@@ -691,43 +716,86 @@
   "Update the atoms with current items and props values."
   [component-id items props]
   (let [{:keys [items-atom props-atom]} (get-or-create-handler-atoms! component-id)]
+    (log/debug "Updating handler atoms"
+               {:component-id component-id
+                :items-count (count items)
+                :props-keys (keys props)})
     (reset! items-atom items)
     (reset! props-atom props)))
 
 (defn- setup-keyboard-handlers!
   "Setup keyboard handlers on a parent node for a hierarchical list component."
   [^javafx.scene.Node node component-id items-atom props-atom]
+  (log/info "Setting up keyboard handlers"
+            {:component-id component-id
+             :node-class (.getSimpleName (class node))
+             :focus-traversable? (.isFocusTraversable node)})
   (.addEventFilter node
     javafx.scene.input.KeyEvent/KEY_PRESSED
     (on-fx-event
       (fn [event]
         (let [code (.getCode event)
               ctrl? (.isShortcutDown event)
+              shift? (.isShiftDown event)
+              alt? (.isAltDown event)
               items @items-atom
-              props @props-atom]
-          (when (cond
-                  (and ctrl? (= code javafx.scene.input.KeyCode/C))
-                  (copy-selected! component-id items props)
+              props @props-atom
+              focused? (.isFocused node)
+              scene (.getScene node)
+              focus-owner (when scene (.getFocusOwner scene))]
+          (log/debug "KEY_PRESSED event received in list handler"
+                     {:component-id component-id
+                      :key-code (str code)
+                      :ctrl? ctrl?
+                      :shift? shift?
+                      :alt? alt?
+                      :node-focused? focused?
+                      :focus-owner-class (when focus-owner (.getSimpleName (class focus-owner)))
+                      :items-count (count items)
+                      :props-keys (keys props)
+                      :selected-ids (get-selected-ids component-id)})
+          (let [handled? (cond
+                           (and ctrl? (= code javafx.scene.input.KeyCode/C))
+                           (do (log/debug "Handling Ctrl+C (copy)")
+                               (copy-selected! component-id items props)
+                               true)
 
-                  (and ctrl? (= code javafx.scene.input.KeyCode/V))
-                  (paste-items! component-id items props)
+                           (and ctrl? (= code javafx.scene.input.KeyCode/V))
+                           (do (log/debug "Handling Ctrl+V (paste)"
+                                          {:clipboard-items-count (count (:clipboard-items props))})
+                               (paste-items! component-id items props)
+                               true)
 
-                  (and ctrl? (= code javafx.scene.input.KeyCode/X))
-                  (do (copy-selected! component-id items props)
-                      (delete-selected! component-id items props))
+                           (and ctrl? (= code javafx.scene.input.KeyCode/X))
+                           (do (log/debug "Handling Ctrl+X (cut)")
+                               (copy-selected! component-id items props)
+                               (delete-selected! component-id items props)
+                               true)
 
-                  (and ctrl? (= code javafx.scene.input.KeyCode/A))
-                  (select-all! component-id items)
+                           (and ctrl? (= code javafx.scene.input.KeyCode/A))
+                           (do (log/debug "Handling Ctrl+A (select all)")
+                               (select-all! component-id items)
+                               true)
 
-                  (and ctrl? (= code javafx.scene.input.KeyCode/G))
-                  (group-selected! component-id items props)
+                           (and ctrl? (= code javafx.scene.input.KeyCode/G))
+                           (do (log/debug "Handling Ctrl+G (group)")
+                               (group-selected! component-id items props)
+                               true)
 
-                  (= code javafx.scene.input.KeyCode/DELETE)
-                  (delete-selected! component-id items props)
+                           (= code javafx.scene.input.KeyCode/DELETE)
+                           (do (log/debug "Handling Delete")
+                               (delete-selected! component-id items props)
+                               true)
 
-                  (= code javafx.scene.input.KeyCode/ESCAPE)
-                  (clear-selection! component-id))
-            (.consume event)))))))
+                           (= code javafx.scene.input.KeyCode/ESCAPE)
+                           (do (log/debug "Handling Escape")
+                               (clear-selection! component-id)
+                               true)
+                           
+                           :else false)]
+            (when handled?
+              (log/debug "Event consumed" {:key-code (str code)})
+              (.consume event))))))))
 
 
 ;; All-in-One Wrapper Component
@@ -770,6 +838,10 @@
          empty-text "No items"
          allow-groups? true
          fallback-label "Unknown"}}]
+  (log/debug "list-editor render"
+             {:component-id component-id
+              :items-count (count items)
+              :clipboard-items-count (count clipboard-items)})
   (let [label-fn (cond
                    get-item-label
                    get-item-label
@@ -788,10 +860,22 @@
         {:keys [items-atom props-atom]} (get-or-create-handler-atoms! component-id)
         _ (update-handler-atoms! component-id items handler-props)]
     {:fx/type fx/ext-on-instance-lifecycle
-     :on-created (fn [node]
+     :on-created (fn [^javafx.scene.Node node]
+                   (log/info "list-editor on-created"
+                             {:component-id component-id
+                              :node-class (.getSimpleName (class node))})
                    (setup-keyboard-handlers! node component-id items-atom props-atom)
                    (.setFocusTraversable node true)
-                   (.requestFocus node))
+                   (log/debug "Requesting focus on list-editor node" {:component-id component-id})
+                   (.requestFocus node)
+                   ;; Also add a focus listener for debugging
+                   (.addListener (.focusedProperty node)
+                     (reify javafx.beans.value.ChangeListener
+                       (changed [_ _ old-val new-val]
+                         (log/debug "list-editor focus changed"
+                                    {:component-id component-id
+                                     :old-focused? old-val
+                                     :new-focused? new-val})))))
      :desc {:fx/type :v-box
             :children [(u/->map&
                         items clipboard-items header-label

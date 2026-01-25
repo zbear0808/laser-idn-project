@@ -432,11 +432,16 @@
         ;; Get recent profiler stats (last 30 frames = ~1 second at 30fps)
         recent-stats (profiler/get-recent-stats 30)
         frame-stats (when recent-stats
-                      {:avg-latency-us (:avg-total-us recent-stats)
-                       :p95-latency-us (:p95-total-us recent-stats)
-                       :max-latency-us (:max-total-us recent-stats)
-                       :avg-base-us (:avg-base-us recent-stats)
-                       :avg-effects-us (:avg-effects-us recent-stats)})]
+                      (cond-> {:avg-latency-us (:avg-total-us recent-stats)
+                               :p95-latency-us (:p95-total-us recent-stats)
+                               :max-latency-us (:max-total-us recent-stats)
+                               :avg-base-us (:avg-base-us recent-stats)
+                               :avg-effects-us (:avg-effects-us recent-stats)}
+                        ;; Include IDN streaming stats when available
+                        (:avg-idn-us recent-stats)
+                        (merge {:avg-idn-us (:avg-idn-us recent-stats)
+                                :p95-idn-us (:p95-idn-us recent-stats)
+                                :max-idn-us (:max-idn-us recent-stats)})))]
     (state/swap-state!
       (fn [s]
         (cond-> s

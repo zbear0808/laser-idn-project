@@ -13,7 +13,8 @@
             [laser-show.idn.output-config :as output-config]
             [laser-show.animation.types :as t]
             [laser-show.idn.hello :as hello]
-            [laser-show.common.util :as u])
+            [laser-show.common.util :as u]
+            [laser-show.profiling.frame-profiler :as profiler])
   (:import [java.net DatagramSocket]))
 
 
@@ -127,7 +128,8 @@
 
 (defn- streaming-loop
   "Main streaming loop - runs in a separate thread.
-   Continuously gets frames from the provider and sends them as IDN packets."
+   Continuously gets frames from the provider and sends them as IDN packets.
+   Records timing metrics for IDN streaming profiling."
   [engine]
   (let [{:keys [target-host target-port frame-provider fps
                 running? socket stats output-config]} engine
@@ -142,12 +144,18 @@
     (while @running?
       (let [loop-start (System/currentTimeMillis)]
         (try
-          (let [frame (frame-provider)
+          ;; Start timing for IDN profiling
+          (let [idn-start-ns (System/nanoTime)
+                frame (frame-provider)
                 frame (or frame (t/empty-frame))
                 idn-packet (create-idn-stream-packet engine frame)
                 hello-packet (hello/wrap-channel-message idn-packet)]
             
             (hello/send-packet @socket hello-packet target-host target-port)
+            
+            ;; Record IDN streaming time (convert ns to us)
+            (let [idn-time-us (/ (- (System/nanoTime) idn-start-ns) 1000.0)]
+              (profiler/record-idn-streaming! idn-time-us))
             
             (let [now (System/currentTimeMillis)
                   last-time (:last-frame-time @stats)

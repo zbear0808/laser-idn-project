@@ -5,9 +5,15 @@
    in a rolling window of the last 1000 frames. Provides statistics like
    average, min, max, and p95 timings.
    
+   Also tracks IDN streaming timing (frame retrieval + packet creation + network send)
+   in a separate rolling window.
+   
    Overhead is negligible so profiler can be always-on.")
 
 (defonce ^:private !samples
+  (atom []))
+
+(defonce ^:private !idn-samples
   (atom []))
 
 (defonce !profiler-enabled
@@ -38,6 +44,22 @@
                   :effect-count effect-count}]
       (swap! !samples (fn [s] (vec (take-last 1000 (conj s sample))))))))
 
+(defn record-idn-streaming!
+  "Record timing for IDN streaming operation (frame retrieval + packet creation + network send).
+   
+   Parameters:
+   - idn-time-us: Total time for the IDN streaming operation (microseconds)
+   
+   Example:
+   ```clojure
+   (record-idn-streaming! 150)
+   ```"
+  [idn-time-us]
+  (when @!profiler-enabled
+    (let [sample {:timestamp-ms (System/currentTimeMillis)
+                  :idn-time-us idn-time-us}]
+      (swap! !idn-samples (fn [s] (vec (take-last 1000 (conj s sample))))))))
+
 ;; Query Functions
 
 (defn get-samples
@@ -57,6 +79,24 @@
    @!samples)
   ([n]
    (vec (take-last n @!samples))))
+
+(defn get-idn-samples
+  "Get raw IDN streaming timing samples.
+   
+   Parameters:
+   - n: (optional) Number of most recent samples to return. Returns all if not specified.
+   
+   Returns: Vector of IDN timing samples, most recent last.
+   
+   Example:
+   ```clojure
+   (get-idn-samples)     ; all samples (up to 1000)
+   (get-idn-samples 100) ; last 100 samples
+   ```"
+  ([]
+   @!idn-samples)
+  ([n]
+   (vec (take-last n @!idn-samples))))
 
 
 ;; Statistics
@@ -89,7 +129,8 @@
    (get-recent-stats 100) ; stats for last 100 frames
    ```"
   [n]
-  (let [recent-samples (get-samples n)]
+  (let [recent-samples (get-samples n)
+        idn-samples (get-idn-samples n)]
     (when (seq recent-samples)
       (let [total-times (mapv :total-time-us recent-samples)
             base-times (mapv :base-time-us recent-samples)
@@ -98,15 +139,25 @@
             
             avg-total (/ (reduce + total-times) (count total-times))
             avg-base (/ (reduce + base-times) (count base-times))
-            avg-effects (/ (reduce + effects-times) (count effects-times))]
+            avg-effects (/ (reduce + effects-times) (count effects-times))
+            
+            ;; IDN streaming stats (optional, may not have samples)
+            idn-times (mapv :idn-time-us idn-samples)
+            idn-stats (when (seq idn-times)
+                        (let [sorted-idn (sort idn-times)]
+                          {:avg-idn-us (/ (reduce + idn-times) (count idn-times))
+                           :p95-idn-us (calculate-percentile sorted-idn 0.95)
+                           :max-idn-us (last sorted-idn)}))]
         
-        {:sample-count (count recent-samples)
-         :avg-total-us avg-total
-         :min-total-us (first sorted-totals)
-         :max-total-us (last sorted-totals)
-         :p95-total-us (calculate-percentile sorted-totals 0.95)
-         :avg-base-us avg-base
-         :avg-effects-us avg-effects}))))
+        (merge
+          {:sample-count (count recent-samples)
+           :avg-total-us avg-total
+           :min-total-us (first sorted-totals)
+           :max-total-us (last sorted-totals)
+           :p95-total-us (calculate-percentile sorted-totals 0.95)
+           :avg-base-us avg-base
+           :avg-effects-us avg-effects}
+          idn-stats)))))
 
 
 

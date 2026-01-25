@@ -54,27 +54,34 @@
 
 
 (defn frame-stats-status
-  "Status showing frame generation latency stats."
+  "Status showing frame generation latency stats and IDN streaming stats."
   [{:keys [fx/context]}]
   (let [stats (fx/sub-ctx context subs/frame-stats)]
     (if (and stats (:avg-latency-us stats))
       {:fx/type :h-box
        :spacing 16
-       :children [{:fx/type status-item
-                   :label "Base"
-                   :value (str (long (or (:avg-base-us stats) 0)) "µs")}
-                  {:fx/type status-item
-                   :label "Effects"
-                   :value (str (long (or (:avg-effects-us stats) 0)) "µs")}
-                  {:fx/type status-item
-                   :label "Total (avg)"
-                   :value (str (long (:avg-latency-us stats)) "µs")}
-                  {:fx/type status-item
-                   :label "p95"
-                   :value (str (long (:p95-latency-us stats)) "µs")}
-                  {:fx/type status-item
-                   :label "max"
-                   :value (str (long (:max-latency-us stats)) "µs")}]}
+       :children (cond-> [{:fx/type status-item
+                           :label "Base"
+                           :value (str (long (or (:avg-base-us stats) 0)) "µs")}
+                          {:fx/type status-item
+                           :label "Effects"
+                           :value (str (long (or (:avg-effects-us stats) 0)) "µs")}
+                          {:fx/type status-item
+                           :label "Total (avg)"
+                           :value (str (long (:avg-latency-us stats)) "µs")}
+                          {:fx/type status-item
+                           :label "p95"
+                           :value (str (long (:p95-latency-us stats)) "µs")}
+                          {:fx/type status-item
+                           :label "max"
+                           :value (str (long (:max-latency-us stats)) "µs")}]
+                  ;; Add IDN stats when streaming is active
+                  (:avg-idn-us stats)
+                  (conj {:fx/type status-item
+                         :label "IDN"
+                         :value (str (long (:avg-idn-us stats)) "µs"
+                                     " (p95: " (long (or (:p95-idn-us stats) 0)) "µs,"
+                                     " max: " (long (or (:max-idn-us stats) 0)) "µs)")}))}
       {:fx/type :label :text "" :pref-width 0})))
 
 
