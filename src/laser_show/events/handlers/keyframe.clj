@@ -363,27 +363,6 @@
           h/mark-dirty)
       state)))
 
-(defn handle-update-keyframe-params
-  "Update all parameters for a keyframe (e.g., from spatial editor).
-   
-   Parameters:
-   - state: Application state
-   - config: Chain config
-   - effect-path: Path to effect
-   - keyframe-idx: Index of keyframe to update
-   - params: Full params map
-   
-   Returns: Updated state"
-  [state config effect-path keyframe-idx params]
-  (let [keyframe-mod (get-keyframe-modulator state config effect-path)
-        keyframes (:keyframes keyframe-mod [])]
-    (if (and (>= keyframe-idx 0) (< keyframe-idx (count keyframes)))
-      (-> state
-          (update-keyframe-modulator config effect-path
-                                     update-in [:keyframes keyframe-idx :params] merge params)
-          h/mark-dirty)
-      state)))
-
 (defn handle-update-spatial-params
   "Update keyframe params from spatial drag operation (translate, corner-pin).
    Converts point-id/x/y coordinates to params using param-map.
@@ -405,29 +384,15 @@
     (if point-params
       (let [x-key (:x point-params)
             y-key (:y point-params)
-            params {x-key x y-key y}]
-        (handle-update-keyframe-params state config effect-path keyframe-idx params))
-      state)))
-
-(defn handle-copy-effect-params-to-keyframe
-  "Copy the effect's current base params to a keyframe.
-   
-   Parameters:
-   - state: Application state
-   - config: Chain config
-   - effect-path: Path to effect
-   - keyframe-idx: Index of keyframe to copy params to
-   
-   Returns: Updated state"
-  [state config effect-path keyframe-idx]
-  (let [params (get-effect-params state config effect-path)
-        keyframe-mod (get-keyframe-modulator state config effect-path)
-        keyframes (:keyframes keyframe-mod [])]
-    (if (and (>= keyframe-idx 0) (< keyframe-idx (count keyframes)))
-      (-> state
-          (update-keyframe-modulator config effect-path
-                                     assoc-in [:keyframes keyframe-idx :params] params)
-          h/mark-dirty)
+            params {x-key x y-key y}
+            keyframe-mod (get-keyframe-modulator state config effect-path)
+            keyframes (:keyframes keyframe-mod [])]
+        (if (and (>= keyframe-idx 0) (< keyframe-idx (count keyframes)))
+          (-> state
+              (update-keyframe-modulator config effect-path
+                                         update-in [:keyframes keyframe-idx :params] merge params)
+              h/mark-dirty)
+          state))
       state)))
 
 
@@ -476,11 +441,6 @@
                                             (:param-key event)
                                             (or (:value event) (:fx/event event)))}
       
-      :keyframe/update-params
-      {:state (handle-update-keyframe-params state config effect-path
-                                             (:keyframe-idx event)
-                                             (:params event))}
-      
       :keyframe/update-spatial-params
       {:state (handle-update-spatial-params state config effect-path
                                             (:keyframe-idx event)
@@ -488,10 +448,6 @@
                                             (:x event)
                                             (:y event)
                                             (:param-map event))}
-      
-      :keyframe/copy-effect-params
-      {:state (handle-copy-effect-params-to-keyframe state config effect-path
-                                                     (:keyframe-idx event))}
       
       ;; Unknown keyframe event
       (do

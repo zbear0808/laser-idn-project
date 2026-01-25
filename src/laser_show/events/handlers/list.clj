@@ -118,14 +118,12 @@
    - :drop-position - :before, :after, or :into
    - :on-change-event - Event type to dispatch with result (e.g., :chain/set-items)
    - :on-change-params - Base params for the change event
-   - :items-key - Key for items in dispatched event (default :items)
    - :items-path - Direct path to items in state (optional, overrides domain/entity-key construction)
    
    If :items-path is not provided, constructs path as [:chains domain entity-key :items]
    using :domain and :entity-key from on-change-params."
   [{:keys [component-id dragging-ids target-id drop-position
-           on-change-event on-change-params items-key items-path state]
-    :or {items-key :items}}]
+           on-change-event on-change-params items-path state]}]
   ;; Read items DIRECTLY from state to avoid stale closure issues
   ;; The items passed in the event may be stale from drag handler setup
   (let [{:keys [domain entity-key]} on-change-params
@@ -139,7 +137,6 @@
                "component-id:" component-id
                "on-change-event:" on-change-event
                "on-change-params:" on-change-params
-               "items-key:" items-key
                "items-path:" items-path
                "items count:" (count items)
                "dragging-ids:" dragging-ids)
@@ -160,7 +157,7 @@
           (let [new-items (chains/move-items-to-target items from-paths target-id drop-position)
                 dispatch-event (assoc on-change-params
                                       :event/type on-change-event
-                                      items-key new-items)]
+                                      :items new-items)]
             (log/debug "handle-perform-drop SUCCESS - dispatching:" (:event/type dispatch-event)
                        "new-items count:" (count new-items))
             {:state (update-in state [:list-ui component-id] merge clear-drag-state)

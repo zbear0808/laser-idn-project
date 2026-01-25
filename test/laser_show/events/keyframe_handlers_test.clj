@@ -302,33 +302,6 @@
       (is (= state result)))))
 
 
-;; Update Keyframe Params Tests
-
-
-(deftest handle-update-keyframe-params-test
-  (testing "Merges params map into keyframe"
-    (let [state (make-test-state [sample-effect-with-keyframes])
-          result (keyframe/handle-update-keyframe-params state sample-config [0] 0 {:x 2.0 :z 1.0})
-          kf-mod (get-in result [:chains :effect-chains [0 0] :items 0 :keyframe-modulator])
-          first-kf (first (:keyframes kf-mod))]
-      (is (= 2.0 (get-in first-kf [:params :x])))
-      (is (= 0.5 (get-in first-kf [:params :y])) "Existing params should be preserved")
-      (is (= 1.0 (get-in first-kf [:params :z])) "New params should be added"))))
-
-
-;; Copy Effect Params Tests
-
-
-(deftest handle-copy-effect-params-to-keyframe-test
-  (testing "Copies effect's base params to keyframe"
-    (let [state (make-test-state [sample-effect-with-keyframes])
-          result (keyframe/handle-copy-effect-params-to-keyframe state sample-config [0] 1)
-          kf-mod (get-in result [:chains :effect-chains [0 0] :items 0 :keyframe-modulator])
-          target-kf (nth (:keyframes kf-mod) 1)]
-      ;; Effect's params are {:x 1.0 :y 1.0}
-      (is (= {:x 1.0 :y 1.0} (:params target-kf))))))
-
-
 ;; Main Handle Function Tests
 
 
@@ -444,33 +417,6 @@
           result (keyframe/handle event)
           kf-mod (get-in result [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator])]
       (is (= 0.9 (get-in kf-mod [:keyframes 0 :params :x])))))
-  
-  (testing "Dispatches :keyframe/update-params"
-    (let [state (make-test-state [sample-effect-with-keyframes])
-          event {:event/type :keyframe/update-params
-                 :domain :effect-chains
-                 :entity-key [0 0]
-                 :effect-path [0]
-                 :keyframe-idx 0
-                 :params {:x 2.0 :y 2.0}
-                 :state state}
-          result (keyframe/handle event)
-          kf-mod (get-in result [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator])]
-      (is (= 2.0 (get-in kf-mod [:keyframes 0 :params :x])))
-      (is (= 2.0 (get-in kf-mod [:keyframes 0 :params :y])))))
-  
-  (testing "Dispatches :keyframe/copy-effect-params"
-    (let [state (make-test-state [sample-effect-with-keyframes])
-          event {:event/type :keyframe/copy-effect-params
-                 :domain :effect-chains
-                 :entity-key [0 0]
-                 :effect-path [0]
-                 :keyframe-idx 0
-                 :state state}
-          result (keyframe/handle event)
-          kf-mod (get-in result [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator])]
-      ;; Effect base params are {:x 1.0 :y 1.0}
-      (is (= {:x 1.0 :y 1.0} (get-in kf-mod [:keyframes 0 :params])))))
   
   (testing "Unknown event type returns empty map"
     (let [event {:event/type :keyframe/unknown-type

@@ -357,7 +357,7 @@
           event {:event/type :cue-chain/set-item-effects
                  :col 0 :row 0
                  :item-path [0]
-                 :effects new-effects
+                 :items new-effects
                  :state sample-state-with-effect}
           result (cue-chain/handle event)]
       (is (= 1 (count (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects]))))
@@ -369,7 +369,7 @@
     (let [event {:event/type :cue-chain/set-item-effects
                  :col 0 :row 0
                  :item-path [0]
-                 :effects []
+                 :items []
                  :state sample-state-with-effect}
           result (cue-chain/handle event)]
       (is (empty? (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects])))

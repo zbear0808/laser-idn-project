@@ -16,13 +16,7 @@
    [laser-show.events.handlers.chain.params :as params]))
 
 
-;; Re-export chain-config from helpers for convenience
-(def chain-config helpers/chain-config)
-
-
-;; ============================================================================
 ;; Main Dispatch Router
-;; ============================================================================
 
 
 (defn handle

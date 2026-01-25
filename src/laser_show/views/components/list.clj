@@ -49,7 +49,8 @@
 ;; Event Dispatch Helpers
 
 (defn- invoke-items-changed!
-  "Dispatch the on-change-event if present."
+  "Dispatch the on-change-event if present.
+   Always uses :items key in the dispatched event."
   [props new-items]
   (when-let [event-type (:on-change-event props)]
     (events/dispatch! (assoc (or (:on-change-params props) {})
@@ -754,48 +755,51 @@
                       :items-count (count items)
                       :props-keys (keys props)
                       :selected-ids (get-selected-ids component-id)})
-          (let [handled? (cond
-                           (and ctrl? (= code javafx.scene.input.KeyCode/C))
-                           (do (log/debug "Handling Ctrl+C (copy)")
-                               (copy-selected! component-id items props)
-                               true)
+          ;; Only handle keyboard shortcuts when this node has focus
+          ;; This prevents multiple list handlers from intercepting the same event
+          (when focused?
+            (let [handled? (cond
+                             (and ctrl? (= code javafx.scene.input.KeyCode/C))
+                             (do (log/debug "Handling Ctrl+C (copy)")
+                                 (copy-selected! component-id items props)
+                                 true)
 
-                           (and ctrl? (= code javafx.scene.input.KeyCode/V))
-                           (do (log/debug "Handling Ctrl+V (paste)"
-                                          {:clipboard-items-count (count (:clipboard-items props))})
-                               (paste-items! component-id items props)
-                               true)
+                             (and ctrl? (= code javafx.scene.input.KeyCode/V))
+                             (do (log/debug "Handling Ctrl+V (paste)"
+                                            {:clipboard-items-count (count (:clipboard-items props))})
+                                 (paste-items! component-id items props)
+                                 true)
 
-                           (and ctrl? (= code javafx.scene.input.KeyCode/X))
-                           (do (log/debug "Handling Ctrl+X (cut)")
-                               (copy-selected! component-id items props)
-                               (delete-selected! component-id items props)
-                               true)
+                             (and ctrl? (= code javafx.scene.input.KeyCode/X))
+                             (do (log/debug "Handling Ctrl+X (cut)")
+                                 (copy-selected! component-id items props)
+                                 (delete-selected! component-id items props)
+                                 true)
 
-                           (and ctrl? (= code javafx.scene.input.KeyCode/A))
-                           (do (log/debug "Handling Ctrl+A (select all)")
-                               (select-all! component-id items)
-                               true)
+                             (and ctrl? (= code javafx.scene.input.KeyCode/A))
+                             (do (log/debug "Handling Ctrl+A (select all)")
+                                 (select-all! component-id items)
+                                 true)
 
-                           (and ctrl? (= code javafx.scene.input.KeyCode/G))
-                           (do (log/debug "Handling Ctrl+G (group)")
-                               (group-selected! component-id items props)
-                               true)
+                             (and ctrl? (= code javafx.scene.input.KeyCode/G))
+                             (do (log/debug "Handling Ctrl+G (group)")
+                                 (group-selected! component-id items props)
+                                 true)
 
-                           (= code javafx.scene.input.KeyCode/DELETE)
-                           (do (log/debug "Handling Delete")
-                               (delete-selected! component-id items props)
-                               true)
+                             (= code javafx.scene.input.KeyCode/DELETE)
+                             (do (log/debug "Handling Delete")
+                                 (delete-selected! component-id items props)
+                                 true)
 
-                           (= code javafx.scene.input.KeyCode/ESCAPE)
-                           (do (log/debug "Handling Escape")
-                               (clear-selection! component-id)
-                               true)
-                           
-                           :else false)]
-            (when handled?
-              (log/debug "Event consumed" {:key-code (str code)})
-              (.consume event))))))))
+                             (= code javafx.scene.input.KeyCode/ESCAPE)
+                             (do (log/debug "Handling Escape")
+                                 (clear-selection! component-id)
+                                 true)
+                             
+                             :else false)]
+              (when handled?
+                (log/debug "Event consumed" {:key-code (str code)})
+                (.consume event)))))))))
 
 
 ;; All-in-One Wrapper Component
@@ -866,8 +870,10 @@
                               :node-class (.getSimpleName (class node))})
                    (setup-keyboard-handlers! node component-id items-atom props-atom)
                    (.setFocusTraversable node true)
-                   (log/debug "Requesting focus on list-editor node" {:component-id component-id})
-                   (.requestFocus node)
+                   ;; NOTE: Don't auto-request focus on creation!
+                   ;; Focus should be determined by user interaction (clicking items).
+                   ;; Auto-requesting focus causes focus stealing between multiple lists
+                   ;; in the same container (e.g., cue chain editor with two lists).
                    ;; Also add a focus listener for debugging
                    (.addListener (.focusedProperty node)
                      (reify javafx.beans.value.ChangeListener

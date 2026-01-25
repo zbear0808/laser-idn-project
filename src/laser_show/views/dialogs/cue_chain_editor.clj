@@ -287,7 +287,6 @@
                                                       :fallback-label "Unknown Effect"
                                                       :on-change-event :cue-chain/set-item-effects
                                                       :on-change-params {:col col :row row :item-path first-selected-path}
-                                                      :items-key :effects
                                                       ;; Direct path to items in state for async drag-drop
                                                       ;; Path: [:chains :cue-chains [col row] :items <first-selected-path...> :effects]
                                                       :items-path (vec (concat [:chains :cue-chains [col row] :items] first-selected-path [:effects]))

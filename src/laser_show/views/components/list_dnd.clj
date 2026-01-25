@@ -54,8 +54,7 @@
         (events/dispatch!
           (u/->map& component-id items dragging-ids target-id drop-position
                     on-change-event on-change-params items-path
-                    :event/type :list/perform-drop
-                    :items-key :items))))))
+                    :event/type :list/perform-drop))))))
 
 (defn- clear-drag-state!
   "Clear all drag-related state after drop or cancel."

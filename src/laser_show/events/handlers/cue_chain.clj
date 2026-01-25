@@ -5,10 +5,11 @@
    presets with per-preset effect chains.
    
    This file handles cue-chain-specific operations:
-   - Editor lifecycle (open/close)
-   - Preset management (add, update parameters, color)
+   - Editor lifecycle (open)
+   - Preset management (add)
    - Tab switching (preset banks, effect banks)
    - Clipboard operations
+   - Destination zone routing
    
    Effect-level operations have moved to chain.clj:
    - Effect CRUD (add, remove, set-enabled)
@@ -65,10 +66,6 @@
               :component-id [:cue-chain col row]
               :items-path [:chains :cue-chains [col row] :items]}})
 
-(defn- handle-cue-chain-close-editor
-  "Close the cue chain editor."
-  [{:keys [state]}]
-  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :open?] false)})
 
 
 ;; Preset Management
@@ -157,38 +154,22 @@
   {:state (assoc-in state [:ui :dialogs :cue-chain-editor :active-effect-tab] (or tab-id :shape))})
 
 
-;; Item Effect Selection
-
-
-(defn- handle-cue-chain-select-item-effect
-  "Select an effect within an item for editing.
-   FLATTENED: No :data nesting."
-  [{:keys [effect-id state]}]
-  {:state (assoc-in state [:ui :dialogs :cue-chain-editor :selected-effect-id] effect-id)})
-
-
 ;; Hierarchical List Integration (Item Effects)
 
 
 (defn- handle-cue-chain-set-item-effects
   "Set the entire effects array for a cue chain item (simple persistence callback)."
-  [{:keys [col row item-path effects state]}]
+  [{:keys [col row item-path items state]}]
   (let [ensure-cell (fn [s]
                       (if (get-in s [:chains :cue-chains [col row]])
                         s
                         (assoc-in s [:chains :cue-chains [col row]] {:items []})))
-        items-path (cue-chain-path col row)
-        effects-path (vec (concat items-path item-path [:effects]))]
+        items-path-full (cue-chain-path col row)
+        effects-path (vec (concat items-path-full item-path [:effects]))]
     {:state (-> state
                 ensure-cell
-                (assoc-in effects-path effects)
+                (assoc-in effects-path items)
                 h/mark-dirty)}))
-
-(defn- handle-cue-chain-update-item-effect-selection
-  "Update the selection state for item effects editor."
-  [{:keys [col row item-path selected-ids state]}]
-  (let [ui-path (item-effects-ui-path col row item-path)]
-    {:state (assoc-in state (conj ui-path :selected-ids) selected-ids)}))
 
 
 ;; Clipboard Operations
@@ -254,14 +235,9 @@
   (case type
     ;; Editor lifecycle
     :cue-chain/open-editor (handle-cue-chain-open-editor event)
-    :cue-chain/close-editor (handle-cue-chain-close-editor event)
     
     ;; Preset management
     :cue-chain/add-preset (handle-cue-chain-add-preset event)
-    ;; NOTE: :cue-chain/update-preset-param, :cue-chain/update-preset-color, and
-    ;; :cue-chain/update-preset-param-from-text have been removed.
-    ;; Use :chain/update-param, :chain/update-color-param, :chain/update-param-from-text
-    ;; with {:domain :cue-chains :entity-key [col row] :effect-path preset-path} instead.
     
     ;; Effect bank (data-driven) - add effect to cue chain item
     :cue-chain/add-effect-from-bank (handle-cue-chain-add-effect-from-bank event)
@@ -270,12 +246,8 @@
     :cue-chain/set-preset-tab (handle-cue-chain-set-preset-tab event)
     :cue-chain/set-effect-tab (handle-cue-chain-set-effect-tab event)
     
-    ;; Item effect selection
-    :cue-chain/select-item-effect (handle-cue-chain-select-item-effect event)
-    
     ;; Hierarchical list integration
     :cue-chain/set-item-effects (handle-cue-chain-set-item-effects event)
-    :cue-chain/update-item-effect-selection (handle-cue-chain-update-item-effect-selection event)
     :cue-chain/set-clipboard (handle-cue-chain-set-clipboard event)
     :cue-chain/set-item-effects-clipboard (handle-cue-chain-set-item-effects-clipboard event)
     

@@ -4,8 +4,7 @@
    Handles:
    - Tab switching
    - Dialog management
-   - Drag and drop operations
-   - Preset selection"
+   - Preview zone filtering"
   (:require [clojure.tools.logging :as log]))
 
 
@@ -13,11 +12,6 @@
   "Change the active tab."
   [{:keys [tab-id state]}]
   {:state (assoc-in state [:ui :active-tab] tab-id)})
-
-(defn- handle-ui-select-preset
-  "Select a preset in the browser."
-  [{:keys [preset-id state]}]
-  {:state (assoc-in state [:ui :selected-preset] preset-id)})
 
 (defn- handle-ui-open-dialog
   "Open a dialog.
@@ -57,24 +51,6 @@
       (log/debug "Tab clicked:" {:dialog-id dialog-id :tab-id tab-id}))
     {:state (update-in state [:ui :dialogs dialog-id] merge actual-updates)}))
 
-(defn- handle-ui-start-drag
-  "Start a drag operation."
-  [{:keys [source-type source-key data state]}]
-  {:state (assoc-in state [:ui :drag]
-                    {:active? true
-                     :source-type source-type
-                     :source-key source-key
-                     :data data})})
-
-(defn- handle-ui-end-drag
-  "End a drag operation."
-  [{:keys [state]}]
-  {:state (assoc-in state [:ui :drag]
-                    {:active? false
-                     :source-type nil
-                     :source-key nil
-                     :data nil})})
-
 (defn- handle-preview-set-zone-filter
   "Set the preview zone group filter.
    
@@ -102,12 +78,9 @@
   [{:keys [event/type] :as event}]
   (case type
     :ui/set-active-tab (handle-ui-set-active-tab event)
-    :ui/select-preset (handle-ui-select-preset event)
     :ui/open-dialog (handle-ui-open-dialog event)
     :ui/close-dialog (handle-ui-close-dialog event)
     :ui/update-dialog-data (handle-ui-update-dialog-data event)
-    :ui/start-drag (handle-ui-start-drag event)
-    :ui/end-drag (handle-ui-end-drag event)
     :preview/set-zone-filter (handle-preview-set-zone-filter event)
     
     ;; Unknown event in this domain
