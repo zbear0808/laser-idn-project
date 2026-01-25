@@ -32,7 +32,7 @@
     :dialog-data dialog-data}"
   (:require
    [clojure.tools.logging :as log]
-   [laser-show.views.components.keyframe-modulator-panel :as keyframe-panel]
+   [laser-show.views.components.visual-editors.keyframe-modulator-panel :as keyframe-panel]
    [laser-show.views.components.effect-param-ui :as effect-param-ui]))
 
 

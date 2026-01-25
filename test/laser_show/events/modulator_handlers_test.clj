@@ -50,7 +50,7 @@
           (is (contains? new-value :max)))))))
 
 (deftest test-toggle-modulated-to-static
-  (testing "Toggling modulator extracts midpoint value"
+  (testing "Toggling modulator preserves config with :active? false"
     (let [event (merge sample-event-base
                        {:event/type :modulator/toggle
                         :param-spec sample-param-spec
@@ -60,9 +60,15 @@
       (is (contains? result :dispatch))
       (let [dispatch (:dispatch result)
             new-value (:value dispatch)]
-        (is (number? new-value))
-        ;; Midpoint of 0.5 and 1.5 is 1.0
-        (is (= 1.0 new-value))))))
+        ;; Should preserve modulator config with :active? false
+        (is (map? new-value))
+        (is (= false (:active? new-value)))
+        ;; Should set :value to midpoint of 0.5 and 1.5 = 1.0
+        (is (= 1.0 (:value new-value)))
+        ;; Should preserve other modulator settings
+        (is (= :sine (:type new-value)))
+        (is (= 0.5 (:min new-value)))
+        (is (= 1.5 (:max new-value)))))))
 
 (deftest test-toggle-uses-param-spec-bounds
   (testing "New modulator uses param-spec bounds when reasonable"

@@ -1,4 +1,4 @@
-(ns laser-show.views.components.custom-param-renderers
+(ns laser-show.views.components.visual-editors.custom-param-renderers
   "Custom parameter renderers for effects with specialized UI needs.
    
    Provides visual editors for effects like:

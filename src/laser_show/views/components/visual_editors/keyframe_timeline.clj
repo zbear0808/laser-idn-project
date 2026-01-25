@@ -1,4 +1,4 @@
-(ns laser-show.views.components.keyframe-timeline
+(ns laser-show.views.components.visual-editors.keyframe-timeline
   "Canvas component for keyframe modulator timeline.
    
    Features:

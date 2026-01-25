@@ -1,4 +1,4 @@
-(ns laser-show.views.components.rotate-canvas
+(ns laser-show.views.components.visual-editors.rotate-canvas
   "Circular dial canvas for rotation angle editing.
    
    Features:

@@ -1,4 +1,4 @@
-(ns laser-show.views.components.spatial-canvas
+(ns laser-show.views.components.visual-editors.spatial-canvas
   "2D spatial canvas component for visual parameter editing.
    
    Features:

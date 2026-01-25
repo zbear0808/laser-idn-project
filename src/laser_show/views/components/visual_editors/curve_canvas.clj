@@ -1,4 +1,4 @@
-(ns laser-show.views.components.curve-canvas
+(ns laser-show.views.components.visual-editors.curve-canvas
   "Canvas component for editing 1D brightness transfer curves.
    
    Features:

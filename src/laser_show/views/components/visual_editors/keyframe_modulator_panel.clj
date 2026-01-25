@@ -1,4 +1,4 @@
-(ns laser-show.views.components.keyframe-modulator-panel
+(ns laser-show.views.components.visual-editors.keyframe-modulator-panel
   "Panel component for keyframe modulator controls.
    
    Contains:
@@ -20,7 +20,7 @@
    │ Selected: Keyframe 1 @ 0%      [+ Add] [- Delete] [Copy Params]│
    └─────────────────────────────────────────────────────────────────┘"
   (:require
-   [laser-show.views.components.keyframe-timeline :as timeline]))
+   [laser-show.views.components.visual-editors.keyframe-timeline :as timeline]))
 
 
 ;; Helper Functions

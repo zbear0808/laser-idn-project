@@ -1,4 +1,4 @@
-(ns laser-show.views.components.scale-canvas
+(ns laser-show.views.components.visual-editors.scale-canvas
   "Scale editor canvas with edge/corner handles.
    
    Features:

@@ -13,7 +13,7 @@
             [laser-show.state.clipboard :as clipboard]
             [laser-show.common.util :as u]
             [laser-show.css.core :as css]
-            [laser-show.views.components.custom-param-renderers :as custom-renderers]
+            [laser-show.views.components.visual-editors.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.list :as list]
             [laser-show.views.components.zone-chips :as zone-chips]))

@@ -15,7 +15,7 @@
    Uses parameter-controls namespace for basic control components."
   (:require [laser-show.animation.modulator-defs :as mod-defs]
             [laser-show.views.components.parameter-controls :as param-controls]
-            [laser-show.views.components.custom-param-renderers :as custom-renderers]
+            [laser-show.views.components.visual-editors.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.modulator-param-control :as mod-param]))
 
 
