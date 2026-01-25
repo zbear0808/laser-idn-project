@@ -19,14 +19,9 @@
    - :on-selection-changed - Called with {:selected-ids #{...} :last-selected-id uuid}
    - :on-copy - Called with copied items for parent to store in clipboard
    
-   Helper factories for common patterns:
-   - make-dispatch-callback - Creates :on-items-changed that dispatches an event
-   - make-selection-callback - Creates :on-selection-changed that dispatches an event
-   - make-registry-label - Creates :get-item-label that looks up from a registry
-   - make-case-label - Creates :get-item-label from a keyword->string map
-   
-   Wrapper component for even simpler usage:
-   - list-editor - All-in-one wrapper with keyboard handling
+   Public API:
+   - list-editor - Complete list editor with keyboard handling, drag-drop,
+                   multi-select, copy/paste, and grouping
    
    Styling is defined in laser-show.css.list."
   (:require
@@ -713,24 +708,10 @@
 
 ;; Main Sidebar Component
 
-(defn list-sidebar
-  "Generic hierarchical list sidebar component using context-based state.
-   
-   Props:
-   - :fx/context - cljfx context (required)
-   - :items - Vector of items (required)
-   - :get-item-label - Function item -> string (required)
-   - :on-items-changed - Callback with new items vector (required)
-   - :on-selection-changed - Callback with selection map (optional)
-   - :on-copy - Callback with copied items (optional)
-   - :clipboard-items - Items available to paste (optional)
-   - :header-label - Header text (default 'LIST')
-   - :empty-text - Empty state text (optional)
-   - :allow-groups? - Enable grouping (default true)
-   - :component-id - Unique ID for state isolation (required)
-   - :on-change-event - Event type for async drag-drop (optional)
-   - :on-change-params - Base params for async drag-drop (optional)
-   - :items-path - Direct path to items in state for async drag-drop (optional)"
+(defn- list-sidebar
+  "INTERNAL: Low-level list rendering component.
+   External code should use list-editor instead, which wraps this
+   with keyboard handling and proper state management."
   [{:keys [fx/context items get-item-label on-items-changed
            on-copy clipboard-items header-label empty-text allow-groups?
            component-id on-change-event on-change-params items-path]
@@ -819,19 +800,16 @@
 
 ;; Callback Factory Functions
 
-(defn make-dispatch-callback
-  "Create an on-items-changed callback that dispatches an event.
-   
-   Usage:
-   :on-items-changed (make-dispatch-callback :effects/set-chain {:col col :row row})"
+(defn- make-dispatch-callback
+  "INTERNAL: Create an on-items-changed callback that dispatches an event."
   [event-type base-params]
   (fn [new-items]
     (events/dispatch! (assoc base-params
                              :event/type event-type
                              :items new-items))))
 
-(defn make-selection-callback
-  "Create an on-selection-changed callback that dispatches an event."
+(defn- make-selection-callback
+  "INTERNAL: Create an on-selection-changed callback that dispatches an event."
   ([event-type base-params]
    (make-selection-callback event-type base-params :selected-ids))
   ([event-type base-params selection-key]
@@ -843,9 +821,8 @@
 
 ;; Label Function Factories
 
-(defn make-registry-label
-  "Create a get-item-label function that looks up names from a registry.
-   Checks custom :name field first before falling back to registry."
+(defn- make-registry-label
+  "INTERNAL: Create a get-item-label function that looks up names from a registry."
   [id-key lookup-fn name-key fallback]
   (fn [item]
     (or (:name item)
