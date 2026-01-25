@@ -5,19 +5,16 @@
    - Projectors have corner-pin geometry directly (no separate zones)
    - Projectors are assigned to zone groups directly
    - Virtual projectors provide alternate corner-pin with inherited color curves
-   - Tags (:graphics, :crowd-scanning) auto-add to matching zone groups
    
    This file handles:
    - Network device discovery (scan, add devices/services)
    - Projector configuration (settings, enabled state, corner-pin)
    - Zone group assignment
-   - Tag management
    - Virtual projector creation and management
    - Connection status updates
    - Test patterns"
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
-            [laser-show.events.handlers.chain :as chain-handlers]
             [laser-show.common.util :as u]))
 
 
@@ -340,39 +337,6 @@
               h/mark-dirty)})
 
 
-;; Tag Management
-
-
-(defn- tag->auto-zone-group
-  "Get the zone group that a tag auto-assigns to."
-  [tag]
-  (case tag
-    :graphics :graphics
-    :crowd-scanning :crowd
-    nil))
-
-
-(defn- handle-projectors-add-tag
-  "Add a tag to a projector. Auto-adds to matching zone group if not already member."
-  [{:keys [projector-id tag state]}]
-  (let [auto-group (tag->auto-zone-group tag)
-        current-groups (get-in state [:projectors projector-id :zone-groups] [])]
-    {:state (-> state
-                (update-in [:projectors projector-id :tags] (fnil conj #{}) tag)
-                ;; Auto-add to matching zone group if not already member
-                (cond-> (and auto-group (not (some #{auto-group} current-groups)))
-                  (update-in [:projectors projector-id :zone-groups] conj auto-group))
-                h/mark-dirty)}))
-
-
-(defn- handle-projectors-remove-tag
-  "Remove a tag from a projector. Does NOT auto-remove from zone group."
-  [{:keys [projector-id tag state]}]
-  {:state (-> state
-              (update-in [:projectors projector-id :tags] disj tag)
-              h/mark-dirty)})
-
-
 ;; Virtual Projector Management
 
 
@@ -483,26 +447,6 @@
               h/mark-dirty)})
 
 
-(defn- handle-vp-add-tag
-  "Add a tag to a virtual projector."
-  [{:keys [vp-id tag state]}]
-  (let [auto-group (tag->auto-zone-group tag)
-        current-groups (get-in state [:virtual-projectors vp-id :zone-groups] [])]
-    {:state (-> state
-                (update-in [:virtual-projectors vp-id :tags] (fnil conj #{}) tag)
-                (cond-> (and auto-group (not (some #{auto-group} current-groups)))
-                  (update-in [:virtual-projectors vp-id :zone-groups] conj auto-group))
-                h/mark-dirty)}))
-
-
-(defn- handle-vp-remove-tag
-  "Remove a tag from a virtual projector."
-  [{:keys [vp-id tag state]}]
-  {:state (-> state
-              (update-in [:virtual-projectors vp-id :tags] disj tag)
-              h/mark-dirty)})
-
-
 ;; Effect Chain Management (for color curves)
 
 
@@ -585,10 +529,6 @@
     :projectors/toggle-zone-group (handle-projectors-toggle-zone-group event)
     :projectors/set-zone-groups (handle-projectors-set-zone-groups event)
     
-    ;; Tags
-    :projectors/add-tag (handle-projectors-add-tag event)
-    :projectors/remove-tag (handle-projectors-remove-tag event)
-    
     ;; Virtual projector management
     :projectors/add-virtual-projector (handle-projectors-add-virtual-projector event)
     :projectors/select-virtual-projector (handle-projectors-select-virtual-projector event)
@@ -599,8 +539,6 @@
     :projectors/vp-reset-corner-pin (handle-vp-reset-corner-pin event)
     :projectors/vp-toggle-zone-group (handle-vp-toggle-zone-group event)
     :projectors/vp-set-zone-groups (handle-vp-set-zone-groups event)
-    :projectors/vp-add-tag (handle-vp-add-tag event)
-    :projectors/vp-remove-tag (handle-vp-remove-tag event)
     
     ;; Effect chain management (for color curves)
     :projectors/add-effect (handle-projectors-add-effect event)

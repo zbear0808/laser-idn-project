@@ -121,20 +121,6 @@
   (u/clamp (double new-g) 0.0 1.0)
   (u/clamp (double new-b) 0.0 1.0)])
 
-(defn update-point-all
- "Update all values of a point with clamping.
-  Coordinates clamped to [-1.0, 1.0], colors to [0.0, 1.0]."
- [new-x new-y new-r new-g new-b]
- [(u/clamp (double new-x) -1.0 1.0)
-  (u/clamp (double new-y) -1.0 1.0)
-  (u/clamp (double new-r) 0.0 1.0)
-  (u/clamp (double new-g) 0.0 1.0)
-  (u/clamp (double new-b) 0.0 1.0)])
-
-
-;; Frame Construction Helpers
-
-
 (defn make-frame
   "Create a LaserFrame (vector of points) from a sequence of points."
   [points]

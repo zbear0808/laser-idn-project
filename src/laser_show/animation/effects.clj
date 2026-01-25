@@ -31,7 +31,6 @@
    [clojure.tools.logging :as log]
    [laser-show.animation.chains :as chains]
    [laser-show.animation.modulation :as mod]
-   [laser-show.animation.types :as t]
    [laser-show.common.util :as u]
    [laser-show.state.queries :as queries]))
 
@@ -125,9 +124,6 @@
    Works with effects that have a single category keyword or a set of categories."
   [category]
   (filterv #(effect-in-category? % category) (list-effects)))
-
-
-
 
 ;; Parameter Helpers
 
@@ -283,37 +279,6 @@
 
 
 
-;; Helper for Per-Point Modulation
-
-
-(defn resolve-params-for-point
-  "Resolve parameters that may contain per-point modulators.
-   
-   Parameters:
-   - raw-params: Parameter map that may contain modulators
-   - time-ms: Current time
-   - bpm: Current BPM
-   - x, y: Normalized point position
-   - idx: Point index
-   - count: Total point count
-   - timing-ctx: Optional map with accumulated-beats, accumulated-ms, phase-offset
-   
-   Returns: Resolved parameter map with all modulators evaluated.
-   
-   NOTE: For better performance with many points, use prepare-per-point-resolution
-   and resolve-for-point-optimized instead."
-  ([raw-params time-ms bpm x y idx count]
-   (resolve-params-for-point raw-params time-ms bpm x y idx count nil))
-  ([raw-params time-ms bpm x y idx count timing-ctx]
-   (let [context (mod/make-context (merge {:time-ms time-ms
-                                           :bpm bpm
-                                           :x x
-                                           :y y
-                                           :point-index idx
-                                           :point-count count}
-                                          timing-ctx))]
-     (mod/resolve-params raw-params context))))
-
 (defn resolve-params-global
   "Resolve parameters globally (not per-point).
    Use this when no per-point modulators are present.
@@ -337,63 +302,6 @@
      (mod/resolve-params raw-params context))))
 
 
-;; Optimized Per-Point Resolution (for performance-critical paths)
-
-
-(defn prepare-per-point-resolution
-  "Prepare optimized data structures for per-point parameter resolution.
-   
-   Call this ONCE before iterating over points. It:
-   1. Creates a base context (reused for all points)
-   2. Partitions params into static (resolved once) and per-point (resolved per point)
-   3. Pre-resolves static params
-   
-   Parameters:
-   - raw-params: Parameter map that may contain modulators
-   - time-ms: Current time
-   - bpm: Current BPM
-   - point-count: Total number of points
-   - frame-ctx: Frame context with :timing-ctx
-   
-   Returns: {:base-ctx context
-             :static-resolved {...}  ; Pre-resolved static params
-             :per-point-keys #{...}  ; Keys that need per-point resolution
-             :raw-params {...}}      ; Original params for per-point lookup"
-  [raw-params time-ms bpm point-count frame-ctx]
-  (let [timing-ctx (:timing-ctx frame-ctx)
-        ;; Create base context ONCE
-        base-ctx (mod/make-base-context (merge {:time-ms time-ms
-                                                :bpm bpm
-                                                :point-count point-count}
-                                               timing-ctx))
-        ;; Partition params
-        {:keys [static-params per-point-keys]} (mod/partition-params-by-per-point raw-params)
-        ;; Pre-resolve static params
-        static-resolved (mod/resolve-params static-params base-ctx)]
-    {:base-ctx base-ctx
-     :static-resolved static-resolved
-     :per-point-keys per-point-keys
-     :raw-params raw-params}))
-
-(defn resolve-for-point-optimized
-  "Resolve params for a single point using pre-computed data.
-   
-   Use with prepare-per-point-resolution for optimal performance.
-   
-   Parameters:
-   - prep: Result from prepare-per-point-resolution
-   - x, y: Point coordinates
-   - point-index: Current point index
-   
-   Returns: Fully resolved params map"
-  [{:keys [base-ctx static-resolved per-point-keys raw-params]} x y point-index]
-  (if (empty? per-point-keys)
-    ;; No per-point modulators, return pre-resolved static params
-    static-resolved
-    ;; Resolve per-point params and merge with static
-    (let [point-ctx (mod/with-point-context base-ctx x y point-index)
-          per-point-resolved (mod/resolve-per-point-params-only raw-params per-point-keys point-ctx)]
-      (merge static-resolved per-point-resolved))))
 
 
 ;; Simplified Per-Point Resolution via Resolver Functions
@@ -452,32 +360,3 @@
       (let [context (mod/make-context (merge {:time-ms time-ms :bpm bpm} timing-ctx))
             resolved (mod/resolve-param param-val context)]
         (constantly resolved)))))
-
-(defn make-multi-param-resolver
-  "Create resolver functions for multiple parameters at once.
-   
-   This is a convenience function when you need resolvers for multiple params.
-   Returns a map of {param-key -> resolver-fn}.
-   
-   Parameters:
-   - param-keys: Sequence of parameter keys to create resolvers for
-   - params: Full params map (may contain modulators)
-   - time-ms: Current time in milliseconds
-   - bpm: Current BPM
-   - ctx: Frame context {:point-count n :timing-ctx {...}}
-   
-   Returns: Map of {param-key -> (fn [x y idx] -> value)}
-   
-   Example usage:
-   ```clojure
-   (let [resolvers (make-multi-param-resolver [:red :green :blue] params time-ms bpm ctx)
-         get-red (:red resolvers)
-         get-green (:green resolvers)
-         get-blue (:blue resolvers)]
-     ...)
-   ```"
-  [param-keys params time-ms bpm ctx]
-  (into {}
-        (mapv (fn [k] [k (make-param-resolver k params time-ms bpm ctx)])
-              param-keys)))
-

@@ -90,10 +90,6 @@
 
 
 
-
-;; Text Color Accessors
-
-
 (defn text-primary
   "Primary text color for main content."
   [] (:text-primary theme/semantic-colors))
@@ -107,21 +103,9 @@
   [] (:text-muted theme/semantic-colors))
 
 
-
-
-
-;; Border Color Accessors
-
-
-
-
 (defn border-default
   "Default border color."
   [] (:border-default theme/semantic-colors))
-
-
-
-;; Accent Color Accessors (Semantic)
 
 
 (defn accent-success
@@ -132,21 +116,9 @@
   "Warning color (orange)."
   [] (:accent-warning theme/semantic-colors))
 
-
-;; Selection Color Accessors
-
-
 (defn selection-bg
   "Selected item background color."
   [] (:selection-bg theme/semantic-colors))
-
-
-;; Base Color Accessors (for inline styles)
-
-
-(defn interactive
-  "Interactive element background (buttons, inputs)."
-  [] (:interactive theme/base-colors))
 
 (defn green
   "Success/action color."

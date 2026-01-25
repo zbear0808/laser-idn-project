@@ -242,39 +242,6 @@
       (is (= [:left :right] zone-groups)))))
 
 
-;; Tag Tests
-
-
-(deftest handle-projectors-add-tag-test
-  (testing "Adding graphics tag auto-assigns to graphics zone group"
-    (let [state-with-graphics-group (assoc-in state-with-projector
-                                              [:zone-groups :graphics]
-                                              {:id :graphics :name "Graphics"})
-          event {:event/type :projectors/add-tag
-                 :projector-id test-projector-id
-                 :tag :graphics
-                 :state state-with-graphics-group}
-          result (projectors/handle event)
-          tags (get-in result [:state :projectors test-projector-id :tags])
-          zone-groups (get-in result [:state :projectors test-projector-id :zone-groups])]
-      (is (contains? tags :graphics))
-      (is (some #{:graphics} zone-groups)))))
-
-
-(deftest handle-projectors-remove-tag-test
-  (testing "Removes tag from projector"
-    (let [state-with-tag (assoc-in state-with-projector
-                                   [:projectors test-projector-id :tags]
-                                   #{:graphics})
-          event {:event/type :projectors/remove-tag
-                 :projector-id test-projector-id
-                 :tag :graphics
-                 :state state-with-tag}
-          result (projectors/handle event)
-          tags (get-in result [:state :projectors test-projector-id :tags])]
-      (is (not (contains? tags :graphics))))))
-
-
 ;; Virtual Projector Tests
 
 

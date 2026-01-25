@@ -1,5 +1,5 @@
 (ns laser-show.routing.zone-effects-test
-  (:require [clojure.test :refer :all]
+  (:require [clojure.test :refer [deftest is testing]]
             [laser-show.routing.zone-effects :as ze]))
 
 

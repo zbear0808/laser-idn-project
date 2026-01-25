@@ -745,67 +745,8 @@
 (defn resolve-params
   "Resolve all parameters in a params map."
   [params context]
-  (update-vals params #(resolve-param % context) )
-  #_(into {}
-          (map (fn [[k v]] [k (resolve-param v context)]))
-          params))
+  (update-vals params #(resolve-param % context)))
 
-
-;; Optimized Per-Point Parameter Resolution
-
-
-(defn partition-params-by-per-point
-  "Partition params into static params and per-point param keys.
-   
-   Static params are those that don't require per-point context.
-   Per-point params are modulator configs that need x, y, point-index.
-   
-   Returns: {:static-params {...} :per-point-keys #{...}}
-   
-   This allows pre-resolving static params once outside the loop,
-   and only evaluating per-point modulators inside the loop."
-  [params]
-  (let [per-point-keys (into #{}
-                             (keep (fn [[k v]]
-                                     (when (config-requires-per-point? v)
-                                       k)))
-                             params)
-        static-params (into {}
-                            (remove (fn [[k _]] (contains? per-point-keys k)))
-                            params)]
-    {:static-params static-params
-     :per-point-keys per-point-keys}))
-
-(defn resolve-per-point-params-only
-  "Resolve only the per-point modulator params from a params map.
-   
-   Parameters:
-   - params: Full params map (may contain modulators)
-   - per-point-keys: Set of keys that have per-point modulators
-   - context: Context with per-point data (x, y, point-index)
-   
-   Returns: Map of resolved per-point param values
-   
-   Use with partition-params-by-per-point for efficient per-point resolution.
-   
-   NOTE: This function respects the :active? flag on modulator configs.
-   Inactive modulators return their static :value or midpoint."
-  [params per-point-keys context]
-  (into {}
-        (map (fn [k]
-               (let [v (get params k)]
-                 [k (if (modulator-config? v)
-                      ;; Check :active? flag before evaluating
-                      (if (get v :active? true)
-                        (evaluate-modulator v context)
-                        ;; Inactive - return :value or midpoint (same as resolve-param)
-                        (let [{:keys [min max value]} v]
-                          (or value
-                              (when (and min max)
-                                (/ (+ (double min) (double max)) 2.0))
-                              0.0)))
-                      v)])))
-        per-point-keys))
 
 
 ;; Keyframe Modulator Evaluation

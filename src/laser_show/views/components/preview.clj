@@ -12,7 +12,6 @@
    This module converts normalized values to 8-bit for JavaFX Color display."
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
-            [laser-show.animation.types :as t]
             [laser-show.common.util :as u])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.paint Color]

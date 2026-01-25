@@ -93,13 +93,6 @@
   [state]
   (:virtual-projectors state))
 
-(defn projector-ui
-  "Get the projector UI state domain."
-  [state]
-  (:projector-ui state))
-
-
-;; Backend Extractors
 
 (defn backend [state]
   (:backend state))
