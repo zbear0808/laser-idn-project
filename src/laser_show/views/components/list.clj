@@ -30,9 +30,8 @@
    [laser-show.common.util :as u]
    [laser-show.events.core :as events]
    [laser-show.subs :as subs]
-   [laser-show.state.core :as state])
-  (:import
-   [javafx.scene.input ClipboardContent TransferMode]))
+   [laser-show.state.core :as state]
+   [laser-show.views.components.list-dnd :as dnd]))
 
 ;; State Access Helpers
 
@@ -112,40 +111,6 @@
   "Clear selection and cancel rename."
   [component-id]
   (events/dispatch! {:event/type :list/clear-selection
-                     :component-id component-id}))
-
-
-;; Drag-and-Drop Logic (Event Dispatching)
-
-(defn- start-drag!
-  "Start a drag operation. If dragged item is selected, drag all selected items.
-   Otherwise, select only the dragged item and drag it."
-  [component-id item-id]
-  (events/dispatch! (u/->map& component-id item-id
-                              :event/type :list/start-drag)))
-
-(defn- update-drop-target!
-  "Update drop target during drag over."
-  [component-id target-id drop-position]
-  (events/dispatch! (u/->map& component-id target-id drop-position
-                              :event/type :list/update-drop-target)))
-
-(defn- handle-drop!
-  "Handle drop operation by dispatching to async handler."
-  [component-id target-id drop-position items props]
-  (when-let [dragging-ids (seq (:dragging-ids (get-ui-state component-id)))]
-    (when (seq items)
-      (let [{:keys [on-change-event on-change-params items-path]} props]
-        (events/dispatch!
-          (u/->map& component-id items dragging-ids target-id drop-position
-                    on-change-event on-change-params items-path
-                    :event/type :list/perform-drop
-                    :items-key :items))))))
-
-(defn- clear-drag-state!
-  "Clear all drag-related state after drop or cancel."
-  [component-id]
-  (events/dispatch! {:event/type :list/clear-drag
                      :component-id component-id}))
 
 
@@ -435,107 +400,6 @@
                                   (cancel-rename! component-id)))}})
 
 
-;; Drag-and-Drop Handlers Setup
-
-(defonce ^:private current-drop-target-node (atom nil))
-
-(def ^:private drop-indicator-classes
-  ["chain-item-drop-before" "chain-item-drop-after"
-   "group-header-drop-before" "group-header-drop-into"])
-
-(defn- clear-drop-indicator-classes!
-  "Remove all drop indicator CSS classes from a node."
-  [^javafx.scene.Node node]
-  (when node
-    (.removeAll (.getStyleClass node) drop-indicator-classes)))
-
-(defn- set-drop-indicator-class!
-  "Set the appropriate drop indicator CSS class on a node."
-  [^javafx.scene.Node node position group?]
-  (let [style-class (.getStyleClass node)]
-    (.removeAll style-class drop-indicator-classes)
-    (let [class-to-add (cond
-                         (and group? (= position :before)) "group-header-drop-before"
-                         (and group? (= position :into)) "group-header-drop-into"
-                         (= position :before) "chain-item-drop-before"
-                         (= position :after) "chain-item-drop-after")]
-      (when class-to-add
-        (.add style-class class-to-add)))))
-
-(defn- setup-drag-source!
-  "Setup drag source handlers on a node."
-  [^javafx.scene.Node node item-id component-id]
-  (.setOnDragDetected node
-    (on-fx-event
-      (fn [event]
-        (let [dragboard (.startDragAndDrop node (into-array TransferMode [TransferMode/MOVE]))
-              content (ClipboardContent.)]
-          (.putString content (pr-str item-id))
-          (.setContent dragboard content)
-          (start-drag! component-id item-id)
-          (.add (.getStyleClass node) "chain-item-dragging")
-          (.consume event)))))
-  (.setOnDragDone node
-    (on-fx-event
-      (fn [event]
-        (.remove (.getStyleClass node) "chain-item-dragging")
-        (when-let [old-target @current-drop-target-node]
-          (clear-drop-indicator-classes! old-target))
-        (reset! current-drop-target-node nil)
-        (clear-drag-state! component-id)
-        (.consume event)))))
-
-(defn- setup-drag-target!
-  "Setup drag target handlers on a node."
-  [^javafx.scene.Node node target-id group? component-id items props]
-  (let [drop-position-atom (atom :before)]
-    (.setOnDragOver node
-      (on-fx-event
-        (fn [event]
-          (when (and (.getDragboard event)
-                     (.hasString (.getDragboard event)))
-            (.acceptTransferModes event (into-array TransferMode [TransferMode/MOVE]))
-            (let [bounds (.getBoundsInLocal node)
-                  y (.getY event)
-                  height (.getHeight bounds)
-                  new-pos (if group?
-                            (if (< y (* height 0.25)) :before :into)
-                            (if (< y (* height 0.5)) :before :after))]
-              (when (not= @drop-position-atom new-pos)
-                (reset! drop-position-atom new-pos)
-                (set-drop-indicator-class! node new-pos group?)
-                (update-drop-target! component-id target-id new-pos))))
-          (.consume event))))
-    (.setOnDragEntered node
-      (on-fx-event
-        (fn [event]
-          (when (.hasString (.getDragboard event))
-            (when-let [old-target @current-drop-target-node]
-              (when (not= old-target node)
-                (clear-drop-indicator-classes! old-target)))
-            (reset! current-drop-target-node node)
-            (let [initial-pos (if group? :into :before)]
-              (reset! drop-position-atom initial-pos)
-              (set-drop-indicator-class! node initial-pos group?)
-              (update-drop-target! component-id target-id initial-pos)))
-          (.consume event))))
-    (.setOnDragExited node
-      (on-fx-event
-        (fn [event]
-          (clear-drop-indicator-classes! node)
-          (.consume event))))
-    (.setOnDragDropped node
-      (on-fx-event
-        (fn [event]
-          (let [drop-pos @drop-position-atom]
-            (clear-drop-indicator-classes! node)
-            (reset! current-drop-target-node nil)
-            (handle-drop! component-id target-id drop-pos items props)
-            (clear-drag-state! component-id)
-            (.setDropCompleted event true)
-            (.consume event)))))))
-
-
 ;; Group Header Component
 
 (defn- group-header
@@ -557,8 +421,8 @@
                        (u/->map depth selected? effectively-disabled?))]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
-                   (setup-drag-source! node group-id component-id)
-                   (setup-drag-target! node group-id true component-id items props)
+                   (dnd/setup-drag-source! node group-id component-id)
+                   (dnd/setup-drag-target! node group-id true component-id items props)
                    (setup-click-handler! node component-id group-id items))
      :desc {:fx/type :h-box
             :style-class header-classes
@@ -621,8 +485,8 @@
                         :effectively-disabled? effectively-disabled?})]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
-                   (setup-drag-source! node item-id component-id)
-                   (setup-drag-target! node item-id false component-id items props)
+                   (dnd/setup-drag-source! node item-id component-id)
+                   (dnd/setup-drag-target! node item-id false component-id items props)
                    (setup-click-handler! node component-id item-id items))
      :desc {:fx/type :h-box
             :style-class item-classes
