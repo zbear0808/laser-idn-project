@@ -53,6 +53,11 @@
 ;; Frame Stats
 
 
+(defn- format-us
+  "Format microseconds with consistent width (5 digits, right-aligned)."
+  [us]
+  (format "%5dµs" (long (or us 0))))
+
 (defn frame-stats-status
   "Status showing frame generation latency stats and IDN streaming stats."
   [{:keys [fx/context]}]
@@ -62,26 +67,26 @@
        :spacing 16
        :children (cond-> [{:fx/type status-item
                            :label "Base"
-                           :value (str (long (or (:avg-base-us stats) 0)) "µs")}
+                           :value (format-us (:avg-base-us stats))}
                           {:fx/type status-item
                            :label "Effects"
-                           :value (str (long (or (:avg-effects-us stats) 0)) "µs")}
+                           :value (format-us (:avg-effects-us stats))}
                           {:fx/type status-item
                            :label "Total (avg)"
-                           :value (str (long (:avg-latency-us stats)) "µs")}
+                           :value (format-us (:avg-latency-us stats))}
                           {:fx/type status-item
                            :label "p95"
-                           :value (str (long (:p95-latency-us stats)) "µs")}
+                           :value (format-us (:p95-latency-us stats))}
                           {:fx/type status-item
                            :label "max"
-                           :value (str (long (:max-latency-us stats)) "µs")}]
+                           :value (format-us (:max-latency-us stats))}]
                   ;; Add IDN stats when streaming is active
                   (:avg-idn-us stats)
                   (conj {:fx/type status-item
                          :label "IDN"
-                         :value (str (long (:avg-idn-us stats)) "µs"
-                                     " (p95: " (long (or (:p95-idn-us stats) 0)) "µs,"
-                                     " max: " (long (or (:max-idn-us stats) 0)) "µs)")}))}
+                         :value (str (format-us (:avg-idn-us stats))
+                                     " (p95: " (format-us (:p95-idn-us stats))
+                                     ", max: " (format-us (:max-idn-us stats)) ")")}))}
       {:fx/type :label :text "" :pref-width 0})))
 
 
