@@ -21,6 +21,7 @@
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
             [laser-show.backend.streaming-engine :as engine]
+            [laser-show.dev-config :as dev-config]
             [laser-show.state.core :as state]
             [laser-show.state.queries :as queries]
             [laser-show.routing.core :as routing]
@@ -33,6 +34,7 @@
 ;; Routing Debug Logging
 ;;
 ;; We use an atom to throttle logging so we don't flood the console
+;; Logging is controlled by dev-config/idn-stream-logging? (disabled by default)
 
 (def ^:private routing-log-counter (atom 0))
 (def ^:const ROUTING_LOG_INTERVAL 300) ;; Log routing info every N frames (~5 seconds at 60fps)
@@ -133,8 +135,9 @@
             ;; Throttled debug logging for routing decisions
             log-count (swap! routing-log-counter inc)]
         
-        ;; Log routing info periodically (every ~5 seconds)
-        (when (zero? (mod log-count ROUTING_LOG_INTERVAL))
+        ;; Log routing info periodically (every ~5 seconds) - only when IDN logging enabled
+        (when (and (dev-config/idn-stream-logging?)
+                   (zero? (mod log-count ROUTING_LOG_INTERVAL)))
           (log/debug (format "Routing debug [projector=%s]: destination-zone=%s, effects=%d, matching-outputs=%s, this-matches?=%s"
                              projector-id
                              (pr-str destination-zone)
@@ -148,8 +151,9 @@
           ;; so IDN streaming works regardless of preview settings
           (let [base-frame (frame-service/generate-current-frame {:skip-zone-filter? true})
                 frame-point-count (when base-frame (count base-frame))]
-            ;; Log frame generation periodically
-            (when (and (zero? (mod log-count ROUTING_LOG_INTERVAL))
+            ;; Log frame generation periodically - only when IDN logging enabled
+            (when (and (dev-config/idn-stream-logging?)
+                       (zero? (mod log-count ROUTING_LOG_INTERVAL))
                        (= projector-id (first (sort (keys (get raw-state :projectors {}))))))
               (log/debug (format "Frame gen [%s]: base-frame-points=%s"
                                  projector-id
@@ -160,7 +164,8 @@
                                        elapsed bpm trigger-time timing-ctx)))
           ;; This projector doesn't match - no frame
           (do
-            (when (and (zero? (mod log-count ROUTING_LOG_INTERVAL))
+            (when (and (dev-config/idn-stream-logging?)
+                       (zero? (mod log-count ROUTING_LOG_INTERVAL))
                        (= projector-id (first (sort (keys (get raw-state :projectors {}))))))
               (log/debug (format "No match [%s]: projector zone-groups=%s"
                                  projector-id

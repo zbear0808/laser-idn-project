@@ -93,13 +93,10 @@
         :-fx-text-fill text-primary
         :-fx-background-radius 0
         :-fx-padding ["8px" "16px"]
-        :-fx-cursor "hand"
+        :-fx-cursor "default"
         ;; Active tab has blue top border, grey right border, no bottom border
         :-fx-border-color [accent-info border "transparent" "transparent"]
-        :-fx-border-width [2 1 0 0]
-        
-        ":hover"
-        {:-fx-background-color bg-interactive}}
+        :-fx-border-width [2 1 0 0]}
        
        
        ;; Bank Item Buttons (for effect banks and preset banks)
