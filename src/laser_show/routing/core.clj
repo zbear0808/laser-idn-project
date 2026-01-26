@@ -26,7 +26,7 @@
    This is the main routing function called by frame service.
    
    NOW processes zone effects to determine final target:
-   1. Read :destination-zone from cue (default to :all)
+   1. Read :destination-zone from cue (nil means route to nothing)
    2. Read :effects from cue
    3. Apply zone effects to get final target zone groups
    4. Match projectors to final target
@@ -35,6 +35,7 @@
    - cue: The cue to route (with :destination-zone and optionally :effects)
    - projectors-items: Map of projector-id -> projector config
    - virtual-projectors: Map of vp-id -> virtual projector config (can be nil)
+   - all-zone-group-ids: Set of all zone group IDs in the system (for broadcast effect)
    
    Returns: Vector of output configs, each containing:
    {:type :projector or :virtual-projector
@@ -42,13 +43,13 @@
     :projector-id physical-projector-id
     :corner-pin geometry config
     :enabled? boolean}"
-  [cue projectors-items virtual-projectors]
+  [cue projectors-items virtual-projectors all-zone-group-ids]
   (let [all-outputs (pm/build-all-outputs projectors-items virtual-projectors)
         
-        ;; Process zone effects to get final target
-        destination (or (:destination-zone cue) {:zone-group-id :all})
+        ;; Process zone effects to get final target (no default destination)
+        destination (:destination-zone cue)
         effects (or (:effects cue) [])
-        final-target-groups (ze/resolve-final-target destination effects)
+        final-target-groups (ze/resolve-final-target destination effects all-zone-group-ids)
         
         ;; Match using final target - convert set to vector for find-outputs-for-target
         target {:zone-groups (vec final-target-groups)}]

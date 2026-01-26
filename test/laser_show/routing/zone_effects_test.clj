@@ -58,8 +58,8 @@
     (is (= #{:left :center :right}
            (ze/apply-replace-mode #{:all} {:target-zone-groups [:left :center :right]}))))
   
-  (testing "defaults to :all when no target specified"
-    (is (= #{:all}
+  (testing "defaults to empty set when no target specified"
+    (is (= #{}
            (ze/apply-replace-mode #{:left} {})))))
 
 
@@ -105,13 +105,13 @@
 
 
 (deftest apply-broadcast-test
-  (testing "broadcast replaces with :all"
-    (is (= #{:all}
-           (ze/apply-broadcast #{:left} {}))))
+  (testing "broadcast replaces with all zone groups"
+    (is (= #{:all :left :right}
+           (ze/apply-broadcast #{:left} {} #{:all :left :right}))))
   
-  (testing "broadcast replaces any target"
-    (is (= #{:all}
-           (ze/apply-broadcast #{:left :right :center} {})))))
+  (testing "broadcast replaces any target with all zone groups"
+    (is (= #{:all :center}
+           (ze/apply-broadcast #{:left :right :center} {} #{:all :center})))))
 
 
 ;; Mirror Effect Tests
@@ -142,58 +142,63 @@
 ;; Resolve Final Target Tests
 
 
+;; Standard test zone groups for all tests
+(def test-all-zone-groups #{:all :left :right :center})
+
+
 (deftest resolve-final-target-test
   (testing "returns base destination when no effects"
     (is (= #{:left}
-           (ze/resolve-final-target {:zone-group-id :left} []))))
+           (ze/resolve-final-target {:zone-group-id :left} [] test-all-zone-groups))))
   
-  (testing "defaults to :all when no destination"
-    (is (= #{:all}
-           (ze/resolve-final-target nil []))))
+  (testing "returns empty set when no destination"
+    (is (= #{}
+           (ze/resolve-final-target nil [] test-all-zone-groups))))
   
-  (testing "defaults to :all when empty destination"
-    (is (= #{:all}
-           (ze/resolve-final-target {} []))))
+  (testing "returns empty set when empty destination"
+    (is (= #{}
+           (ze/resolve-final-target {} [] test-all-zone-groups))))
   
   (testing "processes single zone effect"
-    (let [effects [{:effect-id :zone-reroute 
+    (let [effects [{:effect-id :zone-reroute
                     :enabled? true
                     :params {:mode :replace :target-zone-groups [:right]}}]]
       (is (= #{:right}
-             (ze/resolve-final-target {:zone-group-id :left} effects)))))
+             (ze/resolve-final-target {:zone-group-id :left} effects test-all-zone-groups)))))
   
   (testing "processes multiple zone effects in sequence"
-    (let [effects [{:effect-id :zone-reroute 
+    (let [effects [{:effect-id :zone-reroute
                     :enabled? true
                     :params {:mode :replace :target-zone-groups [:left :right]}}
-                   {:effect-id :zone-reroute 
+                   {:effect-id :zone-reroute
                     :enabled? true
                     :params {:mode :filter :target-zone-groups [:left]}}]]
       ;; Start with :center, replace with [:left :right], filter to [:left]
       (is (= #{:left}
-             (ze/resolve-final-target {:zone-group-id :center} effects)))))
+             (ze/resolve-final-target {:zone-group-id :center} effects test-all-zone-groups)))))
   
   (testing "disabled effects are skipped"
-    (let [effects [{:effect-id :zone-reroute 
+    (let [effects [{:effect-id :zone-reroute
                     :enabled? false
                     :params {:mode :replace :target-zone-groups [:right]}}]]
       (is (= #{:left}
-             (ze/resolve-final-target {:zone-group-id :left} effects)))))
+             (ze/resolve-final-target {:zone-group-id :left} effects test-all-zone-groups)))))
   
   (testing "ignores non-zone effects"
     (let [effects [{:effect-id :scale :enabled? true :params {:x 2}}
                    {:effect-id :zone-reroute :enabled? true :params {:mode :replace :target-zone-groups [:center]}}
                    {:effect-id :rotate :enabled? true :params {:angle 45}}]]
       (is (= #{:center}
-             (ze/resolve-final-target {:zone-group-id :left} effects))))))
+             (ze/resolve-final-target {:zone-group-id :left} effects test-all-zone-groups))))))
 
 
 (deftest zone-broadcast-in-resolve-test
-  (testing "broadcast replaces with :all"
-    (is (= #{:all}
-           (ze/resolve-final-target 
+  (testing "broadcast replaces with all zone groups"
+    (is (= test-all-zone-groups
+           (ze/resolve-final-target
              {:zone-group-id :left}
-             [{:effect-id :zone-broadcast :enabled? true}])))))
+             [{:effect-id :zone-broadcast :enabled? true}]
+             test-all-zone-groups)))))
 
 
 (deftest zone-mirror-in-resolve-test
@@ -201,17 +206,19 @@
     (is (= #{:right}
            (ze/resolve-final-target
              {:zone-group-id :left}
-             [{:effect-id :zone-mirror 
+             [{:effect-id :zone-mirror
                :enabled? true
-               :params {:source-group :left :include-original? false}}]))))
+               :params {:source-group :left :include-original? false}}]
+             test-all-zone-groups))))
   
   (testing "mirror with include-original in resolution"
     (is (= #{:left :right}
            (ze/resolve-final-target
              {:zone-group-id :left}
-             [{:effect-id :zone-mirror 
+             [{:effect-id :zone-mirror
                :enabled? true
-               :params {:source-group :left :include-original? true}}])))))
+               :params {:source-group :left :include-original? true}}]
+             test-all-zone-groups)))))
 
 
 ;; Collect Effects From Cue Chain Tests
@@ -290,22 +297,22 @@
                            :effects [{:effect-id :zone-broadcast :enabled? true}]}]
           destination {:zone-group-id :left}
           collected-effects (ze/collect-effects-from-cue-chain cue-chain-items)
-          final-target (ze/resolve-final-target destination collected-effects)]
-      ;; Should route to :all because zone-broadcast overrides destination
-      (is (= #{:all} final-target))))
+          final-target (ze/resolve-final-target destination collected-effects test-all-zone-groups)]
+      ;; Should route to all zone groups because zone-broadcast overrides destination
+      (is (= test-all-zone-groups final-target))))
   
   (testing "chained zone effects scenario"
     (let [cue-chain-items [{:type :preset
                            :preset-id :circle
                            :enabled? true
-                           :effects [{:effect-id :zone-reroute 
+                           :effects [{:effect-id :zone-reroute
                                      :enabled? true
                                      :params {:mode :replace :target-zone-groups [:left :center :right]}}
-                                    {:effect-id :zone-reroute 
+                                    {:effect-id :zone-reroute
                                      :enabled? true
                                      :params {:mode :filter :target-zone-groups [:left :right]}}]}]
           destination {:zone-group-id :all}
           collected-effects (ze/collect-effects-from-cue-chain cue-chain-items)
-          final-target (ze/resolve-final-target destination collected-effects)]
+          final-target (ze/resolve-final-target destination collected-effects test-all-zone-groups)]
       ;; Start with :all, replace with [:left :center :right], filter to [:left :right]
       (is (= #{:left :right} final-target)))))

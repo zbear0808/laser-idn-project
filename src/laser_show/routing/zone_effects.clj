@@ -53,7 +53,7 @@
 (defn apply-replace-mode
   "Replace mode: completely override target with effect's target."
   [_current-target params]
-  (set (:target-zone-groups params [:all])))
+  (set (:target-zone-groups params [])))
 
 (defn apply-add-mode
   "Add mode: union current target with effect's target."
@@ -63,14 +63,15 @@
 (defn apply-filter-mode
   "Filter mode: intersect current target with effect's target."
   [current-target params]
-  (set/intersection 
-    current-target 
+  (set/intersection
+    current-target
     (set (:target-zone-groups params []))))
 
 (defn apply-broadcast
-  "Broadcast effect: replace with [:all]"
-  [_current-target _params]
-  #{:all})
+  "Broadcast effect: replace with all available zone groups.
+   Requires all-zone-groups to be passed from caller."
+  [_current-target _params all-zone-groups]
+  (set all-zone-groups))
 
 (defn apply-mirror
   "Mirror effect: swap left<->right based on source-group."
@@ -87,8 +88,13 @@
 
 (defn apply-zone-effect
   "Apply a single zone effect to current target set.
-   Returns updated target set."
-  [current-target effect]
+   Returns updated target set.
+   
+   Args:
+   - current-target: Current set of zone group IDs
+   - effect: The zone effect to apply
+   - all-zone-groups: Set of all zone group IDs in the system (for broadcast)"
+  [current-target effect all-zone-groups]
   (let [params (:params effect)
         effect-id (:effect-id effect)]
     (case effect-id
@@ -100,7 +106,7 @@
         current-target)
       
       :zone-broadcast
-      (apply-broadcast current-target params)
+      (apply-broadcast current-target params all-zone-groups)
       
       :zone-mirror
       (apply-mirror current-target params)
@@ -114,16 +120,20 @@
    Args:
    - base-destination: The cue chain's :destination-zone map (e.g., {:zone-group-id :left})
    - effects: Vector of effects (may include zone effects)
+   - all-zone-groups: Set of all zone group IDs in the system (for broadcast effect)
    
    Returns: Set of zone group IDs that should receive the cue"
-  [base-destination effects]
-  (let [;; Start with base destination zone group(s)
+  [base-destination effects all-zone-groups]
+  (let [;; Start with base destination zone group(s), empty set if none specified
         base-groups (if-let [zg-id (:zone-group-id base-destination)]
                       #{zg-id}
-                      #{:all})
+                      #{})
         ;; Extract and apply zone effects
         zone-effects (extract-zone-effects effects)
-        final-groups (reduce apply-zone-effect base-groups zone-effects)]
+        final-groups (reduce (fn [target effect]
+                               (apply-zone-effect target effect all-zone-groups))
+                             base-groups
+                             zone-effects)]
     ;; Debug logging when enabled
     (when @debug-enabled?
       (log/debug (format "resolve-final-target: base-dest=%s -> base-groups=%s, zone-effects=%d -> final=%s"

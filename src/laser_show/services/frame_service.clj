@@ -322,10 +322,11 @@
          (when cue-chain
            ;; Check zone filter BEFORE generating frame for efficiency (unless skipped)
            (let [preview-zone (when-not skip-zone-filter? (get-preview-zone-filter))
-                 raw-destination (:destination-zone cue-chain)
-                 destination (or raw-destination {:zone-group-id :all})
+                 raw-state (state/get-raw-state)
+                 zone-group-ids (set (keys (get raw-state :zone-groups {})))
+                 destination (:destination-zone cue-chain)
                  collected-effects (ze/collect-effects-from-cue-chain (:items cue-chain))
-                 final-targets (ze/resolve-final-target destination collected-effects)
+                 final-targets (ze/resolve-final-target destination collected-effects zone-group-ids)
                  matches? (or skip-zone-filter?
                               (matches-preview-zone? preview-zone final-targets))]
              

@@ -125,7 +125,7 @@
    - all-outputs: Vector of output configs
    - target: Target specification map
    
-   Returns: Vector of matching output configs"
+   Returns: Vector of matching output configs (empty if no criteria specified)"
   [all-outputs target]
   (let [{:keys [zone-groups projector-ids]} target
         enabled-outputs (filter-enabled-outputs all-outputs)
@@ -142,9 +142,9 @@
                                   zone-groups))
                           enabled-outputs)
                  
-                 ;; Default: route to :all zone group
+                 ;; No target criteria specified - route to nothing
                  :else
-                 (filter-outputs-by-zone-group enabled-outputs :all))]
+                 [])]
     ;; Debug logging when enabled
     (when @debug-enabled?
       (log/debug (format "find-outputs-for-target: target=%s, enabled-outputs=%d, zone-groups-in-outputs=%s, matched=%d -> %s"
@@ -167,11 +167,15 @@
    - projectors-items: Map of projector-id -> projector config
    - virtual-projectors: Map of vp-id -> virtual projector config
    
-   Returns: Vector of output configs that should receive this cue"
+   Returns: Vector of output configs that should receive this cue
+            (empty if no destination specified)"
   [cue projectors-items virtual-projectors]
   (let [all-outputs (build-all-outputs projectors-items virtual-projectors)
-        destination (or (:destination-zone cue) {:zone-group-id :all})
-        target {:zone-groups [(or (:zone-group-id destination) :all)]}]
+        destination (:destination-zone cue)
+        zone-group-id (:zone-group-id destination)
+        target (if zone-group-id
+                 {:zone-groups [zone-group-id]}
+                 {:zone-groups []})]
     (find-outputs-for-target all-outputs target)))
 
 
@@ -204,7 +208,7 @@
                         " don't intersect with target " (vec zone-groups))}))
       
       :else
-      {:matched? false :reason "No target criteria specified"})))
+      {:matched? false :reason "No target criteria specified (routes to nothing)"})))
 
 
 (defn routing-diagnostics

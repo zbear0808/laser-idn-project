@@ -104,13 +104,13 @@
             ;; Get projectors and virtual projectors for routing
             projectors-items (get raw-state :projectors {})
             virtual-projectors (get raw-state :virtual-projectors {})
+            zone-group-ids (set (keys (get raw-state :zone-groups {})))
             
-            ;; === FIX: Read actual destination zone from cue chain ===
-            ;; Cues default to :all zone group when no destination is specified
-            destination-zone (or (:destination-zone cue-chain-data)
-                                 {:zone-group-id :all})
+            ;; Read actual destination zone from cue chain (no default fallback)
+            ;; If no destination is specified, routes to nothing (empty set)
+            destination-zone (:destination-zone cue-chain-data)
             
-            ;; === FIX: Collect effects from all items in chain ===
+            ;; Collect effects from all items in chain
             ;; Zone effects (zone-reroute, zone-broadcast, zone-mirror) modify routing
             collected-effects (ze/collect-effects-from-cue-chain
                                 (:items cue-chain-data))
@@ -120,11 +120,12 @@
                              :destination-zone destination-zone
                              :effects collected-effects}
             
-            ;; Build routing map for this cue - now with zone effect processing!
+            ;; Build routing map for this cue - with zone effect processing
             ;; Returns: Vector of output configs
             matching-outputs (routing/build-routing-map cue-for-routing
                                                         projectors-items
-                                                        virtual-projectors)
+                                                        virtual-projectors
+                                                        zone-group-ids)
             
             ;; Check if THIS projector is in the matching outputs
             matching-output-ids (set (map :projector-id matching-outputs))

@@ -32,3 +32,9 @@
 
 (defn virtual-projectors []
   (ex/virtual-projectors (raw-state)))
+
+(defn zone-groups []
+  (ex/zone-groups (raw-state)))
+
+(defn zone-group-ids []
+  (ex/zone-group-ids (raw-state)))

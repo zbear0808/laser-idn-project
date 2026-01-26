@@ -104,6 +104,20 @@
   (:streaming (backend state)))
 
 
+;; Zone Groups Extractors
+
+
+(defn zone-groups
+  "Get the zone-groups map (zone-group-id -> config)."
+  [state]
+  (:zone-groups state))
+
+(defn zone-group-ids
+  "Get a set of all zone group IDs."
+  [state]
+  (set (keys (zone-groups state))))
+
+
 ;; Project Extractors
 
 (defn project [state]
