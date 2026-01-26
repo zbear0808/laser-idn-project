@@ -14,6 +14,7 @@
             [laser-show.animation.types :as t]
             [laser-show.idn.hello :as hello]
             [laser-show.common.util :as u]
+            [laser-show.dev-config :as dev-config]
             [laser-show.profiling.frame-profiler :as profiler])
   (:import [java.net DatagramSocket]))
 
@@ -143,7 +144,7 @@
   [engine]
   (swap! (:sequence-counter engine) #(bit-and (inc %) 0xFFFF)))
 
-;; Debug logging for streaming
+;; Debug logging for streaming (controlled by dev-config/idn-stream-logging?)
 (def ^:private stream-log-counter (atom 0))
 (def ^:const STREAM_LOG_INTERVAL 300) ;; Log every N frames (~5 seconds at 60fps)
 
@@ -180,8 +181,9 @@
                 hello-packet (hello/wrap-channel-message idn-packet {:sequence seq-num})
                 log-count (swap! stream-log-counter inc)]
             
-            ;; Throttled debug logging - log for first service only to reduce spam
-            (when (and (zero? (mod log-count STREAM_LOG_INTERVAL))
+            ;; Throttled debug logging - only when enabled via dev-config
+            (when (and (dev-config/idn-stream-logging?)
+                       (zero? (mod log-count STREAM_LOG_INTERVAL))
                        (= service-id (or service-id 0)))
               (log/debug (format "Streaming [%s:%d svc=%d ch=%d]: frame-points=%d, packet-size=%d, seq=%d"
                                  target-host target-port (or service-id 0) (or channel-id 0)

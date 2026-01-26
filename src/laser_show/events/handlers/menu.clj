@@ -5,8 +5,9 @@
    - File menu: New, Open, Save, Save As, Export, Exit
    - Edit menu: Undo, Redo, Copy, Paste, Clear
    - View menu: Toggle Preview, Fullscreen
-   - Help menu: Documentation, About, Check Updates"
+   - Help menu: Documentation, About, Check Updates, IDN Stream Logging"
   (:require [clojure.tools.logging :as log]
+            [laser-show.dev-config :as dev-config]
             [laser-show.state.persistent :as persistent]))
 
 
@@ -222,6 +223,15 @@
   ;; TODO: Implement update check
   {:state state})
 
+(defn- handle-help-toggle-idn-stream-logging
+  "Toggle IDN stream debug logging on/off."
+  [{:keys [state]}]
+  (let [current (dev-config/idn-stream-logging?)
+        new-value (not current)]
+    (dev-config/set-idn-stream-logging! new-value)
+    (log/info "IDN Stream Logging:" (if new-value "enabled" "disabled"))
+    {:state (assoc-in state [:debug :idn-stream-logging?] new-value)}))
+
 (defn- handle-help-reload-styles
   "Reload all CSS stylesheets to pick up style changes."
   [{:keys [state]}]
@@ -268,6 +278,7 @@
     :help/documentation (handle-help-documentation event)
     :help/about (handle-help-about event)
     :help/check-updates (handle-help-check-updates event)
+    :help/toggle-idn-stream-logging (handle-help-toggle-idn-stream-logging event)
     :help/reload-styles (handle-help-reload-styles event)
     
     ;; Unknown event in this domain
