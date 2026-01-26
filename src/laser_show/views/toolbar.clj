@@ -97,12 +97,15 @@
                    :else "status-indicator-disconnected")]})
 
 (defn connection-status
-  "Connection status display."
+  "Connection status display for multi-projector streaming.
+   
+   Uses zone-aware streaming to all enabled projectors based on their
+   zone group assignments. Legacy single-target streaming is deprecated."
   [{:keys [fx/context]}]
   (let [{:keys [connected? connecting? status-text]} (fx/sub-ctx context subs/connection-status)
-        idn-config (get (fx/sub-val context :config) :idn {:host "127.0.0.1" :port 7255})
-        host (:host idn-config)
-        port (:port idn-config)]
+        ;; Get enabled projector count for display
+        projectors (fx/sub-val context :projectors)
+        enabled-count (count (filter (fn [[_ p]] (:enabled? p)) projectors))]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
@@ -110,14 +113,16 @@
                  :connected? connected?
                  :connecting? connecting?}
                 {:fx/type :label
-                 :text status-text
+                 :text (if connected?
+                         (format "Streaming to %d projector(s)" enabled-count)
+                         status-text)
                  :style-class "label-secondary"}
                 {:fx/type :button
-                 :text (if connected? "Disconnect" "Connect")
+                 :text (if connected? "Stop" "Stream")
                  :style-class "btn-sm"
-                 :on-action {:event/type (if connected? :idn/disconnect :idn/connect)
-                             :host host
-                             :port port}}]}))
+                 :on-action {:event/type (if connected?
+                                           :idn/stop-multi-streaming
+                                           :idn/start-multi-streaming)}}]}))
 
 
 ;; Main Toolbar

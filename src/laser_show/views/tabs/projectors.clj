@@ -43,9 +43,10 @@
 
 (defn- service-entry-item
   "Single service/output entry within a device.
-   Shows service name and add button (+ icon) for multi-output devices."
-  [{:keys [device service configured?]}]
+   Shows service name and checkbox showing enabled state for multi-output devices."
+  [{:keys [device service enabled?]}]
   (let [{:keys [service-id name]} service
+        {:keys [address]} device
         service-display-name (or name (str "Output " service-id))]
     {:fx/type :h-box
      :spacing 8
@@ -54,37 +55,35 @@
      :style-class ["card"]
      :children [{:fx/type :label
                  :text (str "• " service-display-name)
-                 :style-class [(if configured? "label-hint" "label-secondary")]
+                 :style-class ["label-secondary"]
                  :style "-fx-font-size: 11;"}
                 {:fx/type :region :h-box/hgrow :always}
-                {:fx/type :button
-                 :text (if configured? "✓" "+")
-                 :disable configured?
-                 :style-class [(if configured? "button-secondary" "button-info")]
-                 :style "-fx-min-width: 28; -fx-min-height: 24;"
-                 :on-action {:event/type :projectors/add-service
-                             :device device
-                             :service service}}]}))
+                {:fx/type :check-box
+                 :selected enabled?
+                 :on-selected-changed {:event/type :projectors/set-service-enabled
+                                       :host address
+                                       :service-id service-id
+                                       :enabled? :fx/event}}]}))
 
 (defn- discovered-device-item
   "Single discovered device in the list.
    For devices with multiple services, shows expandable service list (click anywhere to expand).
-   For single-service devices, shows inline add button."
-  [{:keys [device configured-services expanded? on-toggle-expand]}]
+   For single-service devices, shows inline checkbox for enabled state."
+  [{:keys [device enabled-services expanded? on-toggle-expand]}]
   (let [{:keys [address host-name status services]} device
         service-count (count services)
         has-multiple-services? (> service-count 1)
-        ;; For single-service devices, check if that service is configured
-        single-service-configured? (and (= service-count 1)
-                                        (contains? configured-services
-                                                   [address (:service-id (first services))]))
-        ;; For no-service devices (service-id 0), check if configured
-        no-service-configured? (and (zero? service-count)
-                                    (contains? configured-services [address 0]))
-        ;; For multi-service devices, check if all services are already configured
-        all-services-configured? (and has-multiple-services?
-                                      (every? #(contains? configured-services [address (:service-id %)])
-                                              services))
+        ;; For single-service devices, check if that service is enabled
+        single-service-enabled? (and (= service-count 1)
+                                     (contains? enabled-services
+                                                [address (:service-id (first services))]))
+        ;; For no-service devices (service-id 0), check if enabled
+        no-service-enabled? (and (zero? service-count)
+                                 (contains? enabled-services [address 0]))
+        ;; For multi-service devices, check if all services are enabled
+        all-services-enabled? (and has-multiple-services?
+                                   (every? #(contains? enabled-services [address (:service-id %)])
+                                           services))
         device-status (cond
                         (:offline status) :offline
                         (:occupied status) :occupied
@@ -117,25 +116,25 @@
                                                  :spacing 8
                                                  :children address-info-children}]}
                                     {:fx/type :region :h-box/hgrow :always}]
-                                   ;; For multi-service devices, show "Add All" button
+                                   ;; For multi-service devices, show "Enable All" button
                                    (when has-multiple-services?
                                      [{:fx/type :button
-                                       :text (if all-services-configured? "✓ All" "+ All")
-                                       :disable all-services-configured?
-                                       :style-class [(if all-services-configured? "button-secondary" "button-primary")]
-                                       :on-action {:event/type :projectors/add-all-services
-                                                   :device device}}])
-                                   ;; For single-service or no-service devices, show add button directly
+                                       :text "Enable All"
+                                       :disable all-services-enabled?
+                                       :style-class ["button-primary"]
+                                       :on-action {:event/type :projectors/enable-all-by-ip
+                                                   :address address}}])
+                                   ;; For single-service or no-service devices, show checkbox directly
                                    (when (not has-multiple-services?)
-                                     [{:fx/type :button
-                                       :text (cond
-                                               single-service-configured? "✓"
-                                               no-service-configured? "✓"
-                                               :else "+")
-                                       :disable (or single-service-configured? no-service-configured?)
-                                       :style-class [(if (or single-service-configured? no-service-configured?) "button-secondary" "button-primary")]
-                                       :on-action {:event/type :projectors/add-device
-                                                   :device device}}])))]
+                                     (let [service-id (if (zero? service-count)
+                                                        0
+                                                        (:service-id (first services)))]
+                                       [{:fx/type :check-box
+                                         :selected (or single-service-enabled? no-service-enabled?)
+                                         :on-selected-changed {:event/type :projectors/set-service-enabled
+                                                               :host address
+                                                               :service-id service-id
+                                                               :enabled? :fx/event}}]))))]
     {:fx/type :v-box
      :spacing 2
      :children
@@ -151,13 +150,13 @@
            :on-mouse-clicked (when has-multiple-services? on-toggle-expand)
            :children header-children}]
          ;; Expanded services list for multi-service devices
-         (when (and has-multiple-services? expanded?)
-           (for [service services]
-             {:fx/type service-entry-item
-              :fx/key (str address "-" (:service-id service))
-              :device device
-              :service service
-              :configured? (contains? configured-services [address (:service-id service)])}))))}))
+          (when (and has-multiple-services? expanded?)
+            (for [service services]
+              {:fx/type service-entry-item
+               :fx/key (str address "-" (:service-id service))
+               :device device
+               :service service
+               :enabled? (contains? enabled-services [address (:service-id service)])}))))}))
 
 (defn- device-discovery-panel
   "Panel for scanning network and listing discovered devices.
@@ -165,7 +164,8 @@
   [{:keys [fx/context]}]
   (let [discovered (fx/sub-ctx context subs/discovered-devices)
         scanning? (fx/sub-ctx context subs/projector-scanning?)
-        configured-services (fx/sub-ctx context subs/configured-projector-services)
+        ;; Use enabled-projector-services to show actual enabled state, not just existence
+        enabled-services (fx/sub-ctx context subs/enabled-projector-services)
         expanded-devices (fx/sub-ctx context subs/expanded-discovered-devices)]
     {:fx/type :v-box
      :spacing 8
@@ -199,7 +199,7 @@
                                                 {:fx/type discovered-device-item
                                                  :fx/key address
                                                  :device device
-                                                 :configured-services configured-services
+                                                 :enabled-services enabled-services
                                                  :expanded? (contains? expanded-devices address)
                                                  :on-toggle-expand {:event/type :projectors/toggle-device-expand
                                                                     :address address}})))
@@ -220,6 +220,8 @@
   [{:keys [projector selected?]}]
   (let [{:keys [id name host service-id service-name enabled? status]} projector
         connected? (:connected? status)
+        ;; Coerce enabled? to boolean to prevent ClassCastException if corrupted data
+        enabled-bool? (boolean enabled?)
         ;; Display host:service or just host
         host-display (if (and service-id (pos? service-id))
                        (str host " #" service-id)
@@ -232,7 +234,7 @@
      :on-mouse-clicked {:event/type :projectors/select-projector
                         :projector-id id}
      :children [{:fx/type :check-box
-                 :selected enabled?
+                 :selected enabled-bool?
                  :on-selected-changed {:event/type :projectors/toggle-enabled
                                        :projector-id id}}
                 {:fx/type status-indicator
@@ -244,12 +246,7 @@
                             {:fx/type :label
                              :text (str host-display)
                              :style-class ["text-small" "label-secondary"]}]}
-                {:fx/type :region :h-box/hgrow :always}
-                {:fx/type :button
-                 :text "✕"
-                 :style-class ["button-close"]
-                 :on-action {:event/type :projectors/remove-projector
-                             :projector-id id}}]}))
+                {:fx/type :region :h-box/hgrow :always}]}))
 
 (defn- configured-projectors-list
   "List of configured projectors."
@@ -455,28 +452,42 @@
                     :dialog-data ui-state}
                   
                   ;; Check for custom renderer in ui-hints: corner-pin-2d
+                  ;; Uses standard chain events - same as all other effect param editors
                   (= :corner-pin-2d renderer-type)
                   {:fx/type custom-renderers/corner-pin-visual-editor
                    :params params
-                   :event-template {:event/type :projectors/update-corner-pin
-                                    :projector-id projector-id
-                                    :effect-idx effect-idx}
-                   :reset-event {:event/type :projectors/reset-corner-pin
-                                 :projector-id projector-id
-                                 :effect-idx effect-idx}
+                   :event-template {:event/type :chain/update-spatial-params
+                                    :domain :projector-effects
+                                    :entity-key projector-id
+                                    :effect-path [effect-idx]}
+                   :reset-event {:event/type :chain/reset-params
+                                 :domain :projector-effects
+                                 :entity-key projector-id
+                                 :effect-path [effect-idx]
+                                 :defaults-map {:tl-x -1.0 :tl-y 1.0
+                                                :tr-x 1.0 :tr-y 1.0
+                                                :bl-x -1.0 :bl-y -1.0
+                                                :br-x 1.0 :br-y -1.0}}
                    :fx-key [:projector projector-id effect-idx]
                    :hint-text "Drag corners to adjust output geometry"}
                   
                   ;; Legacy fallback for :corner-pin effect-id (if not using ui-hints)
+                  ;; Uses standard chain events - same as all other effect param editors
                   (= effect-id :corner-pin)
                   {:fx/type custom-renderers/corner-pin-visual-editor
                    :params params
-                   :event-template {:event/type :projectors/update-corner-pin
-                                    :projector-id projector-id
-                                    :effect-idx effect-idx}
-                   :reset-event {:event/type :projectors/reset-corner-pin
-                                 :projector-id projector-id
-                                 :effect-idx effect-idx}
+                   :event-template {:event/type :chain/update-spatial-params
+                                    :domain :projector-effects
+                                    :entity-key projector-id
+                                    :effect-path [effect-idx]}
+                   :reset-event {:event/type :chain/reset-params
+                                 :domain :projector-effects
+                                 :entity-key projector-id
+                                 :effect-path [effect-idx]
+                                 :defaults-map {:tl-x -1.0 :tl-y 1.0
+                                                :tr-x 1.0 :tr-y 1.0
+                                                :bl-x -1.0 :bl-y -1.0
+                                                :br-x 1.0 :br-y -1.0}}
                    :fx-key [:projector projector-id effect-idx]
                    :hint-text "Drag corners to adjust output geometry"}
                   

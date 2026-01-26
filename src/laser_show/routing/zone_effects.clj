@@ -13,7 +13,16 @@
    - :replace - Completely override the cue's destination zone group
    - :add     - Add zone groups to the cue's destination (union)
    - :filter  - Restrict to zone groups matching both original AND effect target"
-  (:require [clojure.set :as set]))
+  (:require [clojure.set :as set]
+            [clojure.tools.logging :as log]))
+
+
+;; Debug Logging (throttled by caller in multi_engine)
+
+(def ^:private debug-enabled? (atom false))
+
+(defn enable-routing-debug! [] (reset! debug-enabled? true))
+(defn disable-routing-debug! [] (reset! debug-enabled? false))
 
 
 ;; Zone Effect Identification
@@ -113,8 +122,16 @@
                       #{zg-id}
                       #{:all})
         ;; Extract and apply zone effects
-        zone-effects (extract-zone-effects effects)]
-    (reduce apply-zone-effect base-groups zone-effects)))
+        zone-effects (extract-zone-effects effects)
+        final-groups (reduce apply-zone-effect base-groups zone-effects)]
+    ;; Debug logging when enabled
+    (when @debug-enabled?
+      (log/debug (format "resolve-final-target: base-dest=%s -> base-groups=%s, zone-effects=%d -> final=%s"
+                         (pr-str base-destination)
+                         (pr-str base-groups)
+                         (count zone-effects)
+                         (pr-str final-groups))))
+    final-groups))
 
 
 ;; Effect Collection from Cue Chains

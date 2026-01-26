@@ -231,7 +231,26 @@
   "Generate diagnostics for routing to a zone group.
    Shows which outputs match and why."
   [zone-group-id projectors-items virtual-projectors]
-  (pm/routing-diagnostics 
-    projectors-items 
-    virtual-projectors 
+  (pm/routing-diagnostics
+    projectors-items
+    virtual-projectors
     {:zone-groups [zone-group-id]}))
+
+
+;; Debug Logging Control
+
+
+(defn enable-routing-debug!
+  "Enable debug logging for all routing modules.
+   Use this from REPL to troubleshoot routing issues."
+  []
+  (ze/enable-routing-debug!)
+  (pm/enable-routing-debug!)
+  :routing-debug-enabled)
+
+(defn disable-routing-debug!
+  "Disable debug logging for all routing modules."
+  []
+  (ze/disable-routing-debug!)
+  (pm/disable-routing-debug!)
+  :routing-debug-disabled)

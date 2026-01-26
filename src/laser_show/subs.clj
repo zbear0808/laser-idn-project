@@ -352,6 +352,18 @@
                  [(:host proj) (or (:service-id proj) 0)])
                (vals items)))))
 
+(defn enabled-projector-services
+  "Get set of [host service-id] pairs for ENABLED projectors only.
+   Used by discovery panel to show accurate enabled state for each service.
+   Depends on: projectors domain (which IS the map of projector-id -> config)"
+  [context]
+  (let [items (fx/sub-val context :projectors)]
+    (into #{}
+          (comp (filter :enabled?)
+                (map (fn [proj]
+                       [(:host proj) (or (:service-id proj) 0)])))
+          (vals items))))
+
 (defn expanded-discovered-devices
   "Get set of device addresses that are expanded in the discovery panel.
    Used for showing/hiding service lists on multi-output devices.

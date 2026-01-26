@@ -19,6 +19,7 @@
    
    The multi-engine state is stored in [:backend :streaming :multi-engine-state]"
   (:require [clojure.tools.logging :as log]
+            [clojure.string :as str]
             [laser-show.backend.streaming-engine :as engine]
             [laser-show.state.core :as state]
             [laser-show.state.queries :as queries]
@@ -27,6 +28,14 @@
             [laser-show.animation.effects :as effects]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.idn.output-config :as output-config]))
+
+
+;; Routing Debug Logging
+;;
+;; We use an atom to throttle logging so we don't flood the console
+
+(def ^:private routing-log-counter (atom 0))
+(def ^:const ROUTING_LOG_INTERVAL 300) ;; Log routing info every N frames (~5 seconds at 60fps)
 
 
 ;; Multi-Engine State Structure
@@ -118,17 +127,44 @@
                                                         virtual-projectors)
             
             ;; Check if THIS projector is in the matching outputs
-            matching-output-ids (set (map :projector-id matching-outputs))]
+            matching-output-ids (set (map :projector-id matching-outputs))
+            
+            ;; Throttled debug logging for routing decisions
+            log-count (swap! routing-log-counter inc)]
+        
+        ;; Log routing info periodically (every ~5 seconds)
+        (when (zero? (mod log-count ROUTING_LOG_INTERVAL))
+          (log/debug (format "Routing debug [projector=%s]: destination-zone=%s, effects=%d, matching-outputs=%s, this-matches?=%s"
+                             projector-id
+                             (pr-str destination-zone)
+                             (count collected-effects)
+                             (pr-str (mapv :id matching-outputs))
+                             (contains? matching-output-ids projector-id))))
         
         (if (contains? matching-output-ids projector-id)
           ;; This projector receives the cue - generate frame
-          (let [base-frame (frame-service/generate-current-frame)]
+          ;; IMPORTANT: skip-zone-filter? true bypasses preview zone filtering
+          ;; so IDN streaming works regardless of preview settings
+          (let [base-frame (frame-service/generate-current-frame {:skip-zone-filter? true})
+                frame-point-count (when base-frame (count base-frame))]
+            ;; Log frame generation periodically
+            (when (and (zero? (mod log-count ROUTING_LOG_INTERVAL))
+                       (= projector-id (first (sort (keys (get raw-state :projectors {}))))))
+              (log/debug (format "Frame gen [%s]: base-frame-points=%s"
+                                 projector-id
+                                 (or frame-point-count "nil"))))
             (when base-frame
               ;; Apply projector effects (color curves + corner-pin)
               (apply-projector-effects base-frame projector-id
                                        elapsed bpm trigger-time timing-ctx)))
           ;; This projector doesn't match - no frame
-          nil))
+          (do
+            (when (and (zero? (mod log-count ROUTING_LOG_INTERVAL))
+                       (= projector-id (first (sort (keys (get raw-state :projectors {}))))))
+              (log/debug (format "No match [%s]: projector zone-groups=%s"
+                                 projector-id
+                                 (pr-str (:zone-groups (get projectors-items projector-id))))))
+            nil)))
       
       (catch clojure.lang.ExceptionInfo e
         ;; Expected "skip" exceptions (not playing, no active cell, etc.)
@@ -150,30 +186,47 @@
    - projector-id: The projector's ID keyword
    - projector: The projector configuration map
    
-   Returns: A streaming engine instance (not started)"
+   Returns: A streaming engine instance (not started), or nil if host is invalid
+   
+   NOTE: service-id targets the physical laser output on multi-head DACs.
+   Each projector entry represents one service/output on the device."
   [projector-id projector]
-  (let [host (:host projector)
-        port (or (:port projector) 7255)
-        output-cfg (if-let [cfg (:output-config projector)]
-                     (output-config/make-config
-                       (or (:color-bit-depth cfg) 8)
-                       (or (:xy-bit-depth cfg) 16))
-                     output-config/default-config)
-        frame-provider (create-projector-frame-provider projector-id)]
-    (engine/create-engine host frame-provider
-                          :port port
-                          :output-config output-cfg)))
+  (let [host (:host projector)]
+    (when (and host (not (str/blank? host)))
+      (let [port (or (:port projector) 7255)
+            ;; service-id targets the physical output on the DAC (0-255)
+            ;; This is different from channel-id which is for logical multiplexing
+            service-id (or (:service-id projector) 0)
+            output-cfg (if-let [cfg (:output-config projector)]
+                         (output-config/make-config
+                           (or (:color-bit-depth cfg) 8)
+                           (or (:xy-bit-depth cfg) 16))
+                         output-config/default-config)
+            frame-provider (create-projector-frame-provider projector-id)]
+            (log/info (format "Creating engine for %s -> %s:%d service %d (channel %d)"
+                              projector-id host port service-id service-id))
+            (engine/create-engine host frame-provider
+                                  :port port
+                                  :channel-id service-id
+                                  :service-id service-id
+                                  :output-config output-cfg)))))
 
 (defn create-engines
   "Create streaming engines for all enabled projectors.
    
-   Returns: Map of projector-id -> engine"
+   Returns: Map of projector-id -> engine (skips projectors with invalid hosts)"
   []
   (let [projectors (queries/projectors-items)]
     (into {}
-      (for [[proj-id proj] projectors
-            :when (:enabled? proj true)]
-        [proj-id (create-engine-for-projector proj-id proj)]))))
+      (keep (fn [[proj-id proj]]
+              (when (:enabled? proj true)
+                (if-let [engine (create-engine-for-projector proj-id proj)]
+                  [proj-id engine]
+                  (do
+                    (log/warn (format "Skipping projector %s - invalid or missing host: %s"
+                                    proj-id (pr-str (:host proj))))
+                    nil))))
+            projectors))))
 
 
 ;; Multi-Engine Lifecycle

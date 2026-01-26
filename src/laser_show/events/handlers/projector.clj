@@ -6,14 +6,21 @@
    - Projectors are assigned to zone groups directly
    - Virtual projectors provide alternate corner-pin with inherited color curves
    
+   AUTO-DISCOVERY FLOW:
+   - Network scan automatically creates projector entries (disabled by default)
+   - Users enable/disable projectors via toggle controls
+   - Projectors cannot be deleted once discovered (they persist)
+   - 'Enable All' enables all projectors from an IP address
+   
    This file handles:
-   - Network device discovery (scan, add devices/services)
+   - Network device discovery (scan, auto-create projectors)
    - Projector configuration (settings, enabled state, corner-pin)
    - Zone group assignment
    - Virtual projector creation and management
    - Connection status updates
    - Test patterns"
   (:require [clojure.tools.logging :as log]
+            [clojure.string :as str]
             [laser-show.events.helpers :as h]
             [laser-show.common.util :as u]))
 
@@ -63,6 +70,50 @@
   [:ui :projector-effect-ui-state projector-id])
 
 
+;; Deterministic Projector ID
+
+
+(defn- make-projector-id
+  "Create a deterministic projector ID based on host and service-id.
+   This ensures the same device always gets the same ID across scans,
+   preventing duplicate entries."
+  [host service-id]
+  (let [;; Sanitize host for keyword (replace dots with dashes)
+        sanitized-host (str/replace (str host) "." "-")]
+    (keyword (str "projector-" sanitized-host "-" (or service-id 0)))))
+
+
+;; Projector Configuration Factory
+
+
+(defn- make-projector-config
+  "Create a projector configuration map with defaults.
+   
+   Required keys: :name, :host
+   Optional keys: :port, :service-id, :service-name, :unit-id, :zone-groups, :tags, :scan-rate, :enabled?
+   
+   NOTE: Auto-discovered projectors default to enabled?=false.
+   Manual projectors should pass enabled?=true explicitly.
+   
+   Throws: IllegalArgumentException if host is nil or blank"
+  [{:keys [name host port service-id service-name unit-id zone-groups tags scan-rate enabled?]
+    :or {port 7255 zone-groups [:all] tags #{} scan-rate 30000 enabled? false}}]
+  {:pre [(and host (not (str/blank? host)))]}
+  {:name name
+   :host host
+   :port port
+   :service-id service-id
+   :service-name service-name
+   :unit-id unit-id
+   :zone-groups zone-groups
+   :tags tags
+   :enabled? enabled?
+   :scan-rate scan-rate
+   :output-config {:color-bit-depth 8
+                   :xy-bit-depth 16}
+   :status {:connected? false}})
+
+
 ;; Network Discovery
 
 
@@ -74,12 +125,64 @@
      :projectors/scan {:broadcast-address broadcast-addr}}))
 
 
+(defn- auto-create-projector-for-service
+  "Create a projector entry for a discovered device service if it doesn't exist.
+   Returns updated state. Does NOT overwrite existing projectors."
+  [state device service-or-nil]
+  (let [{:keys [address host-name unit-id]
+         device-port :port} device
+        {:keys [service-id]
+         service-name :name
+         :or {service-id 0}} service-or-nil
+        projector-id (make-projector-id address service-id)]
+    ;; Only create if projector doesn't already exist
+    (if (get-in state [:projectors projector-id])
+      state  ;; Already exists, don't overwrite
+      (let [proj-name (or service-name
+                          (when host-name (str host-name (when (pos? service-id) (str " #" service-id))))
+                          (str address (when (pos? service-id) (str " #" service-id))))
+            projector-config (make-projector-config
+                               {:name proj-name
+                                :host address
+                                :port (or device-port 7255)
+                                :service-id service-id
+                                :service-name service-name
+                                :unit-id unit-id
+                                :enabled? false})]  ;; Auto-discovered = disabled by default
+        (-> state
+            (assoc-in [:projectors projector-id] projector-config)
+            (assoc-in [:chains :projector-effects projector-id :items]
+                      (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS)))))))
+
+
+(defn- auto-create-projectors-for-device
+  "Create projector entries for all services on a device.
+   For devices with no services, creates one projector with service-id 0."
+  [state device]
+  (let [services (:services device)]
+    (if (seq services)
+      ;; Device has services - create one projector per service
+      (reduce #(auto-create-projector-for-service %1 device %2) state services)
+      ;; No services - create single projector with service-id 0
+      (auto-create-projector-for-service state device nil))))
+
+
 (defn- handle-projectors-scan-complete
-  "Handle scan completion - update discovered devices list."
+  "Handle scan completion - update discovered devices list and auto-create projectors.
+   
+   Auto-creates projector entries for all discovered devices/services:
+   - Uses deterministic IDs so re-scanning doesn't create duplicates
+   - New projectors are disabled by default (enabled? = false)
+   - Existing projectors are NOT overwritten (preserves user settings)"
   [{:keys [devices state]}]
-  {:state (-> state
-              (assoc-in [:projector-ui :scanning?] false)
-              (assoc-in [:projector-ui :discovered-devices] (vec devices)))})
+  (let [;; Auto-create projectors for all discovered devices
+        state-with-projectors (reduce auto-create-projectors-for-device state devices)
+        ;; Check if any new projectors were created
+        had-new-projectors? (not= (get state :projectors) (get state-with-projectors :projectors))]
+    {:state (-> state-with-projectors
+                (assoc-in [:projector-ui :scanning?] false)
+                (assoc-in [:projector-ui :discovered-devices] (vec devices))
+                (cond-> had-new-projectors? h/mark-dirty))}))
 
 
 (defn- handle-projectors-scan-failed
@@ -89,134 +192,53 @@
   {:state (assoc-in state [:projector-ui :scanning?] false)})
 
 
-;; Projector Configuration Factory
+;; Enable/Disable by IP Address (New auto-discovery flow)
 
 
-(defn- make-projector-config
-  "Create a projector configuration map with defaults.
-   
-   Required keys: :name, :host
-   Optional keys: :port, :service-id, :service-name, :unit-id, :zone-groups, :tags, :scan-rate, :corner-pin"
-  [{:keys [name host port service-id service-name unit-id zone-groups tags scan-rate corner-pin]
-    :or {port 7255 zone-groups [:all] tags #{} scan-rate 30000 corner-pin DEFAULT_CORNER_PIN}}]
-  {:name name
-   :host host
-   :port port
-   :service-id service-id
-   :service-name service-name
-   :unit-id unit-id
-   :zone-groups zone-groups
-   :tags tags
-   :corner-pin corner-pin
-   :enabled? true
-   :scan-rate scan-rate
-   :output-config {:color-bit-depth 8
-                   :xy-bit-depth 16}
-   :status {:connected? false}})
+(defn- handle-projectors-enable-all-by-ip
+  "Enable all projectors matching a given IP address.
+   Used by 'Enable All' button in discovery panel."
+  [{:keys [address state]}]
+  (let [projector-ids (->> (get state :projectors {})
+                           (filter (fn [[_ p]] (= (:host p) address)))
+                           (map first))]
+    (if (seq projector-ids)
+      {:state (-> (reduce #(assoc-in %1 [:projectors %2 :enabled?] true)
+                          state
+                          projector-ids)
+                  h/mark-dirty)}
+      {:state state})))
 
 
-;; Device/Service Addition
+(defn- handle-projectors-set-service-enabled
+  "Set enabled state for a projector identified by host and service-id.
+   Used by enable/disable toggles in discovery panel.
+   Coerces enabled? to boolean to prevent ClassCastException."
+  [{:keys [host service-id enabled? state]}]
+  (let [projector-id (make-projector-id host service-id)
+        ;; Coerce to boolean to handle edge cases where :fx/event might not be substituted
+        enabled-bool? (boolean enabled?)]
+    (if (get-in state [:projectors projector-id])
+      {:state (-> state
+                  (assoc-in [:projectors projector-id :enabled?] enabled-bool?)
+                  h/mark-dirty)}
+      {:state state})))
 
 
-(defn- handle-projectors-add-device
-  "Add a discovered device as a configured projector.
-   If device has services, adds the default service (or first one).
-   For multi-output devices, use :projectors/add-service instead."
-  [{:keys [device state]}]
-  (let [{:keys [address host-name unit-id]
-         device-services :services
-         device-port :port} device
-        services (or device-services [])
-        default-service (or (first (filter #(get-in % [:flags :default-service]) services))
-                            (first services))
-        {:keys [service-id]
-         :or {service-id 0}} default-service
-        service-name (:name default-service)
-        name (or service-name
-                 (when host-name (str host-name "." service-id))
-                 address)
-        projector-id (keyword (str "projector-" (System/currentTimeMillis)))
-        projector-config (make-projector-config
-                           {:name name
-                            :host address
-                            :port (or device-port 7255)
-                            :service-id service-id
-                            :service-name service-name
-                            :unit-id unit-id})]
-    {:state (-> state
-                (assoc-in [:projectors projector-id] projector-config)
-                (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
-                (assoc-in [:projector-ui :active-projector] projector-id)
-                h/mark-dirty)}))
-
-
-(defn- handle-projectors-add-service
-  "Add a specific service/output from a discovered device as a projector.
-   Used when a device has multiple outputs and user wants to add a specific one."
-  [{:keys [device service state]}]
-  (let [{:keys [address host-name unit-id]
-         device-port :port} device
-        {:keys [service-id]
-         service-name :name} service
-        name (or service-name host-name address)
-        projector-id (keyword (str "projector-" (System/currentTimeMillis) "-" service-id))
-        projector-config (make-projector-config
-                           {:name name
-                            :host address
-                            :port (or device-port 7255)
-                            :service-id service-id
-                            :service-name service-name
-                            :unit-id unit-id})]
-    {:state (-> state
-                (assoc-in [:projectors projector-id] projector-config)
-                (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
-                (assoc-in [:projector-ui :active-projector] projector-id)
-                h/mark-dirty)}))
-
-
-(defn- handle-projectors-add-all-services
-  "Add all services from a discovered device as configured projectors."
-  [{:keys [device state]}]
-  (let [{:keys [address host-name unit-id]
-         device-services :services
-         device-port :port} device
-        services (or device-services [])
-        now (System/currentTimeMillis)
-        projector-data (reduce
-                         (fn [acc [idx service]]
-                           (let [{:keys [service-id]
-                                  service-name :name} service
-                                 name (or service-name host-name address)
-                                 projector-id (keyword (str "projector-" now "-" service-id "-" idx))
-                                 projector-config (make-projector-config
-                                                    {:name name
-                                                     :host address
-                                                     :port (or device-port 7255)
-                                                     :service-id service-id
-                                                     :service-name service-name
-                                                     :unit-id unit-id})]
-                             (-> acc
-                                 (assoc-in [:projectors projector-id] projector-config)
-                                 (assoc-in [:effects projector-id] {:items (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS)}))))
-                         {:projectors {} :effects {}}
-                         (map-indexed vector services))
-        first-projector-id (first (keys (:projectors projector-data)))]
-    {:state (-> state
-                (update :projectors merge (:projectors projector-data))
-                (update-in [:chains :projector-effects] merge (:effects projector-data))
-                (assoc-in [:projector-ui :active-projector] first-projector-id)
-                h/mark-dirty)}))
+;; Manual Addition (still supported for non-discovered projectors)
 
 
 (defn- handle-projectors-add-manual
-  "Add a projector manually (not from discovery)."
+  "Add a projector manually (not from discovery).
+   Manual projectors are enabled by default."
   [{:keys [name host port state]}]
   (let [projector-id (keyword (str "projector-" (System/currentTimeMillis)))
         proj-name (or name host)
         projector-config (make-projector-config
                            {:name proj-name
                             :host host
-                            :port (or port 7255)})]
+                            :port (or port 7255)
+                            :enabled? true})]  ;; Manual = enabled by default
     {:state (-> state
                 (assoc-in [:projectors projector-id] projector-config)
                 (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
@@ -262,17 +284,27 @@
 
 
 (defn- handle-projectors-update-settings
-  "Update projector settings (name, host, port, enabled, output-config)."
+  "Update projector settings (name, host, port, enabled, output-config).
+   
+   Validates that host (if provided in updates) is not nil or blank."
   [{:keys [projector-id updates state]}]
+  ;; If updating host, validate it's not nil or blank
+  (when (and (contains? updates :host)
+             (let [new-host (:host updates)]
+               (or (nil? new-host) (str/blank? new-host))))
+    (throw (ex-info "Invalid host: host cannot be nil or blank"
+                    {:projector-id projector-id
+                     :updates updates})))
   {:state (-> state
               (update-in [:projectors projector-id] merge updates)
               h/mark-dirty)})
 
 
 (defn- handle-projectors-toggle-enabled
-  "Toggle a projector's enabled state."
+  "Toggle a projector's enabled state.
+   Coerces enabled? to boolean to prevent ClassCastException."
   [{:keys [projector-id state]}]
-  (let [current (get-in state [:projectors projector-id :enabled?] true)]
+  (let [current (boolean (get-in state [:projectors projector-id :enabled?]))]
     {:state (-> state
                 (assoc-in [:projectors projector-id :enabled?] (not current))
                 h/mark-dirty)}))
@@ -282,35 +314,6 @@
   "Update a projector's connection status (called by streaming service)."
   [{:keys [projector-id status state]}]
   {:state (update-in state [:projectors projector-id :status] merge status)})
-
-
-;; Corner Pin Management
-
-
-(defn- handle-projectors-update-corner-pin
-  "Update corner pin parameters from spatial drag."
-  [{:keys [projector-id point-id x y state]}]
-  (let [param-key (case point-id
-                    :tl [:tl-x :tl-y]
-                    :tr [:tr-x :tr-y]
-                    :bl [:bl-x :bl-y]
-                    :br [:br-x :br-y]
-                    nil)
-        [x-key y-key] param-key]
-    (if param-key
-      {:state (-> state
-                  (assoc-in [:projectors projector-id :corner-pin x-key] x)
-                  (assoc-in [:projectors projector-id :corner-pin y-key] y)
-                  h/mark-dirty)}
-      {:state state})))
-
-
-(defn- handle-projectors-reset-corner-pin
-  "Reset corner pin to default values."
-  [{:keys [projector-id state]}]
-  {:state (-> state
-              (assoc-in [:projectors projector-id :corner-pin] DEFAULT_CORNER_PIN)
-              h/mark-dirty)})
 
 
 ;; Zone Group Assignment
@@ -340,15 +343,25 @@
 ;; Virtual Projector Management
 
 
+(defn- get-parent-corner-pin
+  "Get corner-pin params from a projector's effect chain.
+   Returns DEFAULT_CORNER_PIN if no corner-pin effect is found."
+  [state projector-id]
+  (let [effects (get-in state (projector-effects-path projector-id) [])]
+    (if-let [corner-pin-effect (first (filter #(= :corner-pin (:effect-id %)) effects))]
+      (:params corner-pin-effect)
+      DEFAULT_CORNER_PIN)))
+
+
 (defn- handle-projectors-add-virtual-projector
   "Add a virtual projector for an existing physical projector.
-   The VP starts with a copy of the parent's corner-pin."
+   The VP starts with a copy of the parent's corner-pin from the effect chain."
   [{:keys [parent-projector-id name state]}]
   (let [vp-id (random-uuid)
         parent (get-in state [:projectors parent-projector-id])
         parent-name (:name parent "Unknown")
         vp-name (or name (str parent-name " - Virtual"))
-        parent-corner-pin (or (:corner-pin parent) DEFAULT_CORNER_PIN)
+        parent-corner-pin (get-parent-corner-pin state parent-projector-id)
         vp-config {:name vp-name
                    :parent-projector-id parent-projector-id
                    :zone-groups [:all]
@@ -416,11 +429,11 @@
 
 
 (defn- handle-vp-reset-corner-pin
-  "Reset virtual projector corner pin to parent's values."
+  "Reset virtual projector corner pin to parent's values from effect chain."
   [{:keys [vp-id state]}]
   (let [vp (get-in state [:virtual-projectors vp-id])
         parent-id (:parent-projector-id vp)
-        parent-corner-pin (get-in state [:projectors parent-id :corner-pin] DEFAULT_CORNER_PIN)]
+        parent-corner-pin (get-parent-corner-pin state parent-id)]
     {:state (-> state
                 (assoc-in [:virtual-projectors vp-id :corner-pin] parent-corner-pin)
                 h/mark-dirty)}))
@@ -503,27 +516,23 @@
    Accepts events with :event/type in the :projectors/* namespace."
   [{:keys [event/type] :as event}]
   (case type
-    ;; Network discovery
+    ;; Network discovery (auto-creates projectors on scan complete)
     :projectors/scan-network (handle-projectors-scan-network event)
     :projectors/scan-complete (handle-projectors-scan-complete event)
     :projectors/scan-failed (handle-projectors-scan-failed event)
     
-    ;; Device/service addition
-    :projectors/add-device (handle-projectors-add-device event)
-    :projectors/add-service (handle-projectors-add-service event)
-    :projectors/add-all-services (handle-projectors-add-all-services event)
+    ;; Enable/disable projectors (new auto-discovery flow)
+    :projectors/enable-all-by-ip (handle-projectors-enable-all-by-ip event)
+    :projectors/set-service-enabled (handle-projectors-set-service-enabled event)
     :projectors/add-manual (handle-projectors-add-manual event)
     
     ;; Projector management
     :projectors/select-projector (handle-projectors-select-projector event)
+    ;; Note: remove-projector kept for compatibility but UI no longer calls it
     :projectors/remove-projector (handle-projectors-remove-projector event)
     :projectors/update-settings (handle-projectors-update-settings event)
     :projectors/toggle-enabled (handle-projectors-toggle-enabled event)
     :projectors/update-connection-status (handle-projectors-update-connection-status event)
-    
-    ;; Corner pin
-    :projectors/update-corner-pin (handle-projectors-update-corner-pin event)
-    :projectors/reset-corner-pin (handle-projectors-reset-corner-pin event)
     
     ;; Zone group assignment
     :projectors/toggle-zone-group (handle-projectors-toggle-zone-group event)

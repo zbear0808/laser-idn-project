@@ -49,20 +49,26 @@
    - opts: Optional map with:
      - :fps - Target frames per second (default 60)
      - :port - Target UDP port (default 7255)
-     - :channel-id - IDN channel ID (default 0)
+     - :channel-id - IDN channel ID for message header (default 0)
+     - :service-id - IDN service ID for config header (default 0) - targets specific laser output
      - :output-config - OutputConfig for bit depth (default 8-bit color, 16-bit XY)
    
+   NOTE: channel-id is for logical multiplexing (0-63), service-id targets physical outputs (0-255).
+   For multi-head DACs, each output has a different service-id.
+   
    Returns an engine map that can be started with start!"
-  [target-host frame-provider & {:keys [fps port channel-id output-config]
+  [target-host frame-provider & {:keys [fps port channel-id service-id output-config]
                                   :or {fps DEFAULT_FPS
                                        port DEFAULT_PORT
                                        channel-id DEFAULT_CHANNEL_ID
+                                       service-id 0
                                        output-config output-config/default-config}}]
   {:target-host target-host
    :target-port port
    :frame-provider frame-provider
    :fps fps
    :channel-id channel-id
+   :service-id service-id
    :output-config output-config
    :packet-buffer (idn-stream/create-packet-buffer)
    :running? (atom false)
@@ -70,6 +76,8 @@
    :thread (atom nil)
    :start-time-us (atom 0)
    :last-config-time-ms (atom 0)
+   ;; Each engine needs its own sequence counter for proper packet ordering
+   :sequence-counter (atom 0)
    :stats (atom {:frames-sent 0
                  :last-frame-time 0
                  :actual-fps 0.0})})
@@ -108,10 +116,12 @@
 (defn- create-idn-stream-packet
   "Create an IDN-Stream packet for the given frame.
    Includes configuration periodically per spec requirements.
-   Uses the engine's output-config for bit depth settings."
+   Uses the engine's output-config for bit depth settings.
+   Passes service-id to target the correct physical output on multi-head DACs."
   [engine frame]
   (let [buf (:packet-buffer engine)
         channel-id (:channel-id engine)
+        service-id (:service-id engine)
         timestamp-us (current-timestamp-us engine)
         duration-us (idn-stream/frame-duration-us (:fps engine))
         output-cfg (:output-config engine)
@@ -122,24 +132,39 @@
     
     (if include-config?
       (idn-stream/frame->packet-with-config buf frame channel-id timestamp-us duration-us
+                                            :service-id service-id
                                             :output-config output-cfg)
       (idn-stream/frame->packet buf frame channel-id timestamp-us duration-us
                                 :output-config output-cfg))))
 
+(defn- get-next-sequence!
+  "Get the next sequence number for this engine.
+   Each engine maintains its own sequence counter to avoid interleaving issues."
+  [engine]
+  (swap! (:sequence-counter engine) #(bit-and (inc %) 0xFFFF)))
+
+;; Debug logging for streaming
+(def ^:private stream-log-counter (atom 0))
+(def ^:const STREAM_LOG_INTERVAL 300) ;; Log every N frames (~5 seconds at 60fps)
+
 (defn- streaming-loop
   "Main streaming loop - runs in a separate thread.
    Continuously gets frames from the provider and sends them as IDN packets.
-   Records timing metrics for IDN streaming profiling."
+   Records timing metrics for IDN streaming profiling.
+   
+   Each engine uses its own sequence counter to avoid interleaving issues
+   when multiple engines stream to the same device on different services."
   [engine]
   (let [{:keys [target-host target-port frame-provider fps
-                running? socket stats output-config]} engine
+                running? socket stats output-config service-id channel-id]} engine
         frame-interval-ms (/ 1000.0 fps)]
     
-    (log/info (format "Streaming loop started: %s:%d @ %d FPS (%s)"
-                      target-host target-port fps
+    (log/info (format "Streaming loop started: %s:%d service %d channel %d @ %d FPS (%s)"
+                      target-host target-port (or service-id 0) (or channel-id 0) fps
                       (output-config/config-name output-config)))
     
     (reset! (:last-config-time-ms engine) 0)
+    (reset! (:sequence-counter engine) 0)  ;; Reset sequence on stream start
     
     (while @running?
       (let [loop-start (System/currentTimeMillis)]
@@ -147,9 +172,20 @@
           ;; Start timing for IDN profiling
           (let [idn-start-ns (System/nanoTime)
                 frame (frame-provider)
+                frame-point-count (count (or frame []))
                 frame (or frame (t/empty-frame))
                 idn-packet (create-idn-stream-packet engine frame)
-                hello-packet (hello/wrap-channel-message idn-packet)]
+                ;; Use engine's own sequence counter instead of global one
+                seq-num (get-next-sequence! engine)
+                hello-packet (hello/wrap-channel-message idn-packet {:sequence seq-num})
+                log-count (swap! stream-log-counter inc)]
+            
+            ;; Throttled debug logging - log for first service only to reduce spam
+            (when (and (zero? (mod log-count STREAM_LOG_INTERVAL))
+                       (= service-id (or service-id 0)))
+              (log/debug (format "Streaming [%s:%d svc=%d ch=%d]: frame-points=%d, packet-size=%d, seq=%d"
+                                 target-host target-port (or service-id 0) (or channel-id 0)
+                                 frame-point-count (alength hello-packet) seq-num)))
             
             (hello/send-packet @socket hello-packet target-host target-port)
             

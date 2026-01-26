@@ -9,7 +9,16 @@
    Key concepts:
    - Projectors have corner-pin geometry and color curves
    - Virtual projectors have alternate corner-pin but inherit parent's color curves
-   - Both can be assigned to multiple zone groups")
+   - Both can be assigned to multiple zone groups"
+  (:require [clojure.tools.logging :as log]))
+
+
+;; Debug Logging
+
+(def ^:private debug-enabled? (atom false))
+
+(defn enable-routing-debug! [] (reset! debug-enabled? true))
+(defn disable-routing-debug! [] (reset! debug-enabled? false))
 
 
 ;; Output Config Building
@@ -119,23 +128,32 @@
    Returns: Vector of matching output configs"
   [all-outputs target]
   (let [{:keys [zone-groups projector-ids]} target
-        enabled-outputs (filter-enabled-outputs all-outputs)]
-    (cond
-      ;; Direct projector targeting
-      (seq projector-ids)
-      (filterv #(some #{(:projector-id %)} projector-ids) enabled-outputs)
-      
-      ;; Zone group targeting (OR - match any of the specified groups)
-      (seq zone-groups)
-      (filterv (fn [output]
-                 (some (fn [zg-id]
-                         (output-matches-zone-group? output zg-id))
-                       zone-groups))
-               enabled-outputs)
-      
-      ;; Default: route to :all zone group
-      :else
-      (filter-outputs-by-zone-group enabled-outputs :all))))
+        enabled-outputs (filter-enabled-outputs all-outputs)
+        result (cond
+                 ;; Direct projector targeting
+                 (seq projector-ids)
+                 (filterv #(some #{(:projector-id %)} projector-ids) enabled-outputs)
+                 
+                 ;; Zone group targeting (OR - match any of the specified groups)
+                 (seq zone-groups)
+                 (filterv (fn [output]
+                            (some (fn [zg-id]
+                                    (output-matches-zone-group? output zg-id))
+                                  zone-groups))
+                          enabled-outputs)
+                 
+                 ;; Default: route to :all zone group
+                 :else
+                 (filter-outputs-by-zone-group enabled-outputs :all))]
+    ;; Debug logging when enabled
+    (when @debug-enabled?
+      (log/debug (format "find-outputs-for-target: target=%s, enabled-outputs=%d, zone-groups-in-outputs=%s, matched=%d -> %s"
+                         (pr-str target)
+                         (count enabled-outputs)
+                         (pr-str (mapv (fn [o] [(:id o) (:zone-groups o)]) enabled-outputs))
+                         (count result)
+                         (pr-str (mapv :id result)))))
+    result))
 
 
 ;; Routing Map Building

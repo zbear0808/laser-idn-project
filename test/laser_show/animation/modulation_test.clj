@@ -781,19 +781,19 @@
   
   (testing "Non-numeric params use first value"
     (let [p1 {:mode :linear :name "first"}
-          p2 {:mode :radial :name "second"}]
+          p2 {:mode :radial :name "second"}
+          result (#'mod/interpolate-params p1 p2 0.5)]
       ;; Non-numeric values should use first value
-      (let [result (#'mod/interpolate-params p1 p2 0.5)]
-        (is (= :linear (:mode result)))
-        (is (= "first" (:name result))))))
+      (is (= :linear (:mode result)))
+      (is (= "first" (:name result)))))
   
   (testing "Missing keys in second map"
     (let [p1 {:scale 1.0 :extra 10.0}
-          p2 {:scale 2.0}]
+          p2 {:scale 2.0}
+          result (#'mod/interpolate-params p1 p2 0.5)]
       ;; :extra should interpolate with itself (use p1 value)
-      (let [result (#'mod/interpolate-params p1 p2 0.5)]
-        (is (approx= 1.5 (:scale result)))
-        (is (approx= 10.0 (:extra result)))))))
+      (is (approx= 1.5 (:scale result)))
+      (is (approx= 10.0 (:extra result))))))
 
 (deftest eval-keyframe-basic-test
   (testing "Basic keyframe evaluation"
@@ -849,15 +849,15 @@
                         :period 2.0
                         :time-unit :beats}
           bpm 120
-          ms-per-beat (/ 60000 bpm)]
+          ms-per-beat (/ 60000 bpm)
+          ctx (make-test-context (* 0.5 ms-per-beat) bpm)
+          result-1 (mod/eval-keyframe config-1beat ctx)
+          result-2 (mod/eval-keyframe config-2beat ctx)]
       ;; At 0.5 beats:
       ;; - 1-beat period: phase = 0.5, scale should be at max (2.0)
       ;; - 2-beat period: phase = 0.25, scale should be between (1.5)
-      (let [ctx (make-test-context (* 0.5 ms-per-beat) bpm)
-            result-1 (mod/eval-keyframe config-1beat ctx)
-            result-2 (mod/eval-keyframe config-2beat ctx)]
-        (is (approx= 2.0 (:scale result-1) 0.1))
-        (is (approx= 1.5 (:scale result-2) 0.1))))))
+      (is (approx= 2.0 (:scale result-1) 0.1))
+      (is (approx= 1.5 (:scale result-2) 0.1)))))
 
 (deftest eval-keyframe-loop-mode-test
   (testing "Keyframe loop mode vs once mode"
@@ -901,11 +901,11 @@
                   :loop-mode :loop
                   :time-unit :beats}
           bpm 120
-          ms-per-beat (/ 60000 bpm)]
+          ms-per-beat (/ 60000 bpm)
+          ctx (make-test-context (* 0.75 ms-per-beat) bpm)
+          result (mod/eval-keyframe config ctx)]
       ;; At phase 0.75 (between 0.5 and wrap-around to 0.0)
-      (let [ctx (make-test-context (* 0.75 ms-per-beat) bpm)
-            result (mod/eval-keyframe config ctx)]
-        ;; Interpolates from position 0.5 (scale=2.0) to position 0.0 (scale=1.0)
-        ;; At phase 0.75, we're halfway between 0.5 and 1.0, so t=0.5
-        ;; Result = 2.0 + 0.5*(1.0-2.0) = 1.5
-        (is (approx= 1.5 (:scale result) 0.1))))))
+      ;; Interpolates from position 0.5 (scale=2.0) to position 0.0 (scale=1.0)
+      ;; At phase 0.75, we're halfway between 0.5 and 1.0, so t=0.5
+      ;; Result = 2.0 + 0.5*(1.0-2.0) = 1.5
+      (is (approx= 1.5 (:scale result) 0.1)))))

@@ -41,165 +41,42 @@
   base-state)
 
 
-;; Multi-Service Addition Tests
-
-
-(deftest handle-projectors-add-all-services-test
-  (testing "Adds all services from a multi-output device"
-    (let [event {:event/type :projectors/add-all-services
-                 :device sample-discovered-device
-                 :state sample-state}
-          result (projectors/handle event)
-          projectors (get-in result [:state :projectors])
-          effects (get-in result [:state :chains :projector-effects])]
-      ;; Should create 3 projectors (one per service)
-      (is (= 3 (count projectors)))
-      (is (= 3 (count effects)))
-      
-      ;; Each projector should have correct service-id
-      (let [projector-ids (keys projectors)
-            service-ids (set (map #(get-in projectors [% :service-id]) projector-ids))]
-        (is (= #{0 1 2} service-ids)))
-      
-      ;; Each projector should have zone-groups and corner-pin directly
-      (doseq [[_proj-id proj-data] projectors]
-        (is (vector? (:zone-groups proj-data)))
-        (is (contains? proj-data :corner-pin))
-        (is (set? (:tags proj-data))))
-      
-      ;; Each projector should have default effects chain (color calibration + corner-pin)
-      (doseq [[_projector-id effect-data] effects]
-        (is (vector? (:items effect-data)))
-        ;; Should have RGB curves and corner-pin effects
-        (is (= 2 (count (:items effect-data))))
-        (is (= :rgb-curves (get-in effect-data [:items 0 :effect-id])))
-        (is (= :corner-pin (get-in effect-data [:items 1 :effect-id]))))
-      
-      ;; First projector should be selected
-      (is (some? (get-in result [:state :projector-ui :active-projector])))
-      
-      ;; Project should be marked dirty
-      (is (true? (get-in result [:state :project :dirty?])))))
-  
-  (testing "Each projector gets unique name from service"
-    (let [event {:event/type :projectors/add-all-services
-                 :device sample-discovered-device
-                 :state sample-state}
-          result (projectors/handle event)
-          projectors (get-in result [:state :projectors])
-          names (set (map #(:name (second %)) projectors))]
-      ;; Names should include service names
-      (is (contains? names "Output A"))
-      (is (contains? names "Output B"))
-      (is (contains? names "Output C")))))
-
-
-(deftest handle-projectors-add-device-test
-  (testing "Adds default service when device has multiple services"
-    (let [event {:event/type :projectors/add-device
-                 :device sample-discovered-device
-                 :state sample-state}
-          result (projectors/handle event)
-          projectors (get-in result [:state :projectors])]
-      ;; Should add only 1 projector (the default service)
-      (is (= 1 (count projectors)))
-      
-      ;; Should use default service (service-id 0)
-      (let [projector (first (vals projectors))]
-        (is (= 0 (:service-id projector)))
-        (is (= "Output A" (:service-name projector)))
-        ;; New architecture: projector has zone-groups and corner-pin directly
-        (is (vector? (:zone-groups projector)))
-        (is (contains? projector :corner-pin)))))
-  
-  (testing "Uses first service if no default marked"
-    (let [device-no-default (update sample-discovered-device :services
-                                   (fn [svcs]
-                                     (mapv #(assoc % :flags {}) svcs)))
-          event {:event/type :projectors/add-device
-                 :device device-no-default
-                 :state sample-state}
-          result (projectors/handle event)
-          projector (first (vals (get-in result [:state :projectors])))]
-      ;; Should use first service
-      (is (= 0 (:service-id projector))))))
-
-
-(deftest handle-projectors-add-service-test
-  (testing "Adds specific service from multi-output device"
-    (let [service-b (second (:services sample-discovered-device))
-          event {:event/type :projectors/add-service
-                 :device sample-discovered-device
-                 :service service-b
-                 :state sample-state}
-          result (projectors/handle event)
-          projector (first (vals (get-in result [:state :projectors])))]
-      ;; Should add service B specifically
-      (is (= 1 (:service-id projector)))
-      (is (= "Output B" (:service-name projector))))))
-
-
-;; Corner-Pin Tests (new in v2 architecture)
+;; Test Fixtures
+;;
+;; Corner-pin is stored as an effect in the projector's effect chain.
+;; Updates to corner-pin params go through the standard :chain/update-spatial-params handler.
 
 
 (def test-projector-id :proj-1)
 
 (def state-with-projector
+  "Test state with a projector that has RGB curves and corner-pin effects."
   (-> sample-state
       (assoc-in [:projectors test-projector-id]
                 {:name "Test Projector"
                  :host "192.168.1.100"
                  :enabled? true
                  :zone-groups [:all]
-                 :tags #{}
-                 :corner-pin {:tl-x -1.0 :tl-y 1.0
-                              :tr-x 1.0 :tr-y 1.0
-                              :bl-x -1.0 :bl-y -1.0
-                              :br-x 1.0 :br-y -1.0}})
+                 :tags #{}})
       (assoc-in [:chains :projector-effects test-projector-id :items]
                 [{:id (java.util.UUID/fromString "00000000-0000-0000-0000-000000000001")
                   :effect-id :rgb-curves
-                  :enabled? true}])))
+                  :enabled? true
+                  :params {:r-curve-points [[0.0 0.0] [1.0 1.0]]
+                           :g-curve-points [[0.0 0.0] [1.0 1.0]]
+                           :b-curve-points [[0.0 0.0] [1.0 1.0]]}}
+                 {:id (java.util.UUID/fromString "00000000-0000-0000-0000-000000000002")
+                  :effect-id :corner-pin
+                  :enabled? true
+                  :params {:tl-x -1.0 :tl-y 1.0
+                           :tr-x 1.0 :tr-y 1.0
+                           :bl-x -1.0 :bl-y -1.0
+                           :br-x 1.0 :br-y -1.0}}])))
 
 
-(deftest handle-projectors-update-corner-pin-test
-  (testing "Updates corner-pin coordinates on projector"
-    (let [event {:event/type :projectors/update-corner-pin
-                 :projector-id test-projector-id
-                 :point-id :tl
-                 :x -0.8
-                 :y 0.9
-                 :state state-with-projector}
-          result (projectors/handle event)
-          corner-pin (get-in result [:state :projectors test-projector-id :corner-pin])]
-      (is (= -0.8 (:tl-x corner-pin)))
-      (is (= 0.9 (:tl-y corner-pin)))
-      ;; Other corners unchanged
-      (is (= 1.0 (:tr-x corner-pin)))
-      (is (true? (get-in result [:state :project :dirty?]))))))
-
-
-(deftest handle-projectors-reset-corner-pin-test
-  (testing "Resets corner-pin to default rectangle"
-    (let [modified-state (assoc-in state-with-projector
-                                   [:projectors test-projector-id :corner-pin]
-                                   {:tl-x -0.5 :tl-y 0.5
-                                    :tr-x 0.8 :tr-y 0.9
-                                    :bl-x -0.3 :bl-y -0.7
-                                    :br-x 0.6 :br-y -0.8})
-          event {:event/type :projectors/reset-corner-pin
-                 :projector-id test-projector-id
-                 :state modified-state}
-          result (projectors/handle event)
-          corner-pin (get-in result [:state :projectors test-projector-id :corner-pin])]
-      (is (= -1.0 (:tl-x corner-pin)))
-      (is (= 1.0 (:tl-y corner-pin)))
-      (is (= 1.0 (:tr-x corner-pin)))
-      (is (= 1.0 (:tr-y corner-pin)))
-      (is (= -1.0 (:bl-x corner-pin)))
-      (is (= -1.0 (:bl-y corner-pin)))
-      (is (= 1.0 (:br-x corner-pin)))
-      (is (= -1.0 (:br-y corner-pin))))))
+;; NOTE: Corner-pin updates now go through :chain/update-spatial-params and :chain/reset-params
+;; instead of the special :projectors/update-corner-pin and :projectors/reset-corner-pin handlers.
+;; Tests for that functionality should be in the chain handlers tests.
 
 
 ;; Zone Group Assignment Tests
@@ -384,8 +261,8 @@
                  :state state-with-projector}
           result (projectors/handle event)
           effects (get-in result [:state :chains :projector-effects test-projector-id :items])]
-      ;; Should have added the effect (original had 1 effect)
-      (is (= 2 (count effects)))
+      ;; Should have added the effect (original had 2 effects: rgb-curves + corner-pin)
+      (is (= 3 (count effects)))
       
       ;; New effect should be last
       (let [new-effect (last effects)]
@@ -415,3 +292,116 @@
           new-effect (last effects)]
       (is (= :corner-pin (:effect-id new-effect)))
       (is (= -0.9 (get-in new-effect [:params :tl-x]))))))
+
+
+;; Projector Configuration Validation Tests
+
+
+(deftest handle-projectors-add-manual-with-valid-host-test
+  (testing "Manual projector with valid host is created successfully"
+    (let [event {:event/type :projectors/add-manual
+                 :name "Test Projector"
+                 :host "192.168.1.100"
+                 :port 7255
+                 :state sample-state}
+          result (projectors/handle event)
+          projectors (get-in result [:state :projectors])]
+      (is (= 1 (count projectors)) "Should create one projector")
+      (let [projector (first (vals projectors))]
+        (is (= "Test Projector" (:name projector)) "Should have correct name")
+        (is (= "192.168.1.100" (:host projector)) "Should have valid host")
+        (is (true? (:enabled? projector)) "Manual projectors should be enabled by default")))))
+
+(deftest handle-projectors-add-manual-with-nil-host-throws-test
+  (testing "Manual projector with nil host throws exception"
+    (let [event {:event/type :projectors/add-manual
+                 :name "Invalid Projector"
+                 :host nil
+                 :port 7255
+                 :state sample-state}]
+      (is (thrown? AssertionError (projectors/handle event))
+          "Should throw AssertionError for nil host"))))
+
+(deftest handle-projectors-add-manual-with-blank-host-throws-test
+  (testing "Manual projector with blank host throws exception"
+    (let [event {:event/type :projectors/add-manual
+                 :name "Invalid Projector"
+                 :host ""
+                 :port 7255
+                 :state sample-state}]
+      (is (thrown? AssertionError (projectors/handle event))
+          "Should throw AssertionError for blank host"))))
+
+(deftest handle-projectors-add-manual-with-whitespace-host-throws-test
+  (testing "Manual projector with whitespace-only host throws exception"
+    (let [event {:event/type :projectors/add-manual
+                 :name "Invalid Projector"
+                 :host "   "
+                 :port 7255
+                 :state sample-state}]
+      (is (thrown? AssertionError (projectors/handle event))
+          "Should throw AssertionError for whitespace-only host"))))
+
+(deftest handle-scan-complete-skips-invalid-devices-test
+  (testing "Auto-discovered devices with invalid addresses are created but validation happens at streaming time"
+    ;; Note: Auto-discovery currently doesn't validate hosts at creation time,
+    ;; validation happens when starting streaming engines
+    (let [invalid-device {:address nil  ;; Invalid address
+                          :host-name "BadDevice"
+                          :port 7255
+                          :unit-id "XYZ"
+                          :services [{:service-id 0 :name "Output" :flags {}}]}
+          event {:event/type :projectors/scan-complete
+                 :devices [invalid-device]
+                 :state sample-state}
+          ;; This should throw when trying to create the projector config
+          result (try
+                   (projectors/handle event)
+                   (catch AssertionError _e
+                     ;; Expected - validation at config creation
+                     {:state sample-state}))]
+      ;; If it throws, projector won't be created
+      (is (or (empty? (get-in result [:state :projectors]))
+              ;; Or if exception was caught, state is unchanged
+              (= sample-state (:state result)))
+          "Should not create projector with invalid host"))))
+
+(deftest handle-projectors-update-settings-with-valid-host-test
+  (testing "Updating host to valid value succeeds"
+    (let [event {:event/type :projectors/update-settings
+                 :projector-id test-projector-id
+                 :updates {:host "192.168.1.200"}
+                 :state state-with-projector}
+          result (projectors/handle event)
+          updated-host (get-in result [:state :projectors test-projector-id :host])]
+      (is (= "192.168.1.200" updated-host) "Should update to new valid host"))))
+
+(deftest handle-projectors-update-settings-with-nil-host-throws-test
+  (testing "Updating host to nil throws exception"
+    (let [event {:event/type :projectors/update-settings
+                 :projector-id test-projector-id
+                 :updates {:host nil}
+                 :state state-with-projector}]
+      (is (thrown? clojure.lang.ExceptionInfo (projectors/handle event))
+          "Should throw ExceptionInfo for nil host"))))
+
+(deftest handle-projectors-update-settings-with-blank-host-throws-test
+  (testing "Updating host to blank string throws exception"
+    (let [event {:event/type :projectors/update-settings
+                 :projector-id test-projector-id
+                 :updates {:host ""}
+                 :state state-with-projector}]
+      (is (thrown? clojure.lang.ExceptionInfo (projectors/handle event))
+          "Should throw ExceptionInfo for blank host"))))
+
+(deftest handle-projectors-update-settings-without-host-succeeds-test
+  (testing "Updating other settings without touching host succeeds"
+    (let [event {:event/type :projectors/update-settings
+                 :projector-id test-projector-id
+                 :updates {:name "Updated Name" :port 7256}
+                 :state state-with-projector}
+          result (projectors/handle event)
+          updated-name (get-in result [:state :projectors test-projector-id :name])
+          updated-port (get-in result [:state :projectors test-projector-id :port])]
+      (is (= "Updated Name" updated-name) "Should update name")
+      (is (= 7256 updated-port) "Should update port"))))
