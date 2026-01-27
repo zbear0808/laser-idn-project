@@ -1,0 +1,11 @@
+{:name "Trace Fade (Comet)"
+ :description "A traveling comet trail effect that moves through the shape's point sequence. Creates a bright head with a fading tail behind it."
+ :category :intensity
+ :effects [{:effect-id :trace-fade
+            :enabled true
+            :params {:period 1.0
+                     :time-unit :beats
+                     :tail-length 0.3
+                     :min-brightness 0.0
+                     :wave-shape :exp
+                     :direction :forward}}]}

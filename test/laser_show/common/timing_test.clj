@@ -133,16 +133,17 @@
           (timing/precise-sleep-until next-frame-time)
           (recur (+ next-frame-time interval-nanos) (inc frame-count))))
       
-      ;; Calculate intervals between frames
-      (let [intervals (map (fn [[t1 t2]] (- t2 t1))
-                          (partition 2 1 @timestamps))
-            mean (/ (reduce + intervals) (count intervals))
-            deviations (map #(Math/abs (double (- % mean))) intervals)
-            max-jitter (apply max deviations)]
+      ;; Calculate intervals between frames and compare to expected interval
+      (let [intervals (mapv (fn [[t1 t2]] (- t2 t1))
+                            (partition 2 1 @timestamps))
+            ;; Calculate deviation from expected interval (not from mean)
+            deviations (mapv #(Math/abs (double (- % interval-nanos))) intervals)
+            max-deviation (apply max deviations)]
         
-        ;; Max jitter should be less than 1ms (1,000,000 nanoseconds)
-        (is (< max-jitter 1000000)
-            (str "Max jitter: " (quot max-jitter 1000) "μs, expected <1000μs"))))))
+        ;; Max deviation from expected interval should be less than 1ms
+        (is (< max-deviation 1000000)
+            (str "Max deviation from expected interval: " 
+                 (quot max-deviation 1000) "μs, expected <1000μs"))))))
 
 
 ;; Performance Comparison Test (for documentation)

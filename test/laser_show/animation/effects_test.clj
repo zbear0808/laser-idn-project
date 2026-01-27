@@ -2,7 +2,8 @@
   "Tests for effect chain groups functionality."
   (:require [clojure.test :refer [deftest testing is]]
             [laser-show.animation.effects :as effects]
-            [laser-show.animation.effects.color]  ;; Load color effects
+            [laser-show.animation.effects.color]      ;; Load color effects
+            [laser-show.animation.effects.intensity]  ;; Load intensity effects
             [laser-show.animation.modulation :as mod]
             [laser-show.animation.types :as t]))
 
@@ -364,4 +365,189 @@
         (println "Corner:" (point-b (nth result 2)))
         (is (< (point-b (second result)) 0.1) "Center point should have low blue (near origin)")
         (is (> (point-b (nth result 2)) 0.9) "Corner point should have high blue (far from origin)")))))
+
+
+;; Trace-Fade Effect Tests
+
+(deftest trace-fade-effect-registration-test
+  (testing "trace-fade effect is registered"
+    (let [effect-def (effects/get-effect :trace-fade)]
+      (is (some? effect-def) "trace-fade effect should be registered")
+      (is (= :trace-fade (:id effect-def)))
+      (is (= :intensity (:category effect-def)))
+      (is (= :bpm (:timing effect-def))))))
+
+(deftest trace-fade-head-position-test
+  (testing "trace-fade head position calculation at different beat values"
+    ;; At beat 0, head should be at position 0
+    ;; At beat 0.5 (with period=1), head should be at position 0.5
+    ;; The tail trails BEHIND the head (lower position values)
+    (let [frame (t/make-frame (mapv (fn [_] (t/make-point 0.0 0.0 1.0 1.0 1.0)) (range 10)))
+          ;; Use timing-ctx with accumulated-beats to control head position
+          make-chain (fn [] {:effects [{:effect-id :trace-fade
+                                        :enabled? true
+                                        :params {:period 1.0
+                                                 :time-unit :beats
+                                                 :tail-length 0.3
+                                                 :min-brightness 0.0
+                                                 :wave-shape :linear
+                                                 :direction :forward}}]})]
+      ;; Test at beat 0: head at position 0, so point 0 should be brightest
+      (let [result (effects/apply-effect-chain frame (make-chain) 0 120.0 nil {:effective-beats 0.0})
+            p0 (first result)
+            p9 (last result)]
+        (is (> (point-r p0) 0.9) "At beat 0, first point should be brightest")
+        (is (< (point-r p9) 0.1) "At beat 0, last point should be dim (outside tail)"))
+      
+      ;; Test at beat 0.5: head at position 0.5, tail from 0.2 to 0.5
+      (let [result (effects/apply-effect-chain frame (make-chain) 0 120.0 nil {:effective-beats 0.5})
+            p3 (nth result 3)  ;; pos = 3/9 ≈ 0.33, in tail
+            p4 (nth result 4)  ;; pos = 4/9 ≈ 0.44, in tail (closest to head)
+            p5 (nth result 5)] ;; pos = 5/9 ≈ 0.56, AHEAD of head (should be dark)
+        ;; Point 4 is at pos 4/9 ≈ 0.44, in the tail (head is at 0.5)
+        ;; Point 5 is at pos 5/9 ≈ 0.56, ahead of head (not yet reached)
+        (is (> (point-r p4) 0.5) "At beat 0.5, point in tail should be bright")
+        (is (> (point-r p3) 0.3) "At beat 0.5, point in tail should be visible")
+        (is (< (point-r p5) 0.1) "At beat 0.5, point ahead of head should be dark")))))
+
+(deftest trace-fade-tail-length-test
+  (testing "trace-fade tail length affects visible trail"
+    (let [;; 10 points evenly spaced
+          frame (t/make-frame (mapv (fn [_] (t/make-point 0.0 0.0 1.0 1.0 1.0)) (range 10)))
+          
+          ;; Short tail (0.1 = 10% of points visible)
+          short-tail-chain {:effects [{:effect-id :trace-fade
+                                       :enabled? true
+                                       :params {:period 1.0
+                                                :time-unit :beats
+                                                :tail-length 0.1
+                                                :min-brightness 0.0
+                                                :wave-shape :linear
+                                                :direction :forward}}]}
+          
+          ;; Long tail (0.5 = 50% of points visible)
+          long-tail-chain {:effects [{:effect-id :trace-fade
+                                      :enabled? true
+                                      :params {:period 1.0
+                                               :time-unit :beats
+                                               :tail-length 0.5
+                                               :min-brightness 0.0
+                                               :wave-shape :linear
+                                               :direction :forward}}]}]
+      
+      ;; At beat 0.5 (head at position 0.5)
+      (let [short-result (effects/apply-effect-chain frame short-tail-chain 0 120.0 nil {:effective-beats 0.5})
+            long-result (effects/apply-effect-chain frame long-tail-chain 0 120.0 nil {:effective-beats 0.5})
+            
+            ;; Count how many points have visible intensity (> 0.1)
+            short-visible (count (filter #(> (point-r %) 0.1) short-result))
+            long-visible (count (filter #(> (point-r %) 0.1) long-result))]
+        
+        (is (< short-visible long-visible)
+            (str "Short tail should have fewer visible points than long tail. "
+                 "Short: " short-visible ", Long: " long-visible))))))
+
+(deftest trace-fade-direction-test
+  (testing "trace-fade direction reversal"
+    (let [frame (t/make-frame (mapv (fn [_] (t/make-point 0.0 0.0 1.0 1.0 1.0)) (range 10)))
+          
+          forward-chain {:effects [{:effect-id :trace-fade
+                                    :enabled? true
+                                    :params {:period 1.0
+                                             :time-unit :beats
+                                             :tail-length 0.3
+                                             :min-brightness 0.0
+                                             :wave-shape :linear
+                                             :direction :forward}}]}
+          
+          reverse-chain {:effects [{:effect-id :trace-fade
+                                    :enabled? true
+                                    :params {:period 1.0
+                                             :time-unit :beats
+                                             :tail-length 0.3
+                                             :min-brightness 0.0
+                                             :wave-shape :linear
+                                             :direction :reverse}}]}]
+      
+      ;; At beat 0.25, head should be at different effective positions for forward vs reverse
+      (let [forward-result (effects/apply-effect-chain frame forward-chain 0 120.0 nil {:effective-beats 0.25})
+            reverse-result (effects/apply-effect-chain frame reverse-chain 0 120.0 nil {:effective-beats 0.25})
+            
+            ;; Find which point is brightest in each
+            forward-brightest-idx (first (apply max-key second (map-indexed #(vector %1 (point-r %2)) forward-result)))
+            reverse-brightest-idx (first (apply max-key second (map-indexed #(vector %1 (point-r %2)) reverse-result)))]
+        
+        (is (not= forward-brightest-idx reverse-brightest-idx)
+            (str "Forward and reverse should have different brightest points. "
+                 "Forward: " forward-brightest-idx ", Reverse: " reverse-brightest-idx))))))
+
+(deftest trace-fade-wave-shapes-test
+  (testing "trace-fade wave shapes produce different fade curves"
+    ;; Use 10 points with positions 0/9 to 9/9 (0.0 to 1.0)
+    (let [frame (t/make-frame (mapv (fn [_] (t/make-point 0.0 0.0 1.0 1.0 1.0)) (range 10)))
+          make-chain (fn [shape]
+                       {:effects [{:effect-id :trace-fade
+                                   :enabled? true
+                                   :params {:period 1.0
+                                            :time-unit :beats
+                                            :tail-length 0.5
+                                            :min-brightness 0.0
+                                            :wave-shape shape
+                                            :direction :forward}}]})
+          
+          ;; At beat 0.5, head is at position 0.5
+          ;; Tail extends from pos 0.0 to 0.5 (the 0.5 tail-length)
+          ;; Point positions: 0=0.0, 1≈0.11, 2≈0.22, 3≈0.33, 4≈0.44
+          ;; Point 4 (pos≈0.44) is closest to head, point 0 (pos=0.0) is at tail end
+          linear-result (effects/apply-effect-chain frame (make-chain :linear) 0 120.0 nil {:effective-beats 0.5})
+          exp-result (effects/apply-effect-chain frame (make-chain :exp) 0 120.0 nil {:effective-beats 0.5})
+          smooth-result (effects/apply-effect-chain frame (make-chain :smooth) 0 120.0 nil {:effective-beats 0.5})
+          
+          ;; Point at pos 0.44 (idx 4) is in the front of the tail (distance ≈ 0.06)
+          ;; Point at pos 0.22 (idx 2) is in middle of tail (distance ≈ 0.28)
+          ;; Point at pos 0.0 (idx 0) is at tail end (distance = 0.5)
+          get-mid-intensity (fn [result] (point-r (nth result 2)))
+          get-near-head-intensity (fn [result] (point-r (nth result 4)))]
+      
+      ;; Points near head (idx 4) should be bright for all shapes
+      (is (> (get-near-head-intensity linear-result) 0.7) "Linear: near-head should be bright")
+      (is (> (get-near-head-intensity exp-result) 0.7) "Exp: near-head should be bright")
+      (is (> (get-near-head-intensity smooth-result) 0.7) "Smooth: near-head should be bright")
+      
+      ;; Exp should decay faster initially (lower mid-tail value than linear)
+      ;; At mid-tail (t ≈ 0.56):
+      ;; Linear: fade = 1.0 - 0.56 = 0.44
+      ;; Exp: fade = exp(-0.56 * 3) ≈ 0.19
+      ;; Smooth: fade = (1 - 0.56)^2 ≈ 0.19
+      (let [linear-mid (get-mid-intensity linear-result)
+            exp-mid (get-mid-intensity exp-result)]
+        (is (< exp-mid linear-mid)
+            (str "Exp should decay faster than linear in mid-tail. "
+                 "Linear: " linear-mid ", Exp: " exp-mid))))))
+
+(deftest trace-fade-min-brightness-test
+  (testing "trace-fade respects min brightness"
+    (let [frame (t/make-frame (mapv (fn [_] (t/make-point 0.0 0.0 1.0 1.0 1.0)) (range 10)))
+          
+          ;; Test with min brightness of 0.2
+          min-brightness-chain {:effects [{:effect-id :trace-fade
+                                           :enabled? true
+                                           :params {:period 1.0
+                                                    :time-unit :beats
+                                                    :tail-length 0.3
+                                                    :min-brightness 0.2
+                                                    :wave-shape :linear
+                                                    :direction :forward}}]}
+          
+          result (effects/apply-effect-chain frame min-brightness-chain 0 120.0 nil {:effective-beats 0.0})
+          head-point (first result)
+          tail-point (last result)]
+      
+      ;; Head should have full intensity (peak is always 1.0)
+      (is (> (point-r head-point) 0.9)
+          (str "Head should have full brightness, got " (point-r head-point)))
+      
+      ;; Points outside tail should have min brightness (r = 1.0 * 0.2 = 0.2)
+      (is (< 0.15 (point-r tail-point) 0.25)
+          (str "Tail points should have min brightness ~0.2, got " (point-r tail-point))))))
 

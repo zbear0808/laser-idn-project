@@ -4,10 +4,10 @@
  :effects [{:effect-id :offset
             :enabled true
             :params {:x-offset {:type :sine
-                               :min -0.3
-                               :max 0.3
-                               :period 1.0
-                               :phase 0.0
-                               :loop-mode :loop
-                               :time-unit :beats}
+                                :min -0.3
+                                :max 0.3
+                                :period 1.0
+                                :phase 0.0
+                                :loop-mode :loop
+                                :time-unit :beats}
                      :y-offset 0.0}}]}
