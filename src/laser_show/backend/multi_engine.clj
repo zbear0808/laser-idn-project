@@ -20,6 +20,7 @@
    The multi-engine state is stored in [:backend :streaming :multi-engine-state]"
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
+            [clojure.set :as set]
             [laser-show.backend.streaming-engine :as engine]
             [laser-show.dev-config :as dev-config]
             [laser-show.state.core :as state]
@@ -285,3 +286,69 @@
                             :start-time-ms nil})
     
     (log/info "Multi-engine streaming stopped")))
+
+(defn refresh-engines!
+  "Refresh streaming engines to match current projector state.
+   
+   This should be called when projector enabled state changes while streaming
+   is already running. It will:
+   1. Stop engines for projectors that are no longer enabled
+   2. Create and start engines for newly enabled projectors
+   
+   Returns: Map of new engines (projector-id -> engine)"
+  []
+  (let [multi-state (state/get-in-state [:backend :streaming :multi-engine-state])
+        current-engines (:engines multi-state {})
+        running? (:running? multi-state false)]
+    
+    ;; Only refresh if streaming is actually running
+    (when running?
+      (let [start-time (or (:start-time-ms multi-state) (System/currentTimeMillis))
+            ;; Get current desired engines based on enabled projectors
+            desired-engines (create-engines)
+            current-ids (set (keys current-engines))
+            desired-ids (set (keys desired-engines))
+            
+            ;; Find engines to stop and start
+            engines-to-stop (set/difference current-ids desired-ids)
+            engines-to-start (set/difference desired-ids current-ids)]
+        
+        (log/info (format "Refreshing engines: stopping %d, starting %d"
+                          (count engines-to-stop) (count engines-to-start)))
+        
+        ;; Stop engines for disabled projectors
+        (doseq [proj-id engines-to-stop]
+          (when-let [engine (get current-engines proj-id)]
+            (try
+              (engine/stop! engine)
+              (log/info "Stopped engine for disabled projector:" proj-id)
+              (catch Exception e
+                (log/error "Failed to stop engine for" proj-id ":" (.getMessage e))))))
+        
+        ;; Start engines for newly enabled projectors
+        (doseq [proj-id engines-to-start]
+          (when-let [engine (get desired-engines proj-id)]
+            (try
+              (engine/start! engine)
+              (log/info "Started engine for newly enabled projector:" proj-id)
+              (catch Exception e
+                (log/error "Failed to start engine for" proj-id ":" (.getMessage e))))))
+        
+        ;; Build new engines map: keep running engines that are still needed, add new ones
+        (let [kept-engines (select-keys current-engines desired-ids)
+              new-engines (merge kept-engines (select-keys desired-engines engines-to-start))]
+          
+          ;; Update multi-engine state
+          (state/assoc-in-state! [:backend :streaming :multi-engine-state]
+                                 {:engines new-engines
+                                  :running? true
+                                  :start-time-ms start-time})
+          
+          (log/info (format "Engine refresh complete: now running %d engine(s)"
+                            (count new-engines)))
+          new-engines)))))
+
+(defn streaming-running?
+  "Check if multi-engine streaming is currently running."
+  []
+  (boolean (get-in (state/get-raw-state) [:backend :streaming :running?])))

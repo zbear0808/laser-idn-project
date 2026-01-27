@@ -335,6 +335,23 @@
       (catch Exception e
         (log/error "Error stopping multi-engine streaming:" (.getMessage e))))))
 
+(defn- effect-multi-engine-refresh
+  "Effect that refreshes streaming engines when projector state changes.
+   This is called when projectors are enabled/disabled while streaming is running.
+   It will start engines for newly enabled projectors and stop engines for disabled ones."
+  [_ dispatch]
+  (future
+    (try
+      (when (multi-engine/streaming-running?)
+        (log/info "Refreshing streaming engines...")
+        (let [engines (multi-engine/refresh-engines!)
+              engine-count (count engines)]
+          (log/info (format "Engine refresh complete: %d engine(s) running" engine-count))
+          (dispatch {:event/type :idn/multi-streaming-refreshed
+                     :engine-count engine-count})))
+      (catch Exception e
+        (log/error "Error refreshing streaming engines:" (.getMessage e))))))
+
 
 ;; Wrapped Event Handler
 
@@ -382,6 +399,7 @@
          ;; Multi-engine streaming (new zone-aware system)
          :multi-engine/start effect-multi-engine-start
          :multi-engine/stop effect-multi-engine-stop
+         :multi-engine/refresh effect-multi-engine-refresh
          ;; Project persistence
          :project/save effect-save-project
          :project/load effect-load-project

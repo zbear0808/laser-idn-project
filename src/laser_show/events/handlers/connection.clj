@@ -98,6 +98,12 @@
               (assoc-in [:backend :streaming :engine-count] 0)
               (assoc-in [:backend :streaming :multi-engine-state] nil))})
 
+(defn- handle-multi-streaming-refreshed
+  "Multi-engine streaming refreshed after projector state change.
+   Called by effect handler after engines are refreshed."
+  [{:keys [engine-count state]}]
+  {:state (assoc-in state [:backend :streaming :engine-count] engine-count)})
+
 
 ;; Configuration Handler
 
@@ -121,6 +127,7 @@
    - :idn/stop-multi-streaming - Stop all streaming engines
    - :idn/multi-streaming-started - Engines started confirmation
    - :idn/multi-streaming-stopped - Engines stopped confirmation
+   - :idn/multi-streaming-refreshed - Engines refreshed after projector state change
    
    Legacy single-projector events (backwards compatibility):
    - :idn/connect - Connect to single target
@@ -134,6 +141,7 @@
     :idn/stop-multi-streaming (handle-stop-multi-streaming event)
     :idn/multi-streaming-started (handle-multi-streaming-started event)
     :idn/multi-streaming-stopped (handle-multi-streaming-stopped event)
+    :idn/multi-streaming-refreshed (handle-multi-streaming-refreshed event)
     
     ;; Legacy single-projector (backwards compatibility)
     :idn/connect (handle-idn-connect event)
