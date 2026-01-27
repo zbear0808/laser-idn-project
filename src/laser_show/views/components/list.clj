@@ -8,15 +8,18 @@
    Features:
    - Multi-select with Click, Ctrl+Click, Shift+Click
    - Drag-and-drop reordering (single item or multiple selected items)
-   - Copy/paste operations with deep copy (new UUIDs)
+   - Copy/paste operations with deep copy (new UUIDs) via centralized clipboard
    - Delete with proper cleanup
    - Groups/folders with collapse/expand, nesting up to 3 levels
    - Renaming items and groups
    - Keyboard shortcuts (Ctrl+C/V/X/A/G, Delete, Escape, F2)
    
    Event Dispatch API:
-   - :on-change-event + :on-change-params - Dispatches event when items change
-   - :on-copy-fn - Called with copied items for parent to store in clipboard
+   All item operations dispatch to :list/* event handlers in handlers/list.clj.
+   Required props:
+   - :on-change-event + :on-change-params - Event to dispatch when items change
+   - :items-path - Path to items in state (for handlers to read current items)
+   - :clipboard-type - Type for clipboard operations (:cue-chain-items or :item-effects)
    
    Public API:
    - list-editor - Complete list editor with keyboard handling, drag-drop,
@@ -30,6 +33,7 @@
    [laser-show.common.util :as u]
    [laser-show.events.core :as events]
    [laser-show.subs :as subs]
+   [laser-show.state.clipboard :as clipboard]
    [laser-show.state.core :as state]
    [laser-show.views.components.list-dnd :as dnd]))
 
@@ -44,25 +48,6 @@
   "Get selected IDs set from component state."
   [component-id]
   (or (:selected-ids (get-ui-state component-id)) #{}))
-
-
-;; Event Dispatch Helpers
-
-(defn- invoke-items-changed!
-  "Dispatch the on-change-event if present.
-   Always uses :items key in the dispatched event."
-  [props new-items]
-  (when-let [event-type (:on-change-event props)]
-    (events/dispatch! (assoc (or (:on-change-params props) {})
-                             :event/type event-type
-                             :items new-items))))
-
-(defn- invoke-copy!
-  "Call the :on-copy callback if present, with warning if missing."
-  [props copied-items]
-  (if-let [callback (:on-copy props)]
-    (callback copied-items)
-    (log/warn "copy-selected! no :on-copy callback in props")))
 
 
 ;; JavaFX Event Handler Helper
@@ -115,160 +100,82 @@
                      :component-id component-id}))
 
 
-;; Item Operations (Event Dispatch - No State Mutation)
+;; Item Operations - All dispatch events to handlers/list.clj
+;; Handlers read items from state using :items-path to avoid stale closures
 
-(defn- delete-selected!
-  "Delete selected items and dispatch on-change-event."
-  [component-id items props]
-  (when-let [selected-ids (seq (get-selected-ids component-id))]
-    (let [id->path (chains/find-paths-by-ids items selected-ids)
-          paths-to-delete (vals id->path)
-          new-items (chains/delete-paths-safely items paths-to-delete)]
-      (clear-selection! component-id)
-      (invoke-items-changed! props new-items))))
-
-(defn- copy-selected!
-  "Copy selected items and call :on-copy callback."
-  [component-id items props]
-  (when-let [selected-ids (seq (get-selected-ids component-id))]
-    (let [id->path (chains/find-paths-by-ids items selected-ids)
-          selected-items (mapv #(chains/get-item-at-path items %) (vals id->path))
-          copied-items (chains/deep-copy-items selected-items)]
-      (invoke-copy! props copied-items))))
-
-(defn- paste-items!
-  "Paste items from clipboard after selected item (or at end)."
-  [component-id items props]
-  (when-let [clipboard-items (seq (:clipboard-items props))]
-    (let [{:keys [last-selected-id]} (get-ui-state component-id)
-          items-to-paste (chains/deep-copy-items clipboard-items)
-          path-for-last (when last-selected-id (chains/find-path-by-id items last-selected-id))
-          insert-idx (if path-for-last
-                       (inc (first path-for-last))
-                       (count items))
-          new-items (reduce-kv
-                      (fn [chain idx item]
-                        (chains/insert-at-path chain [(+ insert-idx idx)] item))
-                      items
-                      (vec items-to-paste))
-          pasted-ids (set (map :id items-to-paste))
-          item-id (:id (last items-to-paste))]
-      (events/dispatch! (u/->map& component-id item-id
-                                  :event/type :list/select-item
-                                  :mode :single
-                                  :selected-ids-override pasted-ids))
-      (invoke-items-changed! props new-items))))
-
-
-;; Group Operations (Event Dispatch)
-
-(defn- normalize-selected-ids
-  "Remove redundant descendant IDs when a group AND all its descendants are selected."
-  [selected-ids items]
-  (let [selected-ids (set selected-ids)  ; Ensure it's a set for contains? checks
-        id->path (chains/find-paths-by-ids items selected-ids)
-        group-ids (filterv
-                    (fn [id]
-                      (when-let [path (get id->path id)]
-                        (chains/group? (chains/get-item-at-path items path))))
-                    selected-ids)]
-    (reduce
-      (fn [ids group-id]
-        (let [path (get id->path group-id)
-              group (chains/get-item-at-path items path)
-              descendant-ids (chains/collect-descendant-ids group)]
-          (if (and (seq descendant-ids)
-                   (every? #(contains? selected-ids %) descendant-ids))
-            (apply disj ids descendant-ids)
-            ids)))
-      (set selected-ids)
-      group-ids)))
-
-(defn- create-empty-group!
-  "Create an empty group at the end of the chain."
-  [component-id items props]
-  (let [new-group (chains/create-group [])
-        new-items (conj items new-group)
-        group-id (:id new-group)]
-    (events/dispatch! {:event/type :list/select-item
+(defn- dispatch-delete-selected!
+  "Dispatch :list/delete-selected event."
+  [props]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+    (events/dispatch! {:event/type :list/delete-selected
                        :component-id component-id
+                       :items-path items-path
+                       :on-change-event on-change-event
+                       :on-change-params on-change-params})))
+
+(defn- dispatch-copy-selected!
+  "Dispatch :list/copy-selected event."
+  [props]
+  (let [{:keys [component-id items-path clipboard-type]} props]
+    (events/dispatch! {:event/type :list/copy-selected
+                       :component-id component-id
+                       :items-path items-path
+                       :clipboard-type (or clipboard-type :cue-chain-items)})))
+
+(defn- dispatch-paste-items!
+  "Dispatch :list/paste-items event."
+  [props]
+  (let [{:keys [component-id items-path on-change-event on-change-params clipboard-type]} props]
+    (events/dispatch! {:event/type :list/paste-items
+                       :component-id component-id
+                       :items-path items-path
+                       :on-change-event on-change-event
+                       :on-change-params on-change-params
+                       :clipboard-type (or clipboard-type :cue-chain-items)})))
+
+
+;; Group Operations - All dispatch events to handlers/list.clj
+
+(defn- dispatch-create-empty-group!
+  "Dispatch :list/create-empty-group event."
+  [props]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+    (events/dispatch! {:event/type :list/create-empty-group
+                       :component-id component-id
+                       :items-path items-path
+                       :on-change-event on-change-event
+                       :on-change-params on-change-params})))
+
+(defn- dispatch-group-selected!
+  "Dispatch :list/group-selected event."
+  [props]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+    (events/dispatch! {:event/type :list/group-selected
+                       :component-id component-id
+                       :items-path items-path
+                       :on-change-event on-change-event
+                       :on-change-params on-change-params})))
+
+(defn- dispatch-ungroup!
+  "Dispatch :list/ungroup event."
+  [props group-id]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+    (events/dispatch! {:event/type :list/ungroup
+                       :component-id component-id
+                       :items-path items-path
                        :item-id group-id
-                       :mode :single})
-    (invoke-items-changed! props new-items)))
+                       :on-change-event on-change-event
+                       :on-change-params on-change-params})))
 
-(defn- group-selected!
-  "Group selected items into a new folder.
-   Items must be at the same nesting level to be grouped together."
-  [component-id items props]
-  (log/debug "group-selected! called"
-             {:component-id component-id
-              :items-count (count items)
-              :props-keys (keys props)})
-  (if (empty? items)
-    (log/warn "group-selected! called with EMPTY items vector!" {:component-id component-id})
-    (if-let [selected-ids (seq (get-selected-ids component-id))]
-      (let [normalized-ids (normalize-selected-ids selected-ids items)
-            _ (log/debug "group-selected! normalized IDs"
-                         {:original-count (count selected-ids)
-                          :normalized-count (count normalized-ids)
-                          :normalized-ids normalized-ids})
-            id->path (chains/find-paths-by-ids items normalized-ids)
-            all-paths (vals id->path)
-            _ (log/debug "group-selected! paths found"
-                         {:paths-count (count all-paths)
-                          :paths all-paths})
-            parent-paths (mapv (fn [path]
-                                 (if (= 1 (count path))
-                                   []
-                                   (vec (butlast path))))
-                               all-paths)
-            unique-parents (set parent-paths)
-            same-level? (= 1 (count unique-parents))
-            common-parent (first unique-parents)]
-        (if (and same-level? (seq all-paths))
-          (let [sorted-paths (sort (fn [a b] (compare (vec a) (vec b))) all-paths)
-                items-to-group (mapv #(chains/get-item-at-path items %) sorted-paths)
-                _ (log/debug "group-selected! items to group"
-                             {:items-to-group-count (count items-to-group)
-                              :items-to-group items-to-group})
-                new-group (chains/create-group items-to-group)
-                after-remove (chains/delete-paths-safely items sorted-paths)
-                _ (log/debug "group-selected! after remove"
-                             {:after-remove-count (count after-remove)})
-                first-path (first sorted-paths)
-                insert-path (if (empty? common-parent)
-                              [(first first-path)]
-                              (conj common-parent (last first-path)))
-                new-items (chains/insert-at-path after-remove insert-path new-group)
-                _ (log/debug "group-selected! new items after insert"
-                             {:new-items-count (count new-items)
-                              :new-items new-items})
-                group-id (:id new-group)]
-            (events/dispatch! {:event/type :list/select-item
-                               :component-id component-id
-                               :item-id group-id
-                               :mode :single})
-            (invoke-items-changed! props new-items))
-          (log/warn "group-selected! - items not at same level or no paths found"
-                    {:same-level? same-level?
-                     :all-paths-count (count all-paths)})))
-      (log/warn "group-selected! - no items selected"))))
-
-(defn- ungroup!
-  "Ungroup a folder, splicing its contents into the parent."
-  [component-id items props group-id]
-  (when-let [path (chains/find-path-by-id items group-id)]
-    (when (chains/group? (chains/get-item-at-path items path))
-      (let [new-items (chains/ungroup items path)]
-        (clear-selection! component-id)
-        (invoke-items-changed! props new-items)))))
-
-(defn- toggle-collapse!
-  "Toggle collapse/expand state of a group."
-  [items props group-id]
-  (when-let [path (chains/find-path-by-id items group-id)]
-    (let [new-items (chains/update-at-path items path #(update % :collapsed? not))]
-      (invoke-items-changed! props new-items))))
+(defn- dispatch-toggle-collapse!
+  "Dispatch :list/toggle-collapse event."
+  [props group-id]
+  (let [{:keys [items-path on-change-event on-change-params]} props]
+    (events/dispatch! {:event/type :list/toggle-collapse
+                       :items-path items-path
+                       :item-id group-id
+                       :on-change-event on-change-event
+                       :on-change-params on-change-params})))
 
 
 ;; Rename Operations (Event Dispatching)
@@ -285,22 +192,28 @@
   (events/dispatch! {:event/type :list/cancel-rename
                      :component-id component-id}))
 
-(defn- commit-rename!
-  "Commit rename and update item name."
-  [component-id items props item-id new-name]
-  (when-let [path (chains/find-path-by-id items item-id)]
-    (let [new-items (chains/update-at-path items path #(assoc % :name new-name))]
-      (cancel-rename! component-id)
-      (invoke-items-changed! props new-items))))
+(defn- dispatch-commit-rename!
+  "Dispatch :list/commit-rename event."
+  [props item-id new-name]
+  (let [{:keys [component-id items-path on-change-event on-change-params]} props]
+    (events/dispatch! {:event/type :list/commit-rename
+                       :component-id component-id
+                       :items-path items-path
+                       :item-id item-id
+                       :new-name new-name
+                       :on-change-event on-change-event
+                       :on-change-params on-change-params})))
 
-
-
-(defn- set-enabled!
-  "Set enabled/disabled state for an item."
-  [items props item-id enabled?]
-  (when-let [path (chains/find-path-by-id items item-id)]
-    (let [new-items (chains/update-at-path items path #(assoc % :enabled? enabled?))]
-      (invoke-items-changed! props new-items))))
+(defn- dispatch-set-enabled!
+  "Dispatch :list/set-enabled event."
+  [props item-id enabled?]
+  (let [{:keys [items-path on-change-event on-change-params]} props]
+    (events/dispatch! {:event/type :list/set-enabled
+                       :items-path items-path
+                       :item-id item-id
+                       :enabled? enabled?
+                       :on-change-event on-change-event
+                       :on-change-params on-change-params})))
 
 
 ;; Helper Functions
@@ -404,7 +317,7 @@
 
 (defn- rename-text-field
   "Create a text field for inline renaming with auto-focus and select-all."
-  [{:keys [component-id items props item-id current-name style-class]}]
+  [{:keys [component-id props item-id current-name style-class]}]
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created (fn [^javafx.scene.control.TextField node]
                  (javafx.application.Platform/runLater
@@ -415,8 +328,8 @@
           :text (or current-name "Untitled")
           :style-class style-class
           :on-action (fn [^javafx.event.ActionEvent e]
-                       (commit-rename! component-id items props item-id
-                                       (.getText ^javafx.scene.control.TextField (.getSource e))))
+                       (dispatch-commit-rename! props item-id
+                                                (.getText ^javafx.scene.control.TextField (.getSource e))))
           :on-key-pressed (fn [^javafx.scene.input.KeyEvent e]
                             (when (= (.getCode e) javafx.scene.input.KeyCode/ESCAPE)
                               (cancel-rename! component-id)))
@@ -454,17 +367,16 @@
             :children [{:fx/type :button
                         :text (if collapsed? "▶" "▼")
                         :style-class "group-collapse-btn"
-                        :on-action (fn [_] (toggle-collapse! items props group-id))}
+                        :on-action (fn [_] (dispatch-toggle-collapse! props group-id))}
                        
                        {:fx/type :check-box
                         :selected enabled?
                         :on-selected-changed (fn [new-enabled?]
-                                               (set-enabled! items props group-id new-enabled?))}
+                                               (dispatch-set-enabled! props group-id new-enabled?))}
                        
                        (if renaming?
                          {:fx/type rename-text-field
                           :component-id component-id
-                          :items items
                           :props props
                           :item-id group-id
                           :current-name (:name group)
@@ -482,7 +394,7 @@
                        {:fx/type :button
                         :text "⊗"
                         :style-class "group-ungroup-btn"
-                        :on-action (fn [_] (ungroup! component-id items props group-id))}]}}))
+                        :on-action (fn [_] (dispatch-ungroup! props group-id))}]}}))
 
 
 ;; ============================================================================
@@ -518,12 +430,11 @@
             :children [{:fx/type :check-box
                         :selected enabled?
                         :on-selected-changed (fn [new-enabled?]
-                                               (set-enabled! items props item-id new-enabled?))}
+                                               (dispatch-set-enabled! props item-id new-enabled?))}
                        
                        (if renaming?
                          {:fx/type rename-text-field
                           :component-id component-id
-                          :items items
                           :props props
                           :item-id item-id
                           :current-name item-label
@@ -580,18 +491,18 @@
 
 (defn- group-toolbar
   "Toolbar with group-related buttons."
-  [{:keys [component-id items props selection-count can-create-group?]}]
+  [{:keys [props selection-count can-create-group?]}]
   {:fx/type :h-box
    :spacing 4
    :children [{:fx/type :button
                :text "🗁 New"
                :style-class "chain-toolbar-btn"
-               :on-action (fn [_] (create-empty-group! component-id items props))}
+               :on-action (fn [_] (dispatch-create-empty-group! props))}
               {:fx/type :button
                :text "☐ Group"
                :disable (or (zero? selection-count) (not can-create-group?))
                :style-class "chain-toolbar-btn"
-               :on-action (fn [_] (group-selected! component-id items props))}]})
+               :on-action (fn [_] (dispatch-group-selected! props))}]})
 
 
 ;; Main Sidebar Component
@@ -632,8 +543,6 @@
 
                 (when allow-groups?
                   {:fx/type group-toolbar
-                   :component-id component-id
-                   :items items
                    :props props
                    :selection-count selection-count
                    :can-create-group? can-create-group?})
@@ -644,17 +553,17 @@
                              :text "Copy"
                              :disable (zero? selection-count)
                              :style-class "chain-toolbar-btn"
-                             :on-action (fn [_] (copy-selected! component-id items props))}
+                             :on-action (fn [_] (dispatch-copy-selected! props))}
                             {:fx/type :button
                              :text "Paste"
                              :disable (not can-paste?)
                              :style-class "chain-toolbar-btn"
-                             :on-action (fn [_] (paste-items! component-id items props))}
+                             :on-action (fn [_] (dispatch-paste-items! props))}
                             {:fx/type :button
                              :text "Del"
                              :disable (zero? selection-count)
                              :style-class "chain-toolbar-btn-danger"
-                             :on-action (fn [_] (delete-selected! component-id items props))}]}
+                             :on-action (fn [_] (dispatch-delete-selected! props))}]}
                 (if (empty? items)
                   {:fx/type :label
                    :text empty-text
@@ -761,19 +670,19 @@
             (let [handled? (cond
                              (and ctrl? (= code javafx.scene.input.KeyCode/C))
                              (do (log/debug "Handling Ctrl+C (copy)")
-                                 (copy-selected! component-id items props)
+                                 (dispatch-copy-selected! props)
                                  true)
 
                              (and ctrl? (= code javafx.scene.input.KeyCode/V))
                              (do (log/debug "Handling Ctrl+V (paste)"
                                             {:clipboard-items-count (count (:clipboard-items props))})
-                                 (paste-items! component-id items props)
+                                 (dispatch-paste-items! props)
                                  true)
 
                              (and ctrl? (= code javafx.scene.input.KeyCode/X))
                              (do (log/debug "Handling Ctrl+X (cut)")
-                                 (copy-selected! component-id items props)
-                                 (delete-selected! component-id items props)
+                                 (dispatch-copy-selected! props)
+                                 (dispatch-delete-selected! props)
                                  true)
 
                              (and ctrl? (= code javafx.scene.input.KeyCode/A))
@@ -783,12 +692,12 @@
 
                              (and ctrl? (= code javafx.scene.input.KeyCode/G))
                              (do (log/debug "Handling Ctrl+G (group)")
-                                 (group-selected! component-id items props)
+                                 (dispatch-group-selected! props)
                                  true)
 
                              (= code javafx.scene.input.KeyCode/DELETE)
                              (do (log/debug "Handling Delete")
-                                 (delete-selected! component-id items props)
+                                 (dispatch-delete-selected! props)
                                  true)
 
                              (= code javafx.scene.input.KeyCode/ESCAPE)
@@ -856,9 +765,12 @@
                    :else
                    (fn [item] (or (:name item) fallback-label)))
         
-        handler-props {:on-change-event on-change-event
+        handler-props {:component-id component-id
+                       :items-path items-path
+                       :on-change-event on-change-event
                        :on-change-params on-change-params
                        :clipboard-items clipboard-items
+                       :clipboard-type (get on-change-params :clipboard-type :cue-chain-items)
                        :on-copy on-copy-fn}
         
         {:keys [items-atom props-atom]} (get-or-create-handler-atoms! component-id)

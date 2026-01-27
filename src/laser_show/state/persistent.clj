@@ -179,6 +179,7 @@
   "Load all state from a zip file.
    Merges loaded data into existing state.
    Updates project state with file path.
+   Runs migrations to handle legacy data formats.
    
    Parameters:
    - zip-path - Path to the zip file to load

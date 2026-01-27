@@ -206,7 +206,7 @@
       (is (= 0.5 (:duty-cycle new-value))))))
 
 (deftest test-build-random-modulator
-  (testing "Random modulator has period and period-unit parameters"
+  (testing "Random modulator has period and time-unit parameters"
     (let [event (merge sample-event-base
                        {:event/type :modulator/set-type
                         :param-spec sample-param-spec
@@ -216,4 +216,4 @@
           new-value (get-in result [:dispatch :value])]
       (is (= :random (:type new-value)))
       (is (contains? new-value :period))
-      (is (contains? new-value :period-unit)))))
+      (is (contains? new-value :time-unit)))))

@@ -74,12 +74,12 @@
 (defn- handle-cue-chain-add-preset
   "Add a preset to the cue chain.
    
-   Supports both legacy format (preset-id) and new data-driven format (item-id from bank).
+   Expects :item-id with the preset ID (e.g., :circle, :wave).
+   Optionally accepts :item with full preset definition for advanced use cases.
    
    Auto-selects the newly added preset for better UX."
-  [{:keys [col row preset-id item-id state]}]
-  (let [;; Support both old :preset-id and new :item-id (from data-driven banks)
-        pid (or preset-id item-id)
+  [{:keys [col row item-id state]}]
+  (let [pid item-id
         ;; Ensure cell exists with default destination-zone routing to 'All'
         ensure-cell (fn [s]
                       (if (get-in s [:chains :cue-chains [col row]])

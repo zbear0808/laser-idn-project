@@ -21,16 +21,7 @@
                   text-primary text-muted
                   border-default bg-primary]} theme/semantic-colors]
       
-      {;; Store colors as keywords for code access (legacy support)
-       ::background bg-elevated
-       ::background-hover bg-hover
-       ::background-focused bg-interactive
-       ::text text-primary
-       ::border border-default
-       ::separator border-default
-       ::header-background bg-primary
-
-       ".header-bar"
+      {".header-bar"
        {:-fx-background-color bg-primary}
 
        ".window-title"

@@ -131,17 +131,6 @@
         ":pressed"
         {:-fx-background-color bg-active}}
        
-       ;; Legacy effect bank button (alias for bank-item-btn)
-       ".effect-btn"
-       {:-fx-background-color bg-interactive
-        :-fx-text-fill text-primary
-        :-fx-font-size 10
-        :-fx-padding ["4px" "8px"]
-        :-fx-cursor "hand"
-        
-        ":hover"
-        {:-fx-background-color bg-hover}}
-       
        
        ;; Retrigger Button (for modulator controls)
        

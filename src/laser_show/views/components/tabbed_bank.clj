@@ -110,9 +110,9 @@
                  :active-tab active
                  :on-tab-change on-tab-change}
                 {:fx/type :scroll-pane
-                 :fit-to-width true
-                 :v-box/vgrow :always
-                 :style-class "scroll-pane-transparent"
+                  :fit-to-width true
+                  :v-box/vgrow :always
+                  :style-class "scroll-pane-base"
                  :style (str "-fx-background-color: " bg-color "; -fx-background: " bg-color ";")
                  :content {:fx/type :flow-pane
                            :hgap hg

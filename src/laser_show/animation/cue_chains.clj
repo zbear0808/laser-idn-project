@@ -12,7 +12,7 @@
    {:items [{:type :preset
              :id (uuid)
              :preset-id :circle
-             :params {:radius 0.5 :color [1.0 1.0 1.0]}
+             :params {:radius 0.5 :red 1.0 :green 1.0 :blue 1.0}
              :effects []
              :enabled? true}
             {:type :group

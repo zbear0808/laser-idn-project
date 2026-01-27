@@ -17,10 +17,14 @@
   [key label default min-val max-val]
   {:key key :label label :type :int :default default :min min-val :max max-val})
 
-(defn color-param
-  "Define a color parameter."
-  [key label default]
-  {:key key :label label :type :color :default default})
+(defn color-params
+  "Define RGB color parameters as separate float components.
+   Returns a vector of three param definitions for :red, :green, :blue.
+   This format enables per-channel modulator support."
+  [label [r g b]]
+  [{:key :red :label (str label " R") :type :float :default r :min 0.0 :max 1.0}
+   {:key :green :label (str label " G") :type :float :default g :min 0.0 :max 1.0}
+   {:key :blue :label (str label " B") :type :float :default b :min 0.0 :max 1.0}])
 
 
 ;; Built-in Presets
@@ -36,69 +40,69 @@
   {:id :circle
    :name "Circle"
    :category :geometric
-   :parameters [(float-param :radius "Radius" 0.5 0.1 1.0)
-                (color-param :color "Color" [1.0 1.0 1.0])]
+   :parameters (into [(float-param :radius "Radius" 0.5 0.1 1.0)]
+                     (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/circle-frame})
 
 (def preset-square
   {:id :square
    :name "Square"
    :category :geometric
-   :parameters [(float-param :size "Size" 0.5 0.1 1.0)
-                (color-param :color "Color" [1.0 1.0 1.0])]
+   :parameters (into [(float-param :size "Size" 0.5 0.1 1.0)]
+                     (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/square-frame})
 
 (def preset-triangle
   {:id :triangle
    :name "Triangle"
    :category :geometric
-   :parameters [(float-param :size "Size" 0.5 0.1 1.0)
-                (color-param :color "Color" [1.0 1.0 1.0])]
+   :parameters (into [(float-param :size "Size" 0.5 0.1 1.0)]
+                     (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/triangle-frame})
 
 (def preset-spiral
   {:id :spiral
    :name "Spiral"
    :category :geometric
-   :parameters [(int-param :turns "Turns" 3 1 10)
-                (float-param :start-radius "Inner Radius" 0.1 0.0 0.5)
-                (float-param :end-radius "Outer Radius" 0.5 0.2 1.0)
-                (color-param :color "Color" [1.0 1.0 1.0])]
+   :parameters (into [(int-param :turns "Turns" 3 1 10)
+                      (float-param :start-radius "Inner Radius" 0.1 0.0 0.5)
+                      (float-param :end-radius "Outer Radius" 0.5 0.2 1.0)]
+                     (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/spiral-frame})
 
 (def preset-star
   {:id :star
    :name "Star"
    :category :geometric
-   :parameters [(int-param :spikes "Spikes" 5 3 12)
-                (float-param :outer-radius "Outer Radius" 0.5 0.2 1.0)
-                (float-param :inner-radius "Inner Radius" 0.25 0.1 0.5)
-                (color-param :color "Color" [1.0 1.0 1.0])]
+   :parameters (into [(int-param :spikes "Spikes" 5 3 12)
+                      (float-param :outer-radius "Outer Radius" 0.5 0.2 1.0)
+                      (float-param :inner-radius "Inner Radius" 0.25 0.1 0.5)]
+                     (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/star-frame})
 
 (def preset-wave
   {:id :wave
    :name "Wave"
    :category :wave
-   :parameters [(float-param :amplitude "Amplitude" 0.3 0.1 0.8)
-                (int-param :frequency "Frequency" 2 1 8)
-                (color-param :color "Color" [1.0 1.0 1.0])]
+   :parameters (into [(float-param :amplitude "Amplitude" 0.3 0.1 0.8)
+                      (int-param :frequency "Frequency" 2 1 8)]
+                     (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/wave-frame})
 
 (def preset-beam-fan
   {:id :beam-fan
    :name "Beam Fan"
    :category :beam
-   :parameters [(int-param :num-points "Points" 8 2 32)
-                (color-param :color "Color" [1.0 1.0 1.0])]
+   :parameters (into [(int-param :num-points "Points" 8 2 32)]
+                     (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/beam-fan-frame})
 
 (def preset-horizontal-line
   {:id :horizontal-line
    :name "Horizontal Line"
    :category :beam
-   :parameters [(float-param :length "Length" 1.0 0.1 2.0)
-                (color-param :color "Color" [1.0 1.0 1.0])]
+   :parameters (into [(float-param :length "Length" 1.0 0.1 2.0)]
+                     (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/horizontal-line-frame})
 
 ;; Preset Registry

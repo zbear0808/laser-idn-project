@@ -9,7 +9,10 @@
    - :float / :int - Numeric slider with text field
    - :bool - Checkbox
    - :choice - Combo box dropdown
-   - :color - Color picker (RGB vector)
+   
+   Note: Color parameters are now handled as separate :red, :green, :blue floats
+   for modulator support. Use param-color-picker directly when you need a unified
+   color picker interface that reads/writes these separate RGB params.
    
    Usage:
    ```clojure
@@ -150,25 +153,19 @@
 (defn param-color-picker
   "Color picker for RGB color parameters.
    
-   Expects color values as [r g b] vectors with NORMALIZED 0.0-1.0 components.
+   Reads color from separate :red, :green, :blue values in current-params map
+   with NORMALIZED 0.0-1.0 components.
    The color picker displays/edits using the native JavaFX color picker.
    
    Props:
-   - :param-key - Parameter key
-   - :param-spec - Parameter specification with optional :label and :default [r g b]
-   - :current-value - Current color value [r g b] normalized 0.0-1.0
-   - :on-change-event - Event template with :param-key added
+   - :current-params - Map containing :red, :green, :blue values (0.0-1.0)
+   - :on-change-event - Event template for color changes (no :param-key needed)
    - :label-width - Optional label width (default 80)"
-  [{:keys [param-key param-spec current-value on-change-event label-width]}]
-  (let [{:keys [label]} param-spec
-        ;; Ensure we have valid color vector (normalized 0.0-1.0)
-        color-vec (if (and (vector? current-value) (= 3 (count current-value)))
-                    current-value
-                    (if (and (vector? (:default param-spec)) (= 3 (count (:default param-spec))))
-                      (:default param-spec)
-                      [1.0 1.0 1.0]))
-        [r g b] color-vec
-        display-label (or label (name param-key))
+  [{:keys [current-params on-change-event label-width]}]
+  (let [;; Read separate RGB values from params map
+        r (get current-params :red 1.0)
+        g (get current-params :green 1.0)
+        b (get current-params :blue 1.0)
         label-w (or label-width 80)
         ;; Create JavaFX Color object from normalized values
         color-value (javafx.scene.paint.Color/color
@@ -179,13 +176,13 @@
      :spacing 8
      :alignment :center-left
      :children [{:fx/type :label
-                 :text display-label
+                 :text "Color"
                  :pref-width label-w
                  :style-class ["label-secondary"]}
                 {:fx/type :color-picker
                  :value color-value
                  :pref-width 100
-                 :on-action (assoc on-change-event :param-key param-key)}]}))
+                 :on-action on-change-event}]}))
 
 
 ;; Parameter Control Router
@@ -194,24 +191,21 @@
 (defn param-control
   "Render appropriate control based on parameter type.
    
-   Routes to param-slider, param-choice, param-checkbox, or param-color-picker
+   Routes to param-slider, param-choice, or param-checkbox
    based on the :type field in param-spec.
+   
+   Note: Color parameters are handled as separate :red, :green, :blue floats.
+   Use param-color-picker directly for a unified color picker interface.
    
    Props:
    - :param-key - Parameter key
-   - :param-spec - Parameter specification with :type (:float :int :bool :choice :color)
+   - :param-spec - Parameter specification with :type (:float :int :bool :choice)
    - :current-value - Current parameter value
    - :on-change-event - Event template for value changes
    - :on-text-event - Event template for text field changes (slider only)
    - :label-width - Optional label width (default 80)"
   [{:keys [param-spec] :as props}]
   (case (:type param-spec :float)
-    :color {:fx/type param-color-picker
-            :param-key (:param-key props)
-            :param-spec param-spec
-            :current-value (:current-value props)
-            :on-change-event (:on-change-event props)
-            :label-width (:label-width props)}
     :choice {:fx/type param-choice
              :param-key (:param-key props)
              :param-spec param-spec

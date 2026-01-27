@@ -34,9 +34,7 @@
             [laser-show.state.core :as state]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.events.handlers :as handlers]
-            [laser-show.backend.streaming-engine :as streaming-engine]
             [laser-show.backend.multi-engine :as multi-engine]
-            [laser-show.services.frame-service :as frame-service]
             [laser-show.common.util :as u]
             [laser-show.idn.hello :as idn-hello])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
@@ -98,47 +96,6 @@
             ;; Clamp to reasonable range
             clamped-bpm (u/clamp bpm 40.0 300.0)]
         (dispatch {:event/type :timing/set-bpm :bpm clamped-bpm})))))
-
-(defn- effect-idn-start-streaming
-  "Effect that starts IDN streaming to a target.
-   Creates a streaming engine with a frame provider that generates
-   the same frames shown in the preview window."
-  [{:keys [host port]} dispatch]
-  (future
-    (try
-      (log/info (format "Starting IDN streaming to %s:%d..." host (or port 7255)))
-      
-      ;; Create frame provider - this returns the same frames as preview
-      (let [frame-provider (frame-service/create-frame-provider)
-            ;; Create streaming engine
-            engine (streaming-engine/create-engine 
-                     host 
-                     frame-provider
-                     :port (or port 7255)
-                     :fps streaming-engine/DEFAULT_FPS)]
-        ;; Start the engine
-        (streaming-engine/start! engine)
-        
-        (log/info "IDN streaming started successfully")
-        (dispatch {:event/type :idn/connected 
-                   :engine engine
-                   :target host}))
-      (catch Exception e
-        (log/error "IDN streaming failed:" (.getMessage e))
-        (dispatch {:event/type :idn/connection-failed
-                   :error (.getMessage e)})))))
-
-(defn- effect-idn-stop-streaming
-  "Effect that stops IDN streaming gracefully."
-  [_ _dispatch]
-  (log/info "Stopping IDN streaming...")
-  (when-let [engine (get-in (state/get-raw-state) [:backend :idn :streaming-engine])]
-    (when (and engine (not= engine :placeholder-engine))
-      (try
-        (streaming-engine/stop! engine)
-        (log/info "IDN streaming stopped")
-        (catch Exception e
-          (log/error "Error stopping IDN streaming:" (.getMessage e)))))))
 
 (defn- effect-save-project
   "Effect that saves the project to disk."
@@ -369,10 +326,9 @@
    - :dispatch - dispatch another event
    - :dispatch-later - dispatch event after delay
    - :timing/calculate-bpm - calculate BPM from taps
-   - :idn/start-streaming - start IDN streaming (legacy single-target)
-   - :idn/stop-streaming - stop IDN streaming (legacy single-target)
    - :multi-engine/start - start multi-engine streaming to all projectors
    - :multi-engine/stop - stop multi-engine streaming
+   - :multi-engine/refresh - refresh engines when projectors change
    - :project/save - save project to disk
    - :project/load - load project from disk
    - :fx/show-file-chooser - show file open/save dialog
@@ -393,10 +349,7 @@
          :dispatch effect-dispatch
          :dispatch-later effect-dispatch-later
          :timing/calculate-bpm effect-timing-calculate-bpm
-         ;; Legacy single-target streaming
-         :idn/start-streaming effect-idn-start-streaming
-         :idn/stop-streaming effect-idn-stop-streaming
-         ;; Multi-engine streaming (new zone-aware system)
+         ;; Multi-engine streaming (zone-aware system)
          :multi-engine/start effect-multi-engine-start
          :multi-engine/stop effect-multi-engine-stop
          :multi-engine/refresh effect-multi-engine-refresh

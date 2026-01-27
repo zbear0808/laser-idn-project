@@ -39,14 +39,18 @@
 
 (defn generate-circle
   "Generate points for a circle.
-   Options: :num-points (64), :radius (0.5), :center ([0 0]), :color ([1.0 1.0 1.0])"
-  [& {:keys [num-points radius center color]
+   Options: :num-points (64), :radius (0.5), :center ([0 0]), :red (1.0), :green (1.0), :blue (1.0)"
+  [& {:keys [num-points radius center red green blue]
       :or {num-points 64
            radius 0.5
            center [0 0]
-           color [1.0 1.0 1.0]}}]
+           red 1.0
+           green 1.0
+           blue 1.0}}]
   (let [[cx cy] center
-        [r g b] color
+        r (double red)
+        g (double green)
+        b (double blue)
         cx' (double cx)
         cy' (double cy)
         radius' (double radius)
@@ -63,15 +67,19 @@
 
 (defn generate-line
   "Generate points for a line segment.
-   Options: :num-points (32), :start ([-0.5 0]), :end ([0.5 0]), :color ([1.0 1.0 1.0])"
-  [& {:keys [num-points start end color]
+   Options: :num-points (32), :start ([-0.5 0]), :end ([0.5 0]), :red (1.0), :green (1.0), :blue (1.0)"
+  [& {:keys [num-points start end red green blue]
       :or {num-points 32
            start [-0.5 0]
            end [0.5 0]
-           color [1.0 1.0 1.0]}}]
+           red 1.0
+           green 1.0
+           blue 1.0}}]
   (let [[x1 y1] start
         [x2 y2] end
-        [r g b] color
+        r (double red)
+        g (double green)
+        b (double blue)
         x1' (double x1) y1' (double y1)
         x2' (double x2) y2' (double y2)
         num-pts (long num-points)
@@ -86,14 +94,18 @@
 
 (defn generate-square
   "Generate points for a square.
-   Options: :num-points per side (16), :size (0.5), :center ([0 0]), :color ([1.0 1.0 1.0])"
-  [& {:keys [num-points size center color]
+   Options: :num-points per side (16), :size (0.5), :center ([0 0]), :red (1.0), :green (1.0), :blue (1.0)"
+  [& {:keys [num-points size center red green blue]
       :or {num-points 16
            size 0.5
            center [0 0]
-           color [1.0 1.0 1.0]}}]
+           red 1.0
+           green 1.0
+           blue 1.0}}]
   (let [[cx cy] center
-        [r g b] color
+        r (double red)
+        g (double green)
+        b (double blue)
         cx' (double cx)
         cy' (double cy)
         half (/ (double size) 2.0)
@@ -111,14 +123,18 @@
 
 (defn generate-triangle
   "Generate points for a triangle.
-   Options: :num-points per side (21), :size (0.5), :center ([0 0]), :color ([1.0 1.0 1.0])"
-  [& {:keys [num-points size center color]
+   Options: :num-points per side (21), :size (0.5), :center ([0 0]), :red (1.0), :green (1.0), :blue (1.0)"
+  [& {:keys [num-points size center red green blue]
       :or {num-points 21
            size 0.5
            center [0 0]
-           color [1.0 1.0 1.0]}}]
+           red 1.0
+           green 1.0
+           blue 1.0}}]
   (let [[cx cy] center
-        [r g b] color
+        r (double red)
+        g (double green)
+        b (double blue)
         cx' (double cx)
         cy' (double cy)
         size' (double size)
@@ -136,16 +152,20 @@
 (defn generate-spiral
   "Generate points for a spiral.
    Options: :num-points (128), :turns (3), :start-radius (0.1), :end-radius (0.5),
-            :center ([0 0]), :color ([1.0 1.0 1.0])"
-  [& {:keys [num-points turns start-radius end-radius center color]
+            :center ([0 0]), :red (1.0), :green (1.0), :blue (1.0)"
+  [& {:keys [num-points turns start-radius end-radius center red green blue]
       :or {num-points 128
            turns 3
            start-radius 0.1
            end-radius 0.5
            center [0 0]
-           color [1.0 1.0 1.0]}}]
+           red 1.0
+           green 1.0
+           blue 1.0}}]
   (let [[cx cy] center
-        [r g b] color
+        r (double red)
+        g (double green)
+        b (double blue)
         cx' (double cx)
         cy' (double cy)
         start-radius' (double start-radius)
@@ -167,16 +187,20 @@
 (defn generate-star
   "Generate points for a star.
    Options: :num-points per segment (8), :spikes (5), :outer-radius (0.5),
-            :inner-radius (0.25), :center ([0 0]), :color ([1.0 1.0 1.0])"
-  [& {:keys [num-points spikes outer-radius inner-radius center color]
+            :inner-radius (0.25), :center ([0 0]), :red (1.0), :green (1.0), :blue (1.0)"
+  [& {:keys [num-points spikes outer-radius inner-radius center red green blue]
       :or {num-points 8
            spikes 5
            outer-radius 0.5
            inner-radius 0.25
            center [0 0]
-           color [1.0 1.0 1.0]}}]
+           red 1.0
+           green 1.0
+           blue 1.0}}]
   (let [[cx cy] center
-        [r g b] color
+        r (double red)
+        g (double green)
+        b (double blue)
         cx' (double cx)
         cy' (double cy)
         outer-radius' (double outer-radius)
@@ -218,44 +242,48 @@
          t/make-frame)))
 
 (def circle-frame
-  "Generate a circle frame. Params: :radius, :color, :center, :num-points"
+  "Generate a circle frame. Params: :radius, :red, :green, :blue, :center, :num-points"
   (shape-generator->frame-generator generate-circle))
 
 (def square-frame
-  "Generate a square frame. Params: :size, :color, :center, :num-points"
+  "Generate a square frame. Params: :size, :red, :green, :blue, :center, :num-points"
   (shape-generator->frame-generator generate-square))
 
 (def triangle-frame
-  "Generate a triangle frame. Params: :size, :color, :center, :num-points"
+  "Generate a triangle frame. Params: :size, :red, :green, :blue, :center, :num-points"
   (shape-generator->frame-generator generate-triangle))
 
 (def spiral-frame
-  "Generate a spiral frame. Params: :turns, :start-radius, :end-radius, :color, :center, :num-points"
+  "Generate a spiral frame. Params: :turns, :start-radius, :end-radius, :red, :green, :blue, :center, :num-points"
   (shape-generator->frame-generator generate-spiral))
 
 (def star-frame
-  "Generate a star frame. Params: :spikes, :outer-radius, :inner-radius, :color, :center, :num-points"
+  "Generate a star frame. Params: :spikes, :outer-radius, :inner-radius, :red, :green, :blue, :center, :num-points"
   (shape-generator->frame-generator generate-star))
 
 
 (defn horizontal-line-frame
   "Generate a horizontal line spanning the projection area.
-   Params: :length (default 1.0), :color"
-  [{:keys [length color]
-    :or {length 1.0 color [1.0 1.0 1.0]}}]
+   Params: :length (default 1.0), :red (1.0), :green (1.0), :blue (1.0)"
+  [{:keys [length red green blue]
+    :or {length 1.0 red 1.0 green 1.0 blue 1.0}}]
   (let [half-length (/ (double length) 2.0)]
     (->> (generate-line :num-points 64
                         :start [(- half-length) 0]
                         :end [half-length 0]
-                        :color color)
+                        :red red
+                        :green green
+                        :blue blue)
          t/make-frame)))
 
 (defn wave-frame
   "Generate a sine wave frame.
-   Params: :amplitude (default 0.3), :frequency (default 2), :color"
-  [{:keys [amplitude frequency color]
-    :or {amplitude 0.3 frequency 2 color [1.0 1.0 1.0]}}]
-  (let [[r g b] color
+   Params: :amplitude (default 0.3), :frequency (default 2), :red (1.0), :green (1.0), :blue (1.0)"
+  [{:keys [amplitude frequency red green blue]
+    :or {amplitude 0.3 frequency 2 red 1.0 green 1.0 blue 1.0}}]
+  (let [r (double red)
+        g (double green)
+        b (double blue)
         amplitude' (double amplitude)
         frequency' (double frequency)]
     (->> (range 64)
@@ -270,10 +298,12 @@
   "Generate discrete beam points in a horizontal fan pattern.
    Points snake left-to-right then back for seamless looping.
    Blanking points separate each beam position.
-   Params: :num-points (8), :color ([1.0 1.0 1.0])"
-  [{:keys [num-points color]
-    :or {num-points 8 color [1.0 1.0 1.0]}}]
-  (let [[r g b] color
+   Params: :num-points (8), :red (1.0), :green (1.0), :blue (1.0)"
+  [{:keys [num-points red green blue]
+    :or {num-points 8 red 1.0 green 1.0 blue 1.0}}]
+  (let [r (double red)
+        g (double green)
+        b (double blue)
         x-min -0.99
         x-max 0.99
         y 0.0
@@ -292,3 +322,5 @@
                              (t/make-point x y r g b)
                              (t/blanked-point x y)])))
          t/make-frame)))
+
+

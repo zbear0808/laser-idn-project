@@ -107,10 +107,11 @@
     (cond
       (= renderer-type :rgb-curves)
       {:fx/type custom-renderers/rgb-curves-visual-editor
-       :domain rgb-domain
-       :entity-key rgb-entity-key
-       :effect-path rgb-effect-path
        :current-params current-params
+       :event-template {:event/type :chain/update-curve-point
+                        :domain rgb-domain
+                        :entity-key rgb-entity-key
+                        :effect-path rgb-effect-path}
        :dialog-data dialog-data}
       
       ;; Zone reroute is visual-only (zone group selector)
@@ -118,7 +119,7 @@
       {:fx/type custom-renderers/zone-reroute-visual-editor
        :fx/context context
        :current-params current-params
-       :on-change-event on-change-event}
+       :event-template on-change-event}
       
       ;; Other custom renderers have mode toggle
       :else

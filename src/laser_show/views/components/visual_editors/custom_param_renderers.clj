@@ -10,9 +10,10 @@
    - Zone Reroute: Zone group selector for routing effects
    - Hue Slider: Horizontal gradient for hue selection
    
-   These components support both:
-   1. Legacy props (:col, :row, :effect-idx, :effect-path) for effect chain editor
-   2. Event template pattern (:event-template) for generic reuse (e.g., projectors)
+   All visual editors use the event-template pattern:
+   - :event-template - Base event map that will be augmented with parameter values
+   - :current-params - Current parameter values for the effect
+   - :reset-event - (where applicable) Event for resetting to defaults
    
    Single-parameter visual editors (rotation, hue, hue-shift) support optional
    modulator toggle to enable animation without switching to numeric mode."
@@ -40,24 +41,19 @@
 (defn translate-visual-editor
   "Visual editor for translate effect - single draggable center point.
    
-   Supports two usage patterns:
-   
-   1. Effect chain editor props:
-      - :col, :row - Grid cell coordinates
-      - :effect-path - Path to effect
-      - :current-params - Current parameter values {:x ... :y ...}
-      - :param-specs - Parameter specifications from effect definition
-   
-   2. Event template pattern (for generic reuse, e.g., cue chain items):
-      - :current-params - Current parameter values (or :params as alias)
-      - :event-template - Base event map for on-point-drag (will add :param-map)
-      - :fx-key - (optional) Unique key for spatial canvas
-      - :width, :height - (optional) Canvas dimensions, default 280x280
-      - :hint-text - (optional) Hint text shown above canvas
-      - :bounds - (optional) {:x-min :x-max :y-min :y-max}, defaults from param-specs or ±2.0"
-  [{:keys [col row effect-path current-params params param-specs
+   Props:
+   - :current-params - Current parameter values {:x ... :y ...} (or :params as alias)
+   - :event-template - Base event map for on-point-drag (will add :param-map)
+   - :param-specs - (optional) Parameter specifications for extracting bounds
+   - :fx-key - (optional) Unique key for spatial canvas
+   - :width, :height - (optional) Canvas dimensions, default 280x280
+   - :hint-text - (optional) Hint text shown above canvas
+   - :bounds - (optional) {:x-min :x-max :y-min :y-max}, defaults from param-specs or ±2.0"
+  [{:keys [current-params params param-specs
            event-template fx-key width height hint-text bounds]
-    :or {width 280 height 280}}]
+    :or {width 280 height 280}
+    :as props}]
+  {:pre [(some? event-template)]}
   (let [;; Support both :current-params and :params (alias)
         params-map (or current-params params {})
         
@@ -77,18 +73,12 @@
                  :y-max (or (:max y-spec) 2.0)}))
             {:x-min -2.0 :x-max 2.0 :y-min -2.0 :y-max 2.0})
         
-        ;; Build on-point-drag event - use event-template if provided, else legacy pattern
+        ;; Build on-point-drag event from event-template
         param-map {:center {:x :x :y :y}}
-        on-point-drag-event (if event-template
-                              (assoc event-template :param-map param-map)
-                              {:event/type :chain/update-spatial-params
-                               :domain :effect-chains
-                               :entity-key [col row]
-                               :effect-path effect-path
-                               :param-map param-map})
+        on-point-drag-event (assoc event-template :param-map param-map)
         
         ;; Determine fx/key for spatial canvas
-        canvas-key (or fx-key [col row effect-path])
+        canvas-key (or fx-key :visual-editor)
         
         ;; Hint text
         actual-hint (or hint-text "Drag the point to adjust translation")]
@@ -134,25 +124,20 @@
 (defn corner-pin-visual-editor
   "Visual editor for corner pin effect - 4 draggable corners.
    
-   Supports two usage patterns:
-   
-   1. Effect chain editor props:
-      - :col, :row - Grid cell coordinates
-      - :effect-path - Path to effect
-      - :current-params - Current parameter values {:tl-x :tl-y :tr-x ...}
-      - :param-specs - Parameter specifications from effect definition
-   
-   2. Event template pattern (for generic reuse, e.g., projectors):
-      - :current-params - Current parameter values (or :params as alias)
-      - :event-template - Base event map for on-point-drag (will add :param-map)
-      - :reset-event - (optional) Event to dispatch on reset button click
-      - :fx-key - (optional) Unique key for spatial canvas
-      - :width, :height - (optional) Canvas dimensions, default 280x280
-      - :hint-text - (optional) Hint text shown above canvas
-      - :bounds - (optional) {:x-min :x-max :y-min :y-max}, defaults to ±1.5 or from param-specs"
-  [{:keys [col row effect-path current-params params param-specs
+   Props:
+   - :current-params - Current parameter values {:tl-x :tl-y :tr-x ...} (or :params as alias)
+   - :event-template - Base event map for on-point-drag (will add :param-map)
+   - :reset-event - (optional) Event to dispatch on reset button click
+   - :param-specs - (optional) Parameter specifications for extracting bounds
+   - :fx-key - (optional) Unique key for spatial canvas
+   - :width, :height - (optional) Canvas dimensions, default 280x280
+   - :hint-text - (optional) Hint text shown above canvas
+   - :bounds - (optional) {:x-min :x-max :y-min :y-max}, defaults to ±1.0 or from param-specs"
+  [{:keys [current-params params param-specs
            event-template reset-event fx-key width height hint-text bounds]
-    :or {width 280 height 280}}]
+    :or {width 280 height 280}
+    :as props}]
+  {:pre [(some? event-template)]}
   (let [;; Support both :current-params and :params (alias)
         params-map (or current-params params {})
         
@@ -178,21 +163,15 @@
                  :y-max (or (:max y-spec) 2.0)}))
             {:x-min -1.0 :x-max 1.0 :y-min -1.0 :y-max 1.0})
         
-        ;; Build on-point-drag event - use event-template if provided, else legacy pattern
+        ;; Build on-point-drag event from event-template
         corner-param-map {:tl {:x :tl-x :y :tl-y}
                          :tr {:x :tr-x :y :tr-y}
                          :bl {:x :bl-x :y :bl-y}
                          :br {:x :br-x :y :br-y}}
-        on-point-drag-event (if event-template
-                              (assoc event-template :param-map corner-param-map)
-                              {:event/type :chain/update-spatial-params
-                               :domain :effect-chains
-                               :entity-key [col row]
-                               :effect-path effect-path
-                               :param-map corner-param-map})
+        on-point-drag-event (assoc event-template :param-map corner-param-map)
         
         ;; Determine fx/key for spatial canvas
-        canvas-key (or fx-key [col row effect-path])
+        canvas-key (or fx-key :visual-editor)
         
         ;; Hint text
         actual-hint (or hint-text "Drag corners to adjust perspective mapping")]
@@ -262,30 +241,24 @@
 (defn rotate-visual-editor
  "Visual editor for rotation effect - circular dial.
   
-  Supports two usage patterns:
-  
-  1. Effect chain editor props:
-     - :col, :row - Grid cell coordinates
-     - :effect-path - Path to effect
-     - :current-params - Current parameter values {:angle ...}
-     - :param-specs - Parameter specifications from effect definition
-  
-  2. Event template pattern (for generic reuse):
-     - :current-params - Current parameter values (or :params as alias)
-     - :event-template - Base event map for on-angle-change (will add :param-key :value)
-     - :reset-event - Event to dispatch on right-click reset
-     - :fx-key - (optional) Unique key for canvas
-     - :width, :height - (optional) Canvas dimensions, default 280x280
-     - :hint-text - (optional) Hint text shown above canvas
+  Props:
+  - :current-params - Current parameter values {:angle ...} (or :params as alias)
+  - :event-template - Base event map for on-angle-change (will add :param-key :value)
+  - :reset-event - Event to dispatch on right-click reset
+  - :fx-key - (optional) Unique key for canvas
+  - :width, :height - (optional) Canvas dimensions, default 280x280
+  - :hint-text - (optional) Hint text shown above canvas
   
   Modulator support (optional):
-     - :enable-modulator? - Show modulator toggle button (default false)
-     - :param-spec - Parameter spec for :angle (used by modulator)
-     - :modulator-event-base - Base event for modulator operations"
- [{:keys [col row effect-path current-params params param-specs
+  - :enable-modulator? - Show modulator toggle button (default false)
+  - :param-spec - Parameter spec for :angle (used by modulator)
+  - :modulator-event-base - Base event for modulator operations"
+ [{:keys [current-params params
           event-template reset-event fx-key width height hint-text
           enable-modulator? param-spec modulator-event-base]
-   :or {width 280 height 280}}]
+   :or {width 280 height 280}
+   :as props}]
+ {:pre [(some? event-template) (some? reset-event)]}
  (let [;; Support both :current-params and :params (alias)
        params-map (or current-params params {})
        
@@ -296,23 +269,8 @@
        ;; (including inactive modulators where :active? is false)
        static-angle (mod-defs/get-static-value angle-value 0.0)
        
-       ;; Build on-angle-change event
-       on-angle-change-event (if event-template
-                               event-template
-                               {:event/type :chain/update-param
-                                :domain :effect-chains
-                                :entity-key [col row]
-                                :effect-path effect-path})
-       
-       ;; Build reset event
-       actual-reset-event (or reset-event
-                              {:event/type :chain/reset-params
-                               :domain :effect-chains
-                               :entity-key [col row]
-                               :effect-path effect-path})
-       
        ;; Determine fx/key for canvas
-       canvas-key (or fx-key [col row effect-path])
+       canvas-key (or fx-key :visual-editor)
        
        ;; Hint text
        actual-hint (or hint-text "Drag dial to adjust rotation • Right-click to reset")
@@ -353,8 +311,8 @@
                  :width width
                  :height height
                  :angle static-angle
-                 :on-angle-change (when-not is-modulated? on-angle-change-event)
-                 :on-reset (when-not is-modulated? actual-reset-event)}
+                 :on-angle-change (when-not is-modulated? event-template)
+                 :on-reset (when-not is-modulated? reset-event)}
                 
                 ;; Value display
                 {:fx/type :h-box
@@ -373,24 +331,18 @@
 (defn scale-visual-editor
  "Visual editor for scale effect - centered rectangle with handles.
   
-  Supports two usage patterns:
-  
-  1. Effect chain editor props:
-     - :col, :row - Grid cell coordinates
-     - :effect-path - Path to effect
-     - :current-params - Current parameter values {:x-scale :y-scale :uniform? ...}
-     - :param-specs - Parameter specifications from effect definition
-  
-  2. Event template pattern (for generic reuse):
-     - :current-params - Current parameter values (or :params as alias)
-     - :event-template - Base event map for on-scale-change
-     - :reset-event - Event to dispatch on right-click reset
-     - :fx-key - (optional) Unique key for canvas
-     - :width, :height - (optional) Canvas dimensions, default 280x280
-     - :hint-text - (optional) Hint text shown above canvas"
- [{:keys [col row effect-path current-params params param-specs
+  Props:
+  - :current-params - Current parameter values {:x-scale :y-scale :uniform? ...} (or :params as alias)
+  - :event-template - Base event map for on-scale-change
+  - :reset-event - Event to dispatch on right-click reset
+  - :fx-key - (optional) Unique key for canvas
+  - :width, :height - (optional) Canvas dimensions, default 280x280
+  - :hint-text - (optional) Hint text shown above canvas"
+ [{:keys [current-params params
           event-template reset-event fx-key width height hint-text]
-   :or {width 280 height 280}}]
+   :or {width 280 height 280}
+   :as props}]
+ {:pre [(some? event-template) (some? reset-event)]}
  (let [;; Support both :current-params and :params (alias)
        params-map (or current-params params {})
        
@@ -399,33 +351,11 @@
        y-scale (get params-map :y-scale 1.0)
        uniform? (get params-map :uniform? false)
        
-       ;; Build on-scale-change event
-       on-scale-change-event (if event-template
-                               event-template
-                               {:event/type :chain/update-scale-params
-                                :domain :effect-chains
-                                :entity-key [col row]
-                                :effect-path effect-path})
-       
-       ;; Build reset event with defaults for scale
-       actual-reset-event (or reset-event
-                              {:event/type :chain/reset-params
-                               :domain :effect-chains
-                               :entity-key [col row]
-                               :effect-path effect-path
-                               :defaults-map {:x-scale 1.0 :y-scale 1.0}})
-       
-       ;; Build uniform toggle event
-       on-uniform-change-event (if event-template
-                                 (assoc event-template :param-key :uniform?)
-                                 {:event/type :chain/update-param
-                                  :domain :effect-chains
-                                  :entity-key [col row]
-                                  :effect-path effect-path
-                                  :param-key :uniform?})
+       ;; Build uniform toggle event from event-template
+       on-uniform-change-event (assoc event-template :param-key :uniform?)
        
        ;; Determine fx/key for canvas
-       canvas-key (or fx-key [col row effect-path])
+       canvas-key (or fx-key :visual-editor)
        
        ;; Hint text
        actual-hint (or hint-text "Drag handles to scale • Right-click to reset")]
@@ -445,8 +375,8 @@
                 :x-scale x-scale
                 :y-scale y-scale
                 :uniform? uniform?
-                :on-scale-change on-scale-change-event
-                :on-reset actual-reset-event}
+                :on-scale-change event-template
+                :on-reset reset-event}
                
                {:fx/type :h-box
                 :spacing 12
@@ -487,29 +417,22 @@
  "Single curve editor for one color channel.
    
    Props:
-   - :domain - Chain domain (:effect-chains, :projector-effects, or :item-effects)
-   - :entity-key - Entity key ([col row] or projector-id)
-   - :effect-path - Path to effect
+   - :event-template - Base event map containing :domain, :entity-key, :effect-path
    - :channel - Channel keyword (:r, :g, or :b)
    - :current-points - Control points for this channel"
- [{:keys [domain entity-key effect-path channel current-points]}]
- (let [color (curve-channel-color channel)
+ [{:keys [event-template channel current-points]}]
+ (let [{:keys [domain entity-key effect-path]} event-template
+       color (curve-channel-color channel)
        points (or current-points [[0.0 0.0] [1.0 1.0]])
-       add-event {:event/type :chain/add-curve-point
-                  :domain domain
-                  :entity-key entity-key
-                  :effect-path effect-path
-                  :channel channel}
-       update-event {:event/type :chain/update-curve-point
-                     :domain domain
-                     :entity-key entity-key
-                     :effect-path effect-path
-                     :channel channel}
-       remove-event {:event/type :chain/remove-curve-point
-                     :domain domain
-                     :entity-key entity-key
-                     :effect-path effect-path
-                     :channel channel}
+       add-event (assoc event-template
+                        :event/type :chain/add-curve-point
+                        :channel channel)
+       update-event (assoc event-template
+                           :event/type :chain/update-curve-point
+                           :channel channel)
+       remove-event (assoc event-template
+                           :event/type :chain/remove-curve-point
+                           :channel channel)
        canvas-key [domain entity-key effect-path channel]]
    {:fx/type :v-box
     :spacing 8
@@ -531,13 +454,11 @@
  "Visual editor for RGB curves effect with tabbed R/G/B interface.
     
     Props:
-       - :domain - Chain domain (:effect-chains, :projector-effects, or :item-effects)
-       - :entity-key - Entity key ([col row], projector-id, or item-effects map)
-       - :effect-path - Path to effect
-       - :current-params - Current parameter values
-       - :dialog-data - Dialog state containing UI modes and active channel"
- [{:keys [domain entity-key effect-path current-params dialog-data]}]
- (let [
+    - :current-params - Current parameter values
+    - :event-template - Base event map containing :domain, :entity-key, :effect-path
+    - :dialog-data - Dialog state containing UI modes and active channel"
+ [{:keys [current-params event-template dialog-data]}]
+ (let [{:keys [domain entity-key effect-path]} event-template
        
        ;; Get active channel from dialog state
        active-channel (get-in dialog-data [:ui-modes effect-path :active-curve-channel] :r)
@@ -554,10 +475,8 @@
                       :b b-points
                       r-points)
        
-       tab-change-event {:event/type :chain/set-active-curve-channel
-                         :domain domain
-                         :entity-key entity-key
-                         :effect-path effect-path}]
+       tab-change-event (assoc event-template
+                               :event/type :chain/set-active-curve-channel)]
   {:fx/type :v-box
    :spacing 0
    :style-class ["visual-editor"]
@@ -566,9 +485,7 @@
                :active-tab active-channel
                :on-tab-change tab-change-event}
               {:fx/type curve-editor-for-channel
-               :domain domain
-               :entity-key entity-key
-               :effect-path effect-path
+               :event-template event-template
                :channel active-channel
                :current-points active-points}]}))
 
@@ -596,8 +513,8 @@
   Props:
   - :fx/context - cljfx context (required)
   - :current-params - Current parameter values {:mode :target-zone-groups ...}
-  - :on-change-event - Base event template for param changes (will add :param-key :value or :group-id)"
- [{:keys [fx/context current-params on-change-event]}]
+  - :event-template - Base event template for param changes (will add :param-key :value or :group-id)"
+ [{:keys [fx/context current-params event-template]}]
  (let [;; Get zone groups from context
        zone-groups (fx/sub-ctx context subs/zone-groups-list)
        
@@ -613,7 +530,7 @@
                       :style-class [(if (= mode m)
                                       "visual-editor-mode-btn-active"
                                       "visual-editor-mode-btn")]
-                      :on-action (assoc on-change-event :param-key :mode :value m)})]
+                      :on-action (assoc event-template :param-key :mode :value m)})]
    
    {:fx/type :v-box
     :spacing 12
@@ -651,9 +568,9 @@
                                           :selected? (contains? target-zone-groups (:id group))
                                           ;; Pass event map with group-id, let handler do the toggle logic
                                           :on-toggle {:event/type :chain/toggle-zone-group
-                                                      :domain (:domain on-change-event)
-                                                      :entity-key (:entity-key on-change-event)
-                                                      :effect-path (:effect-path on-change-event)
+                                                      :domain (:domain event-template)
+                                                      :entity-key (:entity-key event-template)
+                                                      :effect-path (:effect-path event-template)
                                                       :group-id (:id group)}}))}
                            {:fx/type :label
                             :text (str "Selected: " (if (empty? target-zone-groups)

@@ -48,8 +48,6 @@
         :-fx-border-radius 4
         :-fx-background-radius 4}
        
-       ;; NOTE: .scroll-pane-transparent moved to theme.clj
-       
        ;; Connection Status Indicator
        ".status-indicator"
        {:-fx-background-radius 5}
@@ -70,7 +68,4 @@
        {:-fx-background-color bg-primary}
        
        ".container-elevated"
-       {:-fx-background-color bg-elevated}
-       
-       ;; NOTE: .scroll-pane-dark moved to components.clj
-       })))
+       {:-fx-background-color bg-elevated}})))

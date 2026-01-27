@@ -494,13 +494,23 @@
                 h/mark-dirty)}))
 
 
-;; Configuration
+;; Calibration Mode
 
 
-(defn- handle-projectors-set-test-pattern
-  "Set or clear the test pattern mode."
-  [{:keys [pattern state]}]
-  {:state (assoc-in state [:projector-ui :test-pattern-mode] pattern)})
+(defn- handle-projectors-toggle-calibration
+  "Toggle calibration mode for a specific projector.
+   Only one projector can be in calibration mode at a time."
+  [{:keys [projector-id state]}]
+  (let [current (get-in state [:projector-ui :calibrating-projector-id])]
+    {:state (assoc-in state [:projector-ui :calibrating-projector-id]
+                      (if (= current projector-id) nil projector-id))}))
+
+
+(defn- handle-projectors-set-calibration-brightness
+  "Set the brightness for calibration test pattern."
+  [{:keys [brightness state]}]
+  {:state (assoc-in state [:projector-ui :calibration-brightness]
+                    (max 0.05 (min 0.5 (double brightness))))})
 
 
 (defn- handle-projectors-set-broadcast-address
@@ -565,8 +575,11 @@
     :projectors/add-effect (handle-projectors-add-effect event)
     :projectors/remove-effect (handle-projectors-remove-effect event)
     
+    ;; Calibration mode
+    :projectors/toggle-calibration (handle-projectors-toggle-calibration event)
+    :projectors/set-calibration-brightness (handle-projectors-set-calibration-brightness event)
+    
     ;; Configuration
-    :projectors/set-test-pattern (handle-projectors-set-test-pattern event)
     :projectors/set-broadcast-address (handle-projectors-set-broadcast-address event)
     :projectors/toggle-device-expand (handle-projectors-toggle-device-expand event)
     

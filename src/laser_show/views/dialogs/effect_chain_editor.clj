@@ -112,6 +112,7 @@
                             :h-box/hgrow :always
                             :items effect-chain
                             :component-id [:effect-chain col row]
+                            :items-path [:chains :effect-chains [col row] :items]
                             :item-id-key :effect-id
                             :item-registry-fn effects/get-effect
                             :fallback-label "Unknown Effect"

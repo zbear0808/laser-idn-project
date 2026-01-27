@@ -263,6 +263,7 @@
                                                   :fallback-label "Unknown Preset"
                                                   :on-change-event :chain/set-items
                                                   :on-change-params {:domain :cue-chains :entity-key [col row]}
+                                                  :items-path [:chains :cue-chains [col row] :items]
                                                   :on-copy-fn (fn [items]
                                                                 (events/dispatch! {:event/type :cue-chain/set-clipboard
                                                                                    :items items}))

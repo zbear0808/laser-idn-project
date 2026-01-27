@@ -14,16 +14,6 @@
             [laser-show.css.theme :as theme]))
 
 
-;; Preset category colors - alias to theme category colors
-
-(def preset-category-colors
-  "Colors for preset categories in the bank."
-  (let [{:keys [geometric wave beam abstract]} theme/category-colors]
-    {:geometric geometric
-     :wave      wave
-     :beam      beam
-     :abstract  abstract}))
-
 
 (def cue-chain-editor
   "Cue chain editor styles."
@@ -59,8 +49,6 @@
         :-fx-border-width 1
         :-fx-border-radius 4}
        
-       ;; NOTE: Header styling uses .header-section from typography.clj
-       
        ".dialog-placeholder"
        {:-fx-background-color bg-primary
         :-fx-alignment "center"}
@@ -74,8 +62,6 @@
        ".dialog-separator"
        {:-fx-border-color border-subtle
         :-fx-border-width ["1px" "0px" "0px" "0px"]}
-       
-       ;; NOTE: Scroll pane styling uses .scroll-pane-base from theme.clj
        
        ".cue-chain-left-column"
        {:-fx-pref-width 280
@@ -111,8 +97,6 @@
        
        
        ;; Sidebar Enhancements (extends effect-chain-sidebar)
-       
-       ;; NOTE: .cue-chain-sidebar-header removed - use .header-section from typography.clj
        
        ".cue-chain-hint"
        {:-fx-text-fill text-muted
@@ -182,8 +166,6 @@
         :-fx-border-width 1
         :-fx-border-radius 4}
        
-       ;; NOTE: .preset-bank-header removed - use .header-section from typography.clj
-       
        ".preset-bank-tab-bar"
        {:-fx-background-color "transparent"
         :-fx-spacing 4
@@ -229,22 +211,22 @@
        
        ;; Category-specific button colors
        ".preset-bank-btn-geometric"
-       {:-fx-border-color (:geometric preset-category-colors)
+       {:-fx-border-color (:geometric theme/category-colors)
         :-fx-border-width "2px"
         :-fx-border-radius 4}
        
        ".preset-bank-btn-wave"
-       {:-fx-border-color (:wave preset-category-colors)
+       {:-fx-border-color (:wave theme/category-colors)
         :-fx-border-width "2px"
         :-fx-border-radius 4}
        
        ".preset-bank-btn-beam"
-       {:-fx-border-color (:beam preset-category-colors)
+       {:-fx-border-color (:beam theme/category-colors)
         :-fx-border-width "2px"
         :-fx-border-radius 4}
        
        ".preset-bank-btn-abstract"
-       {:-fx-border-color (:abstract preset-category-colors)
+       {:-fx-border-color (:abstract theme/category-colors)
         :-fx-border-width "2px"
         :-fx-border-radius 4}
        
@@ -261,8 +243,6 @@
         :-fx-border-color border-subtle
         :-fx-border-width 1
         :-fx-border-radius 4}
-       
-       ;; NOTE: .preset-param-header removed - use .header-section from typography.clj
        
        ".preset-param-name"
        {:-fx-text-fill text-primary
@@ -317,8 +297,6 @@
         :-fx-border-color border-subtle
         :-fx-border-width 1
         :-fx-border-radius 4}
-       
-       ;; NOTE: .preset-effects-header removed - use .header-section from typography.clj
        
        ".preset-effects-empty"
        {:-fx-text-fill text-muted
@@ -379,10 +357,6 @@
         
         ":hover"
         {:-fx-background-color bg-active}}
-       
-       
-       
-       ;; NOTE: Scroll pane styling uses .scroll-pane-base from theme.clj
        
        ;; Section Separators
        

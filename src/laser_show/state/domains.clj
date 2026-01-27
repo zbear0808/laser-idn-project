@@ -234,8 +234,10 @@
                       :doc "Currently selected projector ID for editing"}
    :active-virtual-projector {:default nil
                               :doc "Currently selected virtual projector ID for editing"}
-   :test-pattern-mode {:default nil
-                       :doc "Active test pattern: nil, :grid, or :corners"}
+   :calibrating-projector-id {:default nil
+                              :doc "ID of projector currently in calibration mode, or nil"}
+   :calibration-brightness {:default 0.1
+                            :doc "Brightness for calibration test pattern (0.0-1.0)"}
    :discovered-devices {:default []
                         :doc "List of devices from last network scan"}
    :scanning? {:default false
@@ -336,8 +338,6 @@
   "Backend services state - IDN, streaming, input, logging."
   {:idn {:default {:connected? false
                    :connecting? false
-                   :target nil
-                   :streaming-engine nil
                    :error nil}
          :doc "IDN connection state"}
    :streaming {:default {:engines {}

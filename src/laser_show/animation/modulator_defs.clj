@@ -63,11 +63,11 @@
 (def modulator-params
   "Parameter definitions for each modulator type.
    Each param has :key, :label, :type, :min, :max, :default.
-   Wave modulators have period-unit to switch between beats and seconds."
+   Wave modulators have :time-unit to switch between beats and seconds."
   {:sine [{:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
           {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}
           {:key :period :label "Period" :type :float :min 0.0625 :max 16.0 :default 1.0}
-          {:key :period-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
+          {:key :time-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
           {:key :loop-mode :label "Mode" :type :choice :choices [:loop :once] :default :loop}
           {:key :once-periods :label "# Periods" :type :float :min 0.125 :max 8.0 :default 1.0}
           {:key :phase :label "Phase" :type :float :min 0.0 :max 1.0 :default 0.0}]
@@ -75,7 +75,7 @@
    :triangle [{:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
               {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}
               {:key :period :label "Period" :type :float :min 0.0625 :max 16.0 :default 1.0}
-              {:key :period-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
+              {:key :time-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
               {:key :loop-mode :label "Mode" :type :choice :choices [:loop :once] :default :loop}
               {:key :once-periods :label "# Periods" :type :float :min 0.125 :max 8.0 :default 1.0}
               {:key :phase :label "Phase" :type :float :min 0.0 :max 1.0 :default 0.0}]
@@ -83,7 +83,7 @@
    :sawtooth [{:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
               {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}
               {:key :period :label "Period" :type :float :min 0.0625 :max 16.0 :default 1.0}
-              {:key :period-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
+              {:key :time-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
               {:key :loop-mode :label "Mode" :type :choice :choices [:loop :once] :default :loop}
               {:key :once-periods :label "# Periods" :type :float :min 0.125 :max 8.0 :default 1.0}
               {:key :phase :label "Phase" :type :float :min 0.0 :max 1.0 :default 0.0}]
@@ -91,7 +91,7 @@
    :square [{:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
             {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}
             {:key :period :label "Period" :type :float :min 0.0625 :max 16.0 :default 1.0}
-            {:key :period-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
+            {:key :time-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
             {:key :loop-mode :label "Mode" :type :choice :choices [:loop :once] :default :loop}
             {:key :once-periods :label "# Periods" :type :float :min 0.125 :max 8.0 :default 1.0}
             {:key :duty-cycle :label "Duty Cycle" :type :float :min 0.0 :max 1.0 :default 0.5}
@@ -100,20 +100,20 @@
    :random [{:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
             {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}
             {:key :period :label "Period" :type :float :min 0.0625 :max 16.0 :default 1.0}
-            {:key :period-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
+            {:key :time-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
             {:key :loop-mode :label "Mode" :type :choice :choices [:loop :once] :default :loop}
             {:key :once-periods :label "# Periods" :type :float :min 0.125 :max 8.0 :default 1.0}]
    
    :step [{:key :values :label "Values" :type :text :default "[0 0.5 1]"}
           {:key :period :label "Period" :type :float :min 0.0625 :max 16.0 :default 1.0}
-          {:key :period-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
+          {:key :time-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
           {:key :loop-mode :label "Mode" :type :choice :choices [:loop :once] :default :loop}
           {:key :once-periods :label "# Periods" :type :float :min 0.125 :max 8.0 :default 1.0}]
    
    :decay [{:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
            {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}
            {:key :duration :label "Duration" :type :float :min 0.0625 :max 16.0 :default 1.0}
-           {:key :duration-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
+           {:key :time-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
            {:key :decay-curve :label "Curve" :type :choice :choices [:linear :exp :log] :default :exp}]
    
    :pos-x [{:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}

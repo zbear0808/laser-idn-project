@@ -306,7 +306,7 @@
     (let [event {:event/type :cue-chain/add-preset
                  :col 0
                  :row 0
-                 :preset-id :circle
+                 :item-id :circle
                  :state {:chains {:cue-chains {}}
                          :ui {:dialogs {:cue-chain-editor {:open? false}}}
                          :project {:dirty? false}}}
@@ -329,7 +329,7 @@
     (let [event {:event/type :cue-chain/add-preset
                  :col 0
                  :row 0
-                 :preset-id :wave
+                 :item-id :wave
                  :state sample-state-with-item}
           result (cue-chain/handle event)
           items (get-in result [:state :chains :cue-chains [0 0] :items])

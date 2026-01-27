@@ -445,35 +445,16 @@
                    ;; Check for custom renderer in ui-hints: rgb-curves
                    (= :rgb-curves renderer-type)
                    {:fx/type custom-renderers/rgb-curves-visual-editor
-                    :domain :projector-effects
-                    :entity-key projector-id
-                    :effect-path [effect-idx]
                     :current-params params
+                    :event-template {:event/type :chain/update-curve-point
+                                     :domain :projector-effects
+                                     :entity-key projector-id
+                                     :effect-path [effect-idx]}
                     :dialog-data ui-state}
                   
                   ;; Check for custom renderer in ui-hints: corner-pin-2d
                   ;; Uses standard chain events - same as all other effect param editors
                   (= :corner-pin-2d renderer-type)
-                  {:fx/type custom-renderers/corner-pin-visual-editor
-                   :params params
-                   :event-template {:event/type :chain/update-spatial-params
-                                    :domain :projector-effects
-                                    :entity-key projector-id
-                                    :effect-path [effect-idx]}
-                   :reset-event {:event/type :chain/reset-params
-                                 :domain :projector-effects
-                                 :entity-key projector-id
-                                 :effect-path [effect-idx]
-                                 :defaults-map {:tl-x -1.0 :tl-y 1.0
-                                                :tr-x 1.0 :tr-y 1.0
-                                                :bl-x -1.0 :bl-y -1.0
-                                                :br-x 1.0 :br-y -1.0}}
-                   :fx-key [:projector projector-id effect-idx]
-                   :hint-text "Drag corners to adjust output geometry"}
-                  
-                  ;; Legacy fallback for :corner-pin effect-id (if not using ui-hints)
-                  ;; Uses standard chain events - same as all other effect param editors
-                  (= effect-id :corner-pin)
                   {:fx/type custom-renderers/corner-pin-visual-editor
                    :params params
                    :event-template {:event/type :chain/update-spatial-params
@@ -554,40 +535,45 @@
      :style "-fx-background-color: #505050; -fx-text-fill: white; -fx-font-size: 10;"
      :items menu-items}))
 
-(defn- test-pattern-controls
-  "Buttons to activate test patterns for calibration."
-  [{:keys [fx/context]}]
-  (let [mode (fx/sub-ctx context subs/test-pattern-mode)]
-    {:fx/type :h-box
+(defn- calibration-controls
+  "Calibration mode toggle for the selected projector.
+   Displays a boundary box test pattern for corner pin calibration."
+  [{:keys [fx/context projector-id]}]
+  (let [calibrating-id (fx/sub-ctx context subs/calibrating-projector-id)
+        calibrating? (= calibrating-id projector-id)
+        brightness (fx/sub-ctx context subs/calibration-brightness)]
+    {:fx/type :v-box
      :spacing 8
-     :alignment :center-left
-     :children [{:fx/type :label
-                 :text "TEST PATTERN:"
-                 :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
-                {:fx/type :button
-                 :text "Grid"
-                 :style (str "-fx-padding: 4 12; "
-                            (if (= mode :grid)
-                              "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
-                              "-fx-background-color: #505050; -fx-text-fill: #B0B0B0;"))
-                 :on-action {:event/type :projectors/set-test-pattern
-                             :pattern (if (= mode :grid) nil :grid)}}
-                {:fx/type :button
-                 :text "Corners"
-                 :style (str "-fx-padding: 4 12; "
-                            (if (= mode :corners)
-                              "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
-                              "-fx-background-color: #505050; -fx-text-fill: #B0B0B0;"))
-                 :on-action {:event/type :projectors/set-test-pattern
-                             :pattern (if (= mode :corners) nil :corners)}}
-                {:fx/type :button
-                 :text "Off"
-                 :style (str "-fx-padding: 4 12; "
-                            (if (nil? mode)
-                              "-fx-background-color: #4A6FA5; -fx-text-fill: white;"
-                              "-fx-background-color: #505050; -fx-text-fill: #B0B0B0;"))
-                 :on-action {:event/type :projectors/set-test-pattern
-                             :pattern nil}}]}))
+     :children (filterv some?
+                 [{:fx/type :h-box
+                   :spacing 8
+                   :alignment :center-left
+                   :children [{:fx/type :label
+                               :text "CALIBRATION:"
+                               :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                              {:fx/type :button
+                               :text (if calibrating? "Stop Calibration" "Start Calibration")
+                               :style-class [(if calibrating? "button-danger" "button-primary")]
+                               :on-action {:event/type :projectors/toggle-calibration
+                                           :projector-id projector-id}}]}
+                  (when calibrating?
+                    {:fx/type :h-box
+                     :spacing 8
+                     :alignment :center-left
+                     :children [{:fx/type :label
+                                 :text "Brightness:"
+                                 :style "-fx-text-fill: #808080; -fx-font-size: 11;"}
+                                {:fx/type :slider
+                                 :min 0.05
+                                 :max 0.5
+                                 :value brightness
+                                 :pref-width 150
+                                 :on-value-changed {:event/type :projectors/set-calibration-brightness
+                                                    :brightness :fx/event}}
+                                {:fx/type :label
+                                 :text (format "%.0f%%" (* brightness 100))
+                                 :pref-width 40
+                                 :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]})])}))
 
 (defn- projector-config-panel
   "Configuration panel for the selected projector.
@@ -658,7 +644,7 @@
                                                      :projector-id projector-id
                                                      :selected-ids selected-ids
                                                      :clipboard-items clipboard-items}]}
-                                        ;; Right: Parameter editor + test patterns
+                                        ;; Right: Parameter editor + calibration controls
                                         {:fx/type :v-box
                                          :spacing 16
                                          :h-box/hgrow :always
@@ -671,7 +657,9 @@
                                                              :effect selected-effect
                                                              :ui-state effect-ui-state}])
                                                        [{:fx/type :region :v-box/vgrow :always}
-                                                        {:fx/type test-pattern-controls}]))}]}}]}
+                                                        {:fx/type calibration-controls
+                                                         :fx/context context
+                                                         :projector-id projector-id}]))}]}}]}
       ;; No projector selected
       {:fx/type :v-box
        :children [{:fx/type :scroll-pane

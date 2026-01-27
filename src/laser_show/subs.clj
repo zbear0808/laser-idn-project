@@ -371,11 +371,24 @@
   [context]
   (:expanded-devices (fx/sub-val context :projector-ui) #{}))
 
-(defn test-pattern-mode
-  "Get the current test pattern mode (:grid, :corners, or nil).
+(defn calibrating-projector-id
+  "Get the ID of the projector currently in calibration mode.
+   Returns nil if no projector is calibrating.
    Depends on: projector-ui domain"
   [context]
-  (:test-pattern-mode (fx/sub-val context :projector-ui)))
+  (fx/sub-val context get-in [:projector-ui :calibrating-projector-id]))
+
+(defn calibration-brightness
+  "Get the current calibration test pattern brightness.
+   Depends on: projector-ui domain"
+  [context]
+  (fx/sub-val context get-in [:projector-ui :calibration-brightness] 0.1))
+
+(defn projector-calibrating?
+  "Check if a specific projector is in calibration mode.
+   Depends on: calibrating-projector-id"
+  [context projector-id]
+  (= projector-id (fx/sub-ctx context calibrating-projector-id)))
 
 (defn enabled-projectors
   "Get list of enabled projectors.

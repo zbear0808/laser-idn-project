@@ -254,10 +254,4 @@
         " > .viewport"
         {:-fx-background-color "transparent"}}
        
-       ;; Alias for backwards compatibility
-       ".scroll-pane-transparent"
-       {:-fx-background-color "transparent"
-        :-fx-background "transparent"
-        
-        " > .viewport"
-        {:-fx-background-color "transparent"}}})))
+       })))
