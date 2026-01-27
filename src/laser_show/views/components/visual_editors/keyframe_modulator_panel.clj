@@ -44,7 +44,7 @@
    :style-class "keyframe-panel-header"
    :children [{:fx/type :label
                :text "KEYFRAME ANIMATION"
-               :style-class "dialog-section-header"}
+               :style-class "header-section"}
               {:fx/type :region :h-box/hgrow :always}
               {:fx/type :check-box
                :text "Enable"

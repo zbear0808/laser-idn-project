@@ -59,10 +59,7 @@
         :-fx-border-width 1
         :-fx-border-radius 4}
        
-       ".dialog-section-header"
-       {:-fx-text-fill text-muted
-        :-fx-font-size 11
-        :-fx-font-weight "bold"}
+       ;; NOTE: Header styling uses .header-section from typography.clj
        
        ".dialog-placeholder"
        {:-fx-background-color bg-primary
@@ -78,12 +75,7 @@
        {:-fx-border-color border-subtle
         :-fx-border-width ["1px" "0px" "0px" "0px"]}
        
-       ".dialog-scroll-pane"
-       {:-fx-background-color "transparent"
-        :-fx-background bg-primary
-        
-        " > .viewport"
-        {:-fx-background-color "transparent"}}
+       ;; NOTE: Scroll pane styling uses .scroll-pane-base from theme.clj
        
        ".cue-chain-left-column"
        {:-fx-pref-width 280
@@ -120,11 +112,7 @@
        
        ;; Sidebar Enhancements (extends effect-chain-sidebar)
        
-       
-       ".cue-chain-sidebar-header"
-       {:-fx-text-fill text-muted
-        :-fx-font-size 11
-        :-fx-font-weight "bold"}
+       ;; NOTE: .cue-chain-sidebar-header removed - use .header-section from typography.clj
        
        ".cue-chain-hint"
        {:-fx-text-fill text-muted
@@ -194,10 +182,7 @@
         :-fx-border-width 1
         :-fx-border-radius 4}
        
-       ".preset-bank-header"
-       {:-fx-text-fill text-muted
-        :-fx-font-size 11
-        :-fx-font-weight "bold"}
+       ;; NOTE: .preset-bank-header removed - use .header-section from typography.clj
        
        ".preset-bank-tab-bar"
        {:-fx-background-color "transparent"
@@ -277,10 +262,7 @@
         :-fx-border-width 1
         :-fx-border-radius 4}
        
-       ".preset-param-header"
-       {:-fx-text-fill text-muted
-        :-fx-font-size 11
-        :-fx-font-weight "bold"}
+       ;; NOTE: .preset-param-header removed - use .header-section from typography.clj
        
        ".preset-param-name"
        {:-fx-text-fill text-primary
@@ -336,10 +318,7 @@
         :-fx-border-width 1
         :-fx-border-radius 4}
        
-       ".preset-effects-header"
-       {:-fx-text-fill text-muted
-        :-fx-font-size 11
-        :-fx-font-weight "bold"}
+       ;; NOTE: .preset-effects-header removed - use .header-section from typography.clj
        
        ".preset-effects-empty"
        {:-fx-text-fill text-muted
@@ -403,17 +382,7 @@
        
        
        
-       ;; Dialog Scroll Pane
-       
-       
-       ".cue-chain-scroll-pane"
-       {:-fx-background-color "transparent"
-        :-fx-background bg-primary
-        
-        " > .viewport"
-        {:-fx-background-color "transparent"}}
-       
-       
+       ;; NOTE: Scroll pane styling uses .scroll-pane-base from theme.clj
        
        ;; Section Separators
        

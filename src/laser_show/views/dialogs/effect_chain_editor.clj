@@ -69,7 +69,7 @@
        :style-class "dialog-section"
        :children [{:fx/type :label
                    :text "PARAMETERS"
-                   :style-class "dialog-section-header"}
+                   :style-class "header-section"}
                   {:fx/type :label
                    :text "Select an effect from the chain"
                    :style-class "dialog-placeholder-text"}]})))

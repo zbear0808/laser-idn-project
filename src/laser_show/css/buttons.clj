@@ -25,9 +25,24 @@
           ;; Button border radius constants
           radius-standard 2  ; Standard buttons (primary, secondary, transport)
           radius-small 1]    ; Small buttons (bank items, icon buttons)
+     
+     {
+      ;; Base Button - common properties for all buttons
+      ;; Other button classes can inherit from this pattern
+      ".btn"
+      {:-fx-cursor "hand"
+       :-fx-background-color bg-interactive
+       :-fx-text-fill text-primary
+       :-fx-background-radius radius-standard
+       
+       ":hover"
+       {:-fx-background-color bg-hover}
+       
+       ":disabled"
+       {:-fx-opacity 0.5
+        :-fx-cursor "default"}}
       
-      {
-       ;; Small button variant (used in toolbar)
+      ;; Small button variant (used in toolbar)
        ".btn-sm"
        {:-fx-background-color bg-interactive
         :-fx-text-fill text-primary

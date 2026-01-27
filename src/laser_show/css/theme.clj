@@ -224,9 +224,37 @@
        
        
        
+       ;; Base Classes (for composition)
+       
+       
+       ;; Panel with border - common bordered container pattern
+       ".panel-bordered"
+       {:-fx-border-color border-default
+        :-fx-border-width 1
+        :-fx-border-radius 4
+        :-fx-background-radius 4}
+       
+       ;; Interactive item base - common clickable item pattern
+       ".interactive-item"
+       {:-fx-background-radius 4
+        :-fx-cursor "hand"
+        
+        ":hover"
+        {:-fx-background-color bg-hover}}
+       
+       
        ;; Scroll Pane Styles
        
        
+       ;; Base scroll pane - transparent background (can be extended)
+       ".scroll-pane-base"
+       {:-fx-background-color "transparent"
+        :-fx-background "transparent"
+        
+        " > .viewport"
+        {:-fx-background-color "transparent"}}
+       
+       ;; Alias for backwards compatibility
        ".scroll-pane-transparent"
        {:-fx-background-color "transparent"
         :-fx-background "transparent"

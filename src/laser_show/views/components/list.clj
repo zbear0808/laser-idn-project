@@ -620,7 +620,7 @@
                  :children (filterv some?
                                     [{:fx/type :label
                                       :text header-label
-                                      :style-class "chain-header-label"}
+                                      :style-class "header-section"}
                                      {:fx/type :region :h-box/hgrow :always}
                                      (when (pos? selection-count)
                                        {:fx/type :label
@@ -664,7 +664,7 @@
                    :fit-to-height false
                    :hbar-policy :as-needed
                    :v-box/vgrow :always
-                   :style-class "chain-scroll-pane"
+                   :style-class "scroll-pane-base"
                    :content {:fx/type :v-box
                              :spacing 4
                              :children (u/mapv-indexed

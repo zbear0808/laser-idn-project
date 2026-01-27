@@ -48,12 +48,7 @@
         :-fx-border-radius 4
         :-fx-background-radius 4}
        
-       ".scroll-pane-transparent"
-       {:-fx-background-color "transparent"
-        :-fx-background "transparent"
-        
-        " > .viewport"
-        {:-fx-background-color "transparent"}}
+       ;; NOTE: .scroll-pane-transparent moved to theme.clj
        
        ;; Connection Status Indicator
        ".status-indicator"
@@ -77,9 +72,5 @@
        ".container-elevated"
        {:-fx-background-color bg-elevated}
        
-       ".scroll-pane-dark"
-       {:-fx-background-color bg-primary
-        :-fx-background bg-primary
-        
-        " > .viewport"
-        {:-fx-background-color bg-primary}}})))
+       ;; NOTE: .scroll-pane-dark moved to components.clj
+       })))

@@ -58,10 +58,7 @@
        ;; Header Section
        
        
-       ".chain-header-label"
-       {:-fx-text-fill text-muted
-        :-fx-font-size 11
-        :-fx-font-weight "bold"}
+       ;; NOTE: Header styling uses .header-section from typography.clj
        
        ".chain-selection-count"
        {:-fx-text-fill blue
@@ -327,12 +324,5 @@
        
        
        
-       ;; Scroll Pane
-       
-       
-       ".chain-scroll-pane"
-       {:-fx-background-color "transparent"
-        :-fx-background bg-primary
-        
-        " > .viewport"
-        {:-fx-background-color "transparent"}}})))
+       ;; NOTE: Scroll pane styling uses .scroll-pane-base from theme.clj
+       })))

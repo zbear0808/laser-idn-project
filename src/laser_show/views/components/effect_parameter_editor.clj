@@ -226,7 +226,7 @@
                                 (when keyframe-enabled?
                                   (str " (Keyframe " (inc selected-kf-idx) ")")))
                            "PARAMETERS")
-                   :style-class "dialog-section-header"}
+                   :style-class "header-section"}
                   
                   ;; Parameter controls
                   (if effect-def
@@ -239,7 +239,7 @@
                         {:fx/type :scroll-pane
                          :fx/key param-editor-key
                          :fit-to-width true
-                         :style-class "dialog-scroll-pane"
+                         :style-class "scroll-pane-base"
                          :v-box/vgrow :always
                          :content {:fx/type custom-param-renderer-internal
                                    :fx/context context
@@ -261,7 +261,7 @@
                       ;; Disable modulators when in keyframe mode (keyframes replace modulators)
                       {:fx/type :scroll-pane
                        :fit-to-width true
-                       :style-class "dialog-scroll-pane"
+                       :style-class "scroll-pane-base"
                        :v-box/vgrow :always
                        :content {:fx/type effect-param-ui/modulatable-param-controls-list
                                  :params-map params-map

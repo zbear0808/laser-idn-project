@@ -37,11 +37,7 @@
         :-fx-padding ["2px" "4px"]
         :-fx-background-radius 3}
        
-       ;; Secondary label (used throughout UI)
-       ".label-secondary"
-       {:-fx-text-fill text-secondary
-        :-fx-font-size 11}
-       
+       ;; NOTE: .label-secondary moved to typography.clj
        
        ;; ===========================================
        ;; Checkbox Styling

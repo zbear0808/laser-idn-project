@@ -65,11 +65,11 @@
                  :text (if preset-def
                          (str "PRESET: " (:name preset-def))
                          "PRESET PARAMETERS")
-                 :style-class "dialog-section-header"}
+                 :style-class "header-section"}
                 (if preset-def
                   {:fx/type :scroll-pane
                    :fit-to-width true
-                   :style-class "dialog-scroll-pane"
+                   :style-class "scroll-pane-base"
                    :content {:fx/type :v-box
                              :spacing 8
                              :padding {:top 4}

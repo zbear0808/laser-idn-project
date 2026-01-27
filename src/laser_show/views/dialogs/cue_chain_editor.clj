@@ -80,7 +80,7 @@
        :style-class "dialog-section"
        :children [{:fx/type :label
                    :text "PARAMETERS"
-                   :style-class "dialog-section-header"}
+                   :style-class "header-section"}
                   {:fx/type :label
                    :text "Select an effect from the chain"
                    :style-class "dialog-placeholder-text"}]})))
@@ -158,7 +158,7 @@
                        :spacing 8
                        :children [{:fx/type :label
                                    :text "GROUP PROPERTIES"
-                                   :style-class "dialog-section-header"}
+                                   :style-class "header-section"}
                                   {:fx/type :label
                                    :text (str "Name: " (:name selected-item "Unnamed Group"))
                                    :style-class "group-properties-label"}
@@ -172,7 +172,7 @@
                      :style-class "dialog-section"
                      :children [{:fx/type :label
                                  :text "ITEM PROPERTIES"
-                                 :style-class "dialog-section-header"}
+                                 :style-class "header-section"}
                                 {:fx/type :label
                                  :text "Select a preset or group from the chain"
                                  :style-class "dialog-placeholder-text"}]})])}))
