@@ -2,6 +2,8 @@
   "Timing utilities for precise time measurement and delays.
    Provides high-resolution timing functions for real-time applications.")
 
+(set! *unchecked-math* :warn-on-boxed)
+
 
 (defn nanotime
   "Get current time in nanoseconds from an arbitrary starting point.
@@ -29,18 +31,22 @@
 ;; Precise Sleep/Delay Functions
 
 
+(def ^:const ^long max-busy-wait-nanos 
+  "Maximum time to busy-wait (15ms in nanoseconds)"
+  5000000)
+
 (defn precise-sleep-until
   "Sleep until target time with sub-millisecond precision.
    
    Uses a hybrid two-phase approach for optimal precision and efficiency:
    
    Phase 1 (Coarse Sleep):
-   - Uses Thread/sleep() for delays > 2ms
+   - Uses Thread/sleep() for delays > 5ms
    - Efficient (near-zero CPU usage)
    - Less precise due to OS scheduler granularity
    
    Phase 2 (Fine Busy-Wait):
-   - Uses tight loop with System/nanoTime() for final <2ms
+   - Uses tight loop with System/nanoTime() for final <5ms
    - Precise to ~100 microseconds
    - Uses 10-20% of one CPU core during busy-wait
    
@@ -49,30 +55,32 @@
    
    Not recommended for:
    - Non-critical timing (UI animations)"
-  [target-time-nanos]
+  [^long target-time-nanos]
   (let [now (System/nanoTime)
-        sleep-nanos (- target-time-nanos now)
-        max-busy-wait-nanos (* 15 1000 1000)]
+        sleep-nanos (unchecked-subtract target-time-nanos now)]
     (when (pos? sleep-nanos)
-
       (when (> sleep-nanos max-busy-wait-nanos)
-        (let [coarse-sleep-ms (quot (- sleep-nanos max-busy-wait-nanos) 1000000)]
+        (let [coarse-sleep-ms (quot (unchecked-subtract sleep-nanos max-busy-wait-nanos) 1000000)]
           (Thread/sleep coarse-sleep-ms)))
-      
-      (while (< (System/nanoTime) target-time-nanos)
-        (Thread/yield)))))
+      (loop []
+        (when (< (System/nanoTime) target-time-nanos)
+          (Thread/yield)
+          (recur))))))
 
 (defn precise-sleep-nanos
-  [duration-nanos]
-  (precise-sleep-until (+ (System/nanoTime) duration-nanos)))
+  "Sleep for the specified duration in nanoseconds with sub-millisecond precision."
+  [^long duration-nanos]
+  (precise-sleep-until (unchecked-add (System/nanoTime) duration-nanos)))
 
 (defn precise-sleep-us
-  [duration-us]
-  (precise-sleep-nanos (* duration-us 1000)))
+  "Sleep for the specified duration in microseconds with sub-millisecond precision."
+  [^long duration-us]
+  (precise-sleep-nanos (unchecked-multiply duration-us 1000)))
 
 (defn precise-sleep-ms
-  [duration-ms]
-  (precise-sleep-nanos (* duration-ms 1000000)))
+  "Sleep for the specified duration in milliseconds with sub-millisecond precision."
+  [^long duration-ms]
+  (precise-sleep-nanos (unchecked-multiply duration-ms 1000000)))
 
 
 ;; Timing Utilities
@@ -97,26 +105,26 @@
         result (f)
         end (System/nanoTime)]
     {:result result
-     :nanos (- end start)}))
+     :nanos (unchecked-subtract end start)}))
 
 (defn measure-us
   "Measure the execution time of a function in microseconds."
   [f]
   (let [{:keys [result nanos]} (measure-nanos f)]
     {:result result
-     :us (quot nanos 1000)}))
+     :us (quot (long nanos) 1000)}))
 
 (defn measure-ms
   "Measure the execution time of a function in milliseconds."
   [f]
   (let [{:keys [result nanos]} (measure-nanos f)]
     {:result result
-     :ms (quot nanos 1000000)}))
+     :ms (quot (long nanos) 1000000)}))
 
 
 (defn nanos->micros
   "Convert nanoseconds to microseconds."
-  ^long [nanos]
+  ^long [^long nanos]
   (quot nanos 1000))
 
 
@@ -128,30 +136,30 @@
    (fps->interval-nanos 30)
    ;; => 33333333  ; 33.33ms in nanoseconds
    ```"
-  ^long [fps]
-  (long (/ 1000000000 fps)))
+  ^long [^long fps]
+  (quot 1000000000 fps))
 
 (defn fps->interval-us
   "Convert FPS to frame interval in microseconds."
-  ^long [fps]
-  (long (/ 1000000 fps)))
+  ^long [^long fps]
+  (quot 1000000 fps))
 
 (defn fps->interval-ms
   "Convert FPS to frame interval in milliseconds."
-  ^double [fps]
+  ^double [^double fps]
   (/ 1000.0 fps))
 
 (defn interval-nanos->fps
   "Convert frame interval in nanoseconds to FPS."
-  ^double [interval-nanos]
+  ^double [^double interval-nanos]
   (/ 1000000000.0 interval-nanos))
 
 (defn interval-us->fps
   "Convert frame interval in microseconds to FPS."
-  ^double [interval-us]
+  ^double [^double interval-us]
   (/ 1000000.0 interval-us))
 
 (defn interval-ms->fps
   "Convert frame interval in milliseconds to FPS."
-  ^double [interval-ms]
+  ^double [^double interval-ms]
   (/ 1000.0 interval-ms))

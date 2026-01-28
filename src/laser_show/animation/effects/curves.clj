@@ -35,12 +35,12 @@
    
    Returns [x y] interpolated point.
    Note: Cannot use primitive type hints for >4 args in Clojure."
-  [p0 p1 p2 p3 t]
+  [[x0' y0'] [x1' y1'] [x2' y2'] [x3' y3'] t]
   (let [t (double t)
-        x0 (double (nth p0 0)) y0 (double (nth p0 1))
-        x1 (double (nth p1 0)) y1 (double (nth p1 1))
-        x2 (double (nth p2 0)) y2 (double (nth p2 1))
-        x3 (double (nth p3 0)) y3 (double (nth p3 1))
+        x0 (double x0') y0 (double y0')
+        x1 (double x1') y1 (double y1')
+        x2 (double x2') y2 (double y2')
+        x3 (double x3') y3 (double y3')
         t2 (* t t)
         t3 (* t2 t)
         ;; Catmull-Rom basis functions
@@ -73,10 +73,10 @@
       
       ;; Two points - linear interpolation
       (= n 2)
-      (let [pt0 (first control-points)
-            pt1 (second control-points)
-            x0 (double (nth pt0 0)) y0 (double (nth pt0 1))
-            x1 (double (nth pt1 0)) y1 (double (nth pt1 1))]
+      (let [[x0' y0'] (first control-points)
+            [x1' y1'] (second control-points)
+            x0 (double x0') y0 (double y0')
+            x1 (double x1') y1 (double y1')]
         (if (== x0 x1)
           y0
           (let [t (/ (- target-x x0) (- x1 x0))
