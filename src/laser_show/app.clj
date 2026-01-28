@@ -23,6 +23,7 @@
             [laser-show.css.title-bar :as menus]
             [laser-show.dev-config :as dev-config]
             [clojure.pprint :as pprint])
+  (:import [javafx.application Platform])
   (:gen-class))
 
 (defonce ^{:private true :doc "The cljfx app instance."} *app (atom nil))
@@ -106,7 +107,11 @@
    Auto-scans for IDN devices on startup.
    Returns the app instance."
   []
-  (log/info "Starting Laser Show application...")
+  ;; In dev mode: Allow closing windows without exiting JVM (for REPL development)
+  ;; In prod mode: Closing the window exits the application normally
+  (when (dev-config/dev-mode?)
+    (Platform/setImplicitExit false)
+    (log/info "Dev mode: Window close will not exit JVM"))
 
   ;; Initialize with base state, then apply starter templates for fresh projects
   (state/init-state! (-> (domains/build-initial-state)
