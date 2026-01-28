@@ -264,11 +264,11 @@
 
 (defn horizontal-line-frame
   "Generate a horizontal line spanning the projection area.
-   Params: :length (default 1.0), :red (1.0), :green (1.0), :blue (1.0)"
-  [{:keys [length red green blue]
-    :or {length 1.0 red 1.0 green 1.0 blue 1.0}}]
+   Params: :length (default 1.0), :num-points (default 64), :red (1.0), :green (1.0), :blue (1.0)"
+  [{:keys [length num-points red green blue]
+    :or {length 1.0 num-points 64 red 1.0 green 1.0 blue 1.0}}]
   (let [half-length (/ (double length) 2.0)]
-    (->> (generate-line :num-points 64
+    (->> (generate-line :num-points num-points
                         :start [(- half-length) 0]
                         :end [half-length 0]
                         :red red
@@ -278,17 +278,20 @@
 
 (defn wave-frame
   "Generate a sine wave frame.
-   Params: :amplitude (default 0.3), :frequency (default 2), :red (1.0), :green (1.0), :blue (1.0)"
-  [{:keys [amplitude frequency red green blue]
-    :or {amplitude 0.3 frequency 2 red 1.0 green 1.0 blue 1.0}}]
+   Params: :amplitude (default 0.3), :frequency (default 2), :num-points (default 64),
+           :red (1.0), :green (1.0), :blue (1.0)"
+  [{:keys [amplitude frequency num-points red green blue]
+    :or {amplitude 0.3 frequency 2 num-points 64 red 1.0 green 1.0 blue 1.0}}]
   (let [r (double red)
         g (double green)
         b (double blue)
         amplitude' (double amplitude)
-        frequency' (double frequency)]
-    (->> (range 64)
+        frequency' (double frequency)
+        num-pts (long num-points)
+        divisor (double (dec num-pts))]
+    (->> (range num-pts)
          (into [] (map (fn [i]
-                         (let [t (/ (double i) 63.0)
+                         (let [t (/ (double i) divisor)
                                x (- t 0.5)
                                y (* amplitude' (Math/sin (* TWO-PI frequency' t)))]
                            (t/make-point x y r g b)))))
@@ -298,9 +301,12 @@
   "Generate discrete beam points in a horizontal fan pattern.
    Points snake left-to-right then back for seamless looping.
    Blanking points separate each beam position.
-   Params: :num-points (8), :red (1.0), :green (1.0), :blue (1.0)"
-  [{:keys [num-points red green blue]
-    :or {num-points 8 red 1.0 green 1.0 blue 1.0}}]
+   Params: :num-points (8), :repeats-per-beam (1), :red (1.0), :green (1.0), :blue (1.0)
+   
+   The :repeats-per-beam parameter controls brightness by repeating visible points.
+   Higher values = more repeated points = brighter beams relative to other cues."
+  [{:keys [num-points repeats-per-beam red green blue]
+    :or {num-points 8 repeats-per-beam 1 red 1.0 green 1.0 blue 1.0}}]
   (let [r (double red)
         g (double green)
         b (double blue)
@@ -308,6 +314,8 @@
         x-max 0.99
         y 0.0
         num-pts (long num-points)
+        repeats (long repeats-per-beam)
+        visible-count (* 2 repeats)
         forward-positions (if (= num-pts 1)
                             [0.0]
                             (->> (range num-pts)
@@ -317,10 +325,9 @@
         all-positions (into forward-positions backward-positions)]
     (->> all-positions
          (into [] (mapcat (fn [x]
-                            [(t/blanked-point x y)
-                             (t/make-point x y r g b)
-                             (t/make-point x y r g b)
-                             (t/blanked-point x y)])))
+                            (into [(t/blanked-point x y)]
+                                  (conj (vec (repeat visible-count (t/make-point x y r g b)))
+                                        (t/blanked-point x y))))))
          t/make-frame)))
 
 

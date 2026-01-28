@@ -43,7 +43,8 @@
   {:id :circle
    :name "Circle"
    :category :geometric
-   :parameters (into [(float-param :radius "Radius" 0.5 0.1 1.0)]
+   :parameters (into [(float-param :radius "Radius" 0.5 0.1 1.0)
+                      (int-param :num-points "Point Count" 64 3 128)]
                      (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/circle-frame})
 
@@ -51,7 +52,8 @@
   {:id :square
    :name "Square"
    :category :geometric
-   :parameters (into [(float-param :size "Size" 0.5 0.1 1.0)]
+   :parameters (into [(float-param :size "Size" 0.5 0.1 1.0)
+                      (int-param :num-points "Point Count" 16 3 64)]
                      (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/square-frame})
 
@@ -59,7 +61,8 @@
   {:id :triangle
    :name "Triangle"
    :category :geometric
-   :parameters (into [(float-param :size "Size" 0.5 0.1 1.0)]
+   :parameters (into [(float-param :size "Size" 0.5 0.1 1.0)
+                      (int-param :num-points "Point Count" 21 3 64)]
                      (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/triangle-frame})
 
@@ -69,7 +72,8 @@
    :category :geometric
    :parameters (into [(int-param :turns "Turns" 3 1 10)
                       (float-param :start-radius "Inner Radius" 0.1 0.0 0.5)
-                      (float-param :end-radius "Outer Radius" 0.5 0.2 1.0)]
+                      (float-param :end-radius "Outer Radius" 0.5 0.2 1.0)
+                      (int-param :num-points "Point Count" 128 8 256)]
                      (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/spiral-frame})
 
@@ -79,7 +83,8 @@
    :category :geometric
    :parameters (into [(int-param :spikes "Spikes" 5 3 12)
                       (float-param :outer-radius "Outer Radius" 0.5 0.2 1.0)
-                      (float-param :inner-radius "Inner Radius" 0.25 0.1 0.5)]
+                      (float-param :inner-radius "Inner Radius" 0.25 0.1 0.5)
+                      (int-param :num-points "Point Count" 8 3 32)]
                      (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/star-frame})
 
@@ -88,7 +93,8 @@
    :name "Wave"
    :category :wave
    :parameters (into [(float-param :amplitude "Amplitude" 0.3 0.1 0.8)
-                      (int-param :frequency "Frequency" 2 1 8)]
+                      (int-param :frequency "Frequency" 2 1 8)
+                      (int-param :num-points "Point Count" 64 3 256)]
                      (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/wave-frame})
 
@@ -96,7 +102,8 @@
   {:id :beam-fan
    :name "Beam Fan"
    :category :beam
-   :parameters (into [(int-param :num-points "Points" 8 2 32)]
+   :parameters (into [(int-param :num-points "Points" 8 2 32)
+                      (int-param :repeats-per-beam "Brightness" 1 1 10)]
                      (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/beam-fan-frame})
 
@@ -104,7 +111,8 @@
   {:id :horizontal-line
    :name "Horizontal Line"
    :category :beam
-   :parameters (into [(float-param :length "Length" 1.0 0.1 2.0)]
+   :parameters (into [(float-param :length "Length" 1.0 0.1 2.0)
+                      (int-param :num-points "Point Count" 64 3 256)]
                      (color-params "Color" [1.0 1.0 1.0]))
    :generator gen/horizontal-line-frame})
 
