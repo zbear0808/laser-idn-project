@@ -190,7 +190,12 @@
      {:fx/type :menu-item
       :text "Reload Styles"
       :accelerator [:shortcut :shift :r]
-      :on-action {:event/type :help/reload-styles}}]))
+      :on-action {:event/type :help/reload-styles}}
+     
+     {:fx/type :menu-item
+      :text "Reload App Code"
+      :accelerator [:shortcut :shift :a]
+      :on-action {:event/type :help/reload-app}}]))
 
 
 ;; Menu Components

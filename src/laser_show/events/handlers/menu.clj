@@ -243,6 +243,17 @@
       (log/error "Failed to reload CSS styles:" (:error result))))
   {:state state})
 
+(defn- handle-help-reload-app
+  "Reload all app code to pick up code changes without restarting JVM."
+  [{:keys [state]}]
+  (log/info "Help > Reload App Code")
+  (require 'laser-show.dev.reload)
+  (let [result ((resolve 'laser-show.dev.reload/reload-app-code!))]
+    (if (:success? result)
+      (log/info "App code reloaded successfully")
+      (log/error "Failed to reload app code:" (:error result))))
+  {:state state})
+
 
 ;; Public API
 
@@ -280,6 +291,7 @@
     :help/check-updates (handle-help-check-updates event)
     :help/toggle-idn-stream-logging (handle-help-toggle-idn-stream-logging event)
     :help/reload-styles (handle-help-reload-styles event)
+    :help/reload-app (handle-help-reload-app event)
     
     ;; Unknown event in this domain
     {}))
