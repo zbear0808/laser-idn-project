@@ -12,7 +12,7 @@
             [clojure.string :as str]
             [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
-            [laser-show.state.queries :as queries]
+            [laser-show.state.extractors :as ex]
             [laser-show.state.serialization :as ser]
             [laser-show.animation.modulation :as mod])
   (:import [javafx.scene.input Clipboard ClipboardContent]))
@@ -26,7 +26,7 @@
 (defn- get-internal-clipboard
   "Get the internal clipboard state from central store."
   []
-  (queries/clipboard))
+  (ex/clipboard (state/get-raw-state)))
 
 (defn- set-internal-clipboard!
   "Set the internal clipboard state in central store."

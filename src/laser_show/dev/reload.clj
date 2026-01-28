@@ -16,7 +16,6 @@
    We explicitly EXCLUDE state namespaces to preserve app state during reload:
    - laser-show.state.core
    - laser-show.state.domains
-   - laser-show.state.queries
    - laser-show.state.extractors
    - laser-show.state.templates
    - laser-show.state.serialization

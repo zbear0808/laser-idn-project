@@ -2,12 +2,18 @@
   "Pure data extraction functions that work on raw state maps.
    
    These functions provide a single source of truth for accessing state data.
-   They are used by both:
-   - laser-show.state.queries (for backend/service thread-safe access)
-   - laser-show.subs (for UI memoized subscriptions)
+   They are used by:
+   - Backend/services: Call directly with (state/get-raw-state)
+   - UI components: Via laser-show.subs with fx/sub-val
    
    All functions take state as first argument for consistent composition
-   with thread-first macro (->) and for use with fx/sub-val identity.")
+   with thread-first macro (->) and for use with fx/sub-val identity.
+   
+   Example backend usage:
+     (ex/bpm (state/get-raw-state))
+   
+   Example UI subscription:
+     (fx/sub-val context ex/bpm)")
 
 
 (defn config [state]

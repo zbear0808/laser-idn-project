@@ -32,7 +32,8 @@
    [laser-show.animation.chains :as chains]
    [laser-show.animation.modulation :as mod]
    [laser-show.common.util :as u]
-   [laser-show.state.queries :as queries]))
+   [laser-show.state.core :as state]
+   [laser-show.state.extractors :as ex]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -261,7 +262,7 @@
    
    Returns: Transformed frame (vector of points)"
   ([frame chain time-ms]
-   (apply-effect-chain frame chain time-ms (queries/bpm) nil nil))
+   (apply-effect-chain frame chain time-ms (ex/bpm (state/get-raw-state)) nil nil))
   ([frame chain time-ms bpm]
    (apply-effect-chain frame chain time-ms bpm nil nil))
   ([frame chain time-ms bpm trigger-time]

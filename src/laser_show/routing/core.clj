@@ -14,7 +14,8 @@
    5. Frame service applies corner-pin transform and color curves"
   (:require [laser-show.routing.projector-matcher :as pm]
             [laser-show.routing.zone-effects :as ze]
-            [laser-show.state.queries :as queries]))
+            [laser-show.state.core :as state]
+            [laser-show.state.extractors :as ex]))
 
 
 ;; Routing Map Building
@@ -125,15 +126,16 @@
    
    Returns: Vector of output configs"
   [cue]
-  (let [projectors-items (queries/projectors-items)
-        virtual-projectors (queries/virtual-projectors)]
+  (let [raw-state (state/get-raw-state)
+        projectors-items (ex/projectors-items raw-state)
+        virtual-projectors (ex/virtual-projectors raw-state)]
     (pm/build-routing-map cue projectors-items virtual-projectors)))
 
 
 (defn get-enabled-projectors-from-state
   "Get set of enabled projector IDs from state."
   []
-  (->> (queries/enabled-projectors)
+  (->> (ex/enabled-projectors (state/get-raw-state))
        (map first)
        set))
 
@@ -172,8 +174,9 @@
    
    Returns: Map with routing details"
   [cue]
-  (let [projectors-items (queries/projectors-items)
-        virtual-projectors (queries/virtual-projectors)]
+  (let [raw-state (state/get-raw-state)
+        projectors-items (ex/projectors-items raw-state)
+        virtual-projectors (ex/virtual-projectors raw-state)]
     (preview-cue-routing cue projectors-items virtual-projectors)))
 
 
@@ -220,8 +223,9 @@
 (defn get-outputs-for-zone-group-from-state
   "Get all outputs for a zone group using current state."
   [zone-group-id]
-  (let [projectors-items (queries/projectors-items)
-        virtual-projectors (queries/virtual-projectors)]
+  (let [raw-state (state/get-raw-state)
+        projectors-items (ex/projectors-items raw-state)
+        virtual-projectors (ex/virtual-projectors raw-state)]
     (get-outputs-for-zone-group zone-group-id projectors-items virtual-projectors)))
 
 

@@ -24,7 +24,7 @@
             [laser-show.backend.streaming-engine :as engine]
             [laser-show.dev-config :as dev-config]
             [laser-show.state.core :as state]
-            [laser-show.state.queries :as queries]
+            [laser-show.state.extractors :as ex]
             [laser-show.routing.core :as routing]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.animation.effects :as effects]
@@ -223,7 +223,7 @@
    
    Returns: Map of projector-id -> engine (skips projectors with invalid hosts)"
   []
-  (let [projectors (queries/projectors-items)]
+  (let [projectors (ex/projectors-items (state/get-raw-state))]
     (into {}
       (keep (fn [[proj-id proj]]
               (when (:enabled? proj true)

@@ -8,13 +8,13 @@
    - Low-level mutation primitives for all state changes
    
    For READ operations:
-   - Backend/services: Use laser-show.state.queries (thread-safe, no memoization)
+   - Backend/services: Use extractors directly with get-raw-state (thread-safe, no memoization)
    - UI components: Use laser-show.subs (memoized, context-based subscriptions)
    
    Usage:
    1. Initialize with (init-state!)
    2. Mutate via: (assoc-in-state! [:timing :bpm] 140.0)
-   3. Read in backend: (queries/bpm), (queries/projector id)
+   3. Read in backend: (ex/bpm (state/get-raw-state))
    4. Read in UI: (fx/sub-ctx context subs/bpm)"
   (:require [cljfx.api :as fx]
             [clojure.core.cache :as cache]
@@ -203,7 +203,7 @@
    - swap-state! for complex updates
    
    State reads should use:
-   - queries namespace for backend/services (thread-safe, no memoization)
+   - extractors directly with get-raw-state for backend/services (thread-safe, no memoization)
    - subs namespace for UI components (memoized, context-based)
    
    Parameters:

@@ -29,7 +29,7 @@
    - Lazy sequences avoided in frame generation hot paths"
   (:require [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
-            [laser-show.state.queries :as queries]
+            [laser-show.state.extractors :as ex]
             [laser-show.animation.presets :as presets]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
@@ -67,8 +67,8 @@
    This allows modulators to animate in editor preview mode.
    The retrigger button resets accumulators to zero."
   [current-time-ms]
-  (let [bpm (queries/bpm)]
-    (state/swap-state!
+ (let [bpm (ex/bpm (state/get-raw-state))]
+   (state/swap-state!
       (fn [s]
         (let [{:keys [last-frame-time accumulated-beats accumulated-ms
                       phase-offset phase-offset-target resync-rate]} (:playback s)
