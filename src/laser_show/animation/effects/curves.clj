@@ -9,13 +9,7 @@
    Usage:
    (def points [[0.0 0.0] [0.25 0.31] [0.75 0.86] [1.0 1.0]])
    (def lut (generate-curve-lut points))
-   ;; => 256-entry vector with smooth interpolation through control points
-   
-   The Catmull-Rom spline is chosen because:
-   - It passes through all control points (interpolating spline)
-   - Smooth tangent continuity (C1 continuous)
-   - Simple to implement and compute
-   - Commonly used in graphics applications (Photoshop, etc.)")
+   ;; => 256-entry vector with smooth interpolation through control points")
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)

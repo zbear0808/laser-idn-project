@@ -67,25 +67,32 @@
                          "PRESET PARAMETERS")
                  :style-class "header-section"}
                 (if preset-def
-                  {:fx/type :scroll-pane
-                   :fit-to-width true
-                   :style-class "scroll-pane-base"
-                   :content {:fx/type :v-box
-                             :spacing 8
-                             :padding {:top 4}
-                             :children (vec
-                                        (for [[param-key param-spec] params-map]
-                                          ;; Use the appropriate event for color params
-                                          (let [change-evt (if (= :color (:type param-spec))
-                                                             on-color-event
-                                                             on-change-event)]
-                                            {:fx/type param-controls/param-control
-                                             :param-key param-key
-                                             :param-spec param-spec
-                                             :current-value (get current-params param-key)
-                                             :on-change-event change-evt
-                                             :on-text-event on-text-event
-                                             :label-width 100})))}}
-                  {:fx/type :label
-                   :text "Select a preset from the chain"
-                   :style-class "dialog-placeholder-text"})]}))
+                   {:fx/type :scroll-pane
+                    :fit-to-width true
+                    :style-class "scroll-pane-base"
+                    :content {:fx/type :v-box
+                              :spacing 8
+                              :padding {:top 4}
+                              :children (vec
+                                         (for [[param-key param-spec] params-map
+                                               ;; Skip :green and :blue if they're part of a color group
+                                               ;; (we render them via the color picker when we hit :red)
+                                               :when (not (and (:color-group? param-spec)
+                                                               (#{:green :blue} param-key)))]
+                                           (if (and (:color-group? param-spec) (= :red param-key))
+                                             ;; Render combined color picker for RGB color group
+                                             {:fx/type param-controls/param-color-picker
+                                              :current-params current-params
+                                              :on-change-event on-color-event
+                                              :label-width 100}
+                                             ;; Render normal control for non-color params
+                                             {:fx/type param-controls/param-control
+                                              :param-key param-key
+                                              :param-spec param-spec
+                                              :current-value (get current-params param-key)
+                                              :on-change-event on-change-event
+                                              :on-text-event on-text-event
+                                              :label-width 100})))}}
+                   {:fx/type :label
+                    :text "Select a preset from the chain"
+                    :style-class "dialog-placeholder-text"})]}))

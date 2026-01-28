@@ -20,11 +20,14 @@
 (defn color-params
   "Define RGB color parameters as separate float components.
    Returns a vector of three param definitions for :red, :green, :blue.
-   This format enables per-channel modulator support."
+   This format enables per-channel modulator support.
+   
+   The :color-group? marker allows UI components to detect these as a
+   unified color and render a single color picker instead of three sliders."
   [label [r g b]]
-  [{:key :red :label (str label " R") :type :float :default r :min 0.0 :max 1.0}
-   {:key :green :label (str label " G") :type :float :default g :min 0.0 :max 1.0}
-   {:key :blue :label (str label " B") :type :float :default b :min 0.0 :max 1.0}])
+  [{:key :red :label label :type :float :default r :min 0.0 :max 1.0 :color-group? true}
+   {:key :green :label (str label " G") :type :float :default g :min 0.0 :max 1.0 :color-group? true}
+   {:key :blue :label (str label " B") :type :float :default b :min 0.0 :max 1.0 :color-group? true}])
 
 
 ;; Built-in Presets
