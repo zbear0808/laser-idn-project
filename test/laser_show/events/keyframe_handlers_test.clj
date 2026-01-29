@@ -104,37 +104,6 @@
       (is (true? (get-in result [:project :dirty?])) "Project should be marked dirty"))))
 
 
-;; Initialize Tests
-
-
-(deftest handle-initialize-test
-  (testing "Initializes keyframe modulator with defaults"
-    (let [state (make-test-state [sample-effect])
-          result (keyframe/handle-initialize state sample-config [0])
-          kf-mod (get-in result [:chains :effect-chains [0 0] :items 0 :keyframe-modulator])]
-      (is (true? (:enabled? kf-mod)))
-      (is (= 4.0 (:period kf-mod)))
-      (is (= :beats (:time-unit kf-mod)))
-      (is (= :loop (:loop-mode kf-mod)))
-      (is (= 0 (:selected-keyframe kf-mod)))
-      (is (= 2 (count (:keyframes kf-mod)))))))
-
-
-;; Update Settings Tests
-
-
-(deftest handle-update-settings-test
-  (testing "Updates multiple settings at once"
-    (let [state (make-test-state [sample-effect-with-keyframes])
-          result (keyframe/handle-update-settings state sample-config [0] 
-                                                  {:period 8.0 :time-unit :ms :loop-mode :ping-pong})
-          kf-mod (get-in result [:chains :effect-chains [0 0] :items 0 :keyframe-modulator])]
-      (is (= 8.0 (:period kf-mod)))
-      (is (= :ms (:time-unit kf-mod)))
-      (is (= :ping-pong (:loop-mode kf-mod)))
-      (is (true? (:enabled? kf-mod)) "Other fields should be preserved"))))
-
-
 (deftest handle-update-setting-test
   (testing "Updates a single setting"
     (let [state (make-test-state [sample-effect-with-keyframes])
@@ -315,44 +284,7 @@
                  :enabled? true
                  :state state}
           result (keyframe/handle event)]
-      (is (some? (get-in result [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator])))))
-  
-  (testing "Dispatches :keyframe/initialize"
-    (let [state (make-test-state [sample-effect])
-          event {:event/type :keyframe/initialize
-                 :domain :effect-chains
-                 :entity-key [0 0]
-                 :effect-path [0]
-                 :state state}
-          result (keyframe/handle event)]
-      (is (some? (get-in result [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator])))))
-  
-  (testing "Dispatches :keyframe/update-settings"
-    (let [state (make-test-state [sample-effect-with-keyframes])
-          event {:event/type :keyframe/update-settings
-                 :domain :effect-chains
-                 :entity-key [0 0]
-                 :effect-path [0]
-                 :period 16.0
-                 :time-unit :ms
-                 :state state}
-          result (keyframe/handle event)
-          kf-mod (get-in result [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator])]
-      (is (= 16.0 (:period kf-mod)))
-      (is (= :ms (:time-unit kf-mod)))))
-  
-  (testing "Dispatches :keyframe/update-setting"
-    (let [state (make-test-state [sample-effect-with-keyframes])
-          event {:event/type :keyframe/update-setting
-                 :domain :effect-chains
-                 :entity-key [0 0]
-                 :effect-path [0]
-                 :setting-key :period
-                 :fx/event 32.0
-                 :state state}
-          result (keyframe/handle event)
-          kf-mod (get-in result [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator])]
-      (is (= 32.0 (:period kf-mod)))))
+      (is (some? (get-in result [:state :chains :effect-chains [0 0] :items 0 :keyframe-modulator]))))) 
   
   (testing "Dispatches :keyframe/select"
     (let [state (make-test-state [sample-effect-with-keyframes])

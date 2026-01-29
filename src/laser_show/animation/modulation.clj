@@ -8,6 +8,7 @@
    - Parameter resolution (evaluating modulators)
    
    Implementation details (evaluator functions) are in modulator-evaluators.clj
+   Modulator registrations are in modulators.clj
    Keyframe interpolation logic is in keyframes.clj
    Time/beat utilities are in time.clj
    
@@ -21,19 +22,12 @@
    ;; MIDI controlled
    {:effect-id :scale :params {:x-scale {:type :midi :channel 1 :cc 7 :min 0.5 :max 2.0}}}"
   (:require
-   [laser-show.animation.modulator-evaluators :as evaluators]
+   [laser-show.animation.modulator-registry :as reg]
+   [laser-show.animation.modulators]  ;; Side-effect: registers all modulators
    [laser-show.animation.keyframes :as keyframes]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
-
-
-;; Re-exports from evaluators for backward compatibility
-
-
-(def modulator-types
-  "Set of valid modulator type keywords."
-  evaluators/modulator-types)
 
 
 ;; Modulator Detection
@@ -45,7 +39,7 @@
   [x]
   (and (map? x)
        (contains? x :type)
-       (contains? modulator-types (:type x))))
+       (reg/valid-modulator-type? (:type x))))
 
 
 ;; Modulation Context
@@ -146,17 +140,13 @@
 ;; Per-Point Context Detection
 
 
-(def ^:private per-point-types
-  "Modulator types that require per-point context (x, y, point-index, point-count)."
-  #{:pos-x :pos-y :radial :angle :point-index :point-wave :pos-wave :pos-scroll :rainbow-hue})
-
 (defn config-requires-per-point?
   "Check if a modulator config requires per-point context.
-   Returns true if the config's type is in the per-point-types set AND :active? is true.
+   Returns true if the modulator type is registered with :per-point? true AND :active? is true.
    Inactive modulators don't need per-point processing - they return a static value."
   [config]
   (and (modulator-config? config)
-       (contains? per-point-types (:type config))
+       (reg/per-point? (:type config))
        (get config :active? true)))
 
 (defn any-param-requires-per-point?
@@ -177,15 +167,18 @@
     false))
 
 
-;; Main Evaluation - delegates to evaluators
+;; Main Evaluation - uses registry for fast evaluator lookup
 
 
 (defn evaluate-modulator
   "Evaluate a modulator config with the given context.
-   Uses the modulator-evaluators registry to look up the evaluator fn.
-   Returns the calculated value."
+   Uses the modulator registry to look up the evaluator fn (hot path).
+   Returns the calculated value, or default from :value/:min if evaluator not found."
   [config context]
-  (evaluators/evaluate-modulator config context))
+  (if-let [eval-fn (reg/get-evaluator (:type config))]
+    (eval-fn config context)
+    ;; Default fallback for unknown types
+    (get config :value (get config :min 0.0))))
 
 
 ;; Parameter Resolution

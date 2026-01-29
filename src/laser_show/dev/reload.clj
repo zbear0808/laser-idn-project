@@ -95,7 +95,6 @@
     laser-show.events.handlers.chain.helpers
     laser-show.events.handlers.chain.core
     laser-show.events.handlers.chain.params
-    laser-show.events.handlers.chain.structure
     laser-show.events.handlers.chain
     laser-show.events.handlers.connection
     laser-show.events.handlers.cue-chain

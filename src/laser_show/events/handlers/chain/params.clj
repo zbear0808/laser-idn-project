@@ -10,11 +10,7 @@
    [laser-show.events.helpers :as h]
    [laser-show.events.handlers.effect-params :as effect-params]))
 
-
-;; ============================================================================
 ;; Effect Parameter Operations (Delegate to effect-params)
-;; ============================================================================
-
 
 (defn handle-add-curve-point
   "Thin wrapper that delegates to effect-params.
@@ -63,14 +59,6 @@
         params-path (vec (concat items-path effect-path [:params]))]
     (effect-params/update-scale-params state params-path x-scale y-scale)))
 
-(defn handle-update-rotation-param
-  "Thin wrapper that delegates to effect-params.
-   Updates angle parameter from rotation drag operation."
-  [state config {:keys [effect-path angle]}]
-  (let [items-path (:items-path config)
-        params-path (vec (concat items-path effect-path [:params]))]
-    (effect-params/update-rotation-param state params-path angle)))
-
 (defn handle-reset-params
   "Thin wrapper that delegates to effect-params.
    Resets effect parameters to their default values."
@@ -87,11 +75,7 @@
         params-path (vec (concat items-path effect-path [:params]))]
     (effect-params/toggle-zone-group state params-path group-id)))
 
-
-;; ============================================================================
 ;; Parameter Update Handlers
-;; ============================================================================
-
 
 (defn handle-update-param
   "Update an effect parameter value.
@@ -163,9 +147,7 @@
     (assoc-in state items-path updated-items)))
 
 
-;; ============================================================================
 ;; UI Mode Operations
-;; ============================================================================
 
 
 (defn handle-set-ui-mode

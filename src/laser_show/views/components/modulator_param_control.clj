@@ -22,7 +22,7 @@
    
    Also provides visual-editor-modulator-header for embedding modulator controls
    directly in single-parameter visual editors (rotation dial, hue slider, etc)."
-  (:require [laser-show.animation.modulator-defs :as mod-defs]
+  (:require [laser-show.animation.modulator-registry :as reg]
             [laser-show.views.components.parameter-controls :as param-controls]))
 
 
@@ -36,11 +36,11 @@
    - :current-type - Current modulator type keyword
    - :on-select-event - Event template for type selection (receives :mod-type)"
   [{:keys [current-type on-select-event]}]
-  (let [all-types mod-defs/all-modulator-type-list
-        current-info (get mod-defs/modulator-type->info current-type)]
+  (let [all-types (reg/all-ui-modulators)
+        current-info (reg/get-modulator current-type)]
     {:fx/type :combo-box
      :pref-width 140
-     :value (or current-info (first mod-defs/wave-modulators))
+     :value (or current-info (first all-types))
      :items (vec all-types)
      :button-cell (fn [item]
                     {:text (when item (str (:icon item) " " (:name item)))})
@@ -159,7 +159,7 @@
    - :param-spec - The original param spec (for getting min/max bounds)"
   [{:keys [modulator-config on-param-change-event on-retrigger-event param-spec]}]
   (let [mod-type (:type modulator-config)
-        base-params (get mod-defs/modulator-params mod-type [])
+        base-params (reg/get-params mod-type)
         ;; Adjust min/max param bounds to use param-spec's bounds
         params (mapv (fn [param-def]
                        (case (:key param-def)
@@ -180,7 +180,7 @@
                 (concat
                  ;; Retrigger button at top (for wave and decay modulators)
                  (when (and on-retrigger-event
-                            (mod-defs/supports-retrigger? mod-type))
+                            (reg/retrigger? mod-type))
                    [{:fx/type :h-box
                      :spacing 6
                      :alignment :center-left
@@ -232,7 +232,7 @@
   - :modulator-event-base - Base event template for modulator operations
                             (must have :domain, :entity-key, :effect-path)"
  [{:keys [param-key param-spec current-value modulator-event-base]}]
- (let [is-modulated? (mod-defs/active-modulator? current-value)
+ (let [is-modulated? (reg/active-modulator? current-value)
        display-label (or (:label param-spec) (name param-key))
        ;; Build modulator event templates
        toggle-event (assoc modulator-event-base
@@ -311,11 +311,11 @@
    - :label-width - Optional label width (default 80)"
   [{:keys [param-key param-spec current-value on-change-event on-text-event modulator-event-base label-width]}]
   (let [{:keys [min max label]} param-spec
-         is-modulated? (mod-defs/active-modulator? current-value)
+         is-modulated? (reg/active-modulator? current-value)
          ;; Check if there's an inactive modulator config we need to preserve
-         has-inactive-modulator? (and (mod-defs/modulated? current-value)
-                                      (not (mod-defs/active-modulator? current-value)))
-         static-value (mod-defs/get-static-value current-value (:default param-spec))
+         has-inactive-modulator? (and (reg/modulated? current-value)
+                                      (not (reg/active-modulator? current-value)))
+         static-value (reg/get-static-value current-value (:default param-spec))
          display-label (or label (name param-key))
          label-w (or label-width 80)
          is-int? (= :int (:type param-spec))

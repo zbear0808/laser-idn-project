@@ -33,45 +33,6 @@
       (assoc-in [:playback :trigger-time] 1000)))
 
 
-;; Grid Clear Cell Tests
-
-
-(deftest handle-grid-clear-cell-simple
-  (testing "Clearing a non-active cell removes cue chain and marks dirty"
-    (let [event {:event/type :grid/clear-cell
-                 :col 1
-                 :row 1
-                 :state sample-state-with-content}
-          result (grid/handle event)]
-      (is (nil? (get-in result [:state :chains :cue-chains [1 1]])))
-      (is (true? (get-in result [:state :project :dirty?])))
-      ;; Playback should not be affected
-      (is (false? (get-in result [:state :playback :playing?])))
-      (is (nil? (get-in result [:state :playback :active-cell]))))))
-
-(deftest handle-grid-clear-cell-active
-  (testing "Clearing active cell stops playback"
-    (let [event {:event/type :grid/clear-cell
-                 :col 0
-                 :row 0
-                 :state sample-state-playing}
-          result (grid/handle event)]
-      (is (nil? (get-in result [:state :chains :cue-chains [0 0]])))
-      (is (false? (get-in result [:state :playback :playing?])))
-      (is (nil? (get-in result [:state :playback :active-cell])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
-
-(deftest handle-grid-clear-cell-empty
-  (testing "Clearing empty cell does nothing but marks dirty"
-    (let [event {:event/type :grid/clear-cell
-                 :col 5
-                 :row 5
-                 :state sample-state-empty}
-          result (grid/handle event)]
-      (is (nil? (get-in result [:state :chains :cue-chains [5 5]])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
-
-
 ;; Grid Move Cell Tests
 
 

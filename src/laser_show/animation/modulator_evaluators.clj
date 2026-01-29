@@ -1,8 +1,12 @@
 (ns laser-show.animation.modulator-evaluators
   "Modulator evaluation implementations.
    
-   Contains all eval-* functions for different modulator types and the
-   modulator-evaluators registry mapping type keywords to eval functions.
+   Contains all eval-* functions for different modulator types.
+   The modulator-evaluators map is used by modulators.clj during
+   registration to look up evaluator functions.
+   
+   For runtime evaluation, use laser-show.animation.modulation/evaluate-modulator
+   which looks up evaluators via the registry (reg/get-evaluator).
    
    Each evaluator takes [config context] and returns a numeric value."
   (:require
@@ -442,20 +446,7 @@
    :pos-scroll   eval-pos-scroll
    :rainbow-hue  eval-rainbow-hue})
 
-(def modulator-types
-  "Set of valid modulator type keywords, derived from evaluators registry."
-  (set (keys modulator-evaluators)))
-
-
-;; Main Evaluation Function
-
-
-(defn evaluate-modulator
-  "Evaluate a modulator config with the given context.
-   Uses the modulator-evaluators registry to look up the evaluator fn.
-   Returns the calculated value."
-  [config context]
-  (if-let [eval-fn (get modulator-evaluators (:type config))]
-    (eval-fn config context)
-    ;; Default fallback for unknown types
-    (get config :value (get config :min 0.0))))
+;; Note: The modulator-evaluators map is used by modulators.clj to access
+;; evaluator functions during modulator registration.
+;; For runtime evaluation, use laser-show.animation.modulation/evaluate-modulator
+;; which looks up evaluators via the registry (reg/get-evaluator).

@@ -3,34 +3,12 @@
    
    Contains:
    - Configuration factory (chain-config)
-   - Group creation (make-group)
    
    This module has NO dependencies on other chain sub-modules to avoid cycles.
    
    NOTE: Selection state helpers (get-selected-paths, etc.) were removed as dead code.
    Selection is now handled by the list.clj component using ID-based operations
    with state at [:list-ui component-id].")
-
-
-;; ============================================================================
-;; Group Creation
-;; ============================================================================
-
-
-(defn make-group
-  "Create a new group with given name and items."
-  [name items]
-  {:type :group
-   :id (random-uuid)
-   :name name
-   :collapsed? false
-   :enabled? true
-   :items (vec items)})
-
-
-;; ============================================================================
-;; Configuration Factory
-;; ============================================================================
 
 
 (defn chain-config

@@ -237,7 +237,7 @@
    Accepts events with :event/type in the :cue-chain/* namespace.
    
    Note: Effect CRUD, parameter, curve, and UI mode operations should use :chain/* events:
-   - :chain/add-item, :chain/remove-item-at-path
+   - :chain/add-item, :chain/set-items
    - :chain/update-param, :chain/update-param-from-text
    - :chain/add-curve-point, :chain/update-curve-point, :chain/remove-curve-point
    - :chain/set-active-curve-channel

@@ -21,7 +21,7 @@
             [clojure.string :as str]
             [laser-show.subs :as subs]
             [laser-show.animation.colors :as colors]
-            [laser-show.animation.modulator-defs :as mod-defs]
+            [laser-show.animation.modulator-registry :as reg]
             [laser-show.events.core :as events]
             [laser-show.views.components.visual-editors.spatial-canvas :as spatial-canvas]
             [laser-show.views.components.visual-editors.rotate-canvas :as rotate-canvas]
@@ -267,10 +267,10 @@
        
        ;; Get angle value - could be number or modulator config
        angle-value (get params-map :angle 0.0)
-       is-modulated? (mod-defs/active-modulator? angle-value)
+       is-modulated? (reg/active-modulator? angle-value)
        ;; Always use get-static-value - handles both plain numbers and modulator configs
        ;; (including inactive modulators where :active? is false)
-       static-angle (mod-defs/get-static-value angle-value 0.0)
+       static-angle (reg/get-static-value angle-value 0.0)
        
        ;; Determine fx/key for canvas
        canvas-key (or fx-key :visual-editor)
@@ -630,10 +630,10 @@
   (let [params-map (or current-params {})
         ;; Get hue value - could be number or modulator config
         hue-value (get params-map :hue 0.0)
-        is-modulated? (mod-defs/active-modulator? hue-value)
+        is-modulated? (reg/active-modulator? hue-value)
         ;; Always use get-static-value - handles both plain numbers and modulator configs
         ;; (including inactive modulators where :active? is false)
-        static-hue (mod-defs/get-static-value hue-value 0.0)
+        static-hue (reg/get-static-value hue-value 0.0)
         actual-hint (or hint-text "Drag to select hue")
         ;; Use a stable key that does NOT change based on current value
         ;; This prevents canvas recreation during dragging
@@ -715,10 +715,10 @@
   (let [params-map (or current-params {})
         ;; Get degrees value - could be number or modulator config
         degrees-value (get params-map :degrees 0.0)
-        is-modulated? (mod-defs/active-modulator? degrees-value)
+        is-modulated? (reg/active-modulator? degrees-value)
         ;; Always use get-static-value - handles both plain numbers and modulator configs
         ;; (including inactive modulators where :active? is false)
-        static-degrees (mod-defs/get-static-value degrees-value 0.0)
+        static-degrees (reg/get-static-value degrees-value 0.0)
         actual-hint (or hint-text "Drag left/right to shift hue")
         ;; Use a stable key that does NOT change based on current value
         ;; This prevents canvas recreation during dragging

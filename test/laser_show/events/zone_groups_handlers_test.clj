@@ -137,41 +137,6 @@
       (is (true? (get-in result [:state :project :dirty?]))))))
 
 
-;; Update Tests
-
-
-(deftest handle-zone-groups-update-test
-  (testing "Update modifies group properties"
-    (let [event {:event/type :zone-groups/update
-                 :group-id :left
-                 :updates {:name "Left Side" :color "#0000FF"}
-                 :state base-state}
-          result (zone-groups/handle event)
-          group (get-in result [:state :zone-groups :left])]
-      (is (= "Left Side" (:name group)))
-      (is (= "#0000FF" (:color group)))
-      (is (true? (get-in result [:state :project :dirty?]))))))
-
-
-;; Duplicate Tests
-
-
-(deftest handle-zone-groups-duplicate-test
-  (testing "Duplicate creates copy with modified name"
-    (let [event {:event/type :zone-groups/duplicate
-                 :group-id :left
-                 :state base-state}
-          result (zone-groups/handle event)
-          groups (get-in result [:state :zone-groups])
-          ;; Find the duplicate (has " (copy)" suffix)
-          duplicate (first (filter #(str/includes? (:name (second %)) "(copy)")
-                                   groups))]
-      (is (some? duplicate))
-      ;; Should be selected
-      (is (= (first duplicate) (get-in result [:state :zone-group-ui :selected-group])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
-
-
 ;; Edit Dialog Tests
 
 

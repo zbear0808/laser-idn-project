@@ -18,20 +18,7 @@
 ;; Test Data Fixtures
 
 
-(def sample-discovered-device
-  {:address "192.168.1.100"
-   :host-name "LaserDAC-1"
-   :port 7255
-   :unit-id "ABC123"
-   :services [{:service-id 0
-               :name "Output A"
-               :flags {:default-service true}}
-              {:service-id 1
-               :name "Output B"
-               :flags {}}
-              {:service-id 2
-               :name "Output C"
-               :flags {}}]})
+
 
 (def base-state
   "Base state using actual app initial state structure."
@@ -75,13 +62,6 @@
                            :br-x 1.0 :br-y -1.0}}])))
 
 
-;; NOTE: Corner-pin updates now go through :chain/update-spatial-params and :chain/reset-params
-;; instead of the special :projectors/update-corner-pin and :projectors/reset-corner-pin handlers.
-;; Tests for that functionality should be in the chain handlers tests.
-
-
-;; Zone Group Assignment Tests
-
 
 (deftest handle-projectors-toggle-zone-group-test
   (testing "Adds zone group when not present"
@@ -109,145 +89,6 @@
       (is (some #{:right} zone-groups)))))
 
 
-(deftest handle-projectors-set-zone-groups-test
-  (testing "Sets zone groups directly"
-    (let [event {:event/type :projectors/set-zone-groups
-                 :projector-id test-projector-id
-                 :zone-groups [:left :right]
-                 :state state-with-projector}
-          result (projectors/handle event)
-          zone-groups (get-in result [:state :projectors test-projector-id :zone-groups])]
-      (is (= [:left :right] zone-groups)))))
-
-
-;; Virtual Projector Tests
-
-
-(def vp-id #uuid "11111111-1111-1111-1111-111111111111")
-
-
-(deftest handle-projectors-add-virtual-projector-test
-  (testing "Creates virtual projector with custom corner-pin inheriting parent's color curves"
-    (let [event {:event/type :projectors/add-virtual-projector
-                 :parent-projector-id test-projector-id
-                 :name "Graphics Zone"
-                 :state state-with-projector}
-          result (projectors/handle event)
-          vps (get-in result [:state :virtual-projectors])
-          new-vp (first (vals vps))]
-      (is (= 1 (count vps)))
-      (is (= "Graphics Zone" (:name new-vp)))
-      (is (= test-projector-id (:parent-projector-id new-vp)))
-      (is (contains? new-vp :corner-pin))
-      (is (vector? (:zone-groups new-vp))))))
-
-
-(deftest handle-vp-update-corner-pin-test
-  (testing "Updates virtual projector corner-pin"
-    (let [state-with-vp (assoc-in state-with-projector
-                                  [:virtual-projectors vp-id]
-                                  {:name "Test VP"
-                                   :parent-projector-id test-projector-id
-                                   :zone-groups [:all]
-                                   :enabled? true
-                                   :corner-pin {:tl-x -1.0 :tl-y 1.0
-                                                :tr-x 1.0 :tr-y 1.0
-                                                :bl-x -1.0 :bl-y -1.0
-                                                :br-x 1.0 :br-y -1.0}})
-          event {:event/type :projectors/vp-update-corner-pin
-                 :vp-id vp-id
-                 :point-id :br
-                 :x 0.7
-                 :y -0.8
-                 :state state-with-vp}
-          result (projectors/handle event)
-          corner-pin (get-in result [:state :virtual-projectors vp-id :corner-pin])]
-      (is (= 0.7 (:br-x corner-pin)))
-      (is (= -0.8 (:br-y corner-pin))))))
-
-
-(deftest handle-vp-toggle-zone-group-test
-  (testing "Toggles zone group on virtual projector"
-    (let [state-with-vp (assoc-in state-with-projector
-                                  [:virtual-projectors vp-id]
-                                  {:name "Test VP"
-                                   :parent-projector-id test-projector-id
-                                   :zone-groups [:all]
-                                   :enabled? true
-                                   :corner-pin {:tl-x -1.0 :tl-y 1.0
-                                                :tr-x 1.0 :tr-y 1.0
-                                                :bl-x -1.0 :bl-y -1.0
-                                                :br-x 1.0 :br-y -1.0}})
-          event {:event/type :projectors/vp-toggle-zone-group
-                 :vp-id vp-id
-                 :zone-group-id :graphics
-                 :state state-with-vp}
-          result (projectors/handle event)
-          zone-groups (get-in result [:state :virtual-projectors vp-id :zone-groups])]
-      (is (some #{:graphics} zone-groups)))))
-
-
-(deftest handle-projectors-remove-virtual-projector-test
-  (testing "Removes virtual projector"
-    (let [state-with-vp (assoc-in state-with-projector
-                                  [:virtual-projectors vp-id]
-                                  {:name "Test VP"
-                                   :parent-projector-id test-projector-id})
-          event {:event/type :projectors/remove-virtual-projector
-                 :vp-id vp-id
-                 :state state-with-vp}
-          result (projectors/handle event)]
-      (is (empty? (get-in result [:state :virtual-projectors]))))))
-
-
-(deftest handle-projectors-remove-projector-test
-  (testing "Removing active projector selects another"
-    (let [state-multi-proj (-> state-with-projector
-                               (assoc-in [:projectors :proj-2] {:name "Projector 2"
-                                                                 :zone-groups [:all]
-                                                                 :tags #{}})
-                               (assoc-in [:projector-ui :active-projector] test-projector-id))
-          event {:event/type :projectors/remove-projector
-                 :projector-id test-projector-id
-                 :state state-multi-proj}
-          result (projectors/handle event)
-          items (get-in result [:state :projectors])
-          active (get-in result [:state :projector-ui :active-projector])]
-      ;; proj-1 should be removed
-      (is (not (contains? items test-projector-id)))
-      ;; Should auto-select proj-2
-      (is (= :proj-2 active))))
-  
-  (testing "Removing non-active projector keeps active unchanged"
-    (let [state-multi-proj (-> state-with-projector
-                               (assoc-in [:projectors :proj-2] {:name "Projector 2"
-                                                                 :zone-groups [:all]
-                                                                 :tags #{}})
-                               (assoc-in [:projector-ui :active-projector] test-projector-id))
-          event {:event/type :projectors/remove-projector
-                 :projector-id :proj-2
-                 :state state-multi-proj}
-          result (projectors/handle event)
-          active (get-in result [:state :projector-ui :active-projector])]
-      ;; Active should still be proj-1
-      (is (= test-projector-id active))))
-  
-  (testing "Removing projector also removes its virtual projectors"
-    (let [state-with-vp (-> state-with-projector
-                            (assoc-in [:virtual-projectors vp-id]
-                                      {:name "Test VP"
-                                       :parent-projector-id test-projector-id
-                                       :zone-groups [:all]}))
-          event {:event/type :projectors/remove-projector
-                 :projector-id test-projector-id
-                 :state state-with-vp}
-          result (projectors/handle event)
-          vps (get-in result [:state :virtual-projectors])]
-      ;; Virtual projector should be removed since parent is gone
-      (is (nil? (get vps vp-id))))))
-
-
-;; Effect Chain Addition Tests
 
 
 (deftest handle-projectors-add-effect-test

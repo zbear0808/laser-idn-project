@@ -22,7 +22,7 @@
     :current-value 1.5
     :on-change-event {:event/type :my/update-param}}
    ```"
-  (:require [laser-show.animation.modulator-defs :as mod-defs]
+  (:require [laser-show.animation.modulator-registry :as reg]
             [laser-show.common.util :as u]))
 
 
@@ -67,7 +67,7 @@
         ;; but protects against edge cases that would cause ClassCastException
         value (cond
                 (number? current-value) current-value
-                (mod-defs/modulated? current-value) (mod-defs/get-static-value current-value (:default param-spec))
+                (reg/modulated? current-value) (reg/get-static-value current-value (:default param-spec))
                 :else (or (:default param-spec) 0))
         is-int? (= :int (:type param-spec))
         display-label (or label (name param-key))

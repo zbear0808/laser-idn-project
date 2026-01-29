@@ -13,7 +13,7 @@
    - Optional modulator support for numeric parameters
    
    Uses parameter-controls namespace for basic control components."
-  (:require [laser-show.animation.modulator-defs :as mod-defs]
+  (:require [laser-show.animation.modulator-registry :as reg]
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.visual-editors.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.modulator-param-control :as mod-param]
@@ -85,7 +85,7 @@
         ui-hints (:ui-hints effect-def)
         renderer-type (:renderer ui-hints)
         ;; Check if any params have ACTIVE modulators
-        has-modulators? (boolean (some (fn [[_k v]] (mod-defs/active-modulator? v)) current-params))
+        has-modulators? (boolean (some (fn [[_k v]] (reg/active-modulator? v)) current-params))
         ;; Single-param visual editors handle their own modulator UI, so they can
         ;; display in either mode even when modulators are active
         single-param-visual-editor? (contains? #{:rotation-dial :hue-slider :hue-shift-strip}

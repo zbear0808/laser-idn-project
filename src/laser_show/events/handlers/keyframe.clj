@@ -25,10 +25,10 @@
    
    DEBUG: Set log level to DEBUG for this namespace to see keyframe operations."
   (:require
-   [clojure.tools.logging :as log]
-   [laser-show.animation.modulator-defs :as mod-defs]
-   [laser-show.events.helpers :as h]
-   [laser-show.events.handlers.chain :as chain]))
+     [clojure.tools.logging :as log]
+     [laser-show.animation.modulator-registry :as reg]
+     [laser-show.events.helpers :as h]
+     [laser-show.events.handlers.chain :as chain]))
 
 
 ;; Helper Functions
@@ -88,8 +88,8 @@
   "Extract static value from a param that may be a modulator config.
    Keyframes should only contain static numeric values."
   [value default]
-  (if (mod-defs/modulated? value)
-    (mod-defs/get-static-value value default)
+  (if (reg/modulated? value)
+    (reg/get-static-value value default)
     (or value default)))
 
 (defn- normalize-params-for-keyframes
@@ -107,7 +107,7 @@
   [params]
   (into {}
         (map (fn [[k v]]
-               (if (mod-defs/modulated? v)
+               (if (reg/modulated? v)
                  [k (assoc v :active? false)]
                  [k v])))
         params))
