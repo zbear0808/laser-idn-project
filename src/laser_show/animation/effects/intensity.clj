@@ -28,7 +28,6 @@
    - Global modulators: resolved once, cached
    - Per-point modulators: evaluated per-point with (fn [x y idx] -> value)"
   (:require [laser-show.animation.effects :as effects]
-            [laser-show.animation.modulation :as mod]
             [laser-show.animation.time :as time]
             [laser-show.animation.types :as t]))
   

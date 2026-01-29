@@ -1,7 +1,8 @@
 (ns laser-show.animation.modulation-test
   "Tests for the parameter modulation system."
   (:require [clojure.test :refer [deftest testing is]]
-            [laser-show.animation.modulation :as mod]))
+            [laser-show.animation.modulation :as mod]
+            [laser-show.animation.keyframes :as kf]))
 
 
 ;; Helper Functions
@@ -680,25 +681,25 @@
                      {:position 0.5 :params {:x 50}}
                      {:position 0.75 :params {:x 75}}]]
       ;; Exact position match
-      (let [[before after] (#'mod/find-surrounding-keyframes keyframes 0.25)]
+      (let [[before after] (kf/find-surrounding-keyframes keyframes 0.25)]
         (is (= 0.0 (:position before)))
         (is (= 0.25 (:position after))))
       ;; Between keyframes
-      (let [[before after] (#'mod/find-surrounding-keyframes keyframes 0.3)]
+      (let [[before after] (kf/find-surrounding-keyframes keyframes 0.3)]
         (is (= 0.25 (:position before)))
         (is (= 0.5 (:position after))))
       ;; Near start
-      (let [[before after] (#'mod/find-surrounding-keyframes keyframes 0.1)]
+      (let [[before after] (kf/find-surrounding-keyframes keyframes 0.1)]
         (is (= 0.0 (:position before)))
         (is (= 0.25 (:position after))))
       ;; After last keyframe (wrap to first)
-      (let [[before after] (#'mod/find-surrounding-keyframes keyframes 0.9)]
+      (let [[before after] (kf/find-surrounding-keyframes keyframes 0.9)]
         (is (= 0.75 (:position before)))
         (is (= 0.0 (:position after))))))
   
   (testing "Single keyframe"
     (let [keyframes [{:position 0.5 :params {:x 50}}]
-          [before after] (#'mod/find-surrounding-keyframes keyframes 0.3)]
+          [before after] (kf/find-surrounding-keyframes keyframes 0.3)]
       ;; Both should be the same keyframe
       (is (= 0.5 (:position before)))
       (is (= 0.5 (:position after))))))
@@ -708,52 +709,52 @@
     (let [kf1 {:position 0.0 :params {}}
           kf2 {:position 1.0 :params {}}]
       ;; At start
-      (is (approx= 0.0 (#'mod/calculate-interp-factor kf1 kf2 0.0) 0.01))
+      (is (approx= 0.0 (kf/calculate-interp-factor kf1 kf2 0.0) 0.01))
       ;; At midpoint
-      (is (approx= 0.5 (#'mod/calculate-interp-factor kf1 kf2 0.5) 0.01))
+      (is (approx= 0.5 (kf/calculate-interp-factor kf1 kf2 0.5) 0.01))
       ;; Near end
-      (is (approx= 0.9 (#'mod/calculate-interp-factor kf1 kf2 0.9) 0.01))))
+      (is (approx= 0.9 (kf/calculate-interp-factor kf1 kf2 0.9) 0.01))))
   
   (testing "Partial range"
     (let [kf1 {:position 0.25 :params {}}
           kf2 {:position 0.75 :params {}}]
       ;; At start of range
-      (is (approx= 0.0 (#'mod/calculate-interp-factor kf1 kf2 0.25) 0.01))
+      (is (approx= 0.0 (kf/calculate-interp-factor kf1 kf2 0.25) 0.01))
       ;; At midpoint of range
-      (is (approx= 0.5 (#'mod/calculate-interp-factor kf1 kf2 0.5) 0.01))
+      (is (approx= 0.5 (kf/calculate-interp-factor kf1 kf2 0.5) 0.01))
       ;; At end of range
-      (is (approx= 1.0 (#'mod/calculate-interp-factor kf1 kf2 0.75) 0.01))))
+      (is (approx= 1.0 (kf/calculate-interp-factor kf1 kf2 0.75) 0.01))))
   
   (testing "Wrap-around case"
     (let [kf1 {:position 0.75 :params {}}
           kf2 {:position 0.25 :params {}}]
       ;; Phase after kf1 but before wrap
-      (is (approx= 0.25 (#'mod/calculate-interp-factor kf1 kf2 0.875) 0.01))
+      (is (approx= 0.25 (kf/calculate-interp-factor kf1 kf2 0.875) 0.01))
       ;; Phase after wrap but before kf2
-      (is (approx= 0.75 (#'mod/calculate-interp-factor kf1 kf2 0.125) 0.01))))
+      (is (approx= 0.75 (kf/calculate-interp-factor kf1 kf2 0.125) 0.01))))
   
   (testing "Same position keyframes"
     (let [kf1 {:position 0.5 :params {}}
           kf2 {:position 0.5 :params {}}]
       ;; Should return 0.0 (avoid division by zero)
-      (is (= 0.0 (#'mod/calculate-interp-factor kf1 kf2 0.5))))))
+      (is (= 0.0 (kf/calculate-interp-factor kf1 kf2 0.5))))))
 
 (deftest interpolate-params-test
   (testing "Linear interpolation of numeric params"
     (let [p1 {:scale 1.0 :hue 0.0 :amount 100.0}
           p2 {:scale 2.0 :hue 360.0 :amount 200.0}]
       ;; At t=0 should equal p1
-      (let [result (#'mod/interpolate-params p1 p2 0.0)]
+      (let [result (kf/interpolate-params p1 p2 0.0)]
         (is (approx= 1.0 (:scale result)))
         (is (approx= 0.0 (:hue result)))
         (is (approx= 100.0 (:amount result))))
       ;; At t=0.5 should be midpoint
-      (let [result (#'mod/interpolate-params p1 p2 0.5)]
+      (let [result (kf/interpolate-params p1 p2 0.5)]
         (is (approx= 1.5 (:scale result)))
         (is (approx= 180.0 (:hue result)))
         (is (approx= 150.0 (:amount result))))
       ;; At t=1 should equal p2
-      (let [result (#'mod/interpolate-params p1 p2 1.0)]
+      (let [result (kf/interpolate-params p1 p2 1.0)]
         (is (approx= 2.0 (:scale result)))
         (is (approx= 360.0 (:hue result)))
         (is (approx= 200.0 (:amount result))))))
@@ -761,7 +762,7 @@
   (testing "Non-numeric params use first value"
     (let [p1 {:mode :linear :name "first"}
           p2 {:mode :radial :name "second"}
-          result (#'mod/interpolate-params p1 p2 0.5)]
+          result (kf/interpolate-params p1 p2 0.5)]
       ;; Non-numeric values should use first value
       (is (= :linear (:mode result)))
       (is (= "first" (:name result)))))
@@ -769,7 +770,7 @@
   (testing "Missing keys in second map"
     (let [p1 {:scale 1.0 :extra 10.0}
           p2 {:scale 2.0}
-          result (#'mod/interpolate-params p1 p2 0.5)]
+          result (kf/interpolate-params p1 p2 0.5)]
       ;; :extra should interpolate with itself (use p1 value)
       (is (approx= 1.5 (:scale result)))
       (is (approx= 10.0 (:extra result))))))

@@ -1,8 +1,15 @@
 (ns laser-show.animation.modulation
-  "Parameter modulation system for effects.
+  "Parameter modulation system for effects - public API.
    
-   Modulators are represented as pure data configs that can be serialized to EDN.
-   The modulator functions are created at runtime when parameters are resolved.
+   This namespace provides the public interface for parameter modulation:
+   - Context creation for parameter resolution
+   - Modulator type detection
+   - Per-point detection for position-based modulators
+   - Parameter resolution (evaluating modulators)
+   
+   Implementation details (evaluator functions) are in modulator-evaluators.clj
+   Keyframe interpolation logic is in keyframes.clj
+   Time/beat utilities are in time.clj
    
    Usage:
    ;; Static value
@@ -14,18 +21,31 @@
    ;; MIDI controlled
    {:effect-id :scale :params {:x-scale {:type :midi :channel 1 :cc 7 :min 0.5 :max 2.0}}}"
   (:require
-   [clojure.edn :as edn]
-   [laser-show.animation.time :as time]
-   [laser-show.common.util :as u]))
+   [laser-show.animation.modulator-evaluators :as evaluators]
+   [laser-show.animation.keyframes :as keyframes]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
-;; Forward declarations for modulator-config? and evaluators
-(declare modulator-config?)
-;; Forward declarations for beat calculation helpers
-(declare get-beats-from-context get-ms-from-context)
 
+;; Re-exports from evaluators for backward compatibility
+
+
+(def modulator-types
+  "Set of valid modulator type keywords."
+  evaluators/modulator-types)
+
+
+;; Modulator Detection
+
+
+(defn modulator-config?
+  "Check if a value is a modulator config map (pure data representation).
+   Modulator configs are maps with a :type key that matches a known modulator type."
+  [x]
+  (and (map? x)
+       (contains? x :type)
+       (contains? modulator-types (:type x))))
 
 
 ;; Modulation Context
@@ -123,93 +143,6 @@
      (assoc :point-index point-index)))
 
 
-
-;; Period/Frequency Conversion
-
-
-(defn- period->frequency
-  "Convert period (beats per cycle) to frequency (cycles per beat).
-   Period of 0 is treated as infinite frequency (returns a large number)."
-  ^double [^double period]
-  (if (zero? period)
-    1000000.0  ; effectively instant
-    (/ 1.0 period)))
-
-
-;; Once-Mode Helper Functions
-
-
-(defn- calculate-once-progress
-  "Calculate progress (0.0 to 1.0) for once-mode modulators.
-   
-   Parameters:
-   - time-ms: Current time in milliseconds
-   - trigger-time: Time when modulator was triggered (falls back to 0 if nil)
-   - duration: Duration value
-   - time-unit: :beats or :seconds
-   - bpm: Current BPM (required for :beats time-unit)
-   
-   Returns: Progress value clamped to 0.0-1.0"
-  [time-ms trigger-time duration time-unit bpm]
-  (let [start-time (double (or trigger-time 0.0))
-        time-ms' (double (or time-ms 0))
-        elapsed (- time-ms' start-time)
-        duration' (double (or duration 1.0))
-        bpm' (double (or bpm 120.0))
-        duration-ms (double (if (= time-unit :seconds)
-                              (* duration' 1000.0)
-                              (time/beats->ms duration' bpm')))]
-    (if (pos? duration-ms)
-      (u/clamp (/ elapsed duration-ms) 0.0 1.0)
-      1.0)))
-
-(defn- resolve-trigger-time
-  "Resolve trigger time from either a fixed value or an atom reference.
-   Returns the trigger time as a number, or nil if not available."
-  [trigger-source]
-  (cond
-    (instance? clojure.lang.IDeref trigger-source) @trigger-source
-    (number? trigger-source) trigger-source
-    :else nil))
-
-(defn- calculate-modulator-phase
-  "Calculate the phase for a modulator based on loop-mode and timing settings.
-   
-   For looping modulators, uses effective-beats (accumulated-beats + phase-offset)
-   which enables smooth animation during BPM changes and phase resync on tap tempo.
-   
-   For once-mode modulators, uses raw accumulated-beats without phase correction
-   since these should play through exactly once from trigger without resync effects.
-   
-   Parameters:
-   - context: Modulation context with timing fields
-   - period: Beats per cycle (converted to frequency internally)
-   - phase-param: Phase offset parameter (0.0-1.0)
-   - loop-mode: :loop or :once
-   - duration: Duration for once-mode
-   - time-unit: :beats or :seconds
-   - trigger-override: Optional trigger time to use instead of context's trigger-time
-   
-   Returns: Phase value for oscillation"
-  ([context period phase-param loop-mode duration time-unit]
-   (calculate-modulator-phase context period phase-param loop-mode duration time-unit nil))
-  ([{:keys [time-ms bpm trigger-time] :as context}
-    period phase-param loop-mode duration time-unit trigger-override]
-   (let [bpm (double (or bpm 120.0))
-         frequency (period->frequency (double period))
-         phase-param (double (or phase-param 0.0))]
-     (if (= loop-mode :once)
-       ;; Once mode: use raw accumulated-beats (no phase correction)
-       ;; for predictable one-shot behavior from trigger
-       (let [effective-trigger-time (or (resolve-trigger-time trigger-override) trigger-time)
-             progress (double (calculate-once-progress (or time-ms 0) effective-trigger-time duration time-unit bpm))]
-         (+ (* progress frequency) phase-param))
-       ;; Loop mode: use effective-beats (with phase correction for tap resync)
-       ;; Falls back to calculating from time-ms/bpm for backward compatibility
-       (let [beats (double (get-beats-from-context context))]
-         (+ (* beats frequency) phase-param))))))
-
-
 ;; Per-Point Context Detection
 
 
@@ -244,467 +177,7 @@
     false))
 
 
-;; Beat Calculation Helper
-
-(defn- get-beats-from-context
-  "Get the current beat count from context with proper fallback.
-   
-   Priority:
-   1. effective-beats (includes phase correction for looping)
-   2. accumulated-beats (raw incremental beats)
-   3. Calculate from time-ms and bpm (backward compatibility with tests)
-   4. Default to 0.0
-   
-   This ensures backward compatibility with contexts that only have time-ms/bpm."
-  ^double [{:keys [effective-beats accumulated-beats time-ms bpm]}]
-  (double
-   (or effective-beats
-       accumulated-beats
-       (when (and time-ms bpm (pos? (double bpm)))
-         (time/ms->beats time-ms bpm))
-       0.0)))
-
-(defn- get-ms-from-context
-  "Get the current milliseconds from context with proper fallback.
-   
-   Priority:
-   1. accumulated-ms (incremental since trigger)
-   2. time-ms (absolute timestamp - backward compatibility with tests)
-   3. Default to 0.0"
-  ^double [{:keys [accumulated-ms time-ms]}]
-  (double (or accumulated-ms time-ms 0.0)))
-
-
-;; Internal Modulator Implementations
-
-
-(defn- eval-sine
-  "Evaluate sine wave modulator.
-   In once mode, completes once-periods cycles then holds at the final position."
-  [{:keys [min max period phase loop-mode once-periods time-unit]
-    :or {min 0.0 max 1.0 period 1.0 phase 0.0 loop-mode :loop once-periods 1.0 time-unit :beats}
-    :as config}
-   {:keys [time-ms bpm trigger-time] :as context}]
-  (if (= loop-mode :once)
-    ;; Once mode: complete once-periods cycles then hold at final position
-    (let [num-cycles (double (or once-periods 1.0))
-          total-duration (* (double period) num-cycles)
-          progress (double (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))
-          ;; Calculate total phase progression (0 to num-cycles)
-          total-phase (+ (* progress num-cycles) (double phase))
-          ;; Extract cycle position (0.0-1.0) for oscillate
-          cycle-phase (mod total-phase 1.0)
-          ;; If we've completed all cycles, hold at the final position
-          ;; For sine, final position at end of last cycle is at phase 0.0 (which is max)
-          final-phase (if (>= progress 1.0)
-                        (mod (+ num-cycles (double phase)) 1.0)
-                        cycle-phase)]
-      (time/oscillate (double min) (double max) final-phase :sine))
-    ;; Loop mode: use standard phase calculation
-    (let [p (calculate-modulator-phase context period phase :loop period (or time-unit :beats))]
-      (time/oscillate (double min) (double max) p :sine))))
-
-(defn- eval-triangle
-  "Evaluate triangle wave modulator.
-   In once mode, completes once-periods cycles then holds at the final position."
-  [{:keys [min max period phase loop-mode once-periods time-unit]
-    :or {min 0.0 max 1.0 period 1.0 phase 0.0 loop-mode :loop once-periods 1.0 time-unit :beats}
-    :as config}
-   {:keys [time-ms bpm trigger-time] :as context}]
-  (if (= loop-mode :once)
-    (let [num-cycles (double (or once-periods 1.0))
-          total-duration (* (double period) num-cycles)
-          progress (double (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))
-          ;; Calculate total phase progression (0 to num-cycles)
-          total-phase (+ (* progress num-cycles) (double phase))
-          ;; Extract cycle position (0.0-1.0) for oscillate
-          cycle-phase (mod total-phase 1.0)
-          ;; If we've completed all cycles, hold at the final position
-          final-phase (if (>= progress 1.0)
-                        (mod (+ num-cycles (double phase)) 1.0)
-                        cycle-phase)]
-      (time/oscillate (double min) (double max) final-phase :triangle))
-    (let [p (calculate-modulator-phase context period phase :loop period (or time-unit :beats))]
-      (time/oscillate (double min) (double max) p :triangle))))
-
-(defn- eval-sawtooth
-  "Evaluate sawtooth wave modulator.
-   In once mode, completes once-periods cycles then holds at the final position.
-   Uses effective-beats for smooth BPM-change animation in loop mode."
-  [{:keys [min max period phase loop-mode once-periods time-unit]
-    :or {min 0.0 max 1.0 period 1.0 phase 0.0 loop-mode :loop once-periods 1.0 time-unit :beats}
-    :as config}
-   {:keys [time-ms bpm trigger-time] :as context}]
-  (if (= loop-mode :once)
-    (let [num-cycles (double (or once-periods 1.0))
-          total-duration (* (double period) num-cycles)
-          progress (double (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))
-          ;; Calculate total phase progression (0 to num-cycles)
-          total-phase (+ (* progress num-cycles) (double phase))
-          ;; Extract cycle position (0.0-1.0) for oscillate
-          ;; If we're at the end of a cycle (phase close to integer > 0), use 0.9999
-          cycle-phase (let [raw-phase (double (mod total-phase 1.0))]
-                        (if (and (< raw-phase 0.001) (>= total-phase 0.999))
-                          0.9999
-                          raw-phase))
-          ;; If we've completed all cycles, hold at the final position
-          final-phase (if (>= progress 1.0)
-                        ;; Calculate exact final phase, use 0.9999 if it wraps to 0
-                        (let [end-phase (double (mod (+ num-cycles (double phase)) 1.0))]
-                          (if (< end-phase 0.001) 0.9999 end-phase))
-                        cycle-phase)]
-      (time/oscillate (double min) (double max) final-phase :sawtooth))
-    (let [p (calculate-modulator-phase context period phase :loop period (or time-unit :beats))]
-      (time/oscillate (double min) (double max) p :sawtooth))))
-
-(defn- eval-square
-  "Evaluate square wave modulator.
-   In once mode, completes once-periods cycles then holds at the final position.
-   Uses effective-beats for smooth BPM-change animation in loop mode."
-  [{:keys [min max period duty-cycle phase loop-mode once-periods time-unit]
-    :or {min 0.0 max 1.0 period 1.0 duty-cycle 0.5 phase 0.0 loop-mode :loop once-periods 1.0 time-unit :beats}
-    :as config}
-   {:keys [time-ms bpm trigger-time] :as context}]
-  (let [square-fn (fn [^double p]
-                    (let [cycle-phase (double (mod p 1.0))]
-                      (if (< cycle-phase (double duty-cycle))
-                        (double max)
-                        (double min))))]
-    (if (= loop-mode :once)
-      (let [num-cycles (double (or once-periods 1.0))
-            total-duration (* (double period) num-cycles)
-            progress (double (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))
-            ;; Calculate total phase progression (0 to num-cycles)
-            total-phase (+ (* progress num-cycles) (double phase))
-            ;; If we've completed all cycles, hold at the final position
-            final-phase (if (>= progress 1.0)
-                          ;; Calculate exact final phase, use 0.9999 if it wraps to 0
-                          (let [end-phase (double (mod (+ num-cycles (double phase)) 1.0))]
-                            (if (< end-phase 0.001) 0.9999 end-phase))
-                          ;; During animation, use total_phase directly (square-fn will mod it)
-                          total-phase)]
-        (square-fn final-phase))
-      (let [p (calculate-modulator-phase context period phase :loop period (or time-unit :beats))]
-        (square-fn p)))))
-
-(defn- eval-sine-hz
-  "Evaluate sine wave at fixed Hz frequency.
-   Uses accumulated-ms for smooth animation unaffected by BPM changes."
-  [{:keys [min max frequency-hz]
-    :or {min 0.0 max 1.0 frequency-hz 1.0}}
-   context]
-  (let [ms (get-ms-from-context context)
-        p (* ms (double frequency-hz) 0.001)]  ;; Convert to cycles
-    (time/oscillate (double min) (double max) p :sine)))
-
-(defn- eval-square-hz
-  "Evaluate square wave at fixed Hz frequency.
-   Uses accumulated-ms for smooth animation unaffected by BPM changes."
-  [{:keys [min max frequency-hz duty-cycle]
-    :or {min 0.0 max 1.0 frequency-hz 1.0 duty-cycle 0.5}}
-   context]
-  (let [ms (get-ms-from-context context)
-        p (double (mod (* ms (double frequency-hz) 0.001) 1.0))]
-    (if (< p (double duty-cycle))
-      (double max)
-      (double min))))
-
-(defn- eval-linear-decay
-  "Evaluate linear decay modulator."
-  [{:keys [start end duration-ms trigger]
-    :or {start 1.0 end 0.0 duration-ms 1000 trigger 0}}
-   {:keys [time-ms]}]
-  (let [elapsed (- (double time-ms) (double trigger))
-        progress (min 1.0 (/ elapsed (double duration-ms)))
-        range-v (- (double end) (double start))]
-    (+ (double start) (* progress range-v))))
-
-(defn- eval-halflife-decay
-  "Evaluate half-life based exponential decay."
-  [{:keys [start end half-life-ms trigger]
-    :or {start 1.0 end 0.0 half-life-ms 500 trigger 0}}
-   {:keys [time-ms]}]
-  (let [elapsed (- (double time-ms) (double trigger))
-        range-v (- (double start) (double end))
-        ln2 (Math/log 2.0)
-        decay-factor (Math/exp (- (/ (* elapsed ln2) (double half-life-ms))))]
-    (+ (double end) (* decay-factor range-v))))
-
-(defn- eval-exp-decay
-  "Evaluate exponential decay (beat-synced).
-   Uses effective-beats for smooth BPM-change animation."
-  [{:keys [min max decay-type]
-    :or {min 0.0 max 1.0 decay-type :linear}}
-   context]
-  (let [beats (get-beats-from-context context)
-        phase (double (mod beats 1.0))
-        start-v (double max)
-        end-v (double min)]
-    (case decay-type
-      :exp (let [range-exp (- start-v end-v)
-                 decay-factor (Math/exp (* (- phase) 3.0))]
-             (+ end-v (* decay-factor range-exp)))
-      ;; :linear is default
-      (let [range-v (- end-v start-v)]
-        (+ start-v (* phase range-v))))))
-
-(defn- eval-random
-  "Evaluate random modulator.
-   In once mode, generates random values through once-periods cycles then holds at the final position.
-   Uses effective-beats for smooth BPM-change animation in loop mode."
-  [{:keys [min max period changes-per-beat loop-mode once-periods time-unit]
-    :or {min 0.0 max 1.0 period 1.0 changes-per-beat 1.0 loop-mode :loop once-periods 1.0 time-unit :beats}}
-   {:keys [time-ms bpm trigger-time] :as context}]
-  (let [random-fn (fn [^double p]
-                    (let [changes-in-period (double (or changes-per-beat (/ 1.0 (double period))))
-                          seed (long (* p changes-in-period))
-                          rng (java.util.Random. seed)
-                          t (.nextDouble ^java.util.Random rng)
-                          range-v (- (double max) (double min))]
-                      (+ (double min) (* t range-v))))]
-    (if (= loop-mode :once)
-      ;; Once mode: complete once-periods cycles then hold at final position
-      (let [num-cycles (double (or once-periods 1.0))
-            total-duration (* (double period) num-cycles)
-            progress (double (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))
-            ;; Calculate total phase progression (0 to num-cycles)
-            total-phase (* progress num-cycles)
-            ;; If we've completed all cycles, hold at the final position
-            final-phase (if (>= progress 1.0)
-                          num-cycles
-                          total-phase)]
-        (random-fn final-phase))
-      ;; Loop mode: use standard phase calculation
-      (let [p (calculate-modulator-phase context period 0.0 :loop period (or time-unit :beats))]
-        (random-fn p)))))
-
-(defn- parse-step-values
-  "Parse step values - handles both vectors and EDN strings."
-  [values]
-  (cond
-    (vector? values) values
-    (string? values) (try
-                       (let [parsed (edn/read-string values)]
-                         (if (vector? parsed) parsed [0 1]))
-                       (catch Exception _ [0 1]))
-    :else [0 1]))
-
-(defn- eval-step
-  "Evaluate step modulator.
-   In once mode, steps through values once-periods times then holds at the final position.
-   Uses effective-beats for smooth BPM-change animation in loop mode."
-  [{:keys [values period steps-per-beat loop-mode once-periods time-unit]
-    :or {values [0 1] period 1.0 steps-per-beat 1.0 loop-mode :loop once-periods 1.0 time-unit :beats}}
-   {:keys [time-ms bpm trigger-time] :as context}]
-  (let [parsed-values (parse-step-values values)
-        num-values (count parsed-values)
-        step-fn (fn [^double p]
-                  (let [idx (mod (long (* p (double steps-per-beat))) num-values)]
-                    (nth parsed-values idx)))]
-    (if (= loop-mode :once)
-      ;; Once mode: complete once-periods cycles then hold at final position
-      (let [num-cycles (double (or once-periods 1.0))
-            total-duration (* (double period) num-cycles)
-            progress (double (calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))]
-        (if (>= progress 1.0)
-          ;; Completed: return the last value
-          (last parsed-values)
-          ;; In progress: calculate step based on phase
-          (let [total-phase (* progress num-cycles)
-                idx (mod (long (* total-phase (double steps-per-beat))) num-values)]
-            (nth parsed-values idx))))
-      ;; Loop mode: use standard phase calculation
-      (let [p (calculate-modulator-phase context period 0.0 :loop period (or time-unit :beats))]
-        (step-fn p)))))
-
-(defn- eval-midi
-  "Evaluate MIDI CC modulator."
-  [{:keys [channel cc min max]
-    :or {channel 1 cc 1 min 0.0 max 1.0}}
-   {:keys [midi-state]}]
-  (let [cc-val (double (get-in midi-state [[channel cc]] 0))
-        range-v (- (double max) (double min))]
-    (+ (double min) (* (/ cc-val 127.0) range-v))))
-
-(defn- eval-osc
-  "Evaluate OSC parameter modulator."
-  [{:keys [path min max]
-    :or {path "/control" min 0.0 max 1.0}}
-   {:keys [osc-state]}]
-  (let [osc-val (double (get osc-state path 0.0))
-        range-v (- (double max) (double min))]
-    (+ (double min) (* osc-val range-v))))
-
-(defn- eval-constant
-  "Evaluate constant value modulator."
-  [{:keys [value min] :or {value 0.0 min 0.0}} _context]
-  (or value min))
-
-(defn- eval-point-index
-  "Evaluate point index modulator."
-  [{:keys [min max wrap?]
-    :or {min 0.0 max 1.0 wrap? false}}
-   {:keys [point-index point-count]}]
-  (if (and point-index point-count (pos? (double point-count)))
-    (let [t (/ (double point-index) (clojure.core/max 1.0 (dec (double point-count))))
-          range-v (- (double max) (double min))]
-      (+ (double min) (* (if wrap? (double (mod t 1.0)) t) range-v)))
-    (double min)))
-
-(defn- eval-point-wave
-  "Evaluate point index wave modulator."
-  [{:keys [min max cycles wave-type]
-    :or {min 0.0 max 1.0 cycles 1.0 wave-type :sine}}
-   {:keys [point-index point-count]}]
-  (if (and point-index point-count (pos? (double point-count)))
-    (let [t (/ (double point-index) (clojure.core/max 1.0 (double point-count)))
-          phase (* t (double cycles))]
-      (time/oscillate (double min) (double max) phase wave-type))
-    (double min)))
-
-(defn- eval-pos-x
-  "Evaluate position X modulator."
-  [{:keys [min max] :or {min 0.0 max 1.0}}
-   {:keys [x]}]
-  (if x
-    (let [t (/ (+ (double x) 1.0) 2.0)  ; normalize -1..1 to 0..1
-          range-v (- (double max) (double min))]
-      (+ (double min) (* t range-v)))
-    (double min)))
-
-(defn- eval-pos-y
-  "Evaluate position Y modulator."
-  [{:keys [min max] :or {min 0.0 max 1.0}}
-   {:keys [y]}]
-  (if y
-    (let [t (/ (+ (double y) 1.0) 2.0)
-          range-v (- (double max) (double min))]
-      (+ (double min) (* t range-v)))
-    (double min)))
-
-(defn- eval-radial
-  "Evaluate position radial modulator."
-  [{:keys [min max normalize?]
-    :or {min 0.0 max 1.0 normalize? true}}
-   {:keys [x y]}]
-  (if (and x y)
-    (let [dist (Math/sqrt (+ (* (double x) (double x))
-                             (* (double y) (double y))))
-          max-dist (if normalize? (Math/sqrt 2.0) 1.0)
-          t (clojure.core/min 1.0 (/ dist max-dist))
-          range-v (- (double max) (double min))]
-      (+ (double min) (* t range-v)))
-    (double min)))
-
-(defn- eval-angle
-  "Evaluate position angle modulator."
-  [{:keys [min max] :or {min 0.0 max 1.0}}
-   {:keys [x y]}]
-  (if (and x y)
-    (let [angle (Math/atan2 (double y) (double x))
-          t (/ (+ angle Math/PI) (* 2.0 Math/PI))  ; normalize -π..π to 0..1
-          range-v (- (double max) (double min))]
-      (+ (double min) (* t range-v)))
-    (double min)))
-
-(defn- eval-pos-wave
-  "Evaluate position wave modulator."
-  [{:keys [min max axis frequency wave-type]
-    :or {min 0.0 max 1.0 axis :x frequency 1.0 wave-type :sine}}
-   {:keys [x y]}]
-  (if (and x y)
-    (let [pos-val (case axis
-                    :x (double x)
-                    :y (double y)
-                    :radial (Math/sqrt (+ (* (double x) (double x))
-                                          (* (double y) (double y))))
-                    :angle (/ (+ (Math/atan2 (double y) (double x)) Math/PI)
-                              (* 2.0 Math/PI)))
-          phase (* pos-val (double frequency))]
-      (time/oscillate (double min) (double max) phase wave-type))
-    (double min)))
-
-(defn- eval-pos-scroll
-  "Evaluate position scroll modulator.
-   Uses effective-beats for smooth BPM-change animation."
-  [{:keys [min max axis speed wave-type]
-    :or {min 0.0 max 1.0 axis :x speed 1.0 wave-type :sine}}
-   {:keys [x y] :as context}]
-  (if (and x y)
-    (let [pos-val (case axis :x (double x) :y (double y))
-          beats (double (get-beats-from-context context))
-          time-offset (* (double (mod beats 1.0)) (double speed))
-          phase (+ pos-val time-offset)]
-      (time/oscillate (double min) (double max) phase wave-type))
-    (double min)))
-
-(defn- eval-rainbow-hue
-  "Evaluate rainbow hue modulator.
-   Uses accumulated-ms for smooth animation unaffected by BPM changes."
-  [{:keys [axis speed] :or {axis :x speed 60.0}}
-   {:keys [x y] :as context}]
-  (let [ms (get-ms-from-context context)]
-    (if (and x y)
-      (let [position (case axis
-                       :x (/ (+ (double x) 1.0) 2.0)
-                       :y (/ (+ (double y) 1.0) 2.0)
-                       :radial (Math/sqrt (+ (* (double x) (double x))
-                                             (* (double y) (double y))))
-                       :angle (/ (+ (Math/atan2 (double y) (double x)) Math/PI)
-                                 (* 2.0 Math/PI)))
-            time-offset (double (mod (* (/ ms 1000.0) (double speed)) 360.0))]
-        (mod (+ (* position 360.0) time-offset) 360.0))
-      0.0)))
-
-
-;; Modulator Evaluators Registry
-
-;; 
-;; This map defines all available modulator types and their evaluation functions.
-;; New modulator types should be added here.
-
-(def ^:private modulator-evaluators
-  "Map of modulator type keywords to their evaluation functions.
-   Each function takes [config context] and returns a value."
-  {:sine         eval-sine
-   :triangle     eval-triangle
-   :sawtooth     eval-sawtooth
-   :square       eval-square
-   :sine-hz      eval-sine-hz
-   :square-hz    eval-square-hz
-   :linear-decay eval-linear-decay
-   :halflife-decay eval-halflife-decay
-   :exp-decay    eval-exp-decay
-   :beat-decay   eval-exp-decay  ; alias
-   :random       eval-random
-   :step         eval-step
-   :midi         eval-midi
-   :osc          eval-osc
-   :constant     eval-constant
-   :point-index  eval-point-index
-   :point-wave   eval-point-wave
-   :pos-x        eval-pos-x
-   :pos-y        eval-pos-y
-   :radial       eval-radial
-   :angle        eval-angle
-   :pos-wave     eval-pos-wave
-   :pos-scroll   eval-pos-scroll
-   :rainbow-hue  eval-rainbow-hue})
-
-(def ^:private modulator-types
-  "Set of valid modulator type keywords, derived from evaluators registry."
-  (set (keys modulator-evaluators)))
-
-(defn modulator-config?
-  "Check if a value is a modulator config map (pure data representation).
-   Modulator configs are maps with a :type key that matches a known modulator type."
-  [x]
-  (and (map? x)
-       (contains? x :type)
-       (contains? modulator-types (:type x))))
-
-
-;; Main Evaluation Function
+;; Main Evaluation - delegates to evaluators
 
 
 (defn evaluate-modulator
@@ -712,10 +185,7 @@
    Uses the modulator-evaluators registry to look up the evaluator fn.
    Returns the calculated value."
   [config context]
-  (if-let [eval-fn (get modulator-evaluators (:type config))]
-    (eval-fn config context)
-    ;; Default fallback for unknown types
-    (get config :value (get config :min 0.0))))
+  (evaluators/evaluate-modulator config context))
 
 
 ;; Parameter Resolution
@@ -748,84 +218,17 @@
   (update-vals params #(resolve-param % context)))
 
 
+;; Keyframe Modulator API - delegates to keyframes
 
-;; Keyframe Modulator Evaluation
 
-
-(defn- find-surrounding-keyframes
-  "Find the keyframes before and after the given phase position.
-   Handles wrap-around for looping.
-   
-   Parameters:
-   - sorted-keyframes: Keyframes sorted by :position
-   - phase: Position within period (0.0 to 1.0)
-   
-   Returns: [before-keyframe after-keyframe]"
-  [sorted-keyframes phase]
-  (let [n (count sorted-keyframes)]
-    (cond
-      (= n 1) [(first sorted-keyframes) (first sorted-keyframes)]
-      
-      :else
-      (let [phase' (double phase)
-            ;; Find first keyframe >= phase
-            after-idx (->> sorted-keyframes
-                          (map-indexed vector)
-                          (filter (fn [[_ kf]] (>= (double (:position kf)) phase')))
-                          first
-                          first)]
-        (if after-idx
-          (let [before-idx (if (zero? (long after-idx)) (dec n) (dec (long after-idx)))]
-            [(nth sorted-keyframes before-idx)
-             (nth sorted-keyframes after-idx)])
-          ;; Phase is past all keyframes - wrap to first
-          [(last sorted-keyframes) (first sorted-keyframes)])))))
-
-(defn- calculate-interp-factor
-  "Calculate linear interpolation factor between two keyframes.
-   
-   Parameters:
-   - before: Keyframe before current phase
-   - after: Keyframe after current phase
-   - phase: Current position within period (0.0 to 1.0)
-   
-   Returns: Interpolation factor t (0.0 to 1.0)"
-  ^double [before after ^double phase]
-  (let [p1 (double (:position before))
-        p2 (double (:position after))
-        ;; Handle wrap-around case
-        range-val (if (< p2 p1)
-                    (+ (- 1.0 p1) p2)
-                    (- p2 p1))
-        offset (if (< phase p1)
-                 (+ (- 1.0 p1) phase)
-                 (- phase p1))]
-    (if (zero? range-val) 0.0 (/ offset range-val))))
-
-(defn- interpolate-params
-  "Linearly interpolate between two parameter maps.
-   
-   Parameters:
-   - params1: First parameter map (at t=0)
-   - params2: Second parameter map (at t=1)
-   - t: Interpolation factor (0.0 to 1.0)
-   
-   Returns: Interpolated parameter map"
-  [params1 params2 ^double t]
-  (into {}
-        (mapv (fn [[k v1]]
-                (let [v2 (get params2 k v1)]
-                  [k (if (and (number? v1) (number? v2))
-                       (+ (* (- 1.0 t) (double v1)) (* t (double v2)))
-                       v1)]))
-              params1)))
+(defn keyframe-modulator?
+  "Check if a value is a keyframe modulator config.
+   Keyframe modulators are maps with a :keyframes vector."
+  [x]
+  (keyframes/keyframe-modulator? x))
 
 (defn eval-keyframe
   "Evaluate keyframe modulator by interpolating between keyframes.
-   
-   The keyframe modulator allows users to define exact parameter values at
-   specific positions within a period, with automatic linear interpolation
-   between them.
    
    Parameters:
    - config: Keyframe modulator config map with:
@@ -836,34 +239,5 @@
    - context: Modulation context with timing info
    
    Returns: Interpolated params map, or nil if no keyframes"
-  [{:keys [keyframes period loop-mode time-unit]
-    :or {period 1.0 loop-mode :loop time-unit :beats}
-    :as config}
-   {:keys [time-ms bpm trigger-time] :as context}]
-  
-  (when (seq keyframes)
-    (let [;; Calculate position within period (0.0 to 1.0)
-          beats (get-beats-from-context context)
-          phase (if (= loop-mode :once)
-                  (let [total-duration (double period)
-                        progress (double (calculate-once-progress (or time-ms 0) trigger-time
-                                                                  total-duration (or time-unit :beats)
-                                                                  (or bpm 120.0)))]
-                    (clojure.core/min progress 1.0))
-                  (mod (/ beats (double period)) 1.0))
-
-          sorted-keyframes (sort-by :position keyframes)
-          [before after] (find-surrounding-keyframes sorted-keyframes phase)
-
-          t (calculate-interp-factor before after phase)]
-
-      (interpolate-params (:params before) (:params after) t))))
-
-(defn keyframe-modulator?
-  "Check if a value is a keyframe modulator config.
-   Keyframe modulators are maps with an :enabled? key and :keyframes vector."
-  [x]
-  (and (map? x)
-       (contains? x :keyframes)
-       (vector? (:keyframes x))))
-
+  [config context]
+  (keyframes/eval-keyframe config context))

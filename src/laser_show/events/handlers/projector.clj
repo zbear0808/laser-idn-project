@@ -21,8 +21,7 @@
    - Test patterns"
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
-            [laser-show.events.helpers :as h]
-            [laser-show.common.util :as u]))
+            [laser-show.events.helpers :as h]))
 
 
 ;; Constants
