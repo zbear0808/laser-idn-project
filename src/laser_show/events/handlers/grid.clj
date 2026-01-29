@@ -36,28 +36,6 @@
     ;; Left click on empty - select
     {:state (assoc-in state [:grid :selected-cell] [col row])}))
 
-(defn- handle-grid-trigger-cell
-  "Trigger a cell to start playing its preset."
-  [{:keys [col row state] :as event}]
-  (let [now (h/current-time-ms event)]
-    {:state (-> state
-                (assoc-in [:playback :active-cell] [col row])
-                (assoc-in [:playback :playing?] true)
-                (assoc-in [:playback :trigger-time] now)
-                reset-timing-accumulators)}))
-
-(defn- handle-grid-clear-cell
-  "Clear a grid cell's cue chain."
-  [{:keys [col row state]}]
-  (let [active-cell (get-in state [:playback :active-cell])
-        clearing-active? (= [col row] active-cell)]
-    {:state (-> state
-                (update-in [:chains :cue-chains] dissoc [col row])
-                (cond-> clearing-active?
-                  (-> (assoc-in [:playback :playing?] false)
-                      (assoc-in [:playback :active-cell] nil)))
-                h/mark-dirty)}))
-
 (defn- handle-grid-move-cell
   "Move a cell's cue chain from one position to another."
   [{:keys [from-col from-row to-col to-row state]}]
@@ -99,8 +77,6 @@
   [{:keys [event/type] :as event}]
   (case type
     :grid/cell-clicked (handle-grid-cell-clicked event)
-    :grid/trigger-cell (handle-grid-trigger-cell event)
-    :grid/clear-cell (handle-grid-clear-cell event)
     :grid/move-cell (handle-grid-move-cell event)
     :grid/copy-cell (handle-grid-copy-cell event)
     :grid/paste-cell (handle-grid-paste-cell event)

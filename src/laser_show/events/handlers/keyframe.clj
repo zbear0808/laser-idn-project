@@ -171,46 +171,6 @@
             (update-keyframe-modulator config effect-path assoc :enabled? enabled?)
             h/mark-dirty)))))
 
-(defn handle-initialize
-  "Initialize a keyframe modulator with default keyframes.
-   Uses the effect's current params as the initial keyframe values.
-   Normalizes params and deactivates any active modulators.
-   
-   Parameters:
-   - state: Application state
-   - config: Chain config
-   - effect-path: Path to effect
-   
-   Returns: Updated state"
-  [state config effect-path]
-  (let [params (get-effect-params state config effect-path)
-        normalized-params (normalize-params-for-keyframes params)
-        new-mod {:enabled? true
-                 :period 4.0
-                 :time-unit :beats
-                 :loop-mode :loop
-                 :selected-keyframe 0
-                 :keyframes (create-default-keyframes normalized-params)}]
-    (-> state
-        (update-effect-params config effect-path deactivate-all-modulators)
-        (set-keyframe-modulator config effect-path new-mod)
-        h/mark-dirty)))
-
-(defn handle-update-settings
-  "Update keyframe modulator settings (period, time-unit, loop-mode).
-   
-   Parameters:
-   - state: Application state
-   - config: Chain config
-   - effect-path: Path to effect
-   - settings: Map with any of :period, :time-unit, :loop-mode
-   
-   Returns: Updated state"
-  [state config effect-path settings]
-  (-> state
-      (update-keyframe-modulator config effect-path merge settings)
-      h/mark-dirty))
-
 (defn handle-update-setting
   "Update a single keyframe modulator setting.
    
@@ -409,13 +369,6 @@
     (case type
       :keyframe/toggle-enabled
       {:state (handle-toggle-enabled state config effect-path (:enabled? event))}
-      
-      :keyframe/initialize
-      {:state (handle-initialize state config effect-path)}
-      
-      :keyframe/update-settings
-      {:state (handle-update-settings state config effect-path
-                                      (select-keys event [:period :time-unit :loop-mode]))}
       
       :keyframe/update-setting
       {:state (handle-update-setting state config effect-path

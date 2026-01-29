@@ -83,12 +83,6 @@
         updated-midi (midi/set-channel-filter midi-state channels)]
     {:state (assoc-in state (midi-path) updated-midi)}))
 
-(defn- handle-midi-clear-channel-filter
-  "Clear MIDI channel filter (listen to all channels)."
-  [{:keys [state]}]
-  (let [midi-state (get-midi-state state)
-        updated-midi (midi/clear-channel-filter midi-state)]
-    {:state (assoc-in state (midi-path) updated-midi)}))
 
 (defn- handle-midi-start-learn
   "Start MIDI learn mode."
@@ -163,13 +157,6 @@
   [{:keys [state port]}]
   {:state (assoc-in state (osc-path :port) port)})
 
-(defn- handle-osc-set-address-mapping
-  "Set a single OSC address mapping."
-  [{:keys [state address mapping]}]
-  (let [osc-state (get-osc-state state)
-        updated-osc (osc/set-address-mapping osc-state address mapping)]
-    {:state (assoc-in state (osc-path) updated-osc)}))
-
 (defn- handle-osc-remove-address-mapping
   "Remove an OSC address mapping."
   [{:keys [state address]}]
@@ -227,7 +214,6 @@
     :input/midi-disconnect-device (handle-midi-disconnect-device event)
     :input/midi-disconnect-all (handle-midi-disconnect-all event)
     :input/midi-set-channel-filter (handle-midi-set-channel-filter event)
-    :input/midi-clear-channel-filter (handle-midi-clear-channel-filter event)
     :input/midi-start-learn (handle-midi-start-learn event)
     :input/midi-cancel-learn (handle-midi-cancel-learn event)
     :input/midi-auto-connect (handle-midi-auto-connect event)
@@ -238,7 +224,6 @@
     :input/osc-start-server (handle-osc-start-server event)
     :input/osc-stop-server (handle-osc-stop-server event)
     :input/osc-set-port (handle-osc-set-port event)
-    :input/osc-set-address-mapping (handle-osc-set-address-mapping event)
     :input/osc-remove-address-mapping (handle-osc-remove-address-mapping event)
     :input/osc-load-default-mappings (handle-osc-load-default-mappings event)
     :input/osc-start-learn (handle-osc-start-learn event)

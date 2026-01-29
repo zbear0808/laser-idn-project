@@ -86,25 +86,6 @@
                 (assoc :virtual-projectors updated-vps)
                 h/mark-dirty)}))
 
-(defn- handle-zone-groups-update
-  "Update zone group properties (name, description, color)."
-  [{:keys [group-id updates state]}]
-  {:state (-> state
-              (update-in [:zone-groups group-id] merge updates)
-              h/mark-dirty)})
-
-(defn- handle-zone-groups-duplicate
-  "Duplicate a zone group with a new name."
-  [{:keys [group-id state]}]
-  (let [original (get-in state [:zone-groups group-id])
-        new-id (keyword (str "group-" (System/currentTimeMillis)))
-        new-group (-> original
-                      (assoc :id new-id)
-                      (update :name str " (copy)"))]
-    {:state (-> state
-                (assoc-in [:zone-groups new-id] new-group)
-                (assoc-in [:zone-group-ui :selected-group] new-id)
-                h/mark-dirty)}))
 
 
 ;; Zone Group Edit Dialog
@@ -153,8 +134,6 @@
     :zone-groups/add (handle-zone-groups-add event)
     :zone-groups/create-new (handle-zone-groups-create-new event)
     :zone-groups/remove (handle-zone-groups-remove event)
-    :zone-groups/update (handle-zone-groups-update event)
-    :zone-groups/duplicate (handle-zone-groups-duplicate event)
     :zone-groups/edit (handle-zone-groups-edit event)
     :zone-groups/save-edit (handle-zone-groups-save-edit event)
     :zone-groups/set-editor-color (handle-zone-groups-set-editor-color event)

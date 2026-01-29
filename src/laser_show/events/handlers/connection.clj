@@ -76,15 +76,6 @@
   {:state (assoc-in state [:backend :streaming :engine-count] engine-count)})
 
 
-;; Configuration Handler
-
-
-(defn- handle-config-update
-  "Update a config value."
-  [{:keys [path value state]}]
-  {:state (assoc-in state (into [:config] path) value)})
-
-
 ;; Public API
 
 
@@ -109,9 +100,6 @@
     :idn/multi-streaming-stopped (handle-multi-streaming-stopped event)
     :idn/multi-streaming-refreshed (handle-multi-streaming-refreshed event)
     :idn/connection-failed (handle-idn-connection-failed event)
-    
-    ;; Configuration
-    :config/update (handle-config-update event)
     
     ;; Unknown event in this domain
     {}))

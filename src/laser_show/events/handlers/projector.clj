@@ -265,30 +265,6 @@
               (assoc-in [:projector-ui :active-virtual-projector] nil))})
 
 
-(defn- handle-projectors-remove-projector
-  "Remove a projector configuration and its virtual projectors."
-  [{:keys [projector-id state]}]
-  (let [active (get-in state [:projector-ui :active-projector])
-        items (get state :projectors {})
-        new-items (dissoc items projector-id)
-        ;; Remove virtual projectors for this projector
-        vps (get state :virtual-projectors {})
-        vp-ids-to-remove (keep (fn [[vp-id vp]]
-                                 (when (= (:parent-projector-id vp) projector-id)
-                                   vp-id))
-                               vps)
-        new-vps (apply dissoc vps vp-ids-to-remove)
-        ;; If removing active projector, select first remaining
-        new-active (if (= active projector-id)
-                     (first (keys new-items))
-                     active)]
-    {:state (-> state
-                (assoc :projectors new-items)
-                (assoc :virtual-projectors new-vps)
-                (assoc-in [:projector-ui :active-projector] new-active)
-                (assoc-in [:projector-ui :active-virtual-projector] nil)
-                (update-in [:chains :projector-effects] dissoc projector-id)
-                h/mark-dirty)}))
 
 
 (defn- handle-projectors-update-settings
@@ -322,10 +298,6 @@
       streaming-running? (assoc :multi-engine/refresh true))))
 
 
-(defn- handle-projectors-update-connection-status
-  "Update a projector's connection status (called by streaming service)."
-  [{:keys [projector-id status state]}]
-  {:state (update-in state [:projectors projector-id :status] merge status)})
 
 
 ;; Zone Group Assignment
@@ -344,12 +316,6 @@
                 h/mark-dirty)}))
 
 
-(defn- handle-projectors-set-zone-groups
-  "Set all zone groups for a projector."
-  [{:keys [projector-id zone-groups state]}]
-  {:state (-> state
-              (assoc-in [:projectors projector-id :zone-groups] zone-groups)
-              h/mark-dirty)})
 
 
 ;; Virtual Projector Management
@@ -365,90 +331,6 @@
       DEFAULT_CORNER_PIN)))
 
 
-(defn- handle-projectors-add-virtual-projector
-  "Add a virtual projector for an existing physical projector.
-   The VP starts with a copy of the parent's corner-pin from the effect chain."
-  [{:keys [parent-projector-id name state]}]
-  (let [vp-id (random-uuid)
-        parent (get-in state [:projectors parent-projector-id])
-        parent-name (:name parent "Unknown")
-        vp-name (or name (str parent-name " - Virtual"))
-        parent-corner-pin (get-parent-corner-pin state parent-projector-id)
-        vp-config {:name vp-name
-                   :parent-projector-id parent-projector-id
-                   :zone-groups [:all]
-                   :tags #{}
-                   :corner-pin parent-corner-pin
-                   :enabled? true}]
-    {:state (-> state
-                (assoc-in [:virtual-projectors vp-id] vp-config)
-                (assoc-in [:projector-ui :active-virtual-projector] vp-id)
-                h/mark-dirty)}))
-
-
-(defn- handle-projectors-select-virtual-projector
-  "Select a virtual projector for editing."
-  [{:keys [vp-id state]}]
-  {:state (-> state
-              (assoc-in [:projector-ui :active-virtual-projector] vp-id)
-              (assoc-in [:projector-ui :active-projector] nil))})
-
-
-(defn- handle-projectors-remove-virtual-projector
-  "Remove a virtual projector."
-  [{:keys [vp-id state]}]
-  (let [active (get-in state [:projector-ui :active-virtual-projector])]
-    {:state (-> state
-                (update :virtual-projectors dissoc vp-id)
-                (cond-> (= active vp-id)
-                  (assoc-in [:projector-ui :active-virtual-projector] nil))
-                h/mark-dirty)}))
-
-
-(defn- handle-projectors-update-virtual-projector
-  "Update virtual projector settings (name, enabled)."
-  [{:keys [vp-id updates state]}]
-  {:state (-> state
-              (update-in [:virtual-projectors vp-id] merge updates)
-              h/mark-dirty)})
-
-
-(defn- handle-vp-toggle-enabled
-  "Toggle a virtual projector's enabled state."
-  [{:keys [vp-id state]}]
-  (let [current (get-in state [:virtual-projectors vp-id :enabled?] true)]
-    {:state (-> state
-                (assoc-in [:virtual-projectors vp-id :enabled?] (not current))
-                h/mark-dirty)}))
-
-
-(defn- handle-vp-update-corner-pin
-  "Update corner pin for a virtual projector."
-  [{:keys [vp-id point-id x y state]}]
-  (let [param-key (case point-id
-                    :tl [:tl-x :tl-y]
-                    :tr [:tr-x :tr-y]
-                    :bl [:bl-x :bl-y]
-                    :br [:br-x :br-y]
-                    nil)
-        [x-key y-key] param-key]
-    (if param-key
-      {:state (-> state
-                  (assoc-in [:virtual-projectors vp-id :corner-pin x-key] x)
-                  (assoc-in [:virtual-projectors vp-id :corner-pin y-key] y)
-                  h/mark-dirty)}
-      {:state state})))
-
-
-(defn- handle-vp-reset-corner-pin
-  "Reset virtual projector corner pin to parent's values from effect chain."
-  [{:keys [vp-id state]}]
-  (let [vp (get-in state [:virtual-projectors vp-id])
-        parent-id (:parent-projector-id vp)
-        parent-corner-pin (get-parent-corner-pin state parent-id)]
-    {:state (-> state
-                (assoc-in [:virtual-projectors vp-id :corner-pin] parent-corner-pin)
-                h/mark-dirty)}))
 
 
 (defn- handle-vp-toggle-zone-group
@@ -464,12 +346,6 @@
                 h/mark-dirty)}))
 
 
-(defn- handle-vp-set-zone-groups
-  "Set all zone groups for a virtual projector."
-  [{:keys [vp-id zone-groups state]}]
-  {:state (-> state
-              (assoc-in [:virtual-projectors vp-id :zone-groups] zone-groups)
-              h/mark-dirty)})
 
 
 ;; Effect Chain Management (for color curves)
@@ -484,14 +360,6 @@
                 h/mark-dirty)}))
 
 
-(defn- handle-projectors-remove-effect
-  "Remove an effect from a projector's chain."
-  [{:keys [projector-id effect-idx state]}]
-  (let [effects-vec (get-in state [:chains :projector-effects projector-id :items] [])
-        new-effects (u/removev-indexed (fn [i _] (= i effect-idx)) effects-vec)]
-    {:state (-> state
-                (assoc-in [:chains :projector-effects projector-id :items] new-effects)
-                h/mark-dirty)}))
 
 
 ;; Calibration Mode
@@ -513,10 +381,6 @@
                     (max 0.05 (min 0.5 (double brightness))))})
 
 
-(defn- handle-projectors-set-broadcast-address
-  "Set the broadcast address for network scanning."
-  [{:keys [address state]}]
-  {:state (assoc-in state [:projector-ui :broadcast-address] address)})
 
 
 (defn- handle-projectors-toggle-device-expand
@@ -550,37 +414,23 @@
     
     ;; Projector management
     :projectors/select-projector (handle-projectors-select-projector event)
-    ;; Note: remove-projector kept for compatibility but UI no longer calls it
-    :projectors/remove-projector (handle-projectors-remove-projector event)
     :projectors/update-settings (handle-projectors-update-settings event)
     :projectors/toggle-enabled (handle-projectors-toggle-enabled event)
-    :projectors/update-connection-status (handle-projectors-update-connection-status event)
     
     ;; Zone group assignment
     :projectors/toggle-zone-group (handle-projectors-toggle-zone-group event)
-    :projectors/set-zone-groups (handle-projectors-set-zone-groups event)
     
     ;; Virtual projector management
-    :projectors/add-virtual-projector (handle-projectors-add-virtual-projector event)
-    :projectors/select-virtual-projector (handle-projectors-select-virtual-projector event)
-    :projectors/remove-virtual-projector (handle-projectors-remove-virtual-projector event)
-    :projectors/update-virtual-projector (handle-projectors-update-virtual-projector event)
-    :projectors/vp-toggle-enabled (handle-vp-toggle-enabled event)
-    :projectors/vp-update-corner-pin (handle-vp-update-corner-pin event)
-    :projectors/vp-reset-corner-pin (handle-vp-reset-corner-pin event)
     :projectors/vp-toggle-zone-group (handle-vp-toggle-zone-group event)
-    :projectors/vp-set-zone-groups (handle-vp-set-zone-groups event)
     
     ;; Effect chain management (for color curves)
     :projectors/add-effect (handle-projectors-add-effect event)
-    :projectors/remove-effect (handle-projectors-remove-effect event)
     
     ;; Calibration mode
     :projectors/toggle-calibration (handle-projectors-toggle-calibration event)
     :projectors/set-calibration-brightness (handle-projectors-set-calibration-brightness event)
     
     ;; Configuration
-    :projectors/set-broadcast-address (handle-projectors-set-broadcast-address event)
     :projectors/toggle-device-expand (handle-projectors-toggle-device-expand event)
     
     ;; Unknown event in this domain

@@ -6,13 +6,11 @@
    
    Imports from:
    - helpers: State access, path manipulation, collection operations, config
-   - structure: Groups, DnD, item CRUD
    - params: Parameter operations, UI mode"
   (:require
    [clojure.tools.logging :as log]
    [laser-show.events.helpers :as h]
    [laser-show.events.handlers.chain.helpers :as helpers]
-   [laser-show.events.handlers.chain.structure :as structure]
    [laser-show.events.handlers.chain.params :as params]))
 
 
@@ -30,13 +28,6 @@
  (log/debug "chain/handle ENTER - type:" type "domain:" domain "entity-key:" entity-key)
  (let [config (helpers/chain-config domain entity-key)]
    (case type
-     :chain/set-name
-     (let [name-path (conj (vec (butlast (:items-path config))) :name)]
-       (log/debug "chain/set-name - name:" (:name event) "path:" name-path)
-       {:state (-> state
-                   (assoc-in name-path (:name event))
-                   (h/mark-dirty))})
-     
      :chain/set-items
      (do
        (log/debug "chain/set-items - items count:" (count (:items event))
@@ -48,19 +39,6 @@
      ;; UI mode -> params module
      :chain/set-ui-mode
      {:state (params/handle-set-ui-mode state config (:effect-path event) (:mode event))}
-     
-     ;; Structure events -> structure module
-     :chain/create-empty-group
-     {:state (structure/handle-create-empty-group state config (:name event))}
-     
-     :chain/add-item
-     {:state (structure/handle-add-item state config event)}
-     
-     :chain/remove-item-at-path
-     {:state (structure/handle-remove-item-at-path state config (:path event))}
-     
-     :chain/reorder-items
-     {:state (structure/handle-reorder-items state config (:from-idx event) (:to-idx event))}
      
      ;; Param events -> params module
      :chain/add-curve-point
@@ -80,9 +58,6 @@
      
      :chain/update-scale-params
      {:state (params/handle-update-scale-params state config event)}
-     
-     :chain/update-rotation-param
-     {:state (params/handle-update-rotation-param state config event)}
      
      :chain/reset-params
      {:state (params/handle-reset-params state config event)}

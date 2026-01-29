@@ -6,7 +6,6 @@
    - clear-cell: Clear all effects from a cell
    - copy-cell/paste-cell: Cell clipboard operations
    - move-cell: Move a cell between positions
-   - select-cell: Select a cell for editing
    
    Effect-level operations have moved to chain.clj:
    - Effect CRUD (add, remove, reorder, set-enabled)
@@ -63,10 +62,6 @@
                   h/mark-dirty)}
       {:state state})))
 
-(defn- handle-effects-select-cell
-  "Select an effects cell for editing."
-  [{:keys [col row state]}]
-  {:state (assoc-in state [:effects :selected-cell] [col row])})
 
 
 ;; Effect Chain Editor Lifecycle
@@ -153,7 +148,6 @@
     :effects/copy-cell (handle-effects-copy-cell event)
     :effects/paste-cell (handle-effects-paste-cell event)
     :effects/move-cell (handle-effects-move-cell event)
-    :effects/select-cell (handle-effects-select-cell event)
     
     ;; Effect chain editor lifecycle
     :effect-chain/open-editor (handle-effect-chain-open-editor event)
