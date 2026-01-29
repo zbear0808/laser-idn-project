@@ -1,8 +1,8 @@
 {:paths ["src" "resources" "classes"]
- 
+
  ;; Java source path for JFR custom events (compiled separately)
  :java-src-paths ["java"]
- 
+
  ;; NOTE: JavaFX is platform-specific. Add the appropriate platform alias when running:
  ;;   :win      - Windows
  ;;   :mac      - macOS Intel (x86_64)
@@ -12,19 +12,22 @@
  :deps {org.clojure/clojure {:mvn/version "1.12.4"}
         cljfx/cljfx {:mvn/version "1.10.6"}
         cljfx/css {:mvn/version "1.1.0"}
-        
+
         overtone/midi-clj {:mvn/version "0.5.0"}
         overtone/osc-clj {:mvn/version "0.9.0"}
-        
+
         ;; Required for cljfx contexts (memoized subscriptions)
         org.clojure/core.cache {:mvn/version "1.1.234"}
-        
+
         ;; Profiling
         com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.3.1"}
-        
+
         org.clojure/tools.logging {:mvn/version "1.3.0"}
-        ch.qos.logback/logback-classic {:mvn/version "1.5.16"}}
- 
+        ch.qos.logback/logback-classic {:mvn/version "1.5.16"}
+
+        ;; Icons and extra JavaFX controls
+        org.controlsfx/controlsfx {:mvn/version "11.2.1"}}
+
  :aliases
  {:laser-show
   {:jvm-opts ["-Djavafx.enablePreview=true"
@@ -36,7 +39,7 @@
               ;; JIT optimization - compile hot methods earlier for faster warm-up
               "-XX:CompileThresholdScaling=0.1"]
    :main-opts ["-m" "laser-show.app"]}
-  
+
   :repl
   {:jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"
@@ -52,7 +55,7 @@
                 cider/cider-nrepl {:mvn/version "0.57.0"}}
    :main-opts ["-m" "nrepl.cmdline"
                "--middleware" "[cider.nrepl/cider-middleware]"]}
-  
+
   ;; Dev extras - combine with :laser-show for full dev environment
   ;; Use: clj -M:dev:laser-show
   :dev
@@ -70,17 +73,17 @@
                 org.clojure/tools.namespace {:mvn/version "1.5.0"}
                 hawk/hawk {:mvn/version "0.2.11"}
                 io.github.cljfx/dev {:mvn/version "1.10.6.42"}}}
-  
+
   ;; JFR continuous recording add-on - combine with :dev:laser-show
   ;; Use: clj -M:dev:laser-show:jfr
   :jfr
   {:jvm-opts ["-XX:StartFlightRecording=name=continuous,settings=profile,maxage=5m"]}
-  
-  
+
+
   ;; Platform-specific JavaFX dependencies
   ;; Add ONE of these when running: clj -M:dev:laser-show:win
   ;; Note: $classifier syntax required by newer Clojure CLI versions
-  
+
   :win
   {:extra-deps {org.openjfx/javafx-base$win {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-controls$win {:mvn/version "26-ea+19"}
@@ -88,7 +91,7 @@
                 org.openjfx/javafx-media$win {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-swing$win {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-web$win {:mvn/version "26-ea+19"}}}
-  
+
   ;; macOS Intel (x86_64)
   :mac
   {:extra-deps {org.openjfx/javafx-base$mac {:mvn/version "26-ea+19"}
@@ -97,7 +100,7 @@
                 org.openjfx/javafx-media$mac {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-swing$mac {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-web$mac {:mvn/version "26-ea+19"}}}
-  
+
   ;; macOS Apple Silicon (ARM64)
   :mac-arm
   {:extra-deps {org.openjfx/javafx-base$mac-aarch64 {:mvn/version "26-ea+19"}
@@ -106,7 +109,7 @@
                 org.openjfx/javafx-media$mac-aarch64 {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-swing$mac-aarch64 {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-web$mac-aarch64 {:mvn/version "26-ea+19"}}}
-  
+
   :linux
   {:extra-deps {org.openjfx/javafx-base$linux {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-controls$linux {:mvn/version "26-ea+19"}
@@ -114,61 +117,59 @@
                 org.openjfx/javafx-media$linux {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-swing$linux {:mvn/version "26-ea+19"}
                 org.openjfx/javafx-web$linux {:mvn/version "26-ea+19"}}}
-  
+
   :test
   {:extra-paths ["test"]
    :jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"
               "--enable-native-access=ALL-UNNAMED"]
    :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"
-                                                       :git/sha "dfb30dd"}}
-   :main-opts ["-m" "cognitect.test-runner" 
-               "-d" "test/idn_hello" 
+                                                      :git/sha "dfb30dd"}}
+   :main-opts ["-m" "cognitect.test-runner"
+               "-d" "test/idn_hello"
                "-d" "test/laser_show"]
    :exec-fn cognitect.test-runner.api/test}
-  
+
   :test-integration
   {:extra-paths ["test"]
    :jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"
               "--enable-native-access=ALL-UNNAMED"]
    :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"
-                                                       :git/sha "dfb30dd"}}
+                                                      :git/sha "dfb30dd"}}
    :main-opts ["-m" "cognitect.test-runner" "-d" "test/integration"]
    :exec-fn cognitect.test-runner.api/test}
-  
+
   :test-all
   {:extra-paths ["test"]
    :jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"
               "--enable-native-access=ALL-UNNAMED"]
-   :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1" 
-                                                       :git/sha "dfb30dd"}}
+   :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"
+                                                      :git/sha "dfb30dd"}}
    :main-opts ["-m" "cognitect.test-runner"]
    :exec-fn cognitect.test-runner.api/test}
-  
-  
+
+
   ;; Build alias - builds platform-specific uberjars
   ;; Usage:
   ;;   clj -T:build uber :platform :win      ; Windows
   ;;   clj -T:build uber :platform :mac      ; macOS Intel (x86_64)
   ;;   clj -T:build uber :platform :mac-arm  ; macOS Apple Silicon (ARM64)
   ;;   clj -T:build uber :platform :linux    ; Linux
-  
+
   :build
   {:deps {io.github.clojure/tools.build {:mvn/version "0.10.6"}}
    :ns-default build}
-  
+
   :repl-mcp {:main-opts ["-m" "is.simm.repl-mcp"]
-               :extra-paths ["test"] ;; If you want it to be able to run the tests
-               ;; Option for clj-async-profiler
-               :jvm-opts ["-Djavafx.enablePreview=true"
-                          "-Djavafx.suppressPreviewWarning=true"
-                          "-Djdk.attach.allowAttachSelf"
-                          "-XX:+UnlockDiagnosticVMOptions"
-                          "-XX:+DebugNonSafepoints"
-                          "-XX:+EnableDynamicAgentLoading"
-                          "--enable-native-access=ALL-UNNAMED"]
-               :extra-deps {is.simm/repl-mcp {:git/url "https://github.com/simm-is/repl-mcp" :git/sha "latest-sha"}}}
-  
-  }}
+             :extra-paths ["test"] ;; If you want it to be able to run the tests
+             ;; Option for clj-async-profiler
+             :jvm-opts ["-Djavafx.enablePreview=true"
+                        "-Djavafx.suppressPreviewWarning=true"
+                        "-Djdk.attach.allowAttachSelf"
+                        "-XX:+UnlockDiagnosticVMOptions"
+                        "-XX:+DebugNonSafepoints"
+                        "-XX:+EnableDynamicAgentLoading"
+                        "--enable-native-access=ALL-UNNAMED"]
+             :extra-deps {is.simm/repl-mcp {:git/url "https://github.com/simm-is/repl-mcp" :git/sha "latest-sha"}}}}}

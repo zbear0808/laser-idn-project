@@ -35,7 +35,8 @@
    [laser-show.subs :as subs]
    [laser-show.state.clipboard :as clipboard]
    [laser-show.state.core :as state]
-   [laser-show.views.components.list-dnd :as dnd]))
+   [laser-show.views.components.list-dnd :as dnd]
+   [laser-show.views.components.icons :as icons]))
 
 ;; State Access Helpers
 
@@ -255,41 +256,41 @@
   [{:keys [depth selected? dragging? drop-before? drop-into? effectively-disabled?]}]
   (let [d (depth->class depth)]
     (build-style-classes
-      ["group-header" (str "group-depth-" d) (str "group-indent-" d)]
-      [[selected? "group-header-selected"]
-       [drop-into? "group-header-drop-into"]
-       [drop-before? "group-header-drop-before"]
-       [dragging? "group-header-dragging"]
-       [effectively-disabled? "group-header-disabled"]])))
+     ["group-header" (str "group-depth-" d) (str "group-indent-" d)]
+     [[selected? "group-header-selected"]
+      [drop-into? "group-header-drop-into"]
+      [drop-before? "group-header-drop-before"]
+      [dragging? "group-header-dragging"]
+      [effectively-disabled? "group-header-disabled"]])))
 
 (defn- group-name-style-classes
   "Build style class vector for group name label based on state."
   [{:keys [depth selected? effectively-disabled?]}]
   (build-style-classes
-    ["group-name-label"]
-    [[(and (not selected?) (not effectively-disabled?))
-      (str "group-name-depth-" (depth->class depth))]
-     [selected? "group-name-selected"]
-     [effectively-disabled? "group-name-disabled"]]))
+   ["group-name-label"]
+   [[(and (not selected?) (not effectively-disabled?))
+     (str "group-name-depth-" (depth->class depth))]
+    [selected? "group-name-selected"]
+    [effectively-disabled? "group-name-disabled"]]))
 
 (defn- list-item-style-classes
   "Build style class vector for list item based on state."
   [{:keys [depth selected? dragging? drop-target? drop-position effectively-disabled?]}]
   (build-style-classes
-    ["chain-item" (str "item-indent-" (depth->class depth))]
-    [[selected? "chain-item-selected"]
-     [(and drop-target? (= drop-position :before)) "chain-item-drop-before"]
-     [(and drop-target? (= drop-position :after)) "chain-item-drop-after"]
-     [dragging? "chain-item-dragging"]
-     [effectively-disabled? "chain-item-disabled"]]))
+   ["chain-item" (str "item-indent-" (depth->class depth))]
+   [[selected? "chain-item-selected"]
+    [(and drop-target? (= drop-position :before)) "chain-item-drop-before"]
+    [(and drop-target? (= drop-position :after)) "chain-item-drop-after"]
+    [dragging? "chain-item-dragging"]
+    [effectively-disabled? "chain-item-disabled"]]))
 
 (defn- list-item-name-style-classes
   "Build style class vector for list item name label based on state."
   [{:keys [selected? effectively-disabled?]}]
   (build-style-classes
-    ["chain-item-name"]
-    [[selected? "chain-item-name-selected"]
-     [effectively-disabled? "chain-item-name-disabled"]]))
+   ["chain-item-name"]
+   [[selected? "chain-item-name-selected"]
+    [effectively-disabled? "chain-item-name-disabled"]]))
 
 
 ;; Shared UI Helpers - Click Handler
@@ -298,22 +299,19 @@
   "Setup click handler on a node for selection and double-click rename."
   [^javafx.scene.Node node component-id item-id items]
   (.setOnMouseClicked node
-    (on-fx-event
-      (fn [event]
-        (let [click-count (.getClickCount event)
-              ctrl? (.isShortcutDown event)
-              shift? (.isShiftDown event)]
-          (if (= click-count 2)
-            (do (start-rename! component-id item-id)
-                (.consume event))
-            (do (handle-selection! component-id item-id ctrl? shift? items)
-                (request-list-focus! node)
-                (.consume event))))))))
+                      (on-fx-event
+                       (fn [event]
+                         (let [click-count (.getClickCount event)
+                               ctrl? (.isShortcutDown event)
+                               shift? (.isShiftDown event)]
+                           (if (= click-count 2)
+                             (start-rename! component-id item-id)
+                             (do (handle-selection! component-id item-id ctrl? shift? items)
+                                 (request-list-focus! node)))
+                           (.consume event))))))
 
 
-;; ============================================================================
 ;; Shared UI Helpers - Rename Text Field
-;; ============================================================================
 
 (defn- rename-text-field
   "Create a text field for inline renaming with auto-focus and select-all."
@@ -321,9 +319,9 @@
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created (fn [^javafx.scene.control.TextField node]
                  (javafx.application.Platform/runLater
-                   (fn []
-                     (.requestFocus node)
-                     (javafx.application.Platform/runLater #(.selectAll node)))))
+                  (fn []
+                    (.requestFocus node)
+                    (javafx.application.Platform/runLater #(.selectAll node)))))
    :desc {:fx/type :text-field
           :text (or current-name "Untitled")
           :style-class style-class
@@ -352,11 +350,11 @@
         drop-target? (= group-id drop-target-id)
         drop-before? (and drop-target? (= drop-position :before))
         drop-into? (and drop-target? (= drop-position :into))
-        
+
         header-classes (group-header-style-classes
-                         (u/->map depth selected? dragging? drop-before? drop-into? effectively-disabled?))
+                        (u/->map depth selected? dragging? drop-before? drop-into? effectively-disabled?))
         name-classes (group-name-style-classes
-                       (u/->map depth selected? effectively-disabled?))]
+                      (u/->map depth selected? effectively-disabled?))]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
                    (dnd/setup-drag-source! node group-id component-id)
@@ -368,12 +366,12 @@
                         :text (if collapsed? "▶" "▼")
                         :style-class "group-collapse-btn"
                         :on-action (fn [_] (dispatch-toggle-collapse! props group-id))}
-                       
+
                        {:fx/type :check-box
                         :selected enabled?
                         :on-selected-changed (fn [new-enabled?]
                                                (dispatch-set-enabled! props group-id new-enabled?))}
-                       
+
                        (if renaming?
                          {:fx/type rename-text-field
                           :component-id component-id
@@ -384,13 +382,13 @@
                          {:fx/type :label
                           :text (or (:name group) "Group")
                           :style-class name-classes})
-                       
+
                        {:fx/type :label
                         :text (str "(" item-count ")")
                         :style-class "group-count-badge"}
-                       
+
                        {:fx/type :region :h-box/hgrow :always}
-                       
+
                        {:fx/type :button
                         :text "⊗"
                         :style-class "group-ungroup-btn"
@@ -409,17 +407,17 @@
         enabled? (:enabled? item true)
         effectively-disabled? (or (not enabled?) parent-disabled?)
         drop-target? (= item-id drop-target-id)
-        
+
         item-classes (list-item-style-classes
-                       {:depth depth
-                        :selected? selected?
-                        :dragging? dragging?
-                        :drop-target? drop-target?
-                        :drop-position drop-position
-                        :effectively-disabled? effectively-disabled?})
+                      {:depth depth
+                       :selected? selected?
+                       :dragging? dragging?
+                       :drop-target? drop-target?
+                       :drop-position drop-position
+                       :effectively-disabled? effectively-disabled?})
         name-classes (list-item-name-style-classes
-                       {:selected? selected?
-                        :effectively-disabled? effectively-disabled?})]
+                      {:selected? selected?
+                       :effectively-disabled? effectively-disabled?})]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
                    (dnd/setup-drag-source! node item-id component-id)
@@ -431,7 +429,7 @@
                         :selected enabled?
                         :on-selected-changed (fn [new-enabled?]
                                                (dispatch-set-enabled! props item-id new-enabled?))}
-                       
+
                        (if renaming?
                          {:fx/type rename-text-field
                           :component-id component-id
@@ -453,7 +451,7 @@
   (let [item-id (:id item)
         selected? (contains? (or selected-ids #{}) item-id)
         dragging? (contains? (or dragging-ids #{}) item-id)
-        common-props (u/->map component-id items props depth selected? dragging? 
+        common-props (u/->map component-id items props depth selected? dragging?
                               drop-target-id drop-position parent-disabled?)]
     (if (chains/group? item)
       (let [collapsed? (:collapsed? item false)
@@ -495,7 +493,8 @@
   {:fx/type :h-box
    :spacing 4
    :children [{:fx/type :button
-               :text "🗁 New"
+               :text "New"
+               :graphic {:fx/type icons/icon :icon :folder :size 8}
                :style-class "chain-toolbar-btn"
                :on-action (fn [_] (dispatch-create-empty-group! props))}
               {:fx/type :button
@@ -640,75 +639,76 @@
             {:component-id component-id
              :node-class (.getSimpleName (class node))
              :focus-traversable? (.isFocusTraversable node)})
-  (.addEventFilter node
-    javafx.scene.input.KeyEvent/KEY_PRESSED
-    (on-fx-event
-      (fn [event]
-        (let [code (.getCode event)
-              ctrl? (.isShortcutDown event)
-              shift? (.isShiftDown event)
-              alt? (.isAltDown event)
-              items @items-atom
-              props @props-atom
-              focused? (.isFocused node)
-              scene (.getScene node)
-              focus-owner (when scene (.getFocusOwner scene))]
-          (log/debug "KEY_PRESSED event received in list handler"
-                     {:component-id component-id
-                      :key-code (str code)
-                      :ctrl? ctrl?
-                      :shift? shift?
-                      :alt? alt?
-                      :node-focused? focused?
-                      :focus-owner-class (when focus-owner (.getSimpleName (class focus-owner)))
-                      :items-count (count items)
-                      :props-keys (keys props)
-                      :selected-ids (get-selected-ids component-id)})
-          ;; Only handle keyboard shortcuts when this node has focus
-          ;; This prevents multiple list handlers from intercepting the same event
-          (when focused?
-            (let [handled? (cond
-                             (and ctrl? (= code javafx.scene.input.KeyCode/C))
-                             (do (log/debug "Handling Ctrl+C (copy)")
-                                 (dispatch-copy-selected! props)
-                                 true)
+  (.addEventFilter
+   node
+   javafx.scene.input.KeyEvent/KEY_PRESSED
+   (on-fx-event
+    (fn [event]
+      (let [code (.getCode event)
+            ctrl? (.isShortcutDown event)
+            shift? (.isShiftDown event)
+            alt? (.isAltDown event)
+            items @items-atom
+            props @props-atom
+            focused? (.isFocused node)
+            scene (.getScene node)
+            focus-owner (when scene (.getFocusOwner scene))]
+        (log/debug "KEY_PRESSED event received in list handler"
+                   {:component-id component-id
+                    :key-code (str code)
+                    :ctrl? ctrl?
+                    :shift? shift?
+                    :alt? alt?
+                    :node-focused? focused?
+                    :focus-owner-class (when focus-owner (.getSimpleName (class focus-owner)))
+                    :items-count (count items)
+                    :props-keys (keys props)
+                    :selected-ids (get-selected-ids component-id)})
+        ;; Only handle keyboard shortcuts when this node has focus
+        ;; This prevents multiple list handlers from intercepting the same event
+        (when focused?
+          (let [handled? (cond
+                           (and ctrl? (= code javafx.scene.input.KeyCode/C))
+                           (do (log/debug "Handling Ctrl+C (copy)")
+                               (dispatch-copy-selected! props)
+                               true)
 
-                             (and ctrl? (= code javafx.scene.input.KeyCode/V))
-                             (do (log/debug "Handling Ctrl+V (paste)"
-                                            {:clipboard-items-count (count (:clipboard-items props))})
-                                 (dispatch-paste-items! props)
-                                 true)
+                           (and ctrl? (= code javafx.scene.input.KeyCode/V))
+                           (do (log/debug "Handling Ctrl+V (paste)"
+                                          {:clipboard-items-count (count (:clipboard-items props))})
+                               (dispatch-paste-items! props)
+                               true)
 
-                             (and ctrl? (= code javafx.scene.input.KeyCode/X))
-                             (do (log/debug "Handling Ctrl+X (cut)")
-                                 (dispatch-copy-selected! props)
-                                 (dispatch-delete-selected! props)
-                                 true)
+                           (and ctrl? (= code javafx.scene.input.KeyCode/X))
+                           (do (log/debug "Handling Ctrl+X (cut)")
+                               (dispatch-copy-selected! props)
+                               (dispatch-delete-selected! props)
+                               true)
 
-                             (and ctrl? (= code javafx.scene.input.KeyCode/A))
-                             (do (log/debug "Handling Ctrl+A (select all)")
-                                 (select-all! component-id items)
-                                 true)
+                           (and ctrl? (= code javafx.scene.input.KeyCode/A))
+                           (do (log/debug "Handling Ctrl+A (select all)")
+                               (select-all! component-id items)
+                               true)
 
-                             (and ctrl? (= code javafx.scene.input.KeyCode/G))
-                             (do (log/debug "Handling Ctrl+G (group)")
-                                 (dispatch-group-selected! props)
-                                 true)
+                           (and ctrl? (= code javafx.scene.input.KeyCode/G))
+                           (do (log/debug "Handling Ctrl+G (group)")
+                               (dispatch-group-selected! props)
+                               true)
 
-                             (= code javafx.scene.input.KeyCode/DELETE)
-                             (do (log/debug "Handling Delete")
-                                 (dispatch-delete-selected! props)
-                                 true)
+                           (= code javafx.scene.input.KeyCode/DELETE)
+                           (do (log/debug "Handling Delete")
+                               (dispatch-delete-selected! props)
+                               true)
 
-                             (= code javafx.scene.input.KeyCode/ESCAPE)
-                             (do (log/debug "Handling Escape")
-                                 (clear-selection! component-id)
-                                 true)
-                             
-                             :else false)]
-              (when handled?
-                (log/debug "Event consumed" {:key-code (str code)})
-                (.consume event)))))))))
+                           (= code javafx.scene.input.KeyCode/ESCAPE)
+                           (do (log/debug "Handling Escape")
+                               (clear-selection! component-id)
+                               true)
+
+                           :else false)]
+            (when handled?
+              (log/debug "Event consumed" {:key-code (str code)})
+              (.consume event)))))))))
 
 
 ;; All-in-One Wrapper Component
@@ -758,13 +758,13 @@
   (let [label-fn (cond
                    get-item-label
                    get-item-label
-                   
+
                    (and item-id-key item-registry-fn)
                    (make-registry-label item-id-key item-registry-fn fallback-label)
-                   
+
                    :else
                    (fn [item] (or (:name item) fallback-label)))
-        
+
         handler-props {:component-id component-id
                        :items-path items-path
                        :on-change-event on-change-event
@@ -772,7 +772,7 @@
                        :clipboard-items clipboard-items
                        :clipboard-type (get on-change-params :clipboard-type :cue-chain-items)
                        :on-copy on-copy-fn}
-        
+
         {:keys [items-atom props-atom]} (get-or-create-handler-atoms! component-id)
         _ (update-handler-atoms! component-id items handler-props)]
     {:fx/type fx/ext-on-instance-lifecycle
@@ -788,12 +788,12 @@
                    ;; in the same container (e.g., cue chain editor with two lists).
                    ;; Also add a focus listener for debugging
                    (.addListener (.focusedProperty node)
-                     (reify javafx.beans.value.ChangeListener
-                       (changed [_ _ old-val new-val]
-                         (log/debug "list-editor focus changed"
-                                    {:component-id component-id
-                                     :old-focused? old-val
-                                     :new-focused? new-val})))))
+                                 (reify javafx.beans.value.ChangeListener
+                                   (changed [_ _ old-val new-val]
+                                     (log/debug "list-editor focus changed"
+                                                {:component-id component-id
+                                                 :old-focused? old-val
+                                                 :new-focused? new-val})))))
      :desc {:fx/type :v-box
             :children [(u/->map&
                         items clipboard-items header-label
