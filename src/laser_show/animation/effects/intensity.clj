@@ -174,7 +174,8 @@
              cycle-length (+ 1.0 tail-length)
              
              ;; Calculate head position (0.0 to cycle-length, then wraps)
-             head-pos (double (mod (/ time-value (max 0.001 period)) cycle-length))
+             ;; Normalize so the user-specified period represents entire cycle duration
+             head-pos (double (mod (/ (* time-value cycle-length) (max 0.001 period)) cycle-length))
              
              ;; Calculate this point's position in sequence (0.0 to 1.0)
              pos (/ (double idx) (max 1.0 (dec (double point-count))))

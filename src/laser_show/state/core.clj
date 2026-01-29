@@ -121,7 +121,6 @@
 (defn get-in-state
   "Get a value at a path in state.
    
-   NOTE: Prefer using queries namespace for backend or subs namespace for UI.
    This is a low-level primitive used internally.
    
    Parameters:
