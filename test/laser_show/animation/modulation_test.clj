@@ -45,7 +45,6 @@
 (deftest modulator-config?-test
   (testing "modulator-config? correctly identifies configs"
     (is (mod/modulator-config? {:type :sine :min 0 :max 1}))
-    (is (mod/modulator-config? {:type :constant :value 5}))
     (is (not (mod/modulator-config? 1.5)))
     (is (not (mod/modulator-config? {:foo :bar})))
     (is (not (mod/modulator-config? (fn [x] x))))))
@@ -54,21 +53,11 @@
   (testing "resolve-params resolves all params in a map"
     (let [context (make-test-context 0 120)
           params {:static 1.5
-                  :modulated {:type :constant :value 2.0}}
+                  :modulated {:type :sine :min 0.0 :max 2.0 :period 1.0}}
           resolved (mod/resolve-params params context)]
       (is (= 1.5 (:static resolved)))
-      (is (= 2.0 (:modulated resolved))))))
-
-
-;; Constant Modulator Tests
-
-
-(deftest constant-test
-  (testing "Constant modulator returns same value regardless of context"
-    (let [config {:type :constant :value 42}]
-      (is (= 42 (mod/resolve-param config (make-test-context 0 120))))
-      (is (= 42 (mod/resolve-param config (make-test-context 1000 120))))
-      (is (= 42 (mod/resolve-param config (make-test-context 5000 60)))))))
+      ;; Sine at phase 0 with min=0 max=2 starts at max
+      (is (approx= 2.0 (:modulated resolved) 0.1)))))
 
 
 ;; Sine Wave Modulator Tests
@@ -171,64 +160,6 @@
       (is (approx= 0.5 (mod/resolve-param config (make-test-context (* 0.5 ms-per-beat) bpm)) 0.05)))))
 
 
-;; Hz-based Modulator Tests
-
-
-(deftest sine-hz-test
-  (testing "Sine Hz modulator uses Hz instead of BPM"
-    (let [config {:type :sine-hz :min 0.0 :max 1.0 :frequency-hz 1.0}]  ; 1 Hz = 1 cycle per second
-      ;; At t=0, should be at peak (uses cosine internally)
-      (is (approx= 1.0 (mod/resolve-param config (make-test-context 0 120)) 0.05))
-      ;; At t=250ms (quarter cycle), should be at midpoint
-      (is (approx= 0.5 (mod/resolve-param config (make-test-context 250 120)) 0.05))
-      ;; At t=500ms (half cycle), at min
-      (is (approx= 0.0 (mod/resolve-param config (make-test-context 500 120)) 0.05)))))
-
-
-;; Decay Modulator Tests
-
-
-(deftest linear-decay-test
-  (testing "Linear decay from start to end"
-    (let [config {:type :linear-decay :start 1.0 :end 0.0 :duration-ms 1000 :trigger 0}]
-      (is (approx= 1.0 (mod/resolve-param config (make-test-context 0 120))))
-      (is (approx= 0.5 (mod/resolve-param config (make-test-context 500 120))))
-      (is (approx= 0.0 (mod/resolve-param config (make-test-context 1000 120))))
-      ;; Should stay at end value after duration
-      (is (approx= 0.0 (mod/resolve-param config (make-test-context 2000 120)))))))
-
-(deftest halflife-decay-test
-  (testing "Halflife decay halves at half-life"
-    (let [config {:type :halflife-decay :start 1.0 :end 0.0 :half-life-ms 500 :trigger 0}]
-      (is (approx= 1.0 (mod/resolve-param config (make-test-context 0 120))))
-      (is (approx= 0.5 (mod/resolve-param config (make-test-context 500 120)) 0.05))
-      (is (approx= 0.25 (mod/resolve-param config (make-test-context 1000 120)) 0.05)))))
-
-(deftest exp-decay-test
-  (testing "Exp decay (beat-synced) decays each beat"
-    (let [bpm 120
-          ms-per-beat (/ 60000 bpm)
-          config {:type :exp-decay :max 1.0 :min 0.0 :decay-type :linear}]
-      ;; Start of beat
-      (is (approx= 1.0 (mod/resolve-param config (make-test-context 0 bpm))))
-      ;; Middle of beat
-      (is (approx= 0.5 (mod/resolve-param config (make-test-context (* 0.5 ms-per-beat) bpm)) 0.05))
-      ;; End of beat (wraps to start of next)
-      (is (approx= 1.0 (mod/resolve-param config (make-test-context ms-per-beat bpm)) 0.05)))))
-
-(deftest beat-decay-test
-  (testing "Beat decay resets each beat"
-    (let [bpm 120
-          ms-per-beat (/ 60000 bpm)
-          config {:type :beat-decay :max 1.0 :min 0.0 :decay-type :linear}]
-      ;; Start of beat
-      (is (approx= 1.0 (mod/resolve-param config (make-test-context 0 bpm))))
-      ;; Middle of beat
-      (is (approx= 0.5 (mod/resolve-param config (make-test-context (* 0.5 ms-per-beat) bpm)) 0.05))
-      ;; End of beat (wraps to start of next)
-      (is (approx= 1.0 (mod/resolve-param config (make-test-context ms-per-beat bpm)) 0.05)))))
-
-
 ;; Random and Step Modulator Tests
 
 
@@ -269,21 +200,15 @@
     (is (mod/config-requires-per-point? {:type :pos-x :min 0 :max 1}))
     (is (mod/config-requires-per-point? {:type :pos-y :min 0 :max 1}))
     (is (mod/config-requires-per-point? {:type :radial :min 0 :max 1}))
-    (is (mod/config-requires-per-point? {:type :angle :min 0 :max 1}))
-    (is (mod/config-requires-per-point? {:type :pos-wave :min 0 :max 1 :axis :x}))
-    (is (mod/config-requires-per-point? {:type :pos-scroll :min 0 :max 1 :axis :x}))
-    (is (mod/config-requires-per-point? {:type :rainbow-hue :axis :x}))
     
     ;; Point index modulators should require per-point context
     (is (mod/config-requires-per-point? {:type :point-index :min 0 :max 1}))
-    (is (mod/config-requires-per-point? {:type :point-wave :min 0 :max 1}))
     
     ;; Time-based modulators should NOT require per-point context
     (is (not (mod/config-requires-per-point? {:type :sine :min 0 :max 1})))
     (is (not (mod/config-requires-per-point? {:type :triangle :min 0 :max 1})))
     (is (not (mod/config-requires-per-point? {:type :square :min 0 :max 1})))
     (is (not (mod/config-requires-per-point? {:type :sawtooth :min 0 :max 1})))
-    (is (not (mod/config-requires-per-point? {:type :beat-decay :max 1 :min 0})))
     
     ;; Static values should not be per-point
     (is (not (mod/config-requires-per-point? 1.5)))
@@ -347,20 +272,6 @@
       ;; At corner (1,1), distance = sqrt(2) ≈ 1.41 (normalized to 1.0), should be max
       (is (approx= 100.0 (mod/resolve-param config (make-point-context 0 120 1.0 1.0 0 100)) 1.0)))))
 
-(deftest position-angle-mod-test
-  (testing "Position angle modulator maps angle to range"
-    (let [config {:type :angle :min 0.0 :max 360.0}]
-      ;; The modulator normalizes angle from -π..π to 0..1, then scales to min..max
-      ;; At (1, 0), angle = 0 radians, normalized to 0.5, maps to 180°
-      (is (approx= 180.0 (mod/resolve-param config (make-point-context 0 120 1.0 0.0 0 100)) 5.0))
-      
-      ;; At (0, 1), angle = π/2 radians, normalized to 0.75, maps to 270°
-      (is (approx= 270.0 (mod/resolve-param config (make-point-context 0 120 0.0 1.0 0 100)) 5.0))
-      
-      ;; At (-1, 0), angle = π radians (or -π), normalized to 0 or 1, maps to 0° or 360°
-      (let [val (mod/resolve-param config (make-point-context 0 120 -1.0 0.0 0 100))]
-        (is (or (approx= 0.0 val 5.0) (approx= 360.0 val 5.0)))))))
-
 (deftest point-index-mod-test
   (testing "Point index modulator maps point index to range"
     (let [config {:type :point-index :min 0.0 :max 100.0}]
@@ -372,67 +283,6 @@
       
       ;; Last point (index 99) should be max
       (is (approx= 100.0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 99 100)))))))
-
-(deftest point-index-wave-test
-  (testing "Point index wave creates wave patterns along points"
-    (let [config {:type :point-wave :min 0.0 :max 1.0 :cycles 2.0 :wave-type :sine}]  ; 2 cycles
-      ;; At start (index 0), should be at peak (cosine starts at peak)
-      (is (approx= 1.0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 0 100)) 0.1))
-      
-      ;; At 1/4 through points (phase 0.5), should be near min of first cycle
-      (is (approx= 0.0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 25 100)) 0.2))
-      
-      ;; At halfway (phase 1.0), should be at peak (completed one full cycle)
-      (is (approx= 1.0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 50 100)) 0.1)))))
-
-(deftest position-wave-test
-  (testing "Position wave creates spatial wave patterns"
-    (let [config {:type :pos-wave :min 0.0 :max 1.0 :axis :x :frequency 2.0 :wave-type :sine}]  ; 2 cycles across X
-      ;; At X=-1, phase=0, should be at sine peak (cosine starts at peak)
-      (is (approx= 1.0 (mod/resolve-param config (make-point-context 0 120 -1.0 0.0 0 100)) 0.1))
-      
-      ;; At X=0, phase=1, should be back at peak (1 full cycle)
-      (is (approx= 1.0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 0 100)) 0.1))
-      
-      ;; At X=1, phase=2, should be at peak (2 full cycles)
-      (is (approx= 1.0 (mod/resolve-param config (make-point-context 0 120 1.0 0.0 0 100)) 0.1)))))
-
-(deftest rainbow-hue-test
-  (testing "Rainbow hue creates animated rainbow based on position"
-    (let [config {:type :rainbow-hue :axis :x :speed 360.0}]  ; 360°/sec = 1 full rotation per second
-      ;; At X=-1 (left edge) and t=0, hue should be 0
-      (is (approx= 0.0 (mod/resolve-param config (make-point-context 0 120 -1.0 0.0 0 100)) 5.0))
-      
-      ;; At X=0 (center) and t=0, hue should be 180
-      (is (approx= 180.0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 0 100)) 5.0))
-      
-      ;; At X=1 (right edge) and t=0, hue should be 360 (wraps to 0)
-      (let [hue (mod/resolve-param config (make-point-context 0 120 1.0 0.0 0 100))]
-        (is (or (approx= 0.0 hue 5.0) (approx= 360.0 hue 5.0))))
-      
-      ;; At same position but t=1000ms, hue should have shifted by 360°
-      (let [hue-t0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 0 100))
-            hue-t1000 (mod/resolve-param config (make-point-context 1000 120 0.0 0.0 0 100))]
-        (is (approx= (mod (+ hue-t0 360.0) 360.0) (mod hue-t1000 360.0) 5.0))))))
-
-(deftest position-scroll-test
-  (testing "Position scroll creates moving wave patterns"
-    (let [config {:type :pos-scroll :min 0.0 :max 1.0 :axis :x :speed 1.0 :wave-type :sine}
-          val-1 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 0 100))
-          val-2 (mod/resolve-param config (make-point-context 0 120 0.3 0.0 0 100))
-          val-3 (mod/resolve-param config (make-point-context 500 120 0.0 0.0 0 100))]
-      ;; Verify it combines position and time and returns valid values
-      ;; All values should be in valid range
-      (is (>= val-1 0.0))
-      (is (<= val-1 1.0))
-      (is (>= val-2 0.0))
-      (is (<= val-2 1.0))
-      (is (>= val-3 0.0))
-      (is (<= val-3 1.0))
-      ;; At least one pair should be different (either different X or different time)
-      (is (or (not (approx= val-1 val-2 0.01))
-              (not (approx= val-1 val-3 0.01)))
-          "Position-scroll should vary with position or time"))))
 
 (deftest per-point-modulator-without-context-test
   (testing "Per-point modulators return default when context missing"

@@ -103,7 +103,7 @@
       (is (< (point-b p0) 0.01)))))
 
 (deftest set-hue-with-position-modulator-test
-  (testing "set-hue with rainbow-hue modulator produces different hues"
+  (testing "set-hue with pos-x modulator produces different hues"
     ;; NOTE: set-hue only works on points with saturation > 0
     ;; White points (r=g=b=1) have saturation=0, so we need colored points
     ;; Let's use red points instead (h=0, s=1, v=1)
@@ -295,46 +295,6 @@
         (is (< 65 result 80)
             (str "radial at (1,0) should return ~71, got " result))))))
 
-(deftest angle-modulator-test
-  (testing ":angle modulator varies with angle from origin"
-    (let [modulator {:type :angle :min 0 :max 360}]
-      ;; At (1,0) = 0° -> t = 0.5 (since atan2 returns -π to π)
-      ;; Actually: angle=0, t = (0 + π) / 2π = 0.5, result = 180
-      (let [ctx (mod/make-context {:time-ms 0 :bpm 120 :x 1.0 :y 0.0})
-            result (mod/evaluate-modulator modulator ctx)] 
-        (is (< 175 result 185)
-            (str "angle at (1,0) should return ~180, got " result)))
-      ;; At (0,1) = 90° = π/2 -> t = (π/2 + π) / 2π = 0.75, result = 270
-      (let [ctx (mod/make-context {:time-ms 0 :bpm 120 :x 0.0 :y 1.0})
-            result (mod/evaluate-modulator modulator ctx)]
-        (is (< 265 result 275)
-            (str "angle at (0,1) should return ~270, got " result)))
-      ;; At (-1,0) = 180° = π -> t = (π + π) / 2π = 1.0, result = 360
-      (let [ctx (mod/make-context {:time-ms 0 :bpm 120 :x -1.0 :y 0.0})
-            result (mod/evaluate-modulator modulator ctx)]
-        (is (> result 355)
-            (str "angle at (-1,0) should return ~360, got " result))))))
-
-(deftest rainbow-hue-modulator-test
-  (testing ":rainbow-hue modulator varies with position"
-    ;; rainbow-hue returns hue degrees 0-360
-    (let [modulator {:type :rainbow-hue :axis :x :speed 0}]  ;; speed 0 = no time animation
-      ;; At x=-1, position=0, hue = 0
-      (let [ctx (mod/make-context {:time-ms 0 :bpm 120 :x -1.0 :y 0.0})]
-        (is (< (mod/evaluate-modulator modulator ctx) 5)
-            "rainbow-hue at x=-1 should return ~0"))
-      ;; At x=0, position=0.5, hue = 180
-      (let [ctx (mod/make-context {:time-ms 0 :bpm 120 :x 0.0 :y 0.0})
-            result (mod/evaluate-modulator modulator ctx)]
-        (is (< 175 result 185)
-            (str "rainbow-hue at x=0 should return ~180, got " result)))
-      ;; At x=+1, position=1, hue = 360 (wraps to 0)
-      (let [ctx (mod/make-context {:time-ms 0 :bpm 120 :x 1.0 :y 0.0})
-            result (mod/evaluate-modulator modulator ctx)]
-        ;; 360 mod 360 = 0, but the formula is position*360 = 360, so result is 0 or 360
-        (is (or (< result 5) (> result 355))
-            (str "rainbow-hue at x=+1 should return ~0 or ~360, got " result))))))
-
 (deftest all-position-modulators-integration-test
   (testing "all position modulators work with set-color effect"
     (let [;; Create points at different positions
@@ -365,4 +325,3 @@
         (println "Corner:" (point-b (nth result 2)))
         (is (< (point-b (second result)) 0.1) "Center point should have low blue (near origin)")
         (is (> (point-b (nth result 2)) 0.9) "Corner point should have high blue (far from origin)")))))
-

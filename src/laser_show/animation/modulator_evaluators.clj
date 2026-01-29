@@ -126,55 +126,8 @@
         (square-fn p)))))
 
 
-;; Hz-Based Modulators (BPM-independent)
-
-
-(defn- eval-sine-hz
-  "Evaluate sine wave at fixed Hz frequency.
-   Uses accumulated-ms for smooth animation unaffected by BPM changes."
-  [{:keys [min max frequency-hz]
-    :or {min 0.0 max 1.0 frequency-hz 1.0}}
-   context]
-  (let [ms (time/get-ms-from-context context)
-        p (* ms (double frequency-hz) 0.001)]  ;; Convert to cycles
-    (time/oscillate (double min) (double max) p :sine)))
-
-(defn- eval-square-hz
-  "Evaluate square wave at fixed Hz frequency.
-   Uses accumulated-ms for smooth animation unaffected by BPM changes."
-  [{:keys [min max frequency-hz duty-cycle]
-    :or {min 0.0 max 1.0 frequency-hz 1.0 duty-cycle 0.5}}
-   context]
-  (let [ms (time/get-ms-from-context context)
-        p (double (mod (* ms (double frequency-hz) 0.001) 1.0))]
-    (if (< p (double duty-cycle))
-      (double max)
-      (double min))))
-
-
 ;; Decay Modulators
 
-
-(defn- eval-linear-decay
-  "Evaluate linear decay modulator."
-  [{:keys [start end duration-ms trigger]
-    :or {start 1.0 end 0.0 duration-ms 1000 trigger 0}}
-   {:keys [time-ms]}]
-  (let [elapsed (- (double time-ms) (double trigger))
-        progress (min 1.0 (/ elapsed (double duration-ms)))
-        range-v (- (double end) (double start))]
-    (+ (double start) (* progress range-v))))
-
-(defn- eval-halflife-decay
-  "Evaluate half-life based exponential decay."
-  [{:keys [start end half-life-ms trigger]
-    :or {start 1.0 end 0.0 half-life-ms 500 trigger 0}}
-   {:keys [time-ms]}]
-  (let [elapsed (- (double time-ms) (double trigger))
-        range-v (- (double start) (double end))
-        ln2 (Math/log 2.0)
-        decay-factor (Math/exp (- (/ (* elapsed ln2) (double half-life-ms))))]
-    (+ (double end) (* decay-factor range-v))))
 
 (defn- eval-exp-decay
   "Evaluate exponential decay (beat-synced).
@@ -289,11 +242,6 @@
         range-v (- (double max) (double min))]
     (+ (double min) (* osc-val range-v))))
 
-(defn- eval-constant
-  "Evaluate constant value modulator."
-  [{:keys [value min] :or {value 0.0 min 0.0}} _context]
-  (or value min))
-
 
 ;; Per-Point Modulators
 
@@ -307,17 +255,6 @@
     (let [t (/ (double point-index) (clojure.core/max 1.0 (dec (double point-count))))
           range-v (- (double max) (double min))]
       (+ (double min) (* (if wrap? (double (mod t 1.0)) t) range-v)))
-    (double min)))
-
-(defn- eval-point-wave
-  "Evaluate point index wave modulator."
-  [{:keys [min max cycles wave-type]
-    :or {min 0.0 max 1.0 cycles 1.0 wave-type :sine}}
-   {:keys [point-index point-count]}]
-  (if (and point-index point-count (pos? (double point-count)))
-    (let [t (/ (double point-index) (clojure.core/max 1.0 (double point-count)))
-          phase (* t (double cycles))]
-      (time/oscillate (double min) (double max) phase wave-type))
     (double min)))
 
 (defn- eval-pos-x
@@ -354,66 +291,6 @@
       (+ (double min) (* t range-v)))
     (double min)))
 
-(defn- eval-angle
-  "Evaluate position angle modulator."
-  [{:keys [min max] :or {min 0.0 max 1.0}}
-   {:keys [x y]}]
-  (if (and x y)
-    (let [angle (Math/atan2 (double y) (double x))
-          t (/ (+ angle Math/PI) (* 2.0 Math/PI))  ; normalize -π..π to 0..1
-          range-v (- (double max) (double min))]
-      (+ (double min) (* t range-v)))
-    (double min)))
-
-(defn- eval-pos-wave
-  "Evaluate position wave modulator."
-  [{:keys [min max axis frequency wave-type]
-    :or {min 0.0 max 1.0 axis :x frequency 1.0 wave-type :sine}}
-   {:keys [x y]}]
-  (if (and x y)
-    (let [pos-val (case axis
-                    :x (double x)
-                    :y (double y)
-                    :radial (Math/sqrt (+ (* (double x) (double x))
-                                          (* (double y) (double y))))
-                    :angle (/ (+ (Math/atan2 (double y) (double x)) Math/PI)
-                              (* 2.0 Math/PI)))
-          phase (* pos-val (double frequency))]
-      (time/oscillate (double min) (double max) phase wave-type))
-    (double min)))
-
-(defn- eval-pos-scroll
-  "Evaluate position scroll modulator.
-   Uses effective-beats for smooth BPM-change animation."
-  [{:keys [min max axis speed wave-type]
-    :or {min 0.0 max 1.0 axis :x speed 1.0 wave-type :sine}}
-   {:keys [x y] :as context}]
-  (if (and x y)
-    (let [pos-val (case axis :x (double x) :y (double y))
-          beats (double (time/get-beats-from-context context))
-          time-offset (* (double (mod beats 1.0)) (double speed))
-          phase (+ pos-val time-offset)]
-      (time/oscillate (double min) (double max) phase wave-type))
-    (double min)))
-
-(defn- eval-rainbow-hue
-  "Evaluate rainbow hue modulator.
-   Uses accumulated-ms for smooth animation unaffected by BPM changes."
-  [{:keys [axis speed] :or {axis :x speed 60.0}}
-   {:keys [x y] :as context}]
-  (let [ms (time/get-ms-from-context context)]
-    (if (and x y)
-      (let [position (case axis
-                       :x (/ (+ (double x) 1.0) 2.0)
-                       :y (/ (+ (double y) 1.0) 2.0)
-                       :radial (Math/sqrt (+ (* (double x) (double x))
-                                             (* (double y) (double y))))
-                       :angle (/ (+ (Math/atan2 (double y) (double x)) Math/PI)
-                                 (* 2.0 Math/PI)))
-            time-offset (double (mod (* (/ ms 1000.0) (double speed)) 360.0))]
-        (mod (+ (* position 360.0) time-offset) 360.0))
-      0.0)))
-
 
 ;; Modulator Evaluators Registry
 
@@ -425,26 +302,15 @@
    :triangle     eval-triangle
    :sawtooth     eval-sawtooth
    :square       eval-square
-   :sine-hz      eval-sine-hz
-   :square-hz    eval-square-hz
-   :linear-decay eval-linear-decay
-   :halflife-decay eval-halflife-decay
    :exp-decay    eval-exp-decay
-   :beat-decay   eval-exp-decay  ; alias
    :random       eval-random
    :step         eval-step
    :midi         eval-midi
    :osc          eval-osc
-   :constant     eval-constant
    :point-index  eval-point-index
-   :point-wave   eval-point-wave
    :pos-x        eval-pos-x
    :pos-y        eval-pos-y
-   :radial       eval-radial
-   :angle        eval-angle
-   :pos-wave     eval-pos-wave
-   :pos-scroll   eval-pos-scroll
-   :rainbow-hue  eval-rainbow-hue})
+   :radial       eval-radial})
 
 ;; Note: The modulator-evaluators map is used by modulators.clj to access
 ;; evaluator functions during modulator registration.

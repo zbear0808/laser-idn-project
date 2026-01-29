@@ -19,9 +19,9 @@
    ;; Strobe:
    {:effect-id :intensity :params {:amount {:type :square :min 0.0 :max 1.0 :period 0.25}}}
    
-   Per-point modulation (radial fade, wave pattern):
+   Per-point modulation (radial fade, position-based):
    {:effect-id :intensity :params {:amount {:type :radial :min 1.0 :max 0.3}}}
-   {:effect-id :intensity :params {:amount {:type :pos-wave :axis :x :min 0.5 :max 1.0 :frequency 4.0}}}
+   {:effect-id :intensity :params {:amount {:type :pos-x :min 0.5 :max 1.0}}}
    
    Implementation uses make-param-resolver for efficient per-point handling:
    - Static values: resolved once, no per-point overhead

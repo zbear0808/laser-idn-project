@@ -21,7 +21,7 @@
    
    Per-point modulation (rainbow gradient):
    {:effect-id :set-hue :params {:hue {:type :pos-x :min 0 :max 360}}}
-   {:effect-id :set-hue :params {:hue {:type :rainbow-hue :axis :x :speed 60.0}}}
+   {:effect-id :set-hue :params {:hue {:type :point-index :min 0 :max 360}}}
    
    Implementation uses make-param-resolver for efficient per-point handling:
    - Static values: resolved once, no per-point overhead

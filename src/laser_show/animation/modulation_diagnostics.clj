@@ -86,9 +86,7 @@
                      {:x 0.5 :y -0.5}]  ;; somewhere else
         modulators [{:type :pos-x :min 0 :max 100}
                     {:type :pos-y :min 0 :max 100}
-                    {:type :radial :min 0 :max 100}
-                    {:type :angle :min 0 :max 360}
-                    {:type :rainbow-hue :axis :x :speed 0}]]
+                    {:type :radial :min 0 :max 100}]]
     (println "=== Position-Based Modulator Test ===")
     (println "Test points:" (pr-str test-points))
     (println)
@@ -157,8 +155,8 @@
   (print-analysis {:hue {:type :pos-x :min 0 :max 360}})
   (print-analysis {:hue {:type :sine :min 0 :max 360 :period 1}})
   
-  ;; Test a rainbow config
-  (test-modulator-with-points {:type :rainbow-hue :axis :x :speed 60}
+  ;; Test a radial config
+  (test-modulator-with-points {:type :radial :min 0 :max 100}
                               [{:x -1.0 :y 0.0}
                                {:x 0.0 :y 0.0}
                                {:x 1.0 :y 0.0}])
