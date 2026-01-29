@@ -847,19 +847,16 @@
           phase (if (= loop-mode :once)
                   (let [total-duration (double period)
                         progress (double (calculate-once-progress (or time-ms 0) trigger-time
-                                                                   total-duration (or time-unit :beats)
-                                                                   (or bpm 120.0)))]
+                                                                  total-duration (or time-unit :beats)
+                                                                  (or bpm 120.0)))]
                     (clojure.core/min progress 1.0))
                   (mod (/ beats (double period)) 1.0))
-          
-          ;; Find surrounding keyframes
+
           sorted-keyframes (sort-by :position keyframes)
           [before after] (find-surrounding-keyframes sorted-keyframes phase)
-          
-          ;; Calculate interpolation factor
+
           t (calculate-interp-factor before after phase)]
-      
-      ;; Interpolate all params
+
       (interpolate-params (:params before) (:params after) t))))
 
 (defn keyframe-modulator?
@@ -870,33 +867,3 @@
        (contains? x :keyframes)
        (vector? (:keyframes x))))
 
-
-;; Preset Modulator Configs
-
-
-(def presets
-  "Common modulator preset configs (pure data)."
-  {:gentle-pulse   {:type :sine :min 0.7 :max 1.0 :period 1.0}
-   :strong-pulse   {:type :sine :min 0.3 :max 1.0 :period 0.5}
-   :breathe        {:type :sine :min 0.5 :max 1.0 :period 4.0}
-   :strobe-4x      {:type :square :min 0.0 :max 1.0 :period 0.25 :duty-cycle 0.1}
-   :strobe-8x      {:type :square :min 0.0 :max 1.0 :period 0.125 :duty-cycle 0.1}
-   :beat-flash     {:type :exp-decay :max 2.0 :min 1.0 :decay-type :exp}
-   :ramp-up        {:type :sawtooth :min 0.0 :max 1.0 :period 1.0}
-   :ramp-down      {:type :sawtooth :min 1.0 :max 0.0 :period 1.0}
-   :wobble         {:type :sine :min 0.9 :max 1.1 :period 0.25}
-   :fade-x         {:type :pos-x :min 0.0 :max 1.0}
-   :fade-y         {:type :pos-y :min 0.0 :max 1.0}
-   :fade-radial    {:type :radial :min 1.0 :max 0.0}
-   :glow-center    {:type :radial :min 1.0 :max 0.3}
-   :rainbow-x      {:type :rainbow-hue :axis :x :speed 60.0}
-   :rainbow-y      {:type :rainbow-hue :axis :y :speed 60.0}
-   :rainbow-angle  {:type :rainbow-hue :axis :angle :speed 60.0}
-   :fade-path      {:type :point-index :min 0.0 :max 1.0}
-   :wave-path      {:type :point-wave :min 0.3 :max 1.0 :cycles 2.0}})
-
-(defn preset
-  "Get a preset modulator config by keyword.
-   Returns the config map or nil if not found."
-  [preset-key]
-  (get presets preset-key))

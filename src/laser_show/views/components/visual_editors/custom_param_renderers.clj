@@ -27,6 +27,8 @@
             [laser-show.views.components.visual-editors.rotate-canvas :as rotate-canvas]
             [laser-show.views.components.visual-editors.scale-canvas :as scale-canvas]
             [laser-show.views.components.visual-editors.curve-canvas :as curve-canvas]
+            [laser-show.views.components.visual-editors.hue-canvas :as hue-canvas]
+            [laser-show.views.components.visual-editors.hue-shift-canvas :as hue-shift-canvas]
             [laser-show.views.components.tabs :as tabs]
             [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.views.components.modulator-param-control :as mod-param]
@@ -605,120 +607,6 @@
 ;; Hue Slider Visual Editor (for Set Hue effect - 0-360 range)
 
 
-(defn- draw-set-hue-gradient!
-  "Draw a horizontal hue gradient on the canvas for set-hue effect.
-   The gradient covers the full 0 to 360 degree range."
-  [^Canvas canvas width height current-hue]
-  (let [gc (.getGraphicsContext2D canvas)
-        w (double width)
-        h (double height)
-        gradient-height (- h 30)  ;; Leave space for indicator and label
-        gradient-top 0.0]
-    ;; Clear canvas
-    (.clearRect gc 0 0 w h)
-    
-    ;; Draw hue gradient bar - 0 to 360 degrees
-    (doseq [x (range (int w))]
-      (let [hue (* (/ (double x) w) 360.0)
-            [r g b] (colors/hsv->normalized hue 1.0 1.0)]
-        (.setFill gc (javafx.scene.paint.Color/color r g b 1.0))
-        (.fillRect gc x gradient-top 1 gradient-height)))
-    
-    ;; Draw border around gradient
-    (.setStroke gc (javafx.scene.paint.Color/web "#555555"))
-    (.setLineWidth gc 1.0)
-    (.strokeRect gc 0 gradient-top w gradient-height)
-    
-    ;; Calculate indicator position (current-hue from 0 to 360)
-    (let [indicator-x (* (/ current-hue 360.0) w)
-          indicator-top (+ gradient-top gradient-height)
-          triangle-height 10.0
-          triangle-half-width 6.0]
-      
-      ;; Draw indicator triangle pointing up
-      (.setFill gc (javafx.scene.paint.Color/WHITE))
-      (.beginPath gc)
-      (.moveTo gc indicator-x indicator-top)
-      (.lineTo gc (- indicator-x triangle-half-width) (+ indicator-top triangle-height))
-      (.lineTo gc (+ indicator-x triangle-half-width) (+ indicator-top triangle-height))
-      (.closePath gc)
-      (.fill gc)
-      
-      ;; Draw indicator outline
-      (.setStroke gc (javafx.scene.paint.Color/BLACK))
-      (.setLineWidth gc 1.0)
-      (.beginPath gc)
-      (.moveTo gc indicator-x indicator-top)
-      (.lineTo gc (- indicator-x triangle-half-width) (+ indicator-top triangle-height))
-      (.lineTo gc (+ indicator-x triangle-half-width) (+ indicator-top triangle-height))
-      (.closePath gc)
-      (.stroke gc)
-      
-      ;; Draw vertical line through gradient at indicator position
-      (.setStroke gc (javafx.scene.paint.Color/WHITE))
-      (.setLineWidth gc 2.0)
-      (.strokeLine gc indicator-x gradient-top indicator-x gradient-height)
-      (.setStroke gc (javafx.scene.paint.Color/BLACK))
-      (.setLineWidth gc 1.0)
-      (.strokeLine gc (dec indicator-x) gradient-top (dec indicator-x) gradient-height)
-      (.strokeLine gc (inc indicator-x) gradient-top (inc indicator-x) gradient-height)
-      
-      ;; Draw degree label below triangle
-      (.setFill gc (javafx.scene.paint.Color/WHITE))
-      (.setFont gc (javafx.scene.text.Font. "Monospace" 10))
-      (let [label-text (format "%.0f°" current-hue)
-            label-width (* (count label-text) 6)
-            label-x (max 2 (min (- w label-width 2) (- indicator-x (/ label-width 2))))]
-        (.fillText gc label-text label-x (+ indicator-top triangle-height 12))))))
-
-(defn- set-hue-canvas-create
-  "Create and configure the hue slider canvas for set-hue effect."
-  [width height current-hue event-template]
-  (let [canvas (Canvas. (double width) (double height))
-        dragging? (atom false)]
-    
-    ;; Initial draw
-    (draw-set-hue-gradient! canvas width height current-hue)
-    
-    ;; Mouse handlers
-    (let [handle-mouse (fn [^MouseEvent event]
-                         (let [x (.getX event)
-                               w (double width)
-                               ;; Map x from [0, w] to [0, 360]
-                               hue (-> (/ x w)
-                                      (* 360.0)
-                                      (max 0.0)
-                                      (min 360.0))]
-                           ;; Redraw with new position
-                           (draw-set-hue-gradient! canvas width height hue)
-                           ;; Dispatch event with new value
-                           (when event-template
-                             (events/dispatch! (assoc event-template
-                                                      :param-key :hue
-                                                      :value hue)))))]
-      
-      (.setOnMousePressed canvas
-                          (reify EventHandler
-                            (handle [_ event]
-                              (reset! dragging? true)
-                              (handle-mouse event))))
-      
-      (.setOnMouseDragged canvas
-                          (reify EventHandler
-                            (handle [_ event]
-                              (when @dragging?
-                                (handle-mouse event)))))
-      
-      (.setOnMouseReleased canvas
-                           (reify EventHandler
-                             (handle [_ _]
-                               (reset! dragging? false))))
-      
-      ;; Set cursor style
-      (.setStyle canvas "-fx-cursor: crosshair;"))
-    
-    canvas))
-
 (defn hue-visual-editor
   "Visual editor for set-hue effect - horizontal gradient slider.
    
@@ -780,52 +668,12 @@
                     :style-class ["visual-editor-hint"]})
                  
                  ;; Visual hue slider - always shown (disabled when modulated)
-                 {:fx/type fx/ext-on-instance-lifecycle
+                 {:fx/type hue-canvas/hue-canvas
                   :fx/key canvas-key
-                  :on-created (fn [^Canvas canvas]
-                                (let [dragging? (atom false)
-                                      current-hue-atom (atom static-hue)]
-                                  ;; Initial draw
-                                  (draw-set-hue-gradient! canvas width height static-hue)
-                                  
-                                  ;; Only add mouse handlers if NOT modulated
-                                  (when-not is-modulated?
-                                    ;; Mouse handlers
-                                    (let [handle-mouse (fn [^MouseEvent event]
-                                                         (let [x (.getX event)
-                                                               w (double width)
-                                                               new-hue (-> (/ x w)
-                                                                           (* 360.0)
-                                                                           (max 0.0)
-                                                                           (min 360.0))]
-                                                           (reset! current-hue-atom new-hue)
-                                                           (draw-set-hue-gradient! canvas width height new-hue)
-                                                           (when event-template
-                                                             (events/dispatch! (assoc event-template
-                                                                                      :param-key :hue
-                                                                                      :value new-hue)))))]
-                                      
-                                      (.setOnMousePressed canvas
-                                                          (reify EventHandler
-                                                            (handle [_ event]
-                                                              (reset! dragging? true)
-                                                              (handle-mouse event))))
-                                      
-                                      (.setOnMouseDragged canvas
-                                                          (reify EventHandler
-                                                            (handle [_ event]
-                                                              (when @dragging?
-                                                                (handle-mouse event)))))
-                                      
-                                      (.setOnMouseReleased canvas
-                                                           (reify EventHandler
-                                                             (handle [_ _]
-                                                               (reset! dragging? false))))
-                                      
-                                      (.setStyle canvas "-fx-cursor: crosshair;")))))
-                  :desc {:fx/type :canvas
-                         :width width
-                         :height height}}
+                  :width width
+                  :height height
+                  :hue static-hue
+                  :on-hue-change (when-not is-modulated? event-template)}
                  
                  ;; Value display
                  {:fx/type :h-box
@@ -840,128 +688,6 @@
 
 ;; Hue Shift Strip Visual Editor (for Hue Shift effect - shows input/output transformation)
 
-
-(defn- draw-hue-shift-strips!
-  "Draw two hue strips showing input→output transformation.
-   Top strip: Static hue gradient (input) with label on right
-   Bottom strip: Shifted hue gradient (output) with label on right"
-  [^Canvas canvas width height shift-degrees]
-  (let [gc (.getGraphicsContext2D canvas)
-        w (double width)
-        h (double height)
-        label-width 50.0  ;; Reserve space for labels on the right
-        strip-width (- w label-width 4)  ;; Strip width minus label area
-        strip-height (/ (- h 30) 2.0)  ;; Two strips + space for shift label
-        gap 6.0
-        input-top 0.0
-        output-top (+ strip-height gap)
-        label-y (+ output-top strip-height 16)]
-    ;; Clear canvas
-    (.clearRect gc 0 0 w h)
-    
-    ;; Draw input gradient (static, 0-360)
-    (doseq [x (range (int strip-width))]
-      (let [hue (* (/ (double x) strip-width) 360.0)
-            [r g b] (colors/hsv->normalized hue 1.0 1.0)]
-        (.setFill gc (javafx.scene.paint.Color/color r g b 1.0))
-        (.fillRect gc x input-top 1 strip-height)))
-    
-    ;; Draw border around input gradient
-    (.setStroke gc (javafx.scene.paint.Color/web "#555555"))
-    (.setLineWidth gc 1.0)
-    (.strokeRect gc 0 input-top strip-width strip-height)
-    
-    ;; Draw "INPUT" label to the right of the first strip
-    (.setFill gc (javafx.scene.paint.Color/web "#808080"))
-    (.setFont gc (javafx.scene.text.Font. "System" 10))
-    (.fillText gc "INPUT" (+ strip-width 6) (+ input-top (/ strip-height 2) 4))
-    
-    ;; Draw output gradient (shifted by degrees - wraps around)
-    (doseq [x (range (int strip-width))]
-      (let [input-hue (* (/ (double x) strip-width) 360.0)
-            ;; mod with 360 allows infinite wrapping in both directions
-            output-hue (mod (+ input-hue shift-degrees 36000.0) 360.0)
-            [r g b] (colors/hsv->normalized output-hue 1.0 1.0)]
-        (.setFill gc (javafx.scene.paint.Color/color r g b 1.0))
-        (.fillRect gc x output-top 1 strip-height)))
-    
-    ;; Draw border around output gradient
-    (.setStroke gc (javafx.scene.paint.Color/web "#555555"))
-    (.setLineWidth gc 1.0)
-    (.strokeRect gc 0 output-top strip-width strip-height)
-    
-    ;; Draw "OUTPUT" label to the right of the second strip
-    (.setFill gc (javafx.scene.paint.Color/web "#808080"))
-    (.fillText gc "OUTPUT" (+ strip-width 6) (+ output-top (/ strip-height 2) 4))
-    
-    ;; Draw shift amount label below the strips
-    (.setFill gc (javafx.scene.paint.Color/WHITE))
-    (.setFont gc (javafx.scene.text.Font. "Monospace" 11))
-    (let [;; Normalize display value to -180 to +180 range for readability
-          display-degrees (let [normalized (mod (+ shift-degrees 180.0 36000.0) 360.0)]
-                            (- normalized 180.0))
-          label-text (format "Shift: %+.0f°" display-degrees)
-          text-width (* (count label-text) 7)]
-      (.fillText gc label-text (- (/ strip-width 2) (/ text-width 2)) label-y))))
-
-(defn- hue-shift-canvas-create
-  "Create and configure the hue shift strip canvas."
-  [width height current-shift event-template]
-  (let [canvas (Canvas. (double width) (double height))
-        dragging? (atom false)
-        last-x (atom nil)]
-    
-    ;; Initial draw
-    (draw-hue-shift-strips! canvas width height current-shift)
-    
-    ;; Mouse handlers - drag to shift the output strip
-    (let [current-shift-atom (atom current-shift)
-          handle-drag-start (fn [^MouseEvent event]
-                              (reset! dragging? true)
-                              (reset! last-x (.getX event)))
-          handle-drag (fn [^MouseEvent event]
-                        (when @dragging?
-                          (let [x (.getX event)
-                                dx (- x (or @last-x x))
-                                w (double width)
-                                ;; Convert pixel delta to degree delta
-                                ;; Full width = 360 degrees
-                                ;; Negate so dragging right moves the output colors right
-                                ;; (which means decreasing the shift value)
-                                degree-delta (- (* (/ dx w) 360.0))
-                                new-shift (-> (+ @current-shift-atom degree-delta)
-                                             (max -180.0)
-                                             (min 180.0))]
-                            (reset! last-x x)
-                            (reset! current-shift-atom new-shift)
-                            ;; Redraw with new shift
-                            (draw-hue-shift-strips! canvas width height new-shift)
-                            ;; Dispatch event with new value
-                            (when event-template
-                              (events/dispatch! (assoc event-template
-                                                       :param-key :degrees
-                                                       :value new-shift))))))]
-      
-      (.setOnMousePressed canvas
-                          (reify EventHandler
-                            (handle [_ event]
-                              (handle-drag-start event))))
-      
-      (.setOnMouseDragged canvas
-                          (reify EventHandler
-                            (handle [_ event]
-                              (handle-drag event))))
-      
-      (.setOnMouseReleased canvas
-                           (reify EventHandler
-                             (handle [_ _]
-                               (reset! dragging? false)
-                               (reset! last-x nil))))
-      
-      ;; Set cursor style
-      (.setStyle canvas "-fx-cursor: ew-resize;"))
-    
-    canvas))
 
 (defn hue-shift-strip-visual-editor
   "Visual editor for hue shift effect - shows input/output hue transformation.
@@ -1019,62 +745,12 @@
                     :style-class ["visual-editor-hint"]})
                  
                  ;; Visual hue shift strips - always shown (disabled when modulated)
-                 {:fx/type fx/ext-on-instance-lifecycle
+                 {:fx/type hue-shift-canvas/hue-shift-canvas
                   :fx/key canvas-key
-                  :on-created (fn [^Canvas canvas]
-                                (let [dragging? (atom false)
-                                      last-x (atom nil)
-                                      current-shift-atom (atom static-degrees)]
-                                  ;; Initial draw
-                                  (draw-hue-shift-strips! canvas width height static-degrees)
-                                  
-                                  ;; Only add mouse handlers if NOT modulated
-                                  (when-not is-modulated?
-                                    ;; Mouse handlers - drag to shift the output strip
-                                    (let [handle-drag-start (fn [^MouseEvent event]
-                                                              (reset! dragging? true)
-                                                              (reset! last-x (.getX event)))
-                                          handle-drag (fn [^MouseEvent event]
-                                                        (when @dragging?
-                                                          (let [x (.getX event)
-                                                                dx (- x (or @last-x x))
-                                                                w (double width)
-                                                                ;; Convert pixel delta to degree delta
-                                                                ;; Full width = 360 degrees
-                                                                ;; Negate so dragging right moves the output colors right
-                                                                degree-delta (- (* (/ dx w) 360.0))
-                                                                ;; No clamping - allow infinite looping
-                                                                new-shift (+ @current-shift-atom degree-delta)]
-                                                            (reset! last-x x)
-                                                            (reset! current-shift-atom new-shift)
-                                                            ;; Redraw with new shift
-                                                            (draw-hue-shift-strips! canvas width height new-shift)
-                                                            ;; Dispatch event with new value
-                                                            (when event-template
-                                                              (events/dispatch! (assoc event-template
-                                                                                       :param-key :degrees
-                                                                                       :value new-shift))))))]
-                                      
-                                      (.setOnMousePressed canvas
-                                                          (reify EventHandler
-                                                            (handle [_ event]
-                                                              (handle-drag-start event))))
-                                      
-                                      (.setOnMouseDragged canvas
-                                                          (reify EventHandler
-                                                            (handle [_ event]
-                                                              (handle-drag event))))
-                                      
-                                      (.setOnMouseReleased canvas
-                                                           (reify EventHandler
-                                                             (handle [_ _]
-                                                               (reset! dragging? false)
-                                                               (reset! last-x nil))))
-                                      
-                                      (.setStyle canvas "-fx-cursor: ew-resize;")))))
-                  :desc {:fx/type :canvas
-                         :width width
-                         :height height}}
+                  :width width
+                  :height height
+                  :degrees static-degrees
+                  :on-degrees-change (when-not is-modulated? event-template)}
                  
                  ;; Modulator params editor (shown below visual when modulated)
                  (when is-modulated?

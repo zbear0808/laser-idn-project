@@ -259,27 +259,6 @@
       (is (= 1 (mod/resolve-param config (make-test-context (* 4 ms-per-beat) bpm)))))))
 
 
-;; Preset Tests
-
-
-(deftest preset-test
-  (testing "Presets are accessible and valid configs"
-    (is (mod/modulator-config? (mod/preset :gentle-pulse)))
-    (is (mod/modulator-config? (mod/preset :strong-pulse)))
-    (is (mod/modulator-config? (mod/preset :breathe)))
-    (is (mod/modulator-config? (mod/preset :strobe-4x)))
-    (is (nil? (mod/preset :nonexistent)))))
-
-(deftest preset-evaluation-test
-  (testing "Presets can be evaluated and produce valid values"
-    (let [context (make-test-context 0 120)]
-      ;; All presets should produce numbers
-      (doseq [[preset-key _] mod/presets]
-        (let [config (mod/preset preset-key)
-              value (mod/resolve-param config context)]
-          (is (number? value) (str "Preset " preset-key " should produce a number")))))))
-
-
 ;; Per-Point Context Detection Tests
 
 
