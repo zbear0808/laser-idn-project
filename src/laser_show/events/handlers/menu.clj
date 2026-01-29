@@ -59,7 +59,7 @@
                             :initial-directory initial-dir
                             :initial-file-name (or (when current-file
                                                     (.getName (java.io.File. current-file)))
-                                                  (persistent/get-default-project-path))
+                                                  (persistent/get-default-project-filename))
                             :extension-filters [{:description "Laser Show Projects"
                                                 :extensions ["*.zip"]}]
                             :mode :save

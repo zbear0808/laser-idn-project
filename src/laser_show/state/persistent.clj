@@ -234,6 +234,19 @@
       (log/error "Error creating projects directory:" (.getMessage e))
       false)))
 
+(defn get-default-project-filename
+  "Generate a default project filename with timestamp.
+   
+   Returns: Just the filename (not full path)
+   
+   Example:
+   (get-default-project-filename)
+   => \"project-2026-01-28-014509.zip\""
+  []
+  (let [timestamp (.format (java.text.SimpleDateFormat. "yyyy-MM-dd-HHmmss")
+                           (java.util.Date.))]
+    (str "project-" timestamp ".zip")))
+
 (defn get-default-project-path
   "Generate a default project file path with timestamp.
    
@@ -244,6 +257,4 @@
    => \"/home/user/LaserShowProjects/project-2026-01-15-182030.zip\""
   []
   (ensure-projects-dir!)
-  (let [timestamp (.format (java.text.SimpleDateFormat. "yyyy-MM-dd-HHmmss")
-                           (java.util.Date.))]
-    (str default-projects-dir "/project-" timestamp ".zip")))
+  (str default-projects-dir "/" (get-default-project-filename)))
