@@ -11,7 +11,7 @@
 (defonce !router-state
   (atom {:handlers {}           ; Map of handler-id -> {:pattern handler-fn}
          :global-handlers {}    ; Handlers that receive all events
-         :enabled true          ; Global enable/disable
+         :enabled? true          ; Global enable/disable
          :event-log []          ; Recent events for debugging
          :log-enabled false     ; Whether to log events
          :log-errors true       ; Whether to log handler errors
@@ -80,7 +80,7 @@
   [event]
   (let [state @!router-state
         log-errors? (:log-errors state)]
-    (when (and event (:enabled state))
+    (when (and event (:enabled? state))
       (log-event! event)
       
       ;; Call global handlers first
@@ -114,12 +114,12 @@
 (defn enable!
   "Enables event routing."
   []
-  (swap! !router-state assoc :enabled true))
+  (swap! !router-state assoc :enabled? true))
 
 (defn disable!
   "Disables event routing (events will be ignored)."
   []
-  (swap! !router-state assoc :enabled false))
+  (swap! !router-state assoc :enabled? false))
 
 
 

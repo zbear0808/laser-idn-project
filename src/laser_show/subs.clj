@@ -195,7 +195,7 @@
      :name (:name cell-data)
      :effect-count effect-count
      :first-effect-id (:effect-id first-effect)
-     :active? (:active cell-data false)
+     :active? (:active? cell-data false)
      :has-effects? (pos? effect-count)
      :display-text (when first-effect
                      (str (name (:effect-id first-effect))

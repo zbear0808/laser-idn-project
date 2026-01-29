@@ -90,7 +90,7 @@
         chains-state (fx/sub-val context :chains)
         cell-data (get-in chains-state [:effect-chains [col row]])
         effect-chain (:items cell-data [])
-        active? (:active cell-data false)
+        active? (:active? cell-data false)
         clipboard-items (clipboard/get-effects-to-paste)
         ;; For parameter editor - use first selected ID if single select
         first-selected-id (when (= 1 (count selected-ids))

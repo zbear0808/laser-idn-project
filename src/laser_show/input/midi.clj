@@ -87,7 +87,7 @@
   [device-name dispatch-fn get-state-fn]
   (fn [msg]
     (let [midi-state (get-state-fn)]
-      (when (:enabled midi-state)
+      (when (:enabled? midi-state)
         (let [channel-filter (:channel-filter midi-state)
               channel (:channel msg)]
           ;; Check channel filter
@@ -178,18 +178,18 @@
   "Enables MIDI input processing.
    Returns updated state."
   [midi-state]
-  (assoc midi-state :enabled true))
+  (assoc midi-state :enabled? true))
 
 (defn disable
   "Disables MIDI input processing.
    Returns updated state."
   [midi-state]
-  (assoc midi-state :enabled false))
+  (assoc midi-state :enabled? false))
 
 (defn enabled?
   "Returns true if MIDI input is enabled."
   [midi-state]
-  (:enabled midi-state true))
+  (:enabled? midi-state true))
 
 
 ;; MIDI Learn (pure functions for state, setup needs dispatch)
@@ -245,7 +245,7 @@
 
 (def initial-state
   "Default MIDI state structure."
-  {:enabled true
+  {:enabled? true
    :devices {}
    :connected-devices #{}
    :handlers {}

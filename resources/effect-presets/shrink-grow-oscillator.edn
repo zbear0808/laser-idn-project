@@ -2,7 +2,7 @@
  :description "Oscillates scale to create a breathing/pulsing effect"
  :category :shape
  :effects [{:effect-id :scale
-            :enabled true
+            :enabled? true
             :params {:x-scale {:type :sine
                               :min 0.7
                               :max 1.3

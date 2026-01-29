@@ -2,7 +2,7 @@
  :description "Fast strobe effect at 8x per beat"
  :category :intensity
  :effects [{:effect-id :intensity
-            :enabled true
+            :enabled? true
             :params {:amount {:type :square
                              :min 0.0
                              :max 1.0

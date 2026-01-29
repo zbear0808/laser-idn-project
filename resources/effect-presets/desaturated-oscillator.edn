@@ -2,7 +2,7 @@
  :description "Oscillates saturation from grayscale to full color"
  :category :color
  :effects [{:effect-id :saturation
-            :enabled true
+            :enabled? true
             :params {:amount {:type :sine
                              :min 0.0
                              :max 1.0

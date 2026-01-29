@@ -119,7 +119,7 @@
         ensure-cell (fn [s]
                       (if (get-in s [:chains :effect-chains [col row]])
                         s
-                        (assoc-in s [:chains :effect-chains [col row]] {:items [] :active false})))
+                        (assoc-in s [:chains :effect-chains [col row]] {:items [] :active? false})))
         state-with-cell (ensure-cell state)
         current-effects (get-in state-with-cell [:chains :effect-chains [col row] :items] [])]
     {:state (-> state-with-cell

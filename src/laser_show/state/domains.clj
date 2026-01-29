@@ -181,9 +181,9 @@
              :doc "preview panel dimensions and zone group filter (:all, :left, :right, etc., or nil for show all)"}
    :idn {:default {:host nil :port 7255}
          :doc "default IDN connection settings"}
-   :osc {:default {:enabled false :port default-osc-port}
+   :osc {:default {:enabled? false :port default-osc-port}
          :doc "OSC server settings"}
-   :midi {:default {:enabled false :device nil}
+   :midi {:default {:enabled? false :device nil}
           :doc "MIDI input settings"}})
 
 (defstate projectors
@@ -347,7 +347,7 @@
                          :multi-engine-state nil
                          :current-frame nil}
                :doc "Streaming engine state for IDN output"}
-   :input {:default {:midi {:enabled true
+   :input {:default {:midi {:enabled? true
                             :devices {}                ; Map of device-name -> device instance
                             :connected-devices #{}     ; Set of connected device names
                             :handlers {}               ; Map of device-name -> handler fn
@@ -355,18 +355,18 @@
                             :learn-mode nil            ; Promise when learning, nil otherwise
                             :note-mappings {}          ; Optional note remapping
                             :cc-mappings {}}           ; Optional CC remapping
-                     :osc {:enabled false
+                     :osc {:enabled? false
                            :server nil                 ; OSC server instance
                            :server-running? false
                            :port 9000
                            :address-mappings {}        ; Map of OSC address -> event config
                            :handlers {}                ; Map of handler-id -> {:pattern :handler}
                            :learn-mode nil}            ; Promise when learning, nil otherwise
-                     :keyboard {:enabled true
+                     :keyboard {:enabled? true
                                 :attached-components #{}}
                      :router {:handlers {}
                               :event-log []
-                              :enabled true}}
+                              :enabled? true}}
            :doc "Input handling state for MIDI, OSC, and keyboard"}
    :logging {:default {:enabled? false
                        :file nil

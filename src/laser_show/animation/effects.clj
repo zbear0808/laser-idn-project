@@ -173,7 +173,7 @@
   "Create a transducer for a single effect instance.
    
    Parameters:
-   - effect-instance: {:effect-id :scale :enabled true :params {...} :keyframe-modulator {...}}
+   - effect-instance: {:effect-id :scale :enabled? true :params {...} :keyframe-modulator {...}}
    - time-ms: Current time in milliseconds
    - bpm: Current BPM
    - trigger-time: When the effect was triggered (for once-mode modulators)

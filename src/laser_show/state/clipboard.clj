@@ -169,7 +169,7 @@
 
 ;; 
 ;; Effect cells use chain format:
-;; {:type :effect-chain :effects [{:effect-id :scale :params {...}} ...] :active true}
+;; {:type :effect-chain :effects [{:effect-id :scale :params {...}} ...] :active? true}
 
 (defn- serialize-effect-params
   "Convert effect params to pure data configs for serialization.
@@ -210,12 +210,12 @@
    Stores the full effect chain so it persists.
    Also copies to system clipboard as EDN.
    
-   Expects cell-data in format: {:effects [{...}] :active true}"
+   Expects cell-data in format: {:effects [{...}] :active? true}"
   [cell-data]
   (when (and cell-data (seq (:effects cell-data)))
     (let [clip-data {:type :effect-chain
                      :effects (serialize-effect-chain (:effects cell-data))
-                     :active (:active cell-data true)
+                     :active? (:active? cell-data true)
                      :copied-at (System/currentTimeMillis)}]
       (set-internal-clipboard! clip-data)
       (copy-to-system-clipboard! clip-data)
@@ -260,7 +260,7 @@
   "Copy an effects cell to clipboard (from effects grid).
    Also copies to system clipboard as EDN.
    
-   Expects cell-data in format: {:items [...] :active true}"
+   Expects cell-data in format: {:items [...] :active? true}"
   [cell-data]
   (when cell-data
     (let [clip-data {:type :effects-cell

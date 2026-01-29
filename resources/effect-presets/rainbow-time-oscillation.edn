@@ -2,7 +2,7 @@
  :description "Animated rainbow that cycles through hues over time"
  :category :color
  :effects [{:effect-id :hue-shift
-            :enabled true
+            :enabled? true
             :params {:degrees {:type :sawtooth
                               :min 0.0
                               :max 360.0

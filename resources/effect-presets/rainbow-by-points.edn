@@ -2,7 +2,7 @@
  :description "Creates a rainbow gradient across points using point index modulation"
  :category :color
  :effects [{:effect-id :set-hue
-            :enabled true
+            :enabled? true
             :params {:hue {:type :point-index
                           :min 0.0
                           :max 360.0

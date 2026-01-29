@@ -124,7 +124,7 @@
 (defn- effect-clipboard-copy-effects
   "Effect that copies effects to clipboard as a chain."
   [effects _dispatch]
-  (clipboard/copy-effect-chain! {:effects effects :active true}))
+  (clipboard/copy-effect-chain! {:effects effects :active? true}))
 
 (defn- effect-clipboard-paste-effects
   "Effect that pastes effects from clipboard into a chain.

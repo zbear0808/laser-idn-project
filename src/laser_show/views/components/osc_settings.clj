@@ -79,7 +79,7 @@
   "OSC configuration section for settings tab."
   [{:keys [fx/context]}]
   (let [osc-config (fx/sub-ctx context subs/osc-config)
-        enabled? (:enabled osc-config)
+        enabled? (:enabled? osc-config)
         server-running? (:server-running? osc-config false)
         port (:port osc-config 9000)
         address-mappings (:address-mappings osc-config {})

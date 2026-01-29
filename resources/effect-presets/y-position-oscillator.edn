@@ -2,7 +2,7 @@
  :description "Oscillates vertical position up and down"
  :category :shape
  :effects [{:effect-id :offset
-            :enabled true
+            :enabled? true
             :params {:x-offset 0.0
                      :y-offset {:type :sine
                                :min -0.3

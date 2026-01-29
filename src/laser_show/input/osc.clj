@@ -119,7 +119,7 @@
   [dispatch-fn get-state-fn]
   (fn [msg]
     (let [osc-state (get-state-fn)]
-      (when (:enabled osc-state)
+      (when (:enabled? osc-state)
         (let [evts (osc-msg->events msg (:address-mappings osc-state))]
           (doseq [event evts]
             (dispatch-fn event)))))))
@@ -283,18 +283,18 @@
   "Enables OSC input processing.
    Returns updated state."
   [osc-state]
-  (assoc osc-state :enabled true))
+  (assoc osc-state :enabled? true))
 
 (defn disable
   "Disables OSC input processing.
    Returns updated state."
   [osc-state]
-  (assoc osc-state :enabled false))
+  (assoc osc-state :enabled? false))
 
 (defn enabled?
   "Returns true if OSC input is enabled."
   [osc-state]
-  (:enabled osc-state true))
+  (:enabled? osc-state true))
 
 
 ;; Initialization (pure functions)
@@ -302,7 +302,7 @@
 
 (def initial-state
   "Default OSC state structure."
-  {:enabled false
+  {:enabled? false
    :server nil
    :server-running? false
    :port 9000

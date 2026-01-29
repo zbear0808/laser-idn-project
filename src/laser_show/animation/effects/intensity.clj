@@ -67,7 +67,7 @@
 
 (defn- blackout-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        enabled (:enabled resolved)]
+        enabled (:enabled? resolved)]
     (if enabled
       (map (fn [pt]
              (t/update-point-rgb pt 0.0 0.0 0.0)))

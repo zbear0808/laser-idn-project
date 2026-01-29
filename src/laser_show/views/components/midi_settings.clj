@@ -88,7 +88,7 @@
   "MIDI configuration section for settings tab."
   [{:keys [fx/context]}]
   (let [midi-config (fx/sub-ctx context subs/midi-config)
-        enabled? (:enabled midi-config)
+        enabled? (:enabled? midi-config)
         connected-devices (:connected-devices midi-config #{})
         available-devices (:available-devices midi-config [])
         learning? (fx/sub-ctx context subs/midi-learning?)

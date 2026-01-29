@@ -71,7 +71,7 @@ Each preset is an EDN file with the following structure:
  :description "Description of what the effect does"
  :category :color/:intensity/:shape
  :effects [{:effect-id :effect-name
-            :enabled true
+            :enabled? true
             :params {:param-name value-or-modulator}}]}
 ```
 
