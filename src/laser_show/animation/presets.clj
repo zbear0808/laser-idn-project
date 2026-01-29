@@ -132,7 +132,7 @@
 
 (def presets-by-id
   "Map of preset ID to preset definition."
-  (u/map-into :id identity all-presets))
+  (u/map-into :id all-presets))
 
 (defn get-preset
   "Get a preset by ID."

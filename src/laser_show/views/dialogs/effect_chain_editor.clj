@@ -21,6 +21,7 @@
             [laser-show.css.core :as css]
             [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.views.components.effect-parameter-editor :as param-editor]
+            [laser-show.views.components.inline-edit :as inline-edit]
             [laser-show.views.components.list :as list])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
@@ -95,13 +96,34 @@
         first-selected-id (when (= 1 (count selected-ids))
                             (first selected-ids))
         first-selected-path (when first-selected-id
-                              (chains/find-path-by-id effect-chain first-selected-id))]
+                              (chains/find-path-by-id effect-chain first-selected-id))
+        ;; Get chain name for header
+        chain-name (:name cell-data)
+        default-name (str "Cell " (char (+ 65 (or row 0))) (inc (or col 0)))
+        editing-name? (:editing-name? dialog-data false)]
     {:fx/type :v-box
      :spacing 0
      :style-class "dialog-content"
      :pref-width 800
      :pref-height 550
-     :children [;; Main content area
+     :children [;; Header with editable name (double-click to edit)
+               {:fx/type :h-box
+                :alignment :center-left
+                :style-class "dialog-header"
+                :children [{:fx/type inline-edit/inline-edit-text
+                            :value chain-name
+                            :placeholder default-name
+                            :editing? editing-name?
+                            :on-start-edit {:event/type :ui/update-dialog-data
+                                            :dialog-id :effect-chain-editor
+                                            :editing-name? true}
+                            :on-commit {:event/type :effect-chain/set-name
+                                        :col col
+                                        :row row}
+                            :on-cancel {:event/type :ui/update-dialog-data
+                                        :dialog-id :effect-chain-editor
+                                        :editing-name? false}}]}
+               ;; Main content area
                {:fx/type :h-box
                 :spacing 0
                 :v-box/vgrow :always
@@ -178,12 +200,18 @@
   (let [open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)
         dialog-data (fx/sub-ctx context subs/dialog-data :effect-chain-editor)
         {:keys [col row]} dialog-data
+        ;; Get chain data for name in title
+        chains-state (fx/sub-val context :chains)
+        cell-data (get-in chains-state [:effect-chains [col row]])
+        chain-name (:name cell-data)
         ;; Use centralized CSS system - dialogs includes all needed styles
         stylesheets (css/dialog-stylesheet-urls)
-        ;; Generate window title with cell identifier
-        window-title (str "Effects Chain - Cell "
-                         (char (+ 65 (or row 0)))
-                         (inc (or col 0)))]
+        ;; Generate window title with cell identifier and name
+        cell-id (str "Cell " (char (+ 65 (or row 0))) (inc (or col 0)))
+        window-title (str "Effects Chain - "
+                         (if (seq chain-name)
+                           (str chain-name " (" cell-id ")")
+                           cell-id))]
     ;; Log visibility check for debugging
     (when open?
       (log/debug "Effect chain editor visibility check"

@@ -86,6 +86,16 @@
               :component-id [:effect-chain col row]
               :items-path [:chains :effect-chains [col row] :items]}})
 
+(defn- handle-effect-chain-set-name
+  "Set the custom name for an effect chain.
+   Clears name if empty string provided."
+  [{:keys [col row name state]}]
+  (let [name-path [:chains :effect-chains [col row] :name]]
+    {:state (-> state
+                (assoc-in name-path (when (seq name) name))
+                (assoc-in [:ui :dialogs :effect-chain-editor :editing-name?] false)
+                h/mark-dirty)}))
+
 
 ;; Effect Bank (data-driven event from effect-chain editor)
 
@@ -147,6 +157,7 @@
     
     ;; Effect chain editor lifecycle
     :effect-chain/open-editor (handle-effect-chain-open-editor event)
+    :effect-chain/set-name (handle-effect-chain-set-name event)
     
     ;; Effect bank (data-driven) - add effect from bank
     :effect-chain/add-effect-from-bank (handle-effect-chain-add-effect-from-bank event)

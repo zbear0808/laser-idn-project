@@ -41,14 +41,18 @@
    Supports:
    - :updates - A map of keys to merge into dialog state
    - :tab-id - If present without :updates, sets :active-bank-tab to this value
-               (used by styled-tab-bar in dialogs)"
-  [{:keys [dialog-id updates tab-id state]}]
-  (let [actual-updates (cond
+               (used by styled-tab-bar in dialogs)
+   - Any other keys (except reserved ones) are merged directly as updates"
+  [{:keys [dialog-id updates tab-id state] :as event}]
+  ;; Extract any extra keys from event that should be merged directly
+  ;; This allows callers to pass keys like :editing-name? directly without wrapping in :updates
+  (let [reserved-keys #{:event/type :dialog-id :updates :tab-id :state :fx/event}
+        extra-updates (into {} (remove (fn [[k _]] (reserved-keys k)) event))
+        actual-updates (cond
                          updates updates
                          tab-id {:active-bank-tab tab-id}
+                         (seq extra-updates) extra-updates
                          :else {})]
-    (when tab-id
-      (log/debug "Tab clicked:" {:dialog-id dialog-id :tab-id tab-id}))
     {:state (update-in state [:ui :dialogs dialog-id] merge actual-updates)}))
 
 (defn- handle-preview-set-zone-filter

@@ -45,22 +45,31 @@
 
 (defn cell-label
   "Display text for a cue cell.
-   Shows first preset name, or preset count if multiple."
-  [{:keys [first-preset-id preset-count]}]
+   Shows custom name if set, otherwise first preset name, or preset count if multiple."
+  [{:keys [name first-preset-id preset-count]}]
   (cond
+    ;; Custom name takes priority
+    (seq name) name
+    ;; No content
     (nil? first-preset-id) ""
-    (= preset-count 1) (-> first-preset-id name (str/replace "-" " "))
-    :else (str (-> first-preset-id name (str/replace "-" " "))
+    ;; Single preset - show preset name
+    (= preset-count 1) (-> first-preset-id clojure.core/name (str/replace "-" " "))
+    ;; Multiple presets - show first + count
+    :else (str (-> first-preset-id clojure.core/name (str/replace "-" " "))
                " +" (dec preset-count))))
 
 
 (defn effects-label
   "Display text for an effects cell.
-   Shows effect count if any effects present."
-  [{:keys [effect-count has-effects?]}]
-  (if has-effects?
-    (str effect-count " fx")
-    ""))
+   Shows custom name if set, otherwise effect count."
+  [{:keys [name effect-count has-effects?]}]
+  (cond
+    ;; Custom name takes priority
+    (seq name) name
+    ;; Effects present - show count
+    has-effects? (str effect-count " fx")
+    ;; Empty
+    :else ""))
 
 
 ;; Generic Grid Cell Component
@@ -213,7 +222,8 @@
         adapted-data {:active? (:active? display-data)
                       :has-content? (:has-effects? display-data)
                       :effect-count (:effect-count display-data)
-                      :has-effects? (:has-effects? display-data)}]
+                      :has-effects? (:has-effects? display-data)
+                      :name (:name display-data)}]
     {:fx/type generic-grid-cell
      :col col
      :row row

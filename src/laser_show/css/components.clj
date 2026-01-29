@@ -225,4 +225,76 @@
        {:-fx-pref-height 6}
        
        ".scroll-bar:horizontal:hover"
-       {:-fx-pref-height 8}})))
+       {:-fx-pref-height 8}
+       
+       
+       ;; Inline Edit Component - for editable names
+       
+       
+       ;; Container
+       ".inline-edit-container"
+       {:-fx-min-height 28
+        :-fx-alignment "center-left"}
+       
+       ;; Label in normal mode
+       ".inline-edit-label"
+       {:-fx-text-fill text-primary
+        :-fx-font-size 14
+        :-fx-font-weight "bold"
+        :-fx-cursor "hand"
+        :-fx-padding ["4px" "8px"]
+        
+        ":hover"
+        {:-fx-background-color bg-hover
+         :-fx-background-radius 4}}
+       
+       ;; Placeholder text style
+       ".inline-edit-placeholder"
+       {:-fx-text-fill text-muted}
+       
+       ;; Text field in edit mode
+       ".inline-edit-field"
+       {:-fx-background-color bg-interactive
+        :-fx-text-fill text-primary
+        :-fx-font-size 14
+        :-fx-font-weight "bold"
+        :-fx-padding ["4px" "8px"]
+        :-fx-border-color accent-info
+        :-fx-border-width 1
+        :-fx-border-radius 4
+        :-fx-background-radius 4}
+       
+       
+       ;; Dialog header name styles (larger variant)
+       
+       
+       ".dialog-header"
+       {:-fx-padding ["8px" "12px"]
+        :-fx-border-width [0 0 1 0]
+        :-fx-border-color border-default}
+       
+       ".dialog-name-edit"
+       {:-fx-min-height 36}
+       
+       ".dialog-name-label"
+       {:-fx-text-fill text-primary
+        :-fx-font-size 16
+        :-fx-font-weight "bold"
+        :-fx-cursor "hand"
+        :-fx-padding ["6px" "12px"]
+        
+        ":hover"
+        {:-fx-background-color bg-hover
+         :-fx-background-radius 4}}
+       
+       ".dialog-name-field"
+       {:-fx-background-color bg-interactive
+        :-fx-text-fill text-primary
+        :-fx-font-size 16
+        :-fx-font-weight "bold"
+        :-fx-padding ["6px" "12px"]
+        :-fx-border-color accent-info
+        :-fx-border-width 2
+        :-fx-border-radius 4
+        :-fx-background-radius 4
+        :-fx-min-width 200}})))

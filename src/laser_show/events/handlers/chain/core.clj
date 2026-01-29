@@ -30,6 +30,13 @@
  (log/debug "chain/handle ENTER - type:" type "domain:" domain "entity-key:" entity-key)
  (let [config (helpers/chain-config domain entity-key)]
    (case type
+     :chain/set-name
+     (let [name-path (conj (vec (butlast (:items-path config))) :name)]
+       (log/debug "chain/set-name - name:" (:name event) "path:" name-path)
+       {:state (-> state
+                   (assoc-in name-path (:name event))
+                   (h/mark-dirty))})
+     
      :chain/set-items
      (do
        (log/debug "chain/set-items - items count:" (count (:items event))

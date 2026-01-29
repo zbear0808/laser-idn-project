@@ -20,6 +20,7 @@
             [laser-show.events.core :as events]
             [laser-show.css.core :as css]
             [laser-show.views.components.list :as list]
+            [laser-show.views.components.inline-edit :as inline-edit]
             [laser-show.views.components.preset-bank :as preset-bank]
             [laser-show.views.components.preset-param-editor :as preset-param-editor]
             [laser-show.views.components.effect-parameter-editor :as effect-param-editor]
@@ -237,14 +238,36 @@
         effect-dialog-data (merge dialog-data item-effects-ui {:item-effects-ui item-effects-ui})
         
         ;; Get zone groups for destination picker in footer
-        zone-groups (fx/sub-ctx context subs/zone-groups-list)]
-  {:fx/type :v-box
-   :spacing 0
-   :style-class "dialog-content"
-   :pref-width 800
-   :pref-height 700
-   :children [;; Main content area - 2 columns
-             {:fx/type :h-box
+        zone-groups (fx/sub-ctx context subs/zone-groups-list)
+        
+        ;; Get chain name for header
+        chain-name (:name cue-chain)
+        default-name (str "Cell " (char (+ 65 (or row 0))) (inc (or col 0)))
+        editing-name? (:editing-name? dialog-data false)]
+ {:fx/type :v-box
+  :spacing 0
+  :style-class "dialog-content"
+  :pref-width 800
+  :pref-height 700
+  :children [;; Header with editable name (double-click to edit)
+            {:fx/type :h-box
+             :alignment :center-left
+             :style-class "dialog-header"
+             :children [{:fx/type inline-edit/inline-edit-text
+                         :value chain-name
+                         :placeholder default-name
+                         :editing? editing-name?
+                         :on-start-edit {:event/type :ui/update-dialog-data
+                                         :dialog-id :cue-chain-editor
+                                         :editing-name? true}
+                         :on-commit {:event/type :cue-chain/set-name
+                                     :col col
+                                     :row row}
+                         :on-cancel {:event/type :ui/update-dialog-data
+                                     :dialog-id :cue-chain-editor
+                                     :editing-name? false}}]}
+            ;; Main content area - 2 columns
+            {:fx/type :h-box
               :spacing 0
               :v-box/vgrow :always
               :children [;; Left column - cue chain list (top) + item effects (bottom)
@@ -376,10 +399,16 @@
   (let [open? (fx/sub-ctx context subs/dialog-open? :cue-chain-editor)
         dialog-data (fx/sub-ctx context subs/dialog-data :cue-chain-editor)
         {:keys [col row]} dialog-data
+        ;; Get chain data for name in title
+        chains-state (fx/sub-val context :chains)
+        cue-chain (get-in chains-state [:cue-chains [col row]])
+        chain-name (:name cue-chain)
         stylesheets (css/dialog-stylesheet-urls)
-        window-title (str "Cue Chain Editor - Cell "
-                         (char (+ 65 (or row 0)))
-                         (inc (or col 0)))]
+        cell-id (str "Cell " (char (+ 65 (or row 0))) (inc (or col 0)))
+        window-title (str "Cue Chain Editor - "
+                         (if (seq chain-name)
+                           (str chain-name " (" cell-id ")")
+                           cell-id))]
     {:fx/type :stage
      :showing open?
      :title window-title

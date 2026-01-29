@@ -115,6 +115,7 @@
    
    Returns map with:
    - :col, :row - position
+   - :name - custom name for the cue chain (nil if not set)
    - :cue-chain - the full cue chain data
    - :preset-count - number of presets in the cue chain
    - :first-preset-id - id of first preset (for display)
@@ -135,6 +136,7 @@
         preset-count (count flat-items)]
     {:col col
      :row row
+     :name (:name cue-chain-data)
      :cue-chain cue-chain-data
      :preset-count preset-count
      :first-preset-id (:preset-id first-preset)
@@ -172,6 +174,7 @@
    
    Returns map with:
    - :col, :row - position
+   - :name - custom name for the effect chain (nil if not set)
    - :effect-count - number of actual effects in chain (flattened, excludes groups)
    - :first-effect-id - id of first effect (not group)
    - :active? - is effect chain active?
@@ -189,6 +192,7 @@
         effect-count (count flattened-effects)]
     {:col col
      :row row
+     :name (:name cell-data)
      :effect-count effect-count
      :first-effect-id (:effect-id first-effect)
      :active? (:active cell-data false)

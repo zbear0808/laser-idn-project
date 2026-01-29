@@ -214,6 +214,20 @@
                 h/mark-dirty)}))
 
 
+;; Name Operations
+
+
+(defn- handle-cue-chain-set-name
+  "Set the name for a cue chain.
+   Also clears the editing state."
+  [{:keys [col row name state]}]
+  (let [name-path [:chains :cue-chains [col row] :name]]
+    {:state (-> state
+                (assoc-in name-path (when (seq name) name))
+                (assoc-in [:ui :dialogs :cue-chain-editor :editing-name?] false)
+                h/mark-dirty)}))
+
+
 ;; Public API
 
 
@@ -253,6 +267,9 @@
     
     ;; Destination zone routing
     :cue-chain/set-destination-zone-group (handle-cue-chain-set-destination-zone-group event)
+    
+    ;; Name
+    :cue-chain/set-name (handle-cue-chain-set-name event)
     
     ;; Unknown event in this domain
     {}))

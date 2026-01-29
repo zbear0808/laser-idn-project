@@ -1,27 +1,5 @@
 (ns laser-show.events.handlers
-  "Main event dispatcher - routes events to domain-specific handlers.
-   
-   This module is now a thin routing layer that delegates to specialized
-   handler modules organized by domain. The actual event handling logic
-   has been extracted into focused, maintainable modules.
-   
-   SIMPLIFIED ARCHITECTURE (v2):
-   - Removed zones-handlers (zones abstraction eliminated)
-   - Projector handlers now manage zone group assignment and corner-pin directly
-   
-   Handler modules:
-   - grid-handlers: Grid cell operations
-   - effects-handlers: Effect chain operations
-   - cue-chain-handlers: Cue chain editor (presets and groups)
-   - projector-handlers: Projector and virtual projector configuration
-   - zone-groups-handlers: Zone group management (routing targets)
-   - timing-handlers: BPM, tap tempo, and transport controls
-   - ui-handlers: UI state (tabs, dialogs, drag/drop)
-   - project-handlers: Project state management
-   - connection-handlers: IDN connection and configuration
-   - menu-handlers: Menu commands (File/Edit/View/Help)
-   - chain-handlers: Generic chain operations (shared)
-   - input-handlers: MIDI and OSC input device management"
+  "Main event dispatcher - routes events to domain-specific handlers."
   (:require
    [clojure.tools.logging :as log]
    [laser-show.events.handlers.grid :as grid]
