@@ -494,11 +494,12 @@
    :spacing 4
    :children [{:fx/type :button
                :text "New"
-               :graphic {:fx/type icons/icon :icon :folder :size 8}
+               :graphic {:fx/type icons/icon :icon :folder-open-alt :size 8}
                :style-class "chain-toolbar-btn"
                :on-action (fn [_] (dispatch-create-empty-group! props))}
               {:fx/type :button
-               :text "☐ Group"
+               :text "Group"
+               :graphic {:fx/type icons/icon :icon :group :size 8}
                :disable (or (zero? selection-count) (not can-create-group?))
                :style-class "chain-toolbar-btn"
                :on-action (fn [_] (dispatch-group-selected! props))}]})
@@ -550,16 +551,19 @@
                  :spacing 4
                  :children [{:fx/type :button
                              :text "Copy"
+                             :graphic {:fx/type icons/icon :icon :copy :size 8}
                              :disable (zero? selection-count)
                              :style-class "chain-toolbar-btn"
                              :on-action (fn [_] (dispatch-copy-selected! props))}
                             {:fx/type :button
                              :text "Paste"
+                             :graphic {:fx/type icons/icon :icon :paste :size 8}
                              :disable (not can-paste?)
                              :style-class "chain-toolbar-btn"
                              :on-action (fn [_] (dispatch-paste-items! props))}
                             {:fx/type :button
                              :text "Del"
+                             :graphic {:fx/type icons/icon :icon :trash-alt :size 8}
                              :disable (zero? selection-count)
                              :style-class "chain-toolbar-btn-danger"
                              :on-action (fn [_] (dispatch-delete-selected! props))}]}

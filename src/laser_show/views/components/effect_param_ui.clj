@@ -16,7 +16,8 @@
   (:require [laser-show.animation.modulator-defs :as mod-defs]
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.visual-editors.custom-param-renderers :as custom-renderers]
-            [laser-show.views.components.modulator-param-control :as mod-param]))
+            [laser-show.views.components.modulator-param-control :as mod-param]
+            [laser-show.views.components.icons :as icons]))
 
 
 ;; Re-export commonly used functions from parameter-controls
@@ -140,7 +141,8 @@
                                ;; Other editors with modulators must stay in numeric mode
                                (let [disable-visual? (and has-modulators? (not single-param-visual-editor?))]
                                  (cond-> {:fx/type :button
-                                          :text "👁 Visual"
+                                          :text "Visual"
+                                          :graphic {:fx/type icons/icon :icon :eye :size 9}
                                           :disable disable-visual?
                                           :style-class [(cond
                                                           disable-visual? "chip"
@@ -153,7 +155,8 @@
                                    (assoc :on-action (assoc on-mode-change-event :mode :visual))))
                                ;; Numeric mode button - conditionally add :on-action only when valid
                                (cond-> {:fx/type :button
-                                        :text "🔢 Numeric"
+                                        :text "Numeric"
+                                        :graphic {:fx/type icons/icon :icon :sliders :size 9}
                                         :style-class [(if (= actual-mode :numeric) "chip-selected" "chip")]
                                         :style "-fx-font-size: 9; -fx-padding: 3 10;"}
                                  on-mode-change-event

@@ -24,7 +24,10 @@
   {:fx/type fx/ext-instance-factory
    :create (fn []
              (try
-               (let [glyph-name (str/upper-case (name icon))
+               (let [glyph-name (-> icon 
+                                    (name)
+                                    (str/replace "-" "_")
+                                    (str/upper-case))
                      glyph-node (.create font glyph-name)]
                  (.setFontSize glyph-node size)
                  glyph-node)

@@ -29,7 +29,8 @@
             [laser-show.views.components.visual-editors.curve-canvas :as curve-canvas]
             [laser-show.views.components.tabs :as tabs]
             [laser-show.views.components.zone-chips :as zone-chips]
-            [laser-show.views.components.modulator-param-control :as mod-param])
+            [laser-show.views.components.modulator-param-control :as mod-param]
+            [laser-show.views.components.icons :as icons])
   (:import [javafx.scene.canvas Canvas]
            [javafx.scene.input MouseEvent MouseButton]
            [javafx.event EventHandler]))
@@ -582,9 +583,16 @@
                 {:fx/type :v-box
                  :spacing 4
                  :style-class ["visual-editor-info-panel"]
-                 :children [{:fx/type :label
-                             :text "ℹ️ Zone effects modify routing BEFORE frame generation"
-                             :style-class ["visual-editor-info-title"]}
+                 :children [{:fx/type :h-box
+                             :spacing 4
+                             :alignment :center-left
+                             :children [{:fx/type icons/icon
+                                        :icon :info-circle
+                                        :size 12
+                                        :style-class ["icon-info"]}
+                                       {:fx/type :label
+                                        :text "Zone effects modify routing BEFORE frame generation"
+                                        :style-class ["visual-editor-info-title"]}]}
                             {:fx/type :label
                              :text (case mode
                                     :replace "This will completely override the cue's destination"

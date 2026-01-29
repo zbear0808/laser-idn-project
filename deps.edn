@@ -26,7 +26,7 @@
         ch.qos.logback/logback-classic {:mvn/version "1.5.16"}
 
         ;; Icons and extra JavaFX controls
-        org.controlsfx/controlsfx {:mvn/version "11.2.1"}}
+        org.controlsfx/controlsfx {:mvn/version "11.2.3"}}
 
  :aliases
  {:laser-show

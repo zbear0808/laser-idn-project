@@ -1,7 +1,8 @@
 (ns laser-show.views.toolbar
   "Toolbar component with transport controls, BPM, and connection status."
   (:require [cljfx.api :as fx]
-            [laser-show.subs :as subs]))
+            [laser-show.subs :as subs]
+            [laser-show.views.components.icons :as icons]))
 
 
 ;; Transport Controls
@@ -10,9 +11,11 @@
 (defn transport-button
   "A transport control button (play/stop/etc).
    Uses style-class for base styling, inline :style only for dynamic active state."
-  [{:keys [icon-text tooltip on-action active?]}]
+  [{:keys [icon tooltip on-action active?]}]
   {:fx/type :button
-   :text icon-text
+   :graphic {:fx/type icons/icon
+             :icon icon
+             :size 12}
    :style-class (if active? "transport-btn-active" "transport-btn")
    :tooltip {:fx/type :tooltip :text tooltip}
    :on-action on-action})
@@ -25,12 +28,12 @@
      :spacing 4
      :alignment :center-left
      :children [{:fx/type transport-button
-                 :icon-text (if playing? "■" "▶")
+                 :icon (if playing? :stop :play)
                  :tooltip (if playing? "Stop" "Play")
                  :on-action {:event/type (if playing? :transport/stop :transport/play)}
                  :active? playing?}
                 {:fx/type transport-button
-                 :icon-text "↻"
+                 :icon :repeat
                  :tooltip "Retrigger"
                  :on-action {:event/type :transport/retrigger}
                  :active? false}]}))

@@ -2,7 +2,8 @@
   "Status bar component showing current state information."
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
-            [laser-show.css.core :as css]))
+            [laser-show.css.core :as css]
+            [laser-show.views.components.icons :as icons]))
 
 
 ;; Status Items
@@ -98,11 +99,18 @@
   [{:keys [fx/context]}]
   (let [{:keys [dirty? has-project?]} (fx/sub-ctx context subs/project-status)]
     (if has-project?
-      {:fx/type :label
-       :text (if dirty? "● Modified" "✓ Saved")
-       :style (str "-fx-text-fill: "
-                   (if dirty? (css/accent-warning) (css/accent-success))
-                   "; -fx-font-size: 11;")}
+      {:fx/type :h-box
+       :spacing 4
+       :alignment :center-left
+       :children [{:fx/type icons/icon
+                   :icon (if dirty? :circle :check)
+                   :size 10
+                   :style-class [(if dirty? "icon-warning" "icon-success")]}
+                  {:fx/type :label
+                   :text (if dirty? "Modified" "Saved")
+                   :style (str "-fx-text-fill: "
+                              (if dirty? (css/accent-warning) (css/accent-success))
+                              "; -fx-font-size: 11;")}]}
       {:fx/type :label :text "" :pref-width 0})))
 
 
