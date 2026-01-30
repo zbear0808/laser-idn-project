@@ -83,7 +83,6 @@
               {:fx/type tap-tempo-button}]})
 
 
-;; Connection Status
 
 
 (defn connection-indicator
@@ -128,30 +127,6 @@
                                            :idn/start-multi-streaming)}}]}))
 
 
-;; Main Toolbar
-
-
-(defn fa-icon-test
-  "Test component for clj-font-awesome icons."
-  [_]
-  {:fx/type :h-box
-   :spacing 8
-   :alignment :center-left
-   :children [{:fx/type fa/icon
-               :name :gear
-               :style :solid
-               :size 16
-               :color "#cccccc"}
-              {:fx/type fa/icon
-               :name :heart
-               :style :solid
-               :size 16
-               :color "#ff6b6b"}
-              {:fx/type fa/icon
-               :name :star
-               :style :solid
-               :size 16
-               :color "#ffd93d"}]})
 
 (defn toolbar
   "Main toolbar component."
@@ -163,6 +138,5 @@
               {:fx/type :separator :orientation :vertical}
               {:fx/type bpm-controls}
               {:fx/type :separator :orientation :vertical}
-              {:fx/type fa-icon-test}  ;; Test FA6 icons
               {:fx/type :region :h-box/hgrow :always} ;; Spacer
               {:fx/type connection-status}]})

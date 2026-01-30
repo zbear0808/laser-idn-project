@@ -47,6 +47,7 @@
     laser-show.animation.time
     laser-show.animation.colors
     laser-show.animation.modulator-defs
+    laser-show.animation.modulators
     laser-show.animation.modulation
     laser-show.animation.modulation-diagnostics
     laser-show.animation.effects.common

@@ -26,7 +26,6 @@
    - :params    - Vector of parameter definition maps
    - :per-point?   - Boolean, true if requires per-point context (default false)
    - :retrigger?   - Boolean, true if supports retriggering (default false)
-   - :ui-visible?  - Boolean, true if shown in UI dropdowns (default true)
    - :description  - Optional description string"}
   !modulators
   (atom {}))
@@ -38,7 +37,7 @@
 (def valid-categories
   "Set of valid modulator categories.
    
-   - :wave      - Wave-based oscillators (sine, triangle, sawtooth, square, random, step)
+   - :wave      - Wave-based oscillators (sine, triangle, sawtooth, square, random)
    - :one-shot  - One-shot envelopes (decay)
    - :special   - Per-point/position based (pos-x, pos-y, radial, point-index)
    - :external  - External input (midi, osc) - not exposed in UI
@@ -59,31 +58,32 @@
    Required keys:
    - :id        - Keyword identifier (e.g., :sine)
    - :name      - Display name string
-   - :icon      - Icon string for UI
+   - :icon      - Icon string for UI (emoji/text), OR
+   - :icon-name - FontAwesome icon keyword (e.g., :wave-sine), stored as data for UI rendering
    - :category  - One of valid-categories
    - :evaluator - Evaluation function (fn [config context] -> value)
    - :params    - Vector of parameter definition maps
    
    Optional keys:
+   - :icon-style   - FontAwesome style keyword (:solid or :regular, default :solid)
    - :per-point?   - Boolean (default false)
    - :retrigger?   - Boolean (default false)
-   - :ui-visible?  - Boolean (default true)
    - :description  - String description
    
    Returns the registered modulator map."
-  [{:keys [id name icon category evaluator params
-           per-point? retrigger? ui-visible? description]
+  [{:keys [id name icon icon-name icon-style category evaluator params
+           per-point? retrigger? description]
     :or {per-point? false
          retrigger? false
-         ui-visible? true}
+         icon-style :solid}
     :as modulator}]
   ;; Validation assertions
   (assert (keyword? id)
           (str "Modulator :id must be a keyword, got: " (type id)))
   (assert (string? name)
           (str "Modulator :name must be a string, got: " (type name)))
-  (assert (string? icon)
-          (str "Modulator :icon must be a string, got: " (type icon)))
+  (assert (or (string? icon) (keyword? icon-name))
+          (str "Modulator must have either :icon (string) or :icon-name (keyword), got icon=" (type icon) " icon-name=" (type icon-name)))
   (assert (contains? valid-categories category)
           (str "Modulator :category must be one of " valid-categories ", got: " category))
   (assert (fn? evaluator)
@@ -91,10 +91,11 @@
   (assert (vector? params)
           (str "Modulator :params must be a vector, got: " (type params)))
   
-  (let [full-modulator (-> modulator
-                           (assoc :per-point? per-point?)
-                           (assoc :retrigger? retrigger?)
-                           (assoc :ui-visible? ui-visible?))]
+  ;; Store icon-name and icon-style as data, view layer handles rendering
+  (let [full-modulator (cond-> (assoc modulator
+                                      :per-point? per-point?
+                                      :retrigger? retrigger?)
+                         icon-style (assoc :icon-style icon-style))]
     (swap! !modulators assoc id full-modulator)
     full-modulator))
 
@@ -117,11 +118,10 @@
 
 
 (defn all-ui-modulators
-  "Get vector of only UI-visible modulator maps (for dropdowns).
+  "Get vector of modulator maps (for dropdowns).
    Filters out :external and :internal categories and non-visible modulators."
   []
-  (->> (vals @!modulators)
-       (filterv :ui-visible?)
+  (->> (vals @!modulators) 
        (sort-by (juxt :category :name))))
 
 (defn per-point?

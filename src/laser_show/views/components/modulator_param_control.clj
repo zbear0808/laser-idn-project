@@ -22,12 +22,26 @@
    
    Also provides visual-editor-modulator-header for embedding modulator controls
    directly in single-parameter visual editors (rotation dial, hue slider, etc)."
-  (:require [laser-show.animation.modulator-registry :as reg]
+  (:require [clj-font-awesome.core :as fa]
+            [laser-show.animation.modulator-registry :as reg]
             [laser-show.views.components.parameter-controls :as param-controls]))
 
 
 ;; UI Components
 
+
+(defn- modulator-cell-desc
+  "Build cell description for a modulator item.
+   Handles both string icons (emoji) and FontAwesome icon-name keywords."
+  [item]
+  (when item
+    (if-let [icon-name (:icon-name item)]
+      ;; FontAwesome icon-name keyword - create graphic with optional style
+      (let [icon-style (or (:icon-style item) :solid)]
+        {:text (:name item)
+         :graphic {:fx/type fa/icon :name icon-name :style icon-style :size 12}})
+      ;; String icon (emoji) - include in text
+      {:text (str (:icon item) " " (:name item))})))
 
 (defn- modulator-type-selector
   "Dropdown to select modulator type.
@@ -42,11 +56,9 @@
      :pref-width 140
      :value (or current-info (first all-types))
      :items (vec all-types)
-     :button-cell (fn [item]
-                    {:text (when item (str (:icon item) " " (:name item)))})
+     :button-cell (fn [item] (modulator-cell-desc item))
      :cell-factory {:fx/cell-type :list-cell
-                    :describe (fn [item]
-                                {:text (when item (str (:icon item) " " (:name item)))})}
+                    :describe (fn [item] (modulator-cell-desc item))}
      ;; Event map pattern: merge event template with :mod-type
      :on-value-changed (assoc on-select-event :mod-type-item? true)}))
 

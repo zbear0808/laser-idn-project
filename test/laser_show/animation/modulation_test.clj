@@ -178,19 +178,6 @@
       (is (= (mod/resolve-param config context)
              (mod/resolve-param config context))))))
 
-(deftest step-mod-test
-  (testing "Step modulator cycles through values"
-    (let [config {:type :step :values [1 2 3 4] :steps-per-beat 1.0}
-          bpm 120
-          ms-per-beat (/ 60000 bpm)]
-      (is (= 1 (mod/resolve-param config (make-test-context 0 bpm))))
-      (is (= 2 (mod/resolve-param config (make-test-context ms-per-beat bpm))))
-      (is (= 3 (mod/resolve-param config (make-test-context (* 2 ms-per-beat) bpm))))
-      (is (= 4 (mod/resolve-param config (make-test-context (* 3 ms-per-beat) bpm))))
-      ;; Should wrap
-      (is (= 1 (mod/resolve-param config (make-test-context (* 4 ms-per-beat) bpm)))))))
-
-
 ;; Per-Point Context Detection Tests
 
 
@@ -378,19 +365,6 @@
       (is (<= val-after-period 1.0))
       ;; Values after period should be the same (held)
       (is (= val-after-period val-well-after)))))
-
-(deftest step-once-mode-test
-  (testing "Step modulator in once mode holds at last value after one period"
-    (let [bpm 120
-          ms-per-beat (/ 60000 bpm)
-          config {:type :step :values [1 2 3 4] :period 1.0 :loop-mode :once}
-          trigger-time 0]
-      ;; At start, should be first value
-      (is (= 1 (mod/resolve-param config (make-once-mode-context 0 bpm trigger-time))))
-      ;; After one full period, should hold at last value
-      (is (= 4 (mod/resolve-param config (make-once-mode-context ms-per-beat bpm trigger-time))))
-      ;; Well after period, should still hold at last value
-      (is (= 4 (mod/resolve-param config (make-once-mode-context (* 5 ms-per-beat) bpm trigger-time)))))))
 
 (deftest loop-mode-default-test
   (testing "Loop mode defaults to :loop (continues oscillating)"

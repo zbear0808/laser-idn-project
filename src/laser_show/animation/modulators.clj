@@ -48,14 +48,6 @@
    {:key :loop-mode :label "Mode" :type :choice :choices [:loop :once] :default :loop}
    {:key :once-periods :label "# Periods" :type :float :min 0.125 :max 8.0 :default 1.0}])
 
-(def ^:private step-params
-  "Step modulator parameters."
-  [{:key :values :label "Values" :type :text :default "[0 0.5 1]"}
-   {:key :period :label "Period" :type :float :min 0.0625 :max 16.0 :default 1.0}
-   {:key :time-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
-   {:key :loop-mode :label "Mode" :type :choice :choices [:loop :once] :default :loop}
-   {:key :once-periods :label "# Periods" :type :float :min 0.125 :max 8.0 :default 1.0}])
-
 (def ^:private decay-params
   "Decay modulator parameters."
   [{:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
@@ -101,7 +93,7 @@
 (reg/register-modulator!
  {:id          :sine
   :name        "Sine"
-  :icon        "〰️"
+  :icon        "∿"
   :category    :wave
   :evaluator   (get eval/modulator-evaluators :sine)
   :params      wave-params
@@ -131,7 +123,8 @@
 (reg/register-modulator!
  {:id          :square
   :name        "Square"
-  :icon        "▭"
+  ;; :icon        "▭"
+  :icon-name   :wave-square
   :category    :wave
   :evaluator   (get eval/modulator-evaluators :square)
   :params      square-params
@@ -141,20 +134,11 @@
 (reg/register-modulator!
  {:id          :random
   :name        "Random"
-  :icon        "⚡"
+  ;; :icon        "⚡"
+  :icon-name   :shuffle
   :category    :wave
   :evaluator   (get eval/modulator-evaluators :random)
   :params      random-params
-  :per-point?  false
-  :retrigger?  true})
-
-(reg/register-modulator!
- {:id          :step
-  :name        "Step"
-  :icon        "⊟"
-  :category    :wave
-  :evaluator   (get eval/modulator-evaluators :step)
-  :params      step-params
   :per-point?  false
   :retrigger?  true})
 
@@ -205,7 +189,7 @@
 (reg/register-modulator!
  {:id          :point-index
   :name        "Point Index"
-  :icon        "🔢"
+  :icon-name   :arrow-up-9-1
   :category    :special
   :evaluator   (get eval/modulator-evaluators :point-index)
   :params      point-index-params
@@ -230,18 +214,10 @@
 (reg/register-modulator!
  {:id          :osc
   :name        "OSC"
-  :icon        "📡"
+  :icon-name   :ear-listen
   :category    :external
   :evaluator   (get eval/modulator-evaluators :osc)
   :params      osc-params
   :per-point?  false
   :retrigger?  false
   :description "OSC input modulator"})
-
-
-;; Registration Summary
-;; Total: 13 modulator types registered
-;;
-;; Wave (7):      :sine, :triangle, :sawtooth, :square, :random, :step, :decay
-;; Per-Point (4): :pos-x, :pos-y, :radial, :point-index
-;; External (2):  :midi, :osc

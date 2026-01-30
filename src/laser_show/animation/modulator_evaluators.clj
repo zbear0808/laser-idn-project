@@ -10,7 +10,6 @@
    
    Each evaluator takes [config context] and returns a numeric value."
   (:require
-   [clojure.edn :as edn]
    [laser-show.animation.time :as time]))
 
 (set! *warn-on-reflection* true)
@@ -148,7 +147,7 @@
         (+ start-v (* phase range-v))))))
 
 
-;; Random and Step Modulators
+;; Random Modulators
 
 
 (defn- eval-random
@@ -180,46 +179,6 @@
       ;; Loop mode: use standard phase calculation
       (let [p (time/calculate-modulator-phase context period 0.0 :loop period (or time-unit :beats))]
         (random-fn p)))))
-
-(defn- parse-step-values
-  "Parse step values - handles both vectors and EDN strings."
-  [values]
-  (cond
-    (vector? values) values
-    (string? values) (try
-                       (let [parsed (edn/read-string values)]
-                         (if (vector? parsed) parsed [0 1]))
-                       (catch Exception _ [0 1]))
-    :else [0 1]))
-
-(defn- eval-step
-  "Evaluate step modulator.
-   In once mode, steps through values once-periods times then holds at the final position.
-   Uses effective-beats for smooth BPM-change animation in loop mode."
-  [{:keys [values period steps-per-beat loop-mode once-periods time-unit]
-    :or {values [0 1] period 1.0 steps-per-beat 1.0 loop-mode :loop once-periods 1.0 time-unit :beats}}
-   {:keys [time-ms bpm trigger-time] :as context}]
-  (let [parsed-values (parse-step-values values)
-        num-values (count parsed-values)
-        step-fn (fn [^double p]
-                  (let [idx (mod (long (* p (double steps-per-beat))) num-values)]
-                    (nth parsed-values idx)))]
-    (if (= loop-mode :once)
-      ;; Once mode: complete once-periods cycles then hold at final position
-      (let [num-cycles (double (or once-periods 1.0))
-            total-duration (* (double period) num-cycles)
-            progress (double (time/calculate-once-progress (or time-ms 0) trigger-time total-duration (or time-unit :beats) (or bpm 120.0)))]
-        (if (>= progress 1.0)
-          ;; Completed: return the last value
-          (last parsed-values)
-          ;; In progress: calculate step based on phase
-          (let [total-phase (* progress num-cycles)
-                idx (mod (long (* total-phase (double steps-per-beat))) num-values)]
-            (nth parsed-values idx))))
-      ;; Loop mode: use standard phase calculation
-      (let [p (time/calculate-modulator-phase context period 0.0 :loop period (or time-unit :beats))]
-        (step-fn p)))))
-
 
 ;; External Input Modulators (MIDI/OSC)
 
@@ -304,7 +263,6 @@
    :square       eval-square
    :exp-decay    eval-exp-decay
    :random       eval-random
-   :step         eval-step
    :midi         eval-midi
    :osc          eval-osc
    :point-index  eval-point-index

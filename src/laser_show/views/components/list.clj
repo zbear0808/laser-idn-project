@@ -362,7 +362,10 @@
      :desc {:fx/type :h-box
             :style-class header-classes
             :children [{:fx/type :button
-                        :text (if collapsed? "▶" "▼")
+                        ;; :text (if collapsed? "▶" "▼")
+                        :graphic {:fx/type fa/icon
+                                          :name (if collapsed? :circle-chevron-right :circle-chevron-down)
+                                          :size 10}
                         :style-class "group-collapse-btn"
                         :on-action (fn [_] (dispatch-toggle-collapse! props group-id))}
 
@@ -550,13 +553,13 @@
                  :spacing 4
                  :children [{:fx/type :button
                              :text "Copy"
-                             :graphic {:fx/type fa/icon :name :copy :size 8}
+                             :graphic {:fx/type fa/icon :name :copy :style :regular :size 8}
                              :disable (zero? selection-count)
                              :style-class "chain-toolbar-btn"
                              :on-action (fn [_] (dispatch-copy-selected! props))}
                             {:fx/type :button
                              :text "Paste"
-                             :graphic {:fx/type fa/icon :name :paste :size 8}
+                             :graphic {:fx/type fa/icon :name :clipboard :size 8}
                              :disable (not can-paste?)
                              :style-class "chain-toolbar-btn"
                              :on-action (fn [_] (dispatch-paste-items! props))}
