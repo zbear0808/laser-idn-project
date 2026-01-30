@@ -478,25 +478,25 @@
 (deftest keyframe-modulator?-test
   (testing "keyframe-modulator? correctly identifies keyframe configs"
     ;; Valid keyframe modulator config
-    (is (mod/keyframe-modulator?
+    (is (kf/keyframe-modulator?
           {:enabled? true
            :period 1.0
            :keyframes [{:position 0.0 :params {:scale 1.0}}
                        {:position 1.0 :params {:scale 2.0}}]}))
     ;; Also valid without enabled? key (just needs :keyframes vector)
-    (is (mod/keyframe-modulator?
+    (is (kf/keyframe-modulator?
           {:period 1.0
            :keyframes [{:position 0.0 :params {:scale 1.0}}]}))
     ;; Empty keyframes is still a keyframe modulator
-    (is (mod/keyframe-modulator? {:keyframes []}))
+    (is (kf/keyframe-modulator? {:keyframes []}))
     ;; Not a keyframe modulator - regular modulator config
-    (is (not (mod/keyframe-modulator? {:type :sine :min 0 :max 1})))
+    (is (not (kf/keyframe-modulator? {:type :sine :min 0 :max 1})))
     ;; Not a keyframe modulator - no keyframes key
-    (is (not (mod/keyframe-modulator? {:enabled? true :period 1.0})))
+    (is (not (kf/keyframe-modulator? {:enabled? true :period 1.0})))
     ;; Not a keyframe modulator - keyframes is not a vector
-    (is (not (mod/keyframe-modulator? {:keyframes {:pos 0.5 :params {}}})))
+    (is (not (kf/keyframe-modulator? {:keyframes {:pos 0.5 :params {}}})))
     ;; Not a keyframe modulator - plain number
-    (is (not (mod/keyframe-modulator? 1.5)))))
+    (is (not (kf/keyframe-modulator? 1.5)))))
 
 (deftest find-surrounding-keyframes-test
   (testing "Finding surrounding keyframes"
@@ -610,15 +610,15 @@
           ms-per-beat (/ 60000 bpm)]
       ;; At start of period (position 0.0), should be scale 1.0
       (let [ctx (make-test-context 0 bpm)
-            result (mod/eval-keyframe config ctx)]
+            result (kf/eval-keyframe config ctx)]
         (is (approx= 1.0 (:scale result) 0.1)))
       ;; At position 0.25 (between 0.0 and 0.5), should interpolate to 1.5
       (let [ctx (make-test-context (* 0.25 ms-per-beat) bpm)
-            result (mod/eval-keyframe config ctx)]
+            result (kf/eval-keyframe config ctx)]
         (is (approx= 1.5 (:scale result) 0.1)))
       ;; At position 0.5, should be scale 2.0
       (let [ctx (make-test-context (* 0.5 ms-per-beat) bpm)
-            result (mod/eval-keyframe config ctx)]
+            result (kf/eval-keyframe config ctx)]
         (is (approx= 2.0 (:scale result) 0.1))))))
 
 (deftest eval-keyframe-multiple-keyframes-test
@@ -633,12 +633,12 @@
           ms-per-beat (/ 60000 bpm)]
       ;; At position 0.25 (exactly at keyframe)
       (let [ctx (make-test-context (* 0.25 ms-per-beat) bpm)
-            result (mod/eval-keyframe config ctx)]
+            result (kf/eval-keyframe config ctx)]
         (is (approx= 100.0 (:x result) 1.0))
         (is (approx= 50.0 (:y result) 1.0)))
       ;; At position 0.375 (between 0.25 and 0.5)
       (let [ctx (make-test-context (* 0.375 ms-per-beat) bpm)
-            result (mod/eval-keyframe config ctx)]
+            result (kf/eval-keyframe config ctx)]
         (is (approx= 150.0 (:x result) 5.0))
         (is (approx= 75.0 (:y result) 5.0))))))
 
@@ -655,8 +655,8 @@
           bpm 120
           ms-per-beat (/ 60000 bpm)
           ctx (make-test-context (* 0.5 ms-per-beat) bpm)
-          result-1 (mod/eval-keyframe config-1beat ctx)
-          result-2 (mod/eval-keyframe config-2beat ctx)]
+          result-1 (kf/eval-keyframe config-1beat ctx)
+          result-2 (kf/eval-keyframe config-2beat ctx)]
       ;; At 0.5 beats:
       ;; - 1-beat period: phase = 0.5, scale should be at max (2.0)
       ;; - 2-beat period: phase = 0.25, scale should be between (1.5)
@@ -682,12 +682,12 @@
       ;; - loop mode: phase = 0.25 (wrapped from 1.25), scale = 0.5 (between 0.0 and 0.5)
       ;; - once mode: phase = 1.0 (clamped), scale = 0.0 (at phase 1.0 which wraps to first keyframe)
       (let [ctx (make-once-mode-context (* 1.25 ms-per-beat) bpm 0)
-            result-loop (mod/eval-keyframe config-loop ctx)]
+            result-loop (kf/eval-keyframe config-loop ctx)]
         ;; Loop mode at phase 0.25 should interpolate between 0.0 and 1.0 -> 0.5
         (is (approx= 0.5 (:scale result-loop) 0.1)))
       ;; Test once mode separately at phase 0.5 (within the period)
       (let [ctx-once (make-once-mode-context (* 0.5 ms-per-beat) bpm 0)
-            result-once (mod/eval-keyframe config-once ctx-once)]
+            result-once (kf/eval-keyframe config-once ctx-once)]
         ;; At phase 0.5 exactly, should be at scale 1.0
         (is (approx= 1.0 (:scale result-once) 0.1))))))
 
@@ -695,7 +695,7 @@
   (testing "Empty keyframes returns nil"
     (let [config {:keyframes [] :period 1.0}
           ctx (make-test-context 0 120)]
-      (is (nil? (mod/eval-keyframe config ctx))))))
+      (is (nil? (kf/eval-keyframe config ctx))))))
 
 (deftest eval-keyframe-wrap-around-test
   (testing "Keyframe interpolation wraps around at period boundary"
@@ -707,7 +707,7 @@
           bpm 120
           ms-per-beat (/ 60000 bpm)
           ctx (make-test-context (* 0.75 ms-per-beat) bpm)
-          result (mod/eval-keyframe config ctx)]
+          result (kf/eval-keyframe config ctx)]
       ;; At phase 0.75 (between 0.5 and wrap-around to 0.0)
       ;; Interpolates from position 0.5 (scale=2.0) to position 0.0 (scale=1.0)
       ;; At phase 0.75, we're halfway between 0.5 and 1.0, so t=0.5

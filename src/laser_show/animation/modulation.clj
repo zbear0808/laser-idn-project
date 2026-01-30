@@ -23,15 +23,11 @@
    {:effect-id :scale :params {:x-scale {:type :midi :channel 1 :cc 7 :min 0.5 :max 2.0}}}"
   (:require
    [laser-show.animation.modulator-registry :as reg]
-   [laser-show.animation.modulators]  ;; Side-effect: registers all modulators
-   [laser-show.animation.keyframes :as keyframes]
+   [laser-show.animation.modulators] ;; Load modulator registrations
    [laser-show.common.util :as u]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
-
-
-;; Modulator Detection
 
 
 (defn modulator-config?
@@ -41,10 +37,6 @@
   (and (map? x)
        (contains? x :type)
        (reg/valid-modulator-type? (:type x))))
-
-
-;; Modulation Context
-
 
 (defn make-context
   "Create a modulation context for parameter resolution.
@@ -72,21 +64,10 @@
            accumulated-beats accumulated-ms phase-offset]
     :or {midi-state {} osc-state {}
          accumulated-beats 0.0 accumulated-ms 0.0 phase-offset 0.0}}]
-  {:time-ms time-ms
-   :bpm bpm
-   :trigger-time trigger-time
-   :midi-state midi-state
-   :osc-state osc-state
-   ;; Per-point fields for position-based modulators
-   :x x
-   :y y
-   :point-index point-index
-   :point-count point-count
-   ;; Beat accumulation fields
-   :accumulated-beats (or accumulated-beats 0.0)
-   :accumulated-ms (or accumulated-ms 0.0)
-   :phase-offset (or phase-offset 0.0)
-   :effective-beats (+ (double (or accumulated-beats 0.0)) (double (or phase-offset 0.0)))})
+  (u/->map& 
+   time-ms bpm trigger-time midi-state osc-state x y point-index 
+   point-count accumulated-beats accumulated-ms phase-offset
+   :effective-beats (+ (double (or accumulated-beats 0.0)) (double (or phase-offset 0.0)))))
 
 (defn make-base-context
  "Create a base modulation context optimized for per-point iteration.
@@ -107,12 +88,8 @@
  (let [acc-beats (double (or accumulated-beats 0.0))
        acc-ms (double (or accumulated-ms 0.0))
        phase-off (double (or phase-offset 0.0))]
-   {:time-ms time-ms
-    :bpm bpm
-    :trigger-time trigger-time
-    :midi-state midi-state
-    :osc-state osc-state
-    :point-count point-count
+   (u/->map&
+    time-ms bpm trigger-time midi-state osc-state point-count
     :accumulated-beats acc-beats
     :accumulated-ms acc-ms
     :phase-offset phase-off
@@ -120,10 +97,10 @@
     ;; Pre-set per-point fields to nil - will be updated via assoc
     :x nil
     :y nil
-    :point-index nil}))
+    :point-index nil)))
 
 (defn with-point-context
- "Efficiently update a base context with per-point data.
+  "Efficiently update a base context with per-point data.
   Uses assoc instead of creating a new map, much faster than make-context.
   
   Parameters:
@@ -131,11 +108,8 @@
   - x: Point x coordinate
   - y: Point y coordinate
   - point-index: Index of current point"
- [base-ctx x y point-index]
- (-> base-ctx
-     (assoc :x x)
-     (assoc :y y)
-     (assoc :point-index point-index)))
+  [base-ctx x y point-index]
+  (merge base-ctx (u/->map x y point-index)))
 
 
 ;; Per-Point Context Detection
@@ -183,7 +157,7 @@
   [config context]
   (if-let [eval-fn (reg/get-evaluator (:type config))]
     (let [defaults (get-defaults-for-type (:type config))
-          full-config (merge defaults config) #_(if defaults (merge defaults config) config)]
+          full-config (merge defaults config)]
       (eval-fn full-config context))
     ;; Default fallback for unknown types
     (get config :value (get config :min 0.0))))
@@ -217,28 +191,3 @@
   "Resolve all parameters in a params map."
   [params context]
   (update-vals params #(resolve-param % context)))
-
-
-;; Keyframe Modulator API - delegates to keyframes
-
-
-(defn keyframe-modulator?
-  "Check if a value is a keyframe modulator config.
-   Keyframe modulators are maps with a :keyframes vector."
-  [x]
-  (keyframes/keyframe-modulator? x))
-
-(defn eval-keyframe
-  "Evaluate keyframe modulator by interpolating between keyframes.
-   
-   Parameters:
-   - config: Keyframe modulator config map with:
-     - :keyframes - Vector of {:position (0.0-1.0) :params {...}} maps
-     - :period - Beats per cycle (default 1.0)
-     - :time-unit - :beats or :seconds (default :beats)
-     - :loop-mode - :loop or :once (default :loop)
-   - context: Modulation context with timing info
-   
-   Returns: Interpolated params map, or nil if no keyframes"
-  [config context]
-  (keyframes/eval-keyframe config context))

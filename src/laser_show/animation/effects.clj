@@ -32,6 +32,7 @@
    [laser-show.animation.chains :as chains]
    [laser-show.animation.modulation :as mod]
    [laser-show.common.util :as u]
+   [laser-show.animation.keyframes :as kf]
    [laser-show.state.core :as state]
    [laser-show.state.extractors :as ex]))
 
@@ -201,7 +202,7 @@
                                                                     :bpm bpm
                                                                     :trigger-time trigger-time}
                                                                    timing-ctx))]
-                              (mod/eval-keyframe keyframe-mod context))
+                              (kf/eval-keyframe keyframe-mod context))
                             ;; Normal mode: use per-param modulators
                             (:params effect-instance))
               
