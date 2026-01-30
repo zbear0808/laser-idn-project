@@ -501,7 +501,7 @@
                :on-action (fn [_] (dispatch-create-empty-group! props))}
               {:fx/type :button
                :text "Group"
-               :graphic {:fx/type fa/icon :name :layer-group :size 8}
+               :graphic {:fx/type fa/icon :name :folder-tree :size 8}
                :disable (or (zero? selection-count) (not can-create-group?))
                :style-class "chain-toolbar-btn"
                :on-action (fn [_] (dispatch-group-selected! props))}]})

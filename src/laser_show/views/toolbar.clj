@@ -69,6 +69,9 @@
   [{:keys [fx/context]}]
   {:fx/type :button
    :text "TAP"
+   :graphic {:fx/type fa/icon
+             :name :drum
+             :size 12}
    :style-class "btn-sm"
    :tooltip {:fx/type :tooltip :text "Tap to set BPM"}
    :on-action {:event/type :timing/tap-tempo}})
@@ -120,11 +123,14 @@
                          status-text)
                  :style-class "label-secondary"}
                 {:fx/type :button
-                 :text (if connected? "Stop" "Stream")
-                 :style-class "btn-sm"
-                 :on-action {:event/type (if connected?
-                                           :idn/stop-multi-streaming
-                                           :idn/start-multi-streaming)}}]}))
+                  :text (if connected? "Stop" "Stream")
+                  :graphic {:fx/type fa/icon
+                            :name :network-wired
+                            :size 12}
+                  :style-class "btn-sm"
+                  :on-action {:event/type (if connected?
+                                            :idn/stop-multi-streaming
+                                            :idn/start-multi-streaming)}}]}))
 
 
 
