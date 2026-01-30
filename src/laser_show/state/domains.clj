@@ -187,14 +187,17 @@
           :doc "MIDI input settings"}})
 
 (defstate projectors
-  "Projector configurations for geometry calibration, color calibration, and routing.
+  "Projector configurations for color calibration and routing.
    
    SIMPLIFIED ARCHITECTURE (v2):
    Projectors are directly assigned to zone groups - no intermediate 'zone' abstraction.
-   Corner-pin and color curves are configured directly on the projector.
    
    This domain IS the map of projector-id -> projector config.
    UI selection state is stored in :projector-ui domain.
+   
+   NOTE: Corner-pin geometry and color curves are stored as effects in the projector
+   effect chain at [:chains :projector-effects projector-id :items]. They are applied
+   as normal effects during frame rendering in multi_engine.clj.
    
    Each projector entry contains:
    - :name - User-friendly name
@@ -206,23 +209,23 @@
    - :scan-rate - Points per second (pps) for this projector
    - :zone-groups - Vector of zone group IDs this projector belongs to (e.g., [:all :left])
    - :tags - Set of optional tags (:graphics, :crowd-scanning) for categorization
-   - :corner-pin - Geometry calibration {:tl-x :tl-y :tr-x :tr-y :bl-x :bl-y :br-x :br-y}
-   - :color-curves - RGB color calibration curves (stored in :chains :projector-effects)
    - :status - Runtime connection status (not persisted)"
   {})
 
 (defstate virtual-projectors
-  "Virtual projector configurations - alternate geometry for physical projectors.
+  "Virtual projector configurations - alternate outputs for physical projectors.
    
    This domain IS the map of virtual-projector-id (UUID) -> virtual projector config.
    Virtual projectors inherit color curves from their parent projector.
+   
+   NOTE: Corner-pin geometry is stored as an effect in the parent projector's
+   effect chain at [:chains :projector-effects parent-projector-id :items].
    
    Each virtual projector entry contains:
    - :name - User-friendly name
    - :parent-projector-id - ID of the parent physical projector
    - :zone-groups - Vector of zone group IDs
    - :tags - Set of optional tags
-   - :corner-pin - Geometry calibration (overrides parent)
    - :enabled? - Whether to send output to this virtual projector"
   {})
 
@@ -316,10 +319,10 @@
    Three chain types with consistent structure:
    - :effect-chains - Effect modifiers for grid cells
    - :cue-chains - Cue presets/groups for grid cells
-   - :projector-effects - Color calibration effects for projectors (RGB curves)
+   - :projector-effects - Calibration effects for projectors (RGB curves, corner-pin)
    
-   Note: Geometry calibration (corner-pin) is now stored directly on projectors
-   in [:projectors projector-id :corner-pin], NOT as an effect chain.
+   Corner-pin geometry IS stored as an effect in [:chains :projector-effects projector-id :items].
+   It is applied as a normal effect during frame rendering in multi_engine.clj.
    
    All chains use the same structure: {:items [...] :active? bool (optional)}
    This enables generic handlers and simplified subscriptions."
@@ -328,7 +331,7 @@
    :cue-chains {:default {}
                 :doc "Map of [col row] -> {:items [...]}. Starter content is applied via laser-show.state.templates/apply-starter-cue-chains"}
    :projector-effects {:default {}
-                       :doc "Map of projector-id -> {:items [...]} - RGB curves for color calibration"}})
+                       :doc "Map of projector-id -> {:items [...]} - RGB curves and corner-pin for calibration"}})
 
 
 ;; Backend State Domain

@@ -10,8 +10,8 @@
    1. Cue specifies destination (zone-group)
    2. Zone effects can modify the target (reroute, broadcast, mirror)
    3. Find all projectors/VPs in the final target zone group(s)
-   4. Return output configs with corner-pin and projector reference
-   5. Frame service applies corner-pin transform and color curves"
+   4. Return output configs with projector reference
+   5. Frame service applies projector effects (corner-pin, color curves) via multi_engine"
   (:require [laser-show.routing.projector-matcher :as pm]
             [laser-show.routing.zone-effects :as ze]))
 
@@ -20,7 +20,7 @@
    
    This is the main routing function called by frame service.
    
-   NOW processes zone effects to determine final target:
+   Processes zone effects to determine final target:
    1. Read :destination-zone from cue (nil means route to nothing)
    2. Read :effects from cue
    3. Apply zone effects to get final target zone groups
@@ -36,8 +36,10 @@
    {:type :projector or :virtual-projector
     :id output-id
     :projector-id physical-projector-id
-    :corner-pin geometry config
-    :enabled? boolean}"
+    :enabled? boolean}
+   
+   NOTE: Corner-pin and color curve effects are applied separately by multi_engine.clj
+   from [:chains :projector-effects projector-id :items]."
   [cue projectors-items virtual-projectors all-zone-group-ids]
   (let [all-outputs (pm/build-all-outputs projectors-items virtual-projectors)
         

@@ -57,8 +57,6 @@
 (defn grid-size [context]
   (fx/sub-val context ex/grid-size))
 
-(defn selected-cell [context]
-  (fx/sub-val context ex/selected-cell))
 
 ;; --- UI ---
 
@@ -337,24 +335,6 @@
   [context]
   (:scanning? (fx/sub-val context :projector-ui) false))
 
-(defn configured-projector-hosts
-  "Get set of already-configured projector hosts.
-   Useful for indicating which discovered devices are already configured.
-   Depends on: projectors domain (which IS the map of projector-id -> config)"
-  [context]
-  (let [items (fx/sub-val context :projectors)]
-    (into #{} (map :host (vals items)))))
-
-(defn configured-projector-services
-  "Get set of [host service-id] pairs for already-configured projectors.
-   Allows checking if a specific service/output is already configured.
-   Depends on: projectors domain (which IS the map of projector-id -> config)"
-  [context]
-  (let [items (fx/sub-val context :projectors)]
-    (into #{}
-          (map (fn [proj]
-                 [(:host proj) (or (:service-id proj) 0)])
-               (vals items)))))
 
 (defn enabled-projector-services
   "Get set of [host service-id] pairs for ENABLED projectors only.
@@ -387,18 +367,6 @@
    Depends on: projector-ui domain"
   [context]
   (fx/sub-val context get-in [:projector-ui :calibration-brightness] 0.1))
-
-(defn projector-calibrating?
-  "Check if a specific projector is in calibration mode.
-   Depends on: calibrating-projector-id"
-  [context projector-id]
-  (= projector-id (fx/sub-ctx context calibrating-projector-id)))
-
-(defn enabled-projectors
-  "Get list of enabled projectors.
-   Depends on: projectors-list (computed)"
-  [context]
-  (filterv :enabled? (fx/sub-ctx context projectors-list)))
 
 
 (defn projector-effect-ui-state
@@ -467,40 +435,6 @@
   (let [items (fx/sub-val context :virtual-projectors)]
     (mapv (fn [[id config]] (assoc config :id id)) items)))
 
-(defn virtual-projectors-for-projector
-  "Get virtual projectors for a specific parent projector.
-   Depends on: virtual-projectors-list"
-  [context parent-projector-id]
-  (filterv #(= parent-projector-id (:parent-projector-id %))
-           (fx/sub-ctx context virtual-projectors-list)))
-
-(defn virtual-projector
-  "Get a single virtual projector by ID.
-   Depends on: virtual-projectors domain"
-  [context vp-id]
-  (when vp-id
-    (when-let [vp (get (fx/sub-val context :virtual-projectors) vp-id)]
-      (assoc vp :id vp-id))))
-
-(defn active-virtual-projector-id
-  "Get the ID of the currently selected virtual projector.
-   Depends on: projector-ui domain"
-  [context]
-  (:active-virtual-projector (fx/sub-val context :projector-ui)))
-
-(defn active-virtual-projector
-  "Get the full config of the currently selected virtual projector.
-   Depends on: active-virtual-projector-id, virtual-projector"
-  [context]
-  (when-let [id (fx/sub-ctx context active-virtual-projector-id)]
-    (fx/sub-ctx context virtual-projector id)))
-
-(defn projector-corner-pin
-  "Get the corner-pin geometry for a projector.
-   Depends on: projectors domain (which IS the map of projector-id -> config)"
-  [context projector-id]
-  (get-in (fx/sub-val context :projectors)
-          [projector-id :corner-pin]))
 
 (defn projector-zone-groups
   "Get the zone groups a projector belongs to.
@@ -509,14 +443,6 @@
   (get-in (fx/sub-val context :projectors)
           [projector-id :zone-groups]
           []))
-
-(defn projector-tags
-  "Get the tags for a projector.
-   Depends on: projectors domain (which IS the map of projector-id -> config)"
-  [context projector-id]
-  (get-in (fx/sub-val context :projectors)
-          [projector-id :tags]
-          #{}))
 
 
 ;; Level 2: Zone Group Subscriptions
@@ -575,16 +501,6 @@
      :cue-count 0 ;; TODO: Count cues targeting this group
      :projectors projectors
      :virtual-projectors vps}))
-
-(defn all-outputs-for-zone-group
-  "Get all outputs (projectors + VPs) for a zone group.
-   Returns unified list for routing preview."
-  [context group-id]
-  (let [projectors (fx/sub-ctx context projectors-in-zone-group group-id)
-        vps (fx/sub-ctx context virtual-projectors-in-zone-group group-id)]
-    (into
-      (mapv #(assoc % :output-type :projector) projectors)
-      (mapv #(assoc % :output-type :virtual-projector) vps))))
 
 
 ;; Level 2: Input Device Subscriptions (MIDI, OSC)

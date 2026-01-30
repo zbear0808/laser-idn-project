@@ -7,9 +7,12 @@
    - Cues target zone groups, which resolve to projector outputs
    
    Key concepts:
-   - Projectors have corner-pin geometry and color curves
-   - Virtual projectors have alternate corner-pin but inherit parent's color curves
-   - Both can be assigned to multiple zone groups"
+   - Projectors have calibration effects (corner-pin, color curves) stored in effect chains
+   - Virtual projectors inherit calibration from their parent projector
+   - Both can be assigned to multiple zone groups
+   
+   NOTE: Corner-pin and color curve effects are applied as normal effects during
+   frame rendering in multi_engine.clj, not here in the routing layer."
   (:require [clojure.tools.logging :as log]))
 
 
@@ -24,22 +27,14 @@
 ;; Output Config Building
 
 
-(def default-corner-pin
-  "Default corner-pin with no transformation (identity mapping)."
-  {:tl-x -1.0 :tl-y 1.0
-   :tr-x 1.0 :tr-y 1.0
-   :bl-x -1.0 :bl-y -1.0
-   :br-x 1.0 :br-y -1.0})
-
-
 (defn projector->output-config
-  "Convert a projector to an output configuration."
+  "Convert a projector to an output configuration.
+   Note: Corner-pin is not included here - it's applied as an effect in multi_engine.clj."
   [projector-id projector]
   {:type :projector
    :id projector-id
    :projector-id projector-id
    :name (:name projector)
-   :corner-pin (or (:corner-pin projector) default-corner-pin)
    :zone-groups (:zone-groups projector [])
    :tags (:tags projector #{})
    :enabled? (:enabled? projector true)})
@@ -47,13 +42,13 @@
 
 (defn virtual-projector->output-config
   "Convert a virtual projector to an output configuration.
-   Includes the parent projector ID for color curve inheritance."
+   Includes the parent projector ID for effect chain lookup.
+   Note: Corner-pin is not included here - it's applied as an effect in multi_engine.clj."
   [vp-id vp]
   {:type :virtual-projector
    :id vp-id
    :projector-id (:parent-projector-id vp)
    :name (:name vp)
-   :corner-pin (or (:corner-pin vp) default-corner-pin)
    :zone-groups (:zone-groups vp [])
    :tags (:tags vp #{})
    :enabled? (:enabled? vp true)})
