@@ -196,6 +196,16 @@
   :per-point?  true
   :retrigger?  false})
 
+(reg/register-modulator!
+ {:id          :angle
+  :name        "Angle"
+  :icon        "∠"
+  :category    :special
+  :evaluator   (get eval/modulator-evaluators :angle)
+  :params      min-max-params
+  :per-point?  true
+  :retrigger?  false})
+
 
 ;; External Input Modulators
 

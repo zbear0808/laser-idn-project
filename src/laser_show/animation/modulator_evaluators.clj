@@ -219,6 +219,23 @@
       (+ (double min) (* t range-v)))
     (double min)))
 
+(defn- eval-angle
+  "Evaluate angle modulator - maps point angle from origin to range.
+   Uses atan2(y, x) normalized to 0-2π."
+  [{:keys [min max] :or {min 0.0 max 1.0}}
+   {:keys [x y]}]
+  (if (and x y)
+    (let [raw-angle (Math/atan2 (double y) (double x))
+          ;; Normalize from -π..π to 0..2π
+          normalized (if (neg? raw-angle)
+                       (+ raw-angle (* 2.0 Math/PI))
+                       raw-angle)
+          ;; Map to 0..1
+          t (/ normalized (* 2.0 Math/PI))
+          range-v (- (double max) (double min))]
+      (+ (double min) (* t range-v)))
+    (double min)))
+
 
 ;; Modulator Evaluators Registry
 
@@ -237,4 +254,5 @@
    :point-index  eval-point-index
    :pos-x        eval-pos-x
    :pos-y        eval-pos-y
-   :radial       eval-radial})
+   :radial       eval-radial
+   :angle        eval-angle})

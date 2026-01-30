@@ -187,6 +187,7 @@
     (is (mod/config-requires-per-point? {:type :pos-x :min 0 :max 1}))
     (is (mod/config-requires-per-point? {:type :pos-y :min 0 :max 1}))
     (is (mod/config-requires-per-point? {:type :radial :min 0 :max 1}))
+    (is (mod/config-requires-per-point? {:type :angle :min 0 :max 1}))
     
     ;; Point index modulators should require per-point context
     (is (mod/config-requires-per-point? {:type :point-index :min 0 :max 1}))
@@ -270,6 +271,25 @@
       
       ;; Last point (index 99) should be max
       (is (approx= 100.0 (mod/resolve-param config (make-point-context 0 120 0.0 0.0 99 100)))))))
+
+(deftest angle-mod-test
+  (testing "Angle modulator maps point angle to range"
+    (let [config {:type :angle :min 0.0 :max 360.0}]
+      ;; At +X axis (angle = 0), should be min (0.0)
+      (is (approx= 0.0 (mod/resolve-param config (make-point-context 0 120 1.0 0.0 0 100)) 1.0))
+      
+      ;; At +Y axis (angle = π/2 = 90°), should be 90.0
+      (is (approx= 90.0 (mod/resolve-param config (make-point-context 0 120 0.0 1.0 0 100)) 1.0))
+      
+      ;; At -X axis (angle = π = 180°), should be 180.0
+      (is (approx= 180.0 (mod/resolve-param config (make-point-context 0 120 -1.0 0.0 0 100)) 1.0))
+      
+      ;; At -Y axis (angle = 3π/2 = 270°), should be 270.0
+      (is (approx= 270.0 (mod/resolve-param config (make-point-context 0 120 0.0 -1.0 0 100)) 1.0))))
+  
+  (testing "Angle modulator returns min when context missing"
+    (let [context (make-test-context 0 120)]
+      (is (= 0.0 (mod/resolve-param {:type :angle :min 0.0 :max 360.0} context))))))
 
 (deftest per-point-modulator-without-context-test
   (testing "Per-point modulators return default when context missing"
