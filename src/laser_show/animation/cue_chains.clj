@@ -29,7 +29,7 @@
 (defn get-default-params
   "Get default parameter values for a preset."
   [preset-id]
-  (when-let [preset-def (presets/get-preset preset-id)]
+  (when-let [preset-def (presets/presets-by-id preset-id)]
     (u/map-into :key :default (:parameters preset-def))))
 
 (defn create-preset-instance

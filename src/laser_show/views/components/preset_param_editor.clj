@@ -24,7 +24,7 @@
                         If not provided, uses default cue-chain events"
   [{:keys [cell preset-path preset-instance on-param-change]}]
   (let [preset-id (:preset-id preset-instance)
-        preset-def (presets/get-preset preset-id)
+        preset-def (presets/presets-by-id preset-id)
         current-params (:params preset-instance {})
         params-map (param-controls/params-vector->map (:parameters preset-def []))
         [col row] (if (and (vector? cell) (= 2 (count cell)))

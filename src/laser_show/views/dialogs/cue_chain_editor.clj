@@ -282,7 +282,7 @@
                                                   :items (:items cue-chain)
                                                   :component-id [:cue-chain col row]
                                                   :item-id-key :preset-id
-                                                  :item-registry-fn presets/get-preset
+                                                  :item-registry-fn presets/presets-by-id
                                                   :fallback-label "Unknown Preset"
                                                   :on-change-event :chain/set-items
                                                   :on-change-params {:domain :cue-chains :entity-key [col row]}
