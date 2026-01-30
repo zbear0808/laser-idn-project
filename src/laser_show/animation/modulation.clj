@@ -24,7 +24,8 @@
   (:require
    [laser-show.animation.modulator-registry :as reg]
    [laser-show.animation.modulators]  ;; Side-effect: registers all modulators
-   [laser-show.animation.keyframes :as keyframes]))
+   [laser-show.animation.keyframes :as keyframes]
+   [laser-show.common.util :as u]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -167,16 +168,23 @@
     false))
 
 
-;; Main Evaluation - uses registry for fast evaluator lookup
-
+(defn- get-defaults-for-type
+  "Get default values for a modulator type from the registry.
+   Returns a map of param-key -> default-value."
+  [mod-type]
+  (-> (u/map-into :key :default (reg/get-params mod-type))
+      (u/filter-vals some?)))
 
 (defn evaluate-modulator
   "Evaluate a modulator config with the given context.
    Uses the modulator registry to look up the evaluator fn (hot path).
+   Merges in default values from registry for any missing config keys.
    Returns the calculated value, or default from :value/:min if evaluator not found."
   [config context]
   (if-let [eval-fn (reg/get-evaluator (:type config))]
-    (eval-fn config context)
+    (let [defaults (get-defaults-for-type (:type config))
+          full-config (merge defaults config) #_(if defaults (merge defaults config) config)]
+      (eval-fn full-config context))
     ;; Default fallback for unknown types
     (get config :value (get config :min 0.0))))
 
@@ -194,7 +202,7 @@
     (not (modulator-config? param))
     param
 
-    (get param :active? true)  ; Default to true for backward compatibility
+    (get param :active? true) 
     (evaluate-modulator param context)
 
     :else

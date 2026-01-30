@@ -3,7 +3,9 @@
    Handles BPM conversions, phase calculations, and time-based computations.
    
    Also provides context-aware beat extraction and modulator phase calculation
-   utilities used by the modulator evaluation system.")
+   utilities used by the modulator evaluation system." 
+  (:require
+    [laser-show.common.util :as u]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -159,6 +161,39 @@
     (if (pos? duration-ms)
       (min 1.0 (max 0.0 (/ elapsed duration-ms)))
       1.0)))
+
+(defn calculate-once-mode-phase-data
+  "Calculate phase data for once-mode modulators with rich metadata.
+   
+   Parameters:
+   - config: Map with :period, :phase, :once-periods, :time-unit
+   - context: Map with :time-ms, :bpm, :trigger-time
+   
+   Returns map with:
+   - :final-phase - the phase value to use for oscillation (0.0-1.0)
+   - :total-phase - raw total phase progression (can exceed 1.0)
+   - :done? - true if animation has completed all cycles
+   - :num-cycles - number of cycles to complete
+   - :phase - the phase offset parameter"
+  [{:keys [period phase once-periods time-unit]
+    :or {period 1.0 phase 0.0 once-periods 1.0 time-unit :beats}}
+   {:keys [time-ms bpm trigger-time]}]
+  (let [num-cycles (double (or once-periods 1.0))
+        total-duration (* (double period) num-cycles)
+        progress (double (calculate-once-progress
+                          (or time-ms 0)
+                          trigger-time
+                          total-duration
+                          time-unit
+                          (or bpm 120.0)))
+        phase (double phase)
+        total-phase (+ (* progress num-cycles) phase)
+        cycle-phase (mod total-phase 1.0)
+        done? (>= progress 1.0)
+        final-phase (if done?
+                      (mod (+ num-cycles phase) 1.0)
+                      cycle-phase)]
+    (u/->map final-phase total-phase done? num-cycles phase) ))
 
 
 ;; Modulator Phase Calculation

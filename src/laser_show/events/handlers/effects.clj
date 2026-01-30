@@ -142,18 +142,15 @@
    - UI mode switching"
   [{:keys [event/type] :as event}]
   (case type
-    ;; Cell-level operations (retained in this file)
     :effects/toggle-cell (handle-effects-toggle-cell event)
     :effects/clear-cell (handle-effects-clear-cell event)
     :effects/copy-cell (handle-effects-copy-cell event)
     :effects/paste-cell (handle-effects-paste-cell event)
     :effects/move-cell (handle-effects-move-cell event)
     
-    ;; Effect chain editor lifecycle
     :effect-chain/open-editor (handle-effect-chain-open-editor event)
     :effect-chain/set-name (handle-effect-chain-set-name event)
     
-    ;; Effect bank (data-driven) - add effect from bank
     :effect-chain/add-effect-from-bank (handle-effect-chain-add-effect-from-bank event)
     
     ;; Unknown event in this domain
