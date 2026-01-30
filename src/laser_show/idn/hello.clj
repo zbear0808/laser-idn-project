@@ -705,8 +705,7 @@
            (log/debug (format "Received response from %s:%d, length=%d bytes"
                              (.getHostAddress (:address response))
                              (:port response)
-                             (:length response)))
-           (log/debug (format "Raw data: %s" (bytes-to-hex (:data response))))
+                             (:length response))) 
            (let [header (parse-packet-header (:data response))
                  cmd-byte (bit-and (:command header) 0xFF)]
              (log/debug (format "Header: command=0x%02X, client-group=%d, sequence=%d"

@@ -297,7 +297,7 @@
   (let [host "192.168.1.100"
         service-id 0
         ;; Create a projector with the deterministic ID that set-service-enabled expects
-        proj-id (keyword (str "projector-192-168-1-100-0"))
+        proj-id (keyword "projector-192-168-1-100-0")
         state-with-proj (-> base-state
                             (assoc-in [:projectors proj-id]
                                       {:name "Test"

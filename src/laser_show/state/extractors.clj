@@ -86,20 +86,6 @@
   (projectors state))
 
 
-(defn enabled-projectors
-  "Get all enabled projectors."
-  [state]
-  (->> (projectors state)
-       (filter (fn [[_id proj]] (:enabled? proj true)))
-       (into {})))
-
-(defn virtual-projectors
-  "Get the virtual-projectors map (vp-id -> config).
-   This is now its own domain at :virtual-projectors."
-  [state]
-  (:virtual-projectors state))
-
-
 (defn backend [state]
   (:backend state))
 
@@ -108,20 +94,6 @@
 
 (defn streaming-data [state]
   (:streaming (backend state)))
-
-
-;; Zone Groups Extractors
-
-
-(defn zone-groups
-  "Get the zone-groups map (zone-group-id -> config)."
-  [state]
-  (:zone-groups state))
-
-(defn zone-group-ids
-  "Get a set of all zone group IDs."
-  [state]
-  (set (keys (zone-groups state))))
 
 
 ;; Project Extractors

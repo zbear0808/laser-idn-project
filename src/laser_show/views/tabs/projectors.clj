@@ -17,7 +17,7 @@
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.list :as list]
             [laser-show.views.components.zone-chips :as zone-chips]
-            [laser-show.views.components.icons :as icons]))
+            [clj-font-awesome.core :as fa]))
 
 
 ;; Status Indicators
@@ -103,8 +103,8 @@
                                  (concat
                                    ;; Expand indicator (visual only) for multi-service devices
                                    (when has-multiple-services?
-                                     [{:fx/type icons/icon
-                                       :icon (if expanded? :caret-down :caret-right)
+                                     [{:fx/type fa/icon
+                                       :name (if expanded? :circle-chevron-down :circle-chevron-right)
                                        :size 10
                                        :style-class ["text-muted"]}])
                                    ;; Status indicator and device info

@@ -115,17 +115,6 @@
   (when-let [modulator (get @!modulators id)]
     (:evaluator modulator)))
 
-(defn modulators-by-category
-  "Get vector of modulator maps for a category."
-  [category]
-  (->> (vals @!modulators)
-       (filterv #(= category (:category %)))
-       (sort-by :name)))
-
-(defn all-modulators
-  "Get vector of all registered modulator maps."
-  []
-  (vec (vals @!modulators)))
 
 (defn all-ui-modulators
   "Get vector of only UI-visible modulator maps (for dropdowns).

@@ -136,25 +136,6 @@
       (assoc-in (conj params-path :y-scale) y-scale)))
 
 
-;; Rotation Parameter Operations
-
-
-(defn update-rotation-param
-  "Update angle parameter from rotation drag operation.
-   
-   Parameters:
-   - state: Application state
-   - params-path: Full path to the effect's :params map
-   - angle: New angle value in degrees
-   
-   Returns: Updated state with angle param set"
-  [state params-path angle]
-  (assoc-in state (conj params-path :angle) angle))
-
-
-;; Reset Parameters Operations
-
-
 (defn reset-params
   "Reset effect parameters to their default values.
    Uses the defaults-map to determine what values to reset to.

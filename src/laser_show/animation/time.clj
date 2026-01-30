@@ -121,18 +121,6 @@
          (ms->beats time-ms bpm))
        0.0)))
 
-(defn get-ms-from-context
-  "Get the current milliseconds from context with proper fallback.
-   
-   Priority:
-   1. accumulated-ms (incremental since trigger)
-   2. time-ms (absolute timestamp - backward compatibility with tests)
-   3. Default to 0.0"
-  ^double [{:keys [accumulated-ms time-ms]}]
-  (double (or accumulated-ms time-ms 0.0)))
-
-
-;; Trigger Time Resolution
 
 
 (defn resolve-trigger-time

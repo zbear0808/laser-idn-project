@@ -3,7 +3,7 @@
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.css.core :as css]
-            [laser-show.views.components.icons :as icons]))
+            [clj-font-awesome.core :as fa]))
 
 
 ;; Status Items
@@ -102,8 +102,8 @@
       {:fx/type :h-box
        :spacing 4
        :alignment :center-left
-       :children [{:fx/type icons/icon
-                   :icon (if dirty? :circle :check)
+       :children [{:fx/type fa/icon
+                   :name (if dirty? :circle :check)
                    :size 10
                    :style-class [(if dirty? "icon-warning" "icon-success")]}
                   {:fx/type :label

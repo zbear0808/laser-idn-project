@@ -24,8 +24,7 @@
             [laser-show.css.title-bar :as title-bar]
             [laser-show.css.cue-chain-editor :as cue-chain-editor]
             [laser-show.css.list :as list]
-            [laser-show.css.visual-editors :as visual-editors]
-            [laser-show.css.icons :as icons]))
+            [laser-show.css.visual-editors :as visual-editors]))
 
 
 
@@ -51,8 +50,7 @@
    (::css/url title-bar/menu-theme)
    (::css/url cue-chain-editor/cue-chain-editor)
    (::css/url list/list)
-   (::css/url visual-editors/visual-editors)
-   (::css/url icons/styles)])
+   (::css/url visual-editors/visual-editors)])
 
 (defn dialog-stylesheet-urls
   "Returns stylesheet URLs appropriate for dialogs.
@@ -74,8 +72,7 @@
    (::css/url title-bar/menu-theme)
    (::css/url cue-chain-editor/cue-chain-editor)
    (::css/url list/list)
-   (::css/url visual-editors/visual-editors)
-   (::css/url icons/styles)])
+   (::css/url visual-editors/visual-editors)])
 
 
 

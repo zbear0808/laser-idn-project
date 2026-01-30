@@ -20,9 +20,7 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.subs :as subs]
-            [laser-show.animation.colors :as colors]
             [laser-show.animation.modulator-registry :as reg]
-            [laser-show.events.core :as events]
             [laser-show.views.components.visual-editors.spatial-canvas :as spatial-canvas]
             [laser-show.views.components.visual-editors.rotate-canvas :as rotate-canvas]
             [laser-show.views.components.visual-editors.scale-canvas :as scale-canvas]
@@ -32,7 +30,7 @@
             [laser-show.views.components.tabs :as tabs]
             [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.views.components.modulator-param-control :as mod-param]
-            [laser-show.views.components.icons :as icons])
+            [clj-font-awesome.core :as fa])
   (:import [javafx.scene.canvas Canvas]
            [javafx.scene.input MouseEvent MouseButton]
            [javafx.event EventHandler]))
@@ -586,15 +584,14 @@
                  :spacing 4
                  :style-class ["visual-editor-info-panel"]
                  :children [{:fx/type :h-box
-                             :spacing 4
-                             :alignment :center-left
-                             :children [{:fx/type icons/icon
-                                        :icon :info-circle
-                                        :size 12
-                                        :style-class ["icon-info"]}
-                                       {:fx/type :label
-                                        :text "Zone effects modify routing BEFORE frame generation"
-                                        :style-class ["visual-editor-info-title"]}]}
+                              :spacing 4
+                              :alignment :center-left
+                              :children [{:fx/type fa/icon
+                                          :name :circle-info
+                                          :size 12}
+                                         {:fx/type :label
+                                          :text "Zone effects modify routing BEFORE frame generation"
+                                          :style-class ["visual-editor-info-title"]}]}
                             {:fx/type :label
                              :text (case mode
                                     :replace "This will completely override the cue's destination"

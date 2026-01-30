@@ -33,7 +33,6 @@
             [laser-show.animation.presets :as presets]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
-            [laser-show.animation.generators :as gen]
             [laser-show.animation.types :as t]
             [laser-show.common.timing :as timing]
             [laser-show.common.util :as u]
@@ -417,94 +416,6 @@
   "Get the current frame in preview-friendly format."
   []
   (frame->preview-data (generate-current-frame)))
-
-
-;; Frame Provider for Streaming
-
-
-(defn create-frame-provider
-  "Create a frame provider function for IDN streaming.
-   Returns a zero-arity function that returns the current LaserFrame."
-  []
-  (fn []
-    (generate-current-frame)))
-
-
-;; Calibration Frame Generation
-;;
-;; When a projector is in calibration mode, it receives a boundary box test pattern
-;; instead of the normal animation. The corner pin effect from the projector's
-;; effect chain is applied to the test pattern, providing live preview feedback.
-
-
-(defn get-calibrating-projector-id
-  "Get the ID of the projector currently in calibration mode.
-   Returns nil if no projector is calibrating."
-  []
-  (get-in (state/get-raw-state) [:projector-ui :calibrating-projector-id]))
-
-
-(defn get-calibration-brightness
-  "Get the current calibration brightness setting."
-  []
-  (get-in (state/get-raw-state) [:projector-ui :calibration-brightness] 0.1))
-
-
-(defn generate-calibration-frame
-  "Generate a calibration frame for a specific projector.
-   
-   Creates a boundary box test pattern and applies the projector's corner pin
-   effect to provide live preview during calibration.
-   
-   Args:
-   - projector-id: The ID of the calibrating projector
-   
-   Returns: A vector of LaserPoints forming the calibration pattern."
-  [projector-id]
-  (let [s (state/get-raw-state)
-        brightness (get-calibration-brightness)
-        ;; Generate the calibration boundary box using a full-size square with dim gray
-        test-pattern (gen/generate-square :size 2.0 :center [0 0] :num-points 50
-                                          :red brightness :green brightness :blue brightness)
-        ;; Get the projector's effect chain to find corner-pin
-        projector-effects (get-in s [:chains :projector-effects projector-id :items] [])
-        ;; Find corner-pin effect if present
-        corner-pin-effect (first (filter #(= :corner-pin (:effect-id %)) projector-effects))]
-    (if (and corner-pin-effect (:enabled? corner-pin-effect true))
-      ;; Apply corner pin effect to the test pattern
-      (let [timing-ctx {:accumulated-beats 0.0 :accumulated-ms 0.0 :phase-offset 0.0 :effective-beats 0.0}]
-        (try
-          (effects/apply-effect-chain test-pattern {:effects [corner-pin-effect]} 0 120.0 0 timing-ctx)
-          (catch Exception e
-            (log/error "generate-calibration-frame: Corner pin failed:" (.getMessage e))
-            test-pattern)))
-      ;; No corner pin, return raw test pattern
-      test-pattern)))
-
-
-(defn get-frame-for-projector
-  "Get the appropriate frame for a specific projector.
-   
-   If the projector is in calibration mode, returns a calibration test pattern.
-   Otherwise, returns the normal animation frame.
-   
-   Args:
-   - projector-id: The ID of the projector to get a frame for
-   
-   Returns: A vector of LaserPoints or nil."
-  [projector-id]
-  (let [calibrating-id (get-calibrating-projector-id)]
-    (if (= calibrating-id projector-id)
-      ;; This projector is calibrating - send test pattern
-      (generate-calibration-frame projector-id)
-      ;; Normal mode - return standard animation frame
-      (generate-current-frame {:skip-zone-filter? true}))))
-
-
-(defn projector-calibrating?
-  "Check if a specific projector is in calibration mode."
-  [projector-id]
-  (= projector-id (get-calibrating-projector-id)))
 
 
 ;; State Update Integration

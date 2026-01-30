@@ -11,23 +11,6 @@
   (:require [laser-show.animation.modulator-registry :as reg]))
 
 
-
-;; Helper Functions
-
-
-
-(defn modulated?
-  "Check if a param value is a modulator config.
-   Delegates to registry for consistency."
-  [value]
-  (reg/modulated? value))
-
-(defn get-static-value
-  "Extract static value from param (handles both static and modulated).
-   Delegates to registry for consistency."
-  [value default-value]
-  (reg/get-static-value value default-value))
-
 (defn build-default-modulator
   "Build a default modulator config for the given type with param-spec bounds.
    
@@ -51,15 +34,3 @@
       
       (and (:max param-spec) (not= (:max param-spec) 10.0))
       (assoc :max (:max param-spec)))))
-
-(defn active-modulator?
-  "Check if a param value is an active modulator config.
-   Delegates to registry for consistency."
-  [value]
-  (reg/active-modulator? value))
-
-(defn supports-retrigger?
-  "Check if a modulator type supports retriggering.
-   Delegates to registry."
-  [mod-type]
-  (reg/retrigger? mod-type))

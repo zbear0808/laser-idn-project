@@ -5,8 +5,7 @@
    Tests zone group CRUD operations, selection, and editor dialog.
    Zone groups now reference projectors instead of zones."
   (:require
-   [clojure.test :refer [deftest is testing]]
-   [clojure.string :as str]
+   [clojure.test :refer [deftest is testing]] 
    [laser-show.events.handlers.zone-groups :as zone-groups]
    [laser-show.state.domains :refer [build-initial-state]]))
 

@@ -219,21 +219,6 @@
       (log/error "Error creating new project:" (.getMessage e))
       false)))
 
-(defn ensure-projects-dir!
-  "Ensure the default projects directory exists.
-   Creates it if it doesn't exist.
-   
-   Returns: true if directory exists or was created successfully"
-  []
-  (try
-    (let [dir (java.io.File. default-projects-dir)]
-      (when-not (.exists dir)
-        (.mkdirs dir))
-      (.exists dir))
-    (catch Exception e
-      (log/error "Error creating projects directory:" (.getMessage e))
-      false)))
-
 (defn get-default-project-filename
   "Generate a default project filename with timestamp.
    
@@ -246,15 +231,3 @@
   (let [timestamp (.format (java.text.SimpleDateFormat. "yyyy-MM-dd-HHmmss")
                            (java.util.Date.))]
     (str "project-" timestamp ".zip")))
-
-(defn get-default-project-path
-  "Generate a default project file path with timestamp.
-   
-   Returns: Full path to a new project file in the default projects directory
-   
-   Example:
-   (get-default-project-path)
-   => \"/home/user/LaserShowProjects/project-2026-01-15-182030.zip\""
-  []
-  (ensure-projects-dir!)
-  (str default-projects-dir "/" (get-default-project-filename)))

@@ -2,7 +2,7 @@
   "Toolbar component with transport controls, BPM, and connection status."
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
-            [laser-show.views.components.icons :as icons]))
+            [clj-font-awesome.core :as fa]))
 
 
 ;; Transport Controls
@@ -13,8 +13,8 @@
    Uses style-class for base styling, inline :style only for dynamic active state."
   [{:keys [icon tooltip on-action active?]}]
   {:fx/type :button
-   :graphic {:fx/type icons/icon
-             :icon icon
+   :graphic {:fx/type fa/icon
+             :name icon
              :size 12}
    :style-class (if active? "transport-btn-active" "transport-btn")
    :tooltip {:fx/type :tooltip :text tooltip}
@@ -33,7 +33,7 @@
                  :on-action {:event/type (if playing? :transport/stop :transport/play)}
                  :active? playing?}
                 {:fx/type transport-button
-                 :icon :repeat
+                 :icon :rotate-right
                  :tooltip "Retrigger"
                  :on-action {:event/type :transport/retrigger}
                  :active? false}]}))
@@ -137,17 +137,17 @@
   {:fx/type :h-box
    :spacing 8
    :alignment :center-left
-   :children [{:fx/type icons/fa-icon
+   :children [{:fx/type fa/icon
                :name :gear
                :style :solid
                :size 16
                :color "#cccccc"}
-              {:fx/type icons/fa-icon
+              {:fx/type fa/icon
                :name :heart
                :style :solid
                :size 16
                :color "#ff6b6b"}
-              {:fx/type icons/fa-icon
+              {:fx/type fa/icon
                :name :star
                :style :solid
                :size 16

@@ -68,12 +68,6 @@
   (some #(= % zone-group-id) (:zone-groups output [])))
 
 
-(defn filter-outputs-by-zone-group
-  "Filter outputs to only those belonging to a specific zone group."
-  [outputs zone-group-id]
-  (filterv #(output-matches-zone-group? % zone-group-id) outputs))
-
-
 (defn filter-enabled-outputs
   "Filter to only enabled outputs."
   [outputs]
@@ -100,18 +94,7 @@
     (into proj-outputs (or vp-outputs []))))
 
 
-(defn find-outputs-for-zone-group
-  "Find all outputs (projectors and VPs) that match a zone group.
-   
-   Args:
-   - all-outputs: Vector of output configs (from build-all-outputs)
-   - zone-group-id: The zone group to match
-   
-   Returns: Vector of matching output configs"
-  [all-outputs zone-group-id]
-  (-> all-outputs
-      filter-enabled-outputs
-      (filter-outputs-by-zone-group zone-group-id)))
+
 
 
 (defn find-outputs-for-target
@@ -154,75 +137,3 @@
                          (count result)
                          (pr-str (mapv :id result)))))
     result))
-
-
-;; Routing Map Building
-
-
-(defn build-routing-map
-  "Build a routing map from a cue's destination to output configs.
-   
-   Args:
-   - cue: The cue with :destination-zone
-   - projectors-items: Map of projector-id -> projector config
-   - virtual-projectors: Map of vp-id -> virtual projector config
-   
-   Returns: Vector of output configs that should receive this cue
-            (empty if no destination specified)"
-  [cue projectors-items virtual-projectors]
-  (let [all-outputs (build-all-outputs projectors-items virtual-projectors)
-        destination (:destination-zone cue)
-        zone-group-id (:zone-group-id destination)
-        target (if zone-group-id
-                 {:zone-groups [zone-group-id]}
-                 {:zone-groups []})]
-    (find-outputs-for-target all-outputs target)))
-
-
-;; Diagnostic Functions
-
-
-(defn explain-output-match
-  "Explain why an output did or didn't match a target.
-   Useful for debugging routing issues."
-  [output target]
-  (let [{:keys [zone-groups projector-ids]} target
-        output-groups (set (:zone-groups output []))
-        enabled? (:enabled? output true)]
-    (cond
-      (not enabled?)
-      {:matched? false :reason "Output is disabled"}
-      
-      (seq projector-ids)
-      (if (some #{(:projector-id output)} projector-ids)
-        {:matched? true :reason "Projector ID matched direct targeting"}
-        {:matched? false :reason "Projector ID not in target list"})
-      
-      (seq zone-groups)
-      (let [matching-groups (filter output-groups zone-groups)]
-        (if (seq matching-groups)
-          {:matched? true 
-           :reason (str "Zone groups " (vec matching-groups) " matched target")}
-          {:matched? false 
-           :reason (str "Output groups " (vec output-groups) 
-                        " don't intersect with target " (vec zone-groups))}))
-      
-      :else
-      {:matched? false :reason "No target criteria specified (routes to nothing)"})))
-
-
-(defn routing-diagnostics
-  "Generate diagnostics for a routing operation.
-   Shows which outputs matched and why."
-  [projectors-items virtual-projectors target]
-  (let [all-outputs (build-all-outputs projectors-items virtual-projectors)]
-    {:target target
-     :outputs (mapv (fn [output]
-                      (merge
-                        {:id (:id output)
-                         :name (:name output)
-                         :type (:type output)
-                         :projector-id (:projector-id output)}
-                        (explain-output-match output target)))
-                    all-outputs)
-     :matching-outputs (find-outputs-for-target all-outputs target)}))
