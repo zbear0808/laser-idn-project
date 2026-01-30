@@ -166,6 +166,7 @@
   :params      min-max-params
   :per-point?  true
   :retrigger?  false})
+(reg/register-compiler! :pos-x (get eval/modulator-compilers :pos-x))
 
 (reg/register-modulator!
  {:id          :pos-y
@@ -176,6 +177,7 @@
   :params      min-max-params
   :per-point?  true
   :retrigger?  false})
+(reg/register-compiler! :pos-y (get eval/modulator-compilers :pos-y))
 
 (reg/register-modulator!
  {:id          :radial
@@ -186,6 +188,7 @@
   :params      radial-params
   :per-point?  true
   :retrigger?  false})
+(reg/register-compiler! :radial (get eval/modulator-compilers :radial))
 
 (reg/register-modulator!
  {:id          :point-index
@@ -196,6 +199,7 @@
   :params      point-index-params
   :per-point?  true
   :retrigger?  false})
+(reg/register-compiler! :point-index (get eval/modulator-compilers :point-index))
 
 (reg/register-modulator!
  {:id          :angle
@@ -206,6 +210,7 @@
   :params      min-max-params
   :per-point?  true
   :retrigger?  false})
+(reg/register-compiler! :angle (get eval/modulator-compilers :angle))
 
 
 ;; External Input Modulators
@@ -259,3 +264,4 @@
   :per-point?  true
   :retrigger?  false
   :description "Keyframe animation based on spatial position"})
+(reg/register-compiler! :spatial-keyframe kf/compile-spatial-keyframe)

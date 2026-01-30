@@ -30,6 +30,14 @@
   !modulators
   (atom {}))
 
+(defonce ^{:doc "Registry atom: map from modulator type keyword to compiler function.
+   
+   Compilers are optional - not all modulator types have them.
+   Each compiler function takes [config point-count] and returns
+   an optimized (fn [x y idx] -> value) for per-point evaluation."}
+  !compilers
+  (atom {}))
+
 
 ;; Valid Categories
 
@@ -189,3 +197,42 @@
   [value]
   (and (modulated? value)
        (get value :active? true)))
+
+
+;; Compiler Registry Functions
+
+
+(defn register-compiler!
+  "Register a compiler function for a modulator type.
+   Compilers are optional - if not registered, the interpreter path is used.
+   
+   Parameters:
+   - mod-type: Keyword modulator type (e.g., :pos-x)
+   - compiler-fn: Function (fn [config point-count] -> (fn [x y idx] -> value))
+   
+   Returns: The registered compiler function"
+  [mod-type compiler-fn]
+  {:pre [(keyword? mod-type) (fn? compiler-fn)]}
+  (swap! !compilers assoc mod-type compiler-fn)
+  compiler-fn)
+
+(defn get-compiler
+  "Get compiler function for a modulator type.
+   Returns nil if no compiler registered (use interpreter fallback).
+   
+   Parameters:
+   - mod-type: Keyword modulator type
+   
+   Returns: Compiler function or nil"
+  [mod-type]
+  (get @!compilers mod-type))
+
+(defn has-compiler?
+  "Check if a modulator type has a registered compiler.
+   
+   Parameters:
+   - mod-type: Keyword modulator type
+   
+   Returns: Boolean"
+  [mod-type]
+  (contains? @!compilers mod-type))

@@ -256,3 +256,126 @@
    :pos-y        eval-pos-y
    :radial       eval-radial
    :angle        eval-angle})
+
+
+;; Per-Point Modulator Compilers
+;; These functions pre-compute constants and return optimized (fn [x y idx] -> value)
+
+
+(defn compile-pos-x
+  "Compile position X modulator to optimized per-point function.
+   Pre-computes min, max, and range values.
+   
+   Parameters:
+   - config: Modulator config map with :min, :max keys
+   - point-count: Total number of points in frame (unused for pos-x)
+   
+   Returns: (fn [^double x ^double y ^long idx] -> double)"
+  [config _point-count]
+  (let [min-v (double (get config :min 0.0))
+        max-v (double (get config :max 1.0))
+        range-v (- max-v min-v)]
+    (fn ^double [^double x ^double _y ^long _idx]
+      (let [t (/ (+ x 1.0) 2.0)]  ; normalize -1..1 to 0..1
+        (+ min-v (* t range-v))))))
+
+(defn compile-pos-y
+  "Compile position Y modulator to optimized per-point function.
+   Pre-computes min, max, and range values.
+   
+   Parameters:
+   - config: Modulator config map with :min, :max keys
+   - point-count: Total number of points in frame (unused for pos-y)
+   
+   Returns: (fn [^double x ^double y ^long idx] -> double)"
+  [config _point-count]
+  (let [min-v (double (get config :min 0.0))
+        max-v (double (get config :max 1.0))
+        range-v (- max-v min-v)]
+    (fn ^double [^double _x ^double y ^long _idx]
+      (let [t (/ (+ y 1.0) 2.0)]  ; normalize -1..1 to 0..1
+        (+ min-v (* t range-v))))))
+
+(defn compile-radial
+  "Compile radial distance modulator to optimized per-point function.
+   Pre-computes min, max, range, and max-distance values.
+   
+   Parameters:
+   - config: Modulator config map with :min, :max, :normalize? keys
+   - point-count: Total number of points in frame (unused for radial)
+   
+   Returns: (fn [^double x ^double y ^long idx] -> double)"
+  [config _point-count]
+  (let [min-v (double (get config :min 0.0))
+        max-v (double (get config :max 1.0))
+        range-v (- max-v min-v)
+        normalize? (get config :normalize? true)
+        max-dist (if normalize? (Math/sqrt 2.0) 1.0)]
+    (fn ^double [^double x ^double y ^long _idx]
+      (let [dist (Math/sqrt (+ (* x x) (* y y)))
+            t (clojure.core/min 1.0 (/ dist max-dist))]
+        (+ min-v (* t range-v))))))
+
+(defn compile-point-index
+  "Compile point index modulator to optimized per-point function.
+   Pre-computes min, max, range, and denominator for index normalization.
+   
+   Parameters:
+   - config: Modulator config map with :min, :max, :wrap? keys
+   - point-count: Total number of points in frame
+   
+   Returns: (fn [^double x ^double y ^long idx] -> double)"
+  [config point-count]
+  (let [min-v (double (get config :min 0.0))
+        max-v (double (get config :max 1.0))
+        range-v (- max-v min-v)
+        wrap? (boolean (get config :wrap? false))
+        ;; Pre-compute denominator - avoid div by zero
+        denom (clojure.core/max 1.0 (double (dec (long point-count))))]
+    (if (pos? (long point-count))
+      (fn ^double [^double _x ^double _y ^long idx]
+        (let [t (/ (double idx) denom)
+              t' (if wrap? (mod t 1.0) t)]
+          (+ min-v (* t' range-v))))
+      ;; Edge case: no points - return min
+      (constantly min-v))))
+
+(defn compile-angle
+  "Compile angle modulator to optimized per-point function.
+   Pre-computes min, max, range, and 2*PI constant.
+   
+   Parameters:
+   - config: Modulator config map with :min, :max keys
+   - point-count: Total number of points in frame (unused for angle)
+   
+   Returns: (fn [^double x ^double y ^long idx] -> double)"
+  [config _point-count]
+  (let [min-v (double (get config :min 0.0))
+        max-v (double (get config :max 1.0))
+        range-v (- max-v min-v)
+        two-pi (* 2.0 Math/PI)]
+    (fn ^double [^double x ^double y ^long _idx]
+      (let [raw-angle (Math/atan2 y x)
+            ;; Normalize from -π..π to 0..2π
+            normalized (if (neg? raw-angle)
+                         (+ raw-angle two-pi)
+                         raw-angle)
+            ;; Map to 0..1
+            t (/ normalized two-pi)]
+        (+ min-v (* t range-v))))))
+
+
+;; Modulator Compilers Registry
+
+
+(def modulator-compilers
+  "Map of modulator type keywords to their compiler functions.
+   Each compiler takes [config point-count] and returns (fn [x y idx] -> value).
+   
+   Compilers are optional - not all modulator types have them.
+   Only per-point modulators benefit from compilation."
+  {:pos-x        compile-pos-x
+   :pos-y        compile-pos-y
+   :radial       compile-radial
+   :point-index  compile-point-index
+   :angle        compile-angle})

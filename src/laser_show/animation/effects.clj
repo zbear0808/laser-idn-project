@@ -315,10 +315,11 @@
    This is the preferred way to handle per-point modulation. It returns a function
    (fn [x y idx] -> value) that efficiently resolves the parameter value.
    
-   Optimization:
-   - For static values: returns (constantly value) - no per-point overhead
-   - For global modulators: resolves once, returns (constantly resolved-value)
-   - For per-point modulators: returns fn that evaluates with point context
+   Optimization hierarchy:
+   1. Static values: returns (constantly value) - no per-point overhead
+   2. Global modulators: resolves once, returns (constantly resolved-value)
+   3. Per-point modulators WITH compiler: compiles once, returns optimized fn
+   4. Per-point modulators WITHOUT compiler: falls back to interpreter
    
    Parameters:
    - param-key: Keyword key of the parameter to resolve
@@ -346,16 +347,20 @@
       (not (mod/modulator-config? param-val))
       (constantly param-val)
       
-      ;; Per-point modulator - return fn that evaluates per point
+      ;; Per-point modulator - try compilation first, fall back to interpreter
       (mod/config-requires-per-point? param-val)
-      (let [base-ctx (mod/make-base-context
-                       (merge {:time-ms time-ms
-                               :bpm bpm
-                               :point-count point-count}
-                              timing-ctx))]
-        (fn [x y idx]
-          (let [point-ctx (mod/with-point-context base-ctx x y idx)]
-            (mod/evaluate-modulator param-val point-ctx))))
+      (if-let [compiled-fn (mod/compile-per-point-modulator param-val point-count)]
+        ;; Compiled path: use optimized function directly
+        compiled-fn
+        ;; Interpreter fallback: evaluate per point with context
+        (let [base-ctx (mod/make-base-context
+                         (merge {:time-ms time-ms
+                                 :bpm bpm
+                                 :point-count point-count}
+                                timing-ctx))]
+          (fn [x y idx]
+            (let [point-ctx (mod/with-point-context base-ctx x y idx)]
+              (mod/evaluate-modulator param-val point-ctx)))))
       
       ;; Global modulator - resolve once, return constant fn
       :else

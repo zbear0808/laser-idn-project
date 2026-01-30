@@ -191,3 +191,46 @@
   "Resolve all parameters in a params map."
   [params context]
   (update-vals params #(resolve-param % context)))
+
+
+;; Per-Point Modulator Compilation
+
+
+(defn compilable-per-point?
+  "Check if a modulator config can be compiled to optimized form.
+   Returns true if:
+   - Config is a per-point modulator (per-point? = true)
+   - Config is active (:active? defaults to true)
+   - A compiler is registered for this modulator type
+   
+   Parameters:
+   - config: Modulator config map
+   
+   Returns: Boolean"
+  [config]
+  (and (modulator-config? config)
+       (get config :active? true)
+       (reg/per-point? (:type config))
+       (reg/has-compiler? (:type config))))
+
+(defn compile-per-point-modulator
+  "Compile a per-point modulator config into an optimized function.
+   
+   This is the main entry point for modulator compilation. It:
+   1. Looks up the compiler from the registry
+   2. Merges defaults with config
+   3. Calls the compiler to produce an optimized function
+   
+   If no compiler is registered for the modulator type, returns nil
+   (caller should fall back to interpreter path).
+   
+   Parameters:
+   - config: Modulator config map (must have :type key)
+   - point-count: Total number of points in frame
+   
+   Returns: (fn [^double x ^double y ^long idx] -> double) or nil"
+  [config point-count]
+  (when-let [compiler (reg/get-compiler (:type config))]
+    (let [defaults (get-defaults-for-type (:type config))
+          full-config (merge defaults config)]
+      (compiler full-config point-count))))

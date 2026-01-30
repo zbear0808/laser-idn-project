@@ -290,3 +290,155 @@
                 (when (and min max)
                   (/ (+ (double min) (double max)) 2.0))
                 0.0))))
+
+
+;; Spatial Keyframe Compiler
+
+
+(defn- compile-position-fn
+  "Create a position calculation function for a specific axis.
+   Returns an optimized function (fn [x y idx point-count] -> position).
+   
+   Pre-computes axis-specific constants to minimize per-point calculations."
+  [axis normalize?]
+  (case axis
+    :point-index
+    (fn ^double [^double _x ^double _y ^long idx ^long point-count]
+      (if (<= point-count 1)
+        0.0
+        (/ (double idx) (double (dec point-count)))))
+    
+    :pos-x
+    (fn ^double [^double x ^double _y ^long _idx ^long _point-count]
+      (/ (+ x 1.0) 2.0))
+    
+    :pos-y
+    (fn ^double [^double _x ^double y ^long _idx ^long _point-count]
+      (/ (+ y 1.0) 2.0))
+    
+    :radial
+    (let [max-dist (if normalize? sqrt-2 1.0)]
+      (fn ^double [^double x ^double y ^long _idx ^long _point-count]
+        (let [dist (Math/sqrt (+ (* x x) (* y y)))]
+          (clojure.core/min 1.0 (/ dist max-dist)))))
+    
+    :angle
+    (let [two-pi (* 2.0 Math/PI)]
+      (fn ^double [^double x ^double y ^long _idx ^long _point-count]
+        (if (and (zero? x) (zero? y))
+          0.0
+          (let [angle (Math/atan2 y x)
+                normalized (/ (+ angle Math/PI) two-pi)]
+            normalized))))
+    
+    ;; Default - return 0.0
+    (constantly 0.0)))
+
+(defn- precompute-keyframe-data
+  "Pre-process keyframes for fast lookup.
+   Returns a vector of maps with pre-computed values."
+  [sorted-keyframes]
+  (let [n (count sorted-keyframes)]
+    (mapv (fn [i]
+            (let [kf (nth sorted-keyframes i)
+                  next-kf (if (< i (dec n))
+                            (nth sorted-keyframes (inc i))
+                            (first sorted-keyframes))  ;; Would only happen with wrap-around
+                  pos (double (:position kf))
+                  next-pos (double (:position next-kf))
+                  value (double (or (:value kf) 0.0))
+                  next-value (double (or (:value next-kf) 0.0))
+                  interpolation (or (:interpolation kf) :linear)]
+              {:position pos
+               :next-position next-pos
+               :value value
+               :next-value next-value
+               :interpolation interpolation}))
+          (range n))))
+
+(defn compile-spatial-keyframe
+  "Compile spatial keyframe modulator to optimized per-point function.
+   Pre-sorts keyframes, pre-computes axis calculation constants,
+   and captures interpolation logic in closure.
+   
+   Parameters:
+   - config: Spatial keyframe config map with :keyframes, :axis, :normalize? keys
+   - point-count: Total number of points in frame
+   
+   Returns: (fn [^double x ^double y ^long idx] -> double)
+   
+   Note: The returned function handles all spatial axes (point-index, pos-x,
+   pos-y, radial, angle) with axis-specific optimizations baked in."
+  [config point-count]
+  (let [{:keys [keyframes axis normalize? min max value]
+         :or {axis :point-index normalize? true}} config
+        point-count' (long point-count)]
+    
+    (if (seq keyframes)
+      (let [;; Pre-sort keyframes by position
+            sorted-keyframes (vec (sort-by :position keyframes))
+            n (count sorted-keyframes)
+            
+            ;; Pre-compute position function for this axis
+            pos-fn (compile-position-fn axis normalize?)
+            
+            ;; Pre-compute keyframe data for fast lookup
+            kf-data (precompute-keyframe-data sorted-keyframes)
+            
+            ;; Extract position array for binary search
+            positions (double-array (map :position sorted-keyframes))]
+        
+        (fn ^double [^double x ^double y ^long idx]
+          (let [;; Calculate spatial position (0.0 to 1.0)
+                position (pos-fn x y idx point-count')
+                
+                ;; Find surrounding keyframes using clamped lookup
+                ;; (same logic as find-surrounding-keyframes-clamped but inlined)
+                first-pos (aget positions 0)
+                last-pos (aget positions (dec n))]
+            
+            (cond
+              ;; Before first keyframe - clamp to first
+              (<= position first-pos)
+              (:value (first kf-data))
+              
+              ;; After last keyframe - clamp to last
+              (>= position last-pos)
+              (:value (last kf-data))
+              
+              :else
+              ;; Find the surrounding keyframes
+              (let [;; Linear search for small arrays (usually < 10 keyframes)
+                    after-idx (loop [i 0]
+                                (if (>= i n)
+                                  nil
+                                  (if (> (aget positions i) position)
+                                    i
+                                    (recur (inc i)))))
+                    before-idx (if after-idx (dec (long after-idx)) (dec n))
+                    before-kf (nth kf-data before-idx)
+                    after-kf (nth kf-data (or after-idx 0))
+                    
+                    ;; Calculate interpolation factor
+                    p1 (:position before-kf)
+                    p2 (if after-idx
+                         (:next-position before-kf)
+                         1.0)
+                    range-val (- p2 p1)
+                    t (if (zero? range-val) 0.0 (/ (- position p1) range-val))
+                    
+                    ;; Apply interpolation curve
+                    curved-t (interp/apply-interpolation t (:interpolation before-kf))
+                    
+                    ;; Interpolate values
+                    v1 (:value before-kf)
+                    v2 (double (or (:value after-kf) 0.0))]
+                
+                (interp/interpolate-value v1 v2 curved-t))))))
+      
+      ;; No keyframes - return constant function
+      (let [fallback-value (double (or value
+                                       (when (and min max)
+                                         (/ (+ (double min) (double max)) 2.0))
+                                       0.0))]
+        (constantly fallback-value)))))
