@@ -161,6 +161,29 @@
                                    :mod-param-key key
                                    :text-field? true)}]}))
 
+(defn- modulator-param-boolean
+  "Checkbox for a boolean modulator parameter.
+   
+   Props:
+   - :param-def - Parameter definition map with :key, :label, :default
+   - :current-value - Current value for this parameter
+   - :on-change-event - Event template for value changes (receives :mod-param-key)"
+  [{:keys [param-def current-value on-change-event]}]
+  (let [{:keys [key label default]} param-def
+        value (if (some? current-value) current-value default)]
+    {:fx/type :h-box
+     :spacing 6
+     :alignment :center-left
+     :children [{:fx/type :label
+                 :text label
+                 :pref-width 90
+                 :style-class ["text-small"]
+                 :style "-fx-text-fill: #909090;"}
+                {:fx/type :check-box
+                 :selected (boolean value)
+                 ;; Event map pattern: add mod-param-key to template
+                 :on-selected-changed (assoc on-change-event :mod-param-key key)}]}))
+
 (defn- modulator-params-editor
   "Editor for modulator-specific parameters.
    
@@ -218,6 +241,10 @@
                             :param-def param-def
                             :current-value (get modulator-config (:key param-def))
                             :on-change-event on-param-change-event}
+                     :boolean {:fx/type modulator-param-boolean
+                               :param-def param-def
+                               :current-value (get modulator-config (:key param-def))
+                               :on-change-event on-param-change-event}
                      ;; Default: float slider with text field
                      {:fx/type modulator-param-slider
                       :param-def param-def

@@ -27,6 +27,7 @@
             [laser-show.views.components.visual-editors.curve-canvas :as curve-canvas]
             [laser-show.views.components.visual-editors.hue-canvas :as hue-canvas]
             [laser-show.views.components.visual-editors.hue-shift-canvas :as hue-shift-canvas]
+            [laser-show.views.components.visual-editors.keyframe-modulator-panel :as keyframe-panel]
             [laser-show.views.components.tabs :as tabs]
             [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.views.components.modulator-param-control :as mod-param]
@@ -34,6 +35,16 @@
   (:import [javafx.scene.canvas Canvas]
            [javafx.scene.input MouseEvent MouseButton]
            [javafx.event EventHandler]))
+
+
+;; Helper for detecting spatial keyframe modulators
+
+
+(defn- spatial-keyframe?
+  "Returns true if the value is a spatial keyframe modulator config."
+  [value]
+  (and (map? value)
+       (= (:type value) :spatial-keyframe)))
 
 
 ;; Translate Effect Visual Editor
@@ -610,6 +621,9 @@
    Shows a horizontal bar with the full hue spectrum from 0° to 360°.
    Dragging adjusts the hue value in real-time.
    
+   If the hue value is a spatial keyframe modulator, renders the keyframe
+   panel instead of the normal hue slider.
+   
    Props:
    - :current-params - Current parameter values {:hue ...}
    - :event-template - Base event for on-drag (will add :param-key :value)
@@ -623,60 +637,72 @@
   [{:keys [current-params event-template fx-key hint-text
            enable-modulator? param-spec modulator-event-base]}]
   (let [params-map (or current-params {})
-        ;; Get hue value - could be number or modulator config
-        hue-value (get params-map :hue 0.0)
-        is-modulated? (reg/active-modulator? hue-value)
-        ;; Always use get-static-value - handles both plain numbers and modulator configs
-        ;; (including inactive modulators where :active? is false)
-        static-hue (reg/get-static-value hue-value 0.0)
-        actual-hint (or hint-text "Drag to select hue")
-        ;; Use a stable key that does NOT change based on current value
-        ;; This prevents canvas recreation during dragging
-        canvas-key (or fx-key [:hue-editor])
-        ;; Default param spec for hue if not provided
-        hue-param-spec (or param-spec {:min 0.0 :max 360.0 :default 0.0 :label "Hue"})]
-    {:fx/type :v-box
-     :spacing 8
-     :padding 8
-     :style-class ["visual-editor-padded"]
-     :children (filterv some?
-                [;; Modulator header (optional)
-                 (when (and enable-modulator? modulator-event-base)
-                   {:fx/type mod-param/visual-editor-modulator-header
-                    :param-key :hue
-                    :param-spec hue-param-spec
-                    :current-value hue-value
-                    :modulator-event-base modulator-event-base})
-                 
-                 ;; Modulator params editor (shown ABOVE visual when modulated)
-                 (when is-modulated?
-                   {:fx/type mod-param/visual-editor-modulator-params
-                    :param-key :hue
-                    :param-spec hue-param-spec
-                    :current-value hue-value
-                    :modulator-event-base modulator-event-base})
-                 
-                 ;; Hint text (only when NOT modulated)
-                 (when-not is-modulated?
-                   {:fx/type :label
-                    :text actual-hint
-                    :style-class ["visual-editor-hint"]})
-                 
-                 ;; Visual hue slider - always shown (disabled when modulated)
-                 {:fx/type hue-canvas/hue-canvas
-                  :fx/key canvas-key
-                  :hue static-hue
-                  :on-hue-change (when-not is-modulated? event-template)}
-                 
-                 ;; Value display
-                 {:fx/type :h-box
-                  :spacing 12
-                  :alignment :center
-                  :children [{:fx/type :label
-                             :text (if is-modulated?
-                                     "Hue: (modulated)"
-                                     (format "Hue: %.1f°" (double static-hue)))
-                             :style-class ["text-monospace"]}]}])}))
+        ;; Get hue value - could be number, modulator config, or spatial keyframe config
+        hue-value (get params-map :hue 0.0)]
+    
+    ;; Check if this is a spatial keyframe modulator - render keyframe panel if so
+    (if (spatial-keyframe? hue-value)
+      ;; Render spatial keyframe panel
+      {:fx/type keyframe-panel/keyframe-modulator-panel
+       :keyframe-modulator hue-value
+       :domain (:domain event-template)
+       :entity-key (:entity-key event-template)
+       :effect-path (:effect-path event-template)
+       :param-key :hue}
+      
+      ;; Otherwise render normal hue visual editor
+      (let [is-modulated? (reg/active-modulator? hue-value)
+            ;; Always use get-static-value - handles both plain numbers and modulator configs
+            ;; (including inactive modulators where :active? is false)
+            static-hue (reg/get-static-value hue-value 0.0)
+            actual-hint (or hint-text "Drag to select hue")
+            ;; Use a stable key that does NOT change based on current value
+            ;; This prevents canvas recreation during dragging
+            canvas-key (or fx-key [:hue-editor])
+            ;; Default param spec for hue if not provided
+            hue-param-spec (or param-spec {:min 0.0 :max 360.0 :default 0.0 :label "Hue"})]
+        {:fx/type :v-box
+         :spacing 8
+         :padding 8
+         :style-class ["visual-editor-padded"]
+         :children (filterv some?
+                    [;; Modulator header (optional)
+                     (when (and enable-modulator? modulator-event-base)
+                       {:fx/type mod-param/visual-editor-modulator-header
+                        :param-key :hue
+                        :param-spec hue-param-spec
+                        :current-value hue-value
+                        :modulator-event-base modulator-event-base})
+                     
+                     ;; Modulator params editor (shown ABOVE visual when modulated)
+                     (when is-modulated?
+                       {:fx/type mod-param/visual-editor-modulator-params
+                        :param-key :hue
+                        :param-spec hue-param-spec
+                        :current-value hue-value
+                        :modulator-event-base modulator-event-base})
+                     
+                     ;; Hint text (only when NOT modulated)
+                     (when-not is-modulated?
+                       {:fx/type :label
+                        :text actual-hint
+                        :style-class ["visual-editor-hint"]})
+                     
+                     ;; Visual hue slider - always shown (disabled when modulated)
+                     {:fx/type hue-canvas/hue-canvas
+                      :fx/key canvas-key
+                      :hue static-hue
+                      :on-hue-change (when-not is-modulated? event-template)}
+                     
+                     ;; Value display
+                     {:fx/type :h-box
+                      :spacing 12
+                      :alignment :center
+                      :children [{:fx/type :label
+                                 :text (if is-modulated?
+                                         "Hue: (modulated)"
+                                         (format "Hue: %.1f°" (double static-hue)))
+                                 :style-class ["text-monospace"]}]}])}))))
 
 
 ;; Hue Shift Strip Visual Editor (for Hue Shift effect - shows input/output transformation)
@@ -691,6 +717,9 @@
    
    Drag left/right to adjust the shift amount (-180° to +180°).
    
+   If the degrees value is a spatial keyframe modulator, renders the keyframe
+   panel instead of the normal hue shift editor.
+   
    Props:
    - :current-params - Current parameter values {:degrees ...}
    - :event-template - Base event for on-drag (will add :param-key :value)
@@ -704,60 +733,72 @@
   [{:keys [current-params event-template fx-key hint-text
            enable-modulator? param-spec modulator-event-base]}]
   (let [params-map (or current-params {})
-        ;; Get degrees value - could be number or modulator config
-        degrees-value (get params-map :degrees 0.0)
-        is-modulated? (reg/active-modulator? degrees-value)
-        ;; Always use get-static-value - handles both plain numbers and modulator configs
-        ;; (including inactive modulators where :active? is false)
-        static-degrees (reg/get-static-value degrees-value 0.0)
-        actual-hint (or hint-text "Drag left/right to shift hue")
-        ;; Use a stable key that does NOT change based on current value
-        ;; This prevents canvas recreation during dragging
-        canvas-key (or fx-key [:hue-shift-editor])
-        ;; Default param spec for degrees if not provided
-        degrees-param-spec (or param-spec {:min -180.0 :max 180.0 :default 0.0 :label "Degrees"})]
-    {:fx/type :v-box
-     :spacing 8
-     :padding 8
-     :style-class ["visual-editor-padded"]
-     :children (filterv some?
-                [;; Modulator header (optional)
-                 (when (and enable-modulator? modulator-event-base)
-                   {:fx/type mod-param/visual-editor-modulator-header
-                    :param-key :degrees
-                    :param-spec degrees-param-spec
-                    :current-value degrees-value
-                    :modulator-event-base modulator-event-base})
-                 
-                 ;; Hint text (only when NOT modulated)
-                 (when-not is-modulated?
-                   {:fx/type :label
-                    :text actual-hint
-                    :style-class ["visual-editor-hint"]})
-                 
-                 ;; Visual hue shift strips - always shown (disabled when modulated)
-                 {:fx/type hue-shift-canvas/hue-shift-canvas
-                  :fx/key canvas-key
-                  :degrees static-degrees
-                  :on-degrees-change (when-not is-modulated? event-template)}
-                 
-                 ;; Modulator params editor (shown below visual when modulated)
-                 (when is-modulated?
-                   {:fx/type mod-param/visual-editor-modulator-params
-                    :param-key :degrees
-                    :param-spec degrees-param-spec
-                    :current-value degrees-value
-                    :modulator-event-base modulator-event-base})
-                 
-                 ;; Value display
-                 {:fx/type :h-box
-                  :spacing 12
-                  :alignment :center
-                  :children [{:fx/type :label
-                             :text (if is-modulated?
-                                     "Shift: (modulated)"
-                                     (format "Shift: %.1f°" (double static-degrees)))
-                             :style-class ["text-monospace"]}]}])}))
+        ;; Get degrees value - could be number, modulator config, or spatial keyframe config
+        degrees-value (get params-map :degrees 0.0)]
+    
+    ;; Check if this is a spatial keyframe modulator - render keyframe panel if so
+    (if (spatial-keyframe? degrees-value)
+      ;; Render spatial keyframe panel
+      {:fx/type keyframe-panel/keyframe-modulator-panel
+       :keyframe-modulator degrees-value
+       :domain (:domain event-template)
+       :entity-key (:entity-key event-template)
+       :effect-path (:effect-path event-template)
+       :param-key :degrees}
+      
+      ;; Otherwise render normal hue shift visual editor
+      (let [is-modulated? (reg/active-modulator? degrees-value)
+            ;; Always use get-static-value - handles both plain numbers and modulator configs
+            ;; (including inactive modulators where :active? is false)
+            static-degrees (reg/get-static-value degrees-value 0.0)
+            actual-hint (or hint-text "Drag left/right to shift hue")
+            ;; Use a stable key that does NOT change based on current value
+            ;; This prevents canvas recreation during dragging
+            canvas-key (or fx-key [:hue-shift-editor])
+            ;; Default param spec for degrees if not provided
+            degrees-param-spec (or param-spec {:min -180.0 :max 180.0 :default 0.0 :label "Degrees"})]
+        {:fx/type :v-box
+         :spacing 8
+         :padding 8
+         :style-class ["visual-editor-padded"]
+         :children (filterv some?
+                    [;; Modulator header (optional)
+                     (when (and enable-modulator? modulator-event-base)
+                       {:fx/type mod-param/visual-editor-modulator-header
+                        :param-key :degrees
+                        :param-spec degrees-param-spec
+                        :current-value degrees-value
+                        :modulator-event-base modulator-event-base})
+                     
+                     ;; Hint text (only when NOT modulated)
+                     (when-not is-modulated?
+                       {:fx/type :label
+                        :text actual-hint
+                        :style-class ["visual-editor-hint"]})
+                     
+                     ;; Visual hue shift strips - always shown (disabled when modulated)
+                     {:fx/type hue-shift-canvas/hue-shift-canvas
+                      :fx/key canvas-key
+                      :degrees static-degrees
+                      :on-degrees-change (when-not is-modulated? event-template)}
+                     
+                     ;; Modulator params editor (shown below visual when modulated)
+                     (when is-modulated?
+                       {:fx/type mod-param/visual-editor-modulator-params
+                        :param-key :degrees
+                        :param-spec degrees-param-spec
+                        :current-value degrees-value
+                        :modulator-event-base modulator-event-base})
+                     
+                     ;; Value display
+                     {:fx/type :h-box
+                      :spacing 12
+                      :alignment :center
+                      :children [{:fx/type :label
+                                 :text (if is-modulated?
+                                         "Shift: (modulated)"
+                                         (format "Shift: %.1f°" (double static-degrees)))
+                                 :style-class ["text-monospace"]}]}])}))))
 
 
 ;; Set Color Picker Visual Editor

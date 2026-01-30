@@ -2,15 +2,23 @@
   "Keyframe interpolation for effect parameter animation.
    
    Keyframe modulators allow defining exact parameter values at specific
-   positions within a period, with automatic linear interpolation between them.
+   positions within a period, with interpolation between them. Each keyframe's
+   :interpolation key determines the curve used for interpolation TO THE NEXT keyframe.
+   
+   Supported interpolation modes:
+   - :linear (default) - Linear interpolation
+   - :exp-decay - Ease out (fast start, slow end)
+   - :exp-grow - Ease in (slow start, fast end)
+   - :step - Hold value until next keyframe
    
    Usage:
-   {:keyframes [{:position 0.0 :params {:x 0 :y 0}}
-                {:position 0.5 :params {:x 1 :y 1}}
-                {:position 1.0 :params {:x 0 :y 0}}]
+   {:keyframes [{:position 0.0 :params {:x 0 :y 0} :interpolation :linear}
+                {:position 0.5 :params {:x 1 :y 1} :interpolation :exp-decay}
+                {:position 1.0 :params {:x 0 :y 0} :interpolation :step}]
     :period 2.0
     :loop-mode :loop}"
   (:require
+   [laser-show.animation.interpolation :as interp]
    [laser-show.animation.time :as time]))
 
 (set! *warn-on-reflection* true)
@@ -25,6 +33,15 @@
    Keyframe modulators are maps with a :keyframes vector."
   [x]
   (and (map? x)
+       (contains? x :keyframes)
+       (vector? (:keyframes x))))
+
+(defn spatial-keyframe-modulator?
+  "Check if a value is a spatial keyframe modulator config.
+   Spatial keyframe modulators have :type :spatial-keyframe and a :keyframes vector."
+  [x]
+  (and (map? x)
+       (= (:type x) :spatial-keyframe)
        (contains? x :keyframes)
        (vector? (:keyframes x))))
 
@@ -82,25 +99,6 @@
                  (- phase p1))]
     (if (zero? range-val) 0.0 (/ offset range-val))))
 
-(defn interpolate-params
-  "Linearly interpolate between two parameter maps.
-   
-   Parameters:
-   - params1: First parameter map (at t=0)
-   - params2: Second parameter map (at t=1)
-   - t: Interpolation factor (0.0 to 1.0)
-   
-   Returns: Interpolated parameter map"
-  [params1 params2 ^double t]
-  (into {}
-        (mapv (fn [[k v1]]
-                (let [v2 (get params2 k v1)]
-                  [k (if (and (number? v1) (number? v2))
-                       (+ (* (- 1.0 t) (double v1)) (* t (double v2)))
-                       v1)]))
-              params1)))
-
-
 ;; Main Keyframe Evaluation
 
 
@@ -108,12 +106,12 @@
   "Evaluate keyframe modulator by interpolating between keyframes.
    
    The keyframe modulator allows users to define exact parameter values at
-   specific positions within a period, with automatic linear interpolation
-   between them.
+   specific positions within a period. Each keyframe's :interpolation key
+   determines the curve used for interpolation TO THE NEXT keyframe.
    
    Parameters:
    - config: Keyframe modulator config map with:
-     - :keyframes - Vector of {:position (0.0-1.0) :params {...}} maps
+     - :keyframes - Vector of {:position (0.0-1.0) :params {...} :interpolation kw} maps
      - :period - Beats per cycle (default 1.0)
      - :time-unit - :beats or :seconds (default :beats)
      - :loop-mode - :loop or :once (default :loop)
@@ -139,6 +137,156 @@
           sorted-keyframes (sort-by :position keyframes)
           [before after] (find-surrounding-keyframes sorted-keyframes phase)
 
-          t (calculate-interp-factor before after phase)]
+          t (calculate-interp-factor before after phase)
+          ;; Read interpolation mode from "before" keyframe, default to :linear
+          interpolation (or (:interpolation before) :linear)]
 
-      (interpolate-params (:params before) (:params after) t))))
+      (interp/interpolate-params (:params before) (:params after) t interpolation))))
+
+
+;; Spatial Keyframe Support
+
+
+(def ^:private sqrt-2 (Math/sqrt 2.0))
+
+(defn get-spatial-position
+  "Calculate normalized position (0.0-1.0) based on spatial axis type.
+   
+   Parameters:
+   - axis: Keyword specifying the spatial dimension
+     - :point-index - Based on point index within frame
+     - :pos-x - Based on x coordinate (-1..+1 -> 0..1)
+     - :pos-y - Based on y coordinate (-1..+1 -> 0..1)
+     - :radial - Based on distance from origin
+     - :angle - Based on angle from origin (atan2)
+   - context: Modulation context with per-point data
+   - config: Optional config map with :normalize? for radial axis
+   
+   Returns: Normalized position (0.0 to 1.0)"
+  ^double [axis context config]
+  (case axis
+    :point-index
+    (let [point-index (long (or (:point-index context) 0))
+          point-count (long (or (:point-count context) 1))]
+      (if (<= point-count 1)
+        0.0
+        (/ (double point-index) (double (dec point-count)))))
+    
+    :pos-x
+    (let [x (double (or (:x context) 0.0))]
+      (/ (+ x 1.0) 2.0))
+    
+    :pos-y
+    (let [y (double (or (:y context) 0.0))]
+      (/ (+ y 1.0) 2.0))
+    
+    :radial
+    (let [x (double (or (:x context) 0.0))
+          y (double (or (:y context) 0.0))
+          dist (Math/sqrt (+ (* x x) (* y y)))
+          normalize? (get config :normalize? true)
+          max-dist (if normalize? sqrt-2 1.0)]
+      (min 1.0 (/ dist max-dist)))
+    
+    :angle
+    (let [x (double (or (:x context) 0.0))
+          y (double (or (:y context) 0.0))]
+      (if (and (zero? x) (zero? y))
+        0.0
+        (let [angle (Math/atan2 y x)
+              ;; atan2 returns -PI to PI, normalize to 0 to 1
+              normalized (/ (+ angle Math/PI) (* 2.0 Math/PI))]
+          normalized)))
+    
+    ;; Default to 0.0 for unknown axis
+    0.0))
+
+(defn find-surrounding-keyframes-clamped
+  "Find the keyframes before and after the given position, without wrap-around.
+   Used for spatial keyframes where clamping to first/last is preferred.
+   
+   Parameters:
+   - sorted-keyframes: Keyframes sorted by :position
+   - position: Position value (0.0 to 1.0)
+   
+   Returns: [before-keyframe after-keyframe]"
+  [sorted-keyframes ^double position]
+  (let [n (count sorted-keyframes)]
+    (cond
+      (= n 1)
+      [(first sorted-keyframes) (first sorted-keyframes)]
+      
+      ;; Position at or before first keyframe
+      (<= position (double (:position (first sorted-keyframes))))
+      [(first sorted-keyframes) (first sorted-keyframes)]
+      
+      ;; Position at or after last keyframe
+      (>= position (double (:position (last sorted-keyframes))))
+      [(last sorted-keyframes) (last sorted-keyframes)]
+      
+      :else
+      ;; Find the surrounding keyframes
+      (let [after-idx (->> sorted-keyframes
+                          (map-indexed vector)
+                          (filter (fn [[_ kf]] (> (double (:position kf)) position)))
+                          first
+                          first)]
+        (if after-idx
+          [(nth sorted-keyframes (dec (long after-idx)))
+           (nth sorted-keyframes after-idx)]
+          ;; Shouldn't happen, but fallback to last
+          [(last sorted-keyframes) (last sorted-keyframes)])))))
+
+(defn eval-spatial-keyframe
+  "Evaluate spatial keyframe modulator by interpolating based on spatial position.
+   
+   The spatial keyframe modulator allows defining values at specific spatial
+   positions, with interpolation between them based on point position in space.
+   
+   Parameters:
+   - config: Spatial keyframe modulator config map with:
+     - :keyframes - Vector of {:position (0.0-1.0) :value number :interpolation kw} maps
+     - :axis - Spatial axis keyword (:point-index, :pos-x, :pos-y, :radial, :angle)
+     - :normalize? - Boolean for radial normalization (default true)
+     - :min, :max - Optional fallback range when no keyframes defined
+     - :value - Optional explicit fallback value
+   - context: Modulation context with per-point data (:x, :y, :point-index, :point-count)
+   
+   Returns: Interpolated value as double, or fallback value if no keyframes"
+  [{:keys [keyframes axis normalize? min max value]
+    :or {axis :point-index normalize? true}
+    :as config}
+   context]
+  
+  (if (seq keyframes)
+    (let [;; Calculate spatial position (0.0 to 1.0)
+          position (get-spatial-position axis context config)
+          
+          ;; Sort keyframes by position
+          sorted-keyframes (sort-by :position keyframes)
+          
+          ;; Find surrounding keyframes (clamped, no wrap-around)
+          [before after] (find-surrounding-keyframes-clamped sorted-keyframes position)
+          
+          ;; Calculate linear interpolation factor
+          t (calculate-interp-factor before after position)
+          
+          ;; Get interpolation mode from before keyframe
+          interpolation (or (:interpolation before) :linear)
+          
+          ;; Apply interpolation curve
+          curved-t (interp/apply-interpolation t interpolation)
+          
+          ;; Get values from keyframes
+          v1 (double (or (:value before) 0.0))
+          v2 (double (or (:value after) 0.0))]
+      
+      ;; Interpolate between values
+      (interp/interpolate-value v1 v2 curved-t))
+    
+    ;; Fallback when no keyframes defined:
+    ;; Return :value if present, otherwise midpoint of :min/:max, otherwise 0.0
+    (double (or value
+                (when (and min max)
+                  (/ (+ (double min) (double max)) 2.0))
+                0.0))))

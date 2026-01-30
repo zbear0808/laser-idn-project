@@ -10,6 +10,7 @@
    
    Load this namespace to populate the modulator registry."
   (:require
+   [laser-show.animation.keyframes :as kf]
    [laser-show.animation.modulator-registry :as reg]
    [laser-show.animation.modulator-evaluators :as eval]))
 
@@ -231,3 +232,30 @@
   :per-point?  false
   :retrigger?  false
   :description "OSC input modulator"})
+
+
+;; Spatial Keyframe Modulators
+
+
+(def ^:private spatial-keyframe-params
+  "Spatial keyframe modulator parameters."
+  [{:key :axis
+    :label "Axis"
+    :type :choice
+    :choices [:point-index :pos-x :pos-y :radial :angle]
+    :default :point-index}
+   {:key :normalize?
+    :label "Normalize"
+    :type :boolean
+    :default true}])
+
+(reg/register-modulator!
+ {:id          :spatial-keyframe
+  :name        "Spatial Keyframe"
+  :icon        "◇"
+  :category    :special
+  :evaluator   kf/eval-spatial-keyframe
+  :params      spatial-keyframe-params
+  :per-point?  true
+  :retrigger?  false
+  :description "Keyframe animation based on spatial position"})

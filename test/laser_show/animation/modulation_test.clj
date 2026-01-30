@@ -1,6 +1,7 @@
 (ns laser-show.animation.modulation-test
   "Tests for the parameter modulation system."
   (:require [clojure.test :refer [deftest testing is]]
+            [laser-show.animation.interpolation :as interp]
             [laser-show.animation.modulation :as mod]
             [laser-show.animation.keyframes :as kf]))
 
@@ -588,17 +589,17 @@
     (let [p1 {:scale 1.0 :hue 0.0 :amount 100.0}
           p2 {:scale 2.0 :hue 360.0 :amount 200.0}]
       ;; At t=0 should equal p1
-      (let [result (kf/interpolate-params p1 p2 0.0)]
+      (let [result (interp/interpolate-params p1 p2 0.0)]
         (is (approx= 1.0 (:scale result)))
         (is (approx= 0.0 (:hue result)))
         (is (approx= 100.0 (:amount result))))
       ;; At t=0.5 should be midpoint
-      (let [result (kf/interpolate-params p1 p2 0.5)]
+      (let [result (interp/interpolate-params p1 p2 0.5)]
         (is (approx= 1.5 (:scale result)))
         (is (approx= 180.0 (:hue result)))
         (is (approx= 150.0 (:amount result))))
       ;; At t=1 should equal p2
-      (let [result (kf/interpolate-params p1 p2 1.0)]
+      (let [result (interp/interpolate-params p1 p2 1.0)]
         (is (approx= 2.0 (:scale result)))
         (is (approx= 360.0 (:hue result)))
         (is (approx= 200.0 (:amount result))))))
@@ -606,7 +607,7 @@
   (testing "Non-numeric params use first value"
     (let [p1 {:mode :linear :name "first"}
           p2 {:mode :radial :name "second"}
-          result (kf/interpolate-params p1 p2 0.5)]
+          result (interp/interpolate-params p1 p2 0.5)]
       ;; Non-numeric values should use first value
       (is (= :linear (:mode result)))
       (is (= "first" (:name result)))))
@@ -614,7 +615,7 @@
   (testing "Missing keys in second map"
     (let [p1 {:scale 1.0 :extra 10.0}
           p2 {:scale 2.0}
-          result (kf/interpolate-params p1 p2 0.5)]
+          result (interp/interpolate-params p1 p2 0.5)]
       ;; :extra should interpolate with itself (use p1 value)
       (is (approx= 1.5 (:scale result)))
       (is (approx= 10.0 (:extra result))))))
@@ -733,3 +734,99 @@
       ;; At phase 0.75, we're halfway between 0.5 and 1.0, so t=0.5
       ;; Result = 2.0 + 0.5*(1.0-2.0) = 1.5
       (is (approx= 1.5 (:scale result) 0.1)))))
+
+
+;; Keyframe Interpolation Modes Tests
+
+
+(deftest eval-keyframe-interpolation-modes-test
+  (testing "Linear interpolation (default)"
+    ;; Linear interpolation: at t=0.5, result should be exactly 0.5 between values
+    (let [config {:keyframes [{:position 0.0 :params {:scale 0.0} :interpolation :linear}
+                              {:position 1.0 :params {:scale 1.0} :interpolation :linear}]
+                  :period 1.0
+                  :time-unit :beats}
+          bpm 120
+          ms-per-beat (/ 60000 bpm)
+          ctx (make-test-context (* 0.5 ms-per-beat) bpm)
+          result (kf/eval-keyframe config ctx)]
+      (is (approx= 0.5 (:scale result) 0.05))))
+  
+  (testing "Exp-decay interpolation (ease out - fast start)"
+    ;; Exp-decay: at t=0.5, result should be > 0.5 (fast start, slow end)
+    (let [config {:keyframes [{:position 0.0 :params {:scale 0.0} :interpolation :exp-decay}
+                              {:position 1.0 :params {:scale 1.0} :interpolation :linear}]
+                  :period 1.0
+                  :time-unit :beats}
+          bpm 120
+          ms-per-beat (/ 60000 bpm)
+          ctx (make-test-context (* 0.5 ms-per-beat) bpm)
+          result (kf/eval-keyframe config ctx)]
+      ;; With exp-decay (ease out), at t=0.5 we should be past 0.5 (fast start)
+      (is (> (:scale result) 0.6) "Exp-decay should be past midpoint at t=0.5")))
+  
+  (testing "Exp-grow interpolation (ease in - slow start)"
+    ;; Exp-grow: at t=0.5, result should be < 0.5 (slow start, fast end)
+    (let [config {:keyframes [{:position 0.0 :params {:scale 0.0} :interpolation :exp-grow}
+                              {:position 1.0 :params {:scale 1.0} :interpolation :linear}]
+                  :period 1.0
+                  :time-unit :beats}
+          bpm 120
+          ms-per-beat (/ 60000 bpm)
+          ctx (make-test-context (* 0.5 ms-per-beat) bpm)
+          result (kf/eval-keyframe config ctx)]
+      ;; With exp-grow (ease in), at t=0.5 we should be before 0.5 (slow start)
+      (is (< (:scale result) 0.4) "Exp-grow should be before midpoint at t=0.5")))
+  
+  (testing "Step interpolation (hold until next)"
+    ;; Step: should hold first value until t=1, then jump
+    (let [config {:keyframes [{:position 0.0 :params {:scale 0.0} :interpolation :step}
+                              {:position 1.0 :params {:scale 1.0} :interpolation :linear}]
+                  :period 1.0
+                  :time-unit :beats}
+          bpm 120
+          ms-per-beat (/ 60000 bpm)]
+      ;; At t=0.25, should still be at first value
+      (let [ctx (make-test-context (* 0.25 ms-per-beat) bpm)
+            result (kf/eval-keyframe config ctx)]
+        (is (approx= 0.0 (:scale result) 0.05) "Step should hold at first value"))
+      ;; At t=0.75, should still be at first value
+      (let [ctx (make-test-context (* 0.75 ms-per-beat) bpm)
+            result (kf/eval-keyframe config ctx)]
+        (is (approx= 0.0 (:scale result) 0.05) "Step should still hold at first value"))
+      ;; At t=0.99, should still be at first value (hasn't reached t=1 yet)
+      (let [ctx (make-test-context (* 0.99 ms-per-beat) bpm)
+            result (kf/eval-keyframe config ctx)]
+        (is (approx= 0.0 (:scale result) 0.1) "Step should hold until t=1")))))
+
+
+(deftest eval-keyframe-backward-compatibility-test
+  (testing "Keyframes without :interpolation key default to linear"
+    ;; Old config without :interpolation key
+    (let [config {:keyframes [{:position 0.0 :params {:scale 0.0}}  ; No :interpolation
+                              {:position 1.0 :params {:scale 1.0}}]
+                  :period 1.0
+                  :time-unit :beats}
+          bpm 120
+          ms-per-beat (/ 60000 bpm)
+          ctx (make-test-context (* 0.5 ms-per-beat) bpm)
+          result (kf/eval-keyframe config ctx)]
+      ;; Should behave as linear (default): at t=0.5, result = 0.5
+      (is (approx= 0.5 (:scale result) 0.05)))))
+
+
+(deftest eval-keyframe-wrap-around-interpolation-test
+  (testing "Interpolation mode applies correctly at period boundary (wrap-around)"
+    ;; The last keyframe's interpolation mode affects wrap to first keyframe
+    (let [config {:keyframes [{:position 0.0 :params {:scale 0.0} :interpolation :linear}
+                              {:position 0.5 :params {:scale 1.0} :interpolation :step}]  ; step from 0.5 to 0.0
+                  :period 1.0
+                  :loop-mode :loop
+                  :time-unit :beats}
+          bpm 120
+          ms-per-beat (/ 60000 bpm)]
+      ;; At phase 0.75 (between keyframe at 0.5 with step interpolation and wrap to 0.0)
+      ;; Step should hold the value from keyframe at 0.5 (scale=1.0)
+      (let [ctx (make-test-context (* 0.75 ms-per-beat) bpm)
+            result (kf/eval-keyframe config ctx)]
+        (is (approx= 1.0 (:scale result) 0.05) "Step interpolation should hold during wrap-around")))))
