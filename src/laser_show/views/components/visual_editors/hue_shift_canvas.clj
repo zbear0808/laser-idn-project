@@ -11,8 +11,6 @@
    Usage:
    {:fx/type hue-shift-canvas
     :fx/key [unique-id]
-    :width 280
-    :height 100
     :degrees 45.0
     :on-degrees-change {:event/type :chain/update-param ...}}"
   (:require [cljfx.api :as fx]
@@ -94,17 +92,18 @@
 
 ;; Main Canvas Component
 
+;; Hardcoded dimensions for hue shift strips
+(def ^:const hue-shift-strip-width 420)
+(def ^:const hue-shift-strip-height 100)
 
 (defn hue-shift-canvas
   "Two-strip hue transformation canvas for hue shift visualization.
    
    Props:
-   - :width - Canvas width in pixels (default 280)
-   - :height - Canvas height in pixels (default 100)
    - :degrees - Current shift in degrees (supports infinite looping)
    - :on-degrees-change - Event map to dispatch when degrees changes (nil = disabled/read-only)"
-  [{:keys [width height degrees on-degrees-change]
-    :or {width 280 height 100 degrees 0.0}}]
+  [{:keys [degrees on-degrees-change]
+   :or {degrees 0.0}}]
   
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created
@@ -124,7 +123,7 @@
            
            ;; Render function
            render! (fn []
-                     (draw-hue-shift-strips! canvas width height @degrees-atom))
+                     (draw-hue-shift-strips! canvas hue-shift-strip-width hue-shift-strip-height @degrees-atom))
            
            ;; Arrow key handler
            handle-arrow-key! (fn [^KeyEvent e]
@@ -161,7 +160,7 @@
             (when (and @dragging? on-degrees-change)
               (let [x (.getX e)
                     dx (- x (or @last-x x))
-                    w (double width)
+                    w (double hue-shift-strip-width)
                     ;; Convert pixel delta to degree delta
                     ;; Full width = 360 degrees
                     ;; Negate so dragging right moves the output colors right
@@ -216,5 +215,5 @@
                           "-fx-cursor: default;"))))
    
    :desc {:fx/type :canvas
-          :width width
-          :height height}})
+          :width hue-shift-strip-width
+          :height hue-shift-strip-height}})

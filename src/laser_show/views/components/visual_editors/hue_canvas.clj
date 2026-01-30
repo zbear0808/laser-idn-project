@@ -10,8 +10,6 @@
    Usage:
    {:fx/type hue-canvas
     :fx/key [unique-id]
-    :width 280
-    :height 60
     :hue 180.0
     :on-hue-change {:event/type :chain/update-param ...}}"
   (:require [cljfx.api :as fx]
@@ -107,16 +105,18 @@
 ;; Main Canvas Component
 
 
+;; Hardcoded dimensions for hue strip
+(def ^:const hue-strip-width 420)
+(def ^:const hue-strip-height 60)
+
 (defn hue-canvas
   "Horizontal gradient canvas for hue selection.
    
    Props:
-   - :width - Canvas width in pixels (default 280)
-   - :height - Canvas height in pixels (default 60)
    - :hue - Current hue in degrees (0 to 360)
    - :on-hue-change - Event map to dispatch when hue changes (nil = disabled/read-only)"
-  [{:keys [width height hue on-hue-change]
-    :or {width 280 height 60 hue 0.0}}]
+  [{:keys [hue on-hue-change]
+   :or {hue 0.0}}]
   
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created
@@ -135,11 +135,11 @@
            
            ;; Render function
            render! (fn []
-                     (draw-set-hue-gradient! canvas width height @hue-atom))
+                     (draw-set-hue-gradient! canvas hue-strip-width hue-strip-height @hue-atom))
            
            ;; Mouse to hue conversion
            mouse-to-hue (fn [mx]
-                          (let [w (double width)
+                          (let [w (double hue-strip-width)
                                 hue-val (-> (/ mx w)
                                            (* 360.0)
                                            (max 0.0)
@@ -232,5 +232,5 @@
                           "-fx-cursor: default;"))))
    
    :desc {:fx/type :canvas
-          :width width
-          :height height}})
+          :width hue-strip-width
+          :height hue-strip-height}})

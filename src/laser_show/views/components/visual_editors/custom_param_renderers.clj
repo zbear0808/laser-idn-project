@@ -614,16 +614,14 @@
    - :current-params - Current parameter values {:hue ...}
    - :event-template - Base event for on-drag (will add :param-key :value)
    - :fx-key - (optional) Unique key for canvas (should NOT include current value)
-   - :width, :height - (optional) Canvas dimensions, default 280x60
    - :hint-text - (optional) Hint text above canvas
    
    Modulator support (optional):
    - :enable-modulator? - Show modulator toggle button (default false)
    - :param-spec - Parameter spec for :hue (used by modulator)
    - :modulator-event-base - Base event for modulator operations"
-  [{:keys [current-params event-template fx-key width height hint-text
-           enable-modulator? param-spec modulator-event-base]
-    :or {width 280 height 60}}]
+  [{:keys [current-params event-template fx-key hint-text
+           enable-modulator? param-spec modulator-event-base]}]
   (let [params-map (or current-params {})
         ;; Get hue value - could be number or modulator config
         hue-value (get params-map :hue 0.0)
@@ -667,8 +665,6 @@
                  ;; Visual hue slider - always shown (disabled when modulated)
                  {:fx/type hue-canvas/hue-canvas
                   :fx/key canvas-key
-                  :width width
-                  :height height
                   :hue static-hue
                   :on-hue-change (when-not is-modulated? event-template)}
                  
@@ -699,16 +695,14 @@
    - :current-params - Current parameter values {:degrees ...}
    - :event-template - Base event for on-drag (will add :param-key :value)
    - :fx-key - (optional) Unique key for canvas (should NOT include current value)
-   - :width, :height - (optional) Canvas dimensions, default 280x100
    - :hint-text - (optional) Hint text above canvas
    
    Modulator support (optional):
    - :enable-modulator? - Show modulator toggle button (default false)
    - :param-spec - Parameter spec for :degrees (used by modulator)
    - :modulator-event-base - Base event for modulator operations"
-  [{:keys [current-params event-template fx-key width height hint-text
-           enable-modulator? param-spec modulator-event-base]
-    :or {width 280 height 100}}]
+  [{:keys [current-params event-template fx-key hint-text
+           enable-modulator? param-spec modulator-event-base]}]
   (let [params-map (or current-params {})
         ;; Get degrees value - could be number or modulator config
         degrees-value (get params-map :degrees 0.0)
@@ -744,8 +738,6 @@
                  ;; Visual hue shift strips - always shown (disabled when modulated)
                  {:fx/type hue-shift-canvas/hue-shift-canvas
                   :fx/key canvas-key
-                  :width width
-                  :height height
                   :degrees static-degrees
                   :on-degrees-change (when-not is-modulated? event-template)}
                  
