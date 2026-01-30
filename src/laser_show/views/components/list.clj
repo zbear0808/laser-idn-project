@@ -362,10 +362,10 @@
      :desc {:fx/type :h-box
             :style-class header-classes
             :children [{:fx/type :button
-                        ;; :text (if collapsed? "▶" "▼")
                         :graphic {:fx/type fa/icon
-                                          :name (if collapsed? :circle-chevron-right :circle-chevron-down)
-                                          :size 10}
+                                  :name (if collapsed? :circle-chevron-right :circle-chevron-down)
+                                  :size 14
+                                  :style-class "group-collapse-icon"}
                         :style-class "group-collapse-btn"
                         :on-action (fn [_] (dispatch-toggle-collapse! props group-id))}
 

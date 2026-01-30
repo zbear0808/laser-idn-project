@@ -190,13 +190,20 @@
        {:-fx-background-color "transparent"
         :-fx-text-fill text-muted
         :-fx-font-size 10
-        :-fx-padding ["0px" "0px"]
-        :-fx-min-width 8
-        :-fx-background-radius 3
+        :-fx-padding "0px"
+        :-fx-min-width 14
+        :-fx-min-height 14
+        
+        ;; Icon color in default state
+        " .group-collapse-icon"
+        {:-fx-text-fill text-muted}
         
         ":hover"
         {:-fx-text-fill text-primary
-         :-fx-background-color bg-interactive}}
+         
+         ;; Icon color on button hover
+         " .group-collapse-icon"
+         {:-fx-text-fill text-primary}}}
        
        ".group-name-label"
        {:-fx-font-size 12
