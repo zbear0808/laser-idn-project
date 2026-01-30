@@ -99,7 +99,7 @@
                            Will receive :item-id (effect-id) and :item (effect-def)
    - :include-zone? - Include Zone category (default: false)
    - :pref-height - Height of bank (default: 140)"
-  [{:keys [active-tab on-tab-change item-event-template include-zone? pref-height]}]
+  [{:keys [active-tab on-tab-change item-event-template include-zone?]}]
   (let [effects-map (get-effects-by-category)
         tabs (if include-zone?
                effect-bank-tab-definitions-with-zone
@@ -115,5 +115,4 @@
      :item-name-key :name
      :item-id-key :id
      :button-style-class "bank-item-btn"
-     :empty-text "No effects"
-     :pref-height (or pref-height 80)}))
+     :empty-text "No effects"}))

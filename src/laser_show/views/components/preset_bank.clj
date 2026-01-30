@@ -57,7 +57,6 @@
      :item-id-key :id
      :button-style-class "bank-item-btn"
      :empty-text "No presets in this category"
-     :pref-height 150
      :hgap 6
      :vgap 6
      :padding 10}))

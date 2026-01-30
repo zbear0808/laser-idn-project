@@ -92,7 +92,7 @@
         display-items (or items
                          (get items-by-category active)
                          [])
-        h (or pref-height 150)
+        h 80
         hg (or hgap 4)
         vg (or vgap 4)
         pad (or padding 8)

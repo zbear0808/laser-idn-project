@@ -194,14 +194,13 @@
         :-fx-padding ["3px" "10px"]
         :-fx-background-color "#404040"
         :-fx-text-fill "#B0B0B0"
-        :-fx-background-radius 3
         :-fx-cursor "hand"}
        
        ;; Modulator toggle button (active) - highlighted when modulation is enabled
+       ;; Uses accent-success (green) to match numeric mode's modulator-toggle-active
        ".visual-editor-modulator-active"
        {:-fx-font-size 10
         :-fx-padding ["3px" "10px"]
-        :-fx-background-color selection-bg
+        :-fx-background-color (:accent-success theme/semantic-colors)
         :-fx-text-fill "white"
-        :-fx-background-radius 3
         :-fx-cursor "hand"}})))
