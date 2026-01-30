@@ -13,6 +13,9 @@
         cljfx/cljfx {:mvn/version "1.10.6"}
         cljfx/css {:mvn/version "1.1.0"}
 
+        ;; FontAwesome 7 icons
+        org.clojars.zubad/clj-font-awesome {:mvn/version "0.0.7"}
+
         overtone/midi-clj {:mvn/version "0.5.0"}
         overtone/osc-clj {:mvn/version "0.9.0"}
 

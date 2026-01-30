@@ -131,6 +131,28 @@
 ;; Main Toolbar
 
 
+(defn fa-icon-test
+  "Test component for clj-font-awesome icons."
+  [_]
+  {:fx/type :h-box
+   :spacing 8
+   :alignment :center-left
+   :children [{:fx/type icons/fa-icon
+               :name :gear
+               :style :solid
+               :size 16
+               :color "#cccccc"}
+              {:fx/type icons/fa-icon
+               :name :heart
+               :style :solid
+               :size 16
+               :color "#ff6b6b"}
+              {:fx/type icons/fa-icon
+               :name :star
+               :style :solid
+               :size 16
+               :color "#ffd93d"}]})
+
 (defn toolbar
   "Main toolbar component."
   [{:keys [fx/context]}]
@@ -140,5 +162,7 @@
    :children [{:fx/type transport-controls}
               {:fx/type :separator :orientation :vertical}
               {:fx/type bpm-controls}
+              {:fx/type :separator :orientation :vertical}
+              {:fx/type fa-icon-test}  ;; Test FA6 icons
               {:fx/type :region :h-box/hgrow :always} ;; Spacer
               {:fx/type connection-status}]})
