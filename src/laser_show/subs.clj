@@ -595,6 +595,39 @@
   (boolean (fx/sub-val context get-in [:backend :input :osc :learn-mode])))
 
 
+;; Level 2: Link Subscriptions
+
+
+(defn link-connected?
+  "Check if Ableton Link is connected.
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context ex/link-connected?))
+
+(defn link-sync-enabled?
+  "Check if Link BPM sync is enabled.
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context ex/link-sync-enabled?))
+
+(defn link-bpm
+  "Get the current BPM from Ableton Link (if connected).
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context ex/link-bpm))
+
+(defn link-status
+  "Get complete Link status information.
+   Depends on: backend domain
+   
+   Returns map with:
+   - :connected? - Whether Link is connected
+   - :sync-enabled? - Whether BPM sync is enabled
+   - :link-bpm - Current Link BPM (or nil)"
+  [context]
+  (fx/sub-val context ex/link-data))
+
+
 ;; Stylesheet Subscriptions (CSS Hot-Reload)
 
 

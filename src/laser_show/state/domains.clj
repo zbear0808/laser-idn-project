@@ -375,7 +375,11 @@
    :logging {:default {:enabled? false
                        :file nil
                        :path default-log-path}
-             :doc "Packet logging state"}})
+             :doc "Packet logging state"}
+   :link {:default {:connected? false
+                    :sync-enabled? false
+                    :link-bpm nil}
+          :doc "Ableton Link connection state"}})
 
 
 ;; State Builder

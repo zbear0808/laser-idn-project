@@ -3,8 +3,11 @@
    
    Handles:
    - BPM settings and tap tempo
-   - Transport controls (play/stop/retrigger)"
-  (:require [laser-show.events.helpers :as h]))
+   - Transport controls (play/stop/retrigger)
+   - External BPM sync (Ableton Link)"
+  (:require [laser-show.events.helpers :as h]
+            [laser-show.input.link :as link]
+            [laser-show.state.core :as state]))
 
 
 ;; Timing Events
@@ -68,6 +71,44 @@
                 (assoc-in [:playback :last-frame-time] 0))}))
 
 
+;; Link Events
+
+
+(defn- handle-timing-toggle-link-sync
+  "Toggle Ableton Link BPM sync on/off."
+  [{:keys [state dispatch-fn]}]
+  (let [current-sync (get-in state [:backend :link :sync-enabled?] false)
+        link-state (get-in state [:backend :link])
+        new-link-state (if current-sync
+                         (link/disable-sync link-state)
+                         (link/enable-sync link-state))]
+    {:state (assoc-in state [:backend :link] new-link-state)}))
+
+(defn- handle-timing-link-connected
+  "Update Link connection status."
+  [{:keys [state connected?]}]
+  {:state (assoc-in state [:backend :link :connected?] connected?)})
+
+(defn- handle-timing-link-bpm-changed
+  "Receive BPM update from Link network."
+  [{:keys [state bpm]}]
+  {:state (assoc-in state [:backend :link :link-bpm] bpm)})
+
+(defn- handle-timing-sync-to-downbeat
+  "Synchronize playback to Link's next downbeat.
+   Uses phase-offset-target mechanism for smooth correction."
+  [{:keys [state dispatch-fn]}]
+  (let [accumulated-beats (get-in state [:playback :accumulated-beats] 0.0)]
+    (link/sync-to-downbeat! dispatch-fn accumulated-beats)
+    {:state state}))
+
+(defn- handle-timing-set-phase-offset-target
+  "Set the phase offset target for beat alignment.
+   Used by external sync and tap-tempo resync."
+  [{:keys [state offset]}]
+  {:state (assoc-in state [:playback :phase-offset-target] offset)})
+
+
 ;; Public API
 
 
@@ -83,6 +124,13 @@
     :transport/play (handle-transport-play event)
     :transport/stop (handle-transport-stop event)
     :transport/retrigger (handle-transport-retrigger event)
+    
+    ;; Link sync events
+    :timing/toggle-link-sync (handle-timing-toggle-link-sync event)
+    :timing/link-connected (handle-timing-link-connected event)
+    :timing/link-bpm-changed (handle-timing-link-bpm-changed event)
+    :timing/sync-to-downbeat (handle-timing-sync-to-downbeat event)
+    :timing/set-phase-offset-target (handle-timing-set-phase-offset-target event)
     
     ;; Unknown event in this domain
     {}))

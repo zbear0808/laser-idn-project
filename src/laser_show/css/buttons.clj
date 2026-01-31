@@ -84,9 +84,35 @@
         
         ":hover"
         {:-fx-background-color accent-success-hover}}
+      
+      
+      ;; Link Sync Button States
+      
+      
+      ".btn-link-active"
+      {:-fx-background-color accent-success
+       :-fx-text-fill text-primary
+       :-fx-font-size 11
+       :-fx-padding ["2px" "8px"]
+       :-fx-cursor "hand"
+       :-fx-background-radius radius-standard
        
+       ":hover"
+       {:-fx-background-color accent-success-hover}}
+      
+      ".btn-link-connected"
+      {:-fx-background-color "#2E7D32"
+       :-fx-text-fill text-primary
+       :-fx-font-size 11
+       :-fx-padding ["2px" "8px"]
+       :-fx-cursor "hand"
+       :-fx-background-radius radius-standard
        
-       ;; Tab Buttons (VS Code style - flush tabs with right/bottom border)
+       ":hover"
+       {:-fx-background-color accent-success}}
+      
+      
+      ;; Tab Buttons (VS Code style - flush tabs with right/bottom border)
        
        
        ".tab-btn"

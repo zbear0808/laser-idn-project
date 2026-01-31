@@ -20,6 +20,7 @@
             [laser-show.events.core :as events]
             [laser-show.views.root :as root]
             [laser-show.services.frame-service :as frame-service]
+            [laser-show.input.link :as link]
             [laser-show.css.title-bar :as menus]
             [laser-show.dev-config :as dev-config]
             [clojure.pprint :as pprint])
@@ -125,6 +126,13 @@
     (reset! *app app)
     ;; Wire dispatch! to use app's handler (wrapped with async agent)
     (events/set-dispatch-fn! (:handler app)))
+
+  ;; Start Link service (will auto-connect if configured)
+  (let [link-state (get-in (state/get-raw-state) [:backend :link])
+        get-link-state-fn #(get-in (state/get-raw-state) [:backend :link])
+        new-link-state (link/start-link! link-state events/dispatch! get-link-state-fn)]
+    (state/assoc-in-state! [:backend :link] new-link-state)
+    (log/info "Link service initialized"))
 
   ;; Auto-scan for IDN devices on startup
   (log/info "Starting automatic device discovery...")

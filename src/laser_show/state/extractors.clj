@@ -96,6 +96,22 @@
   (:streaming (backend state)))
 
 
+;; Link Extractors
+
+
+(defn link-data [state]
+  (:link (backend state)))
+
+(defn link-connected? [state]
+  (:connected? (link-data state)))
+
+(defn link-sync-enabled? [state]
+  (:sync-enabled? (link-data state)))
+
+(defn link-bpm [state]
+  (:link-bpm (link-data state)))
+
+
 ;; Project Extractors
 
 (defn project [state]

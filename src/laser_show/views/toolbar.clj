@@ -112,6 +112,34 @@
               {:fx/type tap-tempo-button}]})
 
 
+;; Link Sync Controls
+
+
+(defn link-sync-button
+ "Ableton Link sync button with status indicator."
+ [{:keys [fx/context]}]
+ (let [{:keys [connected? sync-enabled? link-bpm]} (fx/sub-ctx context subs/link-status)
+       app-bpm (fx/sub-ctx context subs/bpm)]
+   {:fx/type :button
+    :text "LINK"
+    :graphic {:fx/type fa/icon
+              :name :link
+              :size 12}
+    :style-class (cond
+                   (and connected? sync-enabled?) "btn-link-active"
+                   connected? "btn-link-connected"
+                   :else "btn-sm")
+    :tooltip {:fx/type :tooltip
+              :text (cond
+                      (and connected? sync-enabled?)
+                      (format "Syncing BPM from Ableton Link (%.1f BPM)" (or link-bpm 0.0))
+                      
+                      connected?
+                      (format "Connected to Link (%.1f BPM)\nClick to enable sync" (or link-bpm 0.0))
+                      
+                      :else
+                      "Not connected to Ableton Link")}
+    :on-action {:event/type :timing/toggle-link-sync}}))
 
 
 (defn connection-indicator
@@ -169,6 +197,7 @@
    :children [{:fx/type transport-controls}
               {:fx/type :separator :orientation :vertical}
               {:fx/type bpm-controls}
+              {:fx/type link-sync-button}
               {:fx/type :separator :orientation :vertical}
               {:fx/type :region :h-box/hgrow :always} ;; Spacer
               {:fx/type connection-status}]})
