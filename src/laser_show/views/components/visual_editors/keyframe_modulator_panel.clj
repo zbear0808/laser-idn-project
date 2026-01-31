@@ -40,26 +40,6 @@
   [position]
   (format "%.0f%%" (* 100 position)))
 
-(defn- spatial-keyframe-modulator?
-  "Returns true if the modulator is a spatial keyframe type."
-  [modulator-config]
-  (= (:type modulator-config) :spatial-keyframe))
-
-(def ^:private axis-options
-  "Available axis options for spatial keyframes."
-  [:point-index :pos-x :pos-y :radial :angle])
-
-(defn- axis-display-name
-  "Convert axis keyword to user-friendly display name."
-  [axis]
-  (case axis
-    :point-index "Point Index"
-    :pos-x "Position X"
-    :pos-y "Position Y"
-    :radial "Radial"
-    :angle "Angle"
-    (name axis)))
-
 ;; Driver options for unified keyframe system
 (def driver-options
   "Available driver types for keyframe modulation."
@@ -342,99 +322,6 @@
                                                       {:text (name item)})}
                            :on-value-changed (assoc on-settings-event :setting-key :loop-mode)}]}]})
 
-(defn- spatial-settings-row
-  "Settings row for spatial keyframe modulator.
-   Shows axis dropdown and conditional normalize checkbox."
-  [{:keys [axis normalize? on-axis-change on-normalize-change enabled?]}]
-  {:fx/type :h-box
-   :alignment :center-left
-   :spacing 15
-   :style-class "keyframe-panel-settings"
-   :disable (not enabled?)
-   :children (filterv some?
-              [;; Axis selector
-               {:fx/type :h-box
-                :alignment :center-left
-                :spacing 5
-                :children [{:fx/type :label
-                            :text "Axis:"}
-                           {:fx/type :combo-box
-                            :pref-width 120
-                            :value (or axis :point-index)
-                            :items axis-options
-                            :button-cell (fn [item]
-                                           {:text (axis-display-name item)})
-                            :cell-factory {:fx/cell-type :list-cell
-                                           :describe (fn [item]
-                                                       {:text (axis-display-name item)})}
-                            :on-value-changed on-axis-change}]}
-               
-               ;; Normalize checkbox - only visible when axis is :radial
-               (when (= axis :radial)
-                 {:fx/type :check-box
-                  :text "Normalize"
-                  :selected (boolean normalize?)
-                  :on-selected-changed on-normalize-change})])})
-
-(defn- spatial-value-row
-  "Row for editing selected spatial keyframe value and interpolation.
-   Shows single value spinner and interpolation dropdown."
-  [{:keys [keyframes selected-idx on-value-change on-interpolation-change enabled?]}]
-  (let [selected-kf (when (and selected-idx
-                               (>= selected-idx 0)
-                               (< selected-idx (count keyframes)))
-                      (nth keyframes selected-idx))]
-    {:fx/type :h-box
-     :alignment :center-left
-     :spacing 15
-     :style-class "keyframe-panel-actions"
-     :disable (not enabled?)
-     :children (if selected-kf
-                 [;; Selected keyframe info
-                  {:fx/type :label
-                   :text (str "Keyframe " (inc selected-idx)
-                              " @ " (format-position (:position selected-kf)))
-                   :style-class "label-secondary"}
-                  
-                  ;; Value spinner
-                  {:fx/type :h-box
-                   :alignment :center-left
-                   :spacing 5
-                   :children [{:fx/type :label
-                               :text "Value:"}
-                              {:fx/type :spinner
-                               :pref-width 90
-                               :editable true
-                               :value-factory {:fx/type :double-spinner-value-factory
-                                               :min -1000.0
-                                               :max 1000.0
-                                               :amount-to-step-by 0.1
-                                               :value (or (:value selected-kf) 0.0)}
-                               :on-value-changed (assoc on-value-change
-                                                        :keyframe-idx selected-idx)}]}
-                  
-                  ;; Interpolation selector
-                  {:fx/type :h-box
-                   :alignment :center-left
-                   :spacing 5
-                   :children [{:fx/type :label
-                               :text "Interp:"}
-                              {:fx/type :combo-box
-                               :pref-width 100
-                               :value (or (:interpolation selected-kf) :linear)
-                               :items interpolation-modes
-                               :button-cell (fn [item]
-                                              {:text (interpolation-display-name item)})
-                               :cell-factory {:fx/cell-type :list-cell
-                                              :describe (fn [item]
-                                                          {:text (interpolation-display-name item)})}
-                               :on-value-changed (assoc on-interpolation-change
-                                                        :keyframe-idx selected-idx)}]}]
-                 ;; No keyframe selected
-                 [{:fx/type :label
-                   :text "Click timeline to select"
-                   :style-class "label-secondary"}])}))
-
 (defn- timeline-row
   "Row containing the timeline canvas."
   [{:keys [keyframes selected-idx current-phase
@@ -508,11 +395,7 @@
    - :param-key - Parameter key (e.g. :hue)
    - :current-phase - Current playback position for preview (optional, time-based only)"
   [{:keys [keyframe-modulator domain entity-key effect-path param-key current-phase]}]
-  (let [;; Support both old :type and new :driver system
-        spatial-legacy? (spatial-keyframe-modulator? keyframe-modulator)
-        driver (or (:driver keyframe-modulator)
-                   (when spatial-legacy? (:axis keyframe-modulator :point-index))
-                   :time)
+  (let [driver (or (:driver keyframe-modulator) :time)
         spatial? (spatial-driver? driver)
         enabled? (:enabled? keyframe-modulator false)
         selected-idx (:selected-keyframe keyframe-modulator 0)
