@@ -1,5 +1,5 @@
 (ns laser-show.views.toolbar
-  "Toolbar component with transport controls, BPM, and connection status."
+  "Toolbar component with transport controls, BPM, beat indicator, and connection status."
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [clj-font-awesome.core :as fa]))
@@ -76,13 +76,39 @@
    :tooltip {:fx/type :tooltip :text "Tap to set BPM"}
    :on-action {:event/type :timing/tap-tempo}})
 
+(defn beat-square
+  "Individual beat square in the indicator."
+  [{:keys [current-beat? downbeat?]}]
+  {:fx/type :region
+   :pref-width 12
+   :pref-height 12
+   :style-class (cond-> ["beat-square"]
+                  current-beat? (conj "beat-active")
+                  downbeat? (conj "beat-downbeat"))})
+
+(defn beat-indicator
+  "4-square beat indicator showing current beat position.
+   Uses effective-beats which smoothly adjusts during tap tempo resync."
+  [{:keys [fx/context]}]
+  (let [{:keys [beat-index]} (fx/sub-ctx context subs/beat-position)]
+    {:fx/type :h-box
+     :spacing 3
+     :alignment :center
+     :style-class "beat-indicator"
+     :children (mapv (fn [i]
+                       {:fx/type beat-square
+                        :current-beat? (= i beat-index)
+                        :downbeat? (= i 0)})
+                     (range 4))}))
+
 (defn bpm-controls
-  "BPM display and tap tempo."
+  "BPM display, beat indicator, and tap tempo."
   [{:keys [fx/context]}]
   {:fx/type :h-box
    :spacing 8
    :alignment :center-left
    :children [{:fx/type bpm-display}
+              {:fx/type beat-indicator}
               {:fx/type tap-tempo-button}]})
 
 

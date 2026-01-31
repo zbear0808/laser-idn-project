@@ -14,9 +14,9 @@
 (def layout
   "Layout and container styles for the application."
   (css/register ::layout
-    (let [{:keys [bg-primary bg-surface bg-elevated
-                  text-primary border-subtle
-                  accent-success accent-danger accent-warning]} theme/semantic-colors]
+    (let [{:keys [bg-primary bg-surface bg-elevated bg-subtle
+                  text-primary text-muted border-subtle border-default
+                  accent-info accent-success accent-danger accent-warning]} theme/semantic-colors]
       
       {;; Toolbar
        ".toolbar"
@@ -60,6 +60,23 @@
        
        ".status-indicator-connecting"
        {:-fx-background-color accent-warning}
+       
+       ;; Beat Indicator
+       ".beat-indicator"
+       {:-fx-padding ["0" "4px"]}
+       
+       ".beat-square"
+       {:-fx-background-color bg-subtle
+        :-fx-background-radius "2px"
+        :-fx-border-color border-default
+        :-fx-border-radius "2px"
+        :-fx-border-width "1px"}
+       
+       ".beat-square.beat-active"
+       {:-fx-background-color text-muted}
+       
+       ".beat-square.beat-active.beat-downbeat"
+       {:-fx-background-color accent-info}
        
        ".container-primary"
        {:-fx-background-color bg-primary}

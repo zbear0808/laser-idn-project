@@ -51,6 +51,22 @@
 (defn active-cell [context]
   (fx/sub-val context ex/active-cell))
 
+(defn beat-position
+  "Get the current beat position within a 4-beat bar.
+   Returns a map with:
+   - :beat-index - Current beat, 0-3, where 0 is downbeat
+   - :beat-phase - Progress within current beat, 0.0-1.0
+   
+   Uses effective-beats which includes phase-offset, so tap tempo
+   resync is automatically reflected in the beat position."
+  [context]
+  (let [effective-beats (fx/sub-val context ex/effective-beats)
+        beat-in-bar (mod effective-beats 4.0)
+        beat-index (int (Math/floor beat-in-bar))
+        beat-phase (- beat-in-bar beat-index)]
+    {:beat-index beat-index
+     :beat-phase beat-phase}))
+
 ;; --- Grid ---
 
 

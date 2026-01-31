@@ -44,6 +44,15 @@
 (defn active-cell [state]
   (:active-cell (playback state)))
 
+(defn accumulated-beats [state]
+  (or (:accumulated-beats (playback state)) 0.0))
+
+(defn phase-offset [state]
+  (or (:phase-offset (playback state)) 0.0))
+
+(defn effective-beats [state]
+  (+ (accumulated-beats state) (phase-offset state)))
+
 (defn grid [state]
   (:grid state))
 
