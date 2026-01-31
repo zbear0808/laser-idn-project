@@ -226,13 +226,3 @@
    Returns: Compiler function or nil"
   [mod-type]
   (get @!compilers mod-type))
-
-(defn has-compiler?
-  "Check if a modulator type has a registered compiler.
-   
-   Parameters:
-   - mod-type: Keyword modulator type
-   
-   Returns: Boolean"
-  [mod-type]
-  (contains? @!compilers mod-type))

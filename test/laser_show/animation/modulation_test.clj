@@ -493,31 +493,6 @@
         (is (= final-val held-val) "Should hold at exact final position")))))
 
 
-;; Keyframe Modulator Tests
-
-
-(deftest keyframe-modulator?-test
-  (testing "keyframe-modulator? correctly identifies keyframe configs"
-    ;; Valid keyframe modulator config
-    (is (kf/keyframe-modulator?
-          {:enabled? true
-           :period 1.0
-           :keyframes [{:position 0.0 :params {:scale 1.0}}
-                       {:position 1.0 :params {:scale 2.0}}]}))
-    ;; Also valid without enabled? key (just needs :keyframes vector)
-    (is (kf/keyframe-modulator?
-          {:period 1.0
-           :keyframes [{:position 0.0 :params {:scale 1.0}}]}))
-    ;; Empty keyframes is still a keyframe modulator
-    (is (kf/keyframe-modulator? {:keyframes []}))
-    ;; Not a keyframe modulator - regular modulator config
-    (is (not (kf/keyframe-modulator? {:type :sine :min 0 :max 1})))
-    ;; Not a keyframe modulator - no keyframes key
-    (is (not (kf/keyframe-modulator? {:enabled? true :period 1.0})))
-    ;; Not a keyframe modulator - keyframes is not a vector
-    (is (not (kf/keyframe-modulator? {:keyframes {:pos 0.5 :params {}}})))
-    ;; Not a keyframe modulator - plain number
-    (is (not (kf/keyframe-modulator? 1.5)))))
 
 (deftest find-surrounding-keyframes-test
   (testing "Finding surrounding keyframes"

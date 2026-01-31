@@ -215,22 +215,7 @@
 ;; Per-Point Modulator Compilation
 
 
-(defn compilable-per-point?
-  "Check if a modulator config can be compiled to optimized form.
-   Returns true if:
-   - Config is a per-point modulator (per-point? = true)
-   - Config is active (:active? defaults to true)
-   - A compiler is registered for this modulator type
-   
-   Parameters:
-   - config: Modulator config map
-   
-   Returns: Boolean"
-  [config]
-  (and (modulator-config? config)
-       (get config :active? true)
-       (reg/per-point? (:type config))
-       (reg/has-compiler? (:type config))))
+
 
 (defn compile-per-point-modulator
   "Compile a per-point modulator config into an optimized function.

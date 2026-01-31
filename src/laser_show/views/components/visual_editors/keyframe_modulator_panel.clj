@@ -595,7 +595,3 @@
                                  :keyframes keyframes
                                  :selected-idx selected-idx
                                  :enabled? enabled?}])})])}))
-
-
-;; Legacy support - keyframe-modulator-panel-unified is an alias for keyframe-modulator-panel
-(def keyframe-modulator-panel-unified keyframe-modulator-panel)

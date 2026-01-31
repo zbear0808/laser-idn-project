@@ -44,20 +44,11 @@
 (defn active-cell [state]
   (:active-cell (playback state)))
 
-
-
 (defn grid [state]
   (:grid state))
 
-;; REMOVED: grid-cells function
-;; All cue content is now stored in [:chains :cue-chains [col row] :items]
-;; Access cue chains directly: (get-in state [:chains :cue-chains])
-
 (defn grid-size [state]
   (:size (grid state)))
-
-(defn selected-cell [state]
-  (:selected-cell (grid state)))
 
 
 (defn ui [state]
