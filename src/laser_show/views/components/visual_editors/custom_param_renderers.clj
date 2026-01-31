@@ -27,7 +27,6 @@
             [laser-show.views.components.visual-editors.curve-canvas :as curve-canvas]
             [laser-show.views.components.visual-editors.hue-canvas :as hue-canvas]
             [laser-show.views.components.visual-editors.hue-shift-canvas :as hue-shift-canvas]
-            [laser-show.views.components.visual-editors.keyframe-modulator-panel :as keyframe-panel]
             [laser-show.views.components.tabs :as tabs]
             [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.views.components.modulator-param-control :as mod-param]

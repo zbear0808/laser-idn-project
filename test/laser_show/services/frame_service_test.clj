@@ -13,8 +13,9 @@
 ;; Test Fixtures
 
 
-(defn setup-test-state [f]
+(defn setup-test-state
   "Set up test state before each test"
+  [f]
   (state/init-state! (domains/build-initial-state))
   (f))
 

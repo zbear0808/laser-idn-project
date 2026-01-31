@@ -21,7 +21,7 @@
    - :id        - Keyword identifier (e.g., :sine, :decay)
    - :name      - Display name (e.g., \"Sine\", \"Decay\")
    - :icon      - Icon string/emoji for UI
-   - :category  - Category keyword (:wave, :one-shot, :special, :external, :internal)
+   - :category  - Category keyword (:wave, :special, :external, :internal)
    - :evaluator - Function (fn [config context] -> value) for evaluation
    - :params    - Vector of parameter definition maps
    - :per-point?   - Boolean, true if requires per-point context (default false)
@@ -46,12 +46,10 @@
   "Set of valid modulator categories.
    
    - :wave      - Wave-based oscillators (sine, triangle, sawtooth, square, random)
-   - :one-shot  - One-shot envelopes (decay)
    - :special   - Per-point/position based (pos-x, pos-y, radial, point-index)
    - :external  - External input (midi, osc) - not exposed in UI
    - :internal  - Hz-based variants and aliases - not exposed in UI"
   #{:wave
-    :one-shot
     :special
     :external
     :internal})

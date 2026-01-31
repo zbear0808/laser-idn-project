@@ -8,7 +8,8 @@
    
    For modulator type definitions, parameter specs, and evaluation,
    use laser-show.animation.modulator-registry instead."
-  (:require [laser-show.animation.modulator-registry :as reg]))
+  (:require [laser-show.animation.modulator-registry :as reg]
+            [laser-show.common.util :as u]))
 
 
 (defn build-default-modulator
@@ -23,14 +24,14 @@
    Includes :active? true by default."
   [mod-type param-spec]
   (let [base-params (reg/get-params mod-type)
-        defaults (into {:type mod-type
-                        :active? true}  ; Add active flag by default
-                       (mapv (fn [p] [(:key p) (:default p)])
-                             base-params))]
+        defaults (u/map-into {:type mod-type
+                              :active? true}
+                             :key :default
+                             base-params)]
     ;; Override min/max with param-spec bounds if they have reasonable values
     (cond-> defaults
       (and (:min param-spec) (not= (:min param-spec) -10.0))
       (assoc :min (:min param-spec))
-      
+
       (and (:max param-spec) (not= (:max param-spec) 10.0))
       (assoc :max (:max param-spec)))))

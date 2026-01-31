@@ -10,7 +10,6 @@
    
    Load this namespace to populate the modulator registry."
   (:require
-   [laser-show.animation.keyframes :as kf]
    [laser-show.animation.modulator-registry :as reg]
    [laser-show.animation.modulator-evaluators :as eval]))
 

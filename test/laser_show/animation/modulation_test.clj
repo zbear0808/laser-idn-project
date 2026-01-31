@@ -799,9 +799,9 @@
                   :loop-mode :loop
                   :time-unit :beats}
           bpm 120
-          ms-per-beat (/ 60000 bpm)]
+          ms-per-beat (/ 60000 bpm)
+          ctx (make-test-context (* 0.75 ms-per-beat) bpm)
+          result (kf/eval-keyframe config ctx)]
       ;; At phase 0.75 (between keyframe at 0.5 with step interpolation and wrap to 0.0)
       ;; Step should hold the value from keyframe at 0.5 (scale=1.0)
-      (let [ctx (make-test-context (* 0.75 ms-per-beat) bpm)
-            result (kf/eval-keyframe config ctx)]
-        (is (approx= 1.0 (:scale result) 0.05) "Step interpolation should hold during wrap-around")))))
+      (is (approx= 1.0 (:scale result) 0.05) "Step interpolation should hold during wrap-around"))))

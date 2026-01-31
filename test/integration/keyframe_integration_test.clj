@@ -12,14 +12,7 @@
    [laser-show.animation.effects :as effects]
    [laser-show.animation.interpolation :as interp]
    [laser-show.animation.keyframes :as kf]
-   [laser-show.animation.modulation :as mod]
-   [laser-show.animation.modulator-registry :as reg]
-   [laser-show.state.serialization :as ser]))
-
-
-;; =============================================================================
-;; 6.1 Effect Chain Integration Verification
-;; =============================================================================
+   [laser-show.animation.modulation :as mod]))
 
 
 (deftest make-param-resolver-static-value-test
@@ -37,13 +30,14 @@
     (let [config {:type :sine :min 0.0 :max 100.0 :period 1.0 :active? true}
           params {:amount config}
           ctx {:point-count 10 :timing-ctx {}}
-          resolver (effects/make-param-resolver :amount params 0 120 ctx)]
+          resolver (effects/make-param-resolver :amount params 0 120 ctx)
+          v0 (resolver 0.0 0.0 0)
+          v5 (resolver 0.5 0.5 5)
+          v9 (resolver 0.9 0.9 9)]
       ;; All points should get the same value (resolved once)
-      (let [v0 (resolver 0.0 0.0 0)
-            v5 (resolver 0.5 0.5 5)
-            v9 (resolver 0.9 0.9 9)]
-        (is (= v0 v5))
-        (is (= v5 v9))))))
+
+      (is (= v0 v5))
+      (is (= v5 v9)))))
 
 
 ;; =============================================================================
@@ -212,29 +206,30 @@
     (let [base-config {:keyframes [{:position 0.0 :params {:value 0.0} :interpolation :linear}
                                    {:position 1.0 :params {:value 1.0}}]}
           ;; Point at x=0.5, y=-0.5, index 1 of 4
-          context {:x 0.5 :y -0.5 :point-index 1 :point-count 4 :time-ms 0}]
+          context {:x 0.5 :y -0.5 :point-index 1 :point-count 4 :time-ms 0}
+          result-x (kf/eval-keyframe (assoc base-config :driver :pos-x) context)
+          result-y (kf/eval-keyframe (assoc base-config :driver :pos-y) context)
+          result-idx (kf/eval-keyframe (assoc base-config :driver :point-index) context)
+          
+          value-x (double (or (:value result-x) 0.0))
+          value-y (double (or (:value result-y) 0.0))
+          value-idx (double (or (:value result-idx) 0.0))]
       ;; pos-x: x=0.5 maps to position (0.5+1)/2 = 0.75
       ;; pos-y: y=-0.5 maps to position (-0.5+1)/2 = 0.25
       ;; point-index: 1/3 ≈ 0.333
-      (let [result-x (kf/eval-keyframe (assoc base-config :driver :pos-x) context)
-            result-y (kf/eval-keyframe (assoc base-config :driver :pos-y) context)
-            result-idx (kf/eval-keyframe (assoc base-config :driver :point-index) context)
-            
-            value-x (double (or (:value result-x) 0.0))
-            value-y (double (or (:value result-y) 0.0))
-            value-idx (double (or (:value result-idx) 0.0))]
-        ;; All values should be different since drivers use different inputs
-        (is (not= value-x value-y) "pos-x and pos-y should produce different values")
-        (is (not= value-x value-idx) "pos-x and point-index should produce different values")
-        (is (not= value-y value-idx) "pos-y and point-index should produce different values")
-        
-        ;; Verify expected ranges based on position calculation
-        ;; pos-x: position = 0.75, so value ≈ 0.75
-        (is (< (Math/abs (- 0.75 value-x)) 0.1) "pos-x value should be near 0.75")
-        ;; pos-y: position = 0.25, so value ≈ 0.25
-        (is (< (Math/abs (- 0.25 value-y)) 0.1) "pos-y value should be near 0.25")
-        ;; point-index: position = 1/3 ≈ 0.333, so value ≈ 0.333
-        (is (< (Math/abs (- 0.333 value-idx)) 0.1) "point-index value should be near 0.333")))))
+      
+      ;; All values should be different since drivers use different inputs
+      (is (not= value-x value-y) "pos-x and pos-y should produce different values")
+      (is (not= value-x value-idx) "pos-x and point-index should produce different values")
+      (is (not= value-y value-idx) "pos-y and point-index should produce different values")
+      
+      ;; Verify expected ranges based on position calculation
+      ;; pos-x: position = 0.75, so value ≈ 0.75
+      (is (< (Math/abs (- 0.75 value-x)) 0.1) "pos-x value should be near 0.75")
+      ;; pos-y: position = 0.25, so value ≈ 0.25
+      (is (< (Math/abs (- 0.25 value-y)) 0.1) "pos-y value should be near 0.25")
+      ;; point-index: position = 1/3 ≈ 0.333, so value ≈ 0.333
+      (is (< (Math/abs (- 0.333 value-idx)) 0.1) "point-index value should be near 0.333"))))
 
 (deftest radial-driver-keyframe-test
   (testing "radial driver produces center-to-edge gradient"

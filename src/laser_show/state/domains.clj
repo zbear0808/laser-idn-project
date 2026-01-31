@@ -33,6 +33,7 @@
 ;; Core UI State Domains
 
 
+#_{:clojure-lsp/ignore [:clojure-lsp/unused-public-var]}
 (defstate timing
   "Timing and BPM management for animation synchronization."
   {:bpm {:default default-bpm

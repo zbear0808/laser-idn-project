@@ -15,7 +15,6 @@
     :on-commit {:event/type :my/set-name}
     :on-cancel {:event/type :my/cancel-edit}}"
   (:require [cljfx.api :as fx]
-            [clojure.tools.logging :as log]
             [laser-show.events.core :as events])
   (:import [javafx.scene.input KeyCode MouseButton MouseEvent]))
 
