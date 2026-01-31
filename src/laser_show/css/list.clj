@@ -120,6 +120,10 @@
         :-fx-background-radius 4
         :-fx-border-radius 4
         :-fx-border-width ["0px" "0px" "0px" "3px"]
+        :-fx-cursor "hand"
+        
+        ":hover"
+        {:-fx-background-color bg-hover}
         
         ;; State variants as compound selectors (.group-header.group-header-selected)
         ".group-header-selected"
@@ -261,7 +265,11 @@
        {:-fx-spacing 6
         :-fx-alignment "CENTER_LEFT"
         :-fx-background-color bg-interactive
-        :-fx-background-radius 4}
+        :-fx-background-radius 4
+        :-fx-cursor "hand"
+        
+        ":hover"
+        {:-fx-background-color bg-hover}}
        
        
        ;; Chain Item State Variants (compound selectors)

@@ -10,7 +10,8 @@
    
    Each evaluator takes [config context] and returns a numeric value."
   (:require
-   [laser-show.animation.time :as time]))
+   [laser-show.animation.time :as time]
+   [laser-show.animation.interpolation :as interp]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -237,6 +238,103 @@
     (double min)))
 
 
+;; Unified Keyframe Param Modulator
+;; For per-point evaluation of spatial keyframe drivers
+
+
+(def ^:private sqrt-2 (Math/sqrt 2.0))
+
+(defn- calculate-spatial-position-for-driver
+  "Calculate position [0,1] for a spatial driver given point coordinates.
+   Returns double. Note: No ^double type hint due to JVM limitation (>4 primitive args)."
+  [driver x y point-index point-count normalize?]
+  (let [x (double x)
+        y (double y)
+        point-index (long point-index)
+        point-count (long point-count)]
+    (double
+     (case driver
+       :point-index (if (<= point-count 1)
+                      0.0
+                      (/ (double point-index) (double (dec point-count))))
+       :pos-x (/ (+ x 1.0) 2.0)
+       :pos-y (/ (+ y 1.0) 2.0)
+       :radial (let [dist (Math/sqrt (+ (* x x) (* y y)))
+                     max-dist (if normalize? sqrt-2 1.0)]
+                 (clojure.core/min 1.0 (/ dist max-dist)))
+       0.0))))
+
+(defn- find-surrounding-keyframes-clamped
+  "Find the keyframes before and after the given position, clamped to edges."
+  [sorted-keyframes ^double position]
+  (let [n (count sorted-keyframes)]
+    (cond
+      (= n 1)
+      [(first sorted-keyframes) (first sorted-keyframes)]
+      
+      (<= position (double (:position (first sorted-keyframes))))
+      [(first sorted-keyframes) (first sorted-keyframes)]
+      
+      (>= position (double (:position (last sorted-keyframes))))
+      [(last sorted-keyframes) (last sorted-keyframes)]
+      
+      :else
+      (let [after-idx (->> sorted-keyframes
+                          (map-indexed vector)
+                          (filter (fn [[_ kf]] (> (double (:position kf)) position)))
+                          first
+                          first)]
+        (if after-idx
+          [(nth sorted-keyframes (dec (long after-idx)))
+           (nth sorted-keyframes after-idx)]
+          [(last sorted-keyframes) (last sorted-keyframes)])))))
+
+(defn- calculate-interp-factor
+  "Calculate interpolation factor between two keyframes."
+  ^double [before after ^double position]
+  (let [p1 (double (:position before))
+        p2 (double (:position after))
+        range-val (- p2 p1)
+        offset (- position p1)]
+    (if (zero? range-val) 0.0 (/ offset range-val))))
+
+(defn eval-unified-keyframe-param
+  "Evaluate a unified keyframe modulator for a specific param key.
+   Uses spatial driver to calculate position based on point coordinates.
+   
+   Config keys:
+   - :keyframe-mod - The full keyframe modulator config
+   - :param-key - The param key to extract from interpolated result
+   
+   Returns: The interpolated value for the specified param key"
+  [{:keys [keyframe-mod param-key]} context]
+  (let [{:keys [keyframes driver normalize?]
+         :or {driver :point-index normalize? true}} keyframe-mod
+        {:keys [x y point-index point-count]} context]
+    (if (seq keyframes)
+      (let [position (calculate-spatial-position-for-driver
+                      driver
+                      (double (or x 0.0))
+                      (double (or y 0.0))
+                      (long (or point-index 0))
+                      (long (or point-count 1))
+                      normalize?)
+            sorted-keyframes (sort-by :position keyframes)
+            [before after] (find-surrounding-keyframes-clamped sorted-keyframes position)
+            t (calculate-interp-factor before after position)
+            interpolation (or (:interpolation before) :linear)
+            curved-t (interp/apply-interpolation t interpolation)
+            ;; Get param values from keyframes
+            v1 (get-in before [:params param-key] 0.0)
+            v2 (get-in after [:params param-key] 0.0)]
+        ;; Interpolate if both are numbers, otherwise return v1
+        (if (and (number? v1) (number? v2))
+          (interp/interpolate-value (double v1) (double v2) curved-t)
+          v1))
+      ;; No keyframes - return default
+      0.0)))
+
+
 ;; Modulator Evaluators Registry
 
 
@@ -255,7 +353,8 @@
    :pos-x        eval-pos-x
    :pos-y        eval-pos-y
    :radial       eval-radial
-   :angle        eval-angle})
+   :angle        eval-angle
+   :unified-keyframe-param eval-unified-keyframe-param})
 
 
 ;; Per-Point Modulator Compilers
@@ -365,6 +464,106 @@
         (+ min-v (* t range-v))))))
 
 
+(defn compile-unified-keyframe-param
+  "Compile unified keyframe param modulator to optimized per-point function.
+   Pre-sorts keyframes, pre-computes position functions, and creates a fast lookup.
+   
+   Parameters:
+   - config: Config map with :keyframe-mod and :param-key
+   - point-count: Total number of points in frame
+   
+   Returns: (fn [^double x ^double y ^long idx] -> double)"
+  [config point-count]
+  (let [{:keys [keyframe-mod param-key]} config
+        {:keys [keyframes driver normalize?]
+         :or {driver :point-index normalize? true}} keyframe-mod
+        point-count' (long point-count)]
+    
+    (if (seq keyframes)
+      (let [;; Pre-sort keyframes by position
+            sorted-keyframes (vec (sort-by :position keyframes))
+            n (count sorted-keyframes)
+            
+            ;; Pre-compute position calculation fn based on driver
+            pos-fn (case driver
+                     :point-index
+                     (let [denom (clojure.core/max 1.0 (double (dec point-count')))]
+                       (fn ^double [^double _x ^double _y ^long idx ^long _pc]
+                         (if (<= point-count' 1)
+                           0.0
+                           (/ (double idx) denom))))
+                     
+                     :pos-x
+                     (fn ^double [^double x ^double _y ^long _idx ^long _pc]
+                       (/ (+ x 1.0) 2.0))
+                     
+                     :pos-y
+                     (fn ^double [^double _x ^double y ^long _idx ^long _pc]
+                       (/ (+ y 1.0) 2.0))
+                     
+                     :radial
+                     (let [max-dist (if normalize? sqrt-2 1.0)]
+                       (fn ^double [^double x ^double y ^long _idx ^long _pc]
+                         (let [dist (Math/sqrt (+ (* x x) (* y y)))]
+                           (clojure.core/min 1.0 (/ dist max-dist)))))
+                     
+                     ;; Default
+                     (constantly 0.0))
+            
+            ;; Pre-extract positions array for fast lookup
+            positions (double-array (map :position sorted-keyframes))
+            
+            ;; Pre-extract param values for this param-key
+            param-values (double-array
+                          (map #(double (get-in % [:params param-key] 0.0))
+                               sorted-keyframes))
+            
+            ;; Pre-extract interpolation modes
+            interp-modes (mapv #(or (:interpolation %) :linear) sorted-keyframes)]
+        
+        (fn ^double [^double x ^double y ^long idx]
+          (let [position (pos-fn x y idx point-count')
+                first-pos (aget positions 0)
+                last-pos (aget positions (dec n))]
+            
+            (cond
+              ;; Before first keyframe - clamp to first
+              (<= position first-pos)
+              (aget param-values 0)
+              
+              ;; After last keyframe - clamp to last
+              (>= position last-pos)
+              (aget param-values (dec n))
+              
+              :else
+              ;; Find surrounding keyframes
+              (let [after-idx (loop [i 0]
+                                (if (>= i n)
+                                  nil
+                                  (if (> (aget positions i) position)
+                                    i
+                                    (recur (inc i)))))
+                    before-idx (if after-idx (dec (long after-idx)) (dec n))
+                    
+                    ;; Calculate interpolation factor
+                    p1 (aget positions before-idx)
+                    p2 (aget positions (long (or after-idx 0)))
+                    range-val (- p2 p1)
+                    t (if (zero? range-val) 0.0 (/ (- position p1) range-val))
+                    
+                    ;; Apply interpolation curve
+                    curved-t (interp/apply-interpolation t (nth interp-modes before-idx))
+                    
+                    ;; Get values
+                    v1 (aget param-values before-idx)
+                    v2 (aget param-values (long (or after-idx 0)))]
+                
+                (interp/interpolate-value v1 v2 curved-t))))))
+      
+      ;; No keyframes - return constant 0.0
+      (constantly 0.0))))
+
+
 ;; Modulator Compilers Registry
 
 
@@ -374,8 +573,9 @@
    
    Compilers are optional - not all modulator types have them.
    Only per-point modulators benefit from compilation."
-  {:pos-x        compile-pos-x
-   :pos-y        compile-pos-y
-   :radial       compile-radial
-   :point-index  compile-point-index
-   :angle        compile-angle})
+  {:pos-x                   compile-pos-x
+   :pos-y                   compile-pos-y
+   :radial                  compile-radial
+   :point-index             compile-point-index
+   :angle                   compile-angle
+   :unified-keyframe-param  compile-unified-keyframe-param})

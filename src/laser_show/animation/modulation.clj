@@ -22,6 +22,7 @@
    ;; MIDI controlled
    {:effect-id :scale :params {:x-scale {:type :midi :channel 1 :cc 7 :min 0.5 :max 2.0}}}"
   (:require
+   [laser-show.animation.keyframes :as kf]
    [laser-show.animation.modulator-registry :as reg]
    [laser-show.animation.modulators] ;; Load modulator registrations
    [laser-show.common.util :as u]))
@@ -140,6 +141,24 @@
 
     :else
     false))
+
+(defn keyframe-modulator-requires-per-point?
+  "Returns true if an effect's keyframe-modulator has a spatial driver
+   that requires per-point evaluation.
+   
+   When an effect has a keyframe-modulator with a spatial driver
+   (:point-index, :pos-x, :pos-y, :radial), each point needs to be evaluated
+   individually since each point has different spatial coordinates.
+   
+   Parameters:
+   - effect: Effect map with optional :keyframe-modulator key
+   
+   Returns: Boolean"
+  [effect]
+  (when-let [km (:keyframe-modulator effect)]
+    (when (:enabled? km)
+      (let [driver (get km :driver :time)]
+        (kf/spatial-driver? driver)))))
 
 
 (defn- get-defaults-for-type

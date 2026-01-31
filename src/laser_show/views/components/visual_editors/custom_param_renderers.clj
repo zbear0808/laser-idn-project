@@ -69,9 +69,12 @@
   (let [;; Support both :current-params and :params (alias)
         params-map (or current-params params {})
         
-        ;; Get x/y values
-        x (get params-map :x 0.0)
-        y (get params-map :y 0.0)
+        ;; Get x/y values - could be numbers or modulator configs
+        x-value (get params-map :x 0.0)
+        y-value (get params-map :y 0.0)
+        ;; Extract static numeric values for display and canvas (handles modulators)
+        x (if (number? x-value) x-value (reg/get-static-value x-value 0.0))
+        y (if (number? y-value) y-value (reg/get-static-value y-value 0.0))
         
         ;; Get bounds - prefer explicit :bounds, then param-specs, then defaults
         {:keys [x-min x-max y-min y-max]}

@@ -170,6 +170,28 @@
 ;; Effect Transducer Composition
 
 
+(defn- extract-keyframe-param-keys
+  "Extract all param keys from keyframe configs for spatial drivers.
+   Returns a set of param keys that appear in any keyframe."
+  [keyframe-mod]
+  (let [keyframes (get keyframe-mod :keyframes [])]
+    (into #{} (mapcat (comp keys :params) keyframes))))
+
+(defn- create-spatial-keyframe-params
+  "Create synthetic per-point modulator configs for each param in a spatial keyframe.
+   These configs will be processed by make-param-resolver for per-point evaluation.
+   
+   Returns: Map of {param-key -> unified-keyframe-param-config}"
+  [keyframe-mod]
+  (let [param-keys (extract-keyframe-param-keys keyframe-mod)]
+    (into {}
+          (map (fn [k]
+                 [k {:type :unified-keyframe-param
+                     :keyframe-mod keyframe-mod
+                     :param-key k
+                     :active? true}])
+               param-keys))))
+
 (defn make-effect-transducer
   "Create a transducer for a single effect instance.
    
@@ -183,6 +205,9 @@
    Supports keyframe modulation: if :keyframe-modulator is present and enabled,
    the keyframe modulator's interpolated params are used instead of per-param modulators.
    
+   For spatial keyframe drivers (point-index, pos-x, pos-y, radial), creates synthetic
+   per-point modulator configs that get evaluated per-point by make-param-resolver.
+   
    Returns: A transducer, or nil if effect is disabled or unknown."
   [effect-instance time-ms bpm trigger-time frame-ctx]
   (when (effect-instance-enabled? effect-instance)
@@ -194,23 +219,36 @@
               keyframe-mod (:keyframe-modulator effect-instance)
               keyframe-enabled? (and keyframe-mod (:enabled? keyframe-mod))
               
+              ;; Check if spatial driver (requires per-point evaluation)
+              spatial-driver? (and keyframe-enabled?
+                                   (mod/keyframe-modulator-requires-per-point? effect-instance))
+              
               ;; Resolve params based on modulation mode
-              user-params (if keyframe-enabled?
-                            ;; Keyframe mode: evaluate keyframe modulator to get params
+              user-params (cond
+                            ;; Spatial keyframe mode: create synthetic per-point modulator configs
+                            ;; These will be resolved per-point by make-param-resolver
+                            spatial-driver?
+                            (create-spatial-keyframe-params keyframe-mod)
+                            
+                            ;; Time-based keyframe mode: evaluate once per frame
+                            keyframe-enabled?
                             (let [timing-ctx (:timing-ctx frame-ctx)
                                   context (mod/make-context (merge {:time-ms time-ms
                                                                     :bpm bpm
                                                                     :trigger-time trigger-time}
                                                                    timing-ctx))]
                               (kf/eval-keyframe keyframe-mod context))
+                            
                             ;; Normal mode: use per-param modulators
+                            :else
                             (:params effect-instance))
               
               merged-params (merge-with-defaults effect-id user-params)]
           ;; Note: We pass merged-params (may contain modulators) to the transducer factory
           ;; The transducer is responsible for resolving them (either globally or per-point)
           ;; frame-ctx now includes :timing-ctx for modulator beat accumulation
-          ;; When in keyframe mode, params are already resolved (no modulators)
+          ;; When in keyframe mode (non-spatial), params are already resolved (no modulators)
+          ;; When in spatial keyframe mode, params contain synthetic modulator configs
           (try
             (xf-fn time-ms bpm merged-params frame-ctx)
             (catch Exception e

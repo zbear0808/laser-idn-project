@@ -192,9 +192,11 @@
             ;; Normalize params: extract static values from any modulator configs
             normalized-params (normalize-params-for-keyframes params)
             new-mod {:enabled? true
+                     :driver :time
                      :period 4.0
                      :time-unit :beats
                      :loop-mode :loop
+                     :edge-behavior :clamp
                      :selected-keyframe 0
                      :keyframes (create-default-keyframes normalized-params)}]
         (-> state
@@ -422,6 +424,66 @@
                                      assoc-in [:keyframes keyframe-idx :interpolation] interpolation)
           h/mark-dirty)
       state)))
+
+(defn handle-set-driver
+  "Set the driver type for keyframe modulator.
+   
+   The driver determines what drives the keyframe position:
+   - :time (default) - uses time/beats
+   - :point-index - uses point index within shape
+   - :pos-x - uses point X position
+   - :pos-y - uses point Y position
+   - :radial - uses distance from center
+   
+   Parameters:
+   - state: Application state
+   - config: Chain config
+   - effect-path: Path to effect
+   - driver: Driver type keyword
+   
+   Returns: Updated state"
+  [state config effect-path driver]
+  (-> state
+      (update-keyframe-modulator config effect-path assoc :driver driver)
+      h/mark-dirty))
+
+(defn handle-set-edge-behavior
+  "Set edge behavior (clamp/wrap) for keyframe modulator.
+   
+   Edge behavior determines what happens when driver value is outside [0, 1]:
+   - :clamp - clamps to 0 or 1
+   - :wrap - wraps around (useful for cyclic patterns)
+   
+   Parameters:
+   - state: Application state
+   - config: Chain config
+   - effect-path: Path to effect
+   - edge-behavior: Edge behavior keyword (:clamp or :wrap)
+   
+   Returns: Updated state"
+  [state config effect-path edge-behavior]
+  (-> state
+      (update-keyframe-modulator config effect-path assoc :edge-behavior edge-behavior)
+      h/mark-dirty))
+
+(defn handle-set-normalize
+  "Set normalize flag for radial driver.
+   
+   When normalize? is true, the radial distance is normalized by the
+   maximum distance found in the shape, giving values in [0, 1].
+   When false, raw distance values are used.
+   
+   Parameters:
+   - state: Application state
+   - config: Chain config
+   - effect-path: Path to effect
+   - normalize?: Boolean flag
+   
+   Returns: Updated state"
+  [state config effect-path normalize?]
+  (-> state
+      (update-keyframe-modulator config effect-path assoc :normalize? normalize?)
+      h/mark-dirty))
 
 
 ;; Spatial Keyframe Handlers
@@ -654,6 +716,16 @@
       {:state (handle-set-interpolation state config effect-path
                                         (:keyframe-idx event)
                                         (:interpolation event))}
+      
+      ;; Driver settings events
+      :keyframe/set-driver
+      {:state (handle-set-driver state config effect-path (or (:driver event) (:fx/event event)))}
+      
+      :keyframe/set-edge-behavior
+      {:state (handle-set-edge-behavior state config effect-path (or (:edge-behavior event) (:fx/event event)))}
+      
+      :keyframe/set-normalize
+      {:state (handle-set-normalize state config effect-path (or (:normalize? event) (:fx/event event)))}
       
       ;; Spatial keyframe events (modulator at :params param-key)
       :keyframe/set-axis

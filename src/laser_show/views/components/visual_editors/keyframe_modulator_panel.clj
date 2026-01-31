@@ -60,6 +60,44 @@
     :angle "Angle"
     (name axis)))
 
+;; Driver options for unified keyframe system
+(def driver-options
+  "Available driver types for keyframe modulation."
+  [{:id :time :label "Time"}
+   {:id :point-index :label "Point Index"}
+   {:id :pos-x :label "Position X"}
+   {:id :pos-y :label "Position Y"}
+   {:id :radial :label "Radial"}])
+
+(defn driver-display-name
+  "Convert driver keyword to user-friendly display name."
+  [driver]
+  (case driver
+    :time "Time"
+    :point-index "Point Index"
+    :pos-x "Position X"
+    :pos-y "Position Y"
+    :radial "Radial"
+    "Time"))
+
+(def edge-behavior-options
+  "Available edge behaviors for spatial drivers."
+  [{:id :clamp :label "Clamp (stay at edges)"}
+   {:id :wrap :label "Wrap (loop around)"}])
+
+(defn- edge-behavior-display-name
+  "Convert edge-behavior keyword to user-friendly display name."
+  [behavior]
+  (case behavior
+    :clamp "Clamp"
+    :wrap "Wrap"
+    "Clamp"))
+
+(defn- spatial-driver?
+  "Returns true if driver is a spatial type (not time-based)."
+  [driver]
+  (contains? #{:point-index :pos-x :pos-y :radial} driver))
+
 (def ^:private interpolation-modes
   "Available interpolation modes for spatial keyframes."
   [:linear :exp-decay :exp-grow :step])
@@ -77,6 +115,64 @@
 
 ;; Sub-components
 
+
+(defn- driver-dropdown
+  "Dropdown for selecting the keyframe driver type.
+   Props:
+   - :driver - Current driver keyword (defaults to :time)
+   - :on-driver-change - Event to dispatch when driver changes"
+  [{:keys [driver on-driver-change enabled?]}]
+  {:fx/type :h-box
+   :alignment :center-left
+   :spacing 5
+   :disable (not enabled?)
+   :children [{:fx/type :label
+               :text "Driver:"}
+              {:fx/type :combo-box
+               :pref-width 130
+               :value (or driver :time)
+               :items (mapv :id driver-options)
+               :button-cell (fn [item]
+                              {:text (driver-display-name item)})
+               :cell-factory {:fx/cell-type :list-cell
+                              :describe (fn [item]
+                                          {:text (driver-display-name item)})}
+               :on-value-changed on-driver-change}]})
+
+(defn- edge-behavior-dropdown
+  "Dropdown for selecting edge behavior for spatial drivers.
+   Props:
+   - :edge-behavior - Current edge behavior keyword (defaults to :clamp)
+   - :on-edge-behavior-change - Event to dispatch when edge behavior changes"
+  [{:keys [edge-behavior on-edge-behavior-change enabled?]}]
+  {:fx/type :h-box
+   :alignment :center-left
+   :spacing 5
+   :disable (not enabled?)
+   :children [{:fx/type :label
+               :text "Edge:"}
+              {:fx/type :combo-box
+               :pref-width 100
+               :value (or edge-behavior :clamp)
+               :items (mapv :id edge-behavior-options)
+               :button-cell (fn [item]
+                              {:text (edge-behavior-display-name item)})
+               :cell-factory {:fx/cell-type :list-cell
+                              :describe (fn [item]
+                                          {:text (edge-behavior-display-name item)})}
+               :on-value-changed on-edge-behavior-change}]})
+
+(defn- normalize-checkbox
+  "Checkbox for toggling normalize option (for radial driver only).
+   Props:
+   - :normalize? - Current normalize state
+   - :on-normalize-change - Event to dispatch when normalize changes"
+  [{:keys [normalize? on-normalize-change enabled?]}]
+  {:fx/type :check-box
+   :text "Normalize"
+   :disable (not enabled?)
+   :selected (boolean normalize?)
+   :on-selected-changed on-normalize-change})
 
 (defn- header-row
   "Header with title and optional enable toggle.
@@ -100,6 +196,96 @@
                   :selected (boolean enabled?)
                   :on-selected-changed (assoc on-toggle-event
                                               :enabled? (not enabled?))})])})
+
+(defn- driver-row
+  "Row with driver selection dropdown.
+   Always shown regardless of driver type."
+  [{:keys [driver on-driver-change enabled?]}]
+  {:fx/type :h-box
+   :alignment :center-left
+   :spacing 15
+   :style-class "keyframe-panel-settings"
+   :children [{:fx/type driver-dropdown
+               :driver driver
+               :enabled? enabled?
+               :on-driver-change on-driver-change}]})
+
+(defn- time-settings-row
+  "Settings row for time-based keyframe modulator.
+   Shows period, time-unit, and loop-mode controls."
+  [{:keys [period time-unit loop-mode on-settings-event enabled?]}]
+  {:fx/type :h-box
+   :alignment :center-left
+   :spacing 15
+   :style-class "keyframe-panel-settings"
+   :disable (not enabled?)
+   :children [;; Period
+              {:fx/type :h-box
+               :alignment :center-left
+               :spacing 5
+               :children [{:fx/type :label
+                           :text "Period:"}
+                          {:fx/type :spinner
+                           :pref-width 80
+                           :value-factory {:fx/type :double-spinner-value-factory
+                                           :min 0.25
+                                           :max 64.0
+                                           :amount-to-step-by 0.25
+                                           :value (or period 4.0)}
+                           :on-value-changed (assoc on-settings-event :setting-key :period)}]}
+              
+              ;; Time unit
+              {:fx/type :h-box
+               :alignment :center-left
+               :spacing 5
+               :children [{:fx/type :combo-box
+                           :pref-width 90
+                           :value (or time-unit :beats)
+                           :items [:beats :seconds]
+                           :button-cell (fn [item]
+                                          {:text (name item)})
+                           :cell-factory {:fx/cell-type :list-cell
+                                          :describe (fn [item]
+                                                      {:text (name item)})}
+                           :on-value-changed (assoc on-settings-event :setting-key :time-unit)}]}
+              
+              ;; Loop mode
+              {:fx/type :h-box
+               :alignment :center-left
+               :spacing 5
+               :children [{:fx/type :label
+                           :text "Loop:"}
+                          {:fx/type :combo-box
+                           :pref-width 90
+                           :value (or loop-mode :loop)
+                           :items [:loop :once]
+                           :button-cell (fn [item]
+                                          {:text (name item)})
+                           :cell-factory {:fx/cell-type :list-cell
+                                          :describe (fn [item]
+                                                      {:text (name item)})}
+                           :on-value-changed (assoc on-settings-event :setting-key :loop-mode)}]}]})
+
+(defn- spatial-driver-settings-row
+  "Settings row for spatial driver keyframe modulator.
+   Shows edge-behavior dropdown and optional normalize checkbox (for radial)."
+  [{:keys [driver edge-behavior normalize? on-edge-behavior-change on-normalize-change enabled?]}]
+  {:fx/type :h-box
+   :alignment :center-left
+   :spacing 15
+   :style-class "keyframe-panel-settings"
+   :disable (not enabled?)
+   :children (filterv some?
+              [{:fx/type edge-behavior-dropdown
+                :edge-behavior edge-behavior
+                :enabled? enabled?
+                :on-edge-behavior-change on-edge-behavior-change}
+               ;; Normalize checkbox - only visible when driver is :radial
+               (when (= driver :radial)
+                 {:fx/type normalize-checkbox
+                  :normalize? normalize?
+                  :enabled? enabled?
+                  :on-normalize-change on-normalize-change})])})
 
 (defn- settings-row
   "Row with period, time-unit, and loop-mode controls."
@@ -296,127 +482,120 @@
 (defn keyframe-modulator-panel
   "Panel containing timeline and keyframe controls.
    
-   Supports both time-based and spatial keyframe modulators.
-   Type is determined by :type key in keyframe-modulator config.
+   Supports unified driver-based keyframe modulation system.
+   Driver determines what drives the keyframe interpolation:
+   - :time - Time-based animation (default)
+   - :point-index, :pos-x, :pos-y, :radial - Spatial drivers
    
-   For spatial keyframes:
-   - No enable checkbox is shown (selecting the type from dropdown activates it)
-   - Controls are always visible
-   - Uses :active? key for state
-   
-   For time-based keyframes:
-   - Shows enable checkbox
-   - Uses :enabled? key for state
+   Layout:
+   ┌─────────────────────────────────────────────────────────────────┐
+   │ KEYFRAME ANIMATION                              [Enable] Toggle │
+   ├─────────────────────────────────────────────────────────────────┤
+   │ Driver: [Time ▼]                                                │
+   ├─────────────────────────────────────────────────────────────────┤
+   │ Period: [4.0] [seconds▼] [loop▼]    <- Time driver settings    │
+   │   OR                                                            │
+   │ Edge: [Clamp▼] [✓] Normalize        <- Spatial driver settings │
+   ├─────────────────────────────────────────────────────────────────┤
+   │ [Timeline visualization]                                        │
+   └─────────────────────────────────────────────────────────────────┘
    
    Props:
    - :keyframe-modulator - The keyframe modulator config map (or nil if not initialized)
    - :domain - :effect-chains or :cue-chains
    - :entity-key - [col row] or projector-id
    - :effect-path - Path to effect within chain
-   - :param-key - Parameter key (required for spatial keyframes, e.g. :hue)
+   - :param-key - Parameter key (e.g. :hue)
    - :current-phase - Current playback position for preview (optional, time-based only)"
   [{:keys [keyframe-modulator domain entity-key effect-path param-key current-phase]}]
-  (let [spatial? (spatial-keyframe-modulator? keyframe-modulator)
-        ;; Spatial uses :active?, time-based uses :enabled?
-        ;; For spatial, treat as enabled if the modulator exists (selecting type is activation)
-        enabled? (if spatial?
-                   (or (:active? keyframe-modulator) true)  ;; Always enabled for spatial
-                   (:enabled? keyframe-modulator false))
+  (let [;; Support both old :type and new :driver system
+        spatial-legacy? (spatial-keyframe-modulator? keyframe-modulator)
+        driver (or (:driver keyframe-modulator)
+                   (when spatial-legacy? (:axis keyframe-modulator :point-index))
+                   :time)
+        spatial? (spatial-driver? driver)
+        enabled? (:enabled? keyframe-modulator false)
         selected-idx (:selected-keyframe keyframe-modulator 0)
         keyframes (:keyframes keyframe-modulator [])
         
-        ;; Base event params - spatial events need param-key
-        base-event (cond-> {:domain domain
-                            :entity-key entity-key
-                            :effect-path effect-path}
-                     spatial? (assoc :param-key param-key))]
+        ;; Settings from modulator config
+        period (:period keyframe-modulator 4.0)
+        time-unit (:time-unit keyframe-modulator :beats)
+        loop-mode (:loop-mode keyframe-modulator :loop)
+        edge-behavior (:edge-behavior keyframe-modulator :clamp)
+        normalize? (:normalize? keyframe-modulator false)
+        
+        ;; Base event params
+        base-event {:domain domain
+                    :entity-key entity-key
+                    :effect-path effect-path
+                    :param-key param-key}]
     
     {:fx/type :v-box
      :spacing 8
      :style-class "keyframe-panel"
      :children (filterv some?
-                [;; Header with enable toggle (only for time-based)
+                [;; Header with enable toggle
                  {:fx/type header-row
                   :enabled? enabled?
                   :spatial? spatial?
                   :on-toggle-event (assoc base-event
                                           :event/type :keyframe/toggle-enabled)}
                  
-                 ;; For spatial: always show controls (no checkbox activation needed)
-                 ;; For time-based: only show when enabled
-                 (if spatial?
-                   ;; Spatial keyframe layout - always shown
+                 ;; Only show controls when enabled
+                 (when enabled?
                    {:fx/type :v-box
                     :spacing 8
-                    :children [;; Spatial settings row
-                               {:fx/type spatial-settings-row
-                                :axis (:axis keyframe-modulator :point-index)
-                                :normalize? (:normalize? keyframe-modulator false)
-                                :enabled? true  ;; Always enabled for spatial
-                                :on-axis-change (assoc base-event
-                                                       :event/type :keyframe/set-axis)
-                                :on-normalize-change (assoc base-event
-                                                            :event/type :keyframe/update-setting
-                                                            :setting-key :normalize?)}
-                               
-                               ;; Timeline (shared component)
-                               {:fx/type timeline-row
-                                :keyframes keyframes
-                                :selected-idx selected-idx
-                                :current-phase nil  ;; No playhead for spatial
-                                :enabled? true
-                                :on-select (assoc base-event
-                                                  :event/type :keyframe/spatial-select)
-                                :on-add (assoc base-event
-                                               :event/type :keyframe/spatial-add)
-                                :on-move (assoc base-event
-                                                :event/type :keyframe/spatial-move)
-                                :on-delete (assoc base-event
-                                                  :event/type :keyframe/spatial-delete)}
-                               
-                               ;; Spatial value row
-                               {:fx/type spatial-value-row
-                                :keyframes keyframes
-                                :selected-idx selected-idx
-                                :enabled? true
-                                :on-value-change (assoc base-event
-                                                        :event/type :keyframe/set-value)
-                                :on-interpolation-change (assoc base-event
-                                                                :event/type :keyframe/spatial-set-interpolation)}]}
-                   
-                   ;; Time-based keyframe layout (only when enabled)
-                   (when enabled?
-                     (let [period (:period keyframe-modulator 4.0)
-                           time-unit (:time-unit keyframe-modulator :beats)
-                           loop-mode (:loop-mode keyframe-modulator :loop)]
-                       {:fx/type :v-box
-                        :spacing 8
-                        :children [;; Settings row
-                                   {:fx/type settings-row
-                                    :period period
-                                    :time-unit time-unit
-                                    :loop-mode loop-mode
-                                    :enabled? enabled?
-                                    :on-settings-event (assoc base-event
-                                                              :event/type :keyframe/update-setting)}
-                                   
-                                   ;; Timeline
-                                   {:fx/type timeline-row
-                                    :keyframes keyframes
-                                    :selected-idx selected-idx
-                                    :current-phase current-phase
-                                    :enabled? enabled?
-                                    :on-select (assoc base-event
-                                                      :event/type :keyframe/select)
-                                    :on-add (assoc base-event
-                                                   :event/type :keyframe/add)
-                                    :on-move (assoc base-event
-                                                    :event/type :keyframe/move)
-                                    :on-delete (assoc base-event
-                                                      :event/type :keyframe/delete)}
-                                   
-                                   ;; Actions row
-                                   {:fx/type actions-row
-                                    :keyframes keyframes
-                                    :selected-idx selected-idx
-                                    :enabled? enabled?}]})))])}))
+                    :children (filterv some?
+                               [;; Driver selection row
+                                 {:fx/type driver-row
+                                  :driver driver
+                                  :enabled? enabled?
+                                  :on-driver-change (assoc base-event
+                                                           :event/type :keyframe/set-driver)}
+                                
+                                ;; Conditional settings based on driver type
+                                (if spatial?
+                                  ;; Spatial driver settings
+                                  {:fx/type spatial-driver-settings-row
+                                   :driver driver
+                                   :edge-behavior edge-behavior
+                                   :normalize? normalize?
+                                   :enabled? enabled?
+                                   :on-edge-behavior-change (assoc base-event
+                                                                   :event/type :keyframe/set-edge-behavior)
+                                   :on-normalize-change (assoc base-event
+                                                               :event/type :keyframe/set-normalize)}
+                                  ;; Time driver settings
+                                  {:fx/type time-settings-row
+                                   :period period
+                                   :time-unit time-unit
+                                   :loop-mode loop-mode
+                                   :enabled? enabled?
+                                   :on-settings-event (assoc base-event
+                                                             :event/type :keyframe/update-setting)})
+                                
+                                ;; Timeline
+                                {:fx/type timeline-row
+                                 :keyframes keyframes
+                                 :selected-idx selected-idx
+                                 :current-phase (when-not spatial? current-phase)
+                                 :enabled? enabled?
+                                 :on-select (assoc base-event
+                                                   :event/type :keyframe/select)
+                                 :on-add (assoc base-event
+                                                :event/type :keyframe/add)
+                                 :on-move (assoc base-event
+                                                 :event/type :keyframe/move)
+                                 :on-delete (assoc base-event
+                                                   :event/type :keyframe/delete)}
+                                
+                                ;; Actions/info row
+                                {:fx/type actions-row
+                                 :keyframes keyframes
+                                 :selected-idx selected-idx
+                                 :enabled? enabled?}])})])}))
+
+
+;; Legacy support - keyframe-modulator-panel-unified is an alias for keyframe-modulator-panel
+(def keyframe-modulator-panel-unified keyframe-modulator-panel)

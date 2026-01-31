@@ -265,3 +265,20 @@
   :retrigger?  false
   :description "Keyframe animation based on spatial position"})
 (reg/register-compiler! :spatial-keyframe kf/compile-spatial-keyframe)
+
+
+;; Unified Keyframe Param Modulator
+;; Used internally to wrap spatial keyframe-modulator params as per-point modulators
+
+
+(reg/register-modulator!
+ {:id          :unified-keyframe-param
+  :name        "Unified Keyframe Param"
+  :icon        "⬡"
+  :category    :internal
+  :evaluator   (get eval/modulator-evaluators :unified-keyframe-param)
+  :params      []  ;; No user-facing params - config is passed directly
+  :per-point?  true
+  :retrigger?  false
+  :description "Internal modulator for per-point keyframe param evaluation"})
+(reg/register-compiler! :unified-keyframe-param (get eval/modulator-compilers :unified-keyframe-param))
