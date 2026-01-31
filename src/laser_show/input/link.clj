@@ -40,18 +40,30 @@
    - dispatch-fn: Function to dispatch events (receives event map)
    - get-state-fn: Function that returns current Link state
    
-   Returns: listener function that processes Link status updates"
+   Returns: listener function that processes Link status updates
+   
+   The status map from beat-carabiner includes:
+   - :link-bpm - Current Link session BPM
+   - :link-peers - Number of peers in the Link session"
   [dispatch-fn get-state-fn]
   (fn [status]
     (let [link-state (get-state-fn)
-          new-bpm (:bpm status)
+          new-bpm (:link-bpm status)
+          new-peers (:link-peers status 0)
           old-bpm (:link-bpm link-state)
+          old-peers (:link-peers link-state 0)
           sync-enabled? (:sync-enabled? link-state)]
-      ;; Always update Link state (for UI display)
-      (dispatch-fn {:event/type :timing/link-bpm-changed
-                    :bpm new-bpm})
+      ;; Always update Link BPM state (for UI display)
+      (when new-bpm
+        (dispatch-fn {:event/type :timing/link-bpm-changed
+                      :bpm new-bpm}))
       
-      ;; Only dispatch BPM change if sync is enabled and BPM changed significantly
+      ;; Update peer count if changed
+      (when (not= new-peers old-peers)
+        (dispatch-fn {:event/type :timing/link-peers-changed
+                      :peers new-peers}))
+      
+      ;; Only dispatch BPM change to app if sync is enabled and BPM changed significantly
       (when (and sync-enabled? 
                  new-bpm
                  (bpm-changed? old-bpm new-bpm))
@@ -100,6 +112,7 @@
     (-> link-state
         (assoc :connected? false)
         (assoc :link-bpm nil)
+        (assoc :link-peers 0)
         (dissoc :listener))
     (catch Exception e
       (log/error e "Error stopping Link connection:" (.getMessage e))

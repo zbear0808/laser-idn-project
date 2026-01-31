@@ -49,36 +49,41 @@
    :beats-elapsed {:default 0
                    :doc "Total beats elapsed since start"}
    :quantization {:default :beat
-                  :doc "Quantization mode (:beat :bar :none)"}})
+                  :doc "Quantization mode (:beat :bar :none)"}
+   
+   ;; Global clock for BPM visualization
+   :global-clock {:default {:accumulated-beats 0.0
+                            :accumulated-ms 0.0
+                            :last-frame-time 0}
+                  :doc "Global clock for BPM visualization, independent of cue triggers. Only reset by retrigger button."}})
 
 (defstate playback
-  "Playback control state for animation triggering."
+  "Playback control state for animation triggering.
+   
+   MULTI-CUE ARCHITECTURE:
+   - active-cues: Map of [col row] -> per-cue timing state
+   - Each cue has independent accumulated-beats, phase-offset, etc.
+   - Global clock is in [:timing :global-clock] for BPM visualization"
   {:playing? {:default false
-              :doc "Whether playback is active"}
-   :trigger-time {:default 0
-                  :doc "Timestamp when current animation was triggered"}
-   :active-cell {:default nil
-                 :doc "[col row] of currently playing grid cell"}
+              :doc "Whether playback is active (any cues playing)"}
    :active-cue {:default nil
-                :doc "Currently active cue data"}
+                :doc "Currently active cue data (legacy, may remove)"}
    :cue-queue {:default []
-               :doc "Queue of pending cues"}
+               :doc "Queue of pending cues for quantized triggering"}
    
-   ;; Beat accumulation fields
-   :accumulated-beats {:default 0.0
-                       :doc "Running total of beats since cue trigger"}
-   :accumulated-ms {:default 0.0
-                    :doc "Running total of ms since cue trigger"}
-   :last-frame-time {:default 0
-                     :doc "Timestamp of last frame for delta calculation"}
+   ;; Multi-cue timing state
+   :active-cues {:default {}
+                 :doc "Map of [col row] -> cue timing state. Each cue has:
+                       {:trigger-time long
+                        :accumulated-beats double
+                        :accumulated-ms double
+                        :phase-offset double
+                        :phase-offset-target double
+                        :last-frame-time long}"}
    
-   ;; Phase resync fields
-   :phase-offset {:default 0.0
-                  :doc "Current phase correction offset"}
-   :phase-offset-target {:default 0.0
-                         :doc "Target phase offset from tap resync"}
+   ;; Shared timing settings
    :resync-rate {:default 4.0
-                 :doc "Beats to reach ~63% of target phase correction"}})
+                 :doc "Beats to reach ~63% of target phase correction (shared across all cues)"}})
 
 (defstate grid
   "Cue grid state - the main trigger interface.
@@ -378,8 +383,12 @@
              :doc "Packet logging state"}
    :link {:default {:connected? false
                     :sync-enabled? false
-                    :link-bpm nil}
-          :doc "Ableton Link connection state"}})
+                    :beat-sync? true
+                    :auto-connect? true
+                    :latency-ms 0
+                    :link-bpm nil
+                    :link-peers 0}
+          :doc "Ableton Link connection state and settings"}})
 
 
 ;; State Builder

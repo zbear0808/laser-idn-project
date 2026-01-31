@@ -109,6 +109,54 @@
   {:state (assoc-in state [:playback :phase-offset-target] offset)})
 
 
+;; Link Settings Events
+
+
+(defn- handle-timing-link-toggle
+  "Toggle Link connection on/off."
+  [{:keys [state dispatch-fn]}]
+  (let [connected? (get-in state [:backend :link :connected?] false)
+        link-state (get-in state [:backend :link])
+        get-state-fn #(get-in (state/get-raw-state) [:backend :link])]
+    (if connected?
+      ;; Disconnect
+      (let [new-link-state (link/stop-link! link-state)]
+        {:state (assoc-in state [:backend :link] new-link-state)})
+      ;; Connect
+      (let [new-link-state (link/start-link! link-state dispatch-fn get-state-fn)]
+        {:state (assoc-in state [:backend :link] new-link-state)}))))
+
+(defn- handle-timing-link-set-sync-enabled
+  "Enable or disable BPM sync from Link."
+  [{:keys [state fx/event]}]
+  (let [enabled? (boolean event)
+        link-state (get-in state [:backend :link])
+        new-link-state (if enabled?
+                         (link/enable-sync link-state)
+                         (link/disable-sync link-state))]
+    {:state (assoc-in state [:backend :link] new-link-state)}))
+
+(defn- handle-timing-link-set-beat-sync
+  "Enable or disable downbeat alignment sync."
+  [{:keys [state fx/event]}]
+  {:state (assoc-in state [:backend :link :beat-sync?] (boolean event))})
+
+(defn- handle-timing-link-set-auto-connect
+  "Enable or disable auto-connect on startup."
+  [{:keys [state fx/event]}]
+  {:state (assoc-in state [:backend :link :auto-connect?] (boolean event))})
+
+(defn- handle-timing-link-set-latency
+  "Set latency compensation in milliseconds."
+  [{:keys [state fx/event]}]
+  {:state (assoc-in state [:backend :link :latency-ms] (int (or event 0)))})
+
+(defn- handle-timing-link-peers-changed
+  "Update the number of Link peers."
+  [{:keys [state peers]}]
+  {:state (assoc-in state [:backend :link :link-peers] (or peers 0))})
+
+
 ;; Public API
 
 
@@ -131,6 +179,14 @@
     :timing/link-bpm-changed (handle-timing-link-bpm-changed event)
     :timing/sync-to-downbeat (handle-timing-sync-to-downbeat event)
     :timing/set-phase-offset-target (handle-timing-set-phase-offset-target event)
+    
+    ;; Link settings events (from Settings tab)
+    :timing/link-toggle (handle-timing-link-toggle event)
+    :timing/link-set-sync-enabled (handle-timing-link-set-sync-enabled event)
+    :timing/link-set-beat-sync (handle-timing-link-set-beat-sync event)
+    :timing/link-set-auto-connect (handle-timing-link-set-auto-connect event)
+    :timing/link-set-latency (handle-timing-link-set-latency event)
+    :timing/link-peers-changed (handle-timing-link-peers-changed event)
     
     ;; Unknown event in this domain
     {}))

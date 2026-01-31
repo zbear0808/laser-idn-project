@@ -19,4 +19,7 @@
     <!-- Quiet down noisy libraries -->
     <logger name="org.eclipse.jetty" level="WARN" />
     <logger name="io.netty" level="WARN" />
+    
+    <!-- beat-carabiner logs DEBUG messages for read timeouts (normal behavior) -->
+    <!-- <logger name="beat-carabiner.core" level="INFO" /> -->
 </configuration>

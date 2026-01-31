@@ -2,11 +2,13 @@
   "Settings tab for application configuration.
    
    Includes:
+   - Ableton Link configuration
    - MIDI input configuration
    - OSC input configuration
    - (Future: Keyboard shortcuts, general preferences, etc.)"
   (:require
    [laser-show.css.core :as css]
+   [laser-show.views.components.link-settings :as link-settings]
    [laser-show.views.components.midi-settings :as midi-settings]
    [laser-show.views.components.osc-settings :as osc-settings]))
 
@@ -60,6 +62,16 @@
                                      :text "Configure input devices and application preferences"
                                      :style (str "-fx-text-fill: " (css/text-muted) "; "
                                                  "-fx-font-size: 11;")}]}
+                        
+                        ;; External Sync Section Header
+                        {:fx/type :label
+                         :text "EXTERNAL SYNC"
+                         :style (str "-fx-text-fill: " (css/text-secondary) "; "
+                                     "-fx-font-size: 12; "
+                                     "-fx-font-weight: bold;")}
+                        
+                        ;; Ableton Link Configuration Section
+                        {:fx/type link-settings/link-settings-section}
                         
                         ;; Input Devices Section Header
                         {:fx/type :label

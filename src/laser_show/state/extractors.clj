@@ -32,6 +32,27 @@
   (:bpm (timing state)))
 
 
+;; Global Clock Extractors
+
+
+(defn global-clock
+  "Get the global clock state from timing domain.
+   Returns {:accumulated-beats :accumulated-ms :last-frame-time}"
+  [state]
+  (get-in state [:timing :global-clock]))
+
+(defn global-accumulated-beats
+  "Get accumulated beats from global clock.
+   Use for BPM visualization and phase calculations."
+  [state]
+  (or (:accumulated-beats (global-clock state)) 0.0))
+
+(defn global-accumulated-ms
+  "Get accumulated milliseconds from global clock."
+  [state]
+  (or (:accumulated-ms (global-clock state)) 0.0))
+
+
 ;; Playback Extractors
 
 
@@ -41,16 +62,58 @@
 (defn playing? [state]
   (:playing? (playback state)))
 
-(defn active-cell [state]
-  (:active-cell (playback state)))
+(defn active-cues
+  "Get the map of active cues.
+   Returns {[col row] {:trigger-time :accumulated-beats ...} ...}"
+  [state]
+  (or (:active-cues (playback state)) {}))
 
-(defn accumulated-beats [state]
-  (or (:accumulated-beats (playback state)) 0.0))
+(defn cue-active?
+  "Check if a specific cue is currently active."
+  [state col row]
+  (contains? (active-cues state) [col row]))
 
-(defn phase-offset [state]
-  (or (:phase-offset (playback state)) 0.0))
+(defn cue-timing
+  "Get timing state for a specific cue.
+   Returns nil if cue is not active."
+  [state col row]
+  (get (active-cues state) [col row]))
 
-(defn effective-beats [state]
+(defn resync-rate
+  "Get the phase resync rate (beats to reach ~63% correction)."
+  [state]
+  (or (:resync-rate (playback state)) 4.0))
+
+;; DEPRECATED - use active-cues instead
+(defn active-cell
+  "DEPRECATED: Use active-cues for multi-cue support.
+   Returns first active cue cell for backward compatibility."
+  [state]
+  (first (keys (active-cues state))))
+
+;; DEPRECATED - use cue-timing for specific cue
+(defn accumulated-beats
+  "DEPRECATED: Use (cue-timing state col row) for per-cue beats.
+   Returns accumulated beats from first active cue for backward compatibility."
+  [state]
+  (if-let [[_ timing] (first (active-cues state))]
+    (or (:accumulated-beats timing) 0.0)
+    0.0))
+
+;; DEPRECATED - use cue-timing for specific cue
+(defn phase-offset
+  "DEPRECATED: Use (cue-timing state col row) for per-cue phase.
+   Returns phase offset from first active cue for backward compatibility."
+  [state]
+  (if-let [[_ timing] (first (active-cues state))]
+    (or (:phase-offset timing) 0.0)
+    0.0))
+
+;; DEPRECATED - use cue-timing for specific cue
+(defn effective-beats
+  "DEPRECATED: Use cue-timing and calculate per-cue.
+   Returns effective beats from first active cue for backward compatibility."
+  [state]
   (+ (accumulated-beats state) (phase-offset state)))
 
 (defn grid [state]
