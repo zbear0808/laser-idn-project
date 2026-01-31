@@ -25,27 +25,6 @@
 (set! *unchecked-math* :warn-on-boxed)
 
 
-;; Keyframe Detection
-
-
-(defn keyframe-modulator?
-  "Check if a value is a keyframe modulator config.
-   Keyframe modulators are maps with a :keyframes vector."
-  [x]
-  (and (map? x)
-       (contains? x :keyframes)
-       (vector? (:keyframes x))))
-
-(defn spatial-keyframe-modulator?
-  "Check if a value is a spatial keyframe modulator config.
-   Spatial keyframe modulators have :type :spatial-keyframe and a :keyframes vector."
-  [x]
-  (and (map? x)
-       (= (:type x) :spatial-keyframe)
-       (contains? x :keyframes)
-       (vector? (:keyframes x))))
-
-
 ;; Constants
 
 

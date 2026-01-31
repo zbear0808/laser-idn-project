@@ -177,7 +177,7 @@
     (when (seq effect-chains)
       ;; Use eager operations: into with transducer (comp filter mapcat)
       (let [active-effects (into []
-                                 (comp (filter :active)
+                                 (comp (filter :active?)
                                        (mapcat :items))
                                  (vals effect-chains))]
         (when (seq active-effects)

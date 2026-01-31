@@ -7,50 +7,6 @@
    [laser-show.animation.modulation :as mod]))
 
 ;; =============================================================================
-;; spatial-keyframe-modulator? tests
-;; =============================================================================
-
-(deftest spatial-keyframe-modulator?-valid-config-test
-  (testing "returns true for valid spatial keyframe config"
-    (is (true? (kf/spatial-keyframe-modulator?
-                {:type :spatial-keyframe
-                 :keyframes [{:position 0.0 :value 0.0}
-                             {:position 1.0 :value 1.0}]
-                 :axis :point-index})))))
-
-(deftest spatial-keyframe-modulator?-invalid-configs-test
-  (testing "returns false for time-based keyframe config (no :type)"
-    (is (false? (kf/spatial-keyframe-modulator?
-                 {:keyframes [{:position 0.0 :params {:x 0}}]
-                  :period 1.0}))))
-  
-  (testing "returns false for non-map values"
-    (is (false? (kf/spatial-keyframe-modulator? nil)))
-    (is (false? (kf/spatial-keyframe-modulator? "string")))
-    (is (false? (kf/spatial-keyframe-modulator? 123)))
-    (is (false? (kf/spatial-keyframe-modulator? []))))
-  
-  (testing "returns false for map without :keyframes"
-    (is (false? (kf/spatial-keyframe-modulator?
-                 {:type :spatial-keyframe
-                  :axis :point-index}))))
-  
-  (testing "returns false for map with non-vector :keyframes"
-    (is (false? (kf/spatial-keyframe-modulator?
-                 {:type :spatial-keyframe
-                  :keyframes '({:position 0.0 :value 0.0})
-                  :axis :point-index})))
-    (is (false? (kf/spatial-keyframe-modulator?
-                 {:type :spatial-keyframe
-                  :keyframes #{{:position 0.0 :value 0.0}}
-                  :axis :point-index}))))
-  
-  (testing "returns false for wrong :type"
-    (is (false? (kf/spatial-keyframe-modulator?
-                 {:type :other-type
-                  :keyframes [{:position 0.0 :value 0.0}]})))))
-
-;; =============================================================================
 ;; get-spatial-position tests - Point Index Axis
 ;; =============================================================================
 

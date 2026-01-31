@@ -170,8 +170,36 @@
                  :col 0 :row 1
                  :state sample-state}
           result (effects/handle event)]
-      ;; Should create cell with active: true
-      (is (true? (get-in result [:state :chains :effect-chains [0 1] :active]))))))
+      ;; Should create cell with active?: true
+      (is (true? (get-in result [:state :chains :effect-chains [0 1] :active?])))))
+  
+  (testing "Toggle cell disables active cell"
+    (let [event {:event/type :effects/toggle-cell
+                 :col 0 :row 0  ;; This cell is active in sample-state
+                 :state sample-state}
+          result (effects/handle event)]
+      ;; Should toggle to false
+      (is (false? (get-in result [:state :chains :effect-chains [0 0] :active?])))))
+  
+  (testing "With :fx/event true, sets cell active regardless of current state"
+    (let [;; Cell [0 0] is already active, but :fx/event says true
+          event {:event/type :effects/toggle-cell
+                 :col 0 :row 0
+                 :fx/event true
+                 :state sample-state}
+          result (effects/handle event)]
+      ;; Should remain true (not toggle)
+      (is (true? (get-in result [:state :chains :effect-chains [0 0] :active?])))))
+  
+  (testing "With :fx/event false, sets cell inactive regardless of current state"
+    (let [;; Cell [0 0] is active, but :fx/event says false
+          event {:event/type :effects/toggle-cell
+                 :col 0 :row 0
+                 :fx/event false
+                 :state sample-state}
+          result (effects/handle event)]
+      ;; Should be false (explicit value)
+      (is (false? (get-in result [:state :chains :effect-chains [0 0] :active?]))))))
 
 (deftest handle-effects-clear-cell-test
   (testing "Clear cell removes effects"

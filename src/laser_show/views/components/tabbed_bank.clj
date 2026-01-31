@@ -79,14 +79,13 @@
    
    Layout:
    - :empty-text - Text shown when category is empty (default: \"No items\")
-   - :pref-height - Height of bank (default: 150)
    - :hgap - Horizontal gap between buttons (default: 4)
    - :vgap - Vertical gap between buttons (default: 4)
    - :padding - Padding around flow pane (default: 8)"
-  [{:keys [tab-definitions active-tab on-tab-change
-           items items-by-category
-           item-event-template item-name-key item-id-key button-style-class
-           empty-text pref-height hgap vgap padding]}]
+ [{:keys [tab-definitions active-tab on-tab-change
+          items items-by-category
+          item-event-template item-name-key item-id-key button-style-class
+          empty-text hgap vgap padding]}]
   (let [active (or active-tab (:id (first tab-definitions)))
         ;; Get items either directly or from category map
         display-items (or items

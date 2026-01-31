@@ -23,10 +23,19 @@
 
 
 (defn- handle-effects-toggle-cell
-  "Toggle an effects cell on/off."
-  [{:keys [col row state]}]
-  (let [current-active (get-in state [:chains :effect-chains [col row] :active] false)]
-    {:state (assoc-in state [:chains :effect-chains [col row] :active] (not current-active))}))
+  "Toggle an effects cell on/off.
+   
+   If :fx/event is provided (from checkbox :on-selected-changed), use that value directly.
+   Otherwise (from grid cell click), toggle the current state."
+  [{:keys [col row state] :as event}]
+  (let [;; Check if explicit value was provided (from checkbox)
+        explicit-value (get event :fx/event)
+        current-active (get-in state [:chains :effect-chains [col row] :active?] false)
+        ;; Use explicit value if provided, otherwise toggle
+        new-active (if (some? explicit-value)
+                     explicit-value
+                     (not current-active))]
+    {:state (assoc-in state [:chains :effect-chains [col row] :active?] new-active)}))
 
 (defn- handle-effects-clear-cell
   "Clear all effects from a cell."

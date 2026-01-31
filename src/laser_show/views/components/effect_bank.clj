@@ -96,9 +96,8 @@
    - :active-tab - Currently active category tab (default: :shape)
    - :on-tab-change - Event map for tab changes
    - :item-event-template - Event map template for adding effects
-                           Will receive :item-id (effect-id) and :item (effect-def)
-   - :include-zone? - Include Zone category (default: false)
-   - :pref-height - Height of bank (default: 140)"
+                          Will receive :item-id (effect-id) and :item (effect-def)
+   - :include-zone? - Include Zone category (default: false)"
   [{:keys [active-tab on-tab-change item-event-template include-zone?]}]
   (let [effects-map (get-effects-by-category)
         tabs (if include-zone?
