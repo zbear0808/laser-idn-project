@@ -4,7 +4,12 @@
    Handles:
    - BPM settings and tap tempo
    - Transport controls (play/stop/retrigger)
-   - External BPM sync (Ableton Link)"
+   - External BPM sync (Ableton Link via beat-carabiner)
+   
+   Link Architecture:
+   - Carabiner daemon auto-connects on app startup
+   - Button toggles Link sync mode (:passive/:off)
+   - UI shows both Carabiner and Link status"
   (:require [laser-show.events.helpers :as h]
             [laser-show.input.link :as link]
             [laser-show.state.core :as state]))
@@ -76,18 +81,13 @@
 
 (defn- handle-timing-toggle-link-sync
   "Toggle Ableton Link BPM sync on/off."
-  [{:keys [state dispatch-fn]}]
+  [{:keys [state]}]
   (let [current-sync (get-in state [:backend :link :sync-enabled?] false)
         link-state (get-in state [:backend :link])
         new-link-state (if current-sync
                          (link/disable-sync link-state)
                          (link/enable-sync link-state))]
     {:state (assoc-in state [:backend :link] new-link-state)}))
-
-(defn- handle-timing-link-connected
-  "Update Link connection status."
-  [{:keys [state connected?]}]
-  {:state (assoc-in state [:backend :link :connected?] connected?)})
 
 (defn- handle-timing-link-bpm-changed
   "Receive BPM update from Link network."
@@ -113,21 +113,21 @@
 
 
 (defn- handle-timing-link-toggle
-  "Toggle Link connection on/off."
-  [{:keys [state dispatch-fn]}]
-  (let [connected? (get-in state [:backend :link :connected?] false)
+  "Toggle Link sync mode on/off.
+   Carabiner must be connected first (auto on startup).
+   This enables/disables Link by setting sync mode to :passive or :off."
+  [{:keys [state]}]
+  (let [link-enabled? (get-in state [:backend :link :link-enabled?] false)
         link-state (get-in state [:backend :link])
-        get-state-fn #(get-in (state/get-raw-state) [:backend :link])]
-    (if connected?
-      ;; Disconnect
-      (let [new-link-state (link/stop-link! link-state)]
-        {:state (assoc-in state [:backend :link] new-link-state)})
-      ;; Connect
-      (let [new-link-state (link/start-link! link-state dispatch-fn get-state-fn)]
-        {:state (assoc-in state [:backend :link] new-link-state)}))))
+        new-link-state (if link-enabled?
+                         (link/disable-link! link-state)
+                         (link/enable-link! link-state))]
+    {:state (assoc-in state [:backend :link] new-link-state)}))
 
 (defn- handle-timing-link-set-sync-enabled
-  "Enable or disable BPM sync from Link."
+  "Enable or disable BPM sync from Link to app.
+   This controls whether received Link BPM updates the app BPM.
+   Link must be enabled first."
   [{:keys [state fx/event]}]
   (let [enabled? (boolean event)
         link-state (get-in state [:backend :link])
@@ -142,7 +142,7 @@
   {:state (assoc-in state [:backend :link :beat-sync?] (boolean event))})
 
 (defn- handle-timing-link-set-auto-connect
-  "Enable or disable auto-connect on startup."
+  "Enable or disable auto-connect Carabiner on startup."
   [{:keys [state fx/event]}]
   {:state (assoc-in state [:backend :link :auto-connect?] (boolean event))})
 
@@ -155,6 +155,16 @@
   "Update the number of Link peers."
   [{:keys [state peers]}]
   {:state (assoc-in state [:backend :link :link-peers] (or peers 0))})
+
+(defn- handle-timing-carabiner-connected
+  "Update Carabiner connection status (internal event from link service)."
+  [{:keys [state connected?]}]
+  {:state (assoc-in state [:backend :link :carabiner-connected?] connected?)})
+
+(defn- handle-timing-link-enabled
+  "Update Link enabled status (internal event from link service)."
+  [{:keys [state enabled?]}]
+  {:state (assoc-in state [:backend :link :link-enabled?] enabled?)})
 
 
 ;; Public API
@@ -175,7 +185,6 @@
     
     ;; Link sync events
     :timing/toggle-link-sync (handle-timing-toggle-link-sync event)
-    :timing/link-connected (handle-timing-link-connected event)
     :timing/link-bpm-changed (handle-timing-link-bpm-changed event)
     :timing/sync-to-downbeat (handle-timing-sync-to-downbeat event)
     :timing/set-phase-offset-target (handle-timing-set-phase-offset-target event)
@@ -187,6 +196,10 @@
     :timing/link-set-auto-connect (handle-timing-link-set-auto-connect event)
     :timing/link-set-latency (handle-timing-link-set-latency event)
     :timing/link-peers-changed (handle-timing-link-peers-changed event)
+    
+    ;; Internal Link events
+    :timing/carabiner-connected (handle-timing-carabiner-connected event)
+    :timing/link-enabled (handle-timing-link-enabled event)
     
     ;; Unknown event in this domain
     {}))

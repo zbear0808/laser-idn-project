@@ -26,23 +26,33 @@
 
 
 (defn setup-playing-state-with-cue!
-  "Set up state as if playing with a cue chain"
+  "Set up state as if playing with a cue chain.
+   Updated for multi-cue architecture: uses active-cues map."
   [destination-zone-group]
-  (state/swap-state!
-    (fn [s]
-      (-> s
-          (assoc-in [:playback :playing?] true)
-          (assoc-in [:playback :active-cell] [0 0])
-          (assoc-in [:playback :trigger-time] (System/currentTimeMillis))
-          (assoc-in [:playback :last-frame-time] (System/currentTimeMillis))
-          (assoc-in [:playback :accumulated-beats] 0.0)
-          (assoc-in [:playback :accumulated-ms] 0.0)
-          (assoc-in [:chains :cue-chains [0 0]]
-                    {:destination-zone {:zone-group-id destination-zone-group}
-                     :items [{:type :preset
-                              :preset-id :circle
-                              :enabled? true
-                              :effects []}]})))))
+  (let [current-time (System/currentTimeMillis)]
+    (state/swap-state!
+      (fn [s]
+        (-> s
+            (assoc-in [:playback :playing?] true)
+            ;; New multi-cue structure: active-cues is a map
+            (assoc-in [:playback :active-cues [0 0]]
+                      {:trigger-time current-time
+                       :accumulated-beats 0.0
+                       :accumulated-ms 0.0
+                       :phase-offset 0.0
+                       :phase-offset-target 0.0
+                       :last-frame-time current-time})
+            ;; Initialize global clock
+            (assoc-in [:timing :global-clock]
+                      {:accumulated-beats 0.0
+                       :accumulated-ms 0.0
+                       :last-frame-time current-time})
+            (assoc-in [:chains :cue-chains [0 0]]
+                      {:destination-zone {:zone-group-id destination-zone-group}
+                       :items [{:type :preset
+                                :preset-id :circle
+                                :enabled? true
+                                :effects []}]}))))))
 
 
 ;; Preview Zone Filter Tests
@@ -129,20 +139,25 @@
 
 
 (deftest get-timing-context-test
-  (testing "returns timing context with accumulated values"
+  (testing "returns timing context with accumulated values (from first active cue)"
     (state/swap-state!
       (fn [s]
         (-> s
-            (assoc-in [:playback :accumulated-beats] 42.5)
-            (assoc-in [:playback :accumulated-ms] 10000)
-            (assoc-in [:playback :phase-offset] 0.25))))
+            ;; New structure: timing values are per-cue in active-cues map
+            (assoc-in [:playback :active-cues [0 0]]
+                      {:trigger-time (System/currentTimeMillis)
+                       :accumulated-beats 42.5
+                       :accumulated-ms 10000
+                       :phase-offset 0.25
+                       :phase-offset-target 0.0
+                       :last-frame-time (System/currentTimeMillis)}))))
     (let [ctx (frame-service/get-timing-context)]
       (is (= 42.5 (:accumulated-beats ctx)))
       (is (= 10000 (:accumulated-ms ctx)))
       (is (= 0.25 (:phase-offset ctx)))
       (is (= 42.75 (:effective-beats ctx)) "effective-beats = accumulated-beats + phase-offset")))
   
-  (testing "defaults to zero values"
+  (testing "defaults to zero values when no active cues"
     (let [ctx (frame-service/get-timing-context)]
       (is (number? (:accumulated-beats ctx)))
       (is (number? (:accumulated-ms ctx)))
@@ -163,22 +178,36 @@
 
 
 (deftest get-active-cell-data-test
-  (testing "returns nil when no active cell"
+  (testing "returns nil when no active cues"
     (is (nil? (frame-service/get-active-cell-data))))
   
-  (testing "returns nil when active cell has empty cue chain"
+  (testing "returns nil when active cue has empty cue chain"
     (state/swap-state!
       (fn [s]
         (-> s
-            (assoc-in [:playback :active-cell] [0 0])
+            ;; New structure: use active-cues map
+            (assoc-in [:playback :active-cues [0 0]]
+                      {:trigger-time (System/currentTimeMillis)
+                       :accumulated-beats 0.0
+                       :accumulated-ms 0.0
+                       :phase-offset 0.0
+                       :phase-offset-target 0.0
+                       :last-frame-time (System/currentTimeMillis)})
             (assoc-in [:chains :cue-chains [0 0]] {:items []}))))
     (is (nil? (frame-service/get-active-cell-data))))
   
-  (testing "returns cue chain data when present"
+  (testing "returns cue chain data when present (from first active cue)"
     (state/swap-state!
       (fn [s]
         (-> s
-            (assoc-in [:playback :active-cell] [1 2])
+            ;; New structure: use active-cues map
+            (assoc-in [:playback :active-cues [1 2]]
+                      {:trigger-time (System/currentTimeMillis)
+                       :accumulated-beats 0.0
+                       :accumulated-ms 0.0
+                       :phase-offset 0.0
+                       :phase-offset-target 0.0
+                       :last-frame-time (System/currentTimeMillis)})
             (assoc-in [:chains :cue-chains [1 2]]
                       {:destination-zone {:zone-group-id :left}
                        :items [{:type :preset :preset-id :circle :enabled? true}]}))))

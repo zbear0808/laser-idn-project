@@ -381,14 +381,15 @@
                        :file nil
                        :path default-log-path}
              :doc "Packet logging state"}
-   :link {:default {:connected? false
-                    :sync-enabled? false
-                    :beat-sync? true
-                    :auto-connect? true
-                    :latency-ms 0
-                    :link-bpm nil
-                    :link-peers 0}
-          :doc "Ableton Link connection state and settings"}})
+   :link {:default {:carabiner-connected? false    ;; Carabiner daemon connected (auto on startup)
+                    :link-enabled? false           ;; Link sync enabled (user toggles via button)
+                    :sync-enabled? false           ;; Whether to apply Link BPM to app
+                    :beat-sync? true               ;; Whether to sync downbeat alignment
+                    :auto-connect? true            ;; Auto-connect Carabiner on startup
+                    :latency-ms 0                  ;; Latency compensation
+                    :link-bpm nil                  ;; Current Link session BPM
+                    :link-peers 0}                 ;; Number of Link peers
+          :doc "Ableton Link state. Carabiner auto-connects on startup. Button toggles Link sync mode."}})
 
 
 ;; State Builder

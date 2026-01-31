@@ -16,8 +16,7 @@
            Example: (fx/sub-ctx context cell-display-data 0 0)
    
    For shared extraction logic, we use laser-show.state.extractors which provides
-   pure functions that work on raw state data. This eliminates duplication between
-   queries.clj and subs.clj.
+   pure functions that work on raw state data
    
    Usage in components:
    
@@ -28,7 +27,8 @@
   (:require [cljfx.api :as fx]
             [laser-show.state.extractors :as ex]
             [laser-show.css.core :as css]
-            [laser-show.animation.chains :as chains]))
+            [laser-show.animation.chains :as chains]
+            [laser-show.common.util :as u]))
 
 
 ;; Level 1: Domain Accessors (fx/sub-val wrappers)
@@ -57,10 +57,11 @@
    - :beat-index - Current beat, 0-3, where 0 is downbeat
    - :beat-phase - Progress within current beat, 0.0-1.0
    
-   Uses effective-beats which includes phase-offset, so tap tempo
-   resync is automatically reflected in the beat position."
+   Uses global-accumulated-beats from the global clock, which runs
+   continuously regardless of cue playback state. This ensures the
+   beat indicator animates even when no cues are active."
   [context]
-  (let [effective-beats (fx/sub-val context ex/effective-beats)
+  (let [effective-beats (fx/sub-val context ex/global-accumulated-beats)
         beat-in-bar (mod effective-beats 4.0)
         beat-index (int (Math/floor beat-in-bar))
         beat-phase (- beat-in-bar beat-index)]
@@ -140,7 +141,9 @@
         chains-data (fx/sub-val context :chains)
         cue-chain-data (get-in chains-data [:cue-chains [col row]] {:items []})
         items (:items cue-chain-data [])
-        active (fx/sub-ctx context active-cell)
+        ;; Check if this cell is in the active-cues map (multi-cue support)
+        active-cues (fx/sub-val context ex/active-cues)
+        active? (contains? active-cues [col row])
         ;; Flatten to get all presets (excluding groups)
         flat-items (filter #(= :preset (:type %))
                           (tree-seq #(= :group (:type %))
@@ -154,7 +157,7 @@
      :cue-chain cue-chain-data
      :preset-count preset-count
      :first-preset-id (:preset-id first-preset)
-     :active? (= [col row] active)
+     :active? active?
      :has-content? (pos? preset-count)}))
 
 (defn active-cell-preset
@@ -259,16 +262,13 @@
    - :error - error message
    - :status-text - human-readable status"
   [context]
-  (let [i (fx/sub-val context ex/idn-data)]
-    {:connected? (:connected? i)
-     :connecting? (:connecting? i)
-     :target (:target i)
-     :error (:error i)
-     :status-text (cond
-                    (:connected? i) (str "Connected: " (:target i))
-                    (:connecting? i) "Connecting..."
-                    (:error i) (str "Error: " (:error i))
-                    :else "Disconnected")}))
+  (let [{:keys [connected? connecting? target error] :as i} (fx/sub-val context ex/idn-data)]
+    (u/->map& connected? connecting? target error 
+              :status-text (cond
+                             connected? (str "Connected: " target)
+                             connecting? "Connecting..."
+                             error (str "Error: " error)
+                             :else "Disconnected"))))
 
 
 ;; Level 2: Computed UI State Subscriptions

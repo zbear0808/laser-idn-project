@@ -34,6 +34,7 @@
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.types :as t]
+            [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.common.timing :as timing]
             [laser-show.common.util :as u]
             [laser-show.profiling.frame-profiler :as profiler]
@@ -57,45 +58,42 @@
   "Update beat/time accumulators for the current frame.
    Call once per frame before generating animation.
    
-   Handles:
-   - Incremental beat and ms accumulation (ALWAYS runs - for modulator preview)
-   - Phase offset exponential decay toward target
-   - Protection against large deltas (>1 second gaps)
+   Multi-Cue Architecture:
+   1. Updates global clock (for BPM visualization, runs always)
+   2. Updates each active cue's timing (with phase offset decay)
    
-   NOTE: Beat accumulation runs continuously, not just when playing.
+   NOTE: Global clock and cue timing run continuously, not just when playing.
    This allows modulators to animate in editor preview mode.
    The retrigger button resets accumulators to zero."
   [current-time-ms]
- (let [bpm (ex/bpm (state/get-raw-state))]
-   (state/swap-state!
+  (let [raw-state (state/get-raw-state)
+        bpm (ex/bpm raw-state)
+        resync-rate (ex/resync-rate raw-state)]
+    (state/swap-state!
       (fn [s]
-        (let [{:keys [last-frame-time accumulated-beats accumulated-ms
-                      phase-offset phase-offset-target resync-rate]} (:playback s)
-              resync-rate (or resync-rate 4.0)]
-          (if (pos? last-frame-time)
-            ;; Normal frame - calculate deltas and update
-            (let [delta-ms (- current-time-ms last-frame-time)]
-              ;; Guard against unreasonable deltas (>1 second = probably pause/resume)
-              (if (> delta-ms 1000)
-                ;; Skip accumulation, just update timestamp
-                (assoc-in s [:playback :last-frame-time] current-time-ms)
-                ;; Normal accumulation - runs continuously for modulator preview
-                (let [delta-beats (* delta-ms (/ bpm 60000.0))
-                      new-accumulated-beats (+ (or accumulated-beats 0.0) delta-beats)
-                      new-accumulated-ms (+ (or accumulated-ms 0.0) delta-ms)
-                      ;; Exponential decay toward target phase offset
-                      decay (Math/exp (- (/ delta-beats (max 0.1 resync-rate))))
-                      new-phase-offset (+ (or phase-offset-target 0.0)
-                                          (* (- (or phase-offset 0.0)
-                                                (or phase-offset-target 0.0))
-                                             decay))]
-                  (-> s
-                      (assoc-in [:playback :accumulated-beats] new-accumulated-beats)
-                      (assoc-in [:playback :accumulated-ms] new-accumulated-ms)
-                      (assoc-in [:playback :phase-offset] new-phase-offset)
-                      (assoc-in [:playback :last-frame-time] current-time-ms)))))
-            ;; First frame - just initialize timestamp
-            (assoc-in s [:playback :last-frame-time] current-time-ms)))))))
+        (-> s
+            ;; 1. Update global clock (always, for BPM visualization)
+            (update-in [:timing :global-clock]
+                       (fn [gc]
+                         (cue-timing/update-global-clock
+                           (or gc {:accumulated-beats 0.0
+                                   :accumulated-ms 0.0
+                                   :last-frame-time 0})
+                           current-time-ms
+                           bpm)))
+            ;; 2. Update all active cues' timing
+            (update-in [:playback :active-cues]
+                       (fn [cues]
+                         (reduce-kv
+                           (fn [acc cell-key cue-timing-state]
+                             (assoc acc cell-key
+                                    (cue-timing/update-cue-timing
+                                      cue-timing-state
+                                      current-time-ms
+                                      bpm
+                                      resync-rate)))
+                           {}
+                           (or cues {})))))))))
 
 
 ;; Frame Generation
@@ -106,21 +104,49 @@
 ;; UI thread. Using fx/sub-val from a background thread causes assertion errors.
 
 (defn get-active-cell-data
-  "Get the cell data for the currently active cell.
-   Returns a map with :cue-chain from the unified :chains domain."
+  "DEPRECATED: Use get-all-active-cues-data for multi-cue support.
+   
+   Get the cell data for the currently active cell (first active cue).
+   Returns a map with :cue-chain from the unified :chains domain.
+   For backward compatibility, returns data for first active cue."
   []
   (let [s (state/get-raw-state)
-        active-cell (get-in s [:playback :active-cell])]
-    (when active-cell
-      (let [[col row] active-cell
+        active-cues (get-in s [:playback :active-cues] {})]
+    (when-let [first-cell (first (keys active-cues))]
+      (let [[col row] first-cell
             cue-chain-data (get-in s [:chains :cue-chains [col row]])]
         (when (seq (:items cue-chain-data))
           {:cue-chain cue-chain-data})))))
 
-(defn get-trigger-time
-  "Get the trigger time for animation timing."
+(defn get-all-active-cues-data
+  "Get data for ALL active cues (multi-cue support).
+   
+   Returns a vector of maps, each with:
+   - :cell - [col row] coordinates
+   - :cue-chain - the cue chain data
+   - :cue-timing - the timing state for this cue"
   []
-  (get-in (state/get-raw-state) [:playback :trigger-time] 0))
+  (let [s (state/get-raw-state)
+        active-cues (get-in s [:playback :active-cues] {})]
+    (u/keepv (fn [[[col row] cue-timing]]
+               (let [cue-chain-data (get-in s [:chains :cue-chains [col row]])]
+                 (when (seq (:items cue-chain-data))
+                   {:cell [col row]
+                    :cue-chain cue-chain-data
+                    :cue-timing cue-timing})))
+             active-cues)))
+
+(defn get-trigger-time
+  "DEPRECATED: Use per-cue trigger times.
+   
+   Get the trigger time for animation timing (first active cue).
+   For backward compatibility, returns trigger time of first active cue."
+  []
+  (let [s (state/get-raw-state)
+        active-cues (get-in s [:playback :active-cues] {})]
+    (if-let [[_ first-cue-timing] (first active-cues)]
+      (:trigger-time first-cue-timing 0)
+      0)))
 
 (defn get-bpm
   "Get the current BPM."
@@ -156,15 +182,25 @@
       (contains? final-targets preview-zone))) ;; direct match only
 
 (defn get-timing-context
-  "Get the timing context for modulator evaluation.
-   Returns a map with accumulated-beats, accumulated-ms, phase-offset, effective-beats."
+  "DEPRECATED: Use get-cue-timing-context for per-cue timing.
+   
+   Get the timing context for modulator evaluation (from first active cue).
+   Returns a map with accumulated-beats, accumulated-ms, phase-offset, effective-beats.
+   For backward compatibility, returns context from first active cue."
   []
   (let [s (state/get-raw-state)
-        {:keys [accumulated-beats accumulated-ms phase-offset]} (:playback s)]
-    {:accumulated-beats (or accumulated-beats 0.0)
-     :accumulated-ms (or accumulated-ms 0.0)
-     :phase-offset (or phase-offset 0.0)
-     :effective-beats (+ (or accumulated-beats 0.0) (or phase-offset 0.0))}))
+        active-cues (get-in s [:playback :active-cues] {})]
+    (if-let [[_ first-cue-timing] (first active-cues)]
+      ;; Return context from first active cue
+      (cue-timing/get-cue-timing-context first-cue-timing (ex/bpm s))
+      ;; No active cues - return zeros
+      {:accumulated-beats 0.0
+       :accumulated-ms 0.0
+       :phase-offset 0.0
+       :effective-beats 0.0
+       :time-ms 0
+       :bpm (or (ex/bpm s) 120.0)
+       :trigger-time 0})))
 
 (defn get-active-global-effects
   "Get all active effect instances from the effects grid.
@@ -307,7 +343,8 @@
 
 (defn generate-current-frame
   "Generate the current animation frame based on state.
-   Applies active effects from the effects grid to the base frame.
+   Supports multi-cue playback: generates frames for all active cues and concatenates them.
+   Applies active effects from the effects grid to the combined frame.
    Optionally filters based on preview zone group setting.
    Returns a LaserFrame or nil if nothing to render.
    
@@ -315,76 +352,88 @@
    - skip-zone-filter? - If true, bypasses preview zone filtering (for IDN streaming)
    
    Zone filtering (when not skipped):
-   - Gets the cue chain's destination zone and collects all effects
+   - Gets each cue's destination zone and collects all effects
    - Resolves final target zones after applying zone effects
-   - Only generates frame if targets match the preview zone filter
+   - Only includes cue frames if targets match the preview zone filter
    
    Frame generation is profiled to track performance."
   ([] (generate-current-frame {}))
   ([{:keys [skip-zone-filter?] :or {skip-zone-filter? false}}]
    (when (is-playing?)
-     (when-let [cell-data (get-active-cell-data)]
-       (let [cue-chain (:cue-chain cell-data)]
-         (when cue-chain
-           ;; Check zone filter BEFORE generating frame for efficiency (unless skipped)
-           (let [preview-zone (when-not skip-zone-filter? (get-preview-zone-filter))
-                 raw-state (state/get-raw-state)
-                 zone-group-ids (set (keys (get raw-state :zone-groups {})))
-                 destination (:destination-zone cue-chain)
-                 collected-effects (ze/collect-effects-from-cue-chain (:items cue-chain))
-                 final-targets (ze/resolve-final-target destination collected-effects zone-group-ids)
-                 matches? (or skip-zone-filter?
-                              (matches-preview-zone? preview-zone final-targets))]
-             
-             ;; Only generate frame if preview zone matches (or filter is skipped)
-             (when matches?
-               (let [trigger-time (get-trigger-time)
-                     elapsed (- (System/currentTimeMillis) trigger-time)
-                     bpm (get-bpm)
-                     timing-ctx (get-timing-context)
-                     
-                     ;; Measure base frame generation
-                     base-start (timing/nanotime)
-                     base-frame (generate-frame-from-cue-chain cue-chain elapsed bpm trigger-time timing-ctx)
-                     base-end (timing/nanotime)]
+     (let [all-cues (get-all-active-cues-data)]
+       (when (seq all-cues)
+         (let [preview-zone (when-not skip-zone-filter? (get-preview-zone-filter))
+               raw-state (state/get-raw-state)
+               zone-group-ids (set (keys (get raw-state :zone-groups {})))
+               bpm (get-bpm)
+               current-time (System/currentTimeMillis)
+               
+               ;; Measure base frame generation
+               base-start (timing/nanotime)
+               
+               ;; Generate frame for each active cue
+               cue-frames (u/keepv
+                            (fn [{:keys [cue-chain cue-timing]}]
+                              ;; Zone filtering per cue
+                              (let [destination (:destination-zone cue-chain)
+                                    collected-effects (ze/collect-effects-from-cue-chain (:items cue-chain))
+                                    final-targets (ze/resolve-final-target destination collected-effects zone-group-ids)
+                                    matches? (or skip-zone-filter?
+                                                 (matches-preview-zone? preview-zone final-targets))]
+                                (when matches?
+                                  (let [trigger-time (:trigger-time cue-timing)
+                                        elapsed (- current-time trigger-time)
+                                        timing-ctx (cue-timing/get-cue-timing-context cue-timing bpm)]
+                                    (generate-frame-from-cue-chain cue-chain elapsed bpm trigger-time timing-ctx)))))
+                            all-cues)
+               
+               ;; Concatenate all cue frames with blanking between them
+               base-frame (concatenate-frames cue-frames 0)
+               base-end (timing/nanotime)]
+           
+           (when base-frame
+             (let [effect-chain (get-active-global-effects)
+                   
+                   ;; Measure effect chain application (from effects grid)
+                   ;; Use timing context from first active cue for global effects
+                   first-cue-timing (:cue-timing (first all-cues))
+                   trigger-time (:trigger-time first-cue-timing)
+                   elapsed (- current-time trigger-time)
+                   timing-ctx (cue-timing/get-cue-timing-context first-cue-timing bpm)
+                   
+                   effects-start (timing/nanotime)
+                   final-frame (if effect-chain
+                                 (try
+                                   (effects/apply-effect-chain base-frame effect-chain elapsed bpm trigger-time timing-ctx)
+                                   (catch Exception e
+                                     (log/error "generate-current-frame: Effect chain failed:" (.getMessage e))
+                                     (log/debug "  effect-chain:" effect-chain)
+                                     base-frame))
+                                 base-frame)
+                   effects-end (timing/nanotime)]
+               
+               ;; Record timing (profiler adds timestamp and calculates total)
+               (let [base-time-us (timing/nanos->micros (- base-end base-start))
+                     effects-time-us (if effect-chain
+                                       (timing/nanos->micros (- effects-end effects-start))
+                                       0)
+                     effect-count (if effect-chain (count (:effects effect-chain)) 0)
+                     point-count (count final-frame)]
                  
-                 (when base-frame
-                   (let [effect-chain (get-active-global-effects)
-                         
-                         ;; Measure effect chain application (from effects grid)
-                         effects-start (timing/nanotime)
-                         final-frame (if effect-chain
-                                       (try
-                                         (effects/apply-effect-chain base-frame effect-chain elapsed bpm trigger-time timing-ctx)
-                                         (catch Exception e
-                                           (log/error "generate-current-frame: Effect chain failed:" (.getMessage e))
-                                           (log/debug "  effect-chain:" effect-chain)
-                                           base-frame))
-                                       base-frame)
-                         effects-end (timing/nanotime)]
-                     
-                     ;; Record timing (profiler adds timestamp and calculates total)
-                     (let [base-time-us (timing/nanos->micros (- base-end base-start))
-                           effects-time-us (if effect-chain
-                                             (timing/nanos->micros (- effects-end effects-start))
-                                             0)
-                           effect-count (if effect-chain (count (:effects effect-chain)) 0)
-                           point-count (count final-frame)]
-                       
-                       ;; Frame profiler (always-on stats)
-                       (profiler/record-frame-timing!
-                         {:base-time-us base-time-us
-                          :effects-time-us effects-time-us
-                          :effect-count effect-count})
-                       
-                       ;; JFR event (low-overhead, for continuous recording and spike detection)
-                       (jfr/emit-frame-event!
-                         {:base-time-us base-time-us
-                          :effects-time-us effects-time-us
-                          :effect-count effect-count
-                          :point-count point-count}))
-                     
-                     final-frame)))))))))))
+                 ;; Frame profiler (always-on stats)
+                 (profiler/record-frame-timing!
+                   {:base-time-us base-time-us
+                    :effects-time-us effects-time-us
+                    :effect-count effect-count})
+                 
+                 ;; JFR event (low-overhead, for continuous recording and spike detection)
+                 (jfr/emit-frame-event!
+                   {:base-time-us base-time-us
+                    :effects-time-us effects-time-us
+                    :effect-count effect-count
+                    :point-count point-count}))
+               
+               final-frame))))))))
 
 
 ;; Frame Conversion for Preview

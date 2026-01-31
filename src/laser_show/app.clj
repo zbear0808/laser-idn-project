@@ -127,12 +127,14 @@
     ;; Wire dispatch! to use app's handler (wrapped with async agent)
     (events/set-dispatch-fn! (:handler app)))
 
-  ;; Start Link service (will auto-connect if configured)
+  ;; Start Carabiner service (auto-connect for Link support)
   (let [link-state (get-in (state/get-raw-state) [:backend :link])
-        get-link-state-fn #(get-in (state/get-raw-state) [:backend :link])
-        new-link-state (link/start-link! link-state events/dispatch! get-link-state-fn)]
-    (state/assoc-in-state! [:backend :link] new-link-state)
-    (log/info "Link service initialized"))
+        auto-connect? (:auto-connect? link-state true)
+        get-link-state-fn #(get-in (state/get-raw-state) [:backend :link])]
+    (when auto-connect?
+      (let [new-link-state (link/connect-carabiner! link-state events/dispatch! get-link-state-fn)]
+        (state/assoc-in-state! [:backend :link] new-link-state)
+        (log/info "Carabiner daemon connected (Link available via UI button)"))))
 
   ;; Auto-scan for IDN devices on startup
   (log/info "Starting automatic device discovery...")

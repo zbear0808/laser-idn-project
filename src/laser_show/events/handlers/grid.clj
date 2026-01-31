@@ -6,19 +6,10 @@
    - Cell content management (clear, move)
    - Clipboard operations (copy, paste)"
   (:require [laser-show.events.helpers :as h]
-            [laser-show.state.clipboard :as clipboard]))
+            [laser-show.state.clipboard :as clipboard]
+            [laser-show.state.extractors :as ex]
+            [laser-show.animation.cue-timing :as cue-timing]))
 
-
-(defn- reset-timing-accumulators
-  "Reset all timing accumulators to zero.
-   Called when triggering a new cue for fresh animation start."
-  [state]
-  (-> state
-      (assoc-in [:playback :accumulated-beats] 0.0)
-      (assoc-in [:playback :accumulated-ms] 0.0)
-      (assoc-in [:playback :phase-offset] 0.0)
-      (assoc-in [:playback :phase-offset-target] 0.0)
-      (assoc-in [:playback :last-frame-time] 0)))
 
 (defn- handle-grid-cell-clicked
   "Handle grid cell click - dispatches to trigger or select.
@@ -26,13 +17,17 @@
    This handler receives only single left-clicks."
   [{:keys [col row has-content? state]}]
   (if has-content?
-    ;; Left click on cell with content - trigger
-    (let [now (h/current-time-ms {:time (System/currentTimeMillis)})]
+    ;; Left click on cell with content - trigger using new multi-cue system
+    (let [now (h/current-time-ms {:time (System/currentTimeMillis)})
+          global-clock-beats (ex/global-accumulated-beats state)
+          cue-timing-state (cue-timing/create-cue-timing-state now global-clock-beats)]
       {:state (-> state
-                  (assoc-in [:playback :active-cell] [col row])
+                  ;; Set multi-cue state
+                  (assoc-in [:playback :active-cues [col row]] cue-timing-state)
                   (assoc-in [:playback :playing?] true)
-                  (assoc-in [:playback :trigger-time] now)
-                  reset-timing-accumulators)})
+                  ;; Keep deprecated state for backward compatibility during transition
+                  (assoc-in [:playback :active-cell] [col row])
+                  (assoc-in [:playback :trigger-time] now))})
     ;; Left click on empty - select
     {:state (assoc-in state [:grid :selected-cell] [col row])}))
 

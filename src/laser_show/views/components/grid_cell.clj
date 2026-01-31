@@ -118,7 +118,7 @@
                            (cond
                              ;; Right-click or double-click: dispatch right-click event
                              (or (= button MouseButton/SECONDARY)
-                                 (>= click-count 2))
+                                 #_(>= click-count 2))
                              (do
                                (log/debug "Grid cell right-click/double-click"
                                          {:cell-type cell-type

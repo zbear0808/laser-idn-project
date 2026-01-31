@@ -118,28 +118,33 @@
 (defn link-sync-button
  "Ableton Link sync button with status indicator."
  [{:keys [fx/context]}]
- (let [{:keys [connected? sync-enabled? link-bpm]} (fx/sub-ctx context subs/link-status)
-       app-bpm (fx/sub-ctx context subs/bpm)]
+ (let [{:keys [carabiner-connected? link-enabled? sync-enabled? link-bpm link-peers]}
+       (fx/sub-ctx context subs/link-status)]
    {:fx/type :button
     :text "LINK"
     :graphic {:fx/type fa/icon
               :name :link
               :size 12}
     :style-class (cond
-                   (and connected? sync-enabled?) "btn-link-active"
-                   connected? "btn-link-connected"
+                   (and link-enabled? sync-enabled?) "btn-link-active"
+                   link-enabled? "btn-link-connected"
                    :else "btn-sm")
     :tooltip {:fx/type :tooltip
               :text (cond
-                      (and connected? sync-enabled?)
-                      (format "Syncing BPM from Ableton Link (%.1f BPM)" (or link-bpm 0.0))
+                      (and link-enabled? sync-enabled?)
+                      (format "Syncing BPM from Ableton Link (%.1f BPM, %d peers)"
+                              (or link-bpm 0.0) (or link-peers 0))
                       
-                      connected?
-                      (format "Connected to Link (%.1f BPM)\nClick to enable sync" (or link-bpm 0.0))
+                      link-enabled?
+                      (format "Link enabled (%.1f BPM, %d peers)\nClick to enable BPM sync"
+                              (or link-bpm 0.0) (or link-peers 0))
+                      
+                      carabiner-connected?
+                      "Carabiner ready - Click to enable Link"
                       
                       :else
-                      "Not connected to Ableton Link")}
-    :on-action {:event/type :timing/toggle-link-sync}}))
+                      "Carabiner not connected")}
+    :on-action {:event/type :timing/link-toggle}}))
 
 
 (defn connection-indicator

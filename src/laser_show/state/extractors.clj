@@ -165,14 +165,28 @@
 (defn link-data [state]
   (:link (backend state)))
 
-(defn link-connected? [state]
-  (:connected? (link-data state)))
+(defn carabiner-connected? [state]
+  (:carabiner-connected? (link-data state)))
+
+(defn link-enabled? [state]
+  (:link-enabled? (link-data state)))
+
+(defn link-connected?
+  "DEPRECATED: Use carabiner-connected? or link-enabled? instead.
+   Returns true if both Carabiner is connected AND Link is enabled."
+  [state]
+  (let [data (link-data state)]
+    (and (:carabiner-connected? data)
+         (:link-enabled? data))))
 
 (defn link-sync-enabled? [state]
   (:sync-enabled? (link-data state)))
 
 (defn link-bpm [state]
   (:link-bpm (link-data state)))
+
+(defn link-peers [state]
+  (:link-peers (link-data state)))
 
 
 ;; Project Extractors
