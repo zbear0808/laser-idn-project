@@ -102,6 +102,36 @@
    :trigger-time (or trigger-time 0)})
 
 
+(defn get-global-timing-context
+  "Build timing context map for global effects from global clock state.
+   
+   Unlike per-cue timing, global effects:
+   - Don't reset on cue triggers
+   - Don't need phase offset (already synced at global level)
+   - Use accumulated-ms as effective elapsed time
+   
+   Parameters:
+   - global-clock: Global clock state map
+   - bpm: Current BPM
+   
+   Returns: Timing context map with keys:
+   - :accumulated-beats - Total beats accumulated since startup/last reset
+   - :accumulated-ms - Total milliseconds since startup/last reset
+   - :phase-offset - Always 0 for global clock
+   - :effective-beats - Same as accumulated-beats (no phase correction needed)
+   - :time-ms - Same as accumulated-ms
+   - :bpm - Current BPM
+   - :trigger-time - Always 0 (global effects don't have a trigger time)"
+  [{:keys [accumulated-beats accumulated-ms]} bpm]
+  {:accumulated-beats (or accumulated-beats 0.0)
+   :accumulated-ms (or accumulated-ms 0.0)
+   :phase-offset 0.0
+   :effective-beats (or accumulated-beats 0.0)
+   :time-ms (or accumulated-ms 0)
+   :bpm (or bpm 120.0)
+   :trigger-time 0})
+
+
 (defn create-cue-timing-state
   "Create initial timing state for a newly triggered cue.
    

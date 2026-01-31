@@ -395,16 +395,16 @@
              (let [effect-chain (get-active-global-effects)
                    
                    ;; Measure effect chain application (from effects grid)
-                   ;; Use timing context from first active cue for global effects
-                   first-cue-timing (:cue-timing (first all-cues))
-                   trigger-time (:trigger-time first-cue-timing)
-                   elapsed (- current-time trigger-time)
-                   timing-ctx (cue-timing/get-cue-timing-context first-cue-timing bpm)
+                   ;; Use GLOBAL CLOCK timing for global effects - not cue timing!
+                   ;; This ensures global effects continue smoothly when cues are retriggered
+                   global-clock (get-in raw-state [:timing :global-clock])
+                   global-timing-ctx (cue-timing/get-global-timing-context global-clock bpm)
+                   global-elapsed (long (or (:accumulated-ms global-clock) 0))
                    
                    effects-start (timing/nanotime)
                    final-frame (if effect-chain
                                  (try
-                                   (effects/apply-effect-chain base-frame effect-chain elapsed bpm trigger-time timing-ctx)
+                                   (effects/apply-effect-chain base-frame effect-chain global-elapsed bpm 0 global-timing-ctx)
                                    (catch Exception e
                                      (log/error "generate-current-frame: Effect chain failed:" (.getMessage e))
                                      (log/debug "  effect-chain:" effect-chain)
