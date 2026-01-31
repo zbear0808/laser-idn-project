@@ -16,10 +16,19 @@
   {:state (assoc-in state [:timing :bpm] (double bpm))})
 
 (defn- handle-timing-tap-tempo
-  "Record a tap for tap-tempo calculation."
+  "Record a tap for tap-tempo calculation.
+   Clears old taps if the last tap was more than 2 seconds ago,
+   preventing stale tap data from affecting BPM calculation."
   [{:keys [state] :as event}]
-  (let [now (h/current-time-ms event)]
-    {:state (update-in state [:timing :tap-times] conj now)
+  (let [now (h/current-time-ms event)
+        old-tap-times (get-in state [:timing :tap-times] [])
+        last-tap (peek old-tap-times)
+        ;; Clear tap times if last tap was more than 2000ms ago (30 BPM threshold)
+        new-tap-times (if (or (nil? last-tap)
+                              (> (- now last-tap) 2000))
+                        [now]
+                        (conj old-tap-times now))]
+    {:state (assoc-in state [:timing :tap-times] new-tap-times)
      :timing/calculate-bpm true}))
 
 

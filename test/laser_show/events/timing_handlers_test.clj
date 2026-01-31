@@ -25,6 +25,42 @@
                  :time 1000}
           result (timing/handle event)]
       (is (= [1000] (get-in result [:state :timing :tap-times])))
+      (is (true? (:timing/calculate-bpm result)))))
+  
+  (testing "Multiple taps within 2 seconds are accumulated"
+    (let [state {:timing {:tap-times [1000]}}
+          event {:event/type :timing/tap-tempo
+                 :state state
+                 :time 1500}
+          result (timing/handle event)]
+      (is (= [1000 1500] (get-in result [:state :timing :tap-times])))
+      (is (true? (:timing/calculate-bpm result)))))
+  
+  (testing "Tap after more than 2 seconds clears old taps"
+    (let [state {:timing {:tap-times [1000 1500]}}
+          event {:event/type :timing/tap-tempo
+                 :state state
+                 :time 4000}  ;; 2.5 seconds after last tap
+          result (timing/handle event)]
+      (is (= [4000] (get-in result [:state :timing :tap-times])))
+      (is (true? (:timing/calculate-bpm result)))))
+  
+  (testing "Tap exactly at 2 second boundary clears old taps"
+    (let [state {:timing {:tap-times [1000 1500]}}
+          event {:event/type :timing/tap-tempo
+                 :state state
+                 :time 3501}  ;; Exactly 2001ms after last tap
+          result (timing/handle event)]
+      (is (= [3501] (get-in result [:state :timing :tap-times])))
+      (is (true? (:timing/calculate-bpm result)))))
+  
+  (testing "Tap just under 2 seconds keeps old taps"
+    (let [state {:timing {:tap-times [1000 1500]}}
+          event {:event/type :timing/tap-tempo
+                 :state state
+                 :time 3499}  ;; 1999ms after last tap
+          result (timing/handle event)]
+      (is (= [1000 1500 3499] (get-in result [:state :timing :tap-times])))
       (is (true? (:timing/calculate-bpm result))))))
 
 
