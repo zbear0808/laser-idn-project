@@ -46,7 +46,7 @@
   "Generate a triangle wave value (-1.0 to 1.0) at the given phase (0.0 to 1.0).
    Starts at peak (1.0) when phase=0 for intuitive visual behavior."
   ^double [^double phase]
-  (let [p (mod (+ phase 0.5) 1.0)]  ;; Shift by 0.5 to start at peak
+  (let [p (u/fmod (+ phase 0.5) 1.0)]  ;; Shift by 0.5 to start at peak
     (if (< p 0.5)
       (- (* 4.0 p) 1.0)
       (- 3.0 (* 4.0 p)))))
@@ -61,14 +61,14 @@
   "Generate a normalized sawtooth wave value (0.0 to 1.0) at the given phase.
    Starts at peak (1.0) when phase=0, ramps down to 0.0."
   ^double [^double phase]
-  (- 1.0 (mod phase 1.0)))
+  (- 1.0 (u/fmod phase 1.0)))
 
 (defn square-wave-normalized
   "Generate a normalized square wave value (0.0 or 1.0) at the given phase."
   (^double [^double phase]
    (square-wave-normalized phase 0.5))
   (^double [^double phase ^double duty-cycle]
-   (if (< (mod phase 1.0) duty-cycle) 1.0 0.0)))
+   (if (< (u/fmod phase 1.0) duty-cycle) 1.0 0.0)))
 
 
 ;; Value Oscillation
@@ -80,7 +80,7 @@
   (^double [^double min-val ^double max-val ^double phase]
    (oscillate min-val max-val phase :sine))
   ([^double min-val ^double max-val ^double phase waveform]
-   (let [normalized-phase (mod phase 1.0)
+   (let [normalized-phase (u/fmod phase 1.0)
          t (case waveform
              :sine (sine-wave-normalized normalized-phase)
              :triangle (triangle-wave-normalized normalized-phase)
@@ -188,12 +188,12 @@
                           (or bpm 120.0)))
         phase (double phase)
         total-phase (+ (* progress num-cycles) phase)
-        cycle-phase (mod total-phase 1.0)
+        cycle-phase (u/fmod total-phase 1.0)
         done? (>= progress 1.0)
         final-phase (if done?
-                      (mod (+ num-cycles phase) 1.0)
+                      (u/fmod (+ num-cycles phase) 1.0)
                       cycle-phase)]
-    (u/->map final-phase total-phase done? num-cycles phase) ))
+    (u/->map final-phase total-phase done? num-cycles phase)))
 
 
 ;; Modulator Phase Calculation

@@ -19,7 +19,8 @@
     :loop-mode :loop}"
   (:require
    [laser-show.animation.interpolation :as interp]
-   [laser-show.animation.time :as time]))
+   [laser-show.animation.time :as time]
+   [laser-show.common.util :as u]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -52,14 +53,14 @@
             :or {period 1.0 time-unit :beats loop-mode :loop}}
            time-ms
            {:keys [bpm trigger-time] :as context}]
-  (let [beats (time/get-beats-from-context context)]
+  (let [beats (double (time/get-beats-from-context context))
+        period' (double period)]
     (if (= loop-mode :once)
-      (let [total-duration (double period)
-            progress (double (time/calculate-once-progress (or time-ms 0) trigger-time
-                                                          total-duration (or time-unit :beats)
+      (let [progress (double (time/calculate-once-progress (or time-ms 0) trigger-time
+                                                          period' (or time-unit :beats)
                                                           (or bpm 120.0)))]
         (clojure.core/min progress 1.0))
-      (mod (/ beats (double period)) 1.0))))
+      (u/fmod (/ beats period') 1.0))))
 
 (defn calculate-spatial-position
   "Calculate position in [0,1] based on spatial context and driver type.
@@ -82,13 +83,14 @@
          point-count (long (or (:point-count context) 1))
          normalize? (get config :normalize? true)]
      (case driver
-       :point-index (if (<= point-count 1)
-                      0.0
-                      (/ (double point-index) (double (dec point-count))))
+       :point-index (let [pc (double point-count)]
+                      (if (<= pc 1.0)
+                        0.0
+                        (double (/ (double point-index) (double (- pc 1.0))))))
        :pos-x (/ (+ x 1.0) 2.0)
        :pos-y (/ (+ y 1.0) 2.0)
        :radial (let [dist (Math/sqrt (+ (* x x) (* y y)))
-                     max-dist (if normalize? sqrt-2 1.0)]
+                     max-dist (double (if normalize? sqrt-2 1.0))]
                  (min 1.0 (/ dist max-dist)))
        0.0))))
 

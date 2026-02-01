@@ -11,7 +11,8 @@
    Each evaluator takes [config context] and returns a numeric value."
   (:require
    [laser-show.animation.time :as time]
-   [laser-show.animation.interpolation :as interp]))
+   [laser-show.animation.interpolation :as interp]
+   [laser-show.common.util :as u]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -40,14 +41,16 @@
   ^double [{:keys [period phase loop-mode time-unit] :as config} context]
   (if (= loop-mode :once)
     (let [{:keys [final-phase total-phase done?]} (time/calculate-once-mode-phase-data config context)
+          total-phase' (double total-phase)
+          final-phase' (double final-phase)
           ;; Handle edge case during animation: when total-phase wraps near integer
-          adjusted-cycle-phase (let [raw-phase (double (mod total-phase 1.0))]
-                                 (if (and (< raw-phase 0.001) (>= total-phase 0.999))
+          adjusted-cycle-phase (let [raw-phase (u/fmod total-phase' 1.0)]
+                                 (if (and (< raw-phase 0.001) (>= total-phase' 0.999))
                                    0.9999
                                    raw-phase))]
       ;; After completion: use 0.9999 if final phase wraps to 0
       (if done?
-        (if (< final-phase 0.001) 0.9999 final-phase)
+        (if (< final-phase' 0.001) 0.9999 final-phase')
         adjusted-cycle-phase))
     (calculate-loop-mode-phase period phase time-unit context)))
 
@@ -57,12 +60,14 @@
    This allows square-fn to apply mod itself during animation."
   ^double [{:keys [period phase loop-mode time-unit] :as config} context]
   (if (= loop-mode :once)
-    (let [{:keys [final-phase total-phase done?]} (time/calculate-once-mode-phase-data config context)]
+    (let [{:keys [final-phase total-phase done?]} (time/calculate-once-mode-phase-data config context)
+          final-phase' (double final-phase)
+          total-phase' (double total-phase)]
       (if done?
         ;; After completion: return clamped final phase
-        (if (< final-phase 0.001) 0.9999 final-phase)
+        (if (< final-phase' 0.001) 0.9999 final-phase')
         ;; During animation: return total-phase (square-fn will mod it)
-        total-phase))
+        total-phase'))
     (calculate-loop-mode-phase period phase time-unit context)))
 
 (defn- calculate-random-phase
@@ -117,7 +122,7 @@
    Uses effective-beats for smooth BPM-change animation in loop mode."
   [{:keys [min max duty-cycle] :as config} context]
   (let [phase (calculate-square-phase config context)
-        cycle-phase (mod phase 1.0)]
+        cycle-phase (u/fmod phase 1.0)]
     (if (< cycle-phase (double duty-cycle))
       (double max)
       (double min))))
@@ -131,7 +136,7 @@
    Uses effective-beats for smooth BPM-change animation."
   [{:keys [min max decay-type]} context]
   (let [beats (time/get-beats-from-context context)
-        phase (double (mod beats 1.0))
+        phase (u/fmod beats 1.0)
         start-v (double max)
         end-v (double min)]
     (case decay-type
@@ -187,7 +192,7 @@
   (if (and point-index point-count (pos? (double point-count)))
     (let [t (/ (double point-index) (clojure.core/max 1.0 (dec (double point-count))))
           range-v (- (double max) (double min))]
-      (+ (double min) (* (if wrap? (double (mod t 1.0)) t) range-v)))
+      (+ (double min) (* (if wrap? (u/fmod t 1.0) t) range-v)))
     (double min)))
 
 (defn- eval-pos-x
@@ -252,15 +257,17 @@
         y (double y)
         point-index (long point-index)
         point-count (long point-count)]
-    (double
+     (double
      (case driver
-       :point-index (if (<= point-count 1)
-                      0.0
-                      (/ (double point-index) (double (dec point-count))))
+       :point-index (let [pc (double point-count)
+                          denom (- pc 1.0)]
+                      (if (<= pc 1.0)
+                        0.0
+                        (/ (double point-index) denom)))
        :pos-x (/ (+ x 1.0) 2.0)
        :pos-y (/ (+ y 1.0) 2.0)
        :radial (let [dist (Math/sqrt (+ (* x x) (* y y)))
-                     max-dist (if normalize? sqrt-2 1.0)]
+                     max-dist (double (if normalize? sqrt-2 1.0))]
                  (clojure.core/min 1.0 (/ dist max-dist)))
        0.0))))
 
@@ -434,7 +441,7 @@
     (if (pos? (long point-count))
       (fn ^double [^double _x ^double _y ^long idx]
         (let [t (/ (double idx) denom)
-              t' (if wrap? (mod t 1.0) t)]
+              t' (if wrap? (u/fmod t 1.0) t)]
           (+ min-v (* t' range-v))))
       ;; Edge case: no points - return min
       (constantly min-v))))
@@ -485,11 +492,14 @@
             n (count sorted-keyframes)
             
             ;; Pre-compute position calculation fn based on driver
+            ;; Note: denom is pre-computed outside the fn for primitive performance
             pos-fn (case driver
                      :point-index
-                     (let [denom (clojure.core/max 1.0 (double (dec point-count')))]
+                     (let [pc (double point-count')
+                           pc-minus-1 (- pc 1.0)
+                           denom (clojure.core/max 1.0 pc-minus-1)]
                        (fn ^double [^double _x ^double _y ^long idx ^long _pc]
-                         (if (<= point-count' 1)
+                         (if (<= pc 1.0)
                            0.0
                            (/ (double idx) denom))))
                      
@@ -502,7 +512,7 @@
                        (/ (+ y 1.0) 2.0))
                      
                      :radial
-                     (let [max-dist (if normalize? sqrt-2 1.0)]
+                     (let [max-dist (double (if normalize? sqrt-2 1.0))]
                        (fn ^double [^double x ^double y ^long _idx ^long _pc]
                          (let [dist (Math/sqrt (+ (* x x) (* y y)))]
                            (clojure.core/min 1.0 (/ dist max-dist)))))
@@ -522,7 +532,7 @@
             interp-modes (mapv #(or (:interpolation %) :linear) sorted-keyframes)]
         
         (fn ^double [^double x ^double y ^long idx]
-          (let [position (pos-fn x y idx point-count')
+          (let [position (double (pos-fn x y idx point-count'))
                 first-pos (aget positions 0)
                 last-pos (aget positions (dec n))]
             
@@ -537,13 +547,13 @@
               
               :else
               ;; Find surrounding keyframes
-              (let [after-idx (loop [i 0]
+              (let [after-idx (loop [i (int 0)]
                                 (if (>= i n)
                                   nil
                                   (if (> (aget positions i) position)
                                     i
                                     (recur (inc i)))))
-                    before-idx (if after-idx (dec (long after-idx)) (dec n))
+                    before-idx (long (if after-idx (dec (long after-idx)) (dec n)))
                     
                     ;; Calculate interpolation factor
                     p1 (aget positions before-idx)

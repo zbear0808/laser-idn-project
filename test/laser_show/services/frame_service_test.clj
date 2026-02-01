@@ -177,10 +177,15 @@
     (is (frame-service/is-playing?))))
 
 
-(deftest get-active-cell-data-test
+;; Active Cell Data Tests
+;; Note: Each test case is isolated to avoid state pollution between tests
+
+
+(deftest get-active-cell-data-nil-when-no-cues-test
   (testing "returns nil when no active cues"
-    (is (nil? (frame-service/get-active-cell-data))))
-  
+    (is (nil? (frame-service/get-active-cell-data)))))
+
+(deftest get-active-cell-data-nil-when-empty-items-test
   (testing "returns nil when active cue has empty cue chain"
     (state/swap-state!
       (fn [s]
@@ -194,13 +199,15 @@
                        :phase-offset-target 0.0
                        :last-frame-time (System/currentTimeMillis)})
             (assoc-in [:chains :cue-chains [0 0]] {:items []}))))
-    (is (nil? (frame-service/get-active-cell-data))))
-  
+    (is (nil? (frame-service/get-active-cell-data)))))
+
+(deftest get-active-cell-data-returns-data-when-present-test
   (testing "returns cue chain data when present (from first active cue)"
     (state/swap-state!
       (fn [s]
         (-> s
             ;; New structure: use active-cues map
+            ;; Only set up the one active cue we want to test
             (assoc-in [:playback :active-cues [1 2]]
                       {:trigger-time (System/currentTimeMillis)
                        :accumulated-beats 0.0

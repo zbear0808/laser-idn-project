@@ -9,9 +9,11 @@
 
 (deftest test-initial-state
   (testing "Initial Link state structure"
-    (is (= {:connected? false
+    (is (= {:carabiner-connected? false
+            :link-enabled? false
             :sync-enabled? false
-            :link-bpm nil}
+            :link-bpm nil
+            :link-peers 0}
            link/initial-state))))
 
 (deftest test-enable-disable-sync
@@ -31,9 +33,24 @@
     (is (true? (link/sync-enabled? (link/enable-sync link/initial-state))))))
 
 (deftest test-connected-query
-  (testing "Connection status query"
+  (testing "Connection status query (requires both carabiner-connected? and link-enabled?)"
     (is (false? (link/connected? link/initial-state)))
-    (is (true? (link/connected? (assoc link/initial-state :connected? true))))))
+    ;; connected? requires BOTH carabiner-connected? AND link-enabled? to be true
+    (is (false? (link/connected? (assoc link/initial-state :carabiner-connected? true))))
+    (is (false? (link/connected? (assoc link/initial-state :link-enabled? true))))
+    (is (true? (link/connected? (assoc link/initial-state 
+                                       :carabiner-connected? true 
+                                       :link-enabled? true))))))
+
+(deftest test-carabiner-connected-query
+  (testing "Carabiner connection status query"
+    (is (false? (link/carabiner-connected? link/initial-state)))
+    (is (true? (link/carabiner-connected? (assoc link/initial-state :carabiner-connected? true))))))
+
+(deftest test-link-enabled-query
+  (testing "Link enabled status query"
+    (is (false? (link/link-enabled? link/initial-state)))
+    (is (true? (link/link-enabled? (assoc link/initial-state :link-enabled? true))))))
 
 
 ;; BPM Change Threshold Tests
@@ -57,15 +74,17 @@
 
 
 ;; Status Listener Tests
+;; Note: The status listener expects :link-bpm key in the status map (from beat-carabiner)
 
 
 (deftest test-status-listener-creation
   (testing "Status listener dispatches events correctly"
     (let [dispatched-events (atom [])
           dispatch-fn (fn [event] (swap! dispatched-events conj event))
-          get-state-fn (fn [] {:sync-enabled? true :link-bpm nil})
+          get-state-fn (fn [] {:sync-enabled? true :link-bpm nil :link-peers 0})
           listener (link/create-status-listener dispatch-fn get-state-fn)
-          status {:bpm 125.0 :beat-at-time 2.5}]
+          ;; Status map uses :link-bpm key (as returned by beat-carabiner)
+          status {:link-bpm 125.0 :link-peers 1}]
       
       ;; Call listener with status
       (listener status)
@@ -80,9 +99,10 @@
   (testing "Status listener does not dispatch set-bpm when sync disabled"
     (let [dispatched-events (atom [])
           dispatch-fn (fn [event] (swap! dispatched-events conj event))
-          get-state-fn (fn [] {:sync-enabled? false :link-bpm nil})
+          get-state-fn (fn [] {:sync-enabled? false :link-bpm nil :link-peers 0})
           listener (link/create-status-listener dispatch-fn get-state-fn)
-          status {:bpm 125.0 :beat-at-time 2.5}]
+          ;; Status map uses :link-bpm key (as returned by beat-carabiner)
+          status {:link-bpm 125.0 :link-peers 0}]
       
       ;; Call listener with status
       (listener status)
@@ -97,19 +117,33 @@
   (testing "Status listener respects BPM change threshold"
     (let [dispatched-events (atom [])
           dispatch-fn (fn [event] (swap! dispatched-events conj event))
-          get-state-fn (fn [] {:sync-enabled? true :link-bpm 120.0})
+          get-state-fn (fn [] {:sync-enabled? true :link-bpm 120.0 :link-peers 0})
           listener (link/create-status-listener dispatch-fn get-state-fn)
-          ;; Small change below threshold
-          status {:bpm 120.005 :beat-at-time 2.5}]
+          ;; Small change below threshold - use :link-bpm key
+          status {:link-bpm 120.005 :link-peers 0}]
       
       ;; Call listener with status
       (listener status)
       
-      ;; Should dispatch link-bpm-changed
+      ;; Should dispatch link-bpm-changed (always updates UI display)
       (is (= 1 (count (filter #(= :timing/link-bpm-changed (:event/type %)) @dispatched-events))))
       
       ;; Should NOT dispatch set-bpm due to threshold
       (is (= 0 (count (filter #(= :timing/set-bpm (:event/type %)) @dispatched-events)))))))
+
+(deftest test-status-listener-peers-changed
+  (testing "Status listener dispatches peer count changes"
+    (let [dispatched-events (atom [])
+          dispatch-fn (fn [event] (swap! dispatched-events conj event))
+          get-state-fn (fn [] {:sync-enabled? false :link-bpm 120.0 :link-peers 0})
+          listener (link/create-status-listener dispatch-fn get-state-fn)
+          status {:link-bpm 120.0 :link-peers 2}]
+      
+      ;; Call listener with status
+      (listener status)
+      
+      ;; Should dispatch peers-changed event
+      (is (= 1 (count (filter #(= :timing/link-peers-changed (:event/type %)) @dispatched-events)))))))
 
 
 ;; Initialization Tests
@@ -118,7 +152,7 @@
 (deftest test-init-no-auto-connect
   (testing "Init without auto-connect"
     (let [state (link/init link/initial-state false nil nil)]
-      (is (false? (:connected? state))))))
+      (is (false? (:carabiner-connected? state))))))
 
 ;; Note: Testing actual beat-carabiner connection requires mocking or integration tests
 ;; These tests cover the pure state management functions

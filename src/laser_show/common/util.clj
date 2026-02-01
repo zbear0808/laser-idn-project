@@ -1,9 +1,20 @@
 (ns laser-show.common.util)
 
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
+(defn fmod
+  "Primitive double modulo - avoids boxing unlike clojure.core/mod.
+   Returns the remainder of a/b in the range [0, b) for positive b.
+   Semantically equivalent to clojure.core/mod for positive numbers."
+  ^double [^double a ^double b]
+  (- a (* b (Math/floor (/ a b)))))
+
 (defn clamp
   "Clamps numeric values (inclusive).
   If either boundary is nil, it will be ignored.
-  If `x` is nil, the `default` value is returned."
+  If `x` is nil, the `default` value is returned.
+  Note: For primitive performance, use clamp-double instead."
   ([x low]
    (clamp x low nil nil))
   ([x low high]
@@ -11,8 +22,8 @@
   ([x low high default]
    (cond
      (nil? x) default
-     (and low  (< x low)) low
-     (and high (> x high)) high
+     (and low  (< (double x) (double low))) low
+     (and high (> (double x) (double high))) high
      :else x)))
 
 (defn filter-indexed
