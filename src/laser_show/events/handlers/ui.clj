@@ -4,8 +4,10 @@
    Handles:
    - Tab switching
    - Dialog management
-   - Preview zone filtering"
-  (:require [clojure.tools.logging :as log]))
+   - Preview zone filtering
+   - Preview grid layout"
+  (:require [clojure.tools.logging :as log]
+            [clojure.string :as str]))
 
 
 (defn- handle-ui-set-active-tab
@@ -71,6 +73,61 @@
     (log/debug "Setting preview zone filter:" zone-group-id)
     {:state (assoc-in state [:config :preview :zone-group-filter] zone-group-id)}))
 
+(defn- parse-grid-layout
+  "Parse grid layout string like '2x2' to [cols rows]."
+  [s]
+  (let [[cols rows] (mapv #(Integer/parseInt %) (str/split s #"x"))]
+    [cols rows]))
+
+(defn- handle-preview-set-grid-layout
+  "Set the preview grid layout.
+   
+   Parses layout string like '2x2' and resizes cell array as needed.
+   Zone groups are cycled dynamically from available zone groups."
+  [{:keys [state] :as event}]
+  (let [layout-str (or (:fx/event event) "2x2")
+        [cols rows] (parse-grid-layout layout-str)
+        current-cells (get-in state [:config :preview :grid-cells] [])
+        ;; Get available zone groups from state
+        zone-groups (vals (get state :zone-groups {}))
+        zone-group-ids (mapv :id zone-groups)
+        ;; Build defaults: nil (master) first, then cycle through zone groups
+        default-zone-ids (cons nil (cycle (if (seq zone-group-ids)
+                                            zone-group-ids
+                                            [:all :left :right :center])))
+        total-cells (* cols rows)
+        ;; Resize cells - keep existing, fill new ones from defaults
+        new-cells (vec (map-indexed
+                         (fn [idx _]
+                           (or (get current-cells idx)
+                               {:zone-group-id (nth default-zone-ids idx nil)}))
+                         (range total-cells)))]
+    (log/debug "Setting preview grid layout:" [cols rows] "cells:" (count new-cells))
+    {:state (-> state
+                (assoc-in [:config :preview :grid-layout] [cols rows])
+                (assoc-in [:config :preview :grid-cells] new-cells))}))
+
+(defn- handle-preview-set-cell-zone
+  "Set the zone filter for a specific grid cell.
+   Also closes the zone selector popup after selection."
+  [{:keys [cell-index zone-group-id state]}]
+  (log/debug "Setting preview cell" cell-index "zone to:" zone-group-id)
+  {:state (-> state
+              (assoc-in [:config :preview :grid-cells cell-index :zone-group-id] zone-group-id)
+              (assoc-in [:ui :preview-zone-selector-open] nil))})
+
+(defn- handle-preview-open-zone-selector
+  "Open the zone selector popup for a specific cell."
+  [{:keys [cell-index state]}]
+  (log/debug "Opening zone selector for cell:" cell-index)
+  {:state (assoc-in state [:ui :preview-zone-selector-open] cell-index)})
+
+(defn- handle-preview-close-zone-selector
+  "Close the zone selector popup."
+  [{:keys [state]}]
+  (log/debug "Closing zone selector popup")
+  {:state (assoc-in state [:ui :preview-zone-selector-open] nil)})
+
 
 ;; Public API
 
@@ -86,6 +143,10 @@
     :ui/close-dialog (handle-ui-close-dialog event)
     :ui/update-dialog-data (handle-ui-update-dialog-data event)
     :preview/set-zone-filter (handle-preview-set-zone-filter event)
+    :preview/set-grid-layout (handle-preview-set-grid-layout event)
+    :preview/set-cell-zone (handle-preview-set-cell-zone event)
+    :preview/open-zone-selector (handle-preview-open-zone-selector event)
+    :preview/close-zone-selector (handle-preview-close-zone-selector event)
     
     ;; Unknown event in this domain
     {}))

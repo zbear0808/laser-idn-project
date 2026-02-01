@@ -308,7 +308,7 @@
    
    Depends on: streaming-data from backend domain
    
-   Returns frame with :points vector."
+   Returns frame with :points vector and :cue-destinations map."
   [context]
   (:current-frame (fx/sub-val context ex/streaming-data)))
 
@@ -318,6 +318,41 @@
    Depends on: streaming-data from backend domain"
   [context]
   (:frame-stats (fx/sub-val context ex/streaming-data)))
+
+
+;; Preview Grid Subscriptions
+
+
+(defn preview-frame-data
+  "Get the current preview frame with destinations.
+   Returns {:points [...] :cue-destinations {[col row] #{zones}}} or nil."
+  [context]
+  (fx/sub-ctx context current-frame))
+
+(defn preview-grid-layout
+  "Get the current grid layout [cols rows]."
+  [context]
+  (get-in (fx/sub-val context :config) [:preview :grid-layout] [1 1]))
+
+(defn preview-grid-cells
+  "Get the grid cell configurations."
+  [context]
+  (get-in (fx/sub-val context :config) [:preview :grid-cells] []))
+
+(defn preview-cell-config
+  "Get config for a specific grid cell by index."
+  [context cell-index]
+  (get (fx/sub-ctx context preview-grid-cells) cell-index {:zone-group-id nil}))
+
+(defn preview-show-labels?
+  "Get whether to show zone labels on preview cells."
+  [context]
+  (get-in (fx/sub-val context :config) [:preview :show-labels?] true))
+
+(defn preview-zone-selector-open
+  "Get the cell index whose zone selector popup is open, or nil if none."
+  [context]
+  (fx/sub-val context get-in [:ui :preview-zone-selector-open]))
 
 
 ;; Level 2: Projector Subscriptions

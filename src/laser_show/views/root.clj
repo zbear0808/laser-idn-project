@@ -96,7 +96,7 @@
         bg-primary (css/bg-primary)
         bg-elevated (css/bg-elevated)]
     (if show-preview?
-      ;; Show split pane with preview for non-projector tabs
+      ;; Show split pane with preview grid for non-projector tabs
       {:fx/type :split-pane
        :style (str "-fx-background-color: " bg-primary ";")
        :divider-positions [0.65]
@@ -105,7 +105,7 @@
                 :center {:fx/type tab-content}}
                {:fx/type :border-pane
                 :style (str "-fx-background-color: " bg-elevated ";")
-                :center {:fx/type preview/preview-panel}}]}
+                :center {:fx/type preview/preview-grid-panel}}]}
       ;; Just show tab content without preview for projectors tab
       {:fx/type :border-pane
        :style (str "-fx-background-color: " bg-primary ";")

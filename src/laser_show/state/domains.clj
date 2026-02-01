@@ -136,6 +136,8 @@
    :preview {:default {:frame nil
                        :last-render-time 0}
              :doc "preview panel state"}
+   :preview-zone-selector-open {:default nil
+                                :doc "Cell index whose zone selector popup is open, or nil if none"}
    :window {:default {:width default-window-width
                       :height default-window-height}
             :doc "window dimensions"}
@@ -183,8 +185,16 @@
           :doc "grid dimensions config"}
    :window {:default {:width default-window-width :height default-window-height}
             :doc "window dimensions"}
-   :preview {:default {:width 400 :height 400 :zone-group-filter :all}
-             :doc "preview panel dimensions and zone group filter (:all, :left, :right, etc., or nil for show all)"}
+   :preview {:default {:width 400
+                       :height 400
+                       :zone-group-filter :all
+                       :grid-layout [2 2]
+                       :grid-cells [{:zone-group-id nil}    ;; nil = master view (show all)
+                                    {:zone-group-id :left}
+                                    {:zone-group-id :right}
+                                    {:zone-group-id :center}]
+                       :show-labels? true}
+             :doc "Preview grid configuration. grid-layout is [cols rows], grid-cells is vector of cell configs with :zone-group-id (nil = show all/master view)"}
    :idn {:default {:host nil :port 7255}
          :doc "default IDN connection settings"}
    :osc {:default {:enabled? false :port default-osc-port}
