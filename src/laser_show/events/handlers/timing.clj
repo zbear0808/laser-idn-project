@@ -10,7 +10,8 @@
    - Carabiner daemon auto-connects on app startup
    - Button toggles Link sync mode (:passive/:off)
    - UI shows both Carabiner and Link status"
-  (:require [laser-show.events.helpers :as h]
+  (:require [laser-show.animation.cue-timing :as cue-timing]
+            [laser-show.events.helpers :as h]
             [laser-show.input.link :as link]
             [laser-show.state.core :as state]
             [clojure.tools.logging :as log]))
@@ -50,31 +51,33 @@
   [{:keys [state]}]
   {:state (assoc-in state [:playback :playing?] true)})
 
+(defn- reset-all-active-cues
+  "Reset timing accumulators for all active cues."
+  [active-cues]
+  (reduce-kv (fn [acc k v]
+               (assoc acc k (cue-timing/reset-cue-timing v)))
+             {}
+             active-cues))
+
 (defn- handle-transport-stop
   "Stop playback and reset timing accumulators."
   [{:keys [state]}]
   {:state (-> state
               (assoc-in [:playback :playing?] false)
-              (assoc-in [:playback :active-cell] nil)
-              ;; Reset timing accumulators
-              (assoc-in [:playback :accumulated-beats] 0.0)
-              (assoc-in [:playback :accumulated-ms] 0.0)
-              (assoc-in [:playback :phase-offset] 0.0)
-              (assoc-in [:playback :phase-offset-target] 0.0)
-              (assoc-in [:playback :last-frame-time] 0))})
+              (assoc-in [:playback :active-cue] nil)
+              ;; Reset global clock
+              (update-in [:timing :global-clock] cue-timing/reset-global-clock)
+              ;; Reset all active cue timings
+              (update-in [:playback :active-cues] reset-all-active-cues))})
 
 (defn- handle-transport-retrigger
   "Retrigger the current animation and reset timing accumulators."
-  [{:keys [state] :as event}]
-  (let [now (h/current-time-ms event)]
-    {:state (-> state
-                (assoc-in [:playback :trigger-time] now)
-                ;; Reset timing accumulators for fresh start
-                (assoc-in [:playback :accumulated-beats] 0.0)
-                (assoc-in [:playback :accumulated-ms] 0.0)
-                (assoc-in [:playback :phase-offset] 0.0)
-                (assoc-in [:playback :phase-offset-target] 0.0)
-                (assoc-in [:playback :last-frame-time] 0))}))
+  [{:keys [state]}]
+  {:state (-> state
+              ;; Reset global clock
+              (update-in [:timing :global-clock] cue-timing/reset-global-clock)
+              ;; Reset all active cue timings
+              (update-in [:playback :active-cues] reset-all-active-cues))})
 
 
 ;; Link Events

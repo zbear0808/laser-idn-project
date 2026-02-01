@@ -40,9 +40,15 @@
       (assoc gc :last-frame-time current-time-ms))))
 
 
+(def ^:private ^:const snap-threshold
+  "Phase difference threshold below which we snap directly to target.
+   2% of a beat, ~10ms at 120 BPM - imperceptible to humans."
+  0.02)
+
 (defn update-cue-timing
   "Update a cue's timing accumulators based on delta time.
-   Applies phase offset exponential decay toward target.
+   Applies phase offset exponential decay toward target, with snap-to-target
+   when close enough to eliminate residual drift.
    
    Parameters:
    - cue-timing: Current cue timing state map
@@ -51,7 +57,7 @@
    - resync-rate: Beats to reach ~63% of phase correction (decay rate)
    
    Returns: Updated cue timing state"
-  [{:keys [accumulated-beats accumulated-ms phase-offset phase-offset-target 
+  [{:keys [accumulated-beats accumulated-ms phase-offset phase-offset-target
            last-frame-time trigger-time] :as ct}
    current-time-ms bpm resync-rate]
   (let [last-time (or last-frame-time 0)]
@@ -63,11 +69,14 @@
           (assoc ct :last-frame-time current-time-ms)
           ;; Normal accumulation with phase decay
           (let [delta-beats (* delta-ms (/ bpm 60000.0))
-                ;; Exponential decay toward target phase offset
-                decay (Math/exp (- (/ delta-beats (max 0.1 resync-rate))))
-                new-phase (+ (or phase-offset-target 0.0)
-                            (* (- (or phase-offset 0.0) (or phase-offset-target 0.0)) 
-                               decay))]
+                current-phase (or phase-offset 0.0)
+                target (or phase-offset-target 0.0)
+                diff (- current-phase target)
+                ;; Snap to target when within threshold, else decay
+                new-phase (if (< (Math/abs diff) snap-threshold)
+                            target
+                            (let [decay (Math/exp (- (/ delta-beats (max 0.1 resync-rate))))]
+                              (+ target (* diff decay))))]
             (assoc ct
                    :accumulated-beats (+ (or accumulated-beats 0.0) delta-beats)
                    :accumulated-ms (+ (or accumulated-ms 0.0) delta-ms)
@@ -135,18 +144,22 @@
 (defn create-cue-timing-state
   "Create initial timing state for a newly triggered cue.
    
+   The cue starts at phase 0 (beginning of animation) but will gradually drift
+   toward alignment with the global beat grid via exponential decay.
+   
    Parameters:
    - current-time-ms: Current time in milliseconds
    - global-clock-beats: Current accumulated beats from global clock (for phase sync)
    
    Returns: Initial cue timing state map"
   [current-time-ms global-clock-beats]
-  {:trigger-time current-time-ms
-   :accumulated-beats 0.0
-   :accumulated-ms 0.0
-   :phase-offset 0.0
-   :phase-offset-target 0.0
-   :last-frame-time current-time-ms})
+  (let [target-phase (mod (or global-clock-beats 0.0) 1.0)]
+    {:trigger-time current-time-ms
+     :accumulated-beats 0.0
+     :accumulated-ms 0.0
+     :phase-offset 0.0              ;; Start at beginning of animation
+     :phase-offset-target target-phase  ;; Drift toward global beat position
+     :last-frame-time current-time-ms}))
 
 
 (defn reset-cue-timing

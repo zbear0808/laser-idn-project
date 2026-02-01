@@ -135,23 +135,6 @@
       (draw-no-content gc width height))))
 
 
-;; Preview Canvas Component
-
-
-(defn preview-canvas
-  "Canvas component that displays the current laser frame.
-   
-   Uses the :draw prop pattern for Canvas rendering."
-  [{:keys [fx/context width height]}]
-  (let [frame (fx/sub-ctx context subs/current-frame)
-        w (or width 400)
-        h (or height 400)]
-    {:fx/type :canvas
-     :width w
-     :height h
-     :draw #(draw-preview % frame)}))
-
-
 ;; Zone Group Dropdown Helpers
 
 
@@ -371,50 +354,3 @@
               {:fx/type :border-pane
                :padding 8
                :center {:fx/type preview-grid}}]})
-
-
-;; Legacy Preview Panel (with controls)
-
-
-(defn preview-header
-  "Header for the preview panel with zone group filter dropdown."
-  [{:keys [fx/context]}]
-  (let [stats (fx/sub-ctx context subs/frame-stats)
-        zone-filter (fx/sub-ctx context subs/preview-zone-filter)
-        zone-groups (fx/sub-ctx context subs/zone-groups-list)
-        filter-items (build-zone-filter-items zone-groups)
-        selected-item (find-selected-item filter-items zone-filter)]
-    {:fx/type :h-box
-     :alignment :center-left
-     :spacing 8
-     :padding {:left 8 :right 8 :top 4 :bottom 4}
-     :children [{:fx/type :label
-                 :text "Preview"
-                 :style "-fx-text-fill: white; -fx-font-size: 12; -fx-font-weight: bold;"}
-                {:fx/type :region :h-box/hgrow :always}
-                ;; Zone group filter dropdown
-                {:fx/type :combo-box
-                 :value selected-item
-                 :items filter-items
-                 :converter (zone-filter-converter)
-                 :on-value-changed {:event/type :preview/set-zone-filter}
-                 :pref-width 130
-                 :style "-fx-font-size: 10;"}
-                {:fx/type :label
-                 :text (str (:fps stats 0) " FPS")
-                 :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]}))
-
-(defn preview-panel
-  "Complete preview panel with header and canvas."
-  [{:keys [fx/context]}]
-  (let [preview-cfg (fx/sub-ctx context subs/preview-config)
-        width (:width preview-cfg 400)
-        height (:height preview-cfg 400)]
-    {:fx/type :v-box
-     :style "-fx-background-color: #121212;"
-     :children [{:fx/type preview-header}
-                {:fx/type :border-pane
-                 :padding 8
-                 :center {:fx/type preview-canvas
-                          :width width
-                          :height height}}]}))
