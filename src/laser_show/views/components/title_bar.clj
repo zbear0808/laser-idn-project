@@ -195,7 +195,13 @@
      {:fx/type :menu-item
       :text "Reload App Code"
       :accelerator [:shortcut :shift :a]
-      :on-action {:event/type :help/reload-app}}]))
+      :on-action {:event/type :help/reload-app}}
+     
+     {:fx/type :separator-menu-item}
+     
+     {:fx/type :menu-item
+      :text "Save State Debug..."
+      :on-action {:event/type :help/save-state-debug}}]))
 
 
 ;; Menu Components

@@ -42,6 +42,9 @@ test-*.log
 # Profiling results
 /profiling-results/
 
+# Debug output
+/debug-output/
+
 # Local configuration (not committed)
 /config/
 /plans

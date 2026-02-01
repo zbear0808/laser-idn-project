@@ -15,10 +15,17 @@
    1. Initialize with (init-state!)
    2. Mutate via: (assoc-in-state! [:timing :bpm] 140.0)
    3. Read in backend: (ex/bpm (state/get-raw-state))
-   4. Read in UI: (fx/sub-ctx context subs/bpm)"
+   4. Read in UI: (fx/sub-ctx context subs/bpm)
+   
+   Debug:
+   - (save-state-debug!) - Save full state to timestamped EDN file"
   (:require [cljfx.api :as fx]
             [clojure.core.cache :as cache]
-            [clojure.tools.logging :as log]))
+            [clojure.java.io :as io]
+            [clojure.pprint :as pprint]
+            [clojure.tools.logging :as log])
+  (:import [java.time LocalDateTime]
+           [java.time.format DateTimeFormatter]))
 
 
 ;; Section 1: Core State Atom & Cache
@@ -238,3 +245,41 @@
        
        ;; Return the domain keyword for chaining
        ~domain-kw)))
+
+
+;; Section 7: Debug Utilities
+
+
+(def ^:private debug-output-dir
+  "Directory for debug output files."
+  "debug-output")
+
+(def ^:private timestamp-formatter
+  "Formatter for timestamp in filenames: 2026-02-01T041817"
+  (DateTimeFormatter/ofPattern "yyyy-MM-dd'T'HHmmss"))
+
+(defn save-state-debug!
+  "Save current application state to an EDN file for debugging.
+   
+   Creates a timestamped file in the debug-output/ directory.
+   The state is pretty-printed for readability.
+   
+   Returns the absolute path of the saved file.
+   
+   Example:
+     (save-state-debug!)
+     ;; => \"c:/path/to/project/debug-output/state-debug-2026-02-01T041817.edn\""
+  []
+  (let [state (get-raw-state)
+        timestamp (.format (LocalDateTime/now) timestamp-formatter)
+        filename (str "state-debug-" timestamp ".edn")
+        dir (io/file debug-output-dir)
+        file (io/file dir filename)]
+    ;; Ensure directory exists
+    (.mkdirs dir)
+    ;; Write state as pretty-printed EDN
+    (with-open [w (io/writer file)]
+      (pprint/pprint state w))
+    (let [path (.getAbsolutePath file)]
+      (log/info "State debug saved to:" path)
+      path)))

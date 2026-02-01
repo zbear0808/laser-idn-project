@@ -28,7 +28,10 @@
       (jfr-dump)        - Dump recording to file
       (jfr-spikes 5000) - Alert on frames >5ms
       (jfr-auto-dump 10000) - Auto-dump on frames >10ms
-      (jfr-status)      - Show JFR status"
+      (jfr-status)      - Show JFR status
+      
+   Debug:
+      (save-state-debug!) - Save app state to timestamped EDN file"
   (:require [clojure.tools.namespace.find :as ns-find]
             [clojure.java.io :as io]
             [clojure.string :as str]))
@@ -396,6 +399,28 @@
   ((resolve 'laser-show.profiling.jfr-profiler/print-recordings)))
 
 
+;; Debug Utilities
+
+
+(defn save-state-debug!
+  "Save current application state to an EDN file for debugging.
+   
+   Creates a timestamped file in the debug-output/ directory.
+   The state is pretty-printed for readability.
+   
+   Returns the absolute path of the saved file.
+   
+   Example:
+     (save-state-debug!)
+     ;; => \"c:/path/to/project/debug-output/state-debug-2026-02-01T041817.edn\""
+  []
+  (if @!app-started?
+    (do
+      (require 'laser-show.state.core)
+      ((resolve 'laser-show.state.core/save-state-debug!)))
+    (println "⚠️  App not started. Call (start) first.")))
+
+
 ;; REPL Quick Reference
 
 
@@ -435,4 +460,7 @@
   (jfr-stop)                        ;; Stop recording
   (jfr-status)                      ;; Check JFR status
   (jfr-recordings)                  ;; List saved recordings
+  
+  ;; Debug
+  (save-state-debug!)               ;; Save app state to timestamped EDN file
   )

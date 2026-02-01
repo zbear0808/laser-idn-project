@@ -254,6 +254,15 @@
       (log/error "Failed to reload app code:" (:error result))))
   {:state state})
 
+(defn- handle-help-save-state-debug
+  "Save current application state to an EDN file for debugging."
+  [{:keys [state]}]
+  (log/info "Help > Save State Debug")
+  (require 'laser-show.state.core)
+  (let [path ((resolve 'laser-show.state.core/save-state-debug!))]
+    (log/info "State debug saved to:" path))
+  {:state state})
+
 
 ;; Public API
 
@@ -292,6 +301,7 @@
     :help/toggle-idn-stream-logging (handle-help-toggle-idn-stream-logging event)
     :help/reload-styles (handle-help-reload-styles event)
     :help/reload-app (handle-help-reload-app event)
+    :help/save-state-debug (handle-help-save-state-debug event)
     
     ;; Unknown event in this domain
     {}))
