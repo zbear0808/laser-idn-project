@@ -7,10 +7,14 @@
    - 8-bit or 16-bit color (RGB)
    - 8-bit or 16-bit position (XY)
    
+   Supports application-layer frame fragmentation per IDN-Stream spec Section 6.2.
+   Large frames are automatically split into multiple packets to avoid IP fragmentation.
+   
    Default is standard ISP-DB25 format (8-bit color, 16-bit XY)."
   (:require [clojure.tools.logging :as log]
             [laser-show.idn.stream :as idn-stream]
             [laser-show.idn.output-config :as output-config]
+            [laser-show.idn.fragmentation :as fragmentation]
             [laser-show.animation.types :as t]
             [laser-show.idn.hello :as hello]
             [laser-show.common.util :as u]
@@ -37,6 +41,9 @@
 ;; This ensures robust streaming even with occasional network issues.
 (def ^:const CONFIG_RESEND_INTERVAL_MS 200)
 
+;; Default target MTU for fragmentation (conservative for Ethernet)
+(def ^:const DEFAULT_TARGET_MTU 1400)
+
 
 ;; Engine State
 
@@ -53,17 +60,22 @@
      - :channel-id - IDN channel ID for message header (default 0)
      - :service-id - IDN service ID for config header (default 0) - targets specific laser output
      - :output-config - OutputConfig for bit depth (default 8-bit color, 16-bit XY)
+     - :target-mtu - Target MTU for fragmentation (default 1400)
+     - :fragmentation-enabled? - Enable application-layer fragmentation (default true)
    
    NOTE: channel-id is for logical multiplexing (0-63), service-id targets physical outputs (0-255).
    For multi-head DACs, each output has a different service-id.
    
    Returns an engine map that can be started with start!"
-  [target-host frame-provider & {:keys [fps port channel-id service-id output-config]
+  [target-host frame-provider & {:keys [fps port channel-id service-id output-config
+                                        target-mtu fragmentation-enabled?]
                                   :or {fps DEFAULT_FPS
                                        port DEFAULT_PORT
                                        channel-id DEFAULT_CHANNEL_ID
                                        service-id 0
-                                       output-config output-config/default-config}}]
+                                       output-config output-config/default-config
+                                       target-mtu DEFAULT_TARGET_MTU
+                                       fragmentation-enabled? true}}]
   {:target-host target-host
    :target-port port
    :frame-provider frame-provider
@@ -71,6 +83,8 @@
    :channel-id channel-id
    :service-id service-id
    :output-config output-config
+   :target-mtu target-mtu
+   :fragmentation-enabled? fragmentation-enabled?
    :packet-buffer (idn-stream/create-packet-buffer)
    :running? (atom false)
    :socket (atom nil)
@@ -80,6 +94,8 @@
    ;; Each engine needs its own sequence counter for proper packet ordering
    :sequence-counter (atom 0)
    :stats (atom {:frames-sent 0
+                 :packets-sent 0
+                 :fragments-sent 0
                  :last-frame-time 0
                  :actual-fps 0.0})})
 
@@ -114,8 +130,9 @@
       (/ 1000.0 elapsed-ms)
       0.0)))
 
-(defn- create-idn-stream-packet
-  "Create an IDN-Stream packet for the given frame.
+(defn- create-idn-stream-packets
+  "Create IDN-Stream packet(s) for the given frame.
+   Returns a vector of packets (usually 1, more if fragmented).
    Includes configuration periodically per spec requirements.
    Uses the engine's output-config for bit depth settings.
    Passes service-id to target the correct physical output on multi-head DACs."
@@ -126,17 +143,30 @@
         timestamp-us (current-timestamp-us engine)
         duration-us (idn-stream/frame-duration-us (:fps engine))
         output-cfg (:output-config engine)
+        target-mtu (:target-mtu engine)
+        fragmentation-enabled? (:fragmentation-enabled? engine)
         include-config? (should-resend-config? engine)]
     
     (when include-config?
       (reset! (:last-config-time-ms engine) (System/currentTimeMillis)))
     
-    (if include-config?
-      (idn-stream/frame->packet-with-config buf frame channel-id timestamp-us duration-us
-                                            :service-id service-id
-                                            :output-config output-cfg)
-      (idn-stream/frame->packet buf frame channel-id timestamp-us duration-us
-                                :output-config output-cfg))))
+    ;; Check if fragmentation is enabled and needed
+    (if (and fragmentation-enabled?
+             (fragmentation/needs-fragmentation? frame output-cfg :target-mtu target-mtu))
+      ;; Use fragmentation - returns vector of packets
+      (fragmentation/frame->fragmented-packets
+       buf frame channel-id timestamp-us duration-us
+       :output-config output-cfg
+       :service-id service-id
+       :include-config? include-config?
+       :target-mtu target-mtu)
+      ;; Single packet path (no fragmentation needed or disabled)
+      [(if include-config?
+         (idn-stream/frame->packet-with-config buf frame channel-id timestamp-us duration-us
+                                               :service-id service-id
+                                               :output-config output-cfg)
+         (idn-stream/frame->packet buf frame channel-id timestamp-us duration-us
+                                   :output-config output-cfg))])))
 
 (defn- get-next-sequence!
   "Get the next sequence number for this engine.
@@ -151,18 +181,21 @@
 (defn- streaming-loop
   "Main streaming loop - runs in a separate thread.
    Continuously gets frames from the provider and sends them as IDN packets.
+   Supports application-layer fragmentation for large frames.
    Records timing metrics for IDN streaming profiling.
    
    Each engine uses its own sequence counter to avoid interleaving issues
    when multiple engines stream to the same device on different services."
   [engine]
   (let [{:keys [target-host target-port frame-provider fps
-                running? socket stats output-config service-id channel-id]} engine
+                running? socket stats output-config service-id channel-id
+                fragmentation-enabled?]} engine
         frame-interval-ms (/ 1000.0 fps)]
     
-    (log/info (format "Streaming loop started: %s:%d service %d channel %d @ %d FPS (%s)"
+    (log/info (format "Streaming loop started: %s:%d service %d channel %d @ %d FPS (%s, fragmentation=%s)"
                       target-host target-port (or service-id 0) (or channel-id 0) fps
-                      (output-config/config-name output-config)))
+                      (output-config/config-name output-config)
+                      (if fragmentation-enabled? "enabled" "disabled")))
     
     (reset! (:last-config-time-ms engine) 0)
     (reset! (:sequence-counter engine) 0)  ;; Reset sequence on stream start
@@ -175,21 +208,25 @@
                 frame (frame-provider)
                 frame-point-count (count (or frame []))
                 frame (or frame (t/empty-frame))
-                idn-packet (create-idn-stream-packet engine frame)
-                ;; Use engine's own sequence counter instead of global one
-                seq-num (get-next-sequence! engine)
-                hello-packet (hello/wrap-channel-message idn-packet {:sequence seq-num})
+                ;; Get vector of packets (1 if no fragmentation, multiple if fragmented)
+                idn-packets (create-idn-stream-packets engine frame)
+                packet-count (count idn-packets)
                 log-count (swap! stream-log-counter inc)]
             
-            ;; Throttled debug logging - only when enabled via dev-config
-            (when (and (dev-config/idn-stream-logging?)
-                       (zero? (mod log-count STREAM_LOG_INTERVAL))
-                       (= service-id (or service-id 0)))
-              (log/debug (format "Streaming [%s:%d svc=%d ch=%d]: frame-points=%d, packet-size=%d, seq=%d"
-                                 target-host target-port (or service-id 0) (or channel-id 0)
-                                 frame-point-count (alength hello-packet) seq-num)))
-            
-            (hello/send-packet @socket hello-packet target-host target-port)
+            ;; Send all packets (fragments) for this frame
+            (doseq [idn-packet idn-packets]
+              (let [seq-num (get-next-sequence! engine)
+                    hello-packet (hello/wrap-channel-message idn-packet {:sequence seq-num})]
+                
+                ;; Throttled debug logging - only when enabled via dev-config
+                (when (and (dev-config/idn-stream-logging?)
+                           (zero? (mod log-count STREAM_LOG_INTERVAL))
+                           (= service-id (or service-id 0)))
+                  (log/debug (format "Streaming [%s:%d svc=%d ch=%d]: frame-points=%d, packets=%d, packet-size=%d, seq=%d"
+                                     target-host target-port (or service-id 0) (or channel-id 0)
+                                     frame-point-count packet-count (alength hello-packet) seq-num)))
+                
+                (hello/send-packet @socket hello-packet target-host target-port)))
             
             ;; Record IDN streaming time (convert ns to us)
             (let [idn-time-us (/ (- (System/nanoTime) idn-start-ns) 1000.0)]
@@ -200,6 +237,10 @@
                   actual-fps (calculate-actual-fps last-time now)]
               (swap! stats assoc
                      :frames-sent (inc (:frames-sent @stats))
+                     :packets-sent (+ (:packets-sent @stats) packet-count)
+                     :fragments-sent (if (> packet-count 1)
+                                       (+ (:fragments-sent @stats) packet-count)
+                                       (:fragments-sent @stats))
                      :last-frame-time now
                      :actual-fps actual-fps)))
           
@@ -229,6 +270,8 @@
     (reset! (:start-time-us engine) (* (System/currentTimeMillis) 1000))
     (reset! (:last-config-time-ms engine) 0)
     (reset! (:stats engine) {:frames-sent 0
+                             :packets-sent 0
+                             :fragments-sent 0
                              :last-frame-time (System/currentTimeMillis)
                              :actual-fps 0.0})
     
