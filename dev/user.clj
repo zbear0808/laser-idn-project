@@ -28,7 +28,10 @@
       (jfr-dump)        - Dump recording to file
       (jfr-spikes 5000) - Alert on frames >5ms
       (jfr-auto-dump 10000) - Auto-dump on frames >10ms
-      (jfr-status)      - Show JFR status")
+      (jfr-status)      - Show JFR status"
+  (:require [clojure.tools.namespace.find :as ns-find]
+            [clojure.java.io :as io]
+            [clojure.string :as str]))
 
 
 ;; State
@@ -78,26 +81,44 @@
 
 (defonce ^:private !style-watches (atom #{}))
 
-(def ^:private style-vars
-  "Style vars to watch for hot-reload.
-   Each entry is a var symbol for a CSS module."
-  '[laser-show.css.theme/theme
-    laser-show.css.buttons/buttons
-    laser-show.css.forms/forms
-    laser-show.css.grid-cells/grid-cells
-    laser-show.css.layout/layout
-    laser-show.css.title-bar/menu-theme
-    laser-show.css.cue-chain-editor/cue-chain-editor
-    laser-show.css.list/list])
+(defn- discover-style-vars
+  "Dynamically discover CSS style vars from laser-show.css.* namespaces.
+   
+   Finds all public vars in CSS namespaces that contain cljfx CSS maps
+   (identified by having a :cljfx.css/url key in their value).
+   
+   Returns a sequence of var objects."
+  []
+  (let [src-dir (io/file "src")
+        css-namespaces (->> (ns-find/find-namespaces-in-dir src-dir)
+                            (filter #(str/starts-with? (str %) "laser-show.css."))
+                            ;; Exclude reload namespace itself
+                            (remove #{'laser-show.css.reload 'laser-show.css.core}))
+        ]
+    ;; Load all CSS namespaces and find vars with :cljfx.css/url
+    (doseq [ns-sym css-namespaces]
+      (try (require ns-sym) (catch Exception _)))
+    (->> css-namespaces
+         (mapcat (fn [ns-sym]
+                   (when-let [ns-obj (find-ns ns-sym)]
+                     (->> (ns-publics ns-obj)
+                          vals
+                          (filter (fn [v]
+                                    (when-let [val (try @v (catch Exception _ nil))]
+                                      (and (map? val)
+                                           (contains? val :cljfx.css/url))))))))))))
 
 (defn watch-styles!
   "Enable CSS hot-reload. Re-evaluating style defs updates UI instantly.
    
    How it works:
-   1. Watches CSS module vars (e.g., laser-show.css.theme/theme)
+   1. Discovers CSS module vars dynamically (vars with :cljfx.css/url)
    2. When you eval a (def theme ...) form, the var changes
    3. The watch callback triggers a dummy state update
    4. cljfx sees the state change and re-renders, picking up new CSS URLs
+   
+   Style vars are discovered automatically from laser-show.css.* namespaces,
+   so new CSS files are automatically included without manual updates.
    
    Usage:
    1. Call (watch-styles!) after starting the app with (start)
@@ -111,26 +132,24 @@
     (println "⚠️  App not started. Call (start) first.")
     (throw (ex-info "App must be started before watching styles" {})))
   
-  (doseq [var-sym style-vars]
-    (if-let [v (try (requiring-resolve var-sym) (catch Exception _ nil))]
-      (do
-        (add-watch v ::style-reload
-                   (fn [_ _ old-val new-val]
-                     (when (not= old-val new-val)
-                       (let [url (:cljfx.css/url new-val)]
-                         (if url
-                           (do
-                             (println "🎨 Style updated:" var-sym)
-                             ;; Trigger a dummy state update to force re-render
-                             ;; The actual CSS URLs are computed in subs/stylesheet-urls
-                             ((resolve 'laser-show.state.core/swap-state!)
-                              update-in [:styles :reload-trigger] (fnil inc 0)))
-                           (println "⚠️  Warning: No :cljfx.css/url in" var-sym))))))
-        (swap! !style-watches conj v))
-      (println "⚠️  Warning: Could not resolve" var-sym)))
-  
-  (println "👁️  Watching" (count @!style-watches) "style var(s) for hot-reload")
-  (println "   Edit any CSS file and eval the (def ...) form to update styles instantly!"))
+  (let [style-vars (discover-style-vars)]
+    (doseq [v style-vars]
+      (add-watch v ::style-reload
+                 (fn [_ _ old-val new-val]
+                   (when (not= old-val new-val)
+                     (let [url (:cljfx.css/url new-val)]
+                       (if url
+                         (do
+                           (println "🎨 Style updated:" (symbol v))
+                           ;; Trigger a dummy state update to force re-render
+                           ;; The actual CSS URLs are computed in subs/stylesheet-urls
+                           ((resolve 'laser-show.state.core/swap-state!)
+                            update-in [:styles :reload-trigger] (fnil inc 0)))
+                         (println "⚠️  Warning: No :cljfx.css/url in" (symbol v)))))))
+      (swap! !style-watches conj v))
+    
+    (println "👁️  Watching" (count @!style-watches) "style var(s) for hot-reload")
+    (println "   Edit any CSS file and eval the (def ...) form to update styles instantly!")))
 
 (defn unwatch-styles!
   "Stop watching style vars for hot-reload."
