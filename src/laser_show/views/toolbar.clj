@@ -39,6 +39,45 @@
                  :active? false}]}))
 
 
+;; Global Trigger Mode Selector
+
+
+(def trigger-mode-options
+  "Options for global trigger mode dropdown."
+  [{:id :default :name "Default"}
+   {:id :toggle :name "Toggle"}
+   {:id :retrigger :name "Retrigger"}])
+
+(defn trigger-mode-selector
+  "Global trigger mode selector dropdown.
+   
+   Modes:
+   - Default: Use per-cue trigger mode settings
+   - Toggle: Override all cues to click ON/OFF behavior
+   - Retrigger: Override all cues to always restart behavior"
+  [{:keys [fx/context]}]
+  (let [current-mode (fx/sub-ctx context subs/global-trigger-mode)
+        current-option (or (first (filter #(= (:id %) current-mode) trigger-mode-options))
+                           (first trigger-mode-options))]
+    {:fx/type :h-box
+     :spacing 4
+     :alignment :center-left
+     :children [{:fx/type :label
+                 :text "Trigger:"
+                 :style-class "label-secondary"}
+                {:fx/type :combo-box
+                 :value current-option
+                 :pref-width 90
+                 :style-class "combo-box-dark"
+                 :items trigger-mode-options
+                 :button-cell (fn [mode]
+                                {:text (or (:name mode) "Default")})
+                 :cell-factory {:fx/cell-type :list-cell
+                                :describe (fn [mode]
+                                            {:text (or (:name mode) "Default")})}
+                 :on-value-changed {:event/type :timing/set-global-trigger-mode}}]}))
+
+
 ;; BPM Controls
 
 
@@ -200,6 +239,7 @@
    :style-class "toolbar"
    :alignment :center-left
    :children [{:fx/type transport-controls}
+              {:fx/type trigger-mode-selector}
               {:fx/type :separator :orientation :vertical}
               {:fx/type bpm-controls}
               {:fx/type link-sync-button}

@@ -125,6 +125,52 @@
                                     :row row}}]}))
 
 
+;; Trigger Mode Picker
+
+
+(def ^:private trigger-mode-options
+  "Options for per-cue trigger mode dropdown."
+  [{:id :toggle :name "Toggle"}
+   {:id :retrigger :name "Retrigger"}])
+
+(defn- trigger-mode-dropdown
+  "Dropdown for selecting trigger mode for this cue chain.
+   Renders as a horizontal row: 'Trigger Mode:' label + dropdown.
+   
+   Trigger modes:
+   - :toggle (default) - Click to turn ON, click again to turn OFF
+   - :retrigger - Always start/restart the cue on click
+   
+   Note: Global trigger mode setting can override this per-cue setting.
+   
+   Props:
+   - :col, :row - Grid coordinates
+   - :trigger-mode - Current trigger mode (default :toggle)"
+  [{:keys [col row trigger-mode]}]
+  (let [current-mode (or trigger-mode :toggle)
+        current-option (or (first (filter #(= (:id %) current-mode) trigger-mode-options))
+                           (first trigger-mode-options))]
+    {:fx/type :h-box
+     :spacing 8
+     :alignment :center-left
+     :children [{:fx/type :label
+                 :text "Trigger Mode:"
+                 :style-class "zone-picker-label"}
+                {:fx/type :combo-box
+                 :value current-option
+                 :pref-width 120
+                 :style-class "combo-box-dark"
+                 :items trigger-mode-options
+                 :button-cell (fn [mode]
+                                {:text (or (:name mode) "Toggle")})
+                 :cell-factory {:fx/cell-type :list-cell
+                                :describe (fn [mode]
+                                            {:text (or (:name mode) "Toggle")})}
+                 :on-value-changed {:event/type :cue-chain/set-trigger-mode
+                                    :col col
+                                    :row row}}]}))
+
+
 ;; Middle Section (Preset Config)
 
 
@@ -363,7 +409,7 @@
                                           :selected-effect-ids selected-effect-ids
                                           :dialog-data effect-dialog-data})])}]}
               
-              ;; Footer with destination zone dropdown (left) and close button (right)
+              ;; Footer with destination zone dropdown, trigger mode, and close button
               {:fx/type :h-box
                :alignment :center-left
                :spacing 12
@@ -373,6 +419,10 @@
                            :row row
                            :destination-zone (:destination-zone cue-chain)
                            :zone-groups zone-groups}
+                          {:fx/type trigger-mode-dropdown
+                           :col col
+                           :row row
+                           :trigger-mode (:trigger-mode cue-chain)}
                           {:fx/type :region
                            :h-box/hgrow :always}
                           {:fx/type :button

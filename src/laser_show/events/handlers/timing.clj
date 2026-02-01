@@ -12,7 +12,8 @@
    - UI shows both Carabiner and Link status"
   (:require [laser-show.events.helpers :as h]
             [laser-show.input.link :as link]
-            [laser-show.state.core :as state]))
+            [laser-show.state.core :as state]
+            [clojure.tools.logging :as log]))
 
 
 ;; Timing Events
@@ -167,6 +168,23 @@
   {:state (assoc-in state [:backend :link :link-enabled?] enabled?)})
 
 
+;; Global Trigger Mode
+
+
+(defn- handle-timing-set-global-trigger-mode
+  "Set the global trigger mode override.
+   
+   Global trigger mode options:
+   - :default - Use per-cue trigger mode settings
+   - :toggle - Override all cues to toggle mode (click ON/OFF)
+   - :retrigger - Override all cues to retrigger mode (always restart)"
+  [{:keys [fx/event state]}]
+  (let [;; Extract :id from fx/event (combo-box selected value)
+        mode (or (:mode event) (:id event) :default)]
+    (log/info "Setting global trigger mode:" {:mode mode :fx-event event})
+    {:state (assoc-in state [:config :cue :trigger-mode] mode)}))
+
+
 ;; Public API
 
 
@@ -200,6 +218,9 @@
     ;; Internal Link events
     :timing/carabiner-connected (handle-timing-carabiner-connected event)
     :timing/link-enabled (handle-timing-link-enabled event)
+    
+    ;; Global trigger mode
+    :timing/set-global-trigger-mode (handle-timing-set-global-trigger-mode event)
     
     ;; Unknown event in this domain
     {}))

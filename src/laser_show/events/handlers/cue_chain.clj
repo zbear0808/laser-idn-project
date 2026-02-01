@@ -228,6 +228,25 @@
                 h/mark-dirty)}))
 
 
+;; Trigger Mode Operations
+
+
+(defn- handle-cue-chain-set-trigger-mode
+  "Set the trigger mode for a cue chain.
+   
+   Trigger modes:
+   - :toggle (default) - Click to turn ON, click again to turn OFF
+   - :retrigger - Always start/restart the cue on click"
+  [{:keys [col row fx/event state]}]
+  (let [;; Extract :id from fx/event (combo-box selected value)
+        mode (or (:mode event) (:id event) :toggle)
+        mode-path [:chains :cue-chains [col row] :trigger-mode]]
+    (log/debug "Setting per-cue trigger mode:" {:col col :row row :mode mode :fx-event event})
+    {:state (-> state
+                (assoc-in mode-path mode)
+                h/mark-dirty)}))
+
+
 ;; Public API
 
 
@@ -270,6 +289,9 @@
     
     ;; Name
     :cue-chain/set-name (handle-cue-chain-set-name event)
+    
+    ;; Trigger mode
+    :cue-chain/set-trigger-mode (handle-cue-chain-set-trigger-mode event)
     
     ;; Unknown event in this domain
     {}))

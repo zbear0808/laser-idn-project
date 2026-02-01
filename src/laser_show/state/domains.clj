@@ -190,7 +190,9 @@
    :osc {:default {:enabled? false :port default-osc-port}
          :doc "OSC server settings"}
    :midi {:default {:enabled? false :device nil}
-          :doc "MIDI input settings"}})
+          :doc "MIDI input settings"}
+   :cue {:default {:trigger-mode :default}
+         :doc "Cue playback settings. :trigger-mode can be :default (use per-cue setting), :toggle (click ON/OFF), or :retrigger (always restart)"}})
 
 (defstate projectors
   "Projector configurations for color calibration and routing.

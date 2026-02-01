@@ -112,6 +112,15 @@
   [context]
   (fx/sub-val context get-in [:config :preview :zone-group-filter]))
 
+(defn global-trigger-mode
+  "Get the global trigger mode setting.
+   Returns:
+   - :default - Use per-cue trigger mode settings
+   - :toggle - Override all cues to toggle mode
+   - :retrigger - Override all cues to retrigger mode"
+  [context]
+  (fx/sub-val context get-in [:config :cue :trigger-mode] :default))
+
 
 ;; Level 2: Computed Subscriptions
 ;; These compose multiple Level 1 subscriptions or perform computations.
