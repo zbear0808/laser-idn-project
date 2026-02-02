@@ -53,6 +53,12 @@
         (cond-> (= (get-in state [:playback :active-cell]) [col row])
           (assoc-in [:playback :active-cell] (first (keys remaining-cues)))))))
 
+;; TODO: Implement :grid/trigger-cell handler - trigger cell from external input (MIDI/OSC)
+(defn- handle-grid-trigger-cell
+  [event]
+  (log/error "TODO: Handler not implemented for :grid/trigger-cell" event)
+  {})
+
 (defn- handle-grid-cell-clicked
   "Handle grid cell click - dispatches to trigger or select.
    
@@ -125,6 +131,7 @@
    Accepts events with :event/type in the :grid/* namespace."
   [{:keys [event/type] :as event}]
   (case type
+    :grid/trigger-cell (handle-grid-trigger-cell event)
     :grid/cell-clicked (handle-grid-cell-clicked event)
     :grid/move-cell (handle-grid-move-cell event)
     :grid/copy-cell (handle-grid-copy-cell event)

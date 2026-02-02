@@ -397,12 +397,16 @@
 ;; Uses shared param-controls with projector-specific event templates
 
 
-(defn- make-projector-param-event
-  "Create event template for projector effect parameter updates."
+(defn- make-projector-param-events
+  "Create event templates for projector effect parameter updates.
+   Returns map with :on-change-event and :on-text-event."
   [projector-id effect-idx]
-  {:event/type :projectors/update-effect-param
-   :projector-id projector-id
-   :effect-idx effect-idx})
+  {:on-change-event {:event/type :projectors/update-effect-param
+                     :projector-id projector-id
+                     :effect-idx effect-idx}
+   :on-text-event {:event/type :projectors/update-effect-param-from-text
+                   :projector-id projector-id
+                   :effect-idx effect-idx}})
 
 (defn- standard-effect-params-editor
   "Generic parameter editor using effect registry parameters.
@@ -411,13 +415,13 @@
    This replaces individual effect-specific editors like rgb-calibration-editor,
    gamma-correction-editor, axis-flip-editor, and rotation-offset-editor."
   [{:keys [projector-id effect-idx effect-def params]}]
-  (let [event-template (make-projector-param-event projector-id effect-idx)
+  (let [{:keys [on-change-event on-text-event]} (make-projector-param-events projector-id effect-idx)
         params-map (param-controls/params-vector->map (:parameters effect-def []))]
     {:fx/type param-controls/param-controls-list
      :params-map params-map
      :current-params params
-     :on-change-event event-template
-     :on-text-event event-template}))
+     :on-change-event on-change-event
+     :on-text-event on-text-event}))
 
 (defn- effect-parameter-editor
   "Renders the appropriate editor for a selected effect.

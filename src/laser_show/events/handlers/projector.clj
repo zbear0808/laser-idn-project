@@ -359,6 +359,27 @@
                 h/mark-dirty)}))
 
 
+;; TODO: Implement :projectors/insert-pasted-effects handler - insert pasted effects into projector chain at position
+(defn- handle-projectors-insert-pasted-effects
+  [event]
+  (log/error "TODO: Handler not implemented for :projectors/insert-pasted-effects" event)
+  {})
+
+
+;; TODO: Implement :projectors/update-effect-param handler - update a parameter value for a projector effect
+(defn- handle-projectors-update-effect-param
+  [event]
+  (log/error "TODO: Handler not implemented for :projectors/update-effect-param" event)
+  {})
+
+
+;; TODO: Implement :projectors/update-effect-param-from-text handler - update a parameter value from text input
+(defn- handle-projectors-update-effect-param-from-text
+  [event]
+  (log/error "TODO: Handler not implemented for :projectors/update-effect-param-from-text" event)
+  {})
+
+
 
 
 ;; Calibration Mode
@@ -424,6 +445,9 @@
     
     ;; Effect chain management (for color curves)
     :projectors/add-effect (handle-projectors-add-effect event)
+    :projectors/insert-pasted-effects (handle-projectors-insert-pasted-effects event)
+    :projectors/update-effect-param (handle-projectors-update-effect-param event)
+    :projectors/update-effect-param-from-text (handle-projectors-update-effect-param-from-text event)
     
     ;; Calibration mode
     :projectors/toggle-calibration (handle-projectors-toggle-calibration event)

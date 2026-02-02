@@ -8,7 +8,8 @@
    - Color: Color picker
    - Choice: Combo box
    
-   Uses the shared parameter-controls namespace for rendering controls."
+   Uses the shared parameter-controls namespace for rendering controls.
+   Uses generic :chain/* events with {:domain :cue-chains} for all parameter updates."
   (:require [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.animation.presets :as presets]))
 
@@ -19,10 +20,8 @@
    Props:
    - :cell - [col row] of cell being edited
    - :preset-path - Path to the selected preset in the cue chain
-   - :preset-instance - The preset instance data {:preset-id :params {...} ...}
-   - :on-param-change - (optional) Function (param-key, value) for changes
-                        If not provided, uses default cue-chain events"
-  [{:keys [cell preset-path preset-instance on-param-change]}]
+   - :preset-instance - The preset instance data {:preset-id :params {...} ...}"
+  [{:keys [cell preset-path preset-instance]}]
   (let [preset-id (:preset-id preset-instance)
         preset-def (presets/presets-by-id preset-id)
         current-params (:params preset-instance {})
@@ -33,31 +32,18 @@
         ;; Build event templates using generic chain handlers
         ;; These get :param-key added by the controls
         ;; Use :effect-path key for consistency with chain handlers (path to item within chain)
-        on-change-event (if on-param-change
-                          ;; Custom handler - wrap in a map that will invoke the fn
-                          {:event/type :cue-chain/invoke-param-callback
-                           :callback on-param-change}
-                          ;; Use generic chain handler
-                          {:event/type :chain/update-param
-                           :domain :cue-chains
-                           :entity-key [col row]
-                           :effect-path preset-path})
-        on-text-event (if on-param-change
-                        {:event/type :cue-chain/invoke-param-text-callback
-                         :callback on-param-change}
-                        ;; Use generic chain handler
-                        {:event/type :chain/update-param-from-text
+        on-change-event {:event/type :chain/update-param
                          :domain :cue-chains
                          :entity-key [col row]
-                         :effect-path preset-path})
-        on-color-event (if on-param-change
-                         {:event/type :cue-chain/invoke-param-color-callback
-                          :callback on-param-change}
-                         ;; Use generic chain handler for color (converts color picker action event)
-                         {:event/type :chain/update-color-param
-                          :domain :cue-chains
-                          :entity-key [col row]
-                          :effect-path preset-path})]
+                         :effect-path preset-path}
+        on-text-event {:event/type :chain/update-param-from-text
+                       :domain :cue-chains
+                       :entity-key [col row]
+                       :effect-path preset-path}
+        on-color-event {:event/type :chain/update-color-param
+                        :domain :cue-chains
+                        :entity-key [col row]
+                        :effect-path preset-path}]
     {:fx/type :v-box
      :spacing 8
      :style-class "dialog-section"

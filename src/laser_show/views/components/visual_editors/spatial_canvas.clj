@@ -25,7 +25,7 @@
     :points [{:id :center :x 0.0 :y 0.0 :color \"#4CAF50\" :label \"Center\"}]
     :lines [{:from :tl :to :tr :color \"#4A6FA5\" :width 2}]
     :polygon {:points [:tl :tr :br :bl] :color \"#4A6FA520\"}
-    :on-point-drag {:event/type :effects/update-spatial-params ...}
+    :on-point-drag {:event/type :chain/update-spatial-params ...}
     :on-reset {:event/type :chain/reset-params ...}  ; Right-click anywhere to reset
     :show-grid true
     :show-axes true}"

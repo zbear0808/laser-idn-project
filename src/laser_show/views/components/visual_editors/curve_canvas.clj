@@ -21,9 +21,9 @@
     :height 280
     :color \"#FF5555\"  ; channel color
     :control-points [[0.0 0.0] [0.25 0.31] [1.0 1.0]]  ; sorted [x y] pairs (normalized)
-    :on-add-point {:event/type :effects/add-curve-point ...}
-    :on-update-point {:event/type :effects/update-curve-point ...}
-    :on-remove-point {:event/type :effects/remove-curve-point ...}}"
+    :on-add-point {:event/type :chain/add-curve-point :domain :effect-chains :entity-key [col row] :effect-path [idx] :channel :r}
+    :on-update-point {:event/type :chain/update-curve-point :domain :effect-chains :entity-key [col row] :effect-path [idx] :channel :r}
+    :on-remove-point {:event/type :chain/remove-curve-point :domain :effect-chains :entity-key [col row] :effect-path [idx] :channel :r}}"
   (:require [cljfx.api :as fx]
             [laser-show.events.core :as events]
             [laser-show.animation.effects.curves :as curves])

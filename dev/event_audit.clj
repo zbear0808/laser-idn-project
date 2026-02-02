@@ -1,6 +1,8 @@
 (ns event-audit
   "Audit script to find unused event handlers and missing handler definitions.
    
+   Dynamically scans handler files to discover event namespaces - no manual configuration needed.
+   
    Usage from REPL:
      (require '[event-audit :as audit])
      (audit/run-audit!)                    ; Print report to console
@@ -13,43 +15,31 @@
      (audit/compare-handlers-and-dispatches)"
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.edn :as edn]
             [clojure.set :as set]
             [clojure.pprint :as pp]))
 
 ;; =============================================================================
-;; Configuration
-
-
+;; Configuration - paths only, no manual namespace lists
 ;; =============================================================================
 
 (def handlers-dir "src/laser_show/events/handlers")
 (def source-dirs ["src/laser_show"])
-(def test-dirs ["test"])
-
-;; Event types to ignore in the "missing handlers" report
-;; These are typically docstring examples or intentional test cases
-(def ignored-missing-events
-  #{;; Docstring examples - these appear in component documentation
-    :my/cancel-edit :my/item-click :my/set-name :my/start-edit 
-    :my/tab-change :my/update-param :some/event
-    ;; Test-only events - intentionally testing unknown event handling
-    :keyframe/unknown-type :modulator/unknown-type :zone-groups/unknown-event
-    :custom/set-items})
-
-;; Event types to ignore in the "unused handlers" report
-;; These may be called via effects or are planned features
-(def ignored-unused-events
-  #{;; Called via effect system, not direct dispatch
-    :fx/event})
+(def default-output-dir "debug-output")
 
 ;; =============================================================================
-;; Handler Extraction
+;; Handler File Discovery
 ;; =============================================================================
 
-(defn- read-file-forms
-  "Read all forms from a Clojure file, returning them as a sequence.
-   Uses a simple regex-based approach to avoid reader macro issues."
+(defn- find-handler-files
+  "Recursively find all .clj files in the handlers directory."
+  []
+  (->> (io/file handlers-dir)
+       file-seq
+       (filter #(.isFile %))
+       (filter #(str/ends-with? (.getName %) ".clj"))))
+
+(defn- read-file-content
+  "Read file content, returning nil on error."
   [file]
   (try
     (slurp file)
@@ -57,38 +47,36 @@
       (println "Warning: Could not read file:" (.getPath file) "-" (.getMessage e))
       nil)))
 
+;; =============================================================================
+;; Handler Extraction
+;; =============================================================================
+
 (defn- extract-case-keywords
-  "Extract keywords from case statements in a handle function.
+  "Extract all namespaced keywords from case statements in a handle function.
+   
    Looks for patterns like:
      (case type
        :namespace/event-name (handler-fn event)
        ...)
    
-   Strategy: Find the (defn handle ...) function and extract all namespaced
-   keywords that appear as case branches (keywords at the start of a line
-   or after whitespace in the case body)."
+   Returns a set of keywords found as case branches."
   [content]
-  (let [;; Look for (defn handle or (defn- handle followed by case type
-        ;; Then extract all namespaced keywords that look like event types
-        ;; We look for keywords that match the domain patterns used in handlers
-        handle-fn-pattern #"(?s)\(defn-?\s+handle\s+.*?\(case\s+(?:type|event/type)(.*?)\n\s*;;\s*Unknown"
-        ;; Fallback: just find case type blocks
+  (let [;; Find case blocks that dispatch on type/event-type
+        ;; Pattern captures everything between 'case type' and the closing empty map {}
         case-pattern #"(?s)\(case\s+(?:type|event/type)\s+([\s\S]*?)\n\s*\{\}"
-        ;; Extract keywords from case branches - namespaced keywords
-        keyword-pattern #":([\w-]+)/([\w-]+)"]
-    (let [;; Try to find handle function first
-          handle-match (re-find handle-fn-pattern content)
-          case-match (re-find case-pattern content)
-          case-body (or (second handle-match) (second case-match) "")]
-      (->> (re-seq keyword-pattern case-body)
-           (map (fn [[_ ns name]]
-                  (keyword ns name)))
-           (into #{})))))
+        ;; Extract namespaced keywords
+        keyword-pattern #":([\w-]+)/([\w-]+)"
+        case-match (re-find case-pattern content)
+        case-body (or (second case-match) "")]
+    (->> (re-seq keyword-pattern case-body)
+         (map (fn [[_ ns name]]
+                (keyword ns name)))
+         (into #{}))))
 
 (defn- extract-handler-keywords-from-file
   "Extract all event type keywords that a handler file handles."
   [file]
-  (when-let [content (read-file-forms file)]
+  (when-let [content (read-file-content file)]
     (let [keywords (extract-case-keywords content)]
       (when (seq keywords)
         {:file (.getName file)
@@ -97,58 +85,27 @@
 
 (defn find-defined-handlers
   "Find all event types defined in handler files.
+   Dynamically scans all .clj files in the handlers directory.
    Returns a map of {:event-type {:file ... :path ...}}"
   []
-  (let [handler-files (->> (io/file handlers-dir)
-                           file-seq
-                           (filter #(.isFile %))
-                           (filter #(str/ends-with? (.getName %) ".clj")))]
-    (->> handler-files
-         (map extract-handler-keywords-from-file)
-         (filter some?)
-         (mapcat (fn [{:keys [file path handlers]}]
-                   (map (fn [h] [h {:file file :path path}]) handlers)))
-         (into {}))))
+  (->> (find-handler-files)
+       (map extract-handler-keywords-from-file)
+       (filter some?)
+       (mapcat (fn [{:keys [file path handlers]}]
+                 (map (fn [h] [h {:file file :path path}]) handlers)))
+       (into {})))
+
+(defn- extract-event-namespaces
+  "Extract all unique event namespaces from defined handlers.
+   Returns a set of namespace strings like #{\"grid\" \"effects\" \"ui\"}."
+  [defined-handlers]
+  (->> (keys defined-handlers)
+       (map namespace)
+       (into #{})))
 
 ;; =============================================================================
 ;; Event Dispatch Extraction
 ;; =============================================================================
-
-;; Event domains that we care about - these are the namespaces used in event handlers
-(def event-domains
-  #{"grid" "effects" "effect-chain" "cue-chain" "projectors" "zone-groups"
-    "timing" "transport" "ui" "preview" "project" "idn" "config"
-    "file" "edit" "view" "help" "chain" "list" "modulator" "keyframe" "input"})
-
-(defn- extract-dispatched-events
-  "Extract all namespaced keywords from a file that match our event domains.
-   
-   Simple approach: find ALL namespaced keywords in the file that have a namespace
-   matching one of our event domains. This catches all patterns including:
-     - {:event/type :namespace/event-name}
-     - :on-change-event :namespace/event-name
-     - (if condition :namespace/event-a :namespace/event-b)
-     - etc."
-  [content file-path]
-  (let [;; Find all namespaced keywords
-        keyword-pattern #":([\w-]+)/([\w-]+)"
-        matches (re-seq keyword-pattern content)]
-    (->> matches
-         ;; Filter to only event domains we care about
-         (filter (fn [[_ ns _]] (contains? event-domains ns)))
-         ;; Create event info
-         (map (fn [[full-match ns name]]
-                (let [;; Find line number for this match
-                      idx (.indexOf content full-match)
-                      before-match (when (>= idx 0) (subs content 0 idx))
-                      line-num (if before-match
-                                 (inc (count (filter #(= % \newline) before-match)))
-                                 0)]
-                  {:event-type (keyword ns name)
-                   :file (-> file-path (str/split #"[/\\]") last)
-                   :path file-path
-                   :line line-num})))
-         (into []))))
 
 (defn- find-clj-files
   "Recursively find all .clj files in a directory."
@@ -159,19 +116,75 @@
          (filter #(.isFile %))
          (filter #(str/ends-with? (.getName %) ".clj")))))
 
+(defn- extract-dispatched-events
+  "Extract all namespaced keywords from a file that match the given event namespaces.
+   
+   Args:
+     content - file content string
+     file-path - path to file for location tracking
+     event-namespaces - set of namespace strings to match
+   
+   Returns a vector of {:event-type :file :path :line} maps."
+  [content file-path event-namespaces]
+  (let [keyword-pattern #":([\w-]+)/([\w-]+)"
+        matches (re-seq keyword-pattern content)]
+    (->> matches
+         ;; Filter to only event namespaces we found in handlers
+         (filter (fn [[_ ns _]] (contains? event-namespaces ns)))
+         ;; Create event info with line numbers
+         (map (fn [[full-match ns name]]
+                (let [idx (.indexOf content full-match)
+                      before-match (when (>= idx 0) (subs content 0 idx))
+                      line-num (if before-match
+                                 (inc (count (filter #(= % \newline) before-match)))
+                                 0)]
+                  {:event-type (keyword ns name)
+                   :file (-> file-path (str/split #"[/\\]") last)
+                   :path file-path
+                   :line line-num})))
+         (into []))))
+
 (defn find-dispatched-events
   "Find all event types dispatched throughout the codebase.
-   Only scans source files, NOT test files (to avoid false positives from test data).
+   Uses event namespaces discovered from handler files.
    Returns a map of {:event-type [{:file ... :path ... :line ...}]}"
-  []
-  (let [;; Only scan source files, not test files
-        all-files (mapcat find-clj-files source-dirs)]
-    (->> all-files
-         (mapcat (fn [file]
-                   (when-let [content (read-file-forms file)]
-                     (extract-dispatched-events content (.getPath file)))))
-         (group-by :event-type)
-         (into {}))))
+  ([] (find-dispatched-events (extract-event-namespaces (find-defined-handlers))))
+  ([event-namespaces]
+   (let [all-files (mapcat find-clj-files source-dirs)]
+     (->> all-files
+          (mapcat (fn [file]
+                    (when-let [content (read-file-content file)]
+                      (extract-dispatched-events content (.getPath file) event-namespaces))))
+          (group-by :event-type)
+          (into {})))))
+
+;; =============================================================================
+;; Heuristic Filters for False Positives
+;; =============================================================================
+
+(defn- looks-like-docstring-example?
+  "Check if an event appears to be a docstring example.
+   Heuristic: keywords with generic names like 'my/', 'some/', 'example/'."
+  [event-type]
+  (let [ns (namespace event-type)]
+    (contains? #{"my" "some" "example" "test" "custom"} ns)))
+
+(defn- only-in-tests?
+  "Check if an event is only referenced in test files."
+  [dispatch-locations]
+  (every? (fn [{:keys [path]}]
+            (or (str/includes? path "/test/")
+                (str/includes? path "\\test\\")))
+          dispatch-locations))
+
+(defn- classify-missing-event
+  "Classify why an event might be missing a handler.
+   Returns a reason keyword or nil if it's a real missing handler."
+  [event-type dispatch-locations]
+  (cond
+    (looks-like-docstring-example? event-type) :docstring-example
+    (only-in-tests? dispatch-locations) :test-only
+    :else nil))
 
 ;; =============================================================================
 ;; Analysis and Reporting
@@ -179,64 +192,61 @@
 
 (defn compare-handlers-and-dispatches
   "Compare defined handlers with dispatched events.
-   Returns {:unused [...] :missing [...] :used [...] :ignored-unused [...] :ignored-missing [...]}
+   Returns {:unused [...] :missing [...] :used [...] :filtered [...]}
    
-   Options:
-     :include-ignored? - if true, includes ignored events in unused/missing (default false)"
+   Automatically filters out likely false positives (docstring examples, test-only events)."
   ([] (compare-handlers-and-dispatches {}))
-  ([{:keys [include-ignored?] :or {include-ignored? false}}]
+  ([_opts]
    (let [defined (find-defined-handlers)
-         dispatched (find-dispatched-events)
+         event-namespaces (extract-event-namespaces defined)
+         dispatched (find-dispatched-events event-namespaces)
          defined-set (set (keys defined))
          dispatched-set (set (keys dispatched))
          raw-unused (set/difference defined-set dispatched-set)
          raw-missing (set/difference dispatched-set defined-set)
          used (set/intersection defined-set dispatched-set)
-         ;; Separate ignored from actionable
-         ignored-unused (set/intersection raw-unused ignored-unused-events)
-         ignored-missing (set/intersection raw-missing ignored-missing-events)
-         ;; Filter out ignored unless requested
-         unused (if include-ignored? 
-                  raw-unused 
-                  (set/difference raw-unused ignored-unused-events))
-         missing (if include-ignored?
-                   raw-missing
-                   (set/difference raw-missing ignored-missing-events))]
+         ;; Classify missing events
+         missing-classified (->> raw-missing
+                                 (map (fn [evt]
+                                        {:event-type evt
+                                         :reason (classify-missing-event evt (get dispatched evt))
+                                         :dispatched-from (get dispatched evt)})))
+         ;; Separate real missing from filtered
+         real-missing (filter #(nil? (:reason %)) missing-classified)
+         filtered-missing (filter #(some? (:reason %)) missing-classified)]
      {:unused (mapv (fn [evt]
                       {:event-type evt
                        :defined-in (get defined evt)})
-                    (sort-by str unused))
-      :missing (mapv (fn [evt]
-                       {:event-type evt
-                        :dispatched-from (get dispatched evt)})
-                     (sort-by str missing))
-      :ignored-unused (mapv (fn [evt]
-                              {:event-type evt
-                               :defined-in (get defined evt)})
-                            (sort-by str ignored-unused))
-      :ignored-missing (mapv (fn [evt]
-                               {:event-type evt
-                                :dispatched-from (get dispatched evt)})
-                             (sort-by str ignored-missing))
+                    (sort-by str raw-unused))
+      :missing (mapv (fn [{:keys [event-type dispatched-from]}]
+                       {:event-type event-type
+                        :dispatched-from dispatched-from})
+                     (sort-by #(str (:event-type %)) real-missing))
+      :filtered (mapv (fn [{:keys [event-type reason dispatched-from]}]
+                        {:event-type event-type
+                         :reason reason
+                         :dispatched-from dispatched-from})
+                      (sort-by #(str (:event-type %)) filtered-missing))
       :used (sort-by str used)
+      :event-namespaces (sort event-namespaces)
       :stats {:total-defined (count defined-set)
               :total-dispatched (count dispatched-set)
-              :unused-count (count unused)
-              :missing-count (count missing)
-              :ignored-unused-count (count ignored-unused)
-              :ignored-missing-count (count ignored-missing)
-              :used-count (count used)}})))
+              :unused-count (count raw-unused)
+              :missing-count (count real-missing)
+              :filtered-count (count filtered-missing)
+              :used-count (count used)
+              :namespace-count (count event-namespaces)}})))
 
 (defn- format-location
   "Format a file location for display."
-  [{:keys [file path line]}]
+  [{:keys [file line]}]
   (if line
     (format "%s:%d" file line)
     file))
 
 (defn print-report
   "Print a formatted report of the analysis."
-  [{:keys [unused missing ignored-unused ignored-missing used stats]}]
+  [{:keys [unused missing filtered used event-namespaces stats]}]
   (println "\n" (str/join "" (repeat 70 "=")) "\n")
   (println "EVENT HANDLER AUDIT REPORT")
   (println (str/join "" (repeat 70 "=")) "\n")
@@ -246,12 +256,17 @@
   (println (format "  Total handlers defined:  %d" (:total-defined stats)))
   (println (format "  Total events dispatched: %d" (:total-dispatched stats)))
   (println (format "  Handlers in use:         %d" (:used-count stats)))
-  (println (format "  Unused handlers:         %d (+ %d ignored)" 
-                   (:unused-count stats) 
-                   (:ignored-unused-count stats 0)))
-  (println (format "  Missing handlers:        %d (+ %d ignored)"
+  (println (format "  Unused handlers:         %d" (:unused-count stats)))
+  (println (format "  Missing handlers:        %d (+ %d filtered)" 
                    (:missing-count stats)
-                   (:ignored-missing-count stats 0)))
+                   (:filtered-count stats 0)))
+  (println)
+  
+  ;; Discovered namespaces
+  (println (str/join "" (repeat 70 "-")))
+  (println "DISCOVERED EVENT NAMESPACES (from handler files):")
+  (println (str/join "" (repeat 70 "-")))
+  (println "  " (str/join ", " event-namespaces))
   (println)
   
   ;; Unused handlers
@@ -280,23 +295,18 @@
         (println (format "      ... and %d more locations" (- (count dispatched-from) 3))))))
   (println)
   
-  ;; Note about ignored events
-  (when (or (seq ignored-unused) (seq ignored-missing))
+  ;; Filtered events (likely false positives)
+  (when (seq filtered)
     (println (str/join "" (repeat 70 "-")))
-    (println "IGNORED (docstring examples, test events, etc.):")
+    (println "FILTERED (likely false positives - docstring examples, test-only, etc.):")
     (println (str/join "" (repeat 70 "-")))
-    (when (seq ignored-unused)
-      (println "  Unused:" (str/join ", " (map #(str (:event-type %)) ignored-unused))))
-    (when (seq ignored-missing)
-      (println "  Missing:" (str/join ", " (map #(str (:event-type %)) ignored-missing))))
-    (println "  (Edit ignored-*-events sets in event_audit.clj to customize)")
+    (doseq [{:keys [event-type reason]} filtered]
+      (println (format "  %-40s [%s]" (str event-type) (name reason))))
     (println))
   
   (println (str/join "" (repeat 70 "=")))
   (println "END OF REPORT")
   (println (str/join "" (repeat 70 "=")) "\n"))
-
-(def default-output-dir "debug-output")
 
 (defn- generate-timestamp
   "Generate a timestamp string for filenames."
@@ -346,8 +356,11 @@
   ([] (run-audit! {}))
   ([{:keys [save? output-dir filename quiet?]
      :or {save? false quiet? false}}]
-   (println "Scanning codebase for event handlers and dispatches...")
+   (println "Scanning handler files to discover event namespaces...")
    (let [results (compare-handlers-and-dispatches)]
+     (println (format "Found %d event namespaces: %s" 
+                      (count (:event-namespaces results))
+                      (str/join ", " (:event-namespaces results))))
      (when-not quiet?
        (print-report results))
      (when save?
@@ -368,7 +381,8 @@
   "Show detailed information about a specific event type."
   [event-type]
   (let [defined (find-defined-handlers)
-        dispatched (find-dispatched-events)]
+        event-namespaces (extract-event-namespaces defined)
+        dispatched (find-dispatched-events event-namespaces)]
     (println "\nDetails for" event-type)
     (println (str/join "" (repeat 50 "-")))
     (if-let [handler-info (get defined event-type)]
@@ -398,18 +412,21 @@
 (defn find-duplicate-handlers
   "Find event types that might be handled in multiple files (potential bugs)."
   []
-  (let [handler-files (->> (io/file handlers-dir)
-                           file-seq
-                           (filter #(.isFile %))
-                           (filter #(str/ends-with? (.getName %) ".clj")))]
-    (->> handler-files
-         (map extract-handler-keywords-from-file)
-         (filter some?)
-         (mapcat (fn [{:keys [file handlers]}]
-                   (map (fn [h] {:event h :file file}) handlers)))
-         (group-by :event)
-         (filter (fn [[_ v]] (> (count v) 1)))
-         (into {}))))
+  (->> (find-handler-files)
+       (map extract-handler-keywords-from-file)
+       (filter some?)
+       (mapcat (fn [{:keys [file handlers]}]
+                 (map (fn [h] {:event h :file file}) handlers)))
+       (group-by :event)
+       (filter (fn [[_ v]] (> (count v) 1)))
+       (into {})))
+
+(defn list-handler-files
+  "List all discovered handler files."
+  []
+  (->> (find-handler-files)
+       (map #(.getPath %))
+       sort))
 
 (comment
   ;; REPL usage examples:
@@ -430,6 +447,7 @@
   (def results (compare-handlers-and-dispatches))
   (:unused results)
   (:missing results)
+  (:event-namespaces results)  ; See discovered namespaces
   
   ;; Pretty print results to console
   (pprint-results results)
@@ -447,6 +465,9 @@
   
   ;; Find potential duplicate handlers
   (find-duplicate-handlers)
+  
+  ;; List all discovered handler files
+  (list-handler-files)
   
   ;; Just get defined handlers
   (find-defined-handlers)
