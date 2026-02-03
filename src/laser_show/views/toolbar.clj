@@ -3,9 +3,7 @@
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [clj-font-awesome.core :as fa]
-            [cljfx-svg.core :as cljfx-svg]
-            [laser-show.views.components.svg :as svg]
-            ))
+            [cljfx-svg.core :as svg]))
 
 
 ;; Transport Controls
@@ -110,11 +108,12 @@
   "Tap tempo button."
   [{:keys [fx/context]}]
   {:fx/type :button
+   :pref-width 50
    :text "TAP"
    :graphic {:fx/type fa/icon
              :name :drum
-             :size 12}
-   :style-class "btn-sm"
+             :size 16}
+   :style-class "transport-btn"
    :tooltip {:fx/type :tooltip :text "Tap to set BPM"}
    :on-action {:event/type :timing/tap-tempo}})
 
@@ -178,7 +177,7 @@
                       "Carabiner not connected")]
    {:fx/type :button
     :pref-width 50
-    :graphic {:fx/type cljfx-svg/icon #_svg/icon
+    :graphic {:fx/type svg/icon
               :src "ableton.svg"
               :color :white
               :size 36}
