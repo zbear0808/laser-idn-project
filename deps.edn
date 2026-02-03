@@ -3,31 +3,27 @@
  ;; Java source path for JFR custom events (compiled separately)
  :java-src-paths ["java"]
 
+ ;; needed for svglib
+ :mvn/repos {"jitpack" {:url "https://jitpack.io"}}
+
+
  ;; NOTE: JavaFX is platform-specific. Add the appropriate platform alias when running:
- ;;   :win      - Windows
- ;;   :mac      - macOS Intel (x86_64)
- ;;   :mac-arm  - macOS Apple Silicon (ARM64)
- ;;   :linux    - Linux
  ;; Example: clj -M:dev:laser-show:mac-arm
  :deps {org.clojure/clojure {:mvn/version "1.12.4"}
         cljfx/cljfx {:mvn/version "1.10.6"}
         cljfx/css {:mvn/version "1.1.0"}
-
-        ;; FontAwesome 7 icons
-        org.clojars.zubad/clj-font-awesome {:mvn/version "0.0.7"}
-
-        overtone/midi-clj {:mvn/version "0.5.0"}
-        overtone/osc-clj {:mvn/version "0.9.0"}
-
-        ;; Ableton Link synchronization
-        beat-carabiner/beat-carabiner {:mvn/version "8.0.0"}
-
         ;; Required for cljfx contexts (memoized subscriptions)
         org.clojure/core.cache {:mvn/version "1.1.234"}
 
-        ;; Profiling
-        com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.3.1"}
+        overtone/midi-clj {:mvn/version "0.5.0"}
+        overtone/osc-clj {:mvn/version "0.9.0"}
+        ;; Ableton Link
+        beat-carabiner/beat-carabiner {:mvn/version "8.0.0"}
 
+        org.clojars.zubad/clj-font-awesome {:mvn/version "0.0.7"}
+        cljfx/svg {:local/root "C:/Users/zubair/Documents/GitHub/cljfx-svg/target/cljfx-svg-0.1.0.jar"}
+
+        com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.3.1"}
         org.clojure/tools.logging {:mvn/version "1.3.0"}
         ch.qos.logback/logback-classic {:mvn/version "1.5.16"}}
 

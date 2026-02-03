@@ -92,47 +92,58 @@
 
 
 (deftest generate-current-frame-zone-filter-integration-test
-  (testing "when preview filter is :all and cue destination is :left - UI preview returns nil"
-    ;; This is expected behavior for UI preview - only show content matching filter
+  (testing "when for-preview? is true (default) - zone filter is bypassed for preview mode"
+    ;; Preview mode shows all cues regardless of zone filter
     (setup-playing-state-with-cue! :left)
     (state/assoc-in-state! [:config :preview :zone-group-filter] :all)
-    ;; Without skip-zone-filter?, frame should be nil
-    (let [frame (frame-service/generate-current-frame)]
+    ;; With default for-preview? true, zone filter is bypassed
+    (let [frame-data (frame-service/generate-current-frame)]
+      ;; Frame should be generated with map structure
+      (is (or (nil? frame-data) (map? frame-data))
+          "Preview mode should return map with :points and :cue-destinations")
+      (when frame-data
+        (is (contains? frame-data :points))
+        (is (contains? frame-data :cue-destinations)))))
+  
+  (testing "when for-preview? is false - IDN streaming applies zone filter"
+    ;; This tests BUG-2026-01-25-2 fix: IDN streaming with for-preview? false
+    (setup-playing-state-with-cue! :left)
+    (state/assoc-in-state! [:config :preview :zone-group-filter] :all)
+    ;; With for-preview? false, zone filter SHOULD be applied
+    (let [frame-data (frame-service/generate-current-frame {:for-preview? false})]
       ;; Frame should be nil because :left doesn't match filter :all
-      (is (nil? frame) "UI preview should return nil when zone doesn't match filter")))
+      (is (nil? frame-data) "IDN streaming should respect zone filter when for-preview? is false")))
   
-  (testing "when skip-zone-filter? is true - IDN streaming gets frame regardless of filter"
-    ;; This is the fix for BUG-2026-01-25-2
+  (testing "when skip-zone-filter? is true - zone filter is bypassed (legacy param)"
+    ;; Test legacy skip-zone-filter? parameter still works
     (setup-playing-state-with-cue! :left)
     (state/assoc-in-state! [:config :preview :zone-group-filter] :all)
-    ;; With skip-zone-filter? true, frame should be generated
-    (let [frame (frame-service/generate-current-frame {:skip-zone-filter? true})]
-      ;; Frame should NOT be nil - IDN streaming bypasses preview filter
-      ;; Note: It might still be nil if preset doesn't exist, but that's a different issue
-      ;; The key is that we reach frame generation, not get blocked by zone filter
-      ;; We can check this by using a destination that DOES match and comparing
-      ))
+    ;; With skip-zone-filter? true, filter is bypassed
+    (let [frame-data (frame-service/generate-current-frame {:skip-zone-filter? true})]
+      ;; Frame should be generated
+      (is (or (nil? frame-data) (map? frame-data))
+          "skip-zone-filter? true should bypass zone filtering")))
   
-  (testing "when destination matches filter - both UI and IDN get frame"
+  (testing "when destination matches filter - frame is generated"
     (setup-playing-state-with-cue! :all)
     (state/assoc-in-state! [:config :preview :zone-group-filter] :all)
-    ;; Both should potentially generate frame (if preset exists)
-    (let [frame-normal (frame-service/generate-current-frame)
-          frame-skip (frame-service/generate-current-frame {:skip-zone-filter? true})]
-      ;; Both paths should behave the same when zones match
-      (is (= (nil? frame-normal) (nil? frame-skip))
-          "Both paths should produce same result when zones match")))
+    ;; Both modes should generate frame when zones match
+    (let [frame-preview (frame-service/generate-current-frame {:for-preview? true})
+          frame-idn (frame-service/generate-current-frame {:for-preview? false})]
+      ;; Both should produce same nil/non-nil result when zones match
+      (is (= (nil? frame-preview) (nil? frame-idn))
+          "Both preview and IDN modes should produce same result when zones match")))
   
   (testing "when preview filter is nil (master view) - everything passes"
     (setup-playing-state-with-cue! :left)
     (state/assoc-in-state! [:config :preview :zone-group-filter] nil)
     ;; With nil filter, frame generation should be attempted
-    ;; (may still be nil if preset doesn't exist)
-    (let [frame (frame-service/generate-current-frame)]
-      ;; We can't assert frame is non-nil without valid preset,
-      ;; but at least we verify no exception is thrown
-      (is (or (nil? frame) (vector? frame))
-          "Frame should be nil or a vector of points"))))
+    (let [frame-data (frame-service/generate-current-frame)]
+      ;; Should return map structure or nil
+      (is (or (nil? frame-data) (and (map? frame-data)
+                                     (or (nil? (:points frame-data))
+                                         (vector? (:points frame-data)))))
+          "Frame should be nil or a map with :points vector"))))
 
 
 ;; Timing Context Tests

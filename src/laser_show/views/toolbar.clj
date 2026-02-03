@@ -2,7 +2,10 @@
   "Toolbar component with transport controls, BPM, beat indicator, and connection status."
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
-            [clj-font-awesome.core :as fa]))
+            [clj-font-awesome.core :as fa]
+            [cljfx-svg.core :as cljfx-svg]
+            [laser-show.views.components.svg :as svg]
+            ))
 
 
 ;; Transport Controls
@@ -158,18 +161,8 @@
  "Ableton Link sync button with status indicator."
  [{:keys [fx/context]}]
  (let [{:keys [carabiner-connected? link-enabled? sync-enabled? link-bpm link-peers]}
-       (fx/sub-ctx context subs/link-status)]
-   {:fx/type :button
-    :text "LINK"
-    :graphic {:fx/type fa/icon
-              :name :link
-              :size 12}
-    :style-class (cond
-                   (and link-enabled? sync-enabled?) "btn-link-active"
-                   link-enabled? "btn-link-connected"
-                   :else "btn-sm")
-    :tooltip {:fx/type :tooltip
-              :text (cond
+       (fx/sub-ctx context subs/link-status)
+       tooltip-text (cond
                       (and link-enabled? sync-enabled?)
                       (format "Syncing BPM from Ableton Link (%.1f BPM, %d peers)"
                               (or link-bpm 0.0) (or link-peers 0))
@@ -182,7 +175,17 @@
                       "Carabiner ready - Click to enable Link"
                       
                       :else
-                      "Carabiner not connected")}
+                      "Carabiner not connected")]
+   {:fx/type :button
+    :pref-width 50
+    :graphic {:fx/type cljfx-svg/icon #_svg/icon
+              :src "ableton.svg"
+              :color :white
+              :size 36}
+    :style-class (if (and link-enabled? sync-enabled?)
+                   "transport-btn-active"
+                   "transport-btn")
+    :tooltip {:fx/type :tooltip :text tooltip-text}
     :on-action {:event/type :timing/link-toggle}}))
 
 
