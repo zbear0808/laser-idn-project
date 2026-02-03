@@ -1,19 +1,13 @@
-# Laser Show & IDN-Hello Project
+# Laser Show (i'm bad at naming things)
 
-A Clojure project for controlling laser shows with multiple projectors using the ILDA Digital Network protocols. Features a launchpad-style interface, multi-input support (keyboard, MIDI, OSC), and a sophisticated zone-based routing system.
+A Clojure project for controlling laser shows with multiple projectors using the ILDA Digital Network protocols. Features a launchpad-style interface, multi-input support (keyboard, MIDI, OSC)
 
-Contains two modules:
-1. **Laser Show** - Live laser show control application
-2. **IDN-Hello** - ILDA Digital Network Hello Protocol implementation
+
+<img width="2880" height="1800" alt="{DC4D3125-9F45-4BF8-9EB9-6AF6D73751A2}" src="https://github.com/user-attachments/assets/fe47f5a2-5038-4c44-8fd7-57c76548429f" />
 
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
-  - [Prerequisites](#prerequisites)
-  - [Running Laser Show](#running-laser-show)
-  - [Running IDN-Hello](#running-idn-hello)
-- [Development](#development)
 - [Animation System](#animation-system)
 - [IDN Protocol Support](#idn-protocol-support)
 - [Input System](#input-system)
@@ -21,7 +15,6 @@ Contains two modules:
 - [Current Work](#current-work)
 - [Non-Goals](#non-goals)
 - [Future Possibilities](#future-possibilities)
-- [Troubleshooting](#troubleshooting)
 - [License](#license)
 - [Contributing](#contributing)
 
@@ -32,28 +25,23 @@ Contains two modules:
 
 
 ### Troubleshooting Downloads
-I haven't tested mac or linux builds, they're just generated from my github action
+I partially tested mac or linux builds, they're just generated from my github action, almost all of my dev testing is done on windows.
 
 → Try the universal JAR: `java -jar laser-show-X.X.X-standalone.jar`
-this should work regardless of your OS, but you'd need JDK25 installed
+this should work regardless of your OS, but you'd need JDK23+ installed
 
 ## Animation System
 
 The laser show uses a frame-based animation system with the following core types:
 
-- **LaserPoint**: Individual point with X/Y coordinates (-32768 to 32767) and RGB color (0-255 each)
-- **LaserFrame**: Collection of points representing a single frame
-- **Animation**: Protocol for generating frames over time
+- **LaserPoint**: Individual point with X/Y coordinates [-1, 1] and RGB color [0, 1.0]
+- **LaserFrame**: Vector of points representing a single frame
 
 ## IDN Protocol Support
 
-### IDN-Hello Protocol
+Implements ILDA Digital Network Hello Protocol and IDN Stream Protocol:
 
-Implements ILDA Digital Network Hello Protocol (Draft 2022-03-27):
-
-**Default Port**: UDP 7255
-
-### IDN-Stream Protocol
+**IDN Hello Default Port**: UDP 7255
 
 Frame streaming with X/Y coordinates (16-bit) and RGB color (16-bit each). See [`src/laser_show/backend/idn_stream.clj`](src/laser_show/backend/idn_stream.clj) and [`src/laser_show/backend/streaming_engine.clj`](src/laser_show/backend/streaming_engine.clj).
 
@@ -75,12 +63,12 @@ clj -M:test
 
 Decent coverage of IDN protocol implementation, packet logging
 
-bad coverage of everything else. a lot of ai generated tests that aren't actually checking anything useful, i need to clean those up.
+ok coverage of everything else.
  See [`test/`](test/) directory for test files.
 
 ## Current Work
+general performance improvements for frame generation
 
-todo, update
 
 
 ## Non-Goals
@@ -89,7 +77,7 @@ This project intentionally does not include the following features:
 
 ### High-Quality / Realistic Visualization
 
-Real-time, photorealistic laser visualization is computationally expensive and would be better suited as a standalone application. The current preview is optimized for performance and layout verification, not rendering quality. Building high-quality real-time visualization would add significant complexity without benefiting the core use case of controlling live shows.
+Real-time, photorealistic laser visualization is computationally expensive and would be better suited as a standalone application. The current preview is already the highest cpu user in the app, so i don't want to make it worse. 
 
 **If you need visualization**: Check out the [IDN Tools project](https://gitlab.com/laser_light_lab_uni_bonn/idn-npp/idn-tools) which includes visualization tools for the IDN protocol.
 
@@ -98,6 +86,7 @@ Real-time, photorealistic laser visualization is computationally expensive and w
 Live audio analysis (FFT) is typically noisy and unreliable for direct show control. The signal requires heavy smoothing and filtering to be usable, which is better handled by specialized tools. 
 
 **Instead**: Use external applications (Python scripts, TouchDesigner, Max/MSP, etc.) to analyze audio and send pre-processed OSC or MIDI cc to this application. This separation of concerns allows you to use the best tool for audio analysis while keeping this application focused on laser control.
+also, if you're looking for live audio bpm syncing use [WLEDAudioSyncRTBeat](https://github.com/zak-45/WLEDAudioSyncRTBeat)  
 
 ### Live Audio Playback
 
@@ -107,51 +96,29 @@ Live audio analysis (FFT) is typically noisy and unreliable for direct show cont
 
 ## Future Possibilities
 
-The following feature is planned for future development but is not currently being worked on due to its significant complexity:
+The following feature is planned for future development but is not currently being worked on due to its complexity:
 
 ### Timeline System
 
-A comprehensive timeline system for fully pre-recorded shows:
+A timeline system for fully pre-recorded shows:
 
 - **Timecode Integration**: Full support for MIDI timecode (MTC) and LTC timecode
 - **Seeking/Scrubbing**: Navigate within the timeline, jump to specific cues
 - **Pre-compilation**: Option to pre-render all IDN frames for maximum stability during playback
-- **Live Recording**: Record MIDI/OSC inputs to create and edit cues in real-time
+- **Live Recording**: Record MIDI/OSC inputs to record triggered cues and modified effect parameters and play them back
 - **Beat Quantization**: Snap cue triggers to beat boundaries when recording to timeline
-- **Timeline Editing**: Full editing capabilities for cue timing, transitions, and effects
 
-This is a major architectural addition that requires:
-- Comprehensive timeline data structures
-- Timeline playback engine separate from live performance mode
-- Timeline UI with scrubbing and editing
-- Persistent timeline storage format
-- Pre-compilation pipeline with caching
-- Frame interpolation and transition system
 
-**Status**: Not planned for the near term. The current focus is on perfecting live performance capabilities.
 
-## Troubleshooting
+**Status**: Not planned for the near term. The current focus is on live performance capabilities.
 
-### Laser Show won't start
-- Ensure Java 24+ is installed: `java -version` (JDK 24 recommended for VisualVM compatibility)
-- Download dependencies: `clj -P -M:laser-show`
 
-### IDN-Hello can't discover devices
-- Verify network connectivity to laser hardware
-- Check firewall settings for UDP port 7255
-- Ensure broadcast address is correct for your network
-
-### REPL connection issues
-- Verify nREPL is running: `clj -M:repl`
-- Check the port number in the console output
-- Ensure your editor is configured for nREPL connection
 
 For more help, see [`QUICKSTART.md`](QUICKSTART.md).
 
 ## License
 
-idk yet, but for now Pangolin is not allowed to use any of my code bc they're meanies
-
+agplv3
 
 ## Contributing
 
