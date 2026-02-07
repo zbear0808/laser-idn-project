@@ -2,20 +2,19 @@
   "Multi-engine management for streaming to multiple projectors.
    
    Each projector gets its own streaming engine with a projector-specific
-   frame provider. The frame provider uses the routing system to determine
-   which cues should be sent to each projector.
+   frame provider. The frame provider uses zone-based routing to determine
+   which frames each projector receives.
    
-   SIMPLIFIED ARCHITECTURE (v2):
-   - One streaming engine per enabled projector (and virtual projector)
+   ZONE-BASED ARCHITECTURE (v3):
+   - One streaming engine per enabled projector
    - Each engine has a frame provider that:
-     1. Gets active cues and their destination zone groups
-     2. Uses routing/core to determine if this projector/VP matches
-     3. Generates frame if matched
+     1. Looks up projector's zone-groups from config
+     2. Gets zone-frames map from frame-service (cached per frame)
+     3. Extracts and concatenates frames for projector's zones
      4. Applies projector calibration effects (color curves + corner-pin)
    
-   Corner-pin is now directly on projectors/VPs, eliminating zones.
-   Virtual projectors inherit color curves from parent but have
-   independent corner-pin for things like graphics/crowd scanning.
+   Each projector receives only content routed to its assigned zones.
+   Multiple projectors in the same zone share cached frame computation.
    
    The multi-engine state is stored in [:backend :streaming :multi-engine-state]"
   (:require [clojure.tools.logging :as log]
@@ -25,8 +24,6 @@
             [laser-show.dev-config :as dev-config]
             [laser-show.state.core :as state]
             [laser-show.state.extractors :as ex]
-            [laser-show.routing.core :as routing]
-            [laser-show.routing.zone-effects :as ze]
             [laser-show.animation.effects :as effects]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.idn.output-config :as output-config]))
@@ -49,6 +46,53 @@
 ;;  :start-time-ms timestamp}
 
 
+;; Helper Functions for Zone-Based Frame Routing
+
+
+(defn- get-projector-zone-groups
+  "Get the zone groups a projector belongs to.
+   
+   Args:
+   - raw-state: The raw application state
+   - projector-id: The projector's ID keyword
+   
+   Returns: Vector of zone-group-ids the projector belongs to."
+  [raw-state projector-id]
+  (let [projector (get-in raw-state [:projectors projector-id])]
+    (-> projector
+        :zone-groups
+        seq)))
+
+(defn- extract-frames-for-zones
+  "Extract frames from a zone-frames map for the specified zone groups.
+   
+   Args:
+   - zone-frames-map: Map of {zone-group-id → frame} from generate-frames-by-zone-cached
+   - zone-group-ids: Vector of zone-group-ids to extract frames for
+   
+   Returns: Vector of frames (may contain nils for zones with no content).
+            Returns empty vector if zone-group-ids is empty."
+  [zone-frames-map zone-group-ids]
+  (if (empty? zone-group-ids)
+    []
+    (mapv #(get zone-frames-map %) zone-group-ids)))
+
+(defn- combine-zone-frames
+  "Combine multiple zone frames into a single frame with proper blanking.
+   
+   Uses the concatenate-frames utility from frame-service to join
+   frames with blanking points between them for safe galvo travel.
+   
+   Args:
+   - frames: Vector of frames (each frame is a vector of points)
+   
+   Returns: Combined frame or nil if all input frames are nil/empty."
+  [frames]
+  (let [non-nil-frames (filterv some? frames)]
+    (when (seq non-nil-frames)
+      (frame-service/concatenate-frames non-nil-frames 0))))
+
+
 ;; Frame Provider Creation
 
 
@@ -69,112 +113,95 @@
           frame))
       frame)))
 
+(defn- get-active-cues-data
+  "Get data for ALL active cues (multi-cue support for IDN streaming).
+   
+   Returns a vector of maps, each with:
+   - :cell - [col row] coordinates
+   - :cue-chain - the cue chain data
+   - :cue-timing - the timing state for this cue
+   
+   Returns empty vector if no active cues."
+  [raw-state]
+  (let [active-cues (get-in raw-state [:playback :active-cues] {})]
+    (into []
+          (keep (fn [[[col row] cue-timing]]
+                  (let [cue-chain-data (get-in raw-state [:chains :cue-chains [col row]])]
+                    (when (seq (:items cue-chain-data))
+                      {:cell [col row]
+                       :cue-chain cue-chain-data
+                       :cue-timing cue-timing}))))
+          active-cues)))
+
 (defn- create-projector-frame-provider
   "Create a frame provider function for a specific projector or virtual projector.
    
-   The frame provider:
-   1. Gets the current active cue chain and its destination zone
-   2. Collects zone effects from all items in the chain
-   3. Checks if this projector matches the FINAL target (after zone effects)
-   4. Generates the frame if matched
+   The frame provider uses multi-cue zone-based routing:
+   1. Gets ALL active cues from [:playback :active-cues]
+   2. For each active cue, generates frames by zone
+   3. Extracts frames for this projector's zones from each cue
+   4. Concatenates all zone frames from all cues
    5. Applies projector calibration effects (color curves + corner-pin)
    
-   Returns a zero-arity function that returns a LaserFrame."
+   This aligns with how preview generates frames, supporting multi-cue playback.
+   
+   Returns a zero-arity function that returns a LaserFrame or nil."
   [projector-id]
   (fn []
     (try
       (let [raw-state (state/get-raw-state)
             playing? (get-in raw-state [:playback :playing?])
             
-            ;; If not playing, return empty frame
             _ (when-not playing? (throw (ex-info "Not playing" {:skip true})))
             
-            ;; Get active cell and cue chain
-            active-cell (get-in raw-state [:playback :active-cell])
-            _ (when-not active-cell (throw (ex-info "No active cell" {:skip true})))
+            ;; Get ALL active cues (multi-cue support)
+            all-cues (get-active-cues-data raw-state)
+            _ (when (empty? all-cues) (throw (ex-info "No active cues" {:skip true})))
             
-            [col row] active-cell
-            cue-chain-data (get-in raw-state [:chains :cue-chains [col row]])
-            _ (when-not (seq (:items cue-chain-data))
-                (throw (ex-info "No cue items" {:skip true})))
-            
-            ;; Get timing info
-            trigger-time (get-in raw-state [:playback :trigger-time] 0)
-            elapsed (- (System/currentTimeMillis) trigger-time)
+            projector-zone-groups (get-projector-zone-groups raw-state projector-id)
             bpm (get-in raw-state [:timing :bpm] 120.0)
+            current-time (System/currentTimeMillis)
+            
+            ;; Generate frames for each active cue and extract this projector's zones
+            all-projector-frames
+            (into []
+                  (keep
+                    (fn [{:keys [cue-chain cue-timing]}]
+                      (let [trigger-time (:trigger-time cue-timing 0)
+                            elapsed (- current-time trigger-time)
+                            timing-ctx (frame-service/get-timing-context)
+                            ;; Generate zone frames for this cue
+                            zone-frames-map (frame-service/generate-frames-by-zone-cached
+                                              cue-chain elapsed bpm trigger-time timing-ctx)
+                            ;; Extract frames for this projector's zones
+                            projector-frames (extract-frames-for-zones zone-frames-map projector-zone-groups)]
+                        ;; Combine this cue's zone frames
+                        (combine-zone-frames projector-frames))))
+                  all-cues)
+            
+            ;; Combine frames from all cues
+            combined-frame (combine-zone-frames all-projector-frames)
+            
+            ;; Get timing info for projector effects (use first cue's timing)
+            first-cue-timing (:cue-timing (first all-cues))
+            trigger-time (:trigger-time first-cue-timing 0)
+            elapsed (- current-time trigger-time)
             timing-ctx (frame-service/get-timing-context)
             
-            ;; Get projectors and virtual projectors for routing
-            projectors-items (get raw-state :projectors {})
-            virtual-projectors (get raw-state :virtual-projectors {})
-            zone-group-ids (set (keys (get raw-state :zone-groups {})))
-            
-            ;; Read actual destination zone from cue chain (no default fallback)
-            ;; If no destination is specified, routes to nothing (empty set)
-            destination-zone (:destination-zone cue-chain-data)
-            
-            ;; Collect effects from all items in chain
-            ;; Zone effects (zone-reroute, zone-broadcast, zone-mirror) modify routing
-            collected-effects (ze/collect-effects-from-cue-chain
-                                (:items cue-chain-data))
-            
-            ;; Build cue for routing with real data
-            cue-for-routing {:id :active-cue
-                             :destination-zone destination-zone
-                             :effects collected-effects}
-            
-            ;; Build routing map for this cue - with zone effect processing
-            ;; Returns: Vector of output configs
-            matching-outputs (routing/build-routing-map cue-for-routing
-                                                        projectors-items
-                                                        virtual-projectors
-                                                        zone-group-ids)
-            
-            ;; Check if THIS projector is in the matching outputs
-            matching-output-ids (set (map :projector-id matching-outputs))
-            
-            ;; Throttled debug logging for routing decisions
             log-count (swap! routing-log-counter inc)]
         
-        ;; Log routing info periodically (every ~5 seconds) - only when IDN logging enabled
         (when (and (dev-config/idn-stream-logging?)
                    (zero? (mod log-count ROUTING_LOG_INTERVAL)))
-          (log/debug (format "Routing debug [projector=%s]: destination-zone=%s, effects=%d, matching-outputs=%s, this-matches?=%s"
+          (log/debug (format "Zone routing [%s]: zone-groups=%s, active-cues=%d, combined-points=%s"
                              projector-id
-                             (pr-str destination-zone)
-                             (count collected-effects)
-                             (pr-str (mapv :id matching-outputs))
-                             (contains? matching-output-ids projector-id))))
+                             (pr-str projector-zone-groups)
+                             (count all-cues)
+                             (if combined-frame (count combined-frame) "nil"))))
         
-        (if (contains? matching-output-ids projector-id)
-          ;; This projector receives the cue - generate frame
-          ;; IMPORTANT: skip-zone-filter? true bypasses preview zone filtering
-          ;; so IDN streaming works regardless of preview settings
-          (let [base-frame (frame-service/generate-current-frame {:skip-zone-filter? true})
-                frame-point-count (when base-frame (count base-frame))]
-            ;; Log frame generation periodically - only when IDN logging enabled
-            (when (and (dev-config/idn-stream-logging?)
-                       (zero? (mod log-count ROUTING_LOG_INTERVAL))
-                       (= projector-id (first (sort (keys (get raw-state :projectors {}))))))
-              (log/debug (format "Frame gen [%s]: base-frame-points=%s"
-                                 projector-id
-                                 (or frame-point-count "nil"))))
-            (when base-frame
-              ;; Apply projector effects (color curves + corner-pin)
-              (apply-projector-effects base-frame projector-id
-                                       elapsed bpm trigger-time timing-ctx)))
-          ;; This projector doesn't match - no frame
-          (do
-            (when (and (dev-config/idn-stream-logging?)
-                       (zero? (mod log-count ROUTING_LOG_INTERVAL))
-                       (= projector-id (first (sort (keys (get raw-state :projectors {}))))))
-              (log/debug (format "No match [%s]: projector zone-groups=%s"
-                                 projector-id
-                                 (pr-str (:zone-groups (get projectors-items projector-id))))))
-            nil)))
+        (when combined-frame
+          (apply-projector-effects combined-frame projector-id elapsed bpm trigger-time timing-ctx)))
       
       (catch clojure.lang.ExceptionInfo e
-        ;; Expected "skip" exceptions (not playing, no active cell, etc.)
         (when-not (:skip (ex-data e))
           (log/error "Frame provider error:" (.getMessage e)))
         nil)

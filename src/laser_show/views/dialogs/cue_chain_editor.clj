@@ -103,8 +103,8 @@
   [{:keys [col row destination-zone zone-groups]}]
   (let [current-group-id (:zone-group-id destination-zone :all)
         ;; Find the currently selected group for display
-        current-group (or (first (filter #(= (:id %) current-group-id) zone-groups))
-                          {:id :all :name "All"})]
+        current-group (first (filter #(= (:id %) current-group-id) zone-groups))
+        ]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left

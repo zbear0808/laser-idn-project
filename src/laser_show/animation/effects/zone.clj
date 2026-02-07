@@ -1,101 +1,72 @@
 (ns laser-show.animation.effects.zone
   "Zone group routing effects - modify where cues are sent.
    
-   Unlike regular effects that transform frame data (points, colors),
-   zone routing effects modify ROUTING before frame generation occurs.
+   Zone effects operate at the routing level, not frame generation level.
+   The zone-selector effect allows keyframeable zone group selection,
+   evaluated at render time based on the current beat position.
    
-   These effects appear in the cue-chain editor under the 'Zone' tab
-   and allow dynamic routing based on effect parameters.
-   
-   SIMPLIFIED ARCHITECTURE (v2):
-   Only zone groups exist now - zones have been eliminated.
-   Projectors are assigned directly to zone groups.
-   
-   Modes:
-   - :replace - Completely override the cue's destination zone group
-   - :add     - Add zone groups to the cue's destination (union)
-   - :filter  - Restrict to zone groups matching both original AND effect target"
+   SIMPLIFIED ARCHITECTURE:
+   Only zone groups exist - projectors are assigned directly to zone groups.
+   A single zone-selector effect replaces the old zone-reroute, zone-broadcast,
+   and zone-mirror effects with unified keyframe support."
   (:require [laser-show.animation.effects :as effects]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
 
-;; Zone Reroute Effect
-;;
-;; This effect stores routing parameters that are read by the routing layer.
-;; The transducer is identity because zone effects don't transform frame data.
+;; Zone Selection Helpers
 
 
-(defn- zone-reroute-xf
-  "Identity transducer - zone routing effects don't modify frame data.
-   The routing parameters are read by routing/core.clj."
+(defn evaluate-zone-at-beat
+  "Evaluate which zone group is active at the given beat position.
+   
+   Uses step interpolation - returns the value of the last keyframe
+   at or before the current beat position.
+   
+   Parameters:
+   - params: Effect params containing :target-zone and optional :keyframes
+   - effective-beats: Current beat position (from timing-ctx)
+   
+   Returns: Zone group keyword (e.g., :left, :right, :all, :center)"
+  [params effective-beats]
+  (let [keyframes (get-in params [:target-zone :keyframes])
+        base-value (if (map? (:target-zone params))
+                     (get-in params [:target-zone :value] :all)
+                     (:target-zone params :all))]
+    (if (or (nil? keyframes) (empty? keyframes))
+      base-value
+      ;; Step interpolation: find last keyframe <= current beat
+      (let [sorted (sort-by :beat keyframes)
+            active (->> sorted
+                        (filter #(<= (:beat %) effective-beats))
+                        last)]
+        (or (:value active) base-value)))))
+
+
+;; Zone Selector Effect
+
+
+(defn- zone-selector-xf
+  "Identity transducer - zone selection affects routing, not frame data.
+   
+   The actual zone resolution happens in the routing layer (zone_effects.clj)
+   which reads effect parameters directly and evaluates keyframes at the
+   current beat position."
   [_time-ms _bpm _params _ctx]
   (map identity))
 
 (effects/register-effect!
- {:id :zone-reroute
-  :name "Zone Group Reroute"
+ {:id :zone-selector
+  :name "Zone Selector"
   :category :zone
-  :timing :static
-  :parameters [{:key :mode
-                :label "Mode"
-                :type :choice
-                :default :replace
-                :choices [:replace :add :filter]}
-               {:key :target-zone-groups
-                :label "Target Zone Groups"
-                :type :zone-groups
-                :default [:all]}]
-  :ui-hints {:renderer :zone-reroute
-             :params [:mode :target-zone-groups]
-             :show-routing-preview? true}
-  :apply-transducer zone-reroute-xf})
-
-
-;; Zone Broadcast Effect
-;;
-;; Convenience effect to send to all projectors.
-
-
-(defn- zone-broadcast-xf
-  "Identity transducer - just marks this cue as broadcast."
-  [_time-ms _bpm _params _ctx]
-  (map identity))
-
-(effects/register-effect!
- {:id :zone-broadcast
-  :name "Broadcast to All"
-  :category :zone
-  :timing :static
-  :parameters []
-  :ui-hints {:info "Sends this cue to ALL projectors. Equivalent to zone-reroute with mode :replace and target :all."}
-  :apply-transducer zone-broadcast-xf})
-
-
-;; Zone Mirror Effect
-;;
-;; Send to opposite side (left <-> right).
-
-
-(defn- zone-mirror-xf
-  "Identity transducer - routing logic handles the mirror mapping."
-  [_time-ms _bpm _params _ctx]
-  (map identity))
-
-(effects/register-effect!
- {:id :zone-mirror
-  :name "Mirror Left/Right"
-  :category :zone
-  :timing :static
-  :parameters [{:key :source-group
-                :label "Source Group"
-                :type :choice
-                :default :left
-                :choices [:left :right]}
-               {:key :include-original?
-                :label "Include Original"
-                :type :bool
-                :default false}]
-  :ui-hints {:info "Sends to the opposite side. :left becomes :right and vice versa."}
-  :apply-transducer zone-mirror-xf})
+  :timing :bpm
+  :parameters [{:key :target-zone
+                :label "Target Zone"
+                :type :zone-group-id
+                :default :all
+                :modulatable? true
+                :interpolation :step}]
+  :ui-hints {:renderer :zone-selector
+             :keyframe-editor :step-selector}
+  :apply-transducer zone-selector-xf})

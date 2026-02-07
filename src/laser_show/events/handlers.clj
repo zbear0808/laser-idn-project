@@ -9,7 +9,7 @@
    [laser-show.events.handlers.zone-groups :as zone-groups]
    [laser-show.events.handlers.timing :as timing]
    [laser-show.events.handlers.ui :as ui]
-   [laser-show.events.handlers.project :as project]
+   [laser-show.events.handlers.files :as project]
    [laser-show.events.handlers.connection :as connection]
    [laser-show.events.handlers.menu :as menu]
    [laser-show.events.handlers.chain :as chain]

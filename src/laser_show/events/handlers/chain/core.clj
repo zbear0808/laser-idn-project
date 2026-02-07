@@ -62,9 +62,6 @@
      :chain/reset-params
      {:state (params/handle-reset-params state config event)}
      
-     :chain/toggle-zone-group
-     {:state (params/handle-toggle-zone-group state config event)}
-     
      :chain/update-param
      {:state (params/handle-update-param state config event)}
      

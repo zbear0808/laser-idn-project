@@ -1,16 +1,8 @@
 (ns laser-show.events.handlers.zone-groups
   "Event handlers for zone group management.
    
-   SIMPLIFIED ARCHITECTURE (v2):
-   Zone groups are routing targets that projectors and virtual projectors
-   can be assigned to. Users assign projectors to groups, then target
-   cues to zone groups rather than individual projectors.
-   
    Default groups: :all, :left, :right, :center, :graphics, :crowd"
   (:require [laser-show.events.helpers :as h]))
-
-
-;; Zone Group Selection
 
 
 (defn- handle-zone-groups-select
@@ -21,9 +13,6 @@
               ;; Clear projector/VP selection when zone group is selected
               (assoc-in [:projector-ui :active-projector] nil)
               (assoc-in [:projector-ui :active-virtual-projector] nil))})
-
-
-;; Zone Group CRUD
 
 
 (defn- handle-zone-groups-add

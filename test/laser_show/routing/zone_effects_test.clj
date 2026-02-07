@@ -1,318 +1,283 @@
 (ns laser-show.routing.zone-effects-test
+  "Unit tests for zone-effects module.
+   
+   Tests the new zone-selector effect system:
+   - Zone effect identification  
+   - Zone destination resolution with timing-ctx
+   - Item grouping by resolved zone"
   (:require [clojure.test :refer [deftest is testing]]
-            [laser-show.routing.zone-effects :as ze]))
+            [laser-show.routing.zone-effects :as zone-effects]
+            [laser-show.animation.effects.zone :as zone]))
 
 
-;; Zone Effect Identification Tests
+;; Test Fixtures
+
+(def default-destination {:zone-group-id :left})
+
+(defn make-timing-ctx
+  "Create a timing context for testing."
+  [effective-beats]
+  {:effective-beats effective-beats
+   :bpm 120.0
+   :time-ms (long (* effective-beats 500.0))})
 
 
-(deftest zone-effect?-test
-  (testing "identifies zone effects"
-    (is (ze/zone-effect? {:effect-id :zone-reroute}))
-    (is (ze/zone-effect? {:effect-id :zone-broadcast}))
-    (is (ze/zone-effect? {:effect-id :zone-mirror})))
+;; Test Items
+
+(def item-no-effects
+  "Preset with no effects - uses cue chain default"
+  {:type :preset
+   :id (random-uuid)
+   :preset-id :circle
+   :effects []
+   :enabled? true})
+
+(def item-with-zone-selector
+  "Preset with zone-selector targeting :right"
+  {:type :preset
+   :id (random-uuid)
+   :preset-id :circle
+   :effects [{:effect-id :zone-selector
+              :enabled? true
+              :params {:target-zone :right}}]
+   :enabled? true})
+
+(def item-with-keyframed-zone-selector
+  "Preset with keyframed zone-selector"
+  {:type :preset
+   :id (random-uuid)
+   :preset-id :circle
+   :effects [{:effect-id :zone-selector
+              :enabled? true
+              :params {:target-zone {:value :all
+                                     :keyframes [{:beat 0.0 :value :left}
+                                                 {:beat 2.0 :value :right}
+                                                 {:beat 4.0 :value :center}]}}}]
+   :enabled? true})
+
+(def group-with-zone-selector
+  "Group with zone-selector - children's zone effects should be ignored"
+  {:type :group
+   :id (random-uuid)
+   :name "Test Group"
+   :effects [{:effect-id :zone-selector
+              :enabled? true
+              :params {:target-zone :center}}]
+   :items [{:type :preset
+            :id (random-uuid)
+            :preset-id :circle
+            :effects [{:effect-id :zone-selector
+                       :enabled? true
+                       :params {:target-zone :left}}]  ;; Should be ignored
+            :enabled? true}]
+   :enabled? true})
+
+(def item-disabled
+  "Disabled preset - should not be included in grouping"
+  {:type :preset
+   :id (random-uuid)
+   :preset-id :circle
+   :effects [{:effect-id :zone-selector
+              :enabled? true
+              :params {:target-zone :right}}]
+   :enabled? false})
+
+
+;; zone-effect? tests
+
+(deftest zone-effect-identification-test
+  (testing "zone-effect? identifies zone-selector"
+    (is (true? (zone-effects/zone-effect? {:effect-id :zone-selector}))))
   
-  (testing "rejects non-zone effects"
-    (is (not (ze/zone-effect? {:effect-id :scale})))
-    (is (not (ze/zone-effect? {:effect-id :color-cycle})))
-    (is (not (ze/zone-effect? {:effect-id :rotate})))
-    (is (not (ze/zone-effect? nil)))))
+  (testing "zone-effect? returns false for non-zone effects"
+    (is (false? (zone-effects/zone-effect? {:effect-id :scale})))
+    (is (false? (zone-effects/zone-effect? {:effect-id :translate})))
+    (is (false? (zone-effects/zone-effect? {:effect-id :color-shift})))
+    (is (false? (zone-effects/zone-effect? nil)))))
 
+
+;; extract-zone-effects tests
 
 (deftest extract-zone-effects-test
-  (testing "extracts only enabled zone effects"
-    (let [effects [{:effect-id :scale :enabled? true}
-                   {:effect-id :zone-reroute :enabled? true :params {:mode :replace}}
-                   {:effect-id :zone-broadcast :enabled? false}
-                   {:effect-id :color-cycle :enabled? true}]]
-      (is (= [{:effect-id :zone-reroute :enabled? true :params {:mode :replace}}]
-             (ze/extract-zone-effects effects)))))
+  (testing "Empty effects returns empty vector"
+    (is (= [] (zone-effects/extract-zone-effects []))))
   
-  (testing "treats missing :enabled? as true"
-    (let [effects [{:effect-id :zone-reroute :params {:mode :add}}
-                   {:effect-id :zone-broadcast}]]
-      (is (= 2 (count (ze/extract-zone-effects effects))))))
+  (testing "Returns only enabled zone-selector effects"
+    (is (= [{:effect-id :zone-selector :enabled? true :params {}}]
+           (zone-effects/extract-zone-effects 
+             [{:effect-id :zone-selector :enabled? true :params {}}]))))
   
-  (testing "returns empty vector for no zone effects"
-    (let [effects [{:effect-id :scale :enabled? true}
-                   {:effect-id :rotate :enabled? true}]]
-      (is (= [] (ze/extract-zone-effects effects)))))
+  (testing "Filters out disabled zone-selector"
+    (is (= []
+           (zone-effects/extract-zone-effects
+             [{:effect-id :zone-selector :enabled? false :params {}}]))))
   
-  (testing "preserves order of effects"
-    (let [effects [{:effect-id :zone-reroute :params {:mode :replace}}
-                   {:effect-id :zone-broadcast}
-                   {:effect-id :zone-mirror :params {:source-group :left}}]]
-      (is (= [:zone-reroute :zone-broadcast :zone-mirror]
-             (mapv :effect-id (ze/extract-zone-effects effects)))))))
+  (testing "Filters out non-zone effects"
+    (is (= [{:effect-id :zone-selector :enabled? true :params {:target-zone :left}}]
+           (zone-effects/extract-zone-effects
+             [{:effect-id :scale :enabled? true :params {}}
+              {:effect-id :zone-selector :enabled? true :params {:target-zone :left}}
+              {:effect-id :translate :enabled? true :params {}}])))))
 
 
-;; Replace Mode Tests
+;; evaluate-zone-at-beat tests
 
-
-(deftest apply-replace-mode-test
-  (testing "replace mode overrides target"
-    (is (= #{:right}
-           (ze/apply-replace-mode #{:left} {:target-zone-groups [:right]}))))
+(deftest evaluate-zone-at-beat-test
+  (testing "Simple keyword target returns that keyword"
+    (is (= :left (zone/evaluate-zone-at-beat {:target-zone :left} 0.0)))
+    (is (= :right (zone/evaluate-zone-at-beat {:target-zone :right} 5.0))))
   
-  (testing "replace with multiple targets"
-    (is (= #{:left :center :right}
-           (ze/apply-replace-mode #{:all} {:target-zone-groups [:left :center :right]}))))
+  (testing "Empty keyframes returns base value"
+    (is (= :all (zone/evaluate-zone-at-beat 
+                  {:target-zone {:value :all :keyframes []}} 
+                  0.0))))
   
-  (testing "defaults to empty set when no target specified"
-    (is (= #{}
-           (ze/apply-replace-mode #{:left} {})))))
-
-
-;; Add Mode Tests
-
-
-(deftest apply-add-mode-test
-  (testing "add mode unions targets"
-    (is (= #{:left :right}
-           (ze/apply-add-mode #{:left} {:target-zone-groups [:right]}))))
+  (testing "Nil keyframes returns base value"
+    (is (= :center (zone/evaluate-zone-at-beat
+                     {:target-zone {:value :center :keyframes nil}}
+                     2.5))))
   
-  (testing "add preserves existing targets"
-    (is (= #{:left :center :right}
-           (ze/apply-add-mode #{:left :center} {:target-zone-groups [:right]}))))
+  (testing "Step interpolation with keyframes"
+    (let [params {:target-zone {:value :all
+                                :keyframes [{:beat 0.0 :value :left}
+                                            {:beat 2.0 :value :right}
+                                            {:beat 4.0 :value :center}]}}]
+      ;; At beat 0 - exactly at first keyframe
+      (is (= :left (zone/evaluate-zone-at-beat params 0.0)))
+      ;; Between first and second keyframes
+      (is (= :left (zone/evaluate-zone-at-beat params 1.0)))
+      (is (= :left (zone/evaluate-zone-at-beat params 1.999)))
+      ;; At beat 2 - exactly at second keyframe
+      (is (= :right (zone/evaluate-zone-at-beat params 2.0)))
+      ;; Between second and third keyframes
+      (is (= :right (zone/evaluate-zone-at-beat params 3.0)))
+      ;; At beat 4 - exactly at third keyframe  
+      (is (= :center (zone/evaluate-zone-at-beat params 4.0)))
+      ;; After all keyframes
+      (is (= :center (zone/evaluate-zone-at-beat params 10.0)))))
   
-  (testing "add with empty params does nothing"
-    (is (= #{:left}
-           (ze/apply-add-mode #{:left} {}))))
+  (testing "Beat before first keyframe returns base value"
+    (let [params {:target-zone {:value :all
+                                :keyframes [{:beat 1.0 :value :left}]}}]
+      (is (= :all (zone/evaluate-zone-at-beat params 0.0)))
+      (is (= :all (zone/evaluate-zone-at-beat params 0.5))))))
+
+
+;; resolve-item-zone-destination tests
+
+(deftest resolve-item-zone-destination-test
+  (testing "Item without zone effects uses cue chain default"
+    (is (= :left
+           (zone-effects/resolve-item-zone-destination
+             item-no-effects
+             default-destination
+             (make-timing-ctx 0.0)))))
   
-  (testing "add handles duplicate targets"
-    (is (= #{:left :right}
-           (ze/apply-add-mode #{:left} {:target-zone-groups [:left :right]})))))
-
-
-;; Filter Mode Tests
-
-
-(deftest apply-filter-mode-test
-  (testing "filter mode intersects targets"
-    (is (= #{:center}
-           (ze/apply-filter-mode #{:left :center} {:target-zone-groups [:center :right]}))))
+  (testing "Item with zone-selector uses target zone"
+    (is (= :right
+           (zone-effects/resolve-item-zone-destination
+             item-with-zone-selector
+             default-destination
+             (make-timing-ctx 0.0)))))
   
-  (testing "filter with no overlap returns empty set"
-    (is (= #{}
-           (ze/apply-filter-mode #{:left} {:target-zone-groups [:right]}))))
+  (testing "Group's zone-selector applies, children's effects ignored at group level"
+    (is (= :center
+           (zone-effects/resolve-item-zone-destination
+             group-with-zone-selector
+             default-destination
+             (make-timing-ctx 0.0)))))
   
-  (testing "filter with full overlap preserves all"
-    (is (= #{:left :center}
-           (ze/apply-filter-mode #{:left :center} {:target-zone-groups [:left :center :right]})))))
-
-
-;; Broadcast Effect Tests
-
-
-(deftest apply-broadcast-test
-  (testing "broadcast replaces with all zone groups"
-    (is (= #{:all :left :right}
-           (ze/apply-broadcast #{:left} {} #{:all :left :right}))))
+  (testing "Nil destination defaults to :all"
+    (is (= :all
+           (zone-effects/resolve-item-zone-destination
+             item-no-effects
+             {}
+             (make-timing-ctx 0.0)))))
   
-  (testing "broadcast replaces any target with all zone groups"
-    (is (= #{:all :center}
-           (ze/apply-broadcast #{:left :right :center} {} #{:all :center})))))
-
-
-;; Mirror Effect Tests
-
-
-(deftest apply-mirror-test
-  (testing "mirror swaps left to right"
-    (is (= #{:right}
-           (ze/apply-mirror #{:left} {:source-group :left :include-original? false}))))
+  (testing "Disabled zone effect is ignored"
+    (let [item-disabled-effect {:type :preset
+                                :id (random-uuid)
+                                :effects [{:effect-id :zone-selector
+                                           :enabled? false
+                                           :params {:target-zone :right}}]}]
+      (is (= :left
+             (zone-effects/resolve-item-zone-destination
+               item-disabled-effect
+               default-destination
+               (make-timing-ctx 0.0))))))
   
-  (testing "mirror swaps right to left"
-    (is (= #{:left}
-           (ze/apply-mirror #{:right} {:source-group :right :include-original? false}))))
+  (testing "Keyframed zone-selector evaluates at current beat"
+    ;; At beat 0 → :left
+    (is (= :left
+           (zone-effects/resolve-item-zone-destination
+             item-with-keyframed-zone-selector
+             default-destination
+             (make-timing-ctx 0.0))))
+    ;; At beat 2.0 → :right
+    (is (= :right
+           (zone-effects/resolve-item-zone-destination
+             item-with-keyframed-zone-selector
+             default-destination
+             (make-timing-ctx 2.0))))
+    ;; At beat 4.0 → :center
+    (is (= :center
+           (zone-effects/resolve-item-zone-destination
+             item-with-keyframed-zone-selector
+             default-destination
+             (make-timing-ctx 4.0))))))
+
+
+;; group-items-by-zone tests
+
+(deftest group-items-by-zone-test
+  (testing "Groups items by their resolved zone destination"
+    (let [items [item-no-effects item-with-zone-selector]
+          timing-ctx (make-timing-ctx 0.0)
+          result (zone-effects/group-items-by-zone items default-destination timing-ctx)]
+      ;; item-no-effects → :left (default)
+      ;; item-with-zone-selector → :right
+      (is (= 1 (count (:left result))))
+      (is (= 1 (count (:right result))))
+      (is (= item-no-effects (first (:left result))))
+      (is (= item-with-zone-selector (first (:right result))))))
   
-  (testing "mirror with include-original adds instead of replacing"
-    (is (= #{:left :right}
-           (ze/apply-mirror #{:left} {:source-group :left :include-original? true}))))
+  (testing "Item routes to single zone (no multi-zone in new system)"
+    (let [items [item-with-zone-selector]
+          timing-ctx (make-timing-ctx 0.0)
+          result (zone-effects/group-items-by-zone items default-destination timing-ctx)]
+      ;; New system: each item routes to exactly ONE zone
+      (is (= 1 (count (keys result))))
+      (is (= 1 (count (:right result))))
+      (is (= item-with-zone-selector (first (:right result))))))
   
-  (testing "mirror does nothing for non-matching source"
-    (is (= #{:center}
-           (ze/apply-mirror #{:center} {:source-group :left :include-original? false}))))
+  (testing "Disabled items are skipped"
+    (let [items [item-disabled item-no-effects]
+          timing-ctx (make-timing-ctx 0.0)
+          result (zone-effects/group-items-by-zone items default-destination timing-ctx)]
+      (is (= 1 (count (:left result))))
+      (is (= item-no-effects (first (:left result))))
+      (is (nil? (:right result)))))
   
-  (testing "mirror with unknown group passes through"
-    (is (= #{:custom}
-           (ze/apply-mirror #{:custom} {:source-group :custom :include-original? false})))))
-
-
-;; Resolve Final Target Tests
-
-
-;; Standard test zone groups for all tests
-(def test-all-zone-groups #{:all :left :right :center})
-
-
-(deftest resolve-final-target-test
-  (testing "returns base destination when no effects"
-    (is (= #{:left}
-           (ze/resolve-final-target {:zone-group-id :left} [] test-all-zone-groups))))
+  (testing "Empty items returns empty map"
+    (is (= {} (zone-effects/group-items-by-zone [] default-destination (make-timing-ctx 0.0)))))
   
-  (testing "returns empty set when no destination"
-    (is (= #{}
-           (ze/resolve-final-target nil [] test-all-zone-groups))))
+  (testing "Group with zone-selector routes to single zone"
+    (let [items [group-with-zone-selector]
+          timing-ctx (make-timing-ctx 0.0)
+          result (zone-effects/group-items-by-zone items default-destination timing-ctx)]
+      ;; Group routes to :center
+      (is (= 1 (count (keys result))))
+      (is (= 1 (count (:center result))))
+      (is (= group-with-zone-selector (first (:center result))))))
   
-  (testing "returns empty set when empty destination"
-    (is (= #{}
-           (ze/resolve-final-target {} [] test-all-zone-groups))))
-  
-  (testing "processes single zone effect"
-    (let [effects [{:effect-id :zone-reroute
-                    :enabled? true
-                    :params {:mode :replace :target-zone-groups [:right]}}]]
-      (is (= #{:right}
-             (ze/resolve-final-target {:zone-group-id :left} effects test-all-zone-groups)))))
-  
-  (testing "processes multiple zone effects in sequence"
-    (let [effects [{:effect-id :zone-reroute
-                    :enabled? true
-                    :params {:mode :replace :target-zone-groups [:left :right]}}
-                   {:effect-id :zone-reroute
-                    :enabled? true
-                    :params {:mode :filter :target-zone-groups [:left]}}]]
-      ;; Start with :center, replace with [:left :right], filter to [:left]
-      (is (= #{:left}
-             (ze/resolve-final-target {:zone-group-id :center} effects test-all-zone-groups)))))
-  
-  (testing "disabled effects are skipped"
-    (let [effects [{:effect-id :zone-reroute
-                    :enabled? false
-                    :params {:mode :replace :target-zone-groups [:right]}}]]
-      (is (= #{:left}
-             (ze/resolve-final-target {:zone-group-id :left} effects test-all-zone-groups)))))
-  
-  (testing "ignores non-zone effects"
-    (let [effects [{:effect-id :scale :enabled? true :params {:x 2}}
-                   {:effect-id :zone-reroute :enabled? true :params {:mode :replace :target-zone-groups [:center]}}
-                   {:effect-id :rotate :enabled? true :params {:angle 45}}]]
-      (is (= #{:center}
-             (ze/resolve-final-target {:zone-group-id :left} effects test-all-zone-groups))))))
-
-
-(deftest zone-broadcast-in-resolve-test
-  (testing "broadcast replaces with all zone groups"
-    (is (= test-all-zone-groups
-           (ze/resolve-final-target
-             {:zone-group-id :left}
-             [{:effect-id :zone-broadcast :enabled? true}]
-             test-all-zone-groups)))))
-
-
-(deftest zone-mirror-in-resolve-test
-  (testing "mirror swaps left to right in resolution"
-    (is (= #{:right}
-           (ze/resolve-final-target
-             {:zone-group-id :left}
-             [{:effect-id :zone-mirror
-               :enabled? true
-               :params {:source-group :left :include-original? false}}]
-             test-all-zone-groups))))
-  
-  (testing "mirror with include-original in resolution"
-    (is (= #{:left :right}
-           (ze/resolve-final-target
-             {:zone-group-id :left}
-             [{:effect-id :zone-mirror
-               :enabled? true
-               :params {:source-group :left :include-original? true}}]
-             test-all-zone-groups)))))
-
-
-;; Collect Effects From Cue Chain Tests
-
-
-(deftest collect-effects-from-cue-chain-test
-  (testing "collects effects from simple preset"
-    (let [items [{:type :preset
-                  :preset-id :circle
-                  :enabled? true
-                  :effects [{:effect-id :zone-reroute :params {:mode :replace}}]}]]
-      (is (= [{:effect-id :zone-reroute :params {:mode :replace}}]
-             (ze/collect-effects-from-cue-chain items)))))
-  
-  (testing "collects effects from multiple presets"
-    (let [items [{:type :preset
-                  :preset-id :circle
-                  :enabled? true
-                  :effects [{:effect-id :scale}]}
-                 {:type :preset
-                  :preset-id :square
-                  :enabled? true
-                  :effects [{:effect-id :zone-broadcast}]}]]
-      (is (= [{:effect-id :scale} {:effect-id :zone-broadcast}]
-             (ze/collect-effects-from-cue-chain items)))))
-  
-  (testing "skips disabled items"
-    (let [items [{:type :preset
-                  :preset-id :circle
-                  :enabled? false
-                  :effects [{:effect-id :zone-reroute}]}
-                 {:type :preset
-                  :preset-id :square
-                  :enabled? true
-                  :effects [{:effect-id :zone-broadcast}]}]]
-      (is (= [{:effect-id :zone-broadcast}]
-             (ze/collect-effects-from-cue-chain items)))))
-  
-  (testing "collects effects from nested groups"
-    (let [items [{:type :group
-                  :enabled? true
-                  :effects [{:effect-id :scale}]
-                  :items [{:type :preset
-                           :preset-id :circle
-                           :enabled? true
-                           :effects [{:effect-id :zone-reroute}]}]}]]
-      ;; Group effects + nested preset effects
-      (is (= [{:effect-id :scale} {:effect-id :zone-reroute}]
-             (ze/collect-effects-from-cue-chain items)))))
-  
-  (testing "handles empty effects"
-    (let [items [{:type :preset
-                  :preset-id :circle
-                  :enabled? true
-                  :effects []}]]
-      (is (= []
-             (ze/collect-effects-from-cue-chain items)))))
-  
-  (testing "handles items without :enabled? (defaults to true)"
-    (let [items [{:type :preset
-                  :preset-id :circle
-                  :effects [{:effect-id :scale}]}]]
-      (is (= [{:effect-id :scale}]
-             (ze/collect-effects-from-cue-chain items))))))
-
-
-;; Integration Test: Complete Routing Scenario
-
-
-(deftest integration-routing-scenario-test
-  (testing "complete routing scenario with destination zone and zone effects"
-    (let [;; Cue chain with destination :left and a zone-broadcast effect
-          cue-chain-items [{:type :preset
-                           :preset-id :circle
-                           :enabled? true
-                           :effects [{:effect-id :zone-broadcast :enabled? true}]}]
-          destination {:zone-group-id :left}
-          collected-effects (ze/collect-effects-from-cue-chain cue-chain-items)
-          final-target (ze/resolve-final-target destination collected-effects test-all-zone-groups)]
-      ;; Should route to all zone groups because zone-broadcast overrides destination
-      (is (= test-all-zone-groups final-target))))
-  
-  (testing "chained zone effects scenario"
-    (let [cue-chain-items [{:type :preset
-                           :preset-id :circle
-                           :enabled? true
-                           :effects [{:effect-id :zone-reroute
-                                     :enabled? true
-                                     :params {:mode :replace :target-zone-groups [:left :center :right]}}
-                                    {:effect-id :zone-reroute
-                                     :enabled? true
-                                     :params {:mode :filter :target-zone-groups [:left :right]}}]}]
-          destination {:zone-group-id :all}
-          collected-effects (ze/collect-effects-from-cue-chain cue-chain-items)
-          final-target (ze/resolve-final-target destination collected-effects test-all-zone-groups)]
-      ;; Start with :all, replace with [:left :center :right], filter to [:left :right]
-      (is (= #{:left :right} final-target)))))
+  (testing "Keyframed zone-selector groups change with beat position"
+    (let [items [item-with-keyframed-zone-selector]]
+      ;; At beat 0 → :left
+      (let [result (zone-effects/group-items-by-zone items default-destination (make-timing-ctx 0.0))]
+        (is (= #{:left} (set (keys result)))))
+      ;; At beat 2 → :right
+      (let [result (zone-effects/group-items-by-zone items default-destination (make-timing-ctx 2.0))]
+        (is (= #{:right} (set (keys result)))))
+      ;; At beat 4 → :center
+      (let [result (zone-effects/group-items-by-zone items default-destination (make-timing-ctx 4.0))]
+        (is (= #{:center} (set (keys result))))))))

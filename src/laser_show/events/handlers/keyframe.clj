@@ -444,6 +444,122 @@
       h/mark-dirty))
 
 
+;; Zone Selector Keyframe Handlers
+;; These handlers manage zone keyframes stored in the effect's :keyframes param
+
+
+(defn- get-zone-keyframes-path
+  "Get the path to zone keyframes in effect params."
+  [config effect-path]
+  (into (:items-path config) (conj (vec effect-path) :params :keyframes)))
+
+(defn- get-zone-param-path
+  "Get the path to a zone selector param."
+  [config effect-path param-key]
+  (into (:items-path config) (conj (vec effect-path) :params param-key)))
+
+(defn handle-add-zone-keyframe
+  "Add a new zone keyframe at the specified beat position.
+   
+   Zone keyframes have the structure: {:beat 0.0 :value :zone-id}
+   
+   Parameters:
+   - state: Application state
+   - config: Chain config
+   - effect-path: Path to effect
+   - beat: Beat position for the new keyframe
+   - value: Zone ID value (default from current target-zone)
+   
+   Returns: Updated state"
+  [state config effect-path beat value]
+  (let [keyframes-path (get-zone-keyframes-path config effect-path)
+        current-keyframes (or (get-in state keyframes-path) [])
+        ;; If no value provided, use :all as default
+        zone-value (or value :all)
+        new-keyframe {:beat (double beat) :value zone-value}
+        ;; Add and sort keyframes by beat
+        new-keyframes (vec (sort-by :beat (conj current-keyframes new-keyframe)))]
+    (-> state
+        (assoc-in keyframes-path new-keyframes)
+        h/mark-dirty)))
+
+(defn handle-update-zone-value
+  "Update the zone value at an existing keyframe, or add a new keyframe.
+   
+   If keyframe-idx is provided, updates that keyframe.
+   If only beat is provided, adds or updates keyframe at that beat.
+   
+   Parameters:
+   - state: Application state
+   - config: Chain config
+   - effect-path: Path to effect
+   - keyframe-idx: (optional) Index of keyframe to update
+   - beat: (optional) Beat position (for new keyframes or lookup)
+   - value: New zone ID value
+   
+   Returns: Updated state"
+  [state config effect-path keyframe-idx beat value]
+  (let [keyframes-path (get-zone-keyframes-path config effect-path)
+        current-keyframes (or (get-in state keyframes-path) [])]
+    (cond
+      ;; Update existing keyframe by index
+      (and keyframe-idx (< keyframe-idx (count current-keyframes)))
+      (-> state
+          (assoc-in (conj keyframes-path keyframe-idx :value) value)
+          h/mark-dirty)
+      
+      ;; Find keyframe at beat and update, or add new one
+      beat
+      (let [existing-idx (first (keep-indexed
+                                  (fn [i kf]
+                                    (when (= (:beat kf) (double beat)) i))
+                                  current-keyframes))]
+        (if existing-idx
+          (-> state
+              (assoc-in (conj keyframes-path existing-idx :value) value)
+              h/mark-dirty)
+          (handle-add-zone-keyframe state config effect-path beat value)))
+      
+      :else state)))
+
+(defn handle-delete-zone-keyframe
+  "Delete a zone keyframe.
+   
+   Parameters:
+   - state: Application state
+   - config: Chain config
+   - effect-path: Path to effect
+   - keyframe-idx: Index of keyframe to delete
+   
+   Returns: Updated state"
+  [state config effect-path keyframe-idx]
+  (let [keyframes-path (get-zone-keyframes-path config effect-path)
+        current-keyframes (or (get-in state keyframes-path) [])]
+    (if (and (>= keyframe-idx 0) (< keyframe-idx (count current-keyframes)))
+      (let [new-keyframes (vec (concat (subvec current-keyframes 0 keyframe-idx)
+                                       (subvec current-keyframes (inc keyframe-idx))))]
+        (-> state
+            (assoc-in keyframes-path new-keyframes)
+            h/mark-dirty))
+      state)))
+
+(defn handle-set-zone-loop-length
+  "Set the loop length for zone selector timeline.
+   
+   Parameters:
+   - state: Application state
+   - config: Chain config
+   - effect-path: Path to effect
+   - loop-length: Loop length in beats
+   
+   Returns: Updated state"
+  [state config effect-path loop-length]
+  (let [loop-path (get-zone-param-path config effect-path :loop-length)]
+    (-> state
+        (assoc-in loop-path (double loop-length))
+        h/mark-dirty)))
+
+
 (defn handle
   "Handle keyframe modulator events.
    
@@ -507,6 +623,28 @@
       
       :keyframe/set-normalize
       {:state (handle-set-normalize state config effect-path (or (:normalize? event) (:fx/event event)))}
+      
+      ;; Zone selector keyframe events (keyframes stored in :params :keyframes)
+      :keyframe/add-zone-keyframe
+      {:state (handle-add-zone-keyframe state config effect-path
+                                        (:beat event)
+                                        (:value event))}
+      
+      :keyframe/update-zone-value
+      {:state (handle-update-zone-value state config effect-path
+                                        (:keyframe-idx event)
+                                        (:beat event)
+                                        (or (:value event) (:current-zone event)))}
+      
+      :keyframe/delete-zone-keyframe
+      {:state (handle-delete-zone-keyframe state config effect-path (:keyframe-idx event))}
+      
+      :keyframe/select-zone-keyframe
+      {:state state}  ;; Selection is UI-only, no state change needed
+      
+      :keyframe/set-zone-loop-length
+      {:state (handle-set-zone-loop-length state config effect-path
+                                           (or (:loop-length event) (:fx/event event) (:value event)))}
       
       ;; Unknown keyframe event
       (do

@@ -84,7 +84,7 @@
         ensure-cell (fn [s]
                       (if (get-in s [:chains :cue-chains [col row]])
                         s
-                        (assoc-in s [:chains :cue-chains [col row]]
+                        #_(assoc-in s [:chains :cue-chains [col row]]
                                   {:items []
                                    :destination-zone {:zone-group-id :all}})))
         new-preset (h/ensure-item-fields (cue-chains/create-preset-instance pid {}))
@@ -118,7 +118,7 @@
         ensure-cell (fn [s]
                       (if (get-in s [:chains :cue-chains [col row]])
                         s
-                        (assoc-in s [:chains :cue-chains [col row]]
+                        #_(assoc-in s [:chains :cue-chains [col row]]
                                   {:items []
                                    :destination-zone {:zone-group-id :all}})))
         state-with-cell (ensure-cell state)

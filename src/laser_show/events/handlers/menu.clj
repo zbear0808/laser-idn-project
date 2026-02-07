@@ -5,9 +5,10 @@
    - File menu: New, Open, Save, Save As, Export, Exit
    - Edit menu: Undo, Redo, Copy, Paste, Clear
    - View menu: Toggle Preview, Fullscreen
-   - Help menu: Documentation, About, Check Updates, IDN Stream Logging"
+   - Help menu: Documentation, About, Check Updates, IDN Stream Logging, Zone Routing Debug"
   (:require [clojure.tools.logging :as log]
             [laser-show.dev-config :as dev-config]
+            [laser-show.routing.zone-effects :as ze]
             [laser-show.state.persistent :as persistent]))
 
 
@@ -232,6 +233,18 @@
     (log/info "IDN Stream Logging:" (if new-value "enabled" "disabled"))
     {:state (assoc-in state [:debug :idn-stream-logging?] new-value)}))
 
+(defn- handle-help-toggle-zone-routing-debug
+  "Toggle zone routing debug logging on/off.
+   Logs zone routing information once per playback session when enabled."
+  [{:keys [state]}]
+  (let [current (get-in state [:debug :zone-routing-debug?] false)
+        new-value (not current)]
+    (if new-value
+      (ze/enable-routing-debug!)
+      (ze/disable-routing-debug!))
+    (log/info "Zone Routing Debug:" (if new-value "enabled" "disabled"))
+    {:state (assoc-in state [:debug :zone-routing-debug?] new-value)}))
+
 (defn- handle-help-reload-styles
   "Reload all CSS stylesheets to pick up style changes."
   [{:keys [state]}]
@@ -299,6 +312,7 @@
     :help/about (handle-help-about event)
     :help/check-updates (handle-help-check-updates event)
     :help/toggle-idn-stream-logging (handle-help-toggle-idn-stream-logging event)
+    :help/toggle-zone-routing-debug (handle-help-toggle-zone-routing-debug event)
     :help/reload-styles (handle-help-reload-styles event)
     :help/reload-app (handle-help-reload-app event)
     :help/save-state-debug (handle-help-save-state-debug event)

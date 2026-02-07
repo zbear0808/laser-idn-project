@@ -13,7 +13,7 @@
   (:require [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.events.helpers :as h]
             [laser-show.input.link :as link]
-            [laser-show.state.core :as state]
+            [laser-show.routing.zone-effects :as ze]
             [clojure.tools.logging :as log]))
 
 
@@ -49,6 +49,8 @@
 (defn- handle-transport-play
   "Start playback."
   [{:keys [state]}]
+  ;; Reset zone debug logging so we get one debug cycle on playback start
+  (ze/reset-zone-debug!)
   {:state (assoc-in state [:playback :playing?] true)})
 
 (defn- reset-all-active-cues

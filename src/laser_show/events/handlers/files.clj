@@ -1,4 +1,4 @@
-(ns laser-show.events.handlers.project
+(ns laser-show.events.handlers.files
   "Event handlers for project state management.
    
    Handles:

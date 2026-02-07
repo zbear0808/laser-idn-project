@@ -1,28 +1,40 @@
 (ns laser-show.routing.zone-effects
-  "Zone effect processing - modifies routing targets before projector matching.
+  "Zone effect processing - determines routing targets per item.
    
-   Zone effects are special effects that operate at the routing level,
-   not the frame generation level. They are extracted from effect chains
-   and processed BEFORE projector matching to determine the final target.
+   Zone effects are evaluated at render time using the current beat position.
+   The zone-selector effect allows keyframeable zone group selection with
+   step interpolation between keyframes.
    
-   The zone routing effects (:zone-reroute, :zone-broadcast, :zone-mirror)
-   are registered in laser-show.animation.effects.zone but their routing
-   parameters are processed HERE.
-   
-   Zone Effect Modes:
-   - :replace - Completely override the cue's destination zone group
-   - :add     - Add zone groups to the cue's destination (union)
-   - :filter  - Restrict to zone groups matching both original AND effect target"
-  (:require [clojure.set :as set]
-            [clojure.tools.logging :as log]))
+   Main Entry Point: group-items-by-zone - groups cue chain items by destination zone"
+  (:require [clojure.tools.logging :as log]
+            [laser-show.animation.effects.zone :as zone]))
 
 
-;; Debug Logging (throttled by caller in multi_engine)
+;; Debug Logging (one-shot per playback session to avoid per-frame spam)
+;;
+;; Each log point has its own key, so multiple log points can each fire once.
 
 (def ^:private debug-enabled? (atom false))
+(def ^:private !debug-logged-keys (atom #{}))  ;; Set of keys that have already logged
 
 (defn enable-routing-debug! [] (reset! debug-enabled? true))
 (defn disable-routing-debug! [] (reset! debug-enabled? false))
+
+(defn reset-zone-debug!
+  "Call this when starting playback to enable one debug log cycle.
+   Clears all logged keys so each log point can fire once."
+  []
+  (reset! !debug-logged-keys #{}))
+
+(defn log-once
+  "Log a message only once per playback session for the given key.
+   Each unique key can log once until reset-zone-debug! is called.
+   Public so it can be used from frame-service for consistent debug logging."
+  [log-key msg]
+  (when (and @debug-enabled?
+             (not (contains? @!debug-logged-keys log-key)))
+    (swap! !debug-logged-keys conj log-key)
+    (log/info msg)))
 
 
 ;; Zone Effect Identification
@@ -30,7 +42,7 @@
 
 (def zone-effect-ids
   "Set of effect IDs that are zone routing effects"
-  #{:zone-reroute :zone-broadcast :zone-mirror})
+  #{:zone-selector})
 
 (defn zone-effect?
   "Check if an effect is a zone routing effect."
@@ -47,116 +59,72 @@
        vec))
 
 
-;; Zone Effect Application Functions
+;; Per-Item Zone Resolution
 
 
-(defn apply-replace-mode
-  "Replace mode: completely override target with effect's target."
-  [_current-target params]
-  (set (:target-zone-groups params [])))
+(defn- item-enabled?
+  "Check if an item is enabled. Defaults to true if :enabled? is not present."
+  [item]
+  (:enabled? item true))
 
-(defn apply-add-mode
-  "Add mode: union current target with effect's target."
-  [current-target params]
-  (into current-target (:target-zone-groups params [])))
+(defn- item-zone-effects
+  "Extract enabled zone effects from an item's :effects vector.
+   Returns vector of zone effects (may be empty)."
+  [item]
+  (extract-zone-effects (:effects item [])))
 
-(defn apply-filter-mode
-  "Filter mode: intersect current target with effect's target."
-  [current-target params]
-  (set/intersection
-    current-target
-    (set (:target-zone-groups params []))))
-
-(defn apply-broadcast
-  "Broadcast effect: replace with all available zone groups.
-   Requires all-zone-groups to be passed from caller."
-  [_current-target _params all-zone-groups]
-  (set all-zone-groups))
-
-(defn apply-mirror
-  "Mirror effect: swap left<->right based on source-group."
-  [current-target params]
-  (let [{:keys [source-group include-original?]} params
-        mirror-map {:left :right, :right :left}
-        mirrored (if (contains? current-target source-group)
-                   (conj (disj current-target source-group)
-                         (get mirror-map source-group source-group))
-                   current-target)]
-    (if include-original?
-      (into current-target mirrored)
-      mirrored)))
-
-(defn apply-zone-effect
-  "Apply a single zone effect to current target set.
-   Returns updated target set.
+(defn resolve-item-zone-destination
+  "Determine which zone group an item should route to.
+   
+   Finds the first zone-selector effect on the item and evaluates it
+   at the current beat position. If no zone-selector effect exists,
+   returns the cue chain's default destination.
    
    Args:
-   - current-target: Current set of zone group IDs
-   - effect: The zone effect to apply
-   - all-zone-groups: Set of all zone group IDs in the system (for broadcast)"
-  [current-target effect all-zone-groups]
-  (let [params (:params effect)
-        effect-id (:effect-id effect)]
-    (case effect-id
-      :zone-reroute
-      (case (:mode params :replace)
-        :replace (apply-replace-mode current-target params)
-        :add (apply-add-mode current-target params)
-        :filter (apply-filter-mode current-target params)
-        current-target)
-      
-      :zone-broadcast
-      (apply-broadcast current-target params all-zone-groups)
-      
-      :zone-mirror
-      (apply-mirror current-target params)
-      
-      ;; Unknown effect, pass through
-      current-target)))
+   - item: A cue chain item with :effects vector
+   - cue-chain-destination: The cue chain's :destination-zone map
+   - timing-ctx: Timing context with :effective-beats for keyframe eval
+   
+   Returns: Single zone-group-id keyword"
+  [item cue-chain-destination timing-ctx]
+  (let [zone-effects (item-zone-effects item)
+        effective-beats (:effective-beats timing-ctx 0.0)
+        default-zone (or (:zone-group-id cue-chain-destination) :all)
+        zone-selector (first (filter #(= :zone-selector (:effect-id %)) zone-effects))
+        result (if zone-selector
+                 (zone/evaluate-zone-at-beat (:params zone-selector) effective-beats)
+                 default-zone)]
+    (log-once [:resolve-item (:id item)]
+              (format "[zone-debug] resolve-item: id=%s beat=%.2f result=%s"
+                      (:id item) (double effective-beats) result))
+    result))
 
-(defn resolve-final-target
-  "Process all zone effects and produce final target zone groups.
+(defn group-items-by-zone
+  "Group top-level items by their resolved zone destination.
+   
+   For each enabled item, resolves its zone destination at the current
+   beat position. Each item routes to exactly ONE zone.
    
    Args:
-   - base-destination: The cue chain's :destination-zone map (e.g., {:zone-group-id :left})
-   - effects: Vector of effects (may include zone effects)
-   - all-zone-groups: Set of all zone group IDs in the system (for broadcast effect)
+   - items: Vector of top-level cue chain items
+   - cue-chain-destination: The cue chain's :destination-zone map
+   - timing-ctx: Timing context for keyframe evaluation
    
-   Returns: Set of zone group IDs that should receive the cue"
-  [base-destination effects all-zone-groups]
-  (let [;; Start with base destination zone group(s), empty set if none specified
-        base-groups (if-let [zg-id (:zone-group-id base-destination)]
-                      #{zg-id}
-                      #{})
-        ;; Extract and apply zone effects
-        zone-effects (extract-zone-effects effects)
-        final-groups (reduce (fn [target effect]
-                               (apply-zone-effect target effect all-zone-groups))
-                             base-groups
-                             zone-effects)]
-    ;; Debug logging when enabled
-    (when @debug-enabled?
-      (log/debug (format "resolve-final-target: base-dest=%s -> base-groups=%s, zone-effects=%d -> final=%s"
-                         (pr-str base-destination)
-                         (pr-str base-groups)
-                         (count zone-effects)
-                         (pr-str final-groups))))
-    final-groups))
-
-
-;; Effect Collection from Cue Chains
-
-
-(defn collect-effects-from-cue-chain
-  "Collect all effects from a cue chain's items (presets and groups).
-   Flattens nested groups to get ALL effects in the chain."
-  [cue-chain-items]
-  (->> cue-chain-items
-       (filter #(:enabled? % true))
-       (mapcat (fn [item]
-                 (if (= :group (:type item))
-                   ;; Recursively get effects from group items
-                   (into (:effects item [])
-                         (collect-effects-from-cue-chain (:items item [])))
-                   (:effects item []))))
-       vec))
+   Returns: Map of zone-group-id → vector of items"
+  [items cue-chain-destination timing-ctx]
+  (log-once :group-items-inputs
+            (format "[zone-debug] group-items: destination=%s item-count=%d"
+                    (pr-str cue-chain-destination) (count items)))
+  (let [result (reduce
+                 (fn [acc item]
+                   (if-not (item-enabled? item)
+                     acc
+                     (let [zone-id (resolve-item-zone-destination 
+                                    item cue-chain-destination timing-ctx)]
+                       (update acc zone-id (fnil conj []) item))))
+                 {}
+                 items)]
+    (log-once :group-items-result
+              (format "[zone-debug] group-items result: %s"
+                      (pr-str (into {} (map (fn [[k v]] [k (count v)]) result)))))
+    result))

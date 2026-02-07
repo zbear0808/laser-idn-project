@@ -14,6 +14,7 @@
   (:require [cljfx.api :as fx]
             [cljfx.css :as css]
             [clojure.tools.logging :as log]
+            [taoensso.timbre :as timbre]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.templates :as templates]
@@ -108,6 +109,12 @@
    Auto-scans for IDN devices on startup.
    Returns the app instance."
   []
+  ;; Configure Timbre logging levels (used by beat-carabiner transitive dependency)
+  ;; Suppress DEBUG logs from beat-carabiner (read timeout messages are normal)
+  (timbre/merge-config!
+    {:min-level [["beat-carabiner.*" :info]  ;; INFO and above for beat-carabiner
+                 ["*" :debug]]})              ;; DEBUG for everything else
+
   ;; In dev mode: Allow closing windows without exiting JVM (for REPL development)
   ;; In prod mode: Closing the window exits the application normally
   (when (dev-config/dev-mode?)

@@ -240,14 +240,16 @@
 ;; Preview Grid Helper Functions
 
 
-(defn- any-cue-targets-zone?
-  "Check if ANY active cue targets the given zone-group-id.
-   If zone-group-id is nil, always returns true (master view shows all)."
-  [cue-destinations zone-group-id]
-  (or (nil? zone-group-id)
-      (some (fn [[_cell targets]]
-              (contains? targets zone-group-id))
-            cue-destinations)))
+(defn- get-zone-filtered-points
+  "Get points filtered for a specific zone.
+   - nil zone-id: Return all combined points (master view)
+   - specific zone-id: Look up zone-frames for the exact zone-id"
+  [frame-data zone-id]
+  (if (nil? zone-id)
+    ;; Master view - return all combined points
+    (:points frame-data)
+    ;; Specific zone - look up directly in zone-frames
+    (get (:zone-frames frame-data) zone-id [])))
 
 
 ;; Preview Grid Components
@@ -255,7 +257,7 @@
 
 (defn preview-cell
   "Single preview cell in the grid.
-   Shows frame if any cue targets this cell's zone filter.
+   Shows filtered frame based on zone configuration.
    Includes clickable zone label that opens zone selector dropdown."
   [{:keys [fx/context cell-index width height]}]
   (let [frame-data (fx/sub-ctx context subs/preview-frame-data)
@@ -269,11 +271,8 @@
         show-labels? (fx/sub-ctx context subs/preview-show-labels?)
         popup-open-cell (fx/sub-ctx context subs/preview-zone-selector-open)
         popup-open? (= popup-open-cell cell-index)
-        cue-destinations (:cue-destinations frame-data {})
-        matches? (any-cue-targets-zone? cue-destinations zone-id)
-        ;; Only show points if any cue targets this cell's zone
-        display-frame (when matches?
-                        {:points (:points frame-data)})
+        filtered-points (get-zone-filtered-points frame-data zone-id)
+        display-frame (when (seq filtered-points) {:points filtered-points})
         label-height (if show-labels? 20 0)
         canvas-height (- height label-height 4)]
     {:fx/type :v-box

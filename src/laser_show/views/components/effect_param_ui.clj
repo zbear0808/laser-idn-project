@@ -115,12 +115,16 @@
                         :effect-path rgb-effect-path}
        :dialog-data dialog-data}
       
-      ;; Zone reroute is visual-only (zone group selector)
-      (= renderer-type :zone-reroute)
-      {:fx/type custom-renderers/zone-reroute-visual-editor
+      ;; Zone Selector is visual-only - the timeline UI doesn't translate to numeric sliders
+      ;; and :zone-group-id params hold keywords (zone names), not numbers
+      (= renderer-type :zone-selector)
+      {:fx/type custom-renderers/zone-selector-visual-editor
+       :fx/key canvas-fx-key
        :fx/context context
        :current-params current-params
-       :event-template on-change-event}
+       :event-template {:domain (get spatial-event-keys :domain)
+                        :entity-key (get spatial-event-keys :entity-key)
+                        :effect-path effect-path}}
       
       ;; Other custom renderers have mode toggle
       :else
@@ -243,6 +247,14 @@
                                         :current-params current-params
                                         :event-template on-change-event
                                         :fx-key canvas-fx-key}
+                      
+                      :zone-selector {:fx/type custom-renderers/zone-selector-visual-editor
+                                     :fx/key canvas-fx-key
+                                     :fx/context context
+                                     :current-params current-params
+                                     :event-template {:domain (get spatial-event-keys :domain)
+                                                      :entity-key (get spatial-event-keys :entity-key)
+                                                      :effect-path effect-path}}
                       
                       ;; Fallback to standard params (with optional modulator support)
                       {:fx/type param-list-type

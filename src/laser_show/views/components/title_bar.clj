@@ -165,7 +165,8 @@
 (defn- help-menu-items
   "Create Help menu items."
   [context]
-  (let [idn-logging? (boolean (fx/sub-val context get-in [:debug :idn-stream-logging?]))]
+  (let [idn-logging? (boolean (fx/sub-val context get-in [:debug :idn-stream-logging?]))
+        zone-routing-debug? (boolean (fx/sub-val context get-in [:debug :zone-routing-debug?]))]
     [{:fx/type :menu-item
       :text "Documentation"
       :on-action {:event/type :help/documentation}}
@@ -186,6 +187,11 @@
       :text "IDN Stream Logging"
       :selected idn-logging?
       :on-action {:event/type :help/toggle-idn-stream-logging}}
+     
+     {:fx/type :check-menu-item
+      :text "Zone Routing Debug"
+      :selected zone-routing-debug?
+      :on-action {:event/type :help/toggle-zone-routing-debug}}
      
      {:fx/type :menu-item
       :text "Reload Styles"
