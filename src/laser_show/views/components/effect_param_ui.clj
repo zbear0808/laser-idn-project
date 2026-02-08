@@ -89,7 +89,7 @@
         ;; Single-param visual editors handle their own modulator UI, so they can
         ;; display in either mode even when modulators are active
         single-param-visual-editor? (contains? #{:rotation-dial :hue-slider :hue-shift-strip
-                                                 :oklab-hue-slider :oklab-hue-shift-strip}
+                                                 :oklab-hue-shift-strip}
                                                renderer-type)
         ;; Determine actual mode: respect user's choice for single-param visual editors,
         ;; force numeric mode for other editors with modulators
@@ -241,15 +241,6 @@
                                         :enable-modulator? enable-modulators?
                                         :param-spec (get params-map :degrees)
                                         :modulator-event-base modulator-event-base}
-
-                      :oklab-hue-slider {:fx/type custom-renderers/oklab-hue-visual-editor
-                                         :fx/key canvas-fx-key
-                                         :current-params current-params
-                                         :event-template on-change-event
-                                         :fx-key canvas-fx-key
-                                         :enable-modulator? enable-modulators?
-                                         :param-spec (get params-map :hue)
-                                         :modulator-event-base modulator-event-base}
 
                       :oklab-hue-shift-strip {:fx/type custom-renderers/oklab-hue-shift-visual-editor
                                               :fx/key canvas-fx-key

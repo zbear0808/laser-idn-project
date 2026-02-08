@@ -110,6 +110,9 @@ The JAR will be created at `target/laser-show-0.1.0-standalone.jar`
 ## Troubleshooting
 btw, i've mostly tested on Windows, if you're not on it maybe it'll cause issues
 
+### Windows 10 - VC++ Redistributable
+If you are on Windows 10 and experience issues launching the application, you may need to install the latest [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170).
+
 ### "clj: command not found"
 - Clojure CLI tools are not installed
 - Install from: https://clojure.org/guides/install_clojure

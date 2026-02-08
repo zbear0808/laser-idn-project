@@ -28,7 +28,7 @@
             [laser-show.views.components.visual-editors.curve-canvas :as curve-canvas]
             [laser-show.views.components.visual-editors.hue-canvas :as hue-canvas]
             [laser-show.views.components.visual-editors.hue-shift-canvas :as hue-shift-canvas]
-            [laser-show.views.components.visual-editors.oklab-hue-canvas :as oklab-hue-canvas]
+
             [laser-show.views.components.visual-editors.oklab-hue-shift-canvas :as oklab-hue-shift-canvas]
             [laser-show.views.components.tabs :as tabs]
             [laser-show.views.components.zone-chips :as zone-chips]
@@ -1120,71 +1120,8 @@
                  :on-action event-template}]}))
 
 
-;; Oklab Hue Visual Editors
 
 
-(defn oklab-hue-visual-editor
-  "Visual editor for Oklab set-hue effect - horizontal gradient slider.
-   
-   Shows a horizontal bar with the full hue spectrum from 0° to 360° in Oklab space.
-   Uses constant Lightness and Chroma for perceptual uniformity.
-   
-   Props:
-   - :current-params - Current parameter values {:hue ...}
-   - :event-template - Base event for on-drag (will add :param-key :value)
-   - :fx-key - (optional) Unique key
-   - :hint-text - (optional) Hint text
-   
-   Modulator support:
-   - :enable-modulator? - Show modulator toggle
-   - :param-spec - Parameter spec for :hue
-   - :modulator-event-base - Base event for modulator operations"
-  [{:keys [current-params event-template fx-key hint-text
-           enable-modulator? param-spec modulator-event-base]}]
-  (let [params-map (or current-params {})
-        hue-value (get params-map :hue 0.0)
-        is-modulated? (reg/active-modulator? hue-value)
-        static-hue (reg/get-static-value hue-value 0.0)
-        actual-hint (or hint-text "Drag to select hue")
-        canvas-key (or fx-key [:oklab-hue-editor])
-        hue-param-spec (or param-spec {:min 0.0 :max 360.0 :default 0.0 :label "Hue"})]
-    {:fx/type :v-box
-     :spacing 8
-     :padding 8
-     :style-class ["visual-editor-padded"]
-     :children (filterv some?
-                        [(when (and enable-modulator? modulator-event-base)
-                           {:fx/type mod-param/visual-editor-modulator-header
-                            :param-key :hue
-                            :param-spec hue-param-spec
-                            :current-value hue-value
-                            :modulator-event-base modulator-event-base})
-
-                         (when is-modulated?
-                           {:fx/type mod-param/visual-editor-modulator-params
-                            :param-key :hue
-                            :param-spec hue-param-spec
-                            :current-value hue-value
-                            :modulator-event-base modulator-event-base})
-
-                         (when-not is-modulated?
-                           {:fx/type :label
-                            :text actual-hint
-                            :style-class ["visual-editor-hint"]})
-
-                         {:fx/type oklab-hue-canvas/oklab-hue-canvas
-                          :fx/key canvas-key
-                          :hue static-hue
-                          :on-hue-change (when-not is-modulated? event-template)}
-
-                         {:fx/type :h-box
-                          :spacing 12
-                          :alignment :center
-                          :children [{:fx/type :label
-                                      :text (if is-modulated?
-                                              "Hue: (modulated)"
-                                              (format "Hue: %.1f°" (double static-hue)))
-                                      :style-class ["text-monospace"]}]}])}))
 
 (defn oklab-hue-shift-visual-editor
   "Visual editor for Oklab hue shift effect.
