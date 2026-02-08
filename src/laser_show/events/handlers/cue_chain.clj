@@ -77,20 +77,13 @@
    Expects :item-id with the preset ID (e.g., :circle, :wave).
    Optionally accepts :item with full preset definition for advanced use cases.
    
-   Auto-selects the newly added preset for better UX."
+   Auto-selects the newly added preset for better UX.
+   
+   Requires cell to exist - errors if [:chains :cue-chains [col row]] is nil."
   [{:keys [col row item-id state]}]
-  (let [pid item-id
-        ;; Ensure cell exists with default destination-zone routing to 'All'
-        ensure-cell (fn [s]
-                      (if (get-in s [:chains :cue-chains [col row]])
-                        s
-                        #_(assoc-in s [:chains :cue-chains [col row]]
-                                  {:items []
-                                   :destination-zone {:zone-group-id :all}})))
-        new-preset (h/ensure-item-fields (cue-chains/create-preset-instance pid {}))
-        new-preset-id (:id new-preset)
-        state-with-cell (ensure-cell state)]
-    {:state (-> state-with-cell
+  (let [new-preset (h/ensure-item-fields (cue-chains/create-preset-instance item-id {}))
+        new-preset-id (:id new-preset)]
+    {:state (-> state
                 (update-in (cue-chain-path col row) conj new-preset)
                 h/mark-dirty)
      :dispatch {:event/type :list/select-item
@@ -104,7 +97,9 @@
    This handles the data-driven event format from effect-bank component,
    where :item contains the full effect definition and :item-id is the effect-id.
    
-   Auto-selects the newly added effect for better UX."
+   Auto-selects the newly added effect for better UX.
+   
+   Requires cell to exist - errors if [:chains :cue-chains [col row]] is nil."
   [{:keys [col row parent-path item item-id state]}]
   (let [effect-id (or item-id (:id item))
         params-map (reduce (fn [acc {:keys [key default]}]
@@ -114,18 +109,10 @@
         new-effect (h/ensure-item-fields {:effect-id effect-id
                                           :params params-map})
         new-effect-id (:id new-effect)
-        ;; Ensure cell exists with default destination-zone routing to 'All'
-        ensure-cell (fn [s]
-                      (if (get-in s [:chains :cue-chains [col row]])
-                        s
-                        #_(assoc-in s [:chains :cue-chains [col row]]
-                                  {:items []
-                                   :destination-zone {:zone-group-id :all}})))
-        state-with-cell (ensure-cell state)
         ;; parent-path should be something like [0 :effects]
         target-path (vec (concat [:chains :cue-chains [col row] :items] parent-path))
-        current-effects (get-in state-with-cell target-path [])]
-    {:state (-> state-with-cell
+        current-effects (get-in state target-path [])]
+    {:state (-> state
                 (assoc-in target-path (conj current-effects new-effect))
                 h/mark-dirty)
      :dispatch {:event/type :list/select-item
@@ -158,16 +145,12 @@
 
 
 (defn- handle-cue-chain-set-item-effects
-  "Set the entire effects array for a cue chain item (simple persistence callback)."
+  "Set the entire effects array for a cue chain item (simple persistence callback).
+   
+   Requires cell to exist - errors if [:chains :cue-chains [col row]] is nil."
   [{:keys [col row item-path items state]}]
-  (let [ensure-cell (fn [s]
-                      (if (get-in s [:chains :cue-chains [col row]])
-                        s
-                        (assoc-in s [:chains :cue-chains [col row]] {:items []})))
-        items-path-full (cue-chain-path col row)
-        effects-path (vec (concat items-path-full item-path [:effects]))]
+  (let [effects-path (vec (concat (cue-chain-path col row) item-path [:effects]))]
     {:state (-> state
-                ensure-cell
                 (assoc-in effects-path items)
                 h/mark-dirty)}))
 

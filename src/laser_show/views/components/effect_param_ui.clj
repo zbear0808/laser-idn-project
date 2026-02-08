@@ -81,14 +81,15 @@
         canvas-fx-key (if keyframe-idx
                         [effect-path :kf keyframe-idx]
                         effect-path)
-        
+
         ui-hints (:ui-hints effect-def)
         renderer-type (:renderer ui-hints)
         ;; Check if any params have ACTIVE modulators
         has-modulators? (boolean (some (fn [[_k v]] (reg/active-modulator? v)) current-params))
         ;; Single-param visual editors handle their own modulator UI, so they can
         ;; display in either mode even when modulators are active
-        single-param-visual-editor? (contains? #{:rotation-dial :hue-slider :hue-shift-strip}
+        single-param-visual-editor? (contains? #{:rotation-dial :hue-slider :hue-shift-strip
+                                                 :oklab-hue-slider :oklab-hue-shift-strip}
                                                renderer-type)
         ;; Determine actual mode: respect user's choice for single-param visual editors,
         ;; force numeric mode for other editors with modulators
@@ -114,7 +115,7 @@
                         :entity-key rgb-entity-key
                         :effect-path rgb-effect-path}
        :dialog-data dialog-data}
-      
+
       ;; Zone Selector is visual-only - the timeline UI doesn't translate to numeric sliders
       ;; and :zone-group-id params hold keywords (zone names), not numbers
       (= renderer-type :zone-selector)
@@ -125,7 +126,7 @@
        :event-template {:domain (get spatial-event-keys :domain)
                         :entity-key (get spatial-event-keys :entity-key)
                         :effect-path effect-path}}
-      
+
       ;; Other custom renderers have mode toggle
       :else
       {:fx/type :v-box
@@ -136,43 +137,43 @@
                    :alignment :center-left
                    :padding {:bottom 8}
                    :children (filterv some?
-                               [{:fx/type :label
-                                :text "Edit Mode:"
-                                :style-class ["label-hint"]
-                                :style "-fx-font-size: 10; -fx-font-style: normal;"}
-                               ;; Visual mode button
-                               ;; Single-param visual editors support modulators in both modes, so never disable visual
-                               ;; Other editors with modulators must stay in numeric mode
-                               (let [disable-visual? (and has-modulators? (not single-param-visual-editor?))]
-                                 (cond-> {:fx/type :button
-                                          :text "Visual"
-                                          :graphic {:fx/type fa/icon :name :eye :size 9}
-                                          :disable disable-visual?
-                                          :style-class [(cond
-                                                          disable-visual? "chip"
-                                                          (= actual-mode :visual) "chip-selected"
-                                                          :else "chip")]
-                                          :style (str "-fx-font-size: 9; -fx-padding: 3 10;"
-                                                     (when disable-visual? " -fx-cursor: not-allowed;"))}
-                                   ;; Add :on-action when we have a valid event and visual mode isn't blocked
-                                   (and (not disable-visual?) on-mode-change-event)
-                                   (assoc :on-action (assoc on-mode-change-event :mode :visual))))
-                               ;; Numeric mode button - conditionally add :on-action only when valid
-                               (cond-> {:fx/type :button
-                                        :text "Numeric"
-                                        :graphic {:fx/type fa/icon :name :sliders :size 9}
-                                        :style-class [(if (= actual-mode :numeric) "chip-selected" "chip")]
-                                        :style "-fx-font-size: 9; -fx-padding: 3 10;"}
-                                 on-mode-change-event
-                                 (assoc :on-action (assoc on-mode-change-event :mode :numeric)))
-                               ;; Show tooltip when modulators are blocking visual mode
-                               ;; (but not for single-param visual editors that handle it internally)
-                               (when (and has-modulators? (not single-param-visual-editor?))
-                                 {:fx/type :label
-                                  :text "(modulators active)"
-                                  :style-class ["label-hint"]
-                                  :style "-fx-font-size: 9;"})])}
-                  
+                                      [{:fx/type :label
+                                        :text "Edit Mode:"
+                                        :style-class ["label-hint"]
+                                        :style "-fx-font-size: 10; -fx-font-style: normal;"}
+                                       ;; Visual mode button
+                                       ;; Single-param visual editors support modulators in both modes, so never disable visual
+                                       ;; Other editors with modulators must stay in numeric mode
+                                       (let [disable-visual? (and has-modulators? (not single-param-visual-editor?))]
+                                         (cond-> {:fx/type :button
+                                                  :text "Visual"
+                                                  :graphic {:fx/type fa/icon :name :eye :size 9}
+                                                  :disable disable-visual?
+                                                  :style-class [(cond
+                                                                  disable-visual? "chip"
+                                                                  (= actual-mode :visual) "chip-selected"
+                                                                  :else "chip")]
+                                                  :style (str "-fx-font-size: 9; -fx-padding: 3 10;"
+                                                              (when disable-visual? " -fx-cursor: not-allowed;"))}
+                                           ;; Add :on-action when we have a valid event and visual mode isn't blocked
+                                           (and (not disable-visual?) on-mode-change-event)
+                                           (assoc :on-action (assoc on-mode-change-event :mode :visual))))
+                                       ;; Numeric mode button - conditionally add :on-action only when valid
+                                       (cond-> {:fx/type :button
+                                                :text "Numeric"
+                                                :graphic {:fx/type fa/icon :name :sliders :size 9}
+                                                :style-class [(if (= actual-mode :numeric) "chip-selected" "chip")]
+                                                :style "-fx-font-size: 9; -fx-padding: 3 10;"}
+                                         on-mode-change-event
+                                         (assoc :on-action (assoc on-mode-change-event :mode :numeric)))
+                                       ;; Show tooltip when modulators are blocking visual mode
+                                       ;; (but not for single-param visual editors that handle it internally)
+                                       (when (and has-modulators? (not single-param-visual-editor?))
+                                         {:fx/type :label
+                                          :text "(modulators active)"
+                                          :style-class ["label-hint"]
+                                          :style "-fx-font-size: 9;"})])}
+
                   ;; Render based on mode
                   (if (= actual-mode :visual)
                     ;; Custom visual renderer
@@ -180,82 +181,99 @@
                     ;; The :fx/key on the outer component forces cljfx to recreate the whole tree when keyframe changes
                     (case renderer-type
                       :spatial-2d {:fx/type custom-renderers/translate-visual-editor
-                                  :fx/key canvas-fx-key
-                                  :current-params current-params
-                                  :param-specs (:parameters effect-def)
-                                  :event-template (merge spatial-event-template spatial-event-keys)
-                                  :fx-key canvas-fx-key}
-                      
+                                   :fx/key canvas-fx-key
+                                   :current-params current-params
+                                   :param-specs (:parameters effect-def)
+                                   :event-template (merge spatial-event-template spatial-event-keys)
+                                   :fx-key canvas-fx-key}
+
                       :corner-pin-2d {:fx/type custom-renderers/corner-pin-visual-editor
-                                     :fx/key canvas-fx-key
-                                     :current-params current-params
-                                     :param-specs (:parameters effect-def)
-                                     :event-template (merge spatial-event-template spatial-event-keys)
-                                     :fx-key canvas-fx-key}
-                      
+                                      :fx/key canvas-fx-key
+                                      :current-params current-params
+                                      :param-specs (:parameters effect-def)
+                                      :event-template (merge spatial-event-template spatial-event-keys)
+                                      :fx-key canvas-fx-key}
+
                       :rotation-dial {:fx/type custom-renderers/rotate-visual-editor
-                                     :fx/key canvas-fx-key
-                                     :current-params current-params
-                                     :param-specs (:parameters effect-def)
-                                     :event-template on-change-event
-                                     :reset-event {:event/type :chain/reset-params
-                                                   :domain (get spatial-event-keys :domain)
-                                                   :entity-key (get spatial-event-keys :entity-key)
-                                                   :effect-path effect-path}
-                                     :fx-key canvas-fx-key
-                                     ;; Modulator support for single-param visual editor
-                                     :enable-modulator? enable-modulators?
-                                     :param-spec (get params-map :angle)
-                                     :modulator-event-base modulator-event-base}
-                      
+                                      :fx/key canvas-fx-key
+                                      :current-params current-params
+                                      :param-specs (:parameters effect-def)
+                                      :event-template on-change-event
+                                      :reset-event {:event/type :chain/reset-params
+                                                    :domain (get spatial-event-keys :domain)
+                                                    :entity-key (get spatial-event-keys :entity-key)
+                                                    :effect-path effect-path}
+                                      :fx-key canvas-fx-key
+                                      ;; Modulator support for single-param visual editor
+                                      :enable-modulator? enable-modulators?
+                                      :param-spec (get params-map :angle)
+                                      :modulator-event-base modulator-event-base}
+
                       :scale-2d {:fx/type custom-renderers/scale-visual-editor
-                                :fx/key canvas-fx-key
-                                :current-params current-params
-                                :param-specs (:parameters effect-def)
-                                :event-template {:event/type :chain/update-scale-params
-                                                 :domain (get spatial-event-keys :domain)
-                                                 :entity-key (get spatial-event-keys :entity-key)
-                                                 :effect-path effect-path}
-                                :reset-event {:event/type :chain/reset-params
-                                              :domain (get spatial-event-keys :domain)
-                                              :entity-key (get spatial-event-keys :entity-key)
-                                              :effect-path effect-path}
-                                :fx-key canvas-fx-key}
-                      
+                                 :fx/key canvas-fx-key
+                                 :current-params current-params
+                                 :param-specs (:parameters effect-def)
+                                 :event-template {:event/type :chain/update-scale-params
+                                                  :domain (get spatial-event-keys :domain)
+                                                  :entity-key (get spatial-event-keys :entity-key)
+                                                  :effect-path effect-path}
+                                 :reset-event {:event/type :chain/reset-params
+                                               :domain (get spatial-event-keys :domain)
+                                               :entity-key (get spatial-event-keys :entity-key)
+                                               :effect-path effect-path}
+                                 :fx-key canvas-fx-key}
+
                       :hue-slider {:fx/type custom-renderers/hue-visual-editor
-                                  :fx/key canvas-fx-key
-                                  :current-params current-params
-                                  :event-template on-change-event
-                                  :fx-key canvas-fx-key
-                                  ;; Modulator support for single-param visual editor
-                                  :enable-modulator? enable-modulators?
-                                  :param-spec (get params-map :hue)
-                                  :modulator-event-base modulator-event-base}
-                      
+                                   :fx/key canvas-fx-key
+                                   :current-params current-params
+                                   :event-template on-change-event
+                                   :fx-key canvas-fx-key
+                                   ;; Modulator support for single-param visual editor
+                                   :enable-modulator? enable-modulators?
+                                   :param-spec (get params-map :hue)
+                                   :modulator-event-base modulator-event-base}
+
                       :hue-shift-strip {:fx/type custom-renderers/hue-shift-strip-visual-editor
-                                       :fx/key canvas-fx-key
-                                       :current-params current-params
-                                       :event-template on-change-event
-                                       :fx-key canvas-fx-key
-                                       ;; Modulator support for single-param visual editor
-                                       :enable-modulator? enable-modulators?
-                                       :param-spec (get params-map :degrees)
-                                       :modulator-event-base modulator-event-base}
-                      
-                      :set-color-picker {:fx/type custom-renderers/set-color-picker-visual-editor
                                         :fx/key canvas-fx-key
                                         :current-params current-params
                                         :event-template on-change-event
-                                        :fx-key canvas-fx-key}
-                      
+                                        :fx-key canvas-fx-key
+                                        :enable-modulator? enable-modulators?
+                                        :param-spec (get params-map :degrees)
+                                        :modulator-event-base modulator-event-base}
+
+                      :oklab-hue-slider {:fx/type custom-renderers/oklab-hue-visual-editor
+                                         :fx/key canvas-fx-key
+                                         :current-params current-params
+                                         :event-template on-change-event
+                                         :fx-key canvas-fx-key
+                                         :enable-modulator? enable-modulators?
+                                         :param-spec (get params-map :hue)
+                                         :modulator-event-base modulator-event-base}
+
+                      :oklab-hue-shift-strip {:fx/type custom-renderers/oklab-hue-shift-visual-editor
+                                              :fx/key canvas-fx-key
+                                              :current-params current-params
+                                              :event-template on-change-event
+                                              :fx-key canvas-fx-key
+                                              :enable-modulator? enable-modulators?
+                                              :param-spec (get params-map :degrees)
+                                              :modulator-event-base modulator-event-base}
+
+                      :set-color-picker {:fx/type custom-renderers/set-color-picker-visual-editor
+                                         :fx/key canvas-fx-key
+                                         :current-params current-params
+                                         :event-template on-change-event
+                                         :fx-key canvas-fx-key}
+
                       :zone-selector {:fx/type custom-renderers/zone-selector-visual-editor
-                                     :fx/key canvas-fx-key
-                                     :fx/context context
-                                     :current-params current-params
-                                     :event-template {:domain (get spatial-event-keys :domain)
-                                                      :entity-key (get spatial-event-keys :entity-key)
-                                                      :effect-path effect-path}}
-                      
+                                      :fx/key canvas-fx-key
+                                      :fx/context context
+                                      :current-params current-params
+                                      :event-template {:domain (get spatial-event-keys :domain)
+                                                       :entity-key (get spatial-event-keys :entity-key)
+                                                       :effect-path effect-path}}
+
                       ;; Fallback to standard params (with optional modulator support)
                       {:fx/type param-list-type
                        :params-map params-map
@@ -263,7 +281,7 @@
                        :on-change-event on-change-event
                        :on-text-event on-text-event
                        :modulator-event-base modulator-event-base})
-                    
+
                     ;; Numeric mode - sliders (with optional modulator support)
                     {:fx/type param-list-type
                      :params-map params-map

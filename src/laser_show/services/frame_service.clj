@@ -154,18 +154,6 @@
                     :cue-timing cue-timing})))
              active-cues)))
 
-(defn get-trigger-time
-  "DEPRECATED: Use per-cue trigger times.
-   
-   Get the trigger time for animation timing (first active cue).
-   For backward compatibility, returns trigger time of first active cue."
-  []
-  (let [s (state/get-raw-state)
-        active-cues (get-in s [:playback :active-cues] {})]
-    (if-let [[_ first-cue-timing] (first active-cues)]
-      (:trigger-time first-cue-timing 0)
-      0)))
-
 (defn get-bpm
   "Get the current BPM."
   []
@@ -533,15 +521,9 @@
                
                ;; Aggregate zone frames across all cues: zone-id -> combined points
                ;; This allows preview cells to display points for their zone directly
-               zone-frames-aggregated (reduce
-                                        (fn [acc {:keys [zone-frames]}]
-                                          (reduce-kv
-                                            (fn [m zone-id frame]
-                                              (update m zone-id (fnil into []) frame))
-                                            acc
-                                            zone-frames))
-                                        {}
-                                        cue-results)
+               zone-frames-aggregated (reduce #(merge-with into %1 %2)
+                                              {}
+                                              (u/keepv :zone-frames cue-results))
                base-end (timing/nanotime)]
            
            (when base-frame

@@ -31,9 +31,9 @@
    Points are 5-element vectors [x y r g b]. Access via t/X, t/Y, t/R, t/G, t/B.
    Use t/update-point-rgb for color updates."
   (:require [laser-show.animation.effects :as effects]
-              [laser-show.animation.effects.common :as common]
-              [laser-show.animation.colors :as colors]
-              [laser-show.animation.types :as t]))
+            [laser-show.animation.effects.common :as common]
+            [laser-show.animation.colors :as colors]
+            [laser-show.animation.types :as t]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -118,9 +118,9 @@
              g-mult (double (get-g-mult x y idx))
              b-mult (double (get-b-mult x y idx))]
          (t/update-point-rgb pt
-           (common/clamp-normalized (* r r-mult))
-           (common/clamp-normalized (* g g-mult))
-           (common/clamp-normalized (* b b-mult))))))))
+                             (common/clamp-normalized (* r r-mult))
+                             (common/clamp-normalized (* g g-mult))
+                             (common/clamp-normalized (* b b-mult))))))))
 
 (effects/register-effect!
  {:id :color-filter
@@ -357,3 +357,138 @@
                 :default :x
                 :choices [:x :y :radial :angle]}]
   :apply-transducer rainbow-position-xf})
+
+
+;; Oklab Hue Shift
+
+
+(defn- oklab-hue-shift-xf [time-ms bpm params ctx]
+  (let [get-degrees (effects/make-param-resolver :degrees params time-ms bpm ctx)]
+    (map-indexed
+     (fn [idx pt]
+       (if (t/blanked? pt)
+         pt
+         (let [x (pt t/X) y (pt t/Y)
+               degrees (double (get-degrees x y idx))
+               r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+               [L a b] (colors/rgb->oklab r g b)
+               [L' C' h'] (colors/oklab->oklch L a b)
+               new-h (rem (+ (double h') degrees) 360.0)
+               [L'' a'' b''] (colors/oklch->oklab L' C' new-h)
+               [nr ng nb] (colors/oklab->rgb L'' a'' b'')]
+           (t/update-point-rgb pt nr ng nb)))))))
+
+(effects/register-effect!
+ {:id :oklab-hue-shift
+  :name "Oklab Hue Shift"
+  :category :color
+  :timing :static
+  :ui-hints {:renderer :oklab-hue-shift-strip
+             :default-mode :visual}
+  :parameters [{:key :degrees
+                :label "Degrees"
+                :type :float
+                :default 0.0
+                :min -180.0
+                :max 180.0}]
+  :apply-transducer oklab-hue-shift-xf})
+
+
+;; Oklab Set Hue
+
+
+(defn- oklab-set-hue-xf [time-ms bpm params ctx]
+  (let [get-hue (effects/make-param-resolver :hue params time-ms bpm ctx)]
+    (map-indexed
+     (fn [idx pt]
+       (if (t/blanked? pt)
+         pt
+         (let [x (pt t/X) y (pt t/Y)
+               hue (double (get-hue x y idx))
+               r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+               [L a b-ok] (colors/rgb->oklab r g b)
+               [L' C _h] (colors/oklab->oklch L a b-ok)
+               ;; Apply new hue, preserving L and C
+               [L'' a'' b''] (colors/oklch->oklab L' C hue)
+               [nr ng nb] (colors/oklab->rgb L'' a'' b'')]
+           (t/update-point-rgb pt nr ng nb)))))))
+
+(effects/register-effect!
+ {:id :oklab-set-hue
+  :name "Oklab Set Hue"
+  :category :color
+  :timing :static
+  :ui-hints {:renderer :oklab-hue-slider
+             :default-mode :visual}
+  :parameters [{:key :hue
+                :label "Hue"
+                :type :float
+                :default 0.0
+                :min 0.0
+                :max 360.0}]
+  :apply-transducer oklab-set-hue-xf})
+
+
+;; Oklab Color Lerp
+
+
+(defn- oklab-lerp-xf [time-ms bpm params ctx]
+  (let [get-amount (effects/make-param-resolver :amount params time-ms bpm ctx)
+        get-target-r (effects/make-param-resolver :target-r params time-ms bpm ctx)
+        get-target-g (effects/make-param-resolver :target-g params time-ms bpm ctx)
+        get-target-b (effects/make-param-resolver :target-b params time-ms bpm ctx)]
+    (map-indexed
+     (fn [idx pt]
+       (if (t/blanked? pt)
+         pt
+         (let [x (pt t/X) y (pt t/Y)
+               amount (double (get-amount x y idx))
+               tr (double (get-target-r x y idx))
+               tg (double (get-target-g x y idx))
+               tb (double (get-target-b x y idx))
+
+               r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
+
+               ;; Convert both to Oklab
+               [L1 a1 b1] (colors/rgb->oklab r g b)
+               [L2 a2 b2] (colors/rgb->oklab tr tg tb)
+
+               ;; Interpolate in Oklab space
+               L (+ L1 (* (- L2 L1) amount))
+               a (+ a1 (* (- a2 a1) amount))
+               b (+ b1 (* (- b2 b1) amount))
+
+               ;; Convert back to RGB
+               [nr ng nb] (colors/oklab->rgb L a b)]
+           (t/update-point-rgb pt nr ng nb)))))))
+
+(effects/register-effect!
+ {:id :oklab-lerp
+  :name "Oklab Lerp"
+  :category :color
+  :timing :static
+  :parameters [{:key :amount
+                :label "Amount"
+                :type :float
+                :default 0.0
+                :min 0.0
+                :max 1.0}
+               {:key :target-r
+                :label "Target Red"
+                :type :float
+                :default 1.0
+                :min 0.0
+                :max 1.0}
+               {:key :target-g
+                :label "Target Green"
+                :type :float
+                :default 1.0
+                :min 0.0
+                :max 1.0}
+               {:key :target-b
+                :label "Target Blue"
+                :type :float
+                :default 1.0
+                :min 0.0
+                :max 1.0}]
+  :apply-transducer oklab-lerp-xf})

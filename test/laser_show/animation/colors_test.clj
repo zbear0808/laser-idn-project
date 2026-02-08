@@ -212,3 +212,31 @@
            (count (distinct (map #(first (colors/color-16bit->normalized [% 0 0]))
                                  (range 65536)))))
         "All 65536 16-bit red values should map to distinct normalized values")))
+
+
+
+;;; Oklab Conversion Tests
+
+
+
+(deftest test-oklab-roundtrip
+  (testing "RGB to Oklab and back preserves values"
+    (doseq [r [0.0 0.5 1.0]
+            g [0.0 0.5 1.0]
+            b [0.0 0.5 1.0]]
+      (let [[L a b_] (colors/rgb->oklab r g b)
+            [r2 g2 b2] (colors/oklab->rgb L a b_)]
+        (is (< (Math/abs (- (double r) (double r2))) 0.001) (str "Red roundtrip: " r " vs " r2))
+        (is (< (Math/abs (- (double g) (double g2))) 0.001) (str "Green roundtrip: " g " vs " g2))
+        (is (< (Math/abs (- (double b) (double b2))) 0.001) (str "Blue roundtrip: " b " vs " b2))))))
+
+(deftest test-oklab-oklch-roundtrip
+  (testing "Oklab to Oklch and back preserves values"
+    (doseq [L [0.0 0.5 1.0]
+            a [-0.1 0.0 0.1]
+            b [-0.1 0.0 0.1]]
+      (let [[L2 C h] (colors/oklab->oklch L a b)
+            [L3 a2 b2] (colors/oklch->oklab L2 C h)]
+        (is (< (Math/abs (- (double L) (double L3))) 0.001) (str "L roundtrip: " L " vs " L3))
+        (is (< (Math/abs (- (double a) (double a2))) 0.001) (str "a roundtrip: " a " vs " a2))
+        (is (< (Math/abs (- (double b) (double b2))) 0.001) (str "b roundtrip: " b " vs " b2))))))
