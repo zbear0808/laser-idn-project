@@ -73,7 +73,7 @@
    - :spatial-event-template - Event for spatial editor updates"
   [{:keys [fx/context entity-key full-effect-path effect-def current-params
            ui-mode params-map dialog-data domain keyframe-enabled? selected-kf-idx
-           on-change-event on-text-event spatial-event-template]}]
+           on-change-event on-text-event spatial-event-template on-color-change-event]}]
   {:fx/type effect-param-ui/custom-param-renderer
    :fx/context context
    :effect-def effect-def
@@ -81,10 +81,10 @@
    :ui-mode ui-mode
    :params-map params-map
    :dialog-data dialog-data
-   
+
    ;; Disable modulators when keyframe mode is active
    :enable-modulators? (not keyframe-enabled?)
-   
+
    ;; Event templates for spatial editors (translate, corner-pin)
    ;; Include keyframe-idx when keyframe mode is enabled so canvas is recreated on keyframe change
    :spatial-event-template spatial-event-template
@@ -92,7 +92,7 @@
                         :entity-key entity-key
                         :effect-path full-effect-path
                         :keyframe-idx (when keyframe-enabled? selected-kf-idx)}
-   
+
    ;; Event templates for param controls
    :on-change-event on-change-event
    :on-text-event on-text-event
@@ -105,11 +105,12 @@
                            {:domain domain
                             :entity-key entity-key
                             :effect-path full-effect-path})
-   
+
    ;; RGB curves props
    :rgb-domain domain
    :rgb-entity-key entity-key
-   :rgb-effect-path full-effect-path})
+   :rgb-effect-path full-effect-path
+   :on-color-change-event on-color-change-event})
 
 
 ;; Main Component
@@ -136,38 +137,38 @@
            effect effect-def dialog-data current-phase]}]
   (let [;; Compute full effect path based on domain
         full-effect-path (compute-full-effect-path domain item-path effect-path)
-        
+
         ;; Extract keyframe modulator state
         keyframe-mod (:keyframe-modulator effect)
         keyframe-enabled? (:enabled? keyframe-mod false)
         selected-kf-idx (:selected-keyframe keyframe-mod 0)
         keyframes (:keyframes keyframe-mod [])
-        
+
         ;; Choose param source:
         ;; - When keyframe mode enabled: edit selected keyframe's params
         ;; - When keyframe mode disabled: edit effect's base params
         current-params (if (and keyframe-enabled? (seq keyframes))
                          (get-in keyframes [selected-kf-idx :params] {})
                          (:params effect {}))
-        
+
         ;; DEBUG: Log the params being rendered
         _ (when keyframe-enabled?
             (log/info "RENDER effect-param-editor - keyframe-enabled?:" keyframe-enabled?
                       "selected-kf-idx:" selected-kf-idx
                       "keyframes-count:" (count keyframes)
                       "current-params:" current-params))
-        
+
         ;; Convert params to map format for UI
         params-map (effect-param-ui/params-vector->map (:parameters effect-def []))
-        
+
         ;; Get UI mode from dialog data - stored by full effect path
         ui-mode (get-in dialog-data [:ui-modes full-effect-path])
-        
+
         ;; Build base event params
         base-event-params {:domain domain
                            :entity-key entity-key
                            :effect-path full-effect-path}
-        
+
         ;; Choose event types based on keyframe mode
         on-change-event (if keyframe-enabled?
                           {:event/type :keyframe/update-param
@@ -179,7 +180,7 @@
                            :domain domain
                            :entity-key entity-key
                            :effect-path full-effect-path})
-        
+
         on-text-event (if keyframe-enabled?
                         {:event/type :keyframe/update-param
                          :domain domain
@@ -190,7 +191,19 @@
                          :domain domain
                          :entity-key entity-key
                          :effect-path full-effect-path})
-        
+
+        ;; Color change event (depends on keyframe mode)
+        on-color-change-event (if keyframe-enabled?
+                                {:event/type :keyframe/update-color-param
+                                 :domain domain
+                                 :entity-key entity-key
+                                 :effect-path full-effect-path
+                                 :keyframe-idx selected-kf-idx}
+                                {:event/type :chain/update-color-param
+                                 :domain domain
+                                 :entity-key entity-key
+                                 :effect-path full-effect-path})
+
         ;; Spatial editor event template
         ;; Note: Using :keyframe/update-spatial-params which converts point-id/x/y
         ;; to proper params using param-map (same as :chain/update-spatial-params)
@@ -204,76 +217,77 @@
                                   :domain domain
                                   :entity-key entity-key
                                   :effect-path full-effect-path})]
-    
+
     {:fx/type :v-box
      :spacing 8
      :style-class "dialog-section"
      ;; Filter out nil children
      :children (filterv some?
-                 [;; Keyframe modulator panel (always shown for effects that could use it)
-                  (when effect-def
-                    {:fx/type keyframe-panel/keyframe-modulator-panel
-                     :keyframe-modulator keyframe-mod
-                     :domain domain
-                     :entity-key entity-key
-                     :effect-path full-effect-path
-                     :current-phase current-phase})
-                  
-                  ;; Section header with effect name and keyframe indicator
-                  {:fx/type :label
-                   :text (if effect-def
-                           (str "PARAMETERS: " (:name effect-def)
-                                (when keyframe-enabled?
-                                  (str " (Keyframe " (inc selected-kf-idx) ")")))
-                           "PARAMETERS")
-                   :style-class "header-section"}
-                  
-                  ;; Parameter controls
-                  (if effect-def
-                    (if (:ui-hints effect-def)
-                      ;; Has custom UI - use custom renderer with mode toggle
-                      ;; Add :fx/key to force recreation when keyframe changes (spatial canvas has internal atoms)
-                      (let [param-editor-key (if keyframe-enabled?
-                                               [full-effect-path :kf selected-kf-idx]
-                                               full-effect-path)]
-                        {:fx/type :scroll-pane
-                         :fx/key param-editor-key
-                         :fit-to-width true
-                         :style-class "scroll-pane-base"
-                         :v-box/vgrow :always
-                         :content {:fx/type custom-param-renderer-internal
-                                   :fx/context context
-                                   :entity-key entity-key
-                                   :full-effect-path full-effect-path
-                                   :effect-def effect-def
-                                   :current-params current-params
-                                   :ui-mode ui-mode
-                                   :params-map params-map
-                                   :dialog-data dialog-data
-                                   :domain domain
-                                   :keyframe-enabled? keyframe-enabled?
-                                   :selected-kf-idx selected-kf-idx
-                                   :on-change-event on-change-event
-                                   :on-text-event on-text-event
-                                   :spatial-event-template spatial-event-template}})
-                      
-                      ;; Standard parameters - use modulatable param controls
-                      ;; Disable modulators when in keyframe mode (keyframes replace modulators)
-                      {:fx/type :scroll-pane
-                       :fit-to-width true
-                       :style-class "scroll-pane-base"
-                       :v-box/vgrow :always
-                       :content {:fx/type effect-param-ui/modulatable-param-controls-list
-                                 :params-map params-map
-                                 :current-params current-params
-                                 :on-change-event on-change-event
-                                 :on-text-event on-text-event
-                                 ;; Disable per-param modulators when keyframe mode is on
-                                 :enable-modulators? (not keyframe-enabled?)
-                                 :modulator-event-base (when-not keyframe-enabled?
-                                                         base-event-params)}})
-                    
-                    ;; No effect selected
-                    {:fx/type :label
-                     :text "Select an effect from the chain"
-                     :style-class "dialog-placeholder-text"})])}))
+                        [;; Keyframe modulator panel (always shown for effects that could use it)
+                         (when effect-def
+                           {:fx/type keyframe-panel/keyframe-modulator-panel
+                            :keyframe-modulator keyframe-mod
+                            :domain domain
+                            :entity-key entity-key
+                            :effect-path full-effect-path
+                            :current-phase current-phase})
+
+                         ;; Section header with effect name and keyframe indicator
+                         {:fx/type :label
+                          :text (if effect-def
+                                  (str "PARAMETERS: " (:name effect-def)
+                                       (when keyframe-enabled?
+                                         (str " (Keyframe " (inc selected-kf-idx) ")")))
+                                  "PARAMETERS")
+                          :style-class "header-section"}
+
+                         ;; Parameter controls
+                         (if effect-def
+                           (if (:ui-hints effect-def)
+                             ;; Has custom UI - use custom renderer with mode toggle
+                             ;; Add :fx/key to force recreation when keyframe changes (spatial canvas has internal atoms)
+                             (let [param-editor-key (if keyframe-enabled?
+                                                      [full-effect-path :kf selected-kf-idx]
+                                                      full-effect-path)]
+                               {:fx/type :scroll-pane
+                                :fx/key param-editor-key
+                                :fit-to-width true
+                                :style-class "scroll-pane-base"
+                                :v-box/vgrow :always
+                                :content {:fx/type custom-param-renderer-internal
+                                          :fx/context context
+                                          :entity-key entity-key
+                                          :full-effect-path full-effect-path
+                                          :effect-def effect-def
+                                          :current-params current-params
+                                          :ui-mode ui-mode
+                                          :params-map params-map
+                                          :dialog-data dialog-data
+                                          :domain domain
+                                          :keyframe-enabled? keyframe-enabled?
+                                          :selected-kf-idx selected-kf-idx
+                                          :on-change-event on-change-event
+                                          :on-text-event on-text-event
+                                          :on-color-change-event on-color-change-event
+                                          :spatial-event-template spatial-event-template}})
+
+                             ;; Standard parameters - use modulatable param controls
+                             ;; Disable modulators when in keyframe mode (keyframes replace modulators)
+                             {:fx/type :scroll-pane
+                              :fit-to-width true
+                              :style-class "scroll-pane-base"
+                              :v-box/vgrow :always
+                              :content {:fx/type effect-param-ui/modulatable-param-controls-list
+                                        :params-map params-map
+                                        :current-params current-params
+                                        :on-change-event on-change-event
+                                        :on-text-event on-text-event
+                                        ;; Disable per-param modulators when keyframe mode is on
+                                        :enable-modulators? (not keyframe-enabled?)
+                                        :modulator-event-base (when-not keyframe-enabled?
+                                                                base-event-params)}})
+
+                           ;; No effect selected
+                           {:fx/type :label
+                            :text "Select an effect from the chain"
+                            :style-class "dialog-placeholder-text"})])}))

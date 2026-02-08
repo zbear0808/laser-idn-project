@@ -1117,10 +1117,7 @@
                  :fx/key picker-key
                  :value current-color
                  :style "-fx-color-label-visible: false;"
-                 :on-action {:event/type :chain/update-color-param
-                             :domain (:domain event-template)
-                             :entity-key (:entity-key event-template)
-                             :effect-path (:effect-path event-template)}}]}))
+                 :on-action event-template}]}))
 
 
 ;; Oklab Hue Visual Editors

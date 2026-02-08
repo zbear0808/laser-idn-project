@@ -25,10 +25,10 @@
    
    DEBUG: Set log level to DEBUG for this namespace to see keyframe operations."
   (:require
-     [clojure.tools.logging :as log]
-     [laser-show.animation.modulator-registry :as reg]
-     [laser-show.events.helpers :as h]
-     [laser-show.events.handlers.chain :as chain]))
+   [clojure.tools.logging :as log]
+   [laser-show.animation.modulator-registry :as reg]
+   [laser-show.events.helpers :as h]
+   [laser-show.events.handlers.chain :as chain]))
 
 
 ;; Helper Functions
@@ -507,19 +507,19 @@
       (-> state
           (assoc-in (conj keyframes-path keyframe-idx :value) value)
           h/mark-dirty)
-      
+
       ;; Find keyframe at beat and update, or add new one
       beat
       (let [existing-idx (first (keep-indexed
-                                  (fn [i kf]
-                                    (when (= (:beat kf) (double beat)) i))
-                                  current-keyframes))]
+                                 (fn [i kf]
+                                   (when (= (:beat kf) (double beat)) i))
+                                 current-keyframes))]
         (if existing-idx
           (-> state
               (assoc-in (conj keyframes-path existing-idx :value) value)
               h/mark-dirty)
           (handle-add-zone-keyframe state config effect-path beat value)))
-      
+
       :else state)))
 
 (defn handle-delete-zone-keyframe
@@ -560,6 +560,33 @@
         h/mark-dirty)))
 
 
+(defn handle-update-keyframe-color-param
+  "Update color parameters (red, green, blue) in the selected keyframe.
+   
+   Parameters:
+   - state: Application state
+   - config: Chain config
+   - effect-path: Path to effect
+   - keyframe-idx: Index of keyframe to update
+   - action-event: JavaFX ActionEvent from ColorPicker
+   
+   Returns: Updated state"
+  [state config effect-path keyframe-idx ^javafx.event.ActionEvent action-event]
+  (let [keyframe-mod (get-keyframe-modulator state config effect-path)
+        keyframes (:keyframes keyframe-mod [])]
+    (if (and (>= keyframe-idx 0) (< keyframe-idx (count keyframes)))
+      (let [color-picker (.getSource action-event)
+            color (.getValue color-picker)
+            red (.getRed color)
+            green (.getGreen color)
+            blue (.getBlue color)]
+        (-> state
+            (update-keyframe-modulator config effect-path
+                                       update-in [:keyframes keyframe-idx :params]
+                                       merge {:red red :green green :blue blue})
+            h/mark-dirty))
+      state)))
+
 (defn handle
   "Handle keyframe modulator events.
    
@@ -576,31 +603,31 @@
       ;; Time-based keyframe events (modulator at :keyframe-modulator)
       :keyframe/toggle-enabled
       {:state (handle-toggle-enabled state config effect-path (:enabled? event))}
-      
+
       :keyframe/update-setting
       {:state (handle-update-setting state config effect-path
                                      (:setting-key event)
                                      (:fx/event event))}
-      
+
       :keyframe/select
       {:state (handle-select-keyframe state config effect-path (:keyframe-idx event))}
-      
+
       :keyframe/add
       {:state (handle-add-keyframe state config effect-path (:position event) (:params event))}
-      
+
       :keyframe/move
       {:state (handle-move-keyframe state config effect-path
                                     (:keyframe-idx event) (:new-position event))}
-      
+
       :keyframe/delete
       {:state (handle-delete-keyframe state config effect-path (:keyframe-idx event))}
-      
+
       :keyframe/update-param
       {:state (handle-update-keyframe-param state config effect-path
                                             (:keyframe-idx event)
                                             (:param-key event)
                                             (or (:value event) (:fx/event event)))}
-      
+
       :keyframe/update-spatial-params
       {:state (handle-update-spatial-params state config effect-path
                                             (:keyframe-idx event)
@@ -608,44 +635,49 @@
                                             (:x event)
                                             (:y event)
                                             (:param-map event))}
-      
+
       :keyframe/set-interpolation
       {:state (handle-set-interpolation state config effect-path
                                         (:keyframe-idx event)
                                         (:interpolation event))}
-      
+
       ;; Driver settings events
       :keyframe/set-driver
       {:state (handle-set-driver state config effect-path (or (:driver event) (:fx/event event)))}
-      
+
       :keyframe/set-edge-behavior
       {:state (handle-set-edge-behavior state config effect-path (or (:edge-behavior event) (:fx/event event)))}
-      
+
       :keyframe/set-normalize
       {:state (handle-set-normalize state config effect-path (or (:normalize? event) (:fx/event event)))}
-      
+
       ;; Zone selector keyframe events (keyframes stored in :params :keyframes)
       :keyframe/add-zone-keyframe
       {:state (handle-add-zone-keyframe state config effect-path
                                         (:beat event)
                                         (:value event))}
-      
+
       :keyframe/update-zone-value
       {:state (handle-update-zone-value state config effect-path
                                         (:keyframe-idx event)
                                         (:beat event)
                                         (or (:value event) (:current-zone event)))}
-      
+
       :keyframe/delete-zone-keyframe
       {:state (handle-delete-zone-keyframe state config effect-path (:keyframe-idx event))}
-      
+
       :keyframe/select-zone-keyframe
       {:state state}  ;; Selection is UI-only, no state change needed
-      
+
       :keyframe/set-zone-loop-length
       {:state (handle-set-zone-loop-length state config effect-path
                                            (or (:loop-length event) (:fx/event event) (:value event)))}
-      
+
+      :keyframe/update-color-param
+      {:state (handle-update-keyframe-color-param state config effect-path
+                                                  (:keyframe-idx event)
+                                                  (:fx/event event))}
+
       ;; Unknown keyframe event
       (do
         (log/warn "Unknown keyframe event type:" type)

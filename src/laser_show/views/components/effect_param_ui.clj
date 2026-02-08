@@ -73,7 +73,7 @@
            spatial-event-template spatial-event-keys
            on-change-event on-text-event on-mode-change-event modulator-event-base
            rgb-domain rgb-entity-key rgb-effect-path
-           enable-modulators?]}]
+           enable-modulators? on-color-change-event]}]
   (let [;; Build canvas fx/key that includes keyframe index when in keyframe mode
         ;; This ensures the canvas is recreated when switching keyframes
         effect-path (get spatial-event-keys :effect-path)
@@ -263,7 +263,7 @@
                       :set-color-picker {:fx/type custom-renderers/set-color-picker-visual-editor
                                          :fx/key canvas-fx-key
                                          :current-params current-params
-                                         :event-template on-change-event
+                                         :event-template on-color-change-event
                                          :fx-key canvas-fx-key}
 
                       :zone-selector {:fx/type custom-renderers/zone-selector-visual-editor
