@@ -2,7 +2,7 @@ name: AI Code Review with Google
 
 on:
   pull_request:
-    types: [ready_for_review]
+    types: [opened, synchronize]
 
 jobs:
   ai_code_review:
