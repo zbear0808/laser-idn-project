@@ -3,7 +3,7 @@
    
    Note: toggle-zone-group was removed as part of zone routing simplification.
    The old zone-reroute effect with :target-zone-groups has been replaced by
-   the new zone-selector effect with keyframeable zones parameter."
+   the new zone-selector effect with a simple :target-zone parameter."
   (:require [clojure.test :refer [deftest testing is]]
             [laser-show.events.handlers.effect-params :as ep]))
 

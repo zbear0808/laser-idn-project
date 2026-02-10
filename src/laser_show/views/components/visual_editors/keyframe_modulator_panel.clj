@@ -34,8 +34,6 @@
    - Shows zone dropdown instead of numeric spinner for value editing
    - Timeline shows colored segments instead of line curves"
   (:require
-   [cljfx.api :as fx]
-   [laser-show.subs :as subs]
    [laser-show.views.components.visual-editors.keyframe-timeline :as timeline]))
 
 
@@ -99,58 +97,7 @@
     :step "Step"
     (name mode)))
 
-(defn- zone-group-id-param?
-  "Returns true if the parameter type is :zone-group-id."
-  [param-type]
-  (= param-type :zone-group-id))
-
-
 ;; Sub-components
-
-
-(defn- zone-group-value-editor
-  "Dropdown for selecting zone-group-id keyframe value.
-   Props:
-   - :fx/context - cljfx context for zone-groups subscription
-   - :zone-groups - List of available zone groups
-   - :current-value - Current zone-group-id (keyword like :left, :all)
-   - :on-value-change - Event to dispatch when value changes
-   - :disabled? - Whether the dropdown is disabled"
-  [{:keys [zone-groups current-value on-value-change disabled?]}]
-  (let [;; Add :all as special option at the start
-        all-option {:id :all :name "All Zones" :color "#888888"}
-        all-options (into [all-option] zone-groups)
-        ;; Find the selected item
-        selected-item (or (first (filter #(= (:id %) current-value) all-options))
-                          all-option)]
-    {:fx/type :combo-box
-     :disable (boolean disabled?)
-     :pref-width 150
-     :value selected-item
-     :items all-options
-     :button-cell (fn [item]
-                    {:text (or (:name item) "Select Zone")
-                     :graphic (when item
-                                {:fx/type :circle
-                                 :radius 6
-                                 :fill (or (:color item) "#666666")})})
-     :cell-factory {:fx/cell-type :list-cell
-                    :describe (fn [item]
-                                {:text (or (:name item) "")
-                                 :graphic (when item
-                                            {:fx/type :circle
-                                             :radius 6
-                                             :fill (or (:color item) "#666666")})})}
-     :on-value-changed (fn [new-item]
-                         (when on-value-change
-                           (on-value-change (:id new-item))))}))
-
-(defn- build-zone-group-colors
-  "Build a map of zone-group-id to color for timeline visualization."
-  [zone-groups]
-  (into {:all "#888888"}
-        (mapv (fn [zg] [(:id zg) (or (:color zg) "#666666")])
-              zone-groups)))
 
 
 (defn- driver-dropdown
@@ -386,13 +333,9 @@
    - :selected-idx - Index of selected keyframe
    - :current-phase - Current playback position (0.0-1.0)
    - :on-select, :on-add, :on-move, :on-delete - Event templates
-   - :enabled? - Whether interactions are enabled
-   - :param-type - Parameter type (for zone-group-id rendering)
-   - :zone-group-colors - Map of zone-group-id to color (for zone-group-id rendering)
-   - :param-key - Parameter key name (for zone-group-id keyframes)"
+   - :enabled? - Whether interactions are enabled"
   [{:keys [keyframes selected-idx current-phase
-           on-select on-add on-move on-delete enabled?
-           param-type zone-group-colors param-key]}]
+           on-select on-add on-move on-delete enabled?]}]
   {:fx/type :v-box
    :style-class "keyframe-panel-timeline"
    :children [{:fx/type :label
@@ -407,62 +350,30 @@
                :on-select on-select
                :on-add on-add
                :on-move on-move
-               :on-delete on-delete
-               ;; Zone-group-id specific props
-               :value-type (if (zone-group-id-param? param-type) :zone-group-id :numeric)
-               :zone-group-colors zone-group-colors
-               :param-key param-key}]})
+               :on-delete on-delete}]})
 
 (defn- actions-row
-  "Row with keyframe info and optional zone-group value editor.
+  "Row with keyframe info.
    Props:
    - :keyframes - Vector of keyframe maps
    - :selected-idx - Index of selected keyframe
-   - :enabled? - Whether interactions are enabled
-   - :param-type - Parameter type (:zone-group-id or other)
-   - :zone-groups - Zone groups list (for zone-group-id dropdown)
-   - :on-zone-value-change - Event template for zone value changes
-   - :param-key - Parameter key for accessing keyframe value"
-  [{:keys [keyframes selected-idx enabled? param-type zone-groups on-zone-value-change param-key]}]
+   - :enabled? - Whether interactions are enabled"
+  [{:keys [keyframes selected-idx enabled?]}]
   (let [selected-kf (when (and selected-idx
                                (>= selected-idx 0)
                                (< selected-idx (count keyframes)))
-                      (nth keyframes selected-idx))
-        zone-group-id? (zone-group-id-param? param-type)
-        ;; Get current zone value from selected keyframe params
-        current-zone-value (when (and zone-group-id? selected-kf)
-                             (get-in selected-kf [:params param-key] :all))]
+                      (nth keyframes selected-idx))]
     {:fx/type :h-box
      :alignment :center-left
      :spacing 10
      :style-class "keyframe-panel-actions"
      :disable (not enabled?)
-     :children (filterv some?
-                [;; Selected keyframe info
-                 {:fx/type :label
-                  :text (if selected-kf
-                          (str "Selected: Keyframe " (inc selected-idx)
-                               " @ " (format-position (:position selected-kf)))
-                          "Click timeline to select")
-                  :style-class "label-secondary"}
-                 
-                 ;; Zone value editor (only for zone-group-id parameters)
-                 (when (and zone-group-id? selected-kf)
-                   {:fx/type :h-box
-                    :alignment :center-left
-                    :spacing 5
-                    :children [{:fx/type :label
-                                :text "Zone:"
-                                :style-class "label-secondary"}
-                               {:fx/type zone-group-value-editor
-                                :zone-groups zone-groups
-                                :current-value current-zone-value
-                                :disabled? (not enabled?)
-                                :on-value-change (fn [new-zone-id]
-                                                   (when on-zone-value-change
-                                                     (on-zone-value-change
-                                                      {:keyframe-idx selected-idx
-                                                       :zone-id new-zone-id})))}]})])}))
+     :children [{:fx/type :label
+                 :text (if selected-kf
+                         (str "Selected: Keyframe " (inc selected-idx)
+                              " @ " (format-position (:position selected-kf)))
+                         "Click timeline to select")
+                 :style-class "label-secondary"}]}))
 
 
 ;; Main Panel Component
@@ -475,11 +386,6 @@
    Driver determines what drives the keyframe interpolation:
    - :time - Time-based animation (default)
    - :point-index, :pos-x, :pos-y, :radial - Spatial drivers
-   
-   For :zone-group-id parameter types:
-   - Automatically uses :step interpolation (no blending between zones)
-   - Shows zone dropdown instead of numeric value editor
-   - Timeline shows colored segments representing active zones
    
    Layout:
    ┌─────────────────────────────────────────────────────────────────┐
@@ -495,18 +401,15 @@
    └─────────────────────────────────────────────────────────────────┘
    
    Props:
-   - :fx/context - cljfx context (required for zone-group-id params)
    - :keyframe-modulator - The keyframe modulator config map (or nil if not initialized)
    - :domain - :effect-chains or :cue-chains
    - :entity-key - [col row] or projector-id
    - :effect-path - Path to effect within chain
-   - :param-key - Parameter key (e.g. :hue, :target-zone)
-   - :param-type - Parameter type (e.g. :zone-group-id, :number)
+   - :param-key - Parameter key (e.g. :hue)
    - :current-phase - Current playback position for preview (optional, time-based only)"
-  [{:keys [fx/context keyframe-modulator domain entity-key effect-path param-key param-type current-phase]}]
+  [{:keys [keyframe-modulator domain entity-key effect-path param-key current-phase]}]
   (let [driver (or (:driver keyframe-modulator) :time)
         spatial? (spatial-driver? driver)
-        zone-group-id? (zone-group-id-param? param-type)
         enabled? (:enabled? keyframe-modulator false)
         selected-idx (:selected-keyframe keyframe-modulator 0)
         keyframes (:keyframes keyframe-modulator [])
@@ -517,12 +420,6 @@
         loop-mode (:loop-mode keyframe-modulator :loop)
         edge-behavior (:edge-behavior keyframe-modulator :clamp)
         normalize? (:normalize? keyframe-modulator false)
-        
-        ;; Zone groups for zone-group-id parameters
-        zone-groups (when zone-group-id?
-                      (fx/sub-ctx context subs/zone-groups-list))
-        zone-group-colors (when zone-group-id?
-                            (build-zone-group-colors zone-groups))
         
         ;; Base event params
         base-event {:domain domain
@@ -546,19 +443,15 @@
                    {:fx/type :v-box
                     :spacing 8
                     :children (filterv some?
-                               [;; Driver selection row (hide for zone-group-id - always time-based)
-                                (when-not zone-group-id?
-                                  {:fx/type driver-row
-                                   :driver driver
-                                   :enabled? enabled?
-                                   :on-driver-change (assoc base-event
-                                                            :event/type :keyframe/set-driver)})
+                               [{:fx/type driver-row
+                                 :driver driver
+                                 :enabled? enabled?
+                                 :on-driver-change (assoc base-event
+                                                          :event/type :keyframe/set-driver)}
                                 
                                 ;; Conditional settings based on driver type
-                                ;; Zone-group-id params always use time settings
                                 (cond
-                                  (and (not zone-group-id?) spatial?)
-                                  ;; Spatial driver settings
+                                  spatial?
                                   {:fx/type spatial-driver-settings-row
                                    :driver driver
                                    :edge-behavior edge-behavior
@@ -585,9 +478,6 @@
                                  :selected-idx selected-idx
                                  :current-phase (when-not spatial? current-phase)
                                  :enabled? enabled?
-                                 :param-type param-type
-                                 :zone-group-colors zone-group-colors
-                                 :param-key param-key
                                  :on-select (assoc base-event
                                                    :event/type :keyframe/select)
                                  :on-add (assoc base-event
@@ -597,18 +487,7 @@
                                  :on-delete (assoc base-event
                                                    :event/type :keyframe/delete)}
                                 
-                                ;; Actions/info row with zone editor for zone-group-id params
                                 {:fx/type actions-row
                                  :keyframes keyframes
                                  :selected-idx selected-idx
-                                 :enabled? enabled?
-                                 :param-type param-type
-                                 :param-key param-key
-                                 :zone-groups zone-groups
-                                 :on-zone-value-change (when zone-group-id?
-                                                         (fn [{:keys [keyframe-idx zone-id]}]
-                                                           ((requiring-resolve 'laser-show.events.core/dispatch!)
-                                                            (assoc base-event
-                                                                   :event/type :keyframe/set-zone-value
-                                                                   :keyframe-idx keyframe-idx
-                                                                   :zone-id zone-id))))}])})])}))
+                                 :enabled? enabled?}])})])}))

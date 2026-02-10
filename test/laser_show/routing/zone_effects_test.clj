@@ -1,9 +1,9 @@
 (ns laser-show.routing.zone-effects-test
   "Unit tests for zone-effects module.
    
-   Tests the new zone-selector effect system:
+   Tests the zone-selector effect system:
    - Zone effect identification  
-   - Zone destination resolution with timing-ctx
+   - Zone destination resolution
    - Item grouping by resolved zone"
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.routing.zone-effects :as zone-effects]
@@ -40,19 +40,6 @@
    :effects [{:effect-id :zone-selector
               :enabled? true
               :params {:target-zone :right}}]
-   :enabled? true})
-
-(def item-with-keyframed-zone-selector
-  "Preset with keyframed zone-selector"
-  {:type :preset
-   :id (random-uuid)
-   :preset-id :circle
-   :effects [{:effect-id :zone-selector
-              :enabled? true
-              :params {:target-zone {:value :all
-                                     :keyframes [{:beat 0.0 :value :left}
-                                                 {:beat 2.0 :value :right}
-                                                 {:beat 4.0 :value :center}]}}}]
    :enabled? true})
 
 (def group-with-zone-selector
@@ -120,47 +107,15 @@
               {:effect-id :translate :enabled? true :params {}}])))))
 
 
-;; evaluate-zone-at-beat tests
+;; evaluate-zone tests
 
-(deftest evaluate-zone-at-beat-test
+(deftest evaluate-zone-test
   (testing "Simple keyword target returns that keyword"
-    (is (= :left (zone/evaluate-zone-at-beat {:target-zone :left} 0.0)))
-    (is (= :right (zone/evaluate-zone-at-beat {:target-zone :right} 5.0))))
+    (is (= :left (zone/evaluate-zone {:target-zone :left})))
+    (is (= :right (zone/evaluate-zone {:target-zone :right}))))
   
-  (testing "Empty keyframes returns base value"
-    (is (= :all (zone/evaluate-zone-at-beat 
-                  {:target-zone {:value :all :keyframes []}} 
-                  0.0))))
-  
-  (testing "Nil keyframes returns base value"
-    (is (= :center (zone/evaluate-zone-at-beat
-                     {:target-zone {:value :center :keyframes nil}}
-                     2.5))))
-  
-  (testing "Step interpolation with keyframes"
-    (let [params {:target-zone {:value :all
-                                :keyframes [{:beat 0.0 :value :left}
-                                            {:beat 2.0 :value :right}
-                                            {:beat 4.0 :value :center}]}}]
-      ;; At beat 0 - exactly at first keyframe
-      (is (= :left (zone/evaluate-zone-at-beat params 0.0)))
-      ;; Between first and second keyframes
-      (is (= :left (zone/evaluate-zone-at-beat params 1.0)))
-      (is (= :left (zone/evaluate-zone-at-beat params 1.999)))
-      ;; At beat 2 - exactly at second keyframe
-      (is (= :right (zone/evaluate-zone-at-beat params 2.0)))
-      ;; Between second and third keyframes
-      (is (= :right (zone/evaluate-zone-at-beat params 3.0)))
-      ;; At beat 4 - exactly at third keyframe  
-      (is (= :center (zone/evaluate-zone-at-beat params 4.0)))
-      ;; After all keyframes
-      (is (= :center (zone/evaluate-zone-at-beat params 10.0)))))
-  
-  (testing "Beat before first keyframe returns base value"
-    (let [params {:target-zone {:value :all
-                                :keyframes [{:beat 1.0 :value :left}]}}]
-      (is (= :all (zone/evaluate-zone-at-beat params 0.0)))
-      (is (= :all (zone/evaluate-zone-at-beat params 0.5))))))
+  (testing "Missing target-zone defaults to :all"
+    (is (= :all (zone/evaluate-zone {})))))
 
 
 ;; resolve-item-zone-destination tests
@@ -204,27 +159,7 @@
              (zone-effects/resolve-item-zone-destination
                item-disabled-effect
                default-destination
-               (make-timing-ctx 0.0))))))
-  
-  (testing "Keyframed zone-selector evaluates at current beat"
-    ;; At beat 0 → :left
-    (is (= :left
-           (zone-effects/resolve-item-zone-destination
-             item-with-keyframed-zone-selector
-             default-destination
-             (make-timing-ctx 0.0))))
-    ;; At beat 2.0 → :right
-    (is (= :right
-           (zone-effects/resolve-item-zone-destination
-             item-with-keyframed-zone-selector
-             default-destination
-             (make-timing-ctx 2.0))))
-    ;; At beat 4.0 → :center
-    (is (= :center
-           (zone-effects/resolve-item-zone-destination
-             item-with-keyframed-zone-selector
-             default-destination
-             (make-timing-ctx 4.0))))))
+               (make-timing-ctx 0.0)))))))
 
 
 ;; group-items-by-zone tests
@@ -268,16 +203,4 @@
       ;; Group routes to :center
       (is (= 1 (count (keys result))))
       (is (= 1 (count (:center result))))
-      (is (= group-with-zone-selector (first (:center result))))))
-  
-  (testing "Keyframed zone-selector groups change with beat position"
-    (let [items [item-with-keyframed-zone-selector]]
-      ;; At beat 0 → :left
-      (let [result (zone-effects/group-items-by-zone items default-destination (make-timing-ctx 0.0))]
-        (is (= #{:left} (set (keys result)))))
-      ;; At beat 2 → :right
-      (let [result (zone-effects/group-items-by-zone items default-destination (make-timing-ctx 2.0))]
-        (is (= #{:right} (set (keys result)))))
-      ;; At beat 4 → :center
-      (let [result (zone-effects/group-items-by-zone items default-destination (make-timing-ctx 4.0))]
-        (is (= #{:center} (set (keys result))))))))
+      (is (= group-with-zone-selector (first (:center result)))))))

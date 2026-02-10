@@ -7,7 +7,7 @@
    - Rotation: Circular dial for angle adjustment
    - Scale: Rectangle with edge/corner handles for X/Y scaling
    - RGB Curves: Photoshop-style curve editor for color channel adjustment
-   - Zone Reroute: Zone group selector for routing effects
+   - Zone Selector: Simple zone group dropdown for routing effects
    - Hue Slider: Horizontal gradient for hue selection
    
    All visual editors use the event-template pattern:
@@ -31,12 +31,8 @@
 
             [laser-show.views.components.visual-editors.oklab-hue-shift-canvas :as oklab-hue-shift-canvas]
             [laser-show.views.components.tabs :as tabs]
-            [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.views.components.modulator-param-control :as mod-param]
-            [clj-font-awesome.core :as fa])
-  (:import [javafx.scene.canvas Canvas]
-           [javafx.scene.input MouseEvent MouseButton]
-           [javafx.event EventHandler]))
+            [clj-font-awesome.core :as fa]))
 
 
 ;; Translate Effect Visual Editor
@@ -495,400 +491,55 @@
                  :event-template event-template
                  :channel active-channel
                  :current-points active-points}]}))
-;; Zone Selector Visual Editor - Keyframeable Zone Selection
+;; Zone Selector Visual Editor - Simple Zone Group Dropdown
 
-
-(defn- beat-to-x
-  "Convert beat position to canvas X coordinate."
-  ^double [^double beat ^double loop-length ^double width ^double padding]
-  (let [usable-width (- width (* 2 padding))]
-    (+ padding (* (/ beat loop-length) usable-width))))
-
-(defn- x-to-beat
-  "Convert canvas X coordinate to beat position."
-  ^double [^double x ^double loop-length ^double width ^double padding]
-  (let [usable-width (- width (* 2 padding))
-        clamped-x (max padding (min (- width padding) x))]
-    (* (/ (- clamped-x padding) usable-width) loop-length)))
-
-(defn- zone-color
-  "Get the color for a zone-id from zone groups list."
-  [zone-groups zone-id]
-  (or (some #(when (= (:id %) zone-id) (:color %)) zone-groups)
-      "#666666"))
-
-(defn- zone-name
-  "Get the name for a zone-id from zone groups list."
-  [zone-groups zone-id]
-  (or (some #(when (= (:id %) zone-id) (:name %)) zone-groups)
-      (if (= zone-id :all) "All" (str zone-id))))
-
-(defn- compute-zone-segments
-  "Compute zone segments from keyframes for rendering.
-   Each segment spans from one keyframe beat to the next.
-   Returns: [{:start-beat :end-beat :zone-id :keyframe-idx} ...]"
-  [keyframes base-zone loop-length]
-  (if (empty? keyframes)
-    ;; No keyframes - single segment covering entire timeline
-    [{:start-beat 0.0
-      :end-beat loop-length
-      :zone-id base-zone
-      :keyframe-idx nil}]
-    ;; Build segments from keyframes
-    (let [sorted-kfs (vec (sort-by :beat keyframes))
-          first-kf (first sorted-kfs)
-          ;; Add base segment before first keyframe if it doesn't start at 0
-          initial-segments (when (> (:beat first-kf) 0.0)
-                             [{:start-beat 0.0
-                               :end-beat (:beat first-kf)
-                               :zone-id base-zone
-                               :keyframe-idx nil}])
-          ;; Create segments for each keyframe
-          kf-segments (for [i (range (count sorted-kfs))]
-                        (let [kf (nth sorted-kfs i)
-                              next-beat (if (< i (dec (count sorted-kfs)))
-                                          (:beat (nth sorted-kfs (inc i)))
-                                          loop-length)]
-                          {:start-beat (:beat kf)
-                           :end-beat next-beat
-                           :zone-id (:value kf)
-                           :keyframe-idx i}))]
-      (vec (concat initial-segments kf-segments)))))
-
-(defn- find-segment-at-x
-  "Find which segment contains the given x coordinate."
-  [segments x loop-length width padding]
-  (let [beat (x-to-beat x loop-length width padding)]
-    (first (filter #(and (>= beat (:start-beat %))
-                         (< beat (:end-beat %)))
-                   segments))))
-
-(defn zone-timeline-canvas
-  "Canvas showing zone keyframes as colored segments over time.
-   
-   Unlike the standard keyframe-timeline which shows diamond markers,
-   this shows filled rectangular segments because zone values use
-   step interpolation - the zone holds until the next keyframe.
-   
-   Props:
-   - :width, :height - Canvas dimensions (default 400x80)
-   - :zone-groups - List of zone groups with :id, :name, :color
-   - :keyframes - [{:beat 0.0 :value :left} ...]
-   - :base-value - Default zone when no keyframe applies
-   - :loop-length - Total timeline length in beats
-   - :selected-idx - Index of selected keyframe segment
-   - :on-segment-click - Event when segment is clicked
-   - :on-add-keyframe - Event to add keyframe at beat
-   - :on-delete-keyframe - Event to delete keyframe
-   - :on-select - Event when keyframe is selected"
-  [{:keys [width height zone-groups keyframes base-value loop-length
-           selected-idx on-segment-click on-add-keyframe on-delete-keyframe on-select]
-    :or {width 400 height 80 loop-length 8.0}}]
-  (let [padding 20.0
-        bar-y 30.0
-        bar-height 30.0
-        segments (compute-zone-segments keyframes base-value loop-length)]
-
-    {:fx/type fx/ext-on-instance-lifecycle
-     :on-created
-     (fn [^Canvas canvas]
-       (let [gc (.getGraphicsContext2D canvas)
-             ;; Internal state
-             hover-segment-atom (atom nil)
-             selected-atom (atom selected-idx)]
-
-         (letfn [(render! []
-                   (let [hover-seg @hover-segment-atom
-                         sel-idx @selected-atom]
-                     ;; Background
-                     (.setFill gc (javafx.scene.paint.Color/web "#1E1E1E"))
-                     (.fillRect gc 0 0 width height)
-
-                     ;; Draw beat markers
-                     (.setStroke gc (javafx.scene.paint.Color/web "#444444"))
-                     (.setLineWidth gc 1.0)
-                     (.setFill gc (javafx.scene.paint.Color/web "#888888"))
-                     (.setFont gc (javafx.scene.text.Font/font "System" 9.0))
-                     (.setTextAlign gc javafx.scene.text.TextAlignment/CENTER)
-
-                     (doseq [beat (range (inc (int loop-length)))]
-                       (let [x (beat-to-x beat loop-length width padding)]
-                         (.strokeLine gc x (- bar-y 5) x (+ bar-y bar-height 5))
-                         (.fillText gc (str beat) x (- bar-y 10))))
-
-                     ;; Draw zone segments
-                     (doseq [seg segments]
-                       (let [x1 (beat-to-x (:start-beat seg) loop-length width padding)
-                             x2 (beat-to-x (:end-beat seg) loop-length width padding)
-                             seg-width (- x2 x1)
-                             color (zone-color zone-groups (:zone-id seg))
-                             is-selected? (and (:keyframe-idx seg)
-                                               (= (:keyframe-idx seg) sel-idx))
-                             is-hovered? (= seg hover-seg)]
-                         ;; Segment background
-                         (.setFill gc (javafx.scene.paint.Color/web color (if is-hovered? 0.9 0.7)))
-                         (.fillRoundRect gc x1 bar-y seg-width bar-height 4 4)
-
-                         ;; Selection border
-                         (when is-selected?
-                           (.setStroke gc (javafx.scene.paint.Color/web "#FFFFFF"))
-                           (.setLineWidth gc 2.0)
-                           (.strokeRoundRect gc x1 bar-y seg-width bar-height 4 4))
-
-                         ;; Zone name label (if segment wide enough)
-                         (when (> seg-width 40)
-                           (let [name (zone-name zone-groups (:zone-id seg))
-                                 center-x (+ x1 (/ seg-width 2))
-                                 center-y (+ bar-y (/ bar-height 2) 4)]
-                             (.setFill gc (javafx.scene.paint.Color/web "#FFFFFF"))
-                             (.setFont gc (javafx.scene.text.Font/font "System" javafx.scene.text.FontWeight/BOLD 10.0))
-                             (.fillText gc name center-x center-y)))))
-
-                     ;; Draw keyframe markers (small triangles above segments)
-                     (doseq [[idx kf] (map-indexed vector (or keyframes []))]
-                       (let [x (beat-to-x (:beat kf) loop-length width padding)
-                             is-selected? (= idx sel-idx)]
-                         (.setFill gc (javafx.scene.paint.Color/web (if is-selected? "#FFD700" "#FFFFFF")))
-                         (.fillPolygon gc
-                                       (double-array [(- x 5) x (+ x 5)])
-                                       (double-array [(- bar-y 2) (- bar-y 8) (- bar-y 2)])
-                                       3)))))]
-
-           ;; Mouse click handler
-           (.setOnMouseClicked
-            canvas
-            (reify EventHandler
-              (handle [_ e]
-                (let [mx (.getX e)
-                      my (.getY e)
-                      button (.getButton e)
-                      seg (find-segment-at-x segments mx loop-length width padding)]
-                  (cond
-                    ;; Right-click on segment with keyframe - delete it
-                    (and (= button MouseButton/SECONDARY)
-                         seg
-                         (:keyframe-idx seg)
-                         on-delete-keyframe)
-                    (do
-                      (events/dispatch! (assoc on-delete-keyframe :keyframe-idx (:keyframe-idx seg)))
-                      (render!))
-
-                    ;; Left-click on segment - select and open zone picker
-                    (and (= button MouseButton/PRIMARY) seg)
-                    (do
-                      (when (:keyframe-idx seg)
-                        (reset! selected-atom (:keyframe-idx seg))
-                        (when on-select
-                          (events/dispatch! (assoc on-select :keyframe-idx (:keyframe-idx seg)))))
-                      (when on-segment-click
-                        (events/dispatch! (assoc on-segment-click
-                                                 :beat (:start-beat seg)
-                                                 :keyframe-idx (:keyframe-idx seg)
-                                                 :current-zone (:zone-id seg))))
-                      (render!))
-
-                    ;; Double-click to add keyframe
-                    (and (= button MouseButton/PRIMARY)
-                         (= (.getClickCount e) 2)
-                         on-add-keyframe)
-                    (let [beat (x-to-beat mx loop-length width padding)]
-                      (events/dispatch! (assoc on-add-keyframe :beat beat))
-                      (render!)))))))
-
-           ;; Mouse move for hover
-           (.setOnMouseMoved
-            canvas
-            (reify EventHandler
-              (handle [_ e]
-                (let [mx (.getX e)
-                      my (.getY e)
-                      seg (when (and (>= my bar-y) (<= my (+ bar-y bar-height)))
-                            (find-segment-at-x segments mx loop-length width padding))]
-                  (when (not= seg @hover-segment-atom)
-                    (reset! hover-segment-atom seg)
-                    (render!))
-                  (if seg
-                    (.setStyle canvas "-fx-cursor: hand;")
-                    (.setStyle canvas "-fx-cursor: default;"))))))
-
-           ;; Mouse exit - clear hover
-           (.setOnMouseExited
-            canvas
-            (reify EventHandler
-              (handle [_ e]
-                (when @hover-segment-atom
-                  (reset! hover-segment-atom nil)
-                  (render!)))))
-
-           ;; Initial render
-           (render!))))
-
-     :desc {:fx/type :canvas
-            :width width
-            :height height
-            :style "-fx-cursor: default;"}}))
-
-(defn- zone-selector-dropdown
-  "Dropdown for selecting default/base zone.
-   Props:
-   - :zone-groups - List of available zone groups
-   - :selected-zone - Currently selected zone-group-id
-   - :on-change - Event to dispatch on selection change"
-  [{:keys [zone-groups selected-zone on-change]}]
-  (let [;; Build items list with :all option first
-        all-option {:id :all :name "All" :color "#888888"}
-        items (into [all-option] zone-groups)
-        selected-item (or (first (filter #(= (:id %) selected-zone) items))
-                          all-option)]
-    {:fx/type :combo-box
-     :value selected-item
-     :items items
-     :button-cell (fn [item]
-                    {:text (or (:name item) "Select Zone")
-                     :graphic (when item
-                                {:fx/type :circle
-                                 :radius 6
-                                 :fill (or (:color item) "#666666")})})
-     :cell-factory {:fx/cell-type :list-cell
-                    :describe (fn [item]
-                                {:text (or (:name item) "")
-                                 :graphic (when item
-                                            {:fx/type :circle
-                                             :radius 6
-                                             :fill (or (:color item) "#666666")})})}
-     :on-value-changed (fn [new-item]
-                         (when (and on-change new-item)
-                           (events/dispatch! (assoc on-change :value (:id new-item)))))}))
 
 (defn zone-selector-visual-editor
-  "Visual editor for zone-selector effect with keyframeable zone selection.
-   
+  "Simple zone group selector dropdown.
+
    Props:
    - :fx/context - cljfx context (required for zone groups subscription)
-   - :current-params - {:target-zone :all, :keyframes [...], :loop-length 8.0}
+   - :current-params - {:target-zone :all}
    - :event-template - Base event with :domain, :entity-key, :effect-path"
   [{:keys [fx/context current-params event-template]}]
   (let [{:keys [domain entity-key effect-path]} event-template
         zone-groups (fx/sub-ctx context subs/zone-groups-list)
-
-        ;; Extract params
         target-zone (get current-params :target-zone :all)
-        keyframes (get current-params :keyframes [])
-        loop-length (get current-params :loop-length 8.0)
-
-        ;; Build event templates for sub-components
-        base-zone-change-event {:event/type :chain/update-param
-                                :domain domain
-                                :entity-key entity-key
-                                :effect-path effect-path
-                                :param-key :target-zone}
-
-        add-keyframe-event {:event/type :keyframe/add-zone-keyframe
-                            :domain domain
-                            :entity-key entity-key
-                            :effect-path effect-path}
-
-        update-zone-event {:event/type :keyframe/update-zone-value
-                           :domain domain
-                           :entity-key entity-key
-                           :effect-path effect-path}
-
-        delete-keyframe-event {:event/type :keyframe/delete-zone-keyframe
-                               :domain domain
-                               :entity-key entity-key
-                               :effect-path effect-path}
-
-        select-keyframe-event {:event/type :keyframe/select-zone-keyframe
-                               :domain domain
-                               :entity-key entity-key
-                               :effect-path effect-path}
-
-        loop-length-event {:event/type :keyframe/set-zone-loop-length
-                           :domain domain
-                           :entity-key entity-key
-                           :effect-path effect-path}]
-
+        all-option {:id :all :name "All" :color "#888888"}
+        items (into [all-option] zone-groups)
+        selected-item (or (first (filter #(= (:id %) target-zone) items))
+                          all-option)]
     {:fx/type :v-box
-     :spacing 12
+     :spacing 8
      :padding 12
-     :style-class ["card"]
-     :children [;; Header
-                {:fx/type :label
-                 :text "Zone Selector"
-                 :style-class ["label-section-header"]}
-
-                ;; Default zone dropdown
-                {:fx/type :h-box
-                 :spacing 8
-                 :alignment :center-left
-                 :children [{:fx/type :label
-                             :text "Default Zone:"
-                             :style-class ["label-hint"]}
-                            {:fx/type zone-selector-dropdown
-                             :zone-groups zone-groups
-                             :selected-zone target-zone
-                             :on-change base-zone-change-event}]}
-
-                ;; Timeline section
-                {:fx/type :v-box
-                 :spacing 8
-                 :children [{:fx/type :h-box
-                             :spacing 8
-                             :alignment :center-left
-                             :children [{:fx/type :label
-                                         :text "Timeline:"
-                                         :style-class ["label-hint"]}
-                                        {:fx/type :region
-                                         :h-box/hgrow :always}
-                                        {:fx/type :label
-                                         :text "Loop:"
-                                         :style-class ["label-hint"]}
-                                        {:fx/type :spinner
-                                         :style-class ["spinner-small"]
-                                         :value-factory {:fx/type :double-spinner-value-factory
-                                                         :min 1.0
-                                                         :max 64.0
-                                                         :value loop-length
-                                                         :amount-to-step-by 1.0}
-                                         :editable true
-                                         :pref-width 70
-                                         :on-value-changed (assoc loop-length-event :fx/event-key :value)}
-                                        {:fx/type :label
-                                         :text "beats"
-                                         :style-class ["label-hint"]}]}
-
-                            ;; Zone timeline canvas
-                            {:fx/type zone-timeline-canvas
-                             :width 380
-                             :height 80
-                             :zone-groups zone-groups
-                             :keyframes keyframes
-                             :base-value target-zone
-                             :loop-length loop-length
-                             :selected-idx nil
-                             :on-segment-click update-zone-event
-                             :on-add-keyframe add-keyframe-event
-                             :on-delete-keyframe delete-keyframe-event
-                             :on-select select-keyframe-event}]}
-
-                ;; Add keyframe controls
-                {:fx/type :h-box
-                 :spacing 8
-                 :alignment :center-left
-                 :children [{:fx/type :button
-                             :text "Add Keyframe"
-                             :style-class ["btn-secondary" "btn-small"]
-                             :graphic {:fx/type fa/icon :name :plus :size 10}
-                             :on-action (assoc add-keyframe-event :beat 0.0 :value target-zone)}
-                            {:fx/type :region
-                             :h-box/hgrow :always}
-                            {:fx/type :label
-                             :text "Click timeline to add • Right-click to delete"
-                             :style-class ["label-hint"]
-                             :style "-fx-font-size: 9;"}]}]}))
-
-
-
+     :children [{:fx/type :label
+                 :text "Target Zone:"
+                 :style-class ["label-hint"]}
+                {:fx/type :combo-box
+                 :value selected-item
+                 :items items
+                 :button-cell (fn [item]
+                                {:text (or (:name item) "Select Zone")
+                                 :graphic (when item
+                                            {:fx/type :circle
+                                             :radius 6
+                                             :fill (or (:color item) "#666666")})})
+                 :cell-factory {:fx/cell-type :list-cell
+                                :describe (fn [item]
+                                            {:text (or (:name item) "")
+                                             :graphic (when item
+                                                        {:fx/type :circle
+                                                         :radius 6
+                                                         :fill (or (:color item) "#666666")})})}
+                 :on-value-changed (fn [new-item]
+                                     (when new-item
+                                       (events/dispatch!
+                                        {:event/type :chain/update-param
+                                         :domain domain
+                                         :entity-key entity-key
+                                         :effect-path effect-path
+                                         :param-key :target-zone
+                                         :value (:id new-item)})))}]}))
 
 ;; Hue Slider Visual Editor (for Set Hue effect - 0-360 range)
 

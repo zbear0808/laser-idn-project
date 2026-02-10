@@ -1,9 +1,8 @@
 (ns laser-show.routing.zone-effects
   "Zone effect processing - determines routing targets per item.
    
-   Zone effects are evaluated at render time using the current beat position.
-   The zone-selector effect allows keyframeable zone group selection with
-   step interpolation between keyframes.
+   Zone effects are evaluated at render time. The zone-selector effect
+   specifies a static zone group destination.
    
    Main Entry Point: group-items-by-zone - groups cue chain items by destination zone"
   (:require [clojure.tools.logging :as log]
@@ -76,27 +75,26 @@
 (defn resolve-item-zone-destination
   "Determine which zone group an item should route to.
    
-   Finds the first zone-selector effect on the item and evaluates it
-   at the current beat position. If no zone-selector effect exists,
+   Finds the first zone-selector effect on the item and reads its
+   :target-zone parameter. If no zone-selector effect exists,
    returns the cue chain's default destination.
    
    Args:
    - item: A cue chain item with :effects vector
    - cue-chain-destination: The cue chain's :destination-zone map
-   - timing-ctx: Timing context with :effective-beats for keyframe eval
+   - timing-ctx: Timing context (kept for API compatibility)
    
    Returns: Single zone-group-id keyword"
   [item cue-chain-destination timing-ctx]
   (let [zone-effects (item-zone-effects item)
-        effective-beats (:effective-beats timing-ctx 0.0)
         default-zone (or (:zone-group-id cue-chain-destination) :all)
         zone-selector (first (filter #(= :zone-selector (:effect-id %)) zone-effects))
         result (if zone-selector
-                 (zone/evaluate-zone-at-beat (:params zone-selector) effective-beats)
+                 (zone/evaluate-zone (:params zone-selector))
                  default-zone)]
     (log-once [:resolve-item (:id item)]
-              (format "[zone-debug] resolve-item: id=%s beat=%.2f result=%s"
-                      (:id item) (double effective-beats) result))
+              (format "[zone-debug] resolve-item: id=%s result=%s"
+                      (:id item) result))
     result))
 
 (defn group-items-by-zone

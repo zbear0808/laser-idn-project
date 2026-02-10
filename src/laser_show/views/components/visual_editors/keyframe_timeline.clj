@@ -10,12 +10,7 @@
    - Current playback position indicator (vertical line)
    - Hover states with position display
    
-   For :zone-group-id value types:
-   - Shows colored step segments instead of a line
-   - Each segment represents the zone value from one keyframe to the next
-   - Segments are colored according to zone-group-colors map
-   
-   Visual design (numeric):
+   Visual design:
    ┌────────────────────────────────────────────────────────────────┐
    │  0%                    50%                               100%  │
    │  ├─────────────────────┼─────────────────────────────────┤    │
@@ -25,17 +20,6 @@
    │                           ↑ playback indicator                 │
    └────────────────────────────────────────────────────────────────┘
    
-   Visual design (zone-group-id):
-   ┌────────────────────────────────────────────────────────────────┐
-   │  0%                    50%                               100%  │
-   │  ├─────────────────────┼─────────────────────────────────┤    │
-   │  ┌──────────┬──────────────────┬─────────────────────────┐    │
-   │  │  left    │  center          │  right                  │    │
-   │  │  #F55    │  #55F            │  #5F5                   │    │
-   │  └──────────┴──────────────────┴─────────────────────────┘    │
-   │      ◆            ◆                   ◆                       │
-   └────────────────────────────────────────────────────────────────┘
-   
    Usage:
    {:fx/type keyframe-timeline
     :width 400
@@ -43,9 +27,6 @@
     :keyframes [{:position 0.0 :params {...}} ...]
     :selected-idx 0
     :current-phase 0.35
-    :value-type :zone-group-id  ; or :numeric (default)
-    :zone-group-colors {:left \"#FF5555\" :center \"#5555FF\" :all \"#888888\"}
-    :param-key :target-zone
     :on-select {:event/type :keyframe/select ...}
     :on-add {:event/type :keyframe/add ...}
     :on-move {:event/type :keyframe/move ...}
@@ -74,12 +55,6 @@
 (def ^:private hover-color "#FFFFFF")
 (def ^:private timeline-bg-color "#2A2A2A")
 (def ^:private timeline-border-color "#444444")
-
-;; Step segment constants (for zone-group-id visualization)
-(def ^:private segment-bar-y (+ padding-top 2))
-(def ^:private segment-bar-height 14)
-(def ^:private default-zone-color "#888888")
-
 
 ;; Coordinate Transformations
 
@@ -221,113 +196,6 @@
           (.fillText gc text tx ty))))))
 
 
-;; Step-based visualization functions (for zone-group-id parameters)
-
-
-(defn- get-zone-value-from-keyframe
-  "Extract the zone-group-id value from a keyframe's params."
-  [kf param-key]
-  (get-in kf [:params param-key] :all))
-
-(defn- draw-step-segments
-  "Draw colored segments for step-based keyframe visualization.
-   Each segment spans from one keyframe position to the next.
-   
-   Args:
-   - gc: GraphicsContext
-   - width: Canvas width
-   - height: Canvas height
-   - keyframes: Vector of keyframe maps with :position and :params
-   - zone-group-colors: Map of zone-group-id to color string
-   - param-key: Parameter key for accessing zone value in keyframe params
-   - selected-idx: Index of selected keyframe (for highlighting)
-   - hover-idx: Index of hovered keyframe"
-  [^GraphicsContext gc width height
-   keyframes zone-group-colors param-key selected-idx hover-idx]
-  (let [sorted-kfs (vec (sort-by :position keyframes))
-        n (count sorted-kfs)
-        bar-y segment-bar-y
-        bar-height segment-bar-height]
-    (when (pos? n)
-      (doseq [[idx kf] (map-indexed vector sorted-kfs)]
-        (let [;; Get zone-group-id from params using the param key
-              zone-id (get-zone-value-from-keyframe kf param-key)
-              color (get zone-group-colors zone-id default-zone-color)
-              
-              ;; Calculate segment bounds
-              start-x (position-to-x (:position kf) width)
-              end-x (if (< idx (dec n))
-                      (position-to-x (:position (nth sorted-kfs (inc idx))) width)
-                      (- width padding-right))
-              segment-width (- end-x start-x)
-              
-              ;; Check selection/hover state
-              selected? (= idx selected-idx)
-              hovered? (= idx hover-idx)]
-          
-          ;; Draw segment rectangle
-          (.setFill gc (Color/web color (cond
-                                          selected? 1.0
-                                          hovered? 0.9
-                                          :else 0.75)))
-          (.fillRoundRect gc start-x bar-y segment-width bar-height 3 3)
-          
-          ;; Draw selection border
-          (when selected?
-            (.setStroke gc (Color/web "#FFFFFF"))
-            (.setLineWidth gc 2.0)
-            (.strokeRoundRect gc start-x bar-y segment-width bar-height 3 3))
-          
-          ;; Draw zone label inside segment if wide enough
-          (when (> segment-width 40)
-            (.setFill gc (Color/web "#000000" 0.8))
-            (.setFont gc (Font/font "System" 9.0))
-            (.setTextAlign gc TextAlignment/CENTER)
-            (.fillText gc (if (keyword? zone-id) (name zone-id) (str zone-id))
-                       (+ start-x (/ segment-width 2))
-                       (+ bar-y 10))))))))
-
-(defn- draw-step-keyframe-markers
-  "Draw keyframe markers below step segments (small triangles pointing up)."
-  [^GraphicsContext gc width height keyframes selected-idx hover-idx]
-  (let [marker-y (+ segment-bar-y segment-bar-height 4)]
-    (doseq [[idx kf] (map-indexed vector keyframes)]
-      (let [x (position-to-x (:position kf) width)
-            selected? (= idx selected-idx)
-            hovered? (= idx hover-idx)
-            color (cond selected? selected-color
-                        hovered? hover-color
-                        :else normal-color)]
-        ;; Small triangle pointing up at segment boundary
-        (.setFill gc (Color/web color))
-        (.fillPolygon gc
-                      (double-array [(- x 4) x (+ x 4)])
-                      (double-array [(+ marker-y 6) marker-y (+ marker-y 6)])
-                      3)))))
-
-(defn- draw-zone-position-tooltip
-  "Draw zone name tooltip for step visualization."
-  [^GraphicsContext gc width height keyframes hover-idx param-key zone-group-colors]
-  (let [width (double width)]
-    (when hover-idx
-      (when-let [kf (nth keyframes hover-idx nil)]
-        (let [x (position-to-x (:position kf) width)
-              y segment-bar-y
-              zone-id (get-zone-value-from-keyframe kf param-key)
-              zone-name (if (keyword? zone-id) (name zone-id) (str zone-id))
-              position-text (format "%.0f%%" (* 100 (:position kf)))
-              text (str zone-name " @ " position-text)
-              tx (+ x 12)
-              ty (- y 4)
-              text-width (+ 20 (* 6 (count text)))]
-          (.setFill gc (Color/web "#000000" 0.9))
-          (.fillRoundRect gc (- tx 4) (- ty 10) text-width 14 3 3)
-          (.setFill gc (Color/web "#FFFFFF"))
-          (.setFont gc (Font/font "Consolas" FontWeight/NORMAL 10.0))
-          (.setTextAlign gc TextAlignment/LEFT)
-          (.fillText gc text tx ty))))))
-
-
 ;; Hit Testing
 
 
@@ -361,53 +229,37 @@
    - :keyframes - Vector of {:position :params} maps
    - :selected-idx - Index of currently selected keyframe
    - :current-phase - Current playback position (0.0-1.0) for preview
-   - :value-type - :numeric (default) or :zone-group-id for step visualization
-   - :zone-group-colors - Map of zone-group-id to color (for :zone-group-id mode)
-   - :param-key - Parameter key for zone value lookup (for :zone-group-id mode)
    - :on-select - Event template for selecting keyframe (receives :keyframe-idx)
    - :on-add - Event template for adding keyframe (receives :position)
    - :on-move - Event template for moving keyframe (receives :keyframe-idx :new-position)
    - :on-delete - Event template for deleting keyframe (receives :keyframe-idx)"
   [{:keys [width height keyframes selected-idx current-phase
-           value-type zone-group-colors param-key
            on-select on-add on-move on-delete]
-    :or {width 400 height 60 value-type :numeric}}]
+    :or {width 400 height 60}}]
   
-  (let [zone-group-id? (= value-type :zone-group-id)]
-    {:fx/type fx/ext-on-instance-lifecycle
-     :on-created
-     (fn [^Canvas canvas]
-       (let [gc (.getGraphicsContext2D canvas)
-             ;; Internal state for interaction
-             drag-state (atom {:dragging? false
-                               :keyframe-idx nil
-                               :hover-idx nil})
-             keyframes-atom (atom (or keyframes []))
-             selected-atom (atom selected-idx)
-             phase-atom (atom current-phase)]
-         
-         ;; Render function - differs based on value-type
-         (letfn [(render! []
-                   (let [kfs @keyframes-atom
-                         sel-idx @selected-atom
-                         phase @phase-atom
-                         hover-idx (:hover-idx @drag-state)]
-                     (draw-background gc width height)
-                     (if zone-group-id?
-                       ;; Zone-group-id step visualization
-                       (do
-                         (draw-tick-marks gc width height)
-                         (draw-step-segments gc width height kfs zone-group-colors param-key sel-idx hover-idx)
-                         (draw-step-keyframe-markers gc width height kfs sel-idx hover-idx)
-                         (draw-playhead gc width height phase)
-                         (draw-zone-position-tooltip gc width height kfs hover-idx param-key zone-group-colors))
-                       ;; Standard numeric visualization
-                       (do
-                         (draw-timeline-bar gc width height)
-                         (draw-tick-marks gc width height)
-                         (draw-keyframe-markers gc width height kfs sel-idx hover-idx)
-                         (draw-playhead gc width height phase)
-                         (draw-position-tooltip gc width height kfs hover-idx)))))]
+  {:fx/type fx/ext-on-instance-lifecycle
+   :on-created
+   (fn [^Canvas canvas]
+     (let [gc (.getGraphicsContext2D canvas)
+           ;; Internal state for interaction
+           drag-state (atom {:dragging? false
+                             :keyframe-idx nil
+                             :hover-idx nil})
+           keyframes-atom (atom (or keyframes []))
+           selected-atom (atom selected-idx)
+           phase-atom (atom current-phase)]
+       
+       (letfn [(render! []
+                 (let [kfs @keyframes-atom
+                       sel-idx @selected-atom
+                       phase @phase-atom
+                       hover-idx (:hover-idx @drag-state)]
+                   (draw-background gc width height)
+                   (draw-timeline-bar gc width height)
+                   (draw-tick-marks gc width height)
+                   (draw-keyframe-markers gc width height kfs sel-idx hover-idx)
+                   (draw-playhead gc width height phase)
+                   (draw-position-tooltip gc width height kfs hover-idx)))]
          
          ;; Mouse pressed - start drag, select, or add keyframe
          (.setOnMousePressed
@@ -520,10 +372,10 @@
                 (swap! drag-state assoc :hover-idx nil)
                 (render!)))))
          
-          ;; Initial render
-          (render!))))
-    
-    :desc {:fx/type :canvas
-           :width width
-           :height height
-           :style "-fx-cursor: crosshair;"}}))
+         ;; Initial render
+         (render!))))
+   
+   :desc {:fx/type :canvas
+          :width width
+          :height height
+          :style "-fx-cursor: crosshair;"}})

@@ -1,13 +1,12 @@
 (ns laser-show.routing.zone-routing-integration-test
   "Integration tests for zone-selector effect routing.
    
-   Tests the new simplified zone routing system where:
-   - A single zone-selector effect determines routing destination
-   - Zone selection supports keyframeable animation with step interpolation
+   Tests the simplified zone routing system where:
+   - A single zone-selector effect determines routing destination (static)
    - Groups with zone-selector route all children to the group's destination
    
    Key Functions Under Test:
-   - laser-show.animation.effects.zone/evaluate-zone-at-beat
+   - laser-show.animation.effects.zone/evaluate-zone
    - laser-show.routing.zone-effects/resolve-item-zone-destination
    - laser-show.routing.zone-effects/group-items-by-zone
    - laser-show.services.frame-service/generate-frames-by-zone"
@@ -31,13 +30,6 @@
   "Set of all available zone groups for testing."
   #{:left :center :right :all})
 
-(def standard-test-keyframes
-  "Standard keyframes used across tests for consistency."
-  [{:beat 0.0 :value :left}
-   {:beat 2.0 :value :right}
-   {:beat 4.0 :value :center}])
-
-
 ;; ============================================================================
 ;; Test Cue Chain Fixtures
 ;; ============================================================================
@@ -57,22 +49,6 @@
             :effects [{:effect-id :zone-selector
                        :enabled? true
                        :params {:target-zone :left}}]}]})
-
-(def test-cue-chain-animated-zone-selector
-  "Cue chain with keyframed zone-selector for animated routing."
-  {:id "cue-chain-animated"
-   :name "Animated Zone Selector Test"
-   :destination-zone {:zone-group-id :all}
-   :items [{:id "preset-animated"
-            :type :preset
-            :name "Shape with animated zone"
-            :enabled? true
-            :preset-id :square
-            :params {:size 0.5 :num-points 16 :red 0.0 :green 1.0 :blue 0.0}
-            :effects [{:effect-id :zone-selector
-                       :enabled? true
-                       :params {:target-zone {:value :all
-                                              :keyframes standard-test-keyframes}}}]}]})
 
 (def test-cue-chain-no-zone-effect
   "Cue chain with no zone-selector effect (uses default destination)."
@@ -185,80 +161,18 @@
 
 
 ;; ============================================================================
-;; Unit Tests: evaluate-zone-at-beat
+;; Unit Tests: evaluate-zone
 ;; ============================================================================
 
 
-(deftest evaluate-zone-at-beat-no-keyframes-test
-  (testing "No keyframes returns base value"
-    ;; Simple keyword value
-    (is (= :all (zone/evaluate-zone-at-beat {:target-zone :all} 0.0)))
-    (is (= :left (zone/evaluate-zone-at-beat {:target-zone :left} 5.0)))
-    (is (= :right (zone/evaluate-zone-at-beat {:target-zone :right} 100.0)))
-    
-    ;; Map with empty keyframes
-    (is (= :center (zone/evaluate-zone-at-beat 
-                     {:target-zone {:value :center :keyframes []}} 
-                     0.0)))
-    
-    ;; Map with nil keyframes
-    (is (= :left (zone/evaluate-zone-at-beat 
-                   {:target-zone {:value :left :keyframes nil}} 
-                   2.5)))))
+(deftest evaluate-zone-test
+  (testing "Simple keyword target returns that keyword"
+    (is (= :all (zone/evaluate-zone {:target-zone :all})))
+    (is (= :left (zone/evaluate-zone {:target-zone :left})))
+    (is (= :right (zone/evaluate-zone {:target-zone :right}))))
 
-
-(deftest evaluate-zone-at-beat-step-interpolation-test
-  (testing "Step interpolation returns last keyframe at or before current beat"
-    (let [params {:target-zone {:value :all
-                                :keyframes standard-test-keyframes}}]
-      
-      ;; At beat 0 - exactly at first keyframe
-      (is (= :left (zone/evaluate-zone-at-beat params 0.0)))
-      
-      ;; At beat 0.5 - between keyframes, use last (at 0.0)
-      (is (= :left (zone/evaluate-zone-at-beat params 0.5)))
-      
-      ;; At beat 1.0 - between keyframes, use last (at 0.0)
-      (is (= :left (zone/evaluate-zone-at-beat params 1.0)))
-      
-      ;; At beat 1.999 - still before 2.0 keyframe
-      (is (= :left (zone/evaluate-zone-at-beat params 1.999)))
-      
-      ;; At beat 2.0 - exactly at second keyframe
-      (is (= :right (zone/evaluate-zone-at-beat params 2.0)))
-      
-      ;; At beat 3.0 - between second and third keyframes
-      (is (= :right (zone/evaluate-zone-at-beat params 3.0)))
-      
-      ;; At beat 4.0 - exactly at third keyframe
-      (is (= :center (zone/evaluate-zone-at-beat params 4.0)))
-      
-      ;; At beat 10.0 - after all keyframes, use last
-      (is (= :center (zone/evaluate-zone-at-beat params 10.0))))))
-
-
-(deftest evaluate-zone-at-beat-before-first-keyframe-test
-  (testing "Beat position before first keyframe returns base value"
-    (let [params {:target-zone {:value :all
-                                :keyframes [{:beat 1.0 :value :left}
-                                            {:beat 3.0 :value :right}]}}]
-      ;; Before first keyframe (at 1.0), should return base value :all
-      (is (= :all (zone/evaluate-zone-at-beat params 0.0)))
-      (is (= :all (zone/evaluate-zone-at-beat params 0.5)))
-      (is (= :all (zone/evaluate-zone-at-beat params 0.999))))))
-
-
-(deftest evaluate-zone-at-beat-single-keyframe-test
-  (testing "Single keyframe behaves correctly"
-    (let [params {:target-zone {:value :all
-                                :keyframes [{:beat 2.0 :value :center}]}}]
-      ;; Before keyframe - use base
-      (is (= :all (zone/evaluate-zone-at-beat params 0.0)))
-      (is (= :all (zone/evaluate-zone-at-beat params 1.9)))
-      
-      ;; At and after keyframe - use keyframe value
-      (is (= :center (zone/evaluate-zone-at-beat params 2.0)))
-      (is (= :center (zone/evaluate-zone-at-beat params 5.0))))))
+  (testing "Missing target-zone defaults to :all"
+    (is (= :all (zone/evaluate-zone {})))))
 
 
 ;; ============================================================================
@@ -333,34 +247,6 @@
           cue-chain-dest {:zone-group-id :left}
           timing-ctx (make-timing-ctx 0.0)]
       (is (= :left (ze/resolve-item-zone-destination item cue-chain-dest timing-ctx))))))
-
-
-(deftest resolve-item-zone-destination-with-keyframes-test
-  (testing "Zone-selector with keyframes evaluates at current beat"
-    (let [item {:id "test-item"
-                :effects [{:effect-id :zone-selector
-                           :enabled? true
-                           :params {:target-zone {:value :all
-                                                  :keyframes standard-test-keyframes}}}]}
-          cue-chain-dest {:zone-group-id :all}]
-      
-      ;; At beat 0 → :left
-      (is (= :left (ze/resolve-item-zone-destination item cue-chain-dest (make-timing-ctx 0.0))))
-      
-      ;; At beat 1.5 → still :left (step interpolation)
-      (is (= :left (ze/resolve-item-zone-destination item cue-chain-dest (make-timing-ctx 1.5))))
-      
-      ;; At beat 2.0 → :right
-      (is (= :right (ze/resolve-item-zone-destination item cue-chain-dest (make-timing-ctx 2.0))))
-      
-      ;; At beat 3.0 → still :right
-      (is (= :right (ze/resolve-item-zone-destination item cue-chain-dest (make-timing-ctx 3.0))))
-      
-      ;; At beat 4.0 → :center
-      (is (= :center (ze/resolve-item-zone-destination item cue-chain-dest (make-timing-ctx 4.0))))
-      
-      ;; At beat 10.0 → still :center (after all keyframes)
-      (is (= :center (ze/resolve-item-zone-destination item cue-chain-dest (make-timing-ctx 10.0)))))))
 
 
 ;; ============================================================================
@@ -469,36 +355,6 @@
       (is (or (not (contains? frames-by-zone :center))
               (nil? (:center frames-by-zone)))
           ":center should be empty"))))
-
-
-(deftest zone-selector-animated-frame-routing-test
-  (testing "Animated zone-selector routes frames based on current beat"
-    ;; At beat 0 → :left
-    (let [frames (fs/generate-frames-by-zone
-                   test-cue-chain-animated-zone-selector
-                   0 120.0 0
-                   (make-timing-ctx 0.0))]
-      (is (contains? frames :left))
-      (is (pos? (count (:left frames))))
-      (is (or (not (contains? frames :right)) (nil? (:right frames)))))
-    
-    ;; At beat 2.0 → :right
-    (let [frames (fs/generate-frames-by-zone
-                   test-cue-chain-animated-zone-selector
-                   1000 120.0 0
-                   (make-timing-ctx 2.0))]
-      (is (contains? frames :right))
-      (is (pos? (count (:right frames))))
-      (is (or (not (contains? frames :left)) (nil? (:left frames)))))
-    
-    ;; At beat 4.0 → :center
-    (let [frames (fs/generate-frames-by-zone
-                   test-cue-chain-animated-zone-selector
-                   2000 120.0 0
-                   (make-timing-ctx 4.0))]
-      (is (contains? frames :center))
-      (is (pos? (count (:center frames))))
-      (is (or (not (contains? frames :right)) (nil? (:right frames)))))))
 
 
 (deftest no-zone-effect-uses-default-test

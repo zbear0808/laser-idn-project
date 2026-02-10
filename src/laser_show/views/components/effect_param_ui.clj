@@ -257,14 +257,6 @@
                                          :event-template on-color-change-event
                                          :fx-key canvas-fx-key}
 
-                      :zone-selector {:fx/type custom-renderers/zone-selector-visual-editor
-                                      :fx/key canvas-fx-key
-                                      :fx/context context
-                                      :current-params current-params
-                                      :event-template {:domain (get spatial-event-keys :domain)
-                                                       :entity-key (get spatial-event-keys :entity-key)
-                                                       :effect-path effect-path}}
-
                       ;; Fallback to standard params (with optional modulator support)
                       {:fx/type param-list-type
                        :params-map params-map
