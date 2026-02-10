@@ -631,7 +631,7 @@
   "Update the atoms with current items and props values."
   [component-id items props]
   (let [{:keys [items-atom props-atom]} (get-or-create-handler-atoms! component-id)]
-    (log/debug "Updating handler atoms"
+    #_(log/debug "Updating handler atoms"
                {:component-id component-id
                 :items-count (count items)
                 :props-keys (keys props)})
@@ -757,7 +757,7 @@
          empty-text "No items"
          allow-groups? true
          fallback-label "Unknown"}}]
-  (log/debug "list-editor render"
+  #_(log/debug "list-editor render"
              {:component-id component-id
               :items-count (count items)
               :clipboard-items-count (count clipboard-items)})
