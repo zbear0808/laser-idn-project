@@ -105,13 +105,13 @@
 (deftest service-config-tags-test
   (testing "Default tags match ISP-DB25 compatibility (Section 3.4.10/3.4.11)"
     ;; 7 descriptor tags for X(16-bit), Y(16-bit), R, G, B
-    ;; Plus TAG_VOID for 32-bit alignment (8 tags = 16 bytes = 4 words)
+    ;; Plus TAG_NOP for sample padding (8 tags = 16 bytes = 4 words)
     (let [expected-tags [stream/TAG_X stream/TAG_PRECISION
                          stream/TAG_Y stream/TAG_PRECISION
                          stream/TAG_COLOR_RED
                          stream/TAG_COLOR_GREEN
                          stream/TAG_COLOR_BLUE
-                         stream/TAG_VOID]]  ; Alignment padding per Section 3.4.2
+                         stream/TAG_NOP]]  ; NOP padding byte per Section 3.4.5
       (is (= expected-tags stream/default-graphic-tags))))
 
   (testing "Tags are written correctly to packet"
@@ -195,8 +195,8 @@
           packet (stream/frame->packet buf frame 0 1000 33333
                                        :output-config output-config/standard-config)]
 
-      (is (= (+ 12 (* 7 3)) (alength packet))
-          "Packet size should be header + 3 points * 7 bytes each")))
+      (is (= (+ 12 (* 8 3)) (alength packet))
+          "Packet size should be header + 3 points * 8 bytes each")))
 
   (testing "Multiple points with 16-bit color (default config)"
     (let [points [(t/make-point 0 0 1.0 0 0)
@@ -330,8 +330,8 @@
   (testing "Packet size calculations with standard config (16-bit XY, 8-bit color)"
     (let [config output-config/standard-config]
       (is (= 12 (stream/packet-size-without-config 0 config)) "Empty frame: 8 + 4 = 12")
-      (is (= 19 (stream/packet-size-without-config 1 config)) "1 point: 8 + 4 + 7 = 19")
-      (is (= 26 (stream/packet-size-without-config 2 config)) "2 points: 8 + 4 + 14 = 26")))
+      (is (= 20 (stream/packet-size-without-config 1 config)) "1 point: 8 + 4 + 8 = 20")
+      (is (= 28 (stream/packet-size-without-config 2 config)) "2 points: 8 + 4 + 16 = 28")))
 
   (testing "Packet size calculations with default config (16-bit color, 16-bit XY)"
     (let [config output-config/default-config]
@@ -342,7 +342,7 @@
 
   (testing "Packet size calculations with compact config (8-bit XY, 8-bit color)"
     (let [config output-config/compact-config]
-      ;; 8-bit XY (2 bytes) + 8-bit RGB (3 bytes) = 5 bytes per point
+      ;; 8-bit XY (2 bytes) + 8-bit RGB (3 bytes) + 1 NOP padding = 6 bytes per point
       (is (= 12 (stream/packet-size-without-config 0 config)) "Empty frame: 8 + 4 = 12")
-      (is (= 17 (stream/packet-size-without-config 1 config)) "1 point: 8 + 4 + 5 = 17")
-      (is (= 22 (stream/packet-size-without-config 2 config)) "2 points: 8 + 4 + 10 = 22"))))
+      (is (= 18 (stream/packet-size-without-config 1 config)) "1 point: 8 + 4 + 6 = 18")
+      (is (= 24 (stream/packet-size-without-config 2 config)) "2 points: 8 + 4 + 12 = 24"))))

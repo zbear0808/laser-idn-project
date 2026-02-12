@@ -9,9 +9,9 @@
 ;; Test Fixtures
 
 
-(def standard-config output-config/standard-config)  ; 16-bit XY, 8-bit RGB (7 bytes/pt)
+(def standard-config output-config/standard-config)  ; 16-bit XY, 8-bit RGB (8 bytes/pt with NOP padding)
 (def default-config output-config/default-config)    ; 16-bit XY, 16-bit RGB (10 bytes/pt)
-(def compact-config output-config/compact-config)    ; 8-bit XY, 8-bit RGB (5 bytes/pt)
+(def compact-config output-config/compact-config)    ; 8-bit XY, 8-bit RGB (6 bytes/pt with NOP padding)
 
 (defn make-test-frame
   "Create a test frame with n points."
@@ -23,7 +23,7 @@
 
 
 (deftest calculate-max-points-per-fragment-test
-  (testing "Standard config (16-bit XY, 8-bit RGB = 7 bytes/pt)"
+  (testing "Standard config (16-bit XY, 8-bit RGB = 8 bytes/pt with NOP padding)"
     (let [max-with-config (sut/calculate-max-points-per-fragment 
                            standard-config
                            :target-mtu 1400
@@ -47,13 +47,13 @@
       (is (> max-pts 100))
       (is (< max-pts 180))))
   
-  (testing "Compact config (8-bit XY, 8-bit RGB = 5 bytes/pt)"
-    (let [max-pts (sut/calculate-max-points-per-fragment 
+  (testing "Compact config (8-bit XY, 8-bit RGB = 6 bytes/pt with NOP padding)"
+    (let [max-pts (sut/calculate-max-points-per-fragment
                    compact-config
                    :target-mtu 1400
                    :include-config? false)]
       ;; Should be higher due to smaller point size
-      (is (> max-pts 250))))
+      (is (> max-pts 200))))
   
   (testing "Minimum points enforced"
     (let [max-pts (sut/calculate-max-points-per-fragment 
@@ -108,7 +108,7 @@
       (is (> count-1000 count-500))))
   
   (testing "Different configs affect fragment count"
-    ;; Default config has larger points (10 bytes vs 7 bytes)
+    ;; Default config has larger points (10 bytes vs 8 bytes)
     ;; so it should need more fragments
     (let [count-standard (sut/fragment-count 1000 standard-config)
           count-default (sut/fragment-count 1000 default-config)]

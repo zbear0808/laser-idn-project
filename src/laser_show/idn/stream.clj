@@ -86,13 +86,13 @@
 
 
 (def tags-16bit-xy-8bit-color
-  "Standard ISP-DB25: 16-bit XY, 8-bit RGB"
+  "Standard ISP-DB25: 16-bit XY, 8-bit RGB (8 bytes per sample with NOP padding)"
   [TAG_X TAG_PRECISION    ; X, 16-bit
    TAG_Y TAG_PRECISION    ; Y, 16-bit
    TAG_COLOR_RED          ; Red, 8-bit
    TAG_COLOR_GREEN        ; Green, 8-bit
    TAG_COLOR_BLUE         ; Blue, 8-bit
-   TAG_VOID])             ; Padding for 32-bit alignment
+   TAG_NOP])              ; NOP padding byte for even tag count             ; Padding for 32-bit alignment
 
 (def tags-16bit-xy-16bit-color
   "High precision: 16-bit XY, 16-bit RGB"
@@ -103,22 +103,21 @@
    TAG_COLOR_BLUE TAG_PRECISION]) ; Blue, 16-bit (10 bytes, no padding needed)
 
 (def tags-8bit-xy-8bit-color
-  "Compact: 8-bit XY, 8-bit RGB"
+  "Compact: 8-bit XY, 8-bit RGB (6 bytes per sample with NOP padding)"
   [TAG_X                  ; X, 8-bit
    TAG_Y                  ; Y, 8-bit
    TAG_COLOR_RED          ; Red, 8-bit
    TAG_COLOR_GREEN        ; Green, 8-bit
    TAG_COLOR_BLUE         ; Blue, 8-bit
-   TAG_VOID])             ; Padding (5 bytes -> 6 for alignment)
+   TAG_NOP])              ; NOP padding byte for even tag count             ; Padding (5 bytes -> 6 for alignment)
 
 (def tags-8bit-xy-16bit-color
-  "High color: 8-bit XY, 16-bit RGB"
-  [TAG_X                      ; X, 8-bit
-   TAG_Y                      ; Y, 8-bit
+  "High color: 8-bit XY, 16-bit RGB (8 bytes per sample, even tag count)"
+  [TAG_X                          ; X, 8-bit
+   TAG_Y                          ; Y, 8-bit
    TAG_COLOR_RED TAG_PRECISION    ; Red, 16-bit
    TAG_COLOR_GREEN TAG_PRECISION  ; Green, 16-bit
-   TAG_COLOR_BLUE TAG_PRECISION   ; Blue, 16-bit
-   TAG_VOID])                 ; Padding for alignment
+   TAG_COLOR_BLUE TAG_PRECISION]) ; Blue, 16-bit                 ; Padding for alignment
 
 ;; Default tags (for backward compatibility)
 (def default-graphic-tags tags-16bit-xy-8bit-color)
@@ -279,6 +278,7 @@
 
 (defn write-point!
   "Write a single LaserPoint vector to ByteBuffer based on output config.
+   Includes NOP padding bytes for tag array alignment per IDN spec.
    
    Point values are normalized:
    - x, y: -1.0 to 1.0
@@ -287,7 +287,6 @@
    Output format depends on config bit depths."
   [^ByteBuffer buf point output-config]
   (let [{:keys [color-bit-depth xy-bit-depth]} output-config
-        ;; Convert using output-config functions
         x-out (output-config/normalized->output-xy (point t/X) xy-bit-depth)
         y-out (output-config/normalized->output-xy (point t/Y) xy-bit-depth)
         r-out (output-config/normalized->output-color (point t/R) color-bit-depth)
@@ -300,15 +299,20 @@
       (do (.put buf (unchecked-byte x-out))
           (.put buf (unchecked-byte y-out))))
     ;; Write RGB
-    ;; Note: For 16-bit unsigned values (0-65535), we use unchecked-short
-    ;; because Java short is signed (-32768 to 32767)
     (if (= color-bit-depth 16)
       (do (.putShort buf (unchecked-short r-out))
           (.putShort buf (unchecked-short g-out))
           (.putShort buf (unchecked-short b-out)))
       (do (.put buf (unchecked-byte r-out))
           (.put buf (unchecked-byte g-out))
-          (.put buf (unchecked-byte b-out))))))
+          (.put buf (unchecked-byte b-out))))
+    ;; Write NOP padding bytes for tag array alignment
+    (let [raw-bytes (+ (* 2 (output-config/bytes-per-xy output-config))
+                       (* 3 (output-config/bytes-per-color output-config)))
+          padded-bytes (output-config/bytes-per-sample output-config)
+          padding (- padded-bytes raw-bytes)]
+      (dotimes [_ padding]
+        (.put buf (unchecked-byte 0))))))
 
 
 ;; Frame to Packet Conversion

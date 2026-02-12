@@ -81,13 +81,16 @@
   (if (= xy-bit-depth BIT_DEPTH_16) 2 1))
 
 (defn bytes-per-sample
-  "Calculate bytes per sample for given config.
+  "Calculate bytes per sample for given config, including NOP padding.
    
-   Sample consists of: X + Y + R + G + B
-   Each component can be 1 or 2 bytes depending on bit depth."
+   Sample consists of: X + Y + R + G + B + padding
+   Each component can be 1 or 2 bytes depending on bit depth.
+   Padded to even byte count so each sample byte maps to a descriptor tag
+   and the tag array maintains 32-bit alignment per IDN spec Section 3.4.2."
   [{:keys [color-bit-depth xy-bit-depth] :as config}]
-  (+ (* 2 (bytes-per-xy config))     ; X + Y
-     (* 3 (bytes-per-color config)))) ; R + G + B
+  (let [raw (+ (* 2 (bytes-per-xy config))
+               (* 3 (bytes-per-color config)))]
+    (if (odd? raw) (inc raw) raw))) ; R + G + B
 
 
 ;; Value Conversion Functions
