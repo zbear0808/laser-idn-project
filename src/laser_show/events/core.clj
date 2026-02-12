@@ -197,7 +197,7 @@
   []
   (try
     (let [stages (Stage/getWindows)]
-      (first (filter #(instance? Stage %) stages)))
+      (u/seek #(instance? Stage %) stages))
     (catch Exception e
       (log/warn "Could not get primary stage:" (.getMessage e))
       nil)))

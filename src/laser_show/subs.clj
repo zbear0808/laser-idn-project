@@ -183,7 +183,7 @@
     (let [chains-data (fx/sub-val context :chains)
           cue-chain (get-in chains-data [:cue-chains [col row] :items] [])]
       ;; Return first preset's ID (filter out groups)
-      (:preset-id (first (filter #(= :preset (:type %)) cue-chain))))))
+      (:preset-id (u/seek #(= :preset (:type %)) cue-chain)))))
 
 (defn active-preset
   "Alias for active-cell-preset. Get preset of currently active cell."

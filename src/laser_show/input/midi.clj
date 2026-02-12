@@ -7,7 +7,8 @@
    Actual state storage is managed by the application state in domains.clj."
   (:require [clojure.tools.logging :as log]
             [overtone.midi :as m]
-            [laser-show.input.events :as events]))
+            [laser-show.input.events :as events]
+            [laser-show.common.util :as u]))
 
 
 ;; Device Discovery (pure functions - no state needed)
@@ -30,9 +31,9 @@
 (defn find-device
   "Finds a MIDI device by name (partial match)."
   [name-pattern]
-  (first (filter #(re-find (re-pattern (str "(?i)" name-pattern)) 
-                           (:name %))
-                 (list-devices))))
+  (u/seek #(re-find (re-pattern (str "(?i)" name-pattern)) 
+                    (:name %))
+          (list-devices)))
 
 
 ;; MIDI Message Conversion (pure function)

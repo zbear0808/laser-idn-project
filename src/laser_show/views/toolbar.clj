@@ -3,7 +3,8 @@
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [clj-font-awesome.core :as fa]
-            [cljfx-svg.core :as svg]))
+            [cljfx-svg.core :as svg]
+            [laser-show.common.util :as u]))
 
 
 ;; Transport Controls
@@ -58,7 +59,7 @@
    - Retrigger: Override all cues to always restart behavior"
   [{:keys [fx/context]}]
   (let [current-mode (fx/sub-ctx context subs/global-trigger-mode)
-        current-option (or (first (filter #(= (:id %) current-mode) trigger-mode-options))
+        current-option (or (u/seek #(= (:id %) current-mode) trigger-mode-options)
                            (first trigger-mode-options))]
     {:fx/type :h-box
      :spacing 4

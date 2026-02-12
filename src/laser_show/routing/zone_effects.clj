@@ -6,7 +6,8 @@
    
    Main Entry Point: group-items-by-zone - groups cue chain items by destination zone"
   (:require [clojure.tools.logging :as log]
-            [laser-show.animation.effects.zone :as zone]))
+            [laser-show.animation.effects.zone :as zone]
+            [laser-show.common.util :as u]))
 
 
 ;; Debug Logging (one-shot per playback session to avoid per-frame spam)
@@ -88,7 +89,7 @@
   [item cue-chain-destination timing-ctx]
   (let [zone-effects (item-zone-effects item)
         default-zone (or (:zone-group-id cue-chain-destination) :all)
-        zone-selector (first (filter #(= :zone-selector (:effect-id %)) zone-effects))
+        zone-selector (u/seek #(= :zone-selector (:effect-id %)) zone-effects)
         result (if zone-selector
                  (zone/evaluate-zone (:params zone-selector))
                  default-zone)]

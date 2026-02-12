@@ -24,7 +24,8 @@
             [laser-show.views.components.preset-bank :as preset-bank]
             [laser-show.views.components.preset-param-editor :as preset-param-editor]
             [laser-show.views.components.effect-parameter-editor :as effect-param-editor]
-            [laser-show.views.components.effect-bank :as effect-bank])
+            [laser-show.views.components.effect-bank :as effect-bank]
+            [laser-show.common.util :as u])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
 
@@ -103,7 +104,7 @@
   [{:keys [col row destination-zone zone-groups]}]
   (let [current-group-id (:zone-group-id destination-zone :all)
         ;; Find the currently selected group for display
-        current-group (first (filter #(= (:id %) current-group-id) zone-groups))
+        current-group (u/seek #(= (:id %) current-group-id) zone-groups)
         ]
     {:fx/type :h-box
      :spacing 8
@@ -148,7 +149,7 @@
    - :trigger-mode - Current trigger mode (default :toggle)"
   [{:keys [col row trigger-mode]}]
   (let [current-mode (or trigger-mode :toggle)
-        current-option (or (first (filter #(= (:id %) current-mode) trigger-mode-options))
+        current-option (or (u/seek #(= (:id %) current-mode) trigger-mode-options)
                            (first trigger-mode-options))]
     {:fx/type :h-box
      :spacing 8

@@ -32,7 +32,8 @@
             [laser-show.views.components.visual-editors.oklab-hue-shift-canvas :as oklab-hue-shift-canvas]
             [laser-show.views.components.tabs :as tabs]
             [laser-show.views.components.modulator-param-control :as mod-param]
-            [clj-font-awesome.core :as fa]))
+            [clj-font-awesome.core :as fa]
+            [laser-show.common.util :as u]))
 
 
 ;; Translate Effect Visual Editor
@@ -68,8 +69,8 @@
         {:keys [x-min x-max y-min y-max]}
         (or bounds
             (when param-specs
-              (let [x-spec (first (filter #(= :x (:key %)) param-specs))
-                    y-spec (first (filter #(= :y (:key %)) param-specs))]
+              (let [x-spec (u/seek #(= :x (:key %)) param-specs)
+                    y-spec (u/seek #(= :y (:key %)) param-specs)]
                 {:x-min (or (:min x-spec) -2.0)
                  :x-max (or (:max x-spec) 2.0)
                  :y-min (or (:min y-spec) -2.0)
@@ -158,8 +159,8 @@
         {:keys [x-min x-max y-min y-max]}
         (or bounds
             (when param-specs
-              (let [x-spec (first (filter #(= :tl-x (:key %)) param-specs))
-                    y-spec (first (filter #(= :tl-y (:key %)) param-specs))]
+              (let [x-spec (u/seek #(= :tl-x (:key %)) param-specs)
+                    y-spec (u/seek #(= :tl-y (:key %)) param-specs)]
                 {:x-min (or (:min x-spec) -2.0)
                  :x-max (or (:max x-spec) 2.0)
                  :y-min (or (:min y-spec) -2.0)
@@ -507,7 +508,7 @@
         target-zone (get current-params :target-zone :all)
         all-option {:id :all :name "All" :color "#888888"}
         items (into [all-option] zone-groups)
-        selected-item (or (first (filter #(= (:id %) target-zone) items))
+        selected-item (or (u/seek #(= (:id %) target-zone) items)
                           all-option)]
     {:fx/type :v-box
      :spacing 8

@@ -6,7 +6,8 @@
    state as part of the event map and return effect maps with :state key."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.events.handlers.keyframe :as keyframe]
-            [laser-show.events.handlers.chain :as chain]))
+            [laser-show.events.handlers.chain :as chain]
+            [laser-show.common.util :as u]))
 
 
 ;; Test Fixtures
@@ -148,7 +149,7 @@
           custom-params {:x 2.0 :y 3.0}
           result (keyframe/handle-add-keyframe state sample-config [0] 0.75 custom-params)
           kf-mod (get-in result [:chains :effect-chains [0 0] :items 0 :keyframe-modulator])
-          new-kf (first (filter #(= 0.75 (:position %)) (:keyframes kf-mod)))]
+          new-kf (u/seek #(= 0.75 (:position %)) (:keyframes kf-mod))]
       (is (= custom-params (:params new-kf)))))
   
   (testing "Clamps position to valid range"
@@ -387,7 +388,7 @@
     (let [state (make-test-state [sample-effect-with-keyframes])
           result (keyframe/handle-add-keyframe state sample-config [0] 0.25 nil)
           kf-mod (get-in result [:chains :effect-chains [0 0] :items 0 :keyframe-modulator])
-          new-kf (first (filter #(= 0.25 (:position %)) (:keyframes kf-mod)))]
+          new-kf (u/seek #(= 0.25 (:position %)) (:keyframes kf-mod))]
       (is (= :linear (:interpolation new-kf))))))
 
 

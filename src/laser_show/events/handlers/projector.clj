@@ -21,7 +21,8 @@
    - Test patterns"
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
-            [laser-show.events.helpers :as h]))
+            [laser-show.events.helpers :as h]
+            [laser-show.common.util :as u]))
 
 
 ;; Constants
@@ -318,18 +319,6 @@
 
 
 ;; Virtual Projector Management
-
-
-(defn- get-parent-corner-pin
-  "Get corner-pin params from a projector's effect chain.
-   Returns DEFAULT_CORNER_PIN if no corner-pin effect is found."
-  [state projector-id]
-  (let [effects (get-in state (projector-effects-path projector-id) [])]
-    (if-let [corner-pin-effect (first (filter #(= :corner-pin (:effect-id %)) effects))]
-      (:params corner-pin-effect)
-      DEFAULT_CORNER_PIN)))
-
-
 
 
 (defn- handle-vp-toggle-zone-group

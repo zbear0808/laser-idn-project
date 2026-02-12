@@ -25,7 +25,8 @@
   (:require [clj-async-profiler.core :as prof]
             [clojure.java.browse :as browse]
             [clojure.java.io :as io]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [laser-show.common.util :as u]))
 
 ;; Configuration
 
@@ -133,7 +134,7 @@
    ```"
   [filename]
   (let [profiles (list-profiles)
-        profile (first (filter #(= (:file %) filename) profiles))]
+        profile (u/seek #(= (:file %) filename) profiles)]
     (if profile
       (do
         (println (format "🌐 Opening flamegraph: %s" filename))

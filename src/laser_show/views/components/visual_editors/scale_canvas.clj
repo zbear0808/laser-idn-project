@@ -237,7 +237,7 @@
   (let [;; Get world coords of mouse
         [wx wy] (canvas-to-world mx my cx cy)
         ;; Find the handle definition
-        handle-def (first (filter #(= (:id %) handle-id) handle-defs))
+        handle-def (u/seek #(= (:id %) handle-id) handle-defs)
         axis (:axis handle-def)
         ;; Calculate new scale from mouse position
         base-pixel-size (* base-size max-size)

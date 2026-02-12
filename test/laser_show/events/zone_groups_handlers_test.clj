@@ -7,7 +7,8 @@
   (:require
    [clojure.test :refer [deftest is testing]] 
    [laser-show.events.handlers.zone-groups :as zone-groups]
-   [laser-show.state.domains :refer [build-initial-state]]))
+   [laser-show.state.domains :refer [build-initial-state]]
+   [laser-show.common.util :as u]))
 
 
 ;; Test Data Fixtures
@@ -71,7 +72,7 @@
                  :state state-with-dialog}
           result (zone-groups/handle event)
           groups (get-in result [:state :zone-groups])
-          new-group (first (filter #(= "My New Group" (:name (second %))) groups))]
+          new-group (u/seek #(= "My New Group" (:name (second %))) groups)]
       ;; Should have created a new group
       (is (some? new-group))
       (is (= "My New Group" (:name (second new-group))))
@@ -90,7 +91,7 @@
                  :state base-state}
           result (zone-groups/handle event)
           groups (get-in result [:state :zone-groups])
-          new-group (first (filter #(= "Minimal Group" (:name (second %))) groups))]
+          new-group (u/seek #(= "Minimal Group" (:name (second %))) groups)]
       (is (some? new-group))
       (is (= "" (:description (second new-group))))
       (is (= "#808080" (:color (second new-group)))))))

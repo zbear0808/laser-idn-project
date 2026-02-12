@@ -163,7 +163,7 @@
 (defn- find-selected-item
   "Find the selected item in the list based on zone-filter value."
   [items zone-filter]
-  (or (first (filter #(= (:id %) zone-filter) items))
+  (or (u/seek #(= (:id %) zone-filter) items)
       (first items)))
 
 
@@ -264,7 +264,7 @@
         cell-config (fx/sub-ctx context subs/preview-cell-config cell-index)
         zone-id (:zone-group-id cell-config)
         zone-groups (fx/sub-ctx context subs/zone-groups-list)
-        zone-group (first (filter #(= (:id %) zone-id) zone-groups))
+        zone-group (u/seek #(= (:id %) zone-id) zone-groups)
         zone-name (or (:name zone-group)
                       (if zone-id (name zone-id) "Master"))
         zone-color (or (:color zone-group) "#808080")
