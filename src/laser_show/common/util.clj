@@ -166,10 +166,37 @@
         merged (merge existing value)]
     (assoc-in m path merged)))
 
+(defn- find-chunk-idx
+  ^long [pred ^clojure.lang.Indexed chunk]
+  (let [n (.count chunk)]
+    (loop [idx 0]
+      (if (< idx n)
+        (if (pred (.nth chunk idx))
+          idx
+          (recur (unchecked-inc idx)))
+        -1))))
 
-(defn exception->map
-  "Converts an exception to a map with useful debugging information.
-   Includes the message, class, cause, and full stacktrace."
+
+(defn seek
+  "Equivalent to `(first (filter pred coll))` but eager and faster"
+  [pred coll]
+  (if (chunked-seq? coll)
+    (loop [coll coll]
+      (when coll
+        (let [chunk (chunk-first coll)
+              idx (find-chunk-idx pred chunk)]
+          (if (>= idx 0)
+            (.nth chunk idx) 
+            (recur (chunk-next coll))))))
+    (loop [coll (seq coll)]
+      (when coll
+        (let [x (first coll)]
+          (if (pred x)
+            x
+            (recur (next coll))))))))
+
+
+(defn exception->map 
   [^Throwable e]
   {:message (.getMessage e)
    :class (-> e .getClass .getName)
