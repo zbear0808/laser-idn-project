@@ -69,7 +69,6 @@
                 {:fx/type :combo-box
                  :value current-option
                  :pref-width 90
-                 :style-class "combo-box-dark"
                  :items trigger-mode-options
                  :button-cell (fn [mode]
                                 {:text (or (:name mode) "Default")})
