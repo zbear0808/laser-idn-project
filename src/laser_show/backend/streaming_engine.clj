@@ -75,7 +75,7 @@
                                        service-id 0
                                        output-config output-config/default-config
                                        target-mtu DEFAULT_TARGET_MTU
-                                       fragmentation-enabled? true}}]
+                                       fragmentation-enabled? true #_false}}]
   {:target-host target-host
    :target-port port
    :frame-provider frame-provider
