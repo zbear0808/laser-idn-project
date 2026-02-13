@@ -14,8 +14,9 @@
     :degrees 45.0
     :on-degrees-change {:event/type :chain/update-param ...}}"
   (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events]
-            [laser-show.animation.colors :as colors])
+            [laser-show.animation.colors :as colors]
+            [laser-show.common.util :as u]
+            [laser-show.events.core :as events])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.input MouseEvent MouseButton KeyEvent KeyCode]
            [javafx.scene.paint Color]
@@ -26,64 +27,77 @@
 ;; Drawing Functions
 
 
+(defn hsv-hue->rgb
+  "HSV color function: hue-degrees -> [r g b] at full saturation/value."
+  [hue-degrees]
+  (colors/hsv->normalized hue-degrees 1.0 1.0))
+
+(defn oklab-hue->rgb
+  "Oklab color function: hue-degrees -> [r g b] at fixed L=0.70 C=0.16."
+  [hue-degrees]
+  (let [[L a b-ok] (colors/oklch->oklab 0.70 0.16 hue-degrees)
+        [r g b] (colors/oklab->rgb L a b-ok)]
+    [(u/clamp r 0.0 1.0)
+     (u/clamp g 0.0 1.0)
+     (u/clamp b 0.0 1.0)]))
+
 (defn- draw-hue-shift-strips!
   "Draw two hue strips showing input→output transformation.
    Top strip: Static hue gradient (input) with label on right
-   Bottom strip: Shifted hue gradient (output) with label on right"
-  [^Canvas canvas width height shift-degrees]
+   Bottom strip: Shifted hue gradient (output) with label on right
+   color-fn: (fn [hue-degrees] -> [r g b]) maps hue to normalized RGB"
+  [^Canvas canvas width height shift-degrees color-fn]
   (let [gc (.getGraphicsContext2D canvas)
         w (double width)
         h (double height)
-        label-width 50.0  ;; Reserve space for labels on the right
-        strip-width (- w label-width 4)  ;; Strip width minus label area
-        strip-height (/ (- h 30) 2.0)  ;; Two strips + space for shift label
+        label-width 50.0
+        strip-width (- w label-width 4)
+        strip-height (/ (- h 30) 2.0)
         gap 6.0
         input-top 0.0
         output-top (+ strip-height gap)
         label-y (+ output-top strip-height 16)]
     ;; Clear canvas
     (.clearRect gc 0 0 w h)
-    
+
     ;; Draw input gradient (static, 0-360)
     (doseq [x (range (int strip-width))]
       (let [hue (* (/ (double x) strip-width) 360.0)
-            [r g b] (colors/hsv->normalized hue 1.0 1.0)]
+            [r g b] (color-fn hue)]
         (.setFill gc (Color/color r g b 1.0))
         (.fillRect gc x input-top 1 strip-height)))
-    
+
     ;; Draw border around input gradient
     (.setStroke gc (Color/web "#555555"))
     (.setLineWidth gc 1.0)
     (.strokeRect gc 0 input-top strip-width strip-height)
-    
+
     ;; Draw "INPUT" label to the right of the first strip
     (.setFill gc (Color/web "#808080"))
     (.setFont gc (Font. "System" 10))
     (.fillText gc "INPUT" (+ strip-width 6) (+ input-top (/ strip-height 2) 4))
-    
+
     ;; Draw output gradient (shifted by degrees - wraps around)
     (doseq [x (range (int strip-width))]
       (let [input-hue (* (/ (double x) strip-width) 360.0)
-            ;; mod with 360 allows infinite wrapping in both directions
             output-hue (mod (+ input-hue shift-degrees 36000.0) 360.0)
-            [r g b] (colors/hsv->normalized output-hue 1.0 1.0)]
+            [r g b] (color-fn output-hue)]
         (.setFill gc (Color/color r g b 1.0))
         (.fillRect gc x output-top 1 strip-height)))
-    
+
     ;; Draw border around output gradient
     (.setStroke gc (Color/web "#555555"))
     (.setLineWidth gc 1.0)
     (.strokeRect gc 0 output-top strip-width strip-height)
-    
+
     ;; Draw "OUTPUT" label to the right of the second strip
     (.setFill gc (Color/web "#808080"))
     (.fillText gc "OUTPUT" (+ strip-width 6) (+ output-top (/ strip-height 2) 4))
-    
+
     ;; Draw shift amount label below the strips
     (.setFill gc Color/WHITE)
     (.setFont gc (Font. "Monospace" 11))
-    (let [;; Normalize display value to -180 to +180 range for readability
-          display-degrees (let [normalized (mod (+ shift-degrees 180.0 36000.0) 360.0)]
+    (let [display-degrees (let [normalized (mod (+ shift-degrees 180.0 36000.0) 360.0)]
                             (- normalized 180.0))
           label-text (format "Shift: %+.0f°" display-degrees)
           text-width (* (count label-text) 7)]
@@ -101,9 +115,11 @@
    
    Props:
    - :degrees - Current shift in degrees (supports infinite looping)
+   - :color-fn - (fn [hue-degrees] -> [r g b]) color mapping function (default: hsv-hue->rgb)
    - :on-degrees-change - Event map to dispatch when degrees changes (nil = disabled/read-only)"
-  [{:keys [degrees on-degrees-change]
-   :or {degrees 0.0}}]
+  [{:keys [degrees color-fn on-degrees-change]
+   :or {degrees 0.0
+        color-fn hsv-hue->rgb}}]
   
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created
@@ -123,7 +139,7 @@
            
            ;; Render function
            render! (fn []
-                     (draw-hue-shift-strips! canvas hue-shift-strip-width hue-shift-strip-height @degrees-atom))
+                     (draw-hue-shift-strips! canvas hue-shift-strip-width hue-shift-strip-height @degrees-atom color-fn))
            
            ;; Arrow key handler
            handle-arrow-key! (fn [^KeyEvent e]

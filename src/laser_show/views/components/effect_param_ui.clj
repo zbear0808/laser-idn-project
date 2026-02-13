@@ -16,6 +16,7 @@
   (:require [laser-show.animation.modulator-registry :as reg]
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.visual-editors.custom-param-renderers :as custom-renderers]
+            [laser-show.views.components.visual-editors.hue-shift-canvas :as hue-shift-canvas]
             [laser-show.views.components.modulator-param-control :as mod-param]
             [clj-font-awesome.core :as fa]))
 
@@ -237,15 +238,17 @@
                                         :fx/key canvas-fx-key
                                         :current-params current-params
                                         :event-template on-change-event
+                                        :color-fn hue-shift-canvas/hsv-hue->rgb
                                         :fx-key canvas-fx-key
                                         :enable-modulator? enable-modulators?
                                         :param-spec (get params-map :degrees)
                                         :modulator-event-base modulator-event-base}
 
-                      :oklab-hue-shift-strip {:fx/type custom-renderers/oklab-hue-shift-visual-editor
+                      :oklab-hue-shift-strip {:fx/type custom-renderers/hue-shift-strip-visual-editor
                                               :fx/key canvas-fx-key
                                               :current-params current-params
                                               :event-template on-change-event
+                                              :color-fn hue-shift-canvas/oklab-hue->rgb
                                               :fx-key canvas-fx-key
                                               :enable-modulator? enable-modulators?
                                               :param-spec (get params-map :degrees)

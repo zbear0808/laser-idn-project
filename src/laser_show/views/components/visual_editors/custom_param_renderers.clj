@@ -28,8 +28,6 @@
             [laser-show.views.components.visual-editors.curve-canvas :as curve-canvas]
             [laser-show.views.components.visual-editors.hue-canvas :as hue-canvas]
             [laser-show.views.components.visual-editors.hue-shift-canvas :as hue-shift-canvas]
-
-            [laser-show.views.components.visual-editors.oklab-hue-shift-canvas :as oklab-hue-shift-canvas]
             [laser-show.views.components.tabs :as tabs]
             [laser-show.views.components.modulator-param-control :as mod-param]
             [clj-font-awesome.core :as fa]
@@ -635,6 +633,7 @@
    Props:
    - :current-params - Current parameter values {:degrees ...}
    - :event-template - Base event for on-drag (will add :param-key :value)
+   - :color-fn - Function (degrees -> Color) for rendering the hue gradient strips
    - :fx-key - (optional) Unique key for canvas (should NOT include current value)
    - :hint-text - (optional) Hint text above canvas
    
@@ -642,47 +641,38 @@
    - :enable-modulator? - Show modulator toggle button (default false)
    - :param-spec - Parameter spec for :degrees (used by modulator)
    - :modulator-event-base - Base event for modulator operations"
-  [{:keys [current-params event-template fx-key hint-text
+  [{:keys [current-params event-template color-fn fx-key hint-text
            enable-modulator? param-spec modulator-event-base]}]
   (let [params-map (or current-params {})
-        ;; Get degrees value - could be number or modulator config
         degrees-value (get params-map :degrees 0.0)
         is-modulated? (reg/active-modulator? degrees-value)
-        ;; Always use get-static-value - handles both plain numbers and modulator configs
-        ;; (including inactive modulators where :active? is false)
         static-degrees (reg/get-static-value degrees-value 0.0)
         actual-hint (or hint-text "Drag left/right to shift hue")
-        ;; Use a stable key that does NOT change based on current value
-        ;; This prevents canvas recreation during dragging
         canvas-key (or fx-key [:hue-shift-editor])
-        ;; Default param spec for degrees if not provided
         degrees-param-spec (or param-spec {:min -180.0 :max 180.0 :default 0.0 :label "Degrees"})]
     {:fx/type :v-box
      :spacing 8
      :padding 8
      :style-class ["visual-editor-padded"]
      :children (filterv some?
-                        [;; Modulator header (optional)
-                         (when (and enable-modulator? modulator-event-base)
+                        [(when (and enable-modulator? modulator-event-base)
                            {:fx/type mod-param/visual-editor-modulator-header
                             :param-key :degrees
                             :param-spec degrees-param-spec
                             :current-value degrees-value
                             :modulator-event-base modulator-event-base})
 
-                         ;; Hint text (only when NOT modulated)
                          (when-not is-modulated?
                            {:fx/type :label
                             :text actual-hint
                             :style-class ["visual-editor-hint"]})
 
-                         ;; Visual hue shift strips - always shown (disabled when modulated)
                          {:fx/type hue-shift-canvas/hue-shift-canvas
                           :fx/key canvas-key
                           :degrees static-degrees
+                          :color-fn color-fn
                           :on-degrees-change (when-not is-modulated? event-template)}
 
-                         ;; Modulator params editor (shown below visual when modulated)
                          (when is-modulated?
                            {:fx/type mod-param/visual-editor-modulator-params
                             :param-key :degrees
@@ -690,7 +680,6 @@
                             :current-value degrees-value
                             :modulator-event-base modulator-event-base})
 
-                         ;; Value display
                          {:fx/type :h-box
                           :spacing 12
                           :alignment :center
@@ -775,64 +764,4 @@
 
 
 
-(defn oklab-hue-shift-visual-editor
-  "Visual editor for Oklab hue shift effect.
-   
-   Displays input/output strips in Oklab space.
-   
-   Props:
-   - :current-params - {:degrees ...}
-   - :event-template - Base event for on-drag
-   - :fx-key - (optional) Unique key
-   - :hint-text - (optional) Hint text
-   
-   Modulator support:
-   - :enable-modulator?
-   - :param-spec
-   - :modulator-event-base"
-  [{:keys [current-params event-template fx-key hint-text
-           enable-modulator? param-spec modulator-event-base]}]
-  (let [params-map (or current-params {})
-        degrees-value (get params-map :degrees 0.0)
-        is-modulated? (reg/active-modulator? degrees-value)
-        static-degrees (reg/get-static-value degrees-value 0.0)
-        actual-hint (or hint-text "Drag left/right to shift hue")
-        canvas-key (or fx-key [:oklab-hue-shift-editor])
-        degrees-param-spec (or param-spec {:min -180.0 :max 180.0 :default 0.0 :label "Degrees"})]
-    {:fx/type :v-box
-     :spacing 8
-     :padding 8
-     :style-class ["visual-editor-padded"]
-     :children (filterv some?
-                        [(when (and enable-modulator? modulator-event-base)
-                           {:fx/type mod-param/visual-editor-modulator-header
-                            :param-key :degrees
-                            :param-spec degrees-param-spec
-                            :current-value degrees-value
-                            :modulator-event-base modulator-event-base})
 
-                         (when-not is-modulated?
-                           {:fx/type :label
-                            :text actual-hint
-                            :style-class ["visual-editor-hint"]})
-
-                         {:fx/type oklab-hue-shift-canvas/oklab-hue-shift-canvas
-                          :fx/key canvas-key
-                          :degrees static-degrees
-                          :on-degrees-change (when-not is-modulated? event-template)}
-
-                         (when is-modulated?
-                           {:fx/type mod-param/visual-editor-modulator-params
-                            :param-key :degrees
-                            :param-spec degrees-param-spec
-                            :current-value degrees-value
-                            :modulator-event-base modulator-event-base})
-
-                         {:fx/type :h-box
-                          :spacing 12
-                          :alignment :center
-                          :children [{:fx/type :label
-                                      :text (if is-modulated?
-                                              "Shift: (modulated)"
-                                              (format "Shift: %.1f°" (double static-degrees)))
-                                      :style-class ["text-monospace"]}]}])}))
