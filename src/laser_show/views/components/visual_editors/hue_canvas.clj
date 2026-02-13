@@ -14,10 +14,10 @@
     :on-hue-change {:event/type :chain/update-param ...}}"
   (:require [cljfx.api :as fx]
             [laser-show.events.core :as events]
-            [laser-show.animation.colors :as colors]
+            [laser-show.views.components.visual-editors.gradient-cache :as gc]
             [laser-show.common.util :as u])
-  (:import [javafx.scene.canvas Canvas GraphicsContext]
-           [javafx.scene.input MouseEvent MouseButton KeyEvent KeyCode]
+  (:import [javafx.scene.canvas Canvas]
+           [javafx.scene.input MouseButton KeyEvent KeyCode]
            [javafx.scene.paint Color]
            [javafx.scene.text Font]
            [javafx.event EventHandler]))
@@ -33,29 +33,25 @@
   (let [gc (.getGraphicsContext2D canvas)
         w (double width)
         h (double height)
-        gradient-height (- h 30)  ;; Leave space for indicator and label
+        gradient-height (- h 30)
         gradient-top 0.0]
-    ;; Clear canvas
     (.clearRect gc 0 0 w h)
-    
-    ;; Draw hue gradient bar - 0 to 360 degrees
-    (doseq [x (range (int w))]
-      (let [hue (* (/ (double x) w) 360.0)
-            [r g b] (colors/hsv->normalized hue 1.0 1.0)]
-        (.setFill gc (Color/color r g b 1.0))
-        (.fillRect gc x gradient-top 1 gradient-height)))
-    
+
+    ;; Draw cached hue gradient
+    (let [gradient (gc/get-hsv-gradient! (int w))]
+      (gc/draw-gradient-strip! gc gradient 0 gradient-top w gradient-height))
+
     ;; Draw border around gradient
     (.setStroke gc (Color/web "#555555"))
     (.setLineWidth gc 1.0)
     (.strokeRect gc 0 gradient-top w gradient-height)
-    
+
     ;; Calculate indicator position (current-hue from 0 to 360)
     (let [indicator-x (* (/ current-hue 360.0) w)
           indicator-top (+ gradient-top gradient-height)
           triangle-height 10.0
           triangle-half-width 6.0]
-      
+
       ;; Draw indicator triangle pointing up
       (.setFill gc Color/WHITE)
       (.beginPath gc)
@@ -64,7 +60,7 @@
       (.lineTo gc (+ indicator-x triangle-half-width) (+ indicator-top triangle-height))
       (.closePath gc)
       (.fill gc)
-      
+
       ;; Draw indicator outline
       (.setStroke gc Color/BLACK)
       (.setLineWidth gc 1.0)
@@ -74,7 +70,7 @@
       (.lineTo gc (+ indicator-x triangle-half-width) (+ indicator-top triangle-height))
       (.closePath gc)
       (.stroke gc)
-      
+
       ;; Draw vertical line through gradient at indicator position
       (.setStroke gc Color/WHITE)
       (.setLineWidth gc 2.0)
@@ -83,7 +79,7 @@
       (.setLineWidth gc 1.0)
       (.strokeLine gc (dec indicator-x) gradient-top (dec indicator-x) gradient-height)
       (.strokeLine gc (inc indicator-x) gradient-top (inc indicator-x) gradient-height)
-      
+
       ;; Draw degree label below triangle
       (.setFill gc Color/WHITE)
       (.setFont gc (Font. "Monospace" 10))

@@ -239,6 +239,7 @@
                                         :current-params current-params
                                         :event-template on-change-event
                                         :color-fn hue-shift-canvas/hsv-hue->rgb
+                                        :gradient-key :hsv
                                         :fx-key canvas-fx-key
                                         :enable-modulator? enable-modulators?
                                         :param-spec (get params-map :degrees)
@@ -249,6 +250,7 @@
                                               :current-params current-params
                                               :event-template on-change-event
                                               :color-fn hue-shift-canvas/oklab-hue->rgb
+                                              :gradient-key :oklab
                                               :fx-key canvas-fx-key
                                               :enable-modulator? enable-modulators?
                                               :param-spec (get params-map :degrees)

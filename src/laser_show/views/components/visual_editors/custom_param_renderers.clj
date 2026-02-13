@@ -634,6 +634,7 @@
    - :current-params - Current parameter values {:degrees ...}
    - :event-template - Base event for on-drag (will add :param-key :value)
    - :color-fn - Function (degrees -> Color) for rendering the hue gradient strips
+   - :gradient-key - Which cached gradient to use (:hsv or :oklab), default :hsv
    - :fx-key - (optional) Unique key for canvas (should NOT include current value)
    - :hint-text - (optional) Hint text above canvas
    
@@ -641,7 +642,7 @@
    - :enable-modulator? - Show modulator toggle button (default false)
    - :param-spec - Parameter spec for :degrees (used by modulator)
    - :modulator-event-base - Base event for modulator operations"
-  [{:keys [current-params event-template color-fn fx-key hint-text
+  [{:keys [current-params event-template color-fn gradient-key fx-key hint-text
            enable-modulator? param-spec modulator-event-base]}]
   (let [params-map (or current-params {})
         degrees-value (get params-map :degrees 0.0)
@@ -671,6 +672,7 @@
                           :fx/key canvas-key
                           :degrees static-degrees
                           :color-fn color-fn
+                          :gradient-key gradient-key
                           :on-degrees-change (when-not is-modulated? event-template)}
 
                          (when is-modulated?

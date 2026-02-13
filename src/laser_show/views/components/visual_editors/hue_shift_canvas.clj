@@ -12,13 +12,15 @@
    {:fx/type hue-shift-canvas
     :fx/key [unique-id]
     :degrees 45.0
+    :gradient-key :hsv
     :on-degrees-change {:event/type :chain/update-param ...}}"
   (:require [cljfx.api :as fx]
             [laser-show.animation.colors :as colors]
             [laser-show.common.util :as u]
-            [laser-show.events.core :as events])
-  (:import [javafx.scene.canvas Canvas GraphicsContext]
-           [javafx.scene.input MouseEvent MouseButton KeyEvent KeyCode]
+            [laser-show.events.core :as events]
+            [laser-show.views.components.visual-editors.gradient-cache :as grad])
+  (:import [javafx.scene.canvas Canvas]
+           [javafx.scene.input MouseButton KeyEvent KeyCode]
            [javafx.scene.paint Color]
            [javafx.scene.text Font]
            [javafx.event EventHandler]))
@@ -42,11 +44,11 @@
      (u/clamp b 0.0 1.0)]))
 
 (defn- draw-hue-shift-strips!
-  "Draw two hue strips showing input→output transformation.
+  "Draw two hue strips showing input→output transformation using cached gradients.
    Top strip: Static hue gradient (input) with label on right
    Bottom strip: Shifted hue gradient (output) with label on right
-   color-fn: (fn [hue-degrees] -> [r g b]) maps hue to normalized RGB"
-  [^Canvas canvas width height shift-degrees color-fn]
+   gradient-key: :hsv or :oklab, determines which cached gradient to use"
+  [^Canvas canvas width height shift-degrees gradient-key]
   (let [gc (.getGraphicsContext2D canvas)
         w (double width)
         h (double height)
@@ -56,45 +58,34 @@
         gap 6.0
         input-top 0.0
         output-top (+ strip-height gap)
-        label-y (+ output-top strip-height 16)]
-    ;; Clear canvas
+        label-y (+ output-top strip-height 16)
+        gradient (case gradient-key
+                   :hsv (grad/get-hsv-gradient! (int strip-width))
+                   :oklab (grad/get-oklab-gradient! (int strip-width)))]
     (.clearRect gc 0 0 w h)
 
-    ;; Draw input gradient (static, 0-360)
-    (doseq [x (range (int strip-width))]
-      (let [hue (* (/ (double x) strip-width) 360.0)
-            [r g b] (color-fn hue)]
-        (.setFill gc (Color/color r g b 1.0))
-        (.fillRect gc x input-top 1 strip-height)))
+    ;; Input gradient (cached)
+    (grad/draw-gradient-strip! gc gradient 0 input-top strip-width strip-height)
 
-    ;; Draw border around input gradient
     (.setStroke gc (Color/web "#555555"))
     (.setLineWidth gc 1.0)
     (.strokeRect gc 0 input-top strip-width strip-height)
 
-    ;; Draw "INPUT" label to the right of the first strip
     (.setFill gc (Color/web "#808080"))
     (.setFont gc (Font. "System" 10))
     (.fillText gc "INPUT" (+ strip-width 6) (+ input-top (/ strip-height 2) 4))
 
-    ;; Draw output gradient (shifted by degrees - wraps around)
-    (doseq [x (range (int strip-width))]
-      (let [input-hue (* (/ (double x) strip-width) 360.0)
-            output-hue (mod (+ input-hue shift-degrees 36000.0) 360.0)
-            [r g b] (color-fn output-hue)]
-        (.setFill gc (Color/color r g b 1.0))
-        (.fillRect gc x output-top 1 strip-height)))
+    ;; Output gradient (shifted, cached)
+    (grad/draw-shifted-gradient-strip! gc gradient 0 output-top strip-width strip-height shift-degrees)
 
-    ;; Draw border around output gradient
     (.setStroke gc (Color/web "#555555"))
     (.setLineWidth gc 1.0)
     (.strokeRect gc 0 output-top strip-width strip-height)
 
-    ;; Draw "OUTPUT" label to the right of the second strip
     (.setFill gc (Color/web "#808080"))
     (.fillText gc "OUTPUT" (+ strip-width 6) (+ output-top (/ strip-height 2) 4))
 
-    ;; Draw shift amount label below the strips
+    ;; Shift amount label
     (.setFill gc Color/WHITE)
     (.setFont gc (Font. "Monospace" 11))
     (let [display-degrees (let [normalized (mod (+ shift-degrees 180.0 36000.0) 360.0)]
@@ -115,11 +106,13 @@
    
    Props:
    - :degrees - Current shift in degrees (supports infinite looping)
-   - :color-fn - (fn [hue-degrees] -> [r g b]) color mapping function (default: hsv-hue->rgb)
+   - :color-fn - (fn [hue-degrees] -> [r g b]) color mapping function (default: hsv-hue->rgb, kept for API compat)
+   - :gradient-key - :hsv or :oklab, determines which cached gradient to use (default: :hsv)
    - :on-degrees-change - Event map to dispatch when degrees changes (nil = disabled/read-only)"
-  [{:keys [degrees color-fn on-degrees-change]
-   :or {degrees 0.0
-        color-fn hsv-hue->rgb}}]
+  [{:keys [degrees color-fn gradient-key on-degrees-change]
+    :or {degrees 0.0
+         color-fn hsv-hue->rgb
+         gradient-key :hsv}}]
   
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created
@@ -137,9 +130,8 @@
            
            scene-filter (atom nil)
            
-           ;; Render function
            render! (fn []
-                     (draw-hue-shift-strips! canvas hue-shift-strip-width hue-shift-strip-height @degrees-atom color-fn))
+                     (draw-hue-shift-strips! canvas hue-shift-strip-width hue-shift-strip-height @degrees-atom gradient-key))
            
            ;; Arrow key handler
            handle-arrow-key! (fn [^KeyEvent e]
@@ -177,11 +169,7 @@
               (let [x (.getX e)
                     dx (- x (or @last-x x))
                     w (double hue-shift-strip-width)
-                    ;; Convert pixel delta to degree delta
-                    ;; Full width = 360 degrees
-                    ;; Negate so dragging right moves the output colors right
                     degree-delta (- (* (/ dx w) 360.0))
-                    ;; No clamping - allow infinite looping
                     new-degrees (+ @degrees-atom degree-delta)]
                 (reset! last-x x)
                 (reset! degrees-atom new-degrees)
@@ -227,8 +215,8 @@
        
        ;; Set cursor style based on whether disabled
        (.setStyle canvas (if on-degrees-change
-                          "-fx-cursor: ew-resize;"
-                          "-fx-cursor: default;"))))
+                           "-fx-cursor: ew-resize;"
+                           "-fx-cursor: default;"))))
    
    :desc {:fx/type :canvas
           :width hue-shift-strip-width
