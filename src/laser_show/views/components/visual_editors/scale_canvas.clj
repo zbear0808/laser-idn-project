@@ -1,6 +1,6 @@
 (ns laser-show.views.components.visual-editors.scale-canvas
   "Scale editor canvas with edge/corner handles.
-   
+
    Features:
    - Centered rectangle that scales from center
    - 8 handles: 4 corners + 4 edge midpoints
@@ -8,12 +8,12 @@
    - Supports negative values for mirroring
    - Right-click to reset to default (1.0, 1.0)
    - Keyboard arrow keys for fine adjustment
-   
+
    Handle Behaviors:
    - Corner handles: scale both X and Y
    - Edge handles: scale only the corresponding axis
    - When uniform mode: all handles scale both axes equally
-   
+
    Usage:
    {:fx/type scale-canvas
     :fx/key [unique-id]
@@ -24,14 +24,11 @@
     :uniform? false
     :on-scale-change {:event/type :chain/update-param ...}
     :on-reset {:event/type :chain/reset-params ...}}"
-  (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events]
+  (:require [laser-show.views.components.visual-editors.canvas-interaction :as ci]
             [laser-show.common.util :as u])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
-           [javafx.scene.input MouseEvent MouseButton KeyEvent KeyCode]
-           [javafx.scene.paint Color]
-           [javafx.scene.text Font FontWeight]
-           [javafx.event EventHandler]))
+           [javafx.scene.input MouseButton KeyCode]
+           [javafx.scene.paint Color]))
 
 
 ;; Constants
@@ -272,7 +269,7 @@
 
 (defn scale-canvas
   "Scale editor canvas with edge/corner handles.
-   
+
    Props:
    - :width - Canvas width in pixels (default 280)
    - :height - Canvas height in pixels (default 280)
@@ -283,175 +280,92 @@
    - :on-reset - Event map to dispatch on right-click reset"
   [{:keys [width height x-scale y-scale uniform? on-scale-change on-reset]
     :or {width 280 height 280 x-scale 1.0 y-scale 1.0 uniform? false}}]
-  
-  {:fx/type fx/ext-on-instance-lifecycle
-   :on-created
-   (fn [^Canvas canvas]
-     (let [gc (.getGraphicsContext2D canvas)
-           cx (/ width 2.0)
-           cy (/ height 2.0)
-           max-size (- (min cx cy) 30)  ; Leave margin
-           base-size base-rect-size
-           
-           ;; Internal state
-           drag-state (atom {:dragging? false
-                             :dragging-handle nil
-                             :hover-handle nil
-                             :mouse-over? false})
-           scale-atom (atom {:x (or x-scale 1.0) :y (or y-scale 1.0)})
-           
-           fine-step 0.05   ; 0.05 for arrow keys
-           coarse-step 0.25 ; 0.25 for Shift+arrow keys
-           
-           scene-filter (atom nil)
-           
-           ;; Render function
-           render! (fn []
-                     (let [{:keys [x y]} @scale-atom
-                           x-half (scale-to-canvas x base-size max-size)
-                           y-half (scale-to-canvas y base-size max-size)
-                           handle-positions (calculate-handle-positions x y cx cy base-size max-size)
-                           hover-id (:hover-handle @drag-state)
-                           dragging-id (:dragging-handle @drag-state)]
-                       (draw-background gc width height)
-                       (draw-grid gc width height cx cy)
-                       (draw-axes gc width height cx cy)
-                       (draw-rectangle gc cx cy x-half y-half x y)
-                       (draw-handles gc handle-positions hover-id dragging-id)))
-           
-           ;; Arrow key handler
-           handle-arrow-key! (fn [^KeyEvent e uniform-mode?]
-                               (when (:mouse-over? @drag-state)
-                                 (let [code (.getCode e)
-                                       shift? (.isShiftDown e)
-                                       step (if shift? coarse-step fine-step)
-                                       {:keys [x y]} @scale-atom]
-                                   (when (or (= code KeyCode/LEFT)
-                                             (= code KeyCode/RIGHT)
-                                             (= code KeyCode/UP)
-                                             (= code KeyCode/DOWN))
-                                     (let [[dx dy] (condp = code
-                                                     KeyCode/LEFT  [(- step) 0]
-                                                     KeyCode/RIGHT [step 0]
-                                                     KeyCode/UP    [0 step]
-                                                     KeyCode/DOWN  [0 (- step)])
-                                           ;; Apply uniformly if uniform mode
-                                           [new-x new-y]
-                                           (if uniform-mode?
-                                             (let [delta (if (not= dx 0) dx dy)]
-                                               [(clamp-scale (+ x delta))
-                                                (clamp-scale (+ y delta))])
-                                             [(clamp-scale (+ x dx))
-                                              (clamp-scale (+ y dy))])]
-                                       (reset! scale-atom {:x new-x :y new-y})
-                                       (render!)
-                                       (when on-scale-change
-                                         (events/dispatch! (assoc on-scale-change
-                                                                  :x-scale new-x
-                                                                  :y-scale new-y)))
-                                       (.consume e))))))]
-       
-       ;; Mouse pressed - start drag or reset
-       (.setOnMousePressed
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (let [mx (.getX e)
-                  my (.getY e)
-                  button (.getButton e)
-                  {:keys [x y]} @scale-atom
-                  handle-positions (calculate-handle-positions x y cx cy base-size max-size)
-                  hit-handle (find-closest-handle mx my handle-positions 15)]
-              (cond
-                ;; Right-click - reset to 1.0, 1.0
-                (= button MouseButton/SECONDARY)
-                (do
-                  (reset! scale-atom {:x 1.0 :y 1.0})
-                  (render!)
-                  (when on-reset
-                    (events/dispatch! on-reset)))
-                
-                ;; Left-click on handle - start drag
-                (and (= button MouseButton/PRIMARY) hit-handle)
-                (do
-                  (swap! drag-state assoc 
-                         :dragging? true 
-                         :dragging-handle hit-handle)
-                  (render!)))))))
-       
-       ;; Mouse dragged - update scale
-       (.setOnMouseDragged
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (when (:dragging? @drag-state)
-              (let [mx (.getX e)
-                    my (.getY e)
-                    handle-id (:dragging-handle @drag-state)
-                    {:keys [x y]} @scale-atom
-                    [new-x new-y] (calculate-new-scale handle-id mx my cx cy 
-                                                       base-size max-size x y uniform?)]
-                (reset! scale-atom {:x new-x :y new-y})
-                (render!)
-                (when on-scale-change
-                  (events/dispatch! (assoc on-scale-change
-                                           :x-scale new-x
-                                           :y-scale new-y))))))))
-       
-       ;; Mouse released - end drag
-       (.setOnMouseReleased
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (swap! drag-state assoc :dragging? false :dragging-handle nil)
-            (render!))))
-       
-       ;; Mouse moved - update hover state
-       (.setOnMouseMoved
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (let [mx (.getX e)
-                  my (.getY e)
-                  {:keys [x y]} @scale-atom
-                  handle-positions (calculate-handle-positions x y cx cy base-size max-size)
-                  hit-handle (find-closest-handle mx my handle-positions 15)
-                  current-hover (:hover-handle @drag-state)]
-              (when (not= hit-handle current-hover)
-                (swap! drag-state assoc :hover-handle hit-handle)
-                (render!))
-              (if hit-handle
-                (.setStyle canvas "-fx-cursor: hand;")
-                (.setStyle canvas "-fx-cursor: crosshair;"))))))
-       
-       ;; Mouse entered - track mouse over and register key filter
-       (.setOnMouseEntered
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (swap! drag-state assoc :mouse-over? true)
-            (when-let [scene (.getScene canvas)]
-              (when-not @scene-filter
-                (let [filter (reify EventHandler
-                               (handle [_ e]
-                                 (when (instance? KeyEvent e)
-                                   (handle-arrow-key! e uniform?))))]
-                  (reset! scene-filter filter)
-                  (.addEventFilter scene KeyEvent/KEY_PRESSED filter)))))))
-       
-       ;; Mouse exited - clear hover state
-       (.setOnMouseExited
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (swap! drag-state assoc :hover-handle nil :mouse-over? false)
-            (render!))))
-       
-       ;; Initial render
-       (render!)
-       (.setFocusTraversable canvas true)))
-   
-   :desc {:fx/type :canvas
-          :width width
-          :height height
-          :style "-fx-cursor: crosshair;"}})
+
+  (let [cx (/ width 2.0)
+        cy (/ height 2.0)
+        max-size (- (min cx cy) 30)
+        base-size base-rect-size
+        fine-step 0.05
+        coarse-step 0.25]
+    (ci/interactive-canvas
+     {:width  width
+      :height height
+      :initial-state {:x (or x-scale 1.0) :y (or y-scale 1.0)}
+      :cursor "crosshair"
+
+      :render!
+      (fn [^Canvas canvas state drag-info]
+        (let [gc (.getGraphicsContext2D canvas)
+              {:keys [x y]} state
+              x-half (scale-to-canvas x base-size max-size)
+              y-half (scale-to-canvas y base-size max-size)
+              handle-positions (calculate-handle-positions x y cx cy base-size max-size)]
+          (draw-background gc width height)
+          (draw-grid gc width height cx cy)
+          (draw-axes gc width height cx cy)
+          (draw-rectangle gc cx cy x-half y-half x y)
+          (draw-handles gc handle-positions
+                        (:hover-id drag-info)
+                        (:drag-id drag-info))))
+
+      :on-press
+      (fn [mx my button state _drag-info]
+        (cond
+          (= button MouseButton/SECONDARY)
+          {:state {:x 1.0 :y 1.0}
+           :dispatch on-reset}
+
+          (= button MouseButton/PRIMARY)
+          (let [{:keys [x y]} state
+                handle-positions (calculate-handle-positions x y cx cy base-size max-size)
+                hit-handle (find-closest-handle mx my handle-positions 15)]
+            (when hit-handle
+              {:drag-start true
+               :drag-id hit-handle}))))
+
+      :on-drag
+      (fn [mx my state drag-info]
+        (let [{:keys [x y]} state
+              handle-id (:drag-id drag-info)
+              [new-x new-y] (calculate-new-scale handle-id mx my cx cy
+                                                 base-size max-size x y uniform?)]
+          {:state {:x new-x :y new-y}
+           :dispatch (when on-scale-change
+                       (assoc on-scale-change
+                              :x-scale new-x
+                              :y-scale new-y))}))
+
+      :on-hover
+      (fn [mx my state _drag-info]
+        (let [{:keys [x y]} state
+              handle-positions (calculate-handle-positions x y cx cy base-size max-size)
+              hit-handle (find-closest-handle mx my handle-positions 15)]
+          {:hover-id hit-handle
+           :cursor (if hit-handle "hand" "crosshair")}))
+
+      :on-key
+      (fn [key-code shift? state _drag-info]
+        (when (or (= key-code KeyCode/LEFT)
+                  (= key-code KeyCode/RIGHT)
+                  (= key-code KeyCode/UP)
+                  (= key-code KeyCode/DOWN))
+          (let [{:keys [x y]} state
+                step (if shift? coarse-step fine-step)
+                [dx dy] (condp = key-code
+                          KeyCode/LEFT  [(- step) 0]
+                          KeyCode/RIGHT [step 0]
+                          KeyCode/UP    [0 step]
+                          KeyCode/DOWN  [0 (- step)])
+                [new-x new-y]
+                (if uniform?
+                  (let [delta (if (not= dx 0) dx dy)]
+                    [(clamp-scale (+ x delta))
+                     (clamp-scale (+ y delta))])
+                  [(clamp-scale (+ x dx))
+                   (clamp-scale (+ y dy))])]
+            {:state {:x new-x :y new-y}
+             :dispatch (when on-scale-change
+                         (assoc on-scale-change
+                                :x-scale new-x
+                                :y-scale new-y))
+             :consumed? true})))})))

@@ -14,16 +14,14 @@
     :degrees 45.0
     :gradient-key :hsv
     :on-degrees-change {:event/type :chain/update-param ...}}"
-  (:require [cljfx.api :as fx]
-            [laser-show.animation.colors :as colors]
+  (:require [laser-show.animation.colors :as colors]
             [laser-show.common.util :as u]
-            [laser-show.events.core :as events]
+            [laser-show.views.components.visual-editors.canvas-interaction :as ci]
             [laser-show.views.components.visual-editors.gradient-cache :as grad])
   (:import [javafx.scene.canvas Canvas]
-           [javafx.scene.input MouseButton KeyEvent KeyCode]
+           [javafx.scene.input MouseButton KeyCode]
            [javafx.scene.paint Color]
-           [javafx.scene.text Font]
-           [javafx.event EventHandler]))
+           [javafx.scene.text Font]))
 
 
 ;; Drawing Functions
@@ -106,118 +104,52 @@
    
    Props:
    - :degrees - Current shift in degrees (supports infinite looping)
-   - :color-fn - (fn [hue-degrees] -> [r g b]) color mapping function (default: hsv-hue->rgb, kept for API compat)
    - :gradient-key - :hsv or :oklab, determines which cached gradient to use (default: :hsv)
    - :on-degrees-change - Event map to dispatch when degrees changes (nil = disabled/read-only)"
-  [{:keys [degrees color-fn gradient-key on-degrees-change]
+  [{:keys [degrees gradient-key on-degrees-change]
     :or {degrees 0.0
-         color-fn hsv-hue->rgb
          gradient-key :hsv}}]
-  
-  {:fx/type fx/ext-on-instance-lifecycle
-   :on-created
-   (fn [^Canvas canvas]
-     (let [gc (.getGraphicsContext2D canvas)
-           
-           ;; Internal state
-           dragging? (atom false)
-           last-x (atom nil)
-           degrees-atom (atom (or degrees 0.0))
-           mouse-over? (atom false)
-           
-           fine-step 1.0    ; 1° for arrow keys
-           coarse-step 10.0 ; 10° for Shift+arrow keys
-           
-           scene-filter (atom nil)
-           
-           render! (fn []
-                     (draw-hue-shift-strips! canvas hue-shift-strip-width hue-shift-strip-height @degrees-atom gradient-key))
-           
-           ;; Arrow key handler
-           handle-arrow-key! (fn [^KeyEvent e]
-                               (when (and @mouse-over? on-degrees-change)
-                                 (let [code (.getCode e)
-                                       shift? (.isShiftDown e)
-                                       step (if shift? coarse-step fine-step)]
-                                   (when (or (= code KeyCode/LEFT)
-                                             (= code KeyCode/RIGHT))
-                                     (let [delta (if (= code KeyCode/RIGHT) step (- step))
-                                           new-degrees (+ @degrees-atom delta)]
-                                       (reset! degrees-atom new-degrees)
-                                       (render!)
-                                       (when on-degrees-change
-                                         (events/dispatch! (assoc on-degrees-change
-                                                                  :param-key :degrees
-                                                                  :value new-degrees)))
-                                       (.consume e))))))]
-       
-       ;; Mouse pressed - start drag
-       (.setOnMousePressed
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (when (and (= (.getButton e) MouseButton/PRIMARY) on-degrees-change)
-              (reset! dragging? true)
-              (reset! last-x (.getX e))))))
-       
-       ;; Mouse dragged - update shift
-       (.setOnMouseDragged
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (when (and @dragging? on-degrees-change)
-              (let [x (.getX e)
-                    dx (- x (or @last-x x))
-                    w (double hue-shift-strip-width)
-                    degree-delta (- (* (/ dx w) 360.0))
-                    new-degrees (+ @degrees-atom degree-delta)]
-                (reset! last-x x)
-                (reset! degrees-atom new-degrees)
-                (render!)
-                (when on-degrees-change
-                  (events/dispatch! (assoc on-degrees-change
-                                           :param-key :degrees
-                                           :value new-degrees))))))))
-       
-       ;; Mouse released - end drag
-       (.setOnMouseReleased
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (reset! dragging? false)
-            (reset! last-x nil))))
-       
-       ;; Mouse entered - track mouse over and register key filter
-       (.setOnMouseEntered
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (reset! mouse-over? true)
-            (when-let [scene (.getScene canvas)]
-              (when-not @scene-filter
-                (let [filter (reify EventHandler
-                               (handle [_ e]
-                                 (when (instance? KeyEvent e)
-                                   (handle-arrow-key! e))))]
-                  (reset! scene-filter filter)
-                  (.addEventFilter scene KeyEvent/KEY_PRESSED filter)))))))
-       
-       ;; Mouse exited - clear mouse over state
-       (.setOnMouseExited
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (reset! mouse-over? false))))
-       
-       ;; Initial render
-       (render!)
-       (.setFocusTraversable canvas true)
-       
-       ;; Set cursor style based on whether disabled
-       (.setStyle canvas (if on-degrees-change
-                           "-fx-cursor: ew-resize;"
-                           "-fx-cursor: default;"))))
-   
-   :desc {:fx/type :canvas
-          :width hue-shift-strip-width
-          :height hue-shift-strip-height}})
+
+  (ci/interactive-canvas
+   {:width  hue-shift-strip-width
+    :height hue-shift-strip-height
+    :initial-state (or degrees 0.0)
+    :cursor (if on-degrees-change "ew-resize" "default")
+
+    :render!
+    (fn [^Canvas canvas state _drag-info]
+      (draw-hue-shift-strips! canvas hue-shift-strip-width hue-shift-strip-height
+                              state gradient-key))
+
+    :on-press
+    (fn [mx _my button _state _drag-info]
+      (when (and (= button MouseButton/PRIMARY) on-degrees-change)
+        {:drag-start true
+         :drag-updates {:last-x mx}}))
+
+    :on-drag
+    (fn [mx _my state drag-info]
+      (when on-degrees-change
+        (let [last-x (or (:last-x drag-info) mx)
+              dx (- mx last-x)
+              degree-delta (- (* (/ dx (double hue-shift-strip-width)) 360.0))
+              new-degrees (+ state degree-delta)]
+          {:state new-degrees
+           :dispatch (assoc on-degrees-change
+                            :param-key :degrees
+                            :value new-degrees)
+           :drag-updates {:last-x mx}})))
+
+    :on-key
+    (fn [key-code shift? state _drag-info]
+      (when on-degrees-change
+        (let [step (if shift? 10.0 1.0)]
+          (when (or (= key-code KeyCode/LEFT)
+                    (= key-code KeyCode/RIGHT))
+            (let [delta (if (= key-code KeyCode/RIGHT) step (- step))
+                  new-degrees (+ state delta)]
+              {:state new-degrees
+               :dispatch (assoc on-degrees-change
+                                :param-key :degrees
+                                :value new-degrees)
+               :consumed? true})))))}))

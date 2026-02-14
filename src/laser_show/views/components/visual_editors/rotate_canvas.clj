@@ -21,15 +21,12 @@
     :angle 45.0
     :on-angle-change {:event/type :chain/update-param ...}
     :on-reset {:event/type :chain/reset-params ...}}"
-  (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events]
+  (:require [laser-show.views.components.visual-editors.canvas-interaction :as ci]
             [laser-show.common.util :as u])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
-           [javafx.scene.input MouseEvent MouseButton KeyEvent KeyCode]
+           [javafx.scene.input MouseButton KeyCode]
            [javafx.scene.paint Color]
-           [javafx.scene.text Font FontWeight TextAlignment]
-           [javafx.event EventHandler]
-           [javafx.application Platform]))
+           [javafx.scene.text Font FontWeight TextAlignment]))
 
 
 ;; Constants
@@ -218,158 +215,72 @@
    - :on-reset - Event map to dispatch on right-click reset"
   [{:keys [width height angle on-angle-change on-reset]
     :or {width 280 height 280 angle 0.0}}]
-  
-  {:fx/type fx/ext-on-instance-lifecycle
-   :on-created
-   (fn [^Canvas canvas]
-     (let [gc (.getGraphicsContext2D canvas)
-           cx (/ width 2.0)
-           cy (/ height 2.0)
-           radius (- (min cx cy) 20)  ; Leave margin for labels
-           
-           ;; Internal state
-           drag-state (atom {:dragging? false
-                             :hover? false
-                             :mouse-over? false})
-           angle-atom (atom (or angle 0.0))
-           
-           fine-step 1.0    ; 1° for arrow keys
-           coarse-step 10.0 ; 10° for Shift+arrow keys
-           
-           scene-filter (atom nil)
-           
-           ;; Render function
-           render! (fn []
-                     (let [current-angle @angle-atom
-                           [hx hy] (angle-to-handle-pos current-angle cx cy radius)
-                           hover? (:hover? @drag-state)
-                           dragging? (:dragging? @drag-state)]
-                       (draw-background gc width height)
-                       (draw-dial-circle gc cx cy radius)
-                       (draw-angle-marks gc cx cy radius)
-                       (draw-angle-arc gc cx cy radius current-angle)
-                       (draw-handle-line gc cx cy hx hy)
-                       (draw-center-point gc cx cy)
-                       (draw-handle gc hx hy hover? dragging?)))
-           
-           ;; Arrow key handler
-           handle-arrow-key! (fn [^KeyEvent e]
-                               (when (:mouse-over? @drag-state)
-                                 (let [code (.getCode e)
-                                       shift? (.isShiftDown e)
-                                       step (if shift? coarse-step fine-step)]
-                                   (when (or (= code KeyCode/LEFT)
-                                             (= code KeyCode/RIGHT))
-                                     (let [delta (if (= code KeyCode/RIGHT) step (- step))
-                                           new-angle (clamp-angle (+ @angle-atom delta))]
-                                       (reset! angle-atom new-angle)
-                                       (render!)
-                                       (when on-angle-change
-                                         (events/dispatch! (assoc on-angle-change
-                                                                  :param-key :angle
-                                                                  :value new-angle)))
-                                       (.consume e))))))]
-       
-       ;; Mouse pressed - start drag or reset
-       (.setOnMousePressed
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (let [mx (.getX e)
-                  my (.getY e)
-                  button (.getButton e)
-                  [hx hy] (angle-to-handle-pos @angle-atom cx cy radius)]
-              (cond
-                ;; Right-click - reset to 0°
-                (= button MouseButton/SECONDARY)
-                (do
-                  (reset! angle-atom 0.0)
-                  (render!)
-                  (when on-reset
-                    (events/dispatch! on-reset)))
-                
-                ;; Left-click on handle or anywhere - start drag
-                (= button MouseButton/PRIMARY)
-                (do
-                  (swap! drag-state assoc :dragging? true)
-                  ;; Set initial angle from click position
-                  (let [new-angle (clamp-angle (mouse-to-angle mx my cx cy))]
-                    (reset! angle-atom new-angle)
-                    (render!)
-                    (when on-angle-change
-                      (events/dispatch! (assoc on-angle-change
-                                               :param-key :angle
-                                               :value new-angle))))))))))
-       
-       ;; Mouse dragged - update angle
-       (.setOnMouseDragged
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (when (:dragging? @drag-state)
-              (let [mx (.getX e)
-                    my (.getY e)
-                    new-angle (clamp-angle (mouse-to-angle mx my cx cy))]
-                (reset! angle-atom new-angle)
-                (render!)
-                (when on-angle-change
-                  (events/dispatch! (assoc on-angle-change
-                                           :param-key :angle
-                                           :value new-angle))))))))
-       
-       ;; Mouse released - end drag
-       (.setOnMouseReleased
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (swap! drag-state assoc :dragging? false)
-            (render!))))
-       
-       ;; Mouse moved - update hover state
-       (.setOnMouseMoved
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (let [mx (.getX e)
-                  my (.getY e)
-                  [hx hy] (angle-to-handle-pos @angle-atom cx cy radius)
-                  over-handle? (hit-handle? mx my hx hy)
-                  current-hover (:hover? @drag-state)]
-              (when (not= over-handle? current-hover)
-                (swap! drag-state assoc :hover? over-handle?)
-                (render!))
-              (if over-handle?
-                (.setStyle canvas "-fx-cursor: hand;")
-                (.setStyle canvas "-fx-cursor: crosshair;"))))))
-       
-       ;; Mouse entered - track mouse over and register key filter
-       (.setOnMouseEntered
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (swap! drag-state assoc :mouse-over? true)
-            (when-let [scene (.getScene canvas)]
-              (when-not @scene-filter
-                (let [filter (reify EventHandler
-                               (handle [_ e]
-                                 (when (instance? KeyEvent e)
-                                   (handle-arrow-key! e))))]
-                  (reset! scene-filter filter)
-                  (.addEventFilter scene KeyEvent/KEY_PRESSED filter)))))))
-       
-       ;; Mouse exited - clear hover state
-       (.setOnMouseExited
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (swap! drag-state assoc :hover? false :mouse-over? false)
-            (render!))))
-       
-       ;; Initial render
-       (render!)
-       (.setFocusTraversable canvas true)))
-   
-   :desc {:fx/type :canvas
-          :width width
-          :height height
-          :style "-fx-cursor: crosshair;"}})
+
+  (let [cx (/ width 2.0)
+        cy (/ height 2.0)
+        radius (- (min cx cy) 20)]
+    (ci/interactive-canvas
+     {:width  width
+      :height height
+      :initial-state (or angle 0.0)
+      :cursor "crosshair"
+
+      :render!
+      (fn [^Canvas canvas state drag-info]
+        (let [gc (.getGraphicsContext2D canvas)
+              [hx hy] (angle-to-handle-pos state cx cy radius)]
+          (draw-background gc width height)
+          (draw-dial-circle gc cx cy radius)
+          (draw-angle-marks gc cx cy radius)
+          (draw-angle-arc gc cx cy radius state)
+          (draw-handle-line gc cx cy hx hy)
+          (draw-center-point gc cx cy)
+          (draw-handle gc hx hy
+                       (some? (:hover-id drag-info))
+                       (:dragging? drag-info))))
+
+      :on-press
+      (fn [mx my button state _drag-info]
+        (cond
+          (= button MouseButton/SECONDARY)
+          {:state 0.0
+           :dispatch on-reset}
+
+          (= button MouseButton/PRIMARY)
+          (let [new-angle (clamp-angle (mouse-to-angle mx my cx cy))]
+            {:drag-start true
+             :state new-angle
+             :dispatch (when on-angle-change
+                         (assoc on-angle-change
+                                :param-key :angle
+                                :value new-angle))})))
+
+      :on-drag
+      (fn [mx my _state _drag-info]
+        (let [new-angle (clamp-angle (mouse-to-angle mx my cx cy))]
+          {:state new-angle
+           :dispatch (when on-angle-change
+                       (assoc on-angle-change
+                              :param-key :angle
+                              :value new-angle))}))
+
+      :on-hover
+      (fn [mx my state _drag-info]
+        (let [[hx hy] (angle-to-handle-pos state cx cy radius)
+              over-handle? (hit-handle? mx my hx hy)]
+          {:hover-id (when over-handle? :handle)
+           :cursor (if over-handle? "hand" "crosshair")}))
+
+      :on-key
+      (fn [key-code shift? state _drag-info]
+        (when (or (= key-code KeyCode/LEFT)
+                  (= key-code KeyCode/RIGHT))
+          (let [step (if shift? 10.0 1.0)
+                delta (if (= key-code KeyCode/RIGHT) step (- step))
+                new-angle (clamp-angle (+ state delta))]
+            {:state new-angle
+             :dispatch (when on-angle-change
+                         (assoc on-angle-change
+                                :param-key :angle
+                                :value new-angle))
+             :consumed? true})))})))

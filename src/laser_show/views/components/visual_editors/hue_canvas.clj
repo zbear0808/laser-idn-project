@@ -12,15 +12,13 @@
     :fx/key [unique-id]
     :hue 180.0
     :on-hue-change {:event/type :chain/update-param ...}}"
-  (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events]
+  (:require [laser-show.views.components.visual-editors.canvas-interaction :as ci]
             [laser-show.views.components.visual-editors.gradient-cache :as gc]
             [laser-show.common.util :as u])
   (:import [javafx.scene.canvas Canvas]
-           [javafx.scene.input MouseButton KeyEvent KeyCode]
+           [javafx.scene.input MouseButton KeyCode]
            [javafx.scene.paint Color]
-           [javafx.scene.text Font]
-           [javafx.event EventHandler]))
+           [javafx.scene.text Font]))
 
 
 ;; Drawing Functions
@@ -102,8 +100,18 @@
 
 
 ;; Hardcoded dimensions for hue strip
+
+
 (def ^:const hue-strip-width 420)
 (def ^:const hue-strip-height 60)
+
+(defn- mouse-to-hue
+  "Convert mouse X position to hue value (0-360)."
+  [mx]
+  (-> (/ mx (double hue-strip-width))
+      (* 360.0)
+      (max 0.0)
+      (min 360.0)))
 
 (defn hue-canvas
   "Horizontal gradient canvas for hue selection.
@@ -112,121 +120,41 @@
    - :hue - Current hue in degrees (0 to 360)
    - :on-hue-change - Event map to dispatch when hue changes (nil = disabled/read-only)"
   [{:keys [hue on-hue-change]
-   :or {hue 0.0}}]
-  
-  {:fx/type fx/ext-on-instance-lifecycle
-   :on-created
-   (fn [^Canvas canvas]
-     (let [gc (.getGraphicsContext2D canvas)
-           
-           ;; Internal state
-           dragging? (atom false)
-           hue-atom (atom (or hue 0.0))
-           mouse-over? (atom false)
-           
-           fine-step 1.0    ; 1° for arrow keys
-           coarse-step 10.0 ; 10° for Shift+arrow keys
-           
-           scene-filter (atom nil)
-           
-           ;; Render function
-           render! (fn []
-                     (draw-set-hue-gradient! canvas hue-strip-width hue-strip-height @hue-atom))
-           
-           ;; Mouse to hue conversion
-           mouse-to-hue (fn [mx]
-                          (let [w (double hue-strip-width)
-                                hue-val (-> (/ mx w)
-                                           (* 360.0)
-                                           (max 0.0)
-                                           (min 360.0))]
-                            hue-val))
-           
-           ;; Arrow key handler
-           handle-arrow-key! (fn [^KeyEvent e]
-                               (when (and @mouse-over? on-hue-change)
-                                 (let [code (.getCode e)
-                                       shift? (.isShiftDown e)
-                                       step (if shift? coarse-step fine-step)]
-                                   (when (or (= code KeyCode/LEFT)
-                                             (= code KeyCode/RIGHT))
-                                     (let [delta (if (= code KeyCode/RIGHT) step (- step))
-                                           new-hue (clamp-hue (+ @hue-atom delta))]
-                                       (reset! hue-atom new-hue)
-                                       (render!)
-                                       (when on-hue-change
-                                         (events/dispatch! (assoc on-hue-change
-                                                                  :param-key :hue
-                                                                  :value new-hue)))
-                                       (.consume e))))))]
-       
-       ;; Mouse pressed - start drag or click
-       (.setOnMousePressed
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (when (and (= (.getButton e) MouseButton/PRIMARY) on-hue-change)
-              (reset! dragging? true)
-              (let [mx (.getX e)
-                    new-hue (mouse-to-hue mx)]
-                (reset! hue-atom new-hue)
-                (render!)
-                (events/dispatch! (assoc on-hue-change
-                                         :param-key :hue
-                                         :value new-hue)))))))
-       
-       ;; Mouse dragged - update hue
-       (.setOnMouseDragged
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (when (and @dragging? on-hue-change)
-              (let [mx (.getX e)
-                    new-hue (mouse-to-hue mx)]
-                (reset! hue-atom new-hue)
-                (render!)
-                (events/dispatch! (assoc on-hue-change
-                                         :param-key :hue
-                                         :value new-hue)))))))
-       
-       ;; Mouse released - end drag
-       (.setOnMouseReleased
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (reset! dragging? false))))
-       
-       ;; Mouse entered - track mouse over and register key filter
-       (.setOnMouseEntered
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (reset! mouse-over? true)
-            (when-let [scene (.getScene canvas)]
-              (when-not @scene-filter
-                (let [filter (reify EventHandler
-                               (handle [_ e]
-                                 (when (instance? KeyEvent e)
-                                   (handle-arrow-key! e))))]
-                  (reset! scene-filter filter)
-                  (.addEventFilter scene KeyEvent/KEY_PRESSED filter)))))))
-       
-       ;; Mouse exited - clear mouse over state
-       (.setOnMouseExited
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (reset! mouse-over? false))))
-       
-       ;; Initial render
-       (render!)
-       (.setFocusTraversable canvas true)
-       
-       ;; Set cursor style based on whether disabled
-       (.setStyle canvas (if on-hue-change
-                          "-fx-cursor: crosshair;"
-                          "-fx-cursor: default;"))))
-   
-   :desc {:fx/type :canvas
-          :width hue-strip-width
-          :height hue-strip-height}})
+    :or {hue 0.0}}]
+
+  (ci/interactive-canvas
+   {:width  hue-strip-width
+    :height hue-strip-height
+    :initial-state (or hue 0.0)
+    :cursor (if on-hue-change "crosshair" "default")
+
+    :render!
+    (fn [^Canvas canvas state _drag-info]
+      (draw-set-hue-gradient! canvas hue-strip-width hue-strip-height state))
+
+    :on-press
+    (fn [mx _my button _state _drag-info]
+      (when (and (= button MouseButton/PRIMARY) on-hue-change)
+        (let [new-hue (mouse-to-hue mx)]
+          {:drag-start true
+           :state new-hue
+           :dispatch (assoc on-hue-change :param-key :hue :value new-hue)})))
+
+    :on-drag
+    (fn [mx _my _state _drag-info]
+      (when on-hue-change
+        (let [new-hue (mouse-to-hue mx)]
+          {:state new-hue
+           :dispatch (assoc on-hue-change :param-key :hue :value new-hue)})))
+
+    :on-key
+    (fn [key-code shift? state _drag-info]
+      (when on-hue-change
+        (let [step (if shift? 10.0 1.0)]
+          (when (or (= key-code KeyCode/LEFT)
+                    (= key-code KeyCode/RIGHT))
+            (let [delta (if (= key-code KeyCode/RIGHT) step (- step))
+                  new-hue (clamp-hue (+ state delta))]
+              {:state new-hue
+               :dispatch (assoc on-hue-change :param-key :hue :value new-hue)
+               :consumed? true})))))}))
