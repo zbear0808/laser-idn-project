@@ -183,6 +183,28 @@
         (point-in-polygon? mx my polygon-coords)))))
 
 
+;; Local Preview Helpers
+
+(defn- update-point-in-list
+  "Update a single point's coordinates in the points list."
+  [points point-id x y]
+  (mapv (fn [p]
+          (if (= (:id p) point-id)
+            (assoc p :x x :y y)
+            p))
+        points))
+
+(defn- update-points-in-list
+  "Update multiple points in the points list.
+   updates-map: {point-id {:x ... :y ...}}"
+  [points updates-map]
+  (mapv (fn [p]
+          (if-let [updates (get updates-map (:id p))]
+            (merge p updates)
+            p))
+        points))
+
+
 ;; Main Canvas Component
 
 
@@ -277,7 +299,9 @@
               {:dispatch (assoc on-point-drag
                                 :point-id point-id
                                 :x (double clamped-x)
-                                :y (double clamped-y))}))
+                                :y (double clamped-y))
+               ;; RETURN PREVIEW VALUE
+               :preview-value (update-point-in-list points point-id clamped-x clamped-y)}))
 
           :polygon
           (let [[start-wx start-wy] (:drag-start-world drag-info)
@@ -286,18 +310,25 @@
                 initial-points (:initial-points drag-info)
                 polygon-point-ids (:points polygon)
 
-                events (for [point-id polygon-point-ids
-                             :let [initial-point (get initial-points point-id)]
-                             :when initial-point]
-                         (let [new-x (+ (:x initial-point) dx)
-                               new-y (+ (:y initial-point) dy)
-                               [clamped-x clamped-y] (clamp-to-bounds new-x new-y bounds)]
-                           (assoc on-point-drag
-                                  :point-id point-id
-                                  :x (double clamped-x)
-                                  :y (double clamped-y))))]
+                ;; Calculate new positions for all points in polygon
+                updates-map (into {}
+                                  (for [point-id polygon-point-ids
+                                        :let [initial-point (get initial-points point-id)]
+                                        :when initial-point]
+                                    (let [new-x (+ (:x initial-point) dx)
+                                          new-y (+ (:y initial-point) dy)
+                                          [clamped-x clamped-y] (clamp-to-bounds new-x new-y bounds)]
+                                      [point-id {:x clamped-x :y clamped-y}])))
+
+                events (for [[point-id {:keys [x y]}] updates-map]
+                         (assoc on-point-drag
+                                :point-id point-id
+                                :x (double x)
+                                :y (double y)))]
             (when (seq events)
-              {:dispatch (vec events)}))
+              {:dispatch (vec events)
+               ;; RETURN PREVIEW VALUE
+               :preview-value (update-points-in-list points updates-map)}))
 
           nil)))
 
@@ -353,4 +384,6 @@
                                     :point-id selected-id
                                     :x (double clamped-x)
                                     :y (double clamped-y))
-                   :consumed? true})))))))}))
+                   :consumed? true
+                   ;; RETURN PREVIEW VALUE
+                   :preview-value (update-point-in-list points selected-id clamped-x clamped-y)})))))))}))

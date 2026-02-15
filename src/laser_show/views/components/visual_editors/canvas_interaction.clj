@@ -10,13 +10,14 @@
    1. The Canvas node is reused across renders (via user data + manual update).
    2. It does NOT maintain its own 'value' state atom. It renders whatever
       `value` is passed in via props.
-   3. Interaction callbacks (on-drag, etc.) are responsible for calculating
-      new values and dispatching events to update the global state.
-   4. The component waits for the new props to arrive to re-render the new state."
+   3. Event handlers are now attached via Cljfx props, ensuring they always closed over fresh props.
+   4. Interaction state (dragging?) is kept in a persistent atom in UserData."
   (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events])
+            [laser-show.events.core :as events]
+            [clojure.tools.logging :as log])
   (:import [javafx.scene.canvas Canvas]
            [javafx.scene.input MouseButton KeyEvent KeyCode]
+           [javafx.scene.text Font FontWeight]
            [javafx.event EventHandler]))
 
 (defn- dispatch-result!
@@ -27,168 +28,47 @@
     (if (sequential? dispatch-value)
       (run! events/dispatch! dispatch-value)
       (events/dispatch! dispatch-value))))
+
+(defn- get-drag-atom
+  [^javafx.event.Event e]
+  (let [source (.getSource e)
+        user-data (.getUserData source)]
+    (:drag-atom user-data)))
+
 (defn- update-interactive-canvas!
-  "Called on every render. Updates props in UserData and triggers render."
-  [^Canvas canvas props]
-  (when-let [user-data (.getUserData canvas)]
-    (let [{:keys [props-atom drag-atom]} user-data
-          {:keys [render! value cursor focus-traversable? on-key]} props
+  "Called on every render. Triggers render! callback."
+  [^Canvas canvas props drag-atom]
+  (let [{:keys [render! value cursor focus-traversable? on-key]} props
 
-          has-keyboard? (some? on-key)
-          focus? (if (some? focus-traversable?) focus-traversable? has-keyboard?)]
+        has-keyboard? (some? on-key)
+        focus? (if (some? focus-traversable?) focus-traversable? has-keyboard?)]
 
-      ;; Update the props atom so handlers see the new callbacks/values
-      (reset! props-atom props)
+    ;; Handle focus/style updates
+    (when focus?
+      (.setFocusTraversable canvas true))
+    (when cursor
+      (.setStyle canvas (str "-fx-cursor: " cursor ";")))
 
-      ;; Handle focus/style updates
-      (when focus?
-        (.setFocusTraversable canvas true))
-      (when cursor
-        (.setStyle canvas (str "-fx-cursor: " cursor ";")))
-
-      ;; Trigger render with new props
-      (when render!
-        (render! canvas value @drag-atom)))))
+    ;; Trigger render with new props and current drag state
+    (when render!
+      (let [drag-state @drag-atom
+            ;; PREFER PREVIEW VALUE IF EXISTS
+            render-value (or (:preview-value drag-state) value)]
+        (render! canvas render-value drag-state)))))
 
 (defn- setup-interactive-canvas!
-  "One-time setup for the canvas. Initializes UserData and attaches constant listeners."
+  "One-time setup for the canvas. Initializes UserData."
   [^Canvas canvas]
-  ;; Initialize UserData with atoms that will hold the LATEST props and interaction state
-  (let [props-atom (atom {})
-        drag-atom  (atom {:dragging?   false
+  ;; Initialize UserData with atoms that will hold constant interaction state
+  (let [drag-atom  (atom {:dragging?   false
                           :hover-id    nil
                           :mouse-over? false
-                          :drag-id     nil})
-        scene-filter-atom (atom nil)
+                          :drag-id     nil
+                          :preview-value nil})
+        scene-filter-atom (atom nil)]
 
-        ;; Helper to get current props
-        get-props (fn [] @props-atom)
-
-        ;; Helper to run render! with current value and drag state
-        do-render! (fn []
-                     (let [{:keys [render! value]} @props-atom]
-                       (when render!
-                         (render! canvas value @drag-atom))))]
-
-    (.setUserData canvas {:props-atom props-atom
-                          :drag-atom drag-atom
-                          :scene-filter-atom scene-filter-atom})
-
-    ;; --- Persistent Event Handlers ---
-    ;; These are attached ONCE. They look up the *latest* callbacks from props-atom.
-
-    (.setOnMousePressed
-     canvas
-     (reify EventHandler
-       (handle [_ e]
-         (let [{:keys [on-press value]} (get-props)]
-           (when on-press
-             (let [result (on-press (.getX e) (.getY e) (.getButton e)
-                                    value @drag-atom)]
-               (when result
-                 (when (:drag-start result)
-                   (swap! drag-atom assoc
-                          :dragging? true
-                          :drag-id (:drag-id result)))
-                 (when-let [du (:drag-updates result)]
-                   (swap! drag-atom merge du))
-                 (dispatch-result! (:dispatch result))
-                 ;; Re-render immediately to reflect drag state changes (e.g. highlight)
-                 (do-render!))))))))
-
-    (.setOnMouseDragged
-     canvas
-     (reify EventHandler
-       (handle [_ e]
-         (let [{:keys [on-drag value]} (get-props)]
-           (when (and on-drag (:dragging? @drag-atom))
-             (let [result (on-drag (.getX e) (.getY e)
-                                   value @drag-atom)]
-               (when result
-                 (when (contains? result :drag-id)
-                   (swap! drag-atom assoc :drag-id (:drag-id result)))
-                 (when-let [du (:drag-updates result)]
-                   (swap! drag-atom merge du))
-                 (dispatch-result! (:dispatch result))
-                 ;; Note: We re-render to reflect drag-state, but the VALUE 
-                 ;; usually hasn't changed yet (waiting for props update via event loop).
-                 (do-render!))))))))
-
-    (.setOnMouseReleased
-     canvas
-     (reify EventHandler
-       (handle [_ _e]
-         (let [{:keys [on-release value]} (get-props)]
-           (when on-release
-             (let [result (on-release value @drag-atom)]
-               ;; Side effects from release?
-               (dispatch-result! (:dispatch result))))
-           (swap! drag-atom assoc
-                  :dragging? false
-                  :drag-id nil)
-           (do-render!)))))
-
-    (.setOnMouseMoved
-     canvas
-     (reify EventHandler
-       (handle [_ e]
-         (let [{:keys [on-hover value]} (get-props)]
-           (when on-hover
-             (let [result    (on-hover (.getX e) (.getY e)
-                                       value @drag-atom)
-                   new-hover (:hover-id result)
-                   old-hover (:hover-id @drag-atom)]
-               (when (not= new-hover old-hover)
-                 (swap! drag-atom assoc :hover-id new-hover)
-                 (do-render!))
-               (when-let [c (:cursor result)]
-                 (.setStyle canvas (str "-fx-cursor: " c ";"))))))))
-
-     (.setOnMouseEntered
-      canvas
-      (reify EventHandler
-        (handle [_ _e]
-          (swap! drag-atom assoc :mouse-over? true)
-          (let [{:keys [on-key]} (get-props)]
-            (when on-key
-              (when-let [scene (.getScene canvas)]
-                (when-not @scene-filter-atom
-                  (let [filter (reify EventHandler
-                                 (handle [_ e]
-                                   (when (and (instance? KeyEvent e)
-                                              (:mouse-over? @drag-atom))
-                                     (let [^KeyEvent ke e
-                                           {:keys [on-key value]} (get-props)
-                                           result (when on-key
-                                                    (on-key (.getCode ke)
-                                                            (.isShiftDown ke)
-                                                            value
-                                                            @drag-atom))]
-                                       (when result
-                                         (when-let [du (:drag-updates result)]
-                                           (swap! drag-atom merge du))
-                                         (dispatch-result! (:dispatch result))
-                                         (do-render!)
-                                         (when (:consumed? result)
-                                           (.consume ke)))))))]
-                    (reset! scene-filter-atom filter)
-                    (.addEventFilter scene KeyEvent/KEY_PRESSED filter)))))))))
-
-     (.setOnMouseExited
-      canvas
-      (reify EventHandler
-        (handle [_ _e]
-          (let [{:keys [on-exit value]} (get-props)
-                had-hover? (some? (:hover-id @drag-atom))]
-            (swap! drag-atom assoc :hover-id nil :mouse-over? false)
-            (when on-exit
-              (on-exit value @drag-atom))
-            (do-render!)))))))
-
-  
-
-  
-)
+    (.setUserData canvas {:drag-atom drag-atom
+                          :scene-filter-atom scene-filter-atom})))
 
 (defn interactive-canvas
   "Creates an interactive canvas with standardized mouse/keyboard handling.
@@ -212,6 +92,7 @@
                            :drag-id     - updated drag id
                            :dispatch    - event map or vector of event maps
                            :drag-updates - extra keys to merge into drag-info
+                           :preview-value - (OPTIONAL) immediate local value to render during drag
      :on-release       - (fn [value drag-info])
      :on-hover         - (fn [mx my value drag-info])
                          Returns map with keys:
@@ -237,15 +118,144 @@
     :or {cursor "crosshair"
          value nil}
     :as props}]
-
   {:fx/type fx/ext-on-instance-lifecycle
    :on-created (fn [^Canvas canvas]
                  (setup-interactive-canvas! canvas)
                  ;; Initial update
-                 (update-interactive-canvas! canvas props))
+                 (let [drag-atom (:drag-atom (.getUserData canvas))]
+                   (update-interactive-canvas! canvas props drag-atom)))
    :on-advanced (fn [^Canvas canvas]
-                  (update-interactive-canvas! canvas props))
+                  (log/info "DEBUG: on-advanced called")
+                  (let [drag-atom (:drag-atom (.getUserData canvas))]
+                    (update-interactive-canvas! canvas props drag-atom)))
    :desc {:fx/type :canvas
           :width width
           :height height
-          :style (str "-fx-cursor: " cursor ";")}})
+          ;; Force update by changing accessible-help. This avoids colliding with UserData.
+          :accessible-help (str (java.util.UUID/randomUUID))
+          :style (str "-fx-cursor: " cursor ";")
+
+          :on-mouse-pressed
+          (fn [e]
+            (let [drag-atom (get-drag-atom e)]
+              (when on-press
+                (let [result (on-press (.getX e) (.getY e) (.getButton e)
+                                       value @drag-atom)]
+                  (when result
+                    (when (:drag-start result)
+                      (swap! drag-atom assoc
+                             :dragging? true
+                             :drag-id (:drag-id result)))
+                    (when-let [du (:drag-updates result)]
+                      (swap! drag-atom merge du))
+                    (dispatch-result! (:dispatch result))
+                    ;; Re-render immediately
+                    (render! (.getSource e)
+                             (or (:preview-value @drag-atom) value)
+                             @drag-atom))))))
+
+          :on-mouse-dragged
+          (fn [e]
+            (let [drag-atom (get-drag-atom e)]
+              (when (and on-drag (:dragging? @drag-atom))
+                (let [result (on-drag (.getX e) (.getY e)
+                                      value @drag-atom)]
+                  (when result
+                    (when (contains? result :drag-id)
+                      (swap! drag-atom assoc :drag-id (:drag-id result)))
+
+                    ;; Handle Preview Value
+                    (if-let [pv (:preview-value result)]
+                      (swap! drag-atom assoc :preview-value pv)
+                      nil)
+
+                    (when-let [du (:drag-updates result)]
+                      (swap! drag-atom merge du))
+                    (dispatch-result! (:dispatch result))
+
+                    (render! (.getSource e)
+                             (or (:preview-value @drag-atom) value)
+                             @drag-atom))))))
+
+          :on-mouse-released
+          (fn [e]
+            (let [drag-atom (get-drag-atom e)]
+              (when on-release
+                (let [result (on-release value @drag-atom)]
+                  (dispatch-result! (:dispatch result))))
+              (swap! drag-atom assoc
+                     :dragging? false
+                     :drag-id nil
+                     :preview-value nil)
+              (render! (.getSource e) value @drag-atom)))
+
+          :on-mouse-moved
+          (fn [e]
+            (let [drag-atom (get-drag-atom e)
+                  canvas (.getSource e)]
+              (when on-hover
+                (let [result    (on-hover (.getX e) (.getY e)
+                                          value @drag-atom)
+                      new-hover (:hover-id result)
+                      old-hover (:hover-id @drag-atom)]
+                  (when (not= new-hover old-hover)
+                    (swap! drag-atom assoc :hover-id new-hover)
+                    (render! canvas
+                             (or (:preview-value @drag-atom) value)
+                             @drag-atom))
+                  (when-let [c (:cursor result)]
+                    (.setStyle canvas (str "-fx-cursor: " c ";")))))))
+
+          :on-mouse-entered
+          (fn [e]
+            (let [drag-atom (get-drag-atom e)
+                  canvas (.getSource e)
+                  user-data (.getUserData canvas)
+                  scene-filter-atom (:scene-filter-atom user-data)]
+              (swap! drag-atom assoc :mouse-over? true)
+              (when on-key
+                (when-let [scene (.getScene canvas)]
+                  (when-not @scene-filter-atom
+                    (let [filter (reify EventHandler
+                                   (handle [_ e]
+                                     (when (and (instance? KeyEvent e)
+                                                (:mouse-over? @drag-atom))
+                                       (let [^KeyEvent ke e
+                                             ;; Use closed-over ON-KEY and VALUE
+                                             result (when on-key
+                                                      (on-key (.getCode ke)
+                                                              (.isShiftDown ke)
+                                                              value
+                                                              @drag-atom))]
+                                         (when result
+                                           (when-let [du (:drag-updates result)]
+                                             (swap! drag-atom merge du))
+                                           (dispatch-result! (:dispatch result))
+                                           (render! canvas
+                                                    (or (:preview-value @drag-atom) value)
+                                                    @drag-atom)
+                                           (when (:consumed? result)
+                                             (.consume ke)))))))]
+                      (reset! scene-filter-atom filter)
+                      (.addEventFilter scene KeyEvent/KEY_PRESSED filter)))))))
+
+          :on-mouse-exited
+          (fn [e]
+            (let [drag-atom (get-drag-atom e)
+                  canvas (.getSource e)
+                  user-data (.getUserData canvas)
+                  scene-filter-atom (:scene-filter-atom user-data)]
+              (swap! drag-atom assoc
+                     :hover-id nil
+                     :mouse-over? false
+                     :preview-value nil)
+
+              ;; Remove key filter to prevent stale closures and leaks
+              (when-let [filter @scene-filter-atom]
+                (when-let [scene (.getScene canvas)]
+                  (.removeEventFilter scene KeyEvent/KEY_PRESSED filter))
+                (reset! scene-filter-atom nil))
+
+              (when on-exit
+                (on-exit value @drag-atom))
+              (render! canvas value @drag-atom)))}})
