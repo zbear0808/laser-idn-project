@@ -46,15 +46,15 @@
                               :event/type :list/update-drop-target)))
 
 (defn- handle-drop!
-  "Handle drop operation by dispatching to async handler."
-  [component-id target-id drop-position items props]
+  "Handle drop operation by dispatching to async handler.
+   Handler reads items from state via items-path."
+  [component-id target-id drop-position drop-props]
   (when-let [dragging-ids (seq (:dragging-ids (get-ui-state component-id)))]
-    (when (seq items)
-      (let [{:keys [on-change-event on-change-params items-path]} props]
-        (events/dispatch!
-          (u/->map& component-id items dragging-ids target-id drop-position
-                    on-change-event on-change-params items-path
-                    :event/type :list/perform-drop))))))
+    (let [{:keys [on-change-event on-change-params items-path]} drop-props]
+      (events/dispatch!
+       (u/->map& component-id dragging-ids target-id drop-position
+                 on-change-event on-change-params items-path
+                 :event/type :list/perform-drop)))))
 
 (defn- clear-drag-state!
   "Clear all drag-related state after drop or cancel."
@@ -116,24 +116,24 @@
    3. Dispatches :list/clear-drag event"
   [^javafx.scene.Node node item-id component-id]
   (.setOnDragDetected node
-    (on-fx-event
-      (fn [event]
-        (let [dragboard (.startDragAndDrop node (into-array TransferMode [TransferMode/MOVE]))
-              content (ClipboardContent.)]
-          (.putString content (pr-str item-id))
-          (.setContent dragboard content)
-          (start-drag! component-id item-id)
-          (.add (.getStyleClass node) "chain-item-dragging")
-          (.consume event)))))
+                      (on-fx-event
+                       (fn [event]
+                         (let [dragboard (.startDragAndDrop node (into-array TransferMode [TransferMode/MOVE]))
+                               content (ClipboardContent.)]
+                           (.putString content (pr-str item-id))
+                           (.setContent dragboard content)
+                           (start-drag! component-id item-id)
+                           (.add (.getStyleClass node) "chain-item-dragging")
+                           (.consume event)))))
   (.setOnDragDone node
-    (on-fx-event
-      (fn [event]
-        (.remove (.getStyleClass node) "chain-item-dragging")
-        (when-let [old-target @current-drop-target-node]
-          (clear-drop-indicator-classes! old-target))
-        (reset! current-drop-target-node nil)
-        (clear-drag-state! component-id)
-        (.consume event)))))
+                  (on-fx-event
+                   (fn [event]
+                     (.remove (.getStyleClass node) "chain-item-dragging")
+                     (when-let [old-target @current-drop-target-node]
+                       (clear-drop-indicator-classes! old-target))
+                     (reset! current-drop-target-node nil)
+                     (clear-drag-state! component-id)
+                     (.consume event)))))
 
 
 ;; Drag Target Setup
@@ -146,56 +146,55 @@
    - target-id: ID of the item this node represents
    - group?: true if this is a group header (enables :into drop position)
    - component-id: list component ID for state management
-   - items: current items vector
-   - props: component props containing on-change-event etc.
+   - drop-props: map with :on-change-event, :on-change-params, :items-path
    
    Drop Position Calculation:
    - For groups: top 25% = :before, rest = :into
    - For items: top 50% = :before, bottom 50% = :after"
-  [^javafx.scene.Node node target-id group? component-id items props]
+  [^javafx.scene.Node node target-id group? component-id drop-props]
   (let [drop-position-atom (atom :before)]
     (.setOnDragOver node
-      (on-fx-event
-        (fn [event]
-          (when (and (.getDragboard event)
-                     (.hasString (.getDragboard event)))
-            (.acceptTransferModes event (into-array TransferMode [TransferMode/MOVE]))
-            (let [bounds (.getBoundsInLocal node)
-                  y (.getY event)
-                  height (.getHeight bounds)
-                  new-pos (if group?
-                            (if (< y (* height 0.25)) :before :into)
-                            (if (< y (* height 0.5)) :before :after))]
-              (when (not= @drop-position-atom new-pos)
-                (reset! drop-position-atom new-pos)
-                (set-drop-indicator-class! node new-pos group?)
-                (update-drop-target! component-id target-id new-pos))))
-          (.consume event))))
+                    (on-fx-event
+                     (fn [event]
+                       (when (and (.getDragboard event)
+                                  (.hasString (.getDragboard event)))
+                         (.acceptTransferModes event (into-array TransferMode [TransferMode/MOVE]))
+                         (let [bounds (.getBoundsInLocal node)
+                               y (.getY event)
+                               height (.getHeight bounds)
+                               new-pos (if group?
+                                         (if (< y (* height 0.25)) :before :into)
+                                         (if (< y (* height 0.5)) :before :after))]
+                           (when (not= @drop-position-atom new-pos)
+                             (reset! drop-position-atom new-pos)
+                             (set-drop-indicator-class! node new-pos group?)
+                             (update-drop-target! component-id target-id new-pos))))
+                       (.consume event))))
     (.setOnDragEntered node
-      (on-fx-event
-        (fn [event]
-          (when (.hasString (.getDragboard event))
-            (when-let [old-target @current-drop-target-node]
-              (when (not= old-target node)
-                (clear-drop-indicator-classes! old-target)))
-            (reset! current-drop-target-node node)
-            (let [initial-pos (if group? :into :before)]
-              (reset! drop-position-atom initial-pos)
-              (set-drop-indicator-class! node initial-pos group?)
-              (update-drop-target! component-id target-id initial-pos)))
-          (.consume event))))
+                       (on-fx-event
+                        (fn [event]
+                          (when (.hasString (.getDragboard event))
+                            (when-let [old-target @current-drop-target-node]
+                              (when (not= old-target node)
+                                (clear-drop-indicator-classes! old-target)))
+                            (reset! current-drop-target-node node)
+                            (let [initial-pos (if group? :into :before)]
+                              (reset! drop-position-atom initial-pos)
+                              (set-drop-indicator-class! node initial-pos group?)
+                              (update-drop-target! component-id target-id initial-pos)))
+                          (.consume event))))
     (.setOnDragExited node
-      (on-fx-event
-        (fn [event]
-          (clear-drop-indicator-classes! node)
-          (.consume event))))
+                      (on-fx-event
+                       (fn [event]
+                         (clear-drop-indicator-classes! node)
+                         (.consume event))))
     (.setOnDragDropped node
-      (on-fx-event
-        (fn [event]
-          (let [drop-pos @drop-position-atom]
-            (clear-drop-indicator-classes! node)
-            (reset! current-drop-target-node nil)
-            (handle-drop! component-id target-id drop-pos items props)
-            (clear-drag-state! component-id)
-            (.setDropCompleted event true)
-            (.consume event)))))))
+                       (on-fx-event
+                        (fn [event]
+                          (let [drop-pos @drop-position-atom]
+                            (clear-drop-indicator-classes! node)
+                            (reset! current-drop-target-node nil)
+                            (handle-drop! component-id target-id drop-pos drop-props)
+                            (clear-drag-state! component-id)
+                            (.setDropCompleted event true)
+                            (.consume event)))))))

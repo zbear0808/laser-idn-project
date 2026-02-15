@@ -356,9 +356,10 @@
                       (u/->map depth selected? effectively-disabled?))]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
-                   (dnd/setup-drag-source! node group-id component-id)
-                   (dnd/setup-drag-target! node group-id true component-id items props)
-                   (setup-click-handler! node component-id group-id items))
+                   (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
+                     (dnd/setup-drag-source! node group-id component-id)
+                     (dnd/setup-drag-target! node group-id true component-id drop-props)
+                     (setup-click-handler! node component-id group-id items)))
      :desc {:fx/type :h-box
             :style-class header-classes
             :children [{:fx/type :button
@@ -422,9 +423,10 @@
                        :effectively-disabled? effectively-disabled?})]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
-                   (dnd/setup-drag-source! node item-id component-id)
-                   (dnd/setup-drag-target! node item-id false component-id items props)
-                   (setup-click-handler! node component-id item-id items))
+                   (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
+                     (dnd/setup-drag-source! node item-id component-id)
+                     (dnd/setup-drag-target! node item-id false component-id drop-props)
+                     (setup-click-handler! node component-id item-id items)))
      :desc {:fx/type :h-box
             :style-class item-classes
             :children [{:fx/type :check-box
