@@ -485,9 +485,7 @@
              :renaming? (= item-id renaming-id)))))
 
 
-;; ============================================================================
 ;; Group Toolbar
-;; ============================================================================
 
 (defn- group-toolbar
   "Toolbar with group-related buttons."
@@ -632,9 +630,9 @@
   [component-id items props]
   (let [{:keys [items-atom props-atom]} (get-or-create-handler-atoms! component-id)]
     #_(log/debug "Updating handler atoms"
-               {:component-id component-id
-                :items-count (count items)
-                :props-keys (keys props)})
+                 {:component-id component-id
+                  :items-count (count items)
+                  :props-keys (keys props)})
     (reset! items-atom items)
     (reset! props-atom props)))
 
@@ -758,9 +756,9 @@
          allow-groups? true
          fallback-label "Unknown"}}]
   #_(log/debug "list-editor render"
-             {:component-id component-id
-              :items-count (count items)
-              :clipboard-items-count (count clipboard-items)})
+               {:component-id component-id
+                :items-count (count items)
+                :clipboard-items-count (count clipboard-items)})
   (let [label-fn (cond
                    get-item-label
                    get-item-label

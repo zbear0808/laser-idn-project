@@ -4,29 +4,11 @@
    Features:
    - 280x280 pixel canvas with grid display
    - NORMALIZED 0.0-1.0 input (X) and output (Y) axes
-   - Diagonal reference line (identity mapping)
-   - Draggable control points with constraints:
-     - Corner points (x=0.0, x=1.0): Y-axis only, cannot be deleted
-     - Middle points: fully draggable, can be added/removed
-   - Click empty space to add new point
-   - Right-click to remove points
-   - Hover states with coordinate display
-   - Color-coded rendering based on channel (R/G/B)
-   - Smooth curve rendering using spline interpolation
-   
-   Usage:
-   {:fx/type curve-canvas
-    :fx/key [unique-id]
-    :width 280
-    :height 280
-    :color \"#FF5555\"  ; channel color
-    :control-points [[0.0 0.0] [0.25 0.31] [1.0 1.0]]  ; sorted [x y] pairs (normalized)
-    :on-add-point {:event/type :chain/add-curve-point :domain :effect-chains :entity-key [col row] :effect-path [idx] :channel :r}
-    :on-update-point {:event/type :chain/update-curve-point :domain :effect-chains :entity-key [col row] :effect-path [idx] :channel :r}
-    :on-remove-point {:event/type :chain/remove-curve-point :domain :effect-chains :entity-key [col row] :effect-path [idx] :channel :r}}"
+   - Draggable points with real-time updates"
   (:require [cljfx.api :as fx]
             [laser-show.events.core :as events]
-            [laser-show.animation.effects.curves :as curves])
+            [laser-show.animation.effects.curves :as curves]
+            [laser-show.views.components.visual-editors.canvas-interaction :as ci])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.input MouseButton MouseEvent]
            [javafx.scene.paint Color]
@@ -86,7 +68,7 @@
   [^GraphicsContext gc width height padding]
   (.setStroke gc (Color/web "#303030"))
   (.setLineWidth gc 0.5)
-  
+
   (let [usable-size (- width (* 2 padding))
         grid-count 8
         step (/ usable-size grid-count)]
@@ -146,12 +128,12 @@
       (.setFill gc (Color/web color 0.3))
       (.fillOval gc (- x actual-radius 3) (- y actual-radius 3)
                  (* 2 (+ actual-radius 3)) (* 2 (+ actual-radius 3))))
-    
+
     ;; Point fill
     (.setFill gc (Color/web color (if is-corner? 0.8 1.0)))
     (.fillOval gc (- x actual-radius) (- y actual-radius)
                (* 2 actual-radius) (* 2 actual-radius))
-    
+
     ;; Border
     (.setStroke gc (Color/web "#FFFFFF" 0.8))
     (.setLineWidth gc (if is-corner? 2.0 1.5))
@@ -221,135 +203,75 @@
    - :on-remove-point - Event map for point removal"
   [{:keys [width height color control-points on-add-point on-update-point on-remove-point]
     :or {width 280 height 280 color "#FFFFFF"}}]
-  
-  (let [padding 25]  ;; Padding for axis labels
-    {:fx/type fx/ext-on-instance-lifecycle
-     :on-created
-     (fn [^Canvas canvas]
-       (let [gc (.getGraphicsContext2D canvas)
-             ;; Internal state for interaction
-             drag-state (atom {:dragging? false
-                               :point-idx nil
-                               :hover-idx nil})
-             points-atom (atom (or control-points [[0.0 0.0] [1.0 1.0]]))]
-         
-         ;; Render function
-         (letfn [(render! []
-                   (let [points @points-atom
-                         hover-idx (:hover-idx @drag-state)]
-                     (draw-background gc width height)
-                     (draw-grid gc width height padding)
-                     (draw-diagonal gc width height padding)
-                     (draw-axis-labels gc width height padding)
-                     (draw-curve gc width height padding points color)
-                     (draw-control-points gc width height padding points color hover-idx)
-                     (draw-coordinate-tooltip gc width height padding points hover-idx)))]
-           
-           ;; Mouse pressed - start drag or add point
-           (.setOnMousePressed
-            canvas
-            (reify javafx.event.EventHandler
-              (handle [_ e]
-                (let [mx (.getX e)
-                      my (.getY e)
-                      button (.getButton e)
-                      points @points-atom
-                      hit-idx (find-closest-point mx my points width height padding 12)]
-                  (cond
-                    ;; Right-click on point - remove it
-                    (and (= button MouseButton/SECONDARY) hit-idx)
-                    (let [n (count points)
-                          is-corner? (or (= hit-idx 0) (= hit-idx (dec n)))]
-                      (when (and (not is-corner?) on-remove-point)
-                        (events/dispatch! (assoc on-remove-point :point-idx hit-idx))
-                        (swap! points-atom curves/remove-point hit-idx)
-                        (render!)))
-                    
-                    ;; Left-click on point - start drag
-                    (and (= button MouseButton/PRIMARY) hit-idx)
-                    (do
-                      (swap! drag-state assoc
-                             :dragging? true
-                             :point-idx hit-idx)
-                      (render!))
-                    
-                    ;; Left-click on empty space - add new point
-                    (and (= button MouseButton/PRIMARY) (nil? hit-idx))
-                    (let [[x y] (canvas-to-point mx my width height padding)]
-                      (when on-add-point
-                        ;; Dispatch normalized values (0.0-1.0)
-                        (events/dispatch! (assoc on-add-point
-                                                 :x (double x)
-                                                 :y (double y)))
-                        (swap! points-atom curves/add-point x y)
-                        (render!))))))))
-           
-           ;; Mouse dragged - update point position
-           (.setOnMouseDragged
-            canvas
-            (reify javafx.event.EventHandler
-              (handle [_ e]
-                (when (:dragging? @drag-state)
-                  (let [point-idx (:point-idx @drag-state)
-                        points @points-atom
-                        n (count points)
-                        is-corner? (or (= point-idx 0) (= point-idx (dec n)))
-                        [x y] (canvas-to-point (.getX e) (.getY e) width height padding)
-                        ;; Corner points: keep X fixed
-                        final-x (if is-corner?
-                                  (first (nth points point-idx))
-                                  x)]
-                    ;; Update local state for immediate feedback
-                    (swap! points-atom curves/update-point point-idx final-x y)
-                    (render!)
-                    ;; Dispatch event for state update with normalized values
-                    (when on-update-point
-                      (events/dispatch! (assoc on-update-point
-                                               :point-idx point-idx
-                                               :x (double final-x)
-                                               :y (double y)))))))))
-           
-           ;; Mouse released - end drag
-           (.setOnMouseReleased
-            canvas
-            (reify javafx.event.EventHandler
-              (handle [_ e]
-                (swap! drag-state assoc
-                       :dragging? false
-                       :point-idx nil)
-                (render!))))
-           
-           ;; Mouse moved - update hover state
-           (.setOnMouseMoved
-            canvas
-            (reify javafx.event.EventHandler
-              (handle [_ e]
-                (let [mx (.getX e)
-                      my (.getY e)
-                      points @points-atom
-                      hover-idx (find-closest-point mx my points width height padding 12)
-                      current-hover (:hover-idx @drag-state)]
-                  (when (not= hover-idx current-hover)
-                    (swap! drag-state assoc :hover-idx hover-idx)
-                    (render!))
-                  ;; Update cursor
-                  (if hover-idx
-                    (.setStyle canvas "-fx-cursor: hand;")
-                    (.setStyle canvas "-fx-cursor: crosshair;"))))))
-           
-           ;; Mouse exited - clear hover
-           (.setOnMouseExited
-            canvas
-            (reify javafx.event.EventHandler
-              (handle [_ e]
-                (when (:hover-idx @drag-state)
-                  (swap! drag-state assoc :hover-idx nil)
-                  (render!)))))
-           
-           ;; Initial render
-           (render!))))
-     
-     :desc {:fx/type :canvas
-            :width width
-            :height height
-            :style "-fx-cursor: crosshair;"}}))
+
+  (let [padding 25
+        ;; Ensure we always have valid points for rendering
+        points (or control-points [[0.0 0.0] [1.0 1.0]])]
+
+    (ci/interactive-canvas
+     {:width width
+      :height height
+      :value points  ; Pass points as the state value
+      :cursor "crosshair"
+
+      :render!
+      (fn [^Canvas canvas points drag-info]
+        (let [gc (.getGraphicsContext2D canvas)
+              hover-idx (:hover-idx drag-info)]
+          (draw-background gc width height)
+          (draw-grid gc width height padding)
+          (draw-diagonal gc width height padding)
+          (draw-axis-labels gc width height padding)
+          (draw-curve gc width height padding points color)
+          (draw-control-points gc width height padding points color hover-idx)
+          (draw-coordinate-tooltip gc width height padding points hover-idx)))
+
+      :on-press
+      (fn [mx my button points drag-info]
+        (let [hit-idx (find-closest-point mx my points width height padding 12)]
+          (cond
+            ;; Right-click on point - remove it
+            (and (= button MouseButton/SECONDARY) hit-idx)
+            (let [n (count points)
+                  is-corner? (or (= hit-idx 0) (= hit-idx (dec n)))]
+              (when (and (not is-corner?) on-remove-point)
+                ;; Dispatch remove event - global state will update 
+                ;; and re-render component in next cycle
+                {:dispatch (assoc on-remove-point :point-idx hit-idx)}))
+
+            ;; Left-click on point - start drag
+            (and (= button MouseButton/PRIMARY) hit-idx)
+            {:drag-start true
+             :drag-id hit-idx}
+
+            ;; Left-click on empty space - add new point
+            (and (= button MouseButton/PRIMARY) (nil? hit-idx))
+            (let [[x y] (canvas-to-point mx my width height padding)]
+              (when on-add-point
+                {:dispatch (assoc on-add-point
+                                  :x (double x)
+                                  :y (double y))})))))
+
+      :on-drag
+      (fn [mx my points drag-info]
+        (let [point-idx (:drag-id drag-info)
+              n (count points)
+              is-corner? (or (= point-idx 0) (= point-idx (dec n)))
+              [x y] (canvas-to-point mx my width height padding)
+              ;; Corner points: can only move Y (X is fixed at 0.0 or 1.0)
+              final-x (if is-corner?
+                        (first (nth points point-idx))
+                        x)]
+          ;; Dispatch update event
+          (when on-update-point
+            {:dispatch (assoc on-update-point
+                              :point-idx point-idx
+                              :x (double final-x)
+                              :y (double y))})))
+
+      :on-hover
+      (fn [mx my points drag-info]
+        (let [hover-idx (find-closest-point mx my points width height padding 12)]
+          {:hover-id hover-idx
+           :cursor (if hover-idx "hand" "crosshair")}))})))
+

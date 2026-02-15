@@ -10,30 +10,11 @@
    - Current playback position indicator (vertical line)
    - Hover states with position display
    
-   Visual design:
-   ┌────────────────────────────────────────────────────────────────┐
-   │  0%                    50%                               100%  │
-   │  ├─────────────────────┼─────────────────────────────────┤    │
-   │  ◆                     ◇                                 ◆    │
-   │  │                     │                                 │    │
-   │  ▼ - selected                                                  │
-   │                           ↑ playback indicator                 │
-   └────────────────────────────────────────────────────────────────┘
-   
-   Usage:
-   {:fx/type keyframe-timeline
-    :width 400
-    :height 60
-    :keyframes [{:position 0.0 :params {...}} ...]
-    :selected-idx 0
-    :current-phase 0.35
-    :on-select {:event/type :keyframe/select ...}
-    :on-add {:event/type :keyframe/add ...}
-    :on-move {:event/type :keyframe/move ...}
-    :on-delete {:event/type :keyframe/delete ...}}"
+   Refactored to Stateless Interactive Canvas."
   (:require [cljfx.api :as fx]
             [laser-show.events.core :as events]
-            [laser-show.css.theme :as theme])
+            [laser-show.css.theme :as theme]
+            [laser-show.views.components.visual-editors.canvas-interaction :as ci])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.input MouseButton MouseEvent]
            [javafx.scene.paint Color]
@@ -108,7 +89,7 @@
     (.setFill gc (Color/web "#888888"))
     (.setFont gc (Font/font "System" 9.0))
     (.setTextAlign gc TextAlignment/CENTER)
-    
+
     (doseq [[pos label] (map vector tick-positions labels)]
       (let [x (position-to-x pos width)]
         ;; Tick mark
@@ -236,146 +217,62 @@
   [{:keys [width height keyframes selected-idx current-phase
            on-select on-add on-move on-delete]
     :or {width 400 height 60}}]
-  
-  {:fx/type fx/ext-on-instance-lifecycle
-   :on-created
-   (fn [^Canvas canvas]
-     (let [gc (.getGraphicsContext2D canvas)
-           ;; Internal state for interaction
-           drag-state (atom {:dragging? false
-                             :keyframe-idx nil
-                             :hover-idx nil})
-           keyframes-atom (atom (or keyframes []))
-           selected-atom (atom selected-idx)
-           phase-atom (atom current-phase)]
-       
-       (letfn [(render! []
-                 (let [kfs @keyframes-atom
-                       sel-idx @selected-atom
-                       phase @phase-atom
-                       hover-idx (:hover-idx @drag-state)]
-                   (draw-background gc width height)
-                   (draw-timeline-bar gc width height)
-                   (draw-tick-marks gc width height)
-                   (draw-keyframe-markers gc width height kfs sel-idx hover-idx)
-                   (draw-playhead gc width height phase)
-                   (draw-position-tooltip gc width height kfs hover-idx)))]
-         
-         ;; Mouse pressed - start drag, select, or add keyframe
-         (.setOnMousePressed
-          canvas
-          (reify javafx.event.EventHandler
-            (handle [_ e]
-              (let [mx (.getX e)
-                    my (.getY e)
-                    button (.getButton e)
-                    kfs @keyframes-atom
-                    hit-idx (find-closest-keyframe mx my kfs width height 15)]
-                (cond
-                  ;; Right-click on keyframe - delete it (if more than 1)
-                  (and (= button MouseButton/SECONDARY) hit-idx)
-                  (when (and (> (count kfs) 1) on-delete)
-                    (events/dispatch! (assoc on-delete :keyframe-idx hit-idx))
-                    (let [new-kfs (vec (concat (subvec kfs 0 hit-idx)
-                                               (subvec kfs (inc hit-idx))))]
-                      (reset! keyframes-atom new-kfs)
-                      ;; Adjust selected if needed
-                      (when (>= @selected-atom (count new-kfs))
-                        (reset! selected-atom (dec (count new-kfs))))
-                      (render!)))
-                  
-                  ;; Left-click on keyframe - select and start drag
-                  (and (= button MouseButton/PRIMARY) hit-idx)
-                  (do
-                    (reset! selected-atom hit-idx)
-                    (swap! drag-state assoc
-                           :dragging? true
-                           :keyframe-idx hit-idx)
-                    (when on-select
-                      (events/dispatch! (assoc on-select :keyframe-idx hit-idx)))
-                    (render!))
-                  
-                  ;; Left-click on empty space - add new keyframe
-                  (and (= button MouseButton/PRIMARY) (nil? hit-idx))
-                  (let [position (x-to-position mx width)
-                        clamped-pos (max 0.0 (min 1.0 position))]
-                    (when on-add
-                      (events/dispatch! (assoc on-add :position clamped-pos))
-                      ;; Add to local state for immediate feedback
-                      (let [new-kf {:position clamped-pos :params {}}
-                            new-kfs (vec (sort-by :position (conj @keyframes-atom new-kf)))
-                            new-idx (.indexOf new-kfs new-kf)]
-                        (reset! keyframes-atom new-kfs)
-                        (reset! selected-atom new-idx)
-                        (render!)))))))))
-         
-         ;; Mouse dragged - update keyframe position
-         (.setOnMouseDragged
-          canvas
-          (reify javafx.event.EventHandler
-            (handle [_ e]
-              (when (:dragging? @drag-state)
-                (let [keyframe-idx (:keyframe-idx @drag-state)
-                      position (x-to-position (.getX e) width)
-                      clamped-pos (max 0.0 (min 1.0 position))]
-                  ;; Update local state for immediate feedback
-                  (swap! keyframes-atom assoc-in [keyframe-idx :position] clamped-pos)
-                  ;; Re-sort keyframes and track new index
-                  (let [kfs @keyframes-atom
-                        updated-kf (nth kfs keyframe-idx)
-                        sorted-kfs (vec (sort-by :position kfs))
-                        new-idx (.indexOf sorted-kfs updated-kf)]
-                    (reset! keyframes-atom sorted-kfs)
-                    (swap! drag-state assoc :keyframe-idx new-idx)
-                    (reset! selected-atom new-idx))
-                  (render!)
-                  ;; Dispatch event for state update
-                  (when on-move
-                    (events/dispatch! (assoc on-move
-                                             :keyframe-idx (:keyframe-idx @drag-state)
-                                             :new-position clamped-pos))))))))
-         
-         ;; Mouse released - end drag
-         (.setOnMouseReleased
-          canvas
-          (reify javafx.event.EventHandler
-            (handle [_ e]
-              (swap! drag-state assoc
-                     :dragging? false
-                     :keyframe-idx nil)
-              (render!))))
-         
-         ;; Mouse moved - update hover state
-         (.setOnMouseMoved
-          canvas
-          (reify javafx.event.EventHandler
-            (handle [_ e]
-              (let [mx (.getX e)
-                    my (.getY e)
-                    kfs @keyframes-atom
-                    hover-idx (find-closest-keyframe mx my kfs width height 15)
-                    current-hover (:hover-idx @drag-state)]
-                (when (not= hover-idx current-hover)
-                  (swap! drag-state assoc :hover-idx hover-idx)
-                  (render!))
-                ;; Update cursor
-                (if hover-idx
-                  (.setStyle canvas "-fx-cursor: hand;")
-                  (.setStyle canvas "-fx-cursor: crosshair;"))))))
-         
-         ;; Mouse exited - clear hover
-         (.setOnMouseExited
-          canvas
-          (reify javafx.event.EventHandler
-            (handle [_ e]
-              (when (:hover-idx @drag-state)
-                (swap! drag-state assoc :hover-idx nil)
-                (render!)))))
-         
-         ;; Initial render
-         (render!))))
-   
-   :desc {:fx/type :canvas
-          :width width
-          :height height
-          :style "-fx-cursor: crosshair;"}})
+
+  (ci/interactive-canvas
+   {:width width
+    :height height
+    :value keyframes
+    :cursor "crosshair"
+
+    :render!
+    (fn [^Canvas canvas keyframes drag-info]
+      (let [gc (.getGraphicsContext2D canvas)
+            hover-idx (:hover-idx drag-info)]
+        (draw-background gc width height)
+        (draw-timeline-bar gc width height)
+        (draw-tick-marks gc width height)
+        (draw-keyframe-markers gc width height keyframes selected-idx hover-idx)
+        (draw-playhead gc width height current-phase)
+        (draw-position-tooltip gc width height keyframes hover-idx)))
+
+    :on-press
+    (fn [mx my button keyframes drag-info]
+      (let [hit-idx (find-closest-keyframe mx my keyframes width height 15)]
+        (cond
+          ;; Right-click on keyframe - delete unique (if more than 1)
+          (and (= button MouseButton/SECONDARY) hit-idx)
+          (when (and (> (count keyframes) 1) on-delete)
+            {:dispatch (assoc on-delete :keyframe-idx hit-idx)})
+
+          ;; Left-click on keyframe - select and start drag
+          (and (= button MouseButton/PRIMARY) hit-idx)
+          {:drag-start true
+           :drag-id hit-idx
+           ;; Dispatch select event immediately
+           :dispatch (when on-select
+                       (assoc on-select :keyframe-idx hit-idx))}
+
+          ;; Left-click on empty space - add new keyframe
+          (and (= button MouseButton/PRIMARY) (nil? hit-idx))
+          (let [position (x-to-position mx width)
+                clamped-pos (max 0.0 (min 1.0 position))]
+            (when on-add
+              {:dispatch (assoc on-add :position clamped-pos)}))
+
+          :else nil)))
+
+    :on-drag
+    (fn [mx my keyframes drag-info]
+      (let [keyframe-idx (:drag-id drag-info)
+            position (x-to-position mx width)
+            clamped-pos (max 0.0 (min 1.0 position))]
+        (when on-move
+          {:dispatch (assoc on-move
+                            :keyframe-idx keyframe-idx
+                            :new-position clamped-pos)})))
+
+    :on-hover
+    (fn [mx my keyframes drag-info]
+      (let [hover-idx (find-closest-keyframe mx my keyframes width height 15)]
+        {:hover-id hover-idx
+         :cursor (if hover-idx "hand" "crosshair")}))}))

@@ -25,17 +25,6 @@
             [laser-show.common.util :as u]))
 
 
-;; Constants
-
-
-(def DEFAULT_CORNER_PIN
-  "Default corner-pin with no transformation (identity mapping)."
-  {:tl-x -1.0 :tl-y 1.0
-   :tr-x 1.0 :tr-y 1.0
-   :bl-x -1.0 :bl-y -1.0
-   :br-x 1.0 :br-y -1.0})
-
-
 (def DEFAULT_PROJECTOR_EFFECTS
   "Default effects for all projectors - color calibration and corner pin.
    Uses normalized 0.0-1.0 color values and -1.0 to 1.0 corner pin bounds."

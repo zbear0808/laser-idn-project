@@ -13,14 +13,7 @@
    - Positive angles rotate counter-clockwise
    - Range: -360° to 360° (matches effect definition)
    
-   Usage:
-   {:fx/type rotate-canvas
-    :fx/key [unique-id]
-    :width 280
-    :height 280
-    :angle 45.0
-    :on-angle-change {:event/type :chain/update-param ...}
-    :on-reset {:event/type :chain/reset-params ...}}"
+   Refactored to Stateless Interactive Canvas."
   (:require [laser-show.views.components.visual-editors.canvas-interaction :as ci]
             [laser-show.common.util :as u])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
@@ -83,12 +76,12 @@
   (.setStroke gc (Color/web "#404040"))
   (.setLineWidth gc 2.0)
   (.strokeOval gc (- cx radius) (- cy radius) (* 2 radius) (* 2 radius))
-  
+
   ;; Inner circle (slightly smaller)
   (let [inner-radius (* radius 0.95)]
     (.setStroke gc (Color/web "#303030"))
     (.setLineWidth gc 1.0)
-    (.strokeOval gc (- cx inner-radius) (- cy inner-radius) 
+    (.strokeOval gc (- cx inner-radius) (- cy inner-radius)
                  (* 2 inner-radius) (* 2 inner-radius))))
 
 (defn- draw-angle-marks
@@ -107,7 +100,7 @@
             x2 (+ cx (* outer-r (Math/cos radians)))
             y2 (- cy (* outer-r (Math/sin radians)))]
         (.strokeLine gc x1 y1 x2 y2))))
-  
+
   ;; Draw major ticks every 30°
   (.setStroke gc (Color/web "#505050"))
   (.setLineWidth gc 1.5)
@@ -120,7 +113,7 @@
           x2 (+ cx (* outer-r (Math/cos radians)))
           y2 (- cy (* outer-r (Math/sin radians)))]
       (.strokeLine gc x1 y1 x2 y2)))
-  
+
   ;; Draw cardinal direction labels (0°, 90°, 180°, 270°)
   (.setFill gc (Color/web "#808080"))
   (.setFont gc (Font/font "System" FontWeight/BOLD 10.0))
@@ -222,17 +215,17 @@
     (ci/interactive-canvas
      {:width  width
       :height height
-      :initial-state (or angle 0.0)
+      :value (float (or angle 0.0))
       :cursor "crosshair"
 
       :render!
-      (fn [^Canvas canvas state drag-info]
+      (fn [^Canvas canvas angle drag-info]
         (let [gc (.getGraphicsContext2D canvas)
-              [hx hy] (angle-to-handle-pos state cx cy radius)]
+              [hx hy] (angle-to-handle-pos angle cx cy radius)]
           (draw-background gc width height)
           (draw-dial-circle gc cx cy radius)
           (draw-angle-marks gc cx cy radius)
-          (draw-angle-arc gc cx cy radius state)
+          (draw-angle-arc gc cx cy radius angle)
           (draw-handle-line gc cx cy hx hy)
           (draw-center-point gc cx cy)
           (draw-handle gc hx hy
@@ -240,46 +233,42 @@
                        (:dragging? drag-info))))
 
       :on-press
-      (fn [mx my button state _drag-info]
+      (fn [mx my button angle _drag-info]
         (cond
           (= button MouseButton/SECONDARY)
-          {:state 0.0
-           :dispatch on-reset}
+          {:dispatch on-reset}
 
           (= button MouseButton/PRIMARY)
           (let [new-angle (clamp-angle (mouse-to-angle mx my cx cy))]
             {:drag-start true
-             :state new-angle
              :dispatch (when on-angle-change
                          (assoc on-angle-change
                                 :param-key :angle
                                 :value new-angle))})))
 
       :on-drag
-      (fn [mx my _state _drag-info]
+      (fn [mx my _angle _drag-info]
         (let [new-angle (clamp-angle (mouse-to-angle mx my cx cy))]
-          {:state new-angle
-           :dispatch (when on-angle-change
+          {:dispatch (when on-angle-change
                        (assoc on-angle-change
                               :param-key :angle
                               :value new-angle))}))
 
       :on-hover
-      (fn [mx my state _drag-info]
-        (let [[hx hy] (angle-to-handle-pos state cx cy radius)
+      (fn [mx my angle _drag-info]
+        (let [[hx hy] (angle-to-handle-pos angle cx cy radius)
               over-handle? (hit-handle? mx my hx hy)]
           {:hover-id (when over-handle? :handle)
            :cursor (if over-handle? "hand" "crosshair")}))
 
       :on-key
-      (fn [key-code shift? state _drag-info]
+      (fn [key-code shift? angle _drag-info]
         (when (or (= key-code KeyCode/LEFT)
                   (= key-code KeyCode/RIGHT))
           (let [step (if shift? 10.0 1.0)
                 delta (if (= key-code KeyCode/RIGHT) step (- step))
-                new-angle (clamp-angle (+ state delta))]
-            {:state new-angle
-             :dispatch (when on-angle-change
+                new-angle (clamp-angle (+ angle delta))]
+            {:dispatch (when on-angle-change
                          (assoc on-angle-change
                                 :param-key :angle
                                 :value new-angle))

@@ -1,6 +1,6 @@
 (ns laser-show.views.components.visual-editors.scale-canvas
   "Scale editor canvas with edge/corner handles.
-
+ 
    Features:
    - Centered rectangle that scales from center
    - 8 handles: 4 corners + 4 edge midpoints
@@ -8,22 +8,8 @@
    - Supports negative values for mirroring
    - Right-click to reset to default (1.0, 1.0)
    - Keyboard arrow keys for fine adjustment
-
-   Handle Behaviors:
-   - Corner handles: scale both X and Y
-   - Edge handles: scale only the corresponding axis
-   - When uniform mode: all handles scale both axes equally
-
-   Usage:
-   {:fx/type scale-canvas
-    :fx/key [unique-id]
-    :width 280
-    :height 280
-    :x-scale 1.5
-    :y-scale 1.5
-    :uniform? false
-    :on-scale-change {:event/type :chain/update-param ...}
-    :on-reset {:event/type :chain/reset-params ...}}"
+ 
+   Refactored to Stateless Interactive Canvas."
   (:require [laser-show.views.components.visual-editors.canvas-interaction :as ci]
             [laser-show.common.util :as u])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
@@ -269,7 +255,7 @@
 
 (defn scale-canvas
   "Scale editor canvas with edge/corner handles.
-
+ 
    Props:
    - :width - Canvas width in pixels (default 280)
    - :height - Canvas height in pixels (default 280)
@@ -290,7 +276,7 @@
     (ci/interactive-canvas
      {:width  width
       :height height
-      :initial-state {:x (or x-scale 1.0) :y (or y-scale 1.0)}
+      :value {:x (or x-scale 1.0) :y (or y-scale 1.0)}
       :cursor "crosshair"
 
       :render!
@@ -312,8 +298,7 @@
       (fn [mx my button state _drag-info]
         (cond
           (= button MouseButton/SECONDARY)
-          {:state {:x 1.0 :y 1.0}
-           :dispatch on-reset}
+          {:dispatch on-reset}
 
           (= button MouseButton/PRIMARY)
           (let [{:keys [x y]} state
@@ -329,8 +314,7 @@
               handle-id (:drag-id drag-info)
               [new-x new-y] (calculate-new-scale handle-id mx my cx cy
                                                  base-size max-size x y uniform?)]
-          {:state {:x new-x :y new-y}
-           :dispatch (when on-scale-change
+          {:dispatch (when on-scale-change
                        (assoc on-scale-change
                               :x-scale new-x
                               :y-scale new-y))}))
@@ -363,8 +347,7 @@
                      (clamp-scale (+ y delta))])
                   [(clamp-scale (+ x dx))
                    (clamp-scale (+ y dy))])]
-            {:state {:x new-x :y new-y}
-             :dispatch (when on-scale-change
+            {:dispatch (when on-scale-change
                          (assoc on-scale-change
                                 :x-scale new-x
                                 :y-scale new-y))

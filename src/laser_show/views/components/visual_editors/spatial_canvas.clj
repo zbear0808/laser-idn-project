@@ -10,36 +10,13 @@
    - Support for lines, polygons, and visual feedback
    - Smart cursor feedback (hand on points, move cursor inside polygon)
    
-   Keyboard Controls:
-   - Arrow keys: Move selected point by 0.01 units (fine adjustment)
-   - Shift + Arrow keys: Move selected point by 0.1 units (coarse adjustment)
-   - Tab/Shift+Tab: Cycle through points (when multiple points exist)
-   - Mouse must be hovering over canvas for arrow keys to work
-   
-   Usage:
-   {:fx/type spatial-canvas
-    :fx/key [unique-id]  ; Important: add unique key to force re-creation on context change
-    :width 300
-    :height 300
-    :bounds {:x-min -2.0 :x-max 2.0 :y-min -2.0 :y-max 2.0}
-    :points [{:id :center :x 0.0 :y 0.0 :color \"#4CAF50\" :label \"Center\"}]
-    :lines [{:from :tl :to :tr :color \"#4A6FA5\" :width 2}]
-    :polygon {:points [:tl :tr :br :bl] :color \"#4A6FA520\"}
-    :on-point-drag {:event/type :chain/update-spatial-params ...}
-    :on-reset {:event/type :chain/reset-params ...}  ; Right-click anywhere to reset
-    :show-grid true
-    :show-axes true}"
-  (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events]
-            [laser-show.common.util :as u])
+   Refactored to Stateless Interactive Canvas."
+  (:require [laser-show.common.util :as u]
+            [laser-show.views.components.visual-editors.canvas-interaction :as ci])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
-           [javafx.scene.input MouseEvent MouseButton KeyEvent KeyCode]
+           [javafx.scene.input MouseButton KeyEvent KeyCode]
            [javafx.scene.paint Color]
-           [javafx.scene.text Font FontWeight]
-           [javafx.event EventHandler EventType]
-           [javafx.application Platform]))
-
-(require '[clojure.tools.logging :as log])
+           [javafx.scene.text Font FontWeight]))
 
 
 ;; Coordinate Transformations
@@ -157,6 +134,10 @@
       (.setFont gc (Font/font "System" FontWeight/BOLD 10.0))
       (.fillText gc label (+ x actual-radius 5) (- y actual-radius)))))
 
+
+;; Hit Testing
+
+
 (defn- find-closest-point
   "Find the closest point to mouse coordinates within threshold."
   [mx my points width height bounds threshold]
@@ -225,227 +206,151 @@
     :or {width 300 height 300
          show-grid true show-axes true show-labels true}}]
 
-  (log/info "SPATIAL-CANVAS CREATED - points:" points)
-  {:fx/type fx/ext-on-instance-lifecycle
-   :on-created
-   (fn [^Canvas canvas]
-     (log/info "SPATIAL-CANVAS on-created callback - points:" points)
-     (let [gc (.getGraphicsContext2D canvas)
-           drag-state (atom {:dragging? false
-                             :point-id nil
-                             :hover-id nil
-                             :drag-type nil
-                             :drag-start-world nil
-                             :initial-points nil
-                             :keyboard-selected-id nil
-                             :mouse-over? false})
-           points-map (atom (u/map-into :id points))
-           fine-step 0.005
-           coarse-step 0.02
-           scene-filter (atom nil)
+  (ci/interactive-canvas
+   {:width width
+    :height height
+    :value points
+    :cursor "crosshair"
 
-           ;; Render function
-           render! (fn []
-                     (.clearRect gc 0 0 width height)
-                     (.setFill gc Color/BLACK)
-                     (.fillRect gc 0 0 width height)
-                     (when show-grid
-                       (draw-grid gc width height bounds))
-                     (when show-axes
-                       (draw-axes gc width height bounds))
-                     (when show-labels
-                       (draw-coordinate-labels gc width height bounds))
-                     (when polygon
-                       (draw-polygon gc width height bounds polygon @points-map))
-                     (doseq [line lines]
-                       (draw-line gc width height bounds line @points-map))
-                     (doseq [{:keys [id x y color label]} (vals @points-map)]
-                       (let [[cx cy] (world-to-canvas x y width height bounds)
-                             hover? (= id (:hover-id @drag-state))
-                             keyboard-selected? (= id (:keyboard-selected-id @drag-state))]
-                         (draw-point gc cx cy 6 color label hover? keyboard-selected?))))
+    :initial-drag-state {:keyboard-selected-id (some-> points first :id)}
 
-           ;; Arrow key handler - called from scene filter when mouse is over canvas
-           handle-arrow-key! (fn [^KeyEvent e]
-                               (when (:mouse-over? @drag-state)
-                                 (let [code (.getCode e)
-                                       shift? (.isShiftDown e)
-                                       step (if shift? coarse-step fine-step)
-                                       selected-id (:keyboard-selected-id @drag-state)]
-                                   (when selected-id
-                                     (let [point (get @points-map selected-id)
-                                           [dx dy] (condp = code
-                                                     KeyCode/LEFT  [(- step) 0]
-                                                     KeyCode/RIGHT [step 0]
-                                                     KeyCode/UP    [0 step]
-                                                     KeyCode/DOWN  [0 (- step)]
-                                                     KeyCode/TAB   (do
-                                                                     (let [point-ids (vec (keys @points-map))
-                                                                           current-idx (.indexOf point-ids selected-id)
-                                                                           next-idx (if shift?
-                                                                                      (mod (dec current-idx) (count point-ids))
-                                                                                      (mod (inc current-idx) (count point-ids)))
-                                                                           next-id (nth point-ids next-idx)]
-                                                                       (swap! drag-state assoc :keyboard-selected-id next-id)
-                                                                       (render!)
-                                                                       (.consume e))
-                                                                     nil)
-                                                     nil)]
-                                       (when (and dx dy point)
-                                         (let [new-x (+ (:x point) dx)
-                                               new-y (+ (:y point) dy)
-                                               [clamped-x clamped-y] (clamp-to-bounds new-x new-y bounds)]
-                                           (swap! points-map assoc-in [selected-id :x] clamped-x)
-                                           (swap! points-map assoc-in [selected-id :y] clamped-y)
-                                           (render!)
-                                           (when on-point-drag
-                                             (events/dispatch! (assoc on-point-drag
-                                                                      :point-id selected-id
-                                                                      :x clamped-x
-                                                                      :y clamped-y)))
-                                           (.consume e))))))))]
+    :render!
+    (fn [^Canvas canvas points drag-info]
+      (let [gc (.getGraphicsContext2D canvas)
+            points-map (u/map-into :id points)]
+        (.clearRect gc 0 0 width height)
+        (.setFill gc Color/BLACK)
+        (.fillRect gc 0 0 width height)
+        (when show-grid
+          (draw-grid gc width height bounds))
+        (when show-axes
+          (draw-axes gc width height bounds))
+        (when show-labels
+          (draw-coordinate-labels gc width height bounds))
+        (when polygon
+          (draw-polygon gc width height bounds polygon points-map))
+        (doseq [line lines]
+          (draw-line gc width height bounds line points-map))
+        (doseq [{:keys [id x y color label]} (vals points-map)]
+          (let [[cx cy] (world-to-canvas x y width height bounds)
+                hover? (= id (:hover-id drag-info))
+                keyboard-selected? (= id (:keyboard-selected-id drag-info))]
+            (draw-point gc cx cy 6 color label hover? keyboard-selected?)))))
 
-       ;; Mouse pressed - start drag if over a point or inside polygon, or reset on right-click
-       (.setOnMousePressed
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (if (= (.getButton e) MouseButton/SECONDARY)
-              ;; Right-click: dispatch reset event
-              (when on-reset
-                (events/dispatch! on-reset))
-              ;; Left-click: normal drag behavior
-              (let [mx (.getX e)
-                    my (.getY e)
-                    hit-point (find-closest-point mx my (vals @points-map)
-                                                  width height bounds 10)
-                    [wx wy] (canvas-to-world mx my width height bounds)]
-                (cond
-                  hit-point
-                  (swap! drag-state assoc
-                         :dragging? true
-                         :point-id hit-point
-                         :drag-type :point
-                         :drag-start-world [wx wy]
-                         :initial-points @points-map
-                         :keyboard-selected-id hit-point)
+    :on-press
+    (fn [mx my button points drag-info]
+      (let [points-map (u/map-into :id points)
+            hit-point-id (find-closest-point mx my (vals points-map) width height bounds 10)
+            [wx wy] (canvas-to-world mx my width height bounds)]
+        (if (= button MouseButton/SECONDARY)
+          ;; Right-click: dispatch reset
+          (when on-reset {:dispatch on-reset})
 
-                  (and polygon (check-polygon-hit mx my polygon @points-map width height bounds))
-                  (swap! drag-state assoc
-                         :dragging? true
-                         :drag-type :polygon
-                         :drag-start-world [wx wy]
-                         :initial-points @points-map))
-                (render!))))))
+          ;; Left-click: drag logic
+          (cond
+            hit-point-id
+            {:drag-start true
+             :drag-id hit-point-id
+             :drag-updates {:drag-type :point
+                            :drag-start-world [wx wy]
+                            :initial-points points-map
+                            :keyboard-selected-id hit-point-id}}
 
-       ;; Mouse dragged - update point or polygon position
-       (.setOnMouseDragged
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (when (:dragging? @drag-state)
-              (let [[wx wy] (canvas-to-world (.getX e) (.getY e) width height bounds)
-                    drag-type (:drag-type @drag-state)]
-                (case drag-type
-                  :point
-                  (let [[clamped-x clamped-y] (clamp-to-bounds wx wy bounds)
-                        point-id (:point-id @drag-state)]
-                    (swap! points-map assoc-in [point-id :x] clamped-x)
-                    (swap! points-map assoc-in [point-id :y] clamped-y)
-                    (render!)
-                    (when on-point-drag
-                      (events/dispatch! (assoc on-point-drag
-                                               :point-id point-id
-                                               :x clamped-x
-                                               :y clamped-y))))
+            (and polygon (check-polygon-hit mx my polygon points-map width height bounds))
+            {:drag-start true
+             :drag-id :polygon
+             :drag-updates {:drag-type :polygon
+                            :drag-start-world [wx wy]
+                            :initial-points points-map}}
 
-                  :polygon
-                  (let [[start-wx start-wy] (:drag-start-world @drag-state)
-                        dx (- wx start-wx)
-                        dy (- wy start-wy)
-                        initial-points (:initial-points @drag-state)
-                        polygon-point-ids (:points polygon)]
-                    (doseq [point-id polygon-point-ids]
-                      (when-let [initial-point (get initial-points point-id)]
-                        (let [new-x (+ (:x initial-point) dx)
-                              new-y (+ (:y initial-point) dy)
-                              [clamped-x clamped-y] (clamp-to-bounds new-x new-y bounds)]
-                          (swap! points-map assoc-in [point-id :x] clamped-x)
-                          (swap! points-map assoc-in [point-id :y] clamped-y)
-                          (when on-point-drag
-                            (events/dispatch! (assoc on-point-drag
-                                                     :point-id point-id
-                                                     :x clamped-x
-                                                     :y clamped-y))))))
-                    (render!))
+            :else nil))))
 
-                  nil))))))
+    :on-drag
+    (fn [mx my points drag-info]
+      (let [[wx wy] (canvas-to-world mx my width height bounds)
+            drag-type (:drag-type drag-info)]
+        (case drag-type
+          :point
+          (let [[clamped-x clamped-y] (clamp-to-bounds wx wy bounds)
+                point-id (:drag-id drag-info)]
+            (when on-point-drag
+              {:dispatch (assoc on-point-drag
+                                :point-id point-id
+                                :x (double clamped-x)
+                                :y (double clamped-y))}))
 
-       ;; Mouse released - end drag
-       (.setOnMouseReleased
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (swap! drag-state assoc
-                   :dragging? false
-                   :point-id nil
-                   :drag-type nil
-                   :drag-start-world nil
-                   :initial-points nil)
-            (render!))))
+          :polygon
+          (let [[start-wx start-wy] (:drag-start-world drag-info)
+                dx (- wx start-wx)
+                dy (- wy start-wy)
+                initial-points (:initial-points drag-info)
+                polygon-point-ids (:points polygon)
 
-       ;; Mouse moved - update hover state and cursor
-       (.setOnMouseMoved
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (let [mx (.getX e)
-                  my (.getY e)
-                  hover-point (find-closest-point mx my (vals @points-map)
-                                                  width height bounds 10)
-                  current-hover (:hover-id @drag-state)
-                  inside-polygon? (and polygon
-                                       (not hover-point)
-                                       (check-polygon-hit mx my polygon @points-map width height bounds))]
-              (when (not= hover-point current-hover)
-                (swap! drag-state assoc :hover-id hover-point)
-                (render!))
-              (cond
-                hover-point (.setStyle canvas "-fx-cursor: hand;")
-                inside-polygon? (.setStyle canvas "-fx-cursor: move;")
-                :else (.setStyle canvas "-fx-cursor: hand;"))))))
+                events (for [point-id polygon-point-ids
+                             :let [initial-point (get initial-points point-id)]
+                             :when initial-point]
+                         (let [new-x (+ (:x initial-point) dx)
+                               new-y (+ (:y initial-point) dy)
+                               [clamped-x clamped-y] (clamp-to-bounds new-x new-y bounds)]
+                           (assoc on-point-drag
+                                  :point-id point-id
+                                  :x (double clamped-x)
+                                  :y (double clamped-y))))]
+            (when (seq events)
+              {:dispatch (vec events)}))
 
-       ;; Mouse entered - track that mouse is over canvas and register scene filter
-       (.setOnMouseEntered
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (swap! drag-state assoc :mouse-over? true)
-            ;; Register scene-level event filter for arrow keys
-            (when-let [scene (.getScene canvas)]
-              (when-not @scene-filter
-                (let [filter (reify EventHandler
-                               (handle [_ e]
-                                 (when (instance? KeyEvent e)
-                                   (handle-arrow-key! e))))]
-                  (reset! scene-filter filter)
-                  (.addEventFilter scene KeyEvent/KEY_PRESSED filter)))))))
+          nil)))
 
-       ;; Mouse exited - clear hover and mouse-over state
-       (.setOnMouseExited
-        canvas
-        (reify EventHandler
-          (handle [_ e]
-            (swap! drag-state assoc :hover-id nil :mouse-over? false)
-            (render!))))
+    :on-hover
+    (fn [mx my points drag-info]
+      (let [points-map (u/map-into :id points)
+            hover-point-id (find-closest-point mx my (vals points-map) width height bounds 10)
+            inside-polygon? (and polygon
+                                 (not hover-point-id)
+                                 (check-polygon-hit mx my polygon points-map width height bounds))]
+        {:hover-id hover-point-id
+         :cursor (cond
+                   hover-point-id "hand"
+                   inside-polygon? "move"
+                   :else "crosshair")}))
 
-       ;; Initial render and setup
-       (render!)
-       (when-let [first-point (first (vals @points-map))]
-         (swap! drag-state assoc :keyboard-selected-id (:id first-point)))
-       (.setFocusTraversable canvas true)))
+    :on-key
+    (fn [^KeyCode code shift? points drag-info]
+      (let [fine-step 0.005
+            coarse-step 0.02
+            step (if shift? coarse-step fine-step)
+            selected-id (:keyboard-selected-id drag-info)
+            points-map (u/map-into :id points)]
 
-   :desc {:fx/type :canvas
-          :width width
-          :height height
-          :style "-fx-cursor: hand;"}})
+        (cond
+          ;; TAB: Cycle selection
+          (= code KeyCode/TAB)
+          (let [point-ids (mapv :id points)
+                current-idx (.indexOf point-ids selected-id)
+                next-idx (if shift?
+                           (mod (dec current-idx) (count point-ids))
+                           (mod (inc current-idx) (count point-ids)))
+                next-id (nth point-ids next-idx)]
+            {:consumed? true
+             :drag-updates {:keyboard-selected-id next-id}})
+
+          ;; ARROWS: Move selected point
+          (and selected-id (#{KeyCode/LEFT KeyCode/RIGHT KeyCode/UP KeyCode/DOWN} code))
+          (let [dx (case code
+                     KeyCode/LEFT (- step)
+                     KeyCode/RIGHT step
+                     0.0)
+                dy (case code
+                     KeyCode/UP step
+                     KeyCode/DOWN (- step)
+                     0.0)]
+            (when-let [point (get points-map selected-id)]
+              (let [new-x (+ (:x point) dx)
+                    new-y (+ (:y point) dy)
+                    [clamped-x clamped-y] (clamp-to-bounds new-x new-y bounds)]
+                (when on-point-drag
+                  {:dispatch (assoc on-point-drag
+                                    :point-id selected-id
+                                    :x (double clamped-x)
+                                    :y (double clamped-y))
+                   :consumed? true})))))))}))
