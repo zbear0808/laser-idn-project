@@ -92,7 +92,7 @@
                          (str (int value))
                          (format "%.2f" (double value)))
                  :pref-width 55
-                 :style-class ["text-field"]
+                 :style-class ["text-field" "param-text-field"]
                  :style "-fx-font-size: 11; -fx-padding: 2 4;"
                  :on-action (assoc on-text-event
                                    :param-key param-key

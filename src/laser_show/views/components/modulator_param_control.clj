@@ -99,7 +99,7 @@
                 {:fx/type :text-field
                  :text (format "%.2f" (double value))
                  :pref-width 50
-                 :style-class ["text-field"]
+                 :style-class ["text-field" "param-text-field"]
                  :style "-fx-font-size: 10; -fx-padding: 2 4;"
                  ;; Text field event includes mod-param-key and text field marker
                  :on-action (assoc text-event
@@ -155,6 +155,7 @@
                 {:fx/type :text-field
                  :text (str value)
                  :pref-width 100
+                 :style-class ["text-field" "param-text-field"]
                  :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 10;"
                  ;; Event map pattern: add mod-param-key to template
                  :on-action (assoc on-change-event
@@ -223,9 +224,9 @@
                                  :text "⟲ Retrigger"
                                  :style-class ["retrigger-button"]
                                  :style (str "-fx-font-size: 10; -fx-padding: 2 8; "
-                                            "-fx-background-color: #505050; "
-                                            "-fx-text-fill: #E0E0E0; "
-                                            "-fx-cursor: hand;")
+                                             "-fx-background-color: #505050; "
+                                             "-fx-text-fill: #E0E0E0; "
+                                             "-fx-cursor: hand;")
                                  :on-action on-retrigger-event}
                                 {:fx/type :label
                                  :text "Reset modulator phase"
@@ -258,7 +259,7 @@
 
 
 (defn visual-editor-modulator-header
- "Modulator toggle header for visual editors.
+  "Modulator toggle header for visual editors.
   
   This component provides a compact modulator toggle and type selector
   that can be embedded in visual editors (rotation dial, hue slider, etc)
@@ -270,43 +271,43 @@
   - :current-value - Current param value (number or modulator config map)
   - :modulator-event-base - Base event template for modulator operations
                             (must have :domain, :entity-key, :effect-path)"
- [{:keys [param-key param-spec current-value modulator-event-base]}]
- (let [is-modulated? (reg/active-modulator? current-value)
-       display-label (or (:label param-spec) (name param-key))
-       ;; Build modulator event templates
-       toggle-event (assoc modulator-event-base
-                           :event/type :modulator/toggle
-                           :param-key param-key
-                           :param-spec param-spec
-                           :current-value current-value)
-       set-type-event (assoc modulator-event-base
-                             :event/type :modulator/set-type
-                             :param-key param-key
-                             :param-spec param-spec
-                             :current-value current-value)]
-   {:fx/type :h-box
-    :spacing 8
-    :alignment :center-left
-    :style-class ["visual-editor-modulator-header"]
-    :children (filterv some?
-                [;; Modulate toggle button
-                 {:fx/type :toggle-button
-                  :text (if is-modulated? "∿ Modulating" "∿ Modulate")
-                  :selected is-modulated?
-                  :style-class [(if is-modulated?
-                                  "visual-editor-modulator-active"
-                                  "visual-editor-modulator-toggle")]
-                  :on-selected-changed toggle-event}
-                 
-                 ;; Type selector (only shown when modulated)
-                 (when is-modulated?
-                   {:fx/type modulator-type-selector
-                    :current-type (:type current-value)
-                    :on-select-event set-type-event})])}))
+  [{:keys [param-key param-spec current-value modulator-event-base]}]
+  (let [is-modulated? (reg/active-modulator? current-value)
+        display-label (or (:label param-spec) (name param-key))
+        ;; Build modulator event templates
+        toggle-event (assoc modulator-event-base
+                            :event/type :modulator/toggle
+                            :param-key param-key
+                            :param-spec param-spec
+                            :current-value current-value)
+        set-type-event (assoc modulator-event-base
+                              :event/type :modulator/set-type
+                              :param-key param-key
+                              :param-spec param-spec
+                              :current-value current-value)]
+    {:fx/type :h-box
+     :spacing 8
+     :alignment :center-left
+     :style-class ["visual-editor-modulator-header"]
+     :children (filterv some?
+                        [;; Modulate toggle button
+                         {:fx/type :toggle-button
+                          :text (if is-modulated? "∿ Modulating" "∿ Modulate")
+                          :selected is-modulated?
+                          :style-class [(if is-modulated?
+                                          "visual-editor-modulator-active"
+                                          "visual-editor-modulator-toggle")]
+                          :on-selected-changed toggle-event}
+
+                         ;; Type selector (only shown when modulated)
+                         (when is-modulated?
+                           {:fx/type modulator-type-selector
+                            :current-type (:type current-value)
+                            :on-select-event set-type-event})])}))
 
 
 (defn visual-editor-modulator-params
- "Modulator parameters editor for visual editors.
+  "Modulator parameters editor for visual editors.
   
   Shows the modulator-specific parameters (min, max, period, etc) when
   a visual editor's parameter has an active modulator.
@@ -316,19 +317,19 @@
   - :param-spec - Parameter specification map
   - :current-value - Current modulator config map
   - :modulator-event-base - Base event template for modulator operations"
- [{:keys [param-key param-spec current-value modulator-event-base]}]
- (let [update-mod-param-event (assoc modulator-event-base
-                                     :event/type :modulator/update-param
-                                     :param-key param-key
-                                     :current-value current-value)
-       retrigger-event (assoc modulator-event-base
-                              :event/type :modulator/retrigger
-                              :param-key param-key)]
-   {:fx/type modulator-params-editor
-    :modulator-config current-value
-    :on-param-change-event update-mod-param-event
-    :on-retrigger-event retrigger-event
-    :param-spec param-spec}))
+  [{:keys [param-key param-spec current-value modulator-event-base]}]
+  (let [update-mod-param-event (assoc modulator-event-base
+                                      :event/type :modulator/update-param
+                                      :param-key param-key
+                                      :current-value current-value)
+        retrigger-event (assoc modulator-event-base
+                               :event/type :modulator/retrigger
+                               :param-key param-key)]
+    {:fx/type modulator-params-editor
+     :modulator-config current-value
+     :on-param-change-event update-mod-param-event
+     :on-retrigger-event retrigger-event
+     :param-spec param-spec}))
 
 
 ;; Main Component
@@ -350,105 +351,106 @@
    - :label-width - Optional label width (default 80)"
   [{:keys [param-key param-spec current-value on-change-event on-text-event modulator-event-base label-width]}]
   (let [{:keys [min max label]} param-spec
-         is-modulated? (reg/active-modulator? current-value)
-         ;; Check if there's an inactive modulator config we need to preserve
-         has-inactive-modulator? (and (reg/modulated? current-value)
-                                      (not (reg/active-modulator? current-value)))
-         static-value (reg/get-static-value current-value (:default param-spec))
-         display-label (or label (name param-key))
-         label-w (or label-width 80)
-         is-int? (= :int (:type param-spec))
-         ;; Build modulator event templates with full context
-         toggle-event (assoc modulator-event-base
-                             :event/type :modulator/toggle
-                             :param-key param-key
-                             :param-spec param-spec
-                             :current-value current-value)
-         set-type-event (assoc modulator-event-base
-                               :event/type :modulator/set-type
-                               :param-key param-key
-                               :param-spec param-spec
-                               :current-value current-value)
-         update-mod-param-event (assoc modulator-event-base
-                                       :event/type :modulator/update-param
-                                       :param-key param-key
-                                       :current-value current-value)
-         retrigger-event (assoc modulator-event-base
-                                :event/type :modulator/retrigger
-                                :param-key param-key)
-         ;; When there's an inactive modulator, use the special event that preserves the config
-         static-change-event (if has-inactive-modulator?
-                               (assoc modulator-event-base
-                                      :event/type :modulator/update-static-value
+        is-modulated? (reg/active-modulator? current-value)
+        ;; Check if there's an inactive modulator config we need to preserve
+        has-inactive-modulator? (and (reg/modulated? current-value)
+                                     (not (reg/active-modulator? current-value)))
+        static-value (reg/get-static-value current-value (:default param-spec))
+        display-label (or label (name param-key))
+        label-w (or label-width 80)
+        is-int? (= :int (:type param-spec))
+        ;; Build modulator event templates with full context
+        toggle-event (assoc modulator-event-base
+                            :event/type :modulator/toggle
+                            :param-key param-key
+                            :param-spec param-spec
+                            :current-value current-value)
+        set-type-event (assoc modulator-event-base
+                              :event/type :modulator/set-type
+                              :param-key param-key
+                              :param-spec param-spec
+                              :current-value current-value)
+        update-mod-param-event (assoc modulator-event-base
+                                      :event/type :modulator/update-param
                                       :param-key param-key
                                       :current-value current-value)
-                               (assoc on-change-event :param-key param-key))]
-     {:fx/type :v-box
-      :spacing 4
-      ;; Use filterv to remove nil values - the modulator params editor is only shown when modulated
-      :children (filterv some?
-                 [;; Header row with label, toggle, and value/type
-                  {:fx/type :h-box
-                   :spacing 8
-                   :alignment :center-left
-                   :children [;; Label
-                              {:fx/type :label
-                               :text display-label
-                               :pref-width label-w
-                               :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
-                              
-                              ;; Modulate toggle button - uses event map
-                               {:fx/type :toggle-button
-                                :text "∿"
-                                :selected is-modulated?
-                                :style-class [(if is-modulated?
-                                                "modulator-toggle-active"
-                                                "modulator-toggle")]
-                                :on-selected-changed toggle-event}
-                              
-                              ;; Value display (static) or type selector (modulated)
-                              (if is-modulated?
-                                {:fx/type modulator-type-selector
-                                 :current-type (:type current-value)
-                                 :on-select-event set-type-event}
-                                ;; Static mode: slider + text field
-                                {:fx/type :h-box
-                                 :spacing 6
-                                 :alignment :center-left
-                                 :children [{:fx/type :slider
-                                             :min min
-                                             :max max
-                                             :value (double static-value)
-                                             :pref-width 120
-                                             :snap-to-ticks is-int?
-                                             :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
-                                             ;; Use static-change-event to preserve inactive modulator config
-                                             :on-value-changed static-change-event}
-                                            {:fx/type :text-field
-                                             :text (if is-int?
-                                                     (str (int static-value))
-                                                     (format "%.2f" (double static-value)))
-                                             :pref-width 50
-                                             :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 2 4;"
-                                             ;; Text field also needs to preserve inactive modulator config
-                                             :on-action (if has-inactive-modulator?
-                                                          (assoc modulator-event-base
-                                                                 :event/type :modulator/update-static-value
-                                                                 :param-key param-key
-                                                                 :current-value current-value)
-                                                          (assoc on-text-event
-                                                                 :param-key param-key
-                                                                 :min min
-                                                                 :max max
-                                                                 :is-int? is-int?))}]})]}
-                  
-                  ;; Modulator parameters (only shown when modulated)
-                  (when is-modulated?
-                    {:fx/type modulator-params-editor
-                     :modulator-config current-value
-                     :on-param-change-event update-mod-param-event
-                     :on-retrigger-event retrigger-event
-                     :param-spec param-spec})])}))
+        retrigger-event (assoc modulator-event-base
+                               :event/type :modulator/retrigger
+                               :param-key param-key)
+        ;; When there's an inactive modulator, use the special event that preserves the config
+        static-change-event (if has-inactive-modulator?
+                              (assoc modulator-event-base
+                                     :event/type :modulator/update-static-value
+                                     :param-key param-key
+                                     :current-value current-value)
+                              (assoc on-change-event :param-key param-key))]
+    {:fx/type :v-box
+     :spacing 4
+     ;; Use filterv to remove nil values - the modulator params editor is only shown when modulated
+     :children (filterv some?
+                        [;; Header row with label, toggle, and value/type
+                         {:fx/type :h-box
+                          :spacing 8
+                          :alignment :center-left
+                          :children [;; Label
+                                     {:fx/type :label
+                                      :text display-label
+                                      :pref-width label-w
+                                      :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
+
+                                     ;; Modulate toggle button - uses event map
+                                     {:fx/type :toggle-button
+                                      :text "∿"
+                                      :selected is-modulated?
+                                      :style-class [(if is-modulated?
+                                                      "modulator-toggle-active"
+                                                      "modulator-toggle")]
+                                      :on-selected-changed toggle-event}
+
+                                     ;; Value display (static) or type selector (modulated)
+                                     (if is-modulated?
+                                       {:fx/type modulator-type-selector
+                                        :current-type (:type current-value)
+                                        :on-select-event set-type-event}
+                                       ;; Static mode: slider + text field
+                                       {:fx/type :h-box
+                                        :spacing 6
+                                        :alignment :center-left
+                                        :children [{:fx/type :slider
+                                                    :min min
+                                                    :max max
+                                                    :value (double static-value)
+                                                    :pref-width 120
+                                                    :snap-to-ticks is-int?
+                                                    :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
+                                                    ;; Use static-change-event to preserve inactive modulator config
+                                                    :on-value-changed static-change-event}
+                                                   {:fx/type :text-field
+                                                    :text (if is-int?
+                                                            (str (int static-value))
+                                                            (format "%.2f" (double static-value)))
+                                                    :pref-width 50
+                                                    :style-class ["text-field" "param-text-field"]
+                                                    :style "-fx-background-color: #404040; -fx-text-fill: white; -fx-font-size: 10; -fx-padding: 2 4;"
+                                                    ;; Text field also needs to preserve inactive modulator config
+                                                    :on-action (if has-inactive-modulator?
+                                                                 (assoc modulator-event-base
+                                                                        :event/type :modulator/update-static-value
+                                                                        :param-key param-key
+                                                                        :current-value current-value)
+                                                                 (assoc on-text-event
+                                                                        :param-key param-key
+                                                                        :min min
+                                                                        :max max
+                                                                        :is-int? is-int?))}]})]}
+
+                         ;; Modulator parameters (only shown when modulated)
+                         (when is-modulated?
+                           {:fx/type modulator-params-editor
+                            :modulator-config current-value
+                            :on-param-change-event update-mod-param-event
+                            :on-retrigger-event retrigger-event
+                            :param-spec param-spec})])}))
 
 
 ;; Integration with param-controls-list
