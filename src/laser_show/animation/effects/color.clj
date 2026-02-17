@@ -185,81 +185,7 @@
 ;; Color Replace Effect
 
 
-(defn- color-distance-normalized
-  "Calculate color distance with normalized values (0.0-1.0).
-   Note: Can't use primitive type hints for >4 args in Clojure."
-  [r1 g1 b1 r2 g2 b2]
-  (let [dr (- (double r1) (double r2))
-        dg (- (double g1) (double g2))
-        db (- (double b1) (double b2))]
-    (Math/sqrt (+ (* dr dr) (* dg dg) (* db db)))))
 
-(defn- color-replace-xf [time-ms bpm params ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        ;; All values are already normalized 0.0-1.0
-        from-r (double (:from-r resolved))
-        from-g (double (:from-g resolved))
-        from-b (double (:from-b resolved))
-        to-r (double (:to-r resolved))
-        to-g (double (:to-g resolved))
-        to-b (double (:to-b resolved))
-        ;; Tolerance in normalized space (max ~1.73 for full RGB distance)
-        tolerance (double (:tolerance resolved))]
-    (map (fn [pt]
-           (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-                 dist (double (color-distance-normalized r g b from-r from-g from-b))]
-             (if (<= dist tolerance)
-               (t/update-point-rgb pt to-r to-g to-b)
-               pt))))))
-
-(effects/register-effect!
- {:id :color-replace
-  :name "Color Replace"
-  :category :color
-  :timing :static
-  :parameters [{:key :from-r
-                :label "From Red"
-                :type :float
-                :default 1.0
-                :min 0.0
-                :max 1.0}
-               {:key :from-g
-                :label "From Green"
-                :type :float
-                :default 0.0
-                :min 0.0
-                :max 1.0}
-               {:key :from-b
-                :label "From Blue"
-                :type :float
-                :default 0.0
-                :min 0.0
-                :max 1.0}
-               {:key :to-r
-                :label "To Red"
-                :type :float
-                :default 0.0
-                :min 0.0
-                :max 1.0}
-               {:key :to-g
-                :label "To Green"
-                :type :float
-                :default 1.0
-                :min 0.0
-                :max 1.0}
-               {:key :to-b
-                :label "To Blue"
-                :type :float
-                :default 0.0
-                :min 0.0
-                :max 1.0}
-               {:key :tolerance
-                :label "Tolerance"
-                :type :float
-                :default 0.12
-                :min 0.0
-                :max 1.73}]
-  :apply-transducer color-replace-xf})
 
 
 ;; Set Color Effect (replaces color of ALL points)
@@ -318,45 +244,7 @@
 ;; For more control, use hue-shift with rainbow-hue modulator.
 
 
-(defn- rainbow-position-xf [time-ms bpm params ctx]
-  (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
-        speed (double (:speed resolved))
-        axis (:axis resolved)
-        ;; Use rem for primitive double modulo
-        time-offset (rem (* (/ (double time-ms) 1000.0) speed) 360.0)]
-    (map (fn [pt]
-           (if (t/blanked? pt)
-             pt
-             (let [x (double (pt t/X)) y (double (pt t/Y))
-                   r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-                   position (double (case axis
-                                      :x (/ (+ x 1.0) 2.0)
-                                      :y (/ (+ y 1.0) 2.0)
-                                      :radial (Math/sqrt (+ (* x x) (* y y)))
-                                      :angle (/ (+ (Math/atan2 y x) Math/PI) (* 2.0 Math/PI))))
-                   ;; Use current brightness (value from HSV)
-                   brightness (Math/max (Math/max r g) b)
-                   hue (rem (+ (* position 360.0) time-offset) 360.0)
-                   [nr ng nb] (colors/hsv->normalized hue 1.0 brightness)]
-               (t/update-point-rgb pt nr ng nb)))))))
 
-(effects/register-effect!
- {:id :rainbow-position
-  :name "Rainbow Position (Special)"
-  :category :color
-  :timing :seconds
-  :parameters [{:key :speed
-                :label "Speed (deg/sec)"
-                :type :float
-                :default 60.0
-                :min 0.0
-                :max 360.0}
-               {:key :axis
-                :label "Axis"
-                :type :choice
-                :default :x
-                :choices [:x :y :radial :angle]}]
-  :apply-transducer rainbow-position-xf})
 
 
 ;; Oklab Hue Shift

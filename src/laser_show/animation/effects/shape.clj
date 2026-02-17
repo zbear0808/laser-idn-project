@@ -39,8 +39,8 @@
              x-scale (double (get-x-scale px py idx))
              y-scale (double (get-y-scale px py idx))]
          (t/update-point-xy pt
-           (* px x-scale)
-           (* py y-scale)))))))
+                            (* px x-scale)
+                            (* py y-scale)))))))
 
 (effects/register-effect!
  {:id :scale
@@ -82,8 +82,8 @@
              dx (double (get-x px py idx))
              dy (double (get-y px py idx))]
          (t/update-point-xy pt
-           (+ px dx)
-           (+ py dy)))))))
+                            (+ px dx)
+                            (+ py dy)))))))
 
 (effects/register-effect!
  {:id :translate
@@ -122,8 +122,8 @@
              cos-a (Math/cos radians)
              sin-a (Math/sin radians)]
          (t/update-point-xy pt
-           (- (* x cos-a) (* y sin-a))
-           (+ (* x sin-a) (* y cos-a))))))))
+                            (- (* x cos-a) (* y sin-a))
+                            (+ (* x sin-a) (* y cos-a))))))))
 
 (effects/register-effect!
  {:id :rotation
@@ -143,34 +143,8 @@
 
 
 
-;; Pinch/Bulge Effect
 
 
-(defn- pinch-bulge-xf [time-ms bpm params ctx]
-  (let [get-amount (effects/make-param-resolver :amount params time-ms bpm ctx)]
-    (map-indexed
-     (fn [idx pt]
-       (let [x (double (pt t/X))
-             y (double (pt t/Y))
-             amount (double (get-amount x y idx))
-             distance (Math/sqrt (+ (* x x) (* y y)))
-             factor (if (zero? distance)
-                      1.0
-                      (Math/pow distance amount))]
-         (t/update-point-xy pt (* x factor) (* y factor)))))))
-
-(effects/register-effect!
- {:id :pinch-bulge
-  :name "Pinch/Bulge"
-  :category :shape
-  :timing :static
-  :parameters [{:key :amount
-                :label "Amount"
-                :type :float
-                :default 1.0
-                :min -3.0
-                :max 3.0}]
-  :apply-transducer pinch-bulge-xf})
 
 
 ;; Corner Pin Effect (4-corner perspective/bilinear transform)
@@ -315,63 +289,3 @@
                 :min -1.0
                 :max 1.0}]
   :apply-transducer lens-distortion-xf})
-
-
-;; SPECIAL EFFECTS
-;; These are more complex effects kept for specific use cases.
-;; Consider using modulators with basic effects for more flexibility.
-
-
-
-;; Wave Distortion Effect (Special)
-
-
-(defn- wave-distort-xf [time-ms bpm params ctx]
-  (let [get-amplitude (effects/make-param-resolver :amplitude params time-ms bpm ctx)
-        get-frequency (effects/make-param-resolver :frequency params time-ms bpm ctx)
-        get-speed (effects/make-param-resolver :speed params time-ms bpm ctx)
-        ;; axis is typically static, but support modulation for completeness
-        resolved-axis (effects/resolve-params-global {:axis (:axis params)} time-ms bpm ctx)
-        axis (:axis resolved-axis)]
-    (map-indexed
-     (fn [idx pt]
-       (let [x (double (pt t/X))
-             y (double (pt t/Y))
-             amplitude (double (get-amplitude x y idx))
-             frequency (double (get-frequency x y idx))
-             speed (double (get-speed x y idx))
-             time-offset (* (/ (double time-ms) 1000.0) speed)]
-         (case axis
-           :x (t/update-point-xy pt x (+ y (* amplitude (Math/sin (* 2.0 Math/PI (+ (* x frequency) time-offset))))))
-           :y (t/update-point-xy pt (+ x (* amplitude (Math/sin (* 2.0 Math/PI (+ (* y frequency) time-offset))))) y)
-           pt))))))
-
-(effects/register-effect!
- {:id :wave-distort
-  :name "Wave Distort (Special)"
-  :category :shape
-  :timing :seconds
-  :parameters [{:key :amplitude
-                :label "Amplitude"
-                :type :float
-                :default 0.1
-                :min 0.0
-                :max 1.0}
-               {:key :frequency
-                :label "Frequency"
-                :type :float
-                :default 2.0
-                :min 0.1
-                :max 10.0}
-               {:key :axis
-                :label "Axis"
-                :type :choice
-                :default :x
-                :choices [:x :y]}
-               {:key :speed
-                :label "Speed"
-                :type :float
-                :default 2.0
-                :min 0.0
-                :max 10.0}]
-  :apply-transducer wave-distort-xf})
