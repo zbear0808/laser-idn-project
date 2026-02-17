@@ -125,36 +125,35 @@
   (ci/interactive-canvas
    {:width  hue-strip-width
     :height hue-strip-height
-    :initial-state (or hue 0.0)
+    :value (or hue 0.0)
     :cursor (if on-hue-change "crosshair" "default")
 
     :render!
-    (fn [^Canvas canvas state _drag-info]
-      (draw-set-hue-gradient! canvas hue-strip-width hue-strip-height state))
+    (fn [^Canvas canvas current-hue _drag-info]
+      (draw-set-hue-gradient! canvas hue-strip-width hue-strip-height current-hue))
 
     :on-press
-    (fn [mx _my button _state _drag-info]
+    (fn [mx _my button value _drag-info]
       (when (and (= button MouseButton/PRIMARY) on-hue-change)
         (let [new-hue (mouse-to-hue mx)]
           {:drag-start true
-           :state new-hue
+           :preview-value new-hue
            :dispatch (assoc on-hue-change :param-key :hue :value new-hue)})))
 
     :on-drag
-    (fn [mx _my _state _drag-info]
+    (fn [mx _my _value _drag-info]
       (when on-hue-change
         (let [new-hue (mouse-to-hue mx)]
-          {:state new-hue
+          {:preview-value new-hue
            :dispatch (assoc on-hue-change :param-key :hue :value new-hue)})))
 
     :on-key
-    (fn [key-code shift? state _drag-info]
+    (fn [key-code shift? value _drag-info]
       (when on-hue-change
         (let [step (if shift? 10.0 1.0)]
           (when (or (= key-code KeyCode/LEFT)
                     (= key-code KeyCode/RIGHT))
             (let [delta (if (= key-code KeyCode/RIGHT) step (- step))
-                  new-hue (clamp-hue (+ state delta))]
-              {:state new-hue
-               :dispatch (assoc on-hue-change :param-key :hue :value new-hue)
+                  new-hue (clamp-hue (+ value delta))]
+              {:dispatch (assoc on-hue-change :param-key :hue :value new-hue)
                :consumed? true})))))}))

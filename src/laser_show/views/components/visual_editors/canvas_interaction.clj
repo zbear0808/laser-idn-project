@@ -131,8 +131,6 @@
    :desc {:fx/type :canvas
           :width width
           :height height
-          ;; Force update by changing accessible-help. This avoids colliding with UserData.
-          :accessible-help (str (java.util.UUID/randomUUID))
           :style (str "-fx-cursor: " cursor ";")
 
           :on-mouse-pressed

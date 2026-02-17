@@ -113,43 +113,42 @@
   (ci/interactive-canvas
    {:width  hue-shift-strip-width
     :height hue-shift-strip-height
-    :initial-state (or degrees 0.0)
+    :value (or degrees 0.0)
     :cursor (if on-degrees-change "ew-resize" "default")
 
     :render!
-    (fn [^Canvas canvas state _drag-info]
+    (fn [^Canvas canvas current-degrees _drag-info]
       (draw-hue-shift-strips! canvas hue-shift-strip-width hue-shift-strip-height
-                              state gradient-key))
+                              current-degrees gradient-key))
 
     :on-press
-    (fn [mx _my button _state _drag-info]
+    (fn [mx _my button _value _drag-info]
       (when (and (= button MouseButton/PRIMARY) on-degrees-change)
         {:drag-start true
          :drag-updates {:last-x mx}}))
 
     :on-drag
-    (fn [mx _my state drag-info]
+    (fn [mx _my value drag-info]
       (when on-degrees-change
         (let [last-x (or (:last-x drag-info) mx)
               dx (- mx last-x)
               degree-delta (- (* (/ dx (double hue-shift-strip-width)) 360.0))
-              new-degrees (+ state degree-delta)]
-          {:state new-degrees
+              new-degrees (+ value degree-delta)]
+          {:preview-value new-degrees
            :dispatch (assoc on-degrees-change
                             :param-key :degrees
                             :value new-degrees)
            :drag-updates {:last-x mx}})))
 
     :on-key
-    (fn [key-code shift? state _drag-info]
+    (fn [key-code shift? value _drag-info]
       (when on-degrees-change
         (let [step (if shift? 10.0 1.0)]
           (when (or (= key-code KeyCode/LEFT)
                     (= key-code KeyCode/RIGHT))
             (let [delta (if (= key-code KeyCode/RIGHT) step (- step))
-                  new-degrees (+ state delta)]
-              {:state new-degrees
-               :dispatch (assoc on-degrees-change
+                  new-degrees (+ value delta)]
+              {:dispatch (assoc on-degrees-change
                                 :param-key :degrees
                                 :value new-degrees)
                :consumed? true})))))}))
