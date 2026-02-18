@@ -19,12 +19,17 @@
 
 (defn- dispatch-result!
   "Dispatch event maps from a callback result.
-   Supports single map or vector of maps."
-  [dispatch-value]
-  (when dispatch-value
-    (if (sequential? dispatch-value)
-      (run! events/dispatch! dispatch-value)
-      (events/dispatch! dispatch-value))))
+   Supports single map or vector of maps.
+   Tags each event with :interaction/type when provided."
+  ([dispatch-value] (dispatch-result! dispatch-value nil))
+  ([dispatch-value interaction-type]
+   (when dispatch-value
+     (let [tag-fn (if interaction-type
+                    #(assoc % :interaction/type interaction-type)
+                    identity)]
+       (if (sequential? dispatch-value)
+         (run! (comp events/dispatch! tag-fn) dispatch-value)
+         (events/dispatch! (tag-fn dispatch-value)))))))
 
 (defn- get-canvas-id
   "Get the canvas-id from a JavaFX event's source UserData."
@@ -38,10 +43,12 @@
 
 (defn- update-drag-state!
   "Dispatch a canvas drag state update to global state."
-  [canvas-id updates]
-  (events/dispatch! {:event/type :canvas/update-drag
-                     :canvas-id canvas-id
-                     :updates updates}))
+  ([canvas-id updates] (update-drag-state! canvas-id updates nil))
+  ([canvas-id updates interaction-type]
+   (events/dispatch! (cond-> {:event/type :canvas/update-drag
+                              :canvas-id canvas-id
+                              :updates updates}
+                       interaction-type (assoc :interaction/type interaction-type)))))
 
 (defn- update-interactive-canvas!
   "Called on every render cycle. Triggers render! callback."
@@ -148,8 +155,8 @@
                                           :drag-id (:drag-id result))
                                    (:drag-updates result)
                                    (merge (:drag-updates result)))]
-                    (update-drag-state! canvas-id new-drag)
-                    (dispatch-result! (:dispatch result))
+                    (update-drag-state! canvas-id new-drag :start)
+                    (dispatch-result! (:dispatch result) :start)
                     (render! (.getSource e)
                              (or (:preview-value new-drag) value)
                              new-drag))))))
@@ -170,8 +177,8 @@
                                        (assoc :preview-value (:preview-value result))
                                        (:drag-updates result)
                                        (merge (:drag-updates result)))]
-                        (update-drag-state! canvas-id new-drag)
-                        (dispatch-result! (:dispatch result))
+                        (update-drag-state! canvas-id new-drag :drag)
+                        (dispatch-result! (:dispatch result) :drag)
                         (render! (.getSource e)
                                  (or (:preview-value new-drag) value)
                                  new-drag))))))))
@@ -182,12 +189,12 @@
                   drag-state (get-drag-state canvas-id)]
               (when on-release
                 (let [result (on-release value drag-state)]
-                  (dispatch-result! (:dispatch result))))
+                  (dispatch-result! (:dispatch result) :stop)))
               (let [new-drag (assoc (or drag-state {})
                                     :dragging? false
                                     :drag-id nil
                                     :preview-value nil)]
-                (update-drag-state! canvas-id new-drag)
+                (update-drag-state! canvas-id new-drag :stop)
                 (render! (.getSource e) value new-drag))))
 
           :on-mouse-moved

@@ -31,7 +31,7 @@
     :effect-def effect-definition
     :dialog-data dialog-data}"
   (:require
-   [clojure.tools.logging :as log]
+
    [laser-show.views.components.visual-editors.keyframe-modulator-panel :as keyframe-panel]
    [laser-show.views.components.effect-param-ui :as effect-param-ui]))
 
@@ -151,12 +151,7 @@
                          (get-in keyframes [selected-kf-idx :params] {})
                          (:params effect {}))
 
-        ;; DEBUG: Log the params being rendered
-        _ (when keyframe-enabled?
-            (log/info "RENDER effect-param-editor - keyframe-enabled?:" keyframe-enabled?
-                      "selected-kf-idx:" selected-kf-idx
-                      "keyframes-count:" (count keyframes)
-                      "current-params:" current-params))
+
 
         ;; Convert params to map format for UI
         params-map (effect-param-ui/params-vector->map (:parameters effect-def []))

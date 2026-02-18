@@ -73,13 +73,13 @@
                             mod-max (get current-value :max 1.0)
                             ;; Use existing :value if present, otherwise compute midpoint
                             initial-value (or (:value current-value)
-                                             (/ (+ (double mod-min) (double mod-max)) 2.0))]
+                                              (/ (+ (double mod-min) (double mod-max)) 2.0))]
                         (assoc current-value
                                :active? false
                                :value initial-value))
                       ;; Already static - no change needed
                       current-value))]
-    (log/debug "modulator/toggle - param-key:" param-key
+    (log/trace "modulator/toggle - param-key:" param-key
                "want-modulated?:" want-modulated?
                "keyframe-enabled?:" keyframe-enabled?
                "has-existing-config?:" (mod/modulator-config? current-value))
@@ -127,7 +127,7 @@
                    (keyword? fx-event) fx-event
                    ;; Fall back to :mod-type key if present
                    :else (:mod-type event))]
-    (log/debug "modulator/set-type - param-key:" param-key "new type:" mod-type)
+    (log/trace "modulator/set-type - param-key:" param-key "new type:" mod-type)
     (if-not mod-type
       (do
         (log/warn "modulator/set-type called without valid mod-type")
@@ -183,7 +183,7 @@
                         max-val (or (:mod-param-max event) 10.0)]
                     (parse-text-value text-val min-val max-val))
                   raw-val)]
-    (log/debug "modulator/update-param - param-key:" param-key "mod-param-key:" mod-param-key "new-val:" new-val "text-field?:" text-field?)
+    (log/trace "modulator/update-param - param-key:" param-key "mod-param-key:" mod-param-key "new-val:" new-val "text-field?:" text-field?)
     (when new-val
       (if (mod/modulator-config? current-value)
         (let [updated-config (assoc current-value mod-param-key new-val)]
@@ -206,7 +206,7 @@
    
    Returns a :dispatch effect to reset timing using the existing transport/retrigger event."
   [{:keys [param-key] :as _event}]
-  (log/debug "modulator/retrigger - param-key:" param-key)
+  (log/trace "modulator/retrigger - param-key:" param-key)
   ;; Reset the playback accumulators using existing transport/retrigger handler
   {:dispatch {:event/type :transport/retrigger}})
 
@@ -229,7 +229,7 @@
                     (assoc current-value :value new-static-value)
                     ;; Plain number - just use new value
                     new-static-value)]
-    (log/debug "modulator/update-static-value - param-key:" param-key
+    (log/trace "modulator/update-static-value - param-key:" param-key
                "new-value:" new-static-value
                "has-config?:" (mod/modulator-config? current-value))
     {:dispatch {:event/type :chain/update-param
@@ -249,7 +249,7 @@
    Routes to appropriate handler based on :event/type.
    All handlers return effect maps (typically :dispatch to chain/update-param)."
   [{:keys [event/type] :as event}]
-  (log/debug "modulator/handle - type:" type)
+  (log/trace "modulator/handle - type:" type)
   (case type
     :modulator/toggle (handle-toggle event)
     :modulator/set-type (handle-set-type event)

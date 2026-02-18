@@ -480,7 +480,7 @@
    Spatial keyframe events additionally require :param-key to locate the
    modulator within effect params."
   [{:keys [event/type domain entity-key effect-path state] :as event}]
-  (log/debug "keyframe/handle - type:" type "domain:" domain "entity-key:" entity-key
+  (log/trace "keyframe/handle - type:" type "domain:" domain "entity-key:" entity-key
              "effect-path:" effect-path)
   (let [config (chain/chain-config domain entity-key)]
     (case type

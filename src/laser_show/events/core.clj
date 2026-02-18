@@ -179,8 +179,8 @@
         (log/info (format "Found %d IDN device(s)" (count devices)))
         (doseq [device devices]
           (log/debug (format "  Device %s: %d service(s)"
-                            (:address device)
-                            (count (:services device)))))
+                             (:address device)
+                             (count (:services device)))))
         (dispatch {:event/type :projectors/scan-complete
                    :devices devices}))
       (catch Exception e
@@ -217,49 +217,49 @@
    with :file-path set to the selected file path (or nil if cancelled)."
   [{:keys [title mode initial-directory initial-file-name extension-filters on-result]} dispatch]
   (Platform/runLater
-    (fn []
-      (try
-        (let [chooser (FileChooser.)
-              stage (get-primary-stage)]
-          
-          ;; Set title
-          (when title
-            (.setTitle chooser title))
-          
-          ;; Set initial directory
-          (when initial-directory
-            (let [dir (File. initial-directory)]
-              (when (.exists dir)
-                (.setInitialDirectory chooser dir))))
-          
-          ;; Set initial filename (for save mode)
-          (when initial-file-name
-            (.setInitialFileName chooser initial-file-name))
-          
-          ;; Add extension filters
-          (doseq [{:keys [description extensions]} extension-filters]
-            (let [exts (into-array String extensions)
-                  filter (FileChooser$ExtensionFilter. description exts)]
-              (.add (.getExtensionFilters chooser) filter)))
-          
-          ;; Show dialog based on mode
-          (let [selected-file (case mode
-                                :save (.showSaveDialog chooser stage)
-                                (.showOpenDialog chooser stage))
-                file-path (when selected-file
+   (fn []
+     (try
+       (let [chooser (FileChooser.)
+             stage (get-primary-stage)]
+
+         ;; Set title
+         (when title
+           (.setTitle chooser title))
+
+         ;; Set initial directory
+         (when initial-directory
+           (let [dir (File. initial-directory)]
+             (when (.exists dir)
+               (.setInitialDirectory chooser dir))))
+
+         ;; Set initial filename (for save mode)
+         (when initial-file-name
+           (.setInitialFileName chooser initial-file-name))
+
+         ;; Add extension filters
+         (doseq [{:keys [description extensions]} extension-filters]
+           (let [exts (into-array String extensions)
+                 filter (FileChooser$ExtensionFilter. description exts)]
+             (.add (.getExtensionFilters chooser) filter)))
+
+         ;; Show dialog based on mode
+         (let [selected-file (case mode
+                               :save (.showSaveDialog chooser stage)
+                               (.showOpenDialog chooser stage))
+               file-path (when selected-file
                            (.getAbsolutePath selected-file))]
-            
-            (log/debug "File chooser result:" file-path)
-            
-            ;; Dispatch result event with file path
-            (when on-result
-              (dispatch (assoc on-result :file-path file-path)))))
-        
-        (catch Exception e
-          (log/error "Error showing file chooser:" (.getMessage e))
-          ;; Dispatch result with nil to indicate failure/cancellation
-          (when on-result
-            (dispatch (assoc on-result :file-path nil))))))))
+
+           (log/debug "File chooser result:" file-path)
+
+           ;; Dispatch result event with file path
+           (when on-result
+             (dispatch (assoc on-result :file-path file-path)))))
+
+       (catch Exception e
+         (log/error "Error showing file chooser:" (.getMessage e))
+         ;; Dispatch result with nil to indicate failure/cancellation
+         (when on-result
+           (dispatch (assoc on-result :file-path nil))))))))
 
 ;; Multi-Engine Streaming Effects
 
@@ -337,33 +337,33 @@
    - :clipboard/paste-projector-effects - paste effects from clipboard (projector chain)
    - :projectors/scan - scan network for IDN devices"
   (-> handlers/handle-event
-      
+
       ;; Inject co-effects into events
       (fx/wrap-co-effects
-        {:state co-effect-state
-         :time co-effect-time})
-      
+       {:state co-effect-state
+        :time co-effect-time})
+
       ;; Handle effects from events
       (fx/wrap-effects
-        {:state effect-state
-         :dispatch effect-dispatch
-         :dispatch-later effect-dispatch-later
-         :timing/calculate-bpm effect-timing-calculate-bpm
-         ;; Multi-engine streaming (zone-aware system)
-         :multi-engine/start effect-multi-engine-start
-         :multi-engine/stop effect-multi-engine-stop
-         :multi-engine/refresh effect-multi-engine-refresh
-         ;; Project persistence
-         :project/save effect-save-project
-         :project/load effect-load-project
-         ;; File chooser dialog
-         :fx/show-file-chooser effect-show-file-chooser
-         ;; Clipboard effects for effect chain editor
-         :clipboard/copy-effects effect-clipboard-copy-effects
-         :clipboard/paste-effects effect-clipboard-paste-effects
-         :clipboard/paste-projector-effects effect-clipboard-paste-projector-effects
-         ;; Projector scanning effects
-         :projectors/scan effect-projectors-scan})))
+       {:state effect-state
+        :dispatch effect-dispatch
+        :dispatch-later effect-dispatch-later
+        :timing/calculate-bpm effect-timing-calculate-bpm
+        ;; Multi-engine streaming (zone-aware system)
+        :multi-engine/start effect-multi-engine-start
+        :multi-engine/stop effect-multi-engine-stop
+        :multi-engine/refresh effect-multi-engine-refresh
+        ;; Project persistence
+        :project/save effect-save-project
+        :project/load effect-load-project
+        ;; File chooser dialog
+        :fx/show-file-chooser effect-show-file-chooser
+        ;; Clipboard effects for effect chain editor
+        :clipboard/copy-effects effect-clipboard-copy-effects
+        :clipboard/paste-effects effect-clipboard-paste-effects
+        :clipboard/paste-projector-effects effect-clipboard-paste-projector-effects
+        ;; Projector scanning effects
+        :projectors/scan effect-projectors-scan})))
 
 ;; Convenience Functions
 
@@ -396,37 +396,38 @@
    (dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})"
   [event]
   (if-let [dispatch @*dispatch-fn]
-    ;; Use app's dispatch when available (async via agent)
     (do
-      (log/debug "dispatch! using app dispatch-fn for event:" (:event/type event))
+      (when-not (= :drag (:interaction/type event))
+        (log/debug "dispatch! using app dispatch-fn for event:" (:event/type event)))
       (dispatch event))
     ;; Fallback: Manually inject co-effects and process effects
     ;; (used during testing or before app is initialized)
-    (let [_ (log/debug "dispatch! using FALLBACK for event:" (:event/type event))
+    (let [_ (when-not (= :drag (:interaction/type event))
+              (log/debug "dispatch! using FALLBACK for event:" (:event/type event)))
           enriched-event (assoc event
-                               :state (state/get-raw-state)
-                               :time (System/currentTimeMillis))
+                                :state (state/get-raw-state)
+                                :time (System/currentTimeMillis))
           effects (handlers/handle-event enriched-event)]
       (log/debug "dispatch! fallback - effects keys:" (keys effects))
       ;; Apply state effect if present
       (when-let [new-state (:state effects)]
         (log/debug "dispatch! fallback - applying :state effect")
         (state/reset-state! new-state))
-      
+
       ;; Handle clipboard effects (for keyboard shortcuts in effect chain editor)
       (when-let [effects-to-copy (:clipboard/copy-effects effects)]
         (effect-clipboard-copy-effects effects-to-copy nil))
-      
+
       (when-let [paste-params (:clipboard/paste-effects effects)]
         (effect-clipboard-paste-effects paste-params dispatch!))
-      
+
       (when-let [paste-params (:clipboard/paste-projector-effects effects)]
         (effect-clipboard-paste-projector-effects paste-params dispatch!))
-      
+
       ;; Handle projector scanning effect (for auto-scan on startup)
       (when-let [scan-params (:projectors/scan effects)]
         (effect-projectors-scan scan-params dispatch!))
-      
+
       ;; Handle dispatch effect (for event chaining)
       (when-let [event-to-dispatch (:dispatch effects)]
         (log/debug "dispatch! fallback - processing :dispatch effect:" (:event/type event-to-dispatch))
@@ -434,5 +435,5 @@
           (dispatch! event-to-dispatch)
           (catch Exception e
             (log/error e "dispatch! fallback - error dispatching nested event"))))
-      
+
       effects)))
