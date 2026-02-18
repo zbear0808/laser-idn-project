@@ -1,7 +1,6 @@
 (ns laser-show.backend.multi-engine-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [laser-show.backend.multi-engine :as me]
-            [laser-show.services.frame-service :as frame-service]
+            [laser-show.backend.multi-engine :as me] 
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]))
 
@@ -253,30 +252,29 @@
                                 [0.6 0.5 0.0 1.0 0.0]]
                        :right  [[1.0 0.0 0.0 0.0 1.0]
                                 [1.0 0.1 0.0 0.0 1.0]]}
-          projector-zones [:left :center]]
+          projector-zones [:left :center]
+          projector-frames (#'me/extract-frames-for-zones zone-frames projector-zones)
+          combined (#'me/combine-zone-frames projector-frames)] 
       
-      (let [projector-frames (#'me/extract-frames-for-zones zone-frames projector-zones)
-            combined (#'me/combine-zone-frames projector-frames)]
-        
-        (testing "Extracts correct number of zone frames"
-          (is (= 2 (count projector-frames))))
-        
-        (testing "Combined frame contains content from both zones"
-          (is (some? combined))
-          (is (> (count combined) 4)))
-        
-        (testing ":right zone is NOT included"
-          (let [right-first-point [1.0 0.0 0.0 0.0 1.0]
-                right-last-point [1.0 0.1 0.0 0.0 1.0]]
-            (is (not (some #{right-first-point} combined)))
-            (is (not (some #{right-last-point} combined)))))
-        
-        (testing ":left and :center content IS included"
-          (is (= [0.0 0.0 1.0 0.0 0.0] (first combined)))
-          (is (= [0.6 0.5 0.0 1.0 0.0] (last combined))))
-        
-        (testing "Blanking points exist between zone frames"
-          (let [has-blank? (fn [pt] (and (= 0.0 (nth pt 2))
-                                          (= 0.0 (nth pt 3))
-                                          (= 0.0 (nth pt 4))))]
-            (is (some has-blank? combined) "Should have at least one blanking point")))))))
+      (testing "Extracts correct number of zone frames"
+        (is (= 2 (count projector-frames))))
+      
+      (testing "Combined frame contains content from both zones"
+        (is (some? combined))
+        (is (> (count combined) 4)))
+      
+      (testing ":right zone is NOT included"
+        (let [right-first-point [1.0 0.0 0.0 0.0 1.0]
+              right-last-point [1.0 0.1 0.0 0.0 1.0]]
+          (is (not (some #{right-first-point} combined)))
+          (is (not (some #{right-last-point} combined)))))
+      
+      (testing ":left and :center content IS included"
+        (is (= [0.0 0.0 1.0 0.0 0.0] (first combined)))
+        (is (= [0.6 0.5 0.0 1.0 0.0] (last combined))))
+      
+      (testing "Blanking points exist between zone frames"
+        (let [has-blank? (fn [pt] (and (= 0.0 (nth pt 2))
+                                       (= 0.0 (nth pt 3))
+                                       (= 0.0 (nth pt 4))))]
+          (is (some has-blank? combined) "Should have at least one blanking point"))))))

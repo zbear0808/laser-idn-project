@@ -8,12 +8,8 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
-            [laser-show.state.domains :as domains]
-            [laser-show.animation.cue-timing :as cue-timing]))
-
-
+            [laser-show.state.domains :as domains]))
 ;; Test Fixtures
-
 
 (defn setup-test-state
   "Set up test state before each test"

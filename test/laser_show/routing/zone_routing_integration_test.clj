@@ -17,22 +17,9 @@
    [laser-show.services.frame-service :as fs]
    [laser-show.backend.multi-engine :as me]
    [laser-show.state.core :as state]
-   [laser-show.state.domains :as domains]
-   [laser-show.animation.types :as t]))
+   [laser-show.state.domains :as domains]))
 
-
-;; ============================================================================
-;; Test Constants and Fixtures
-;; ============================================================================
-
-
-(def test-zone-groups
-  "Set of all available zone groups for testing."
-  #{:left :center :right :all})
-
-;; ============================================================================
 ;; Test Cue Chain Fixtures
-;; ============================================================================
 
 
 (def test-cue-chain-static-zone-selector

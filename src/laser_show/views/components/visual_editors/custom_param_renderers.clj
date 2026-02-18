@@ -17,8 +17,7 @@
    
    Single-parameter visual editors (rotation, hue, hue-shift) support optional
    modulator toggle to enable animation without switching to numeric mode."
-  (:require [cljfx.api :as fx]
-            [clojure.string :as str]
+  (:require [cljfx.api :as fx] 
             [laser-show.subs :as subs]
             [laser-show.events.core :as events]
             [laser-show.animation.modulator-registry :as reg]
@@ -29,8 +28,7 @@
             [laser-show.views.components.visual-editors.hue-canvas :as hue-canvas]
             [laser-show.views.components.visual-editors.hue-shift-canvas :as hue-shift-canvas]
             [laser-show.views.components.tabs :as tabs]
-            [laser-show.views.components.modulator-param-control :as mod-param]
-            [clj-font-awesome.core :as fa]
+            [laser-show.views.components.modulator-param-control :as mod-param] 
             [laser-show.common.util :as u]))
 
 

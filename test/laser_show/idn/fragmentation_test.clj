@@ -1,6 +1,6 @@
 (ns laser-show.idn.fragmentation-test
   "Tests for IDN-Stream frame fragmentation support."
-  (:require [clojure.test :refer [deftest testing is are]]
+  (:require [clojure.test :refer [deftest testing is]]
             [laser-show.idn.fragmentation :as sut]
             [laser-show.idn.output-config :as output-config]
             [laser-show.idn.stream :as idn-stream]))

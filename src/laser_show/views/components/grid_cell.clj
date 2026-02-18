@@ -116,25 +116,23 @@
                          (let [button (.getButton e)
                                click-count (.getClickCount e)]
                            (cond
-                             ;; Right-click or double-click: dispatch right-click event
-                             (or (= button MouseButton/SECONDARY)
-                                 #_(>= click-count 2))
+                             (= button MouseButton/SECONDARY)
                              (do
                                (log/debug "Grid cell right-click/double-click"
-                                         {:cell-type cell-type
-                                          :col col
-                                          :row row
-                                          :event-type (:event/type on-right-click)
-                                          :button (str button)
-                                          :click-count click-count})
+                                          {:cell-type cell-type
+                                           :col col
+                                           :row row
+                                           :event-type (:event/type on-right-click)
+                                           :button (str button)
+                                           :click-count click-count})
                                (events/dispatch! (assoc on-right-click
-                                                       :col col :row row)))
+                                                        :col col :row row)))
                              
                              ;; Single left-click: dispatch click event
                              :else
                              (events/dispatch! (assoc on-click
-                                                     :col col :row row
-                                                     :has-content? has-content?)))))
+                                                      :col col :row row
+                                                      :has-content? has-content?)))))
      
      ;; Drag handlers - use inline handlers that are re-created on each render
      ;; This ensures has-content? and other values are always current

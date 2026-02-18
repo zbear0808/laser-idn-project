@@ -11,10 +11,9 @@
    - Hover states with position display
    
    Refactored to Stateless Interactive Canvas."
-  (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events]
-            [laser-show.css.theme :as theme]
-            [laser-show.views.components.visual-editors.canvas-interaction :as ci])
+  (:require
+   [laser-show.css.theme :as theme]
+   [laser-show.views.components.visual-editors.canvas-interaction :as ci])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.input MouseButton MouseEvent]
            [javafx.scene.paint Color]
