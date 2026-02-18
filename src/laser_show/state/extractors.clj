@@ -47,11 +47,6 @@
   [state]
   (or (:accumulated-beats (global-clock state)) 0.0))
 
-(defn global-accumulated-ms
-  "Get accumulated milliseconds from global clock."
-  [state]
-  (or (:accumulated-ms (global-clock state)) 0.0))
-
 
 ;; Playback Extractors
 
@@ -68,17 +63,6 @@
   [state]
   (or (:active-cues (playback state)) {}))
 
-(defn cue-active?
-  "Check if a specific cue is currently active."
-  [state col row]
-  (contains? (active-cues state) [col row]))
-
-(defn cue-timing
-  "Get timing state for a specific cue.
-   Returns nil if cue is not active."
-  [state col row]
-  (get (active-cues state) [col row]))
-
 (defn resync-rate
   "Get the phase resync rate (beats to reach ~63% correction)."
   [state]
@@ -90,31 +74,6 @@
    Returns first active cue cell for backward compatibility."
   [state]
   (first (keys (active-cues state))))
-
-;; DEPRECATED - use cue-timing for specific cue
-(defn accumulated-beats
-  "DEPRECATED: Use (cue-timing state col row) for per-cue beats.
-   Returns accumulated beats from first active cue for backward compatibility."
-  [state]
-  (if-let [[_ timing] (first (active-cues state))]
-    (or (:accumulated-beats timing) 0.0)
-    0.0))
-
-;; DEPRECATED - use cue-timing for specific cue
-(defn phase-offset
-  "DEPRECATED: Use (cue-timing state col row) for per-cue phase.
-   Returns phase offset from first active cue for backward compatibility."
-  [state]
-  (if-let [[_ timing] (first (active-cues state))]
-    (or (:phase-offset timing) 0.0)
-    0.0))
-
-;; DEPRECATED - use cue-timing for specific cue
-(defn effective-beats
-  "DEPRECATED: Use cue-timing and calculate per-cue.
-   Returns effective beats from first active cue for backward compatibility."
-  [state]
-  (+ (accumulated-beats state) (phase-offset state)))
 
 (defn grid [state]
   (:grid state))
@@ -165,12 +124,6 @@
 (defn link-data [state]
   (:link (backend state)))
 
-(defn carabiner-connected? [state]
-  (:carabiner-connected? (link-data state)))
-
-(defn link-enabled? [state]
-  (:link-enabled? (link-data state)))
-
 (defn link-connected?
   "DEPRECATED: Use carabiner-connected? or link-enabled? instead.
    Returns true if both Carabiner is connected AND Link is enabled."
@@ -185,8 +138,6 @@
 (defn link-bpm [state]
   (:link-bpm (link-data state)))
 
-(defn link-peers [state]
-  (:link-peers (link-data state)))
 
 
 ;; Project Extractors

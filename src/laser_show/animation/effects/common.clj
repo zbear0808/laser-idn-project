@@ -11,10 +11,6 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
-
-;; Normalized Value Clamping (for colors 0.0-1.0)
-
-
 (defn clamp-normalized
   "Clamp a value to valid normalized range (0.0-1.0).
    Used for color channel values."

@@ -14,8 +14,6 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
-;; Catmull-Rom Spline Implementation
-
 
 (defn clamp
   "Clamp value to [min-val, max-val] range."
@@ -48,7 +46,6 @@
         b1 (* 0.5 (+ (* 3.0 t3) (* -5.0 t2) 2.0))
         b2 (* 0.5 (+ (* -3.0 t3) (* 4.0 t2) t))
         b3 (* 0.5 (+ t3 (- t2)))
-        ;; Interpolated values
         x (+ (* b0 x0) (* b1 x1) (* b2 x2) (* b3 x3))
         y (+ (* b0 y0) (* b1 y1) (* b2 y2) (* b3 y3))]
     [x y]))
@@ -116,8 +113,6 @@
         (double (nth result 1))))))
 
 
-;; LUT Generation
-
 
 (defn generate-curve-lut
   "Generate 256-entry lookup table from NORMALIZED control points.
@@ -143,8 +138,6 @@
                 (clamp y 0.0 1.0)))
             (range 256)))))
 
-
-;; Curve Sampling for Rendering
 
 
 (defn sample-curve-for-display
@@ -175,57 +168,3 @@
                   (clamp y 0.0 1.0)]))
              (range num-samples-long))))))
 
-(defn add-point
-  "Add a new control point and return sorted points.
-   
-   Parameters:
-   - points: Current control points (normalized)
-   - x, y: New point coordinates (normalized 0.0-1.0)
-   
-   Returns sorted vector with new point added."
-  [points x y]
-  (let [clamped-x (clamp (double x) 0.0 1.0)
-        clamped-y (clamp (double y) 0.0 1.0)
-        new-point [clamped-x clamped-y]
-        updated (conj (vec points) new-point)]
-    (vec (sort-by first updated))))
-
-(defn update-point
-  "Update a control point at index and return sorted points.
-   
-   For corner points (first and last), only Y can be modified.
-   
-   Parameters:
-   - points: Current control points (normalized)
-   - idx: Index of point to update
-   - x, y: New coordinates (normalized 0.0-1.0)
-   
-   Returns sorted vector with updated point."
-  [points idx x y]
-  (let [n (long (count points))
-        idx-long (long idx)
-        is-corner? (or (== idx-long 0) (== idx-long (dec n)))
-        current-point (nth points idx-long)
-        new-x (if is-corner? (double (first current-point)) (clamp (double x) 0.0 1.0))
-        new-y (clamp (double y) 0.0 1.0)
-        updated (assoc points idx-long [new-x new-y])]
-    (vec (sort-by first updated))))
-
-(defn remove-point
-  "Remove a control point at index.
-   
-   Corner points (first and last) cannot be removed.
-   
-   Parameters:
-   - points: Current control points
-   - idx: Index of point to remove
-   
-   Returns vector with point removed, or unchanged if corner."
-  [points idx]
-  (let [n (long (count points))
-        idx-long (long idx)
-        is-corner? (or (== idx-long 0) (== idx-long (dec n)))]
-    (if is-corner?
-      points ;; Cannot remove corners
-      (vec (concat (subvec points 0 idx-long)
-                   (subvec points (inc idx-long)))))))

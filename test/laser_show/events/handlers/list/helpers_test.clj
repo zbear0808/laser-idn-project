@@ -3,17 +3,13 @@
   (:require [clojure.test :refer [deftest testing is]]
             [laser-show.events.handlers.list.helpers :as h]))
 
-
-;; Test Data Fixtures
-
-
 (def id-a (java.util.UUID/fromString "00000000-0000-0000-0000-00000000000a"))
 (def id-b (java.util.UUID/fromString "00000000-0000-0000-0000-00000000000b"))
 (def id-c (java.util.UUID/fromString "00000000-0000-0000-0000-00000000000c"))
 (def id-d (java.util.UUID/fromString "00000000-0000-0000-0000-00000000000d"))
 (def id-e (java.util.UUID/fromString "00000000-0000-0000-0000-00000000000e"))
-(def id-g1 (java.util.UUID/fromString "00000000-0000-0000-0000-0000000000aa"))
-(def id-g2 (java.util.UUID/fromString "00000000-0000-0000-0000-0000000000bb"))
+(def id-f (java.util.UUID/fromString "00000000-0000-0000-0000-0000000000aa"))
+
 
 (def item-a {:id id-a :name "A"})
 (def item-b {:id id-b :name "B"})
@@ -22,7 +18,7 @@
 (def item-e {:id id-e :name "E"})
 
 (def group-1
-  {:id id-g1 :type :group :name "G1" :enabled? true
+  {:id id-f :type :group :name "G1" :enabled? true
    :items [item-c item-d]})
 
 (def flat-tree [item-a item-b item-c])
@@ -36,7 +32,7 @@
 (def doubly-nested-tree
   "Tree: A, G1{C, G2{D}}, E"
   [item-a
-   {:id id-g1 :type :group :name "G1" :enabled? true
+   {:id id-f :type :group :name "G1" :enabled? true
     :items [item-c
             {:id id-g2-val :type :group :name "G2" :enabled? true
              :items [item-d]}]}
@@ -61,7 +57,7 @@
       (is (= [item-d] (get-in result [1 :items])))))
 
   (testing "remove a group itself"
-    (let [result (h/remove-by-ids nested-tree #{id-g1})]
+    (let [result (h/remove-by-ids nested-tree #{id-f})]
       (is (= [item-a item-e] result))))
 
   (testing "remove from deeply nested"
@@ -89,7 +85,7 @@
       (is (= "C2" (get-in result [1 :items 0 :name])))))
 
   (testing "update group itself"
-    (let [result (h/update-by-id nested-tree id-g1 #(assoc % :name "Renamed"))]
+    (let [result (h/update-by-id nested-tree id-f #(assoc % :name "Renamed"))]
       (is (= "Renamed" (get-in result [1 :name])))))
 
   (testing "update nonexistent ID — no change"
@@ -168,15 +164,15 @@
 (deftest insert-into-group-test
   (testing "insert into group"
     (let [new-item {:id (java.util.UUID/randomUUID) :name "NEW"}
-          result (h/insert-into-group nested-tree id-g1 [new-item])]
+          result (h/insert-into-group nested-tree id-f [new-item])]
       (is (= 3 (count (get-in result [1 :items]))))
       (is (= "NEW" (get-in result [1 :items 2 :name])))))
 
   (testing "insert into empty group"
-    (let [empty-group {:id id-g1 :type :group :name "Empty" :items []}
+    (let [empty-group {:id id-f :type :group :name "Empty" :items []}
           tree [item-a empty-group]
           new-item {:id (java.util.UUID/randomUUID) :name "NEW"}
-          result (h/insert-into-group tree id-g1 [new-item])]
+          result (h/insert-into-group tree id-f [new-item])]
       (is (= 1 (count (get-in result [1 :items]))))
       (is (= "NEW" (get-in result [1 :items 0 :name]))))))
 
@@ -197,14 +193,14 @@
 
   (testing "move item into group"
     ;; A G1{C D} E → move A into G1
-    (let [result (h/move-items nested-tree #{id-a} id-g1 :into)]
+    (let [result (h/move-items nested-tree #{id-a} id-f :into)]
       (is (= 2 (count result)))  ;; G1 and E at top level
       (is (= 3 (count (get-in result [0 :items]))))  ;; C, D, A inside G1
       (is (= id-a (get-in result [0 :items 2 :id])))))
 
   (testing "move item out of group"
     ;; A G1{C D} E → move C after G1
-    (let [result (h/move-items nested-tree #{id-c} id-g1 :after)]
+    (let [result (h/move-items nested-tree #{id-c} id-f :after)]
       (is (= 4 (count result)))  ;; A, G1, C, E
       (is (= id-c (:id (nth result 2))))
       ;; G1 should only have D
@@ -268,7 +264,7 @@
 (deftest ungroup-by-id-test
   (testing "ungroup at top level"
     ;; A G1{C D} E → ungroup G1 → A C D E
-    (let [result (h/ungroup-by-id nested-tree id-g1)]
+    (let [result (h/ungroup-by-id nested-tree id-f)]
       (is (= [id-a id-c id-d id-e] (mapv :id result)))))
 
   (testing "ungroup nested group"
@@ -285,7 +281,7 @@
     (is (= nested-tree (h/ungroup-by-id nested-tree id-a))))
 
   (testing "ungroup empty group"
-    (let [empty-group {:id id-g1 :type :group :name "Empty" :items []}
+    (let [empty-group {:id id-f :type :group :name "Empty" :items []}
           tree [item-a empty-group item-e]
-          result (h/ungroup-by-id tree id-g1)]
+          result (h/ungroup-by-id tree id-f)]
       (is (= [id-a id-e] (mapv :id result))))))

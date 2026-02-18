@@ -242,28 +242,6 @@
     (catch Exception e
       (log/error e "Error syncing to downbeat:" (.getMessage e)))))
 
-
-;; Legacy API (for backwards compatibility during transition)
-
-
-(defn start-link!
-  "DEPRECATED: Use connect-carabiner! followed by enable-link!.
-   
-   Starts Link by connecting to Carabiner and enabling sync mode.
-   Returns updated state map."
-  [link-state dispatch-fn get-state-fn]
-  (-> link-state
-      (connect-carabiner! dispatch-fn get-state-fn)
-      (enable-link!)))
-
-(defn stop-link!
-  "DEPRECATED: Use disconnect-carabiner!.
-   
-   Stops Link by disabling sync and disconnecting from Carabiner.
-   Returns updated state map."
-  [link-state]
-  (disconnect-carabiner! link-state))
-
 (defn connected?
   "DEPRECATED: Use carabiner-connected? or link-enabled?.
    
@@ -271,9 +249,6 @@
   [link-state]
   (and (:carabiner-connected? link-state false)
        (:link-enabled? link-state false)))
-
-
-;; Initialization
 
 
 (def initial-state
@@ -295,9 +270,3 @@
    (if auto-connect?
      (connect-carabiner! link-state dispatch-fn get-state-fn)
      link-state)))
-
-(defn shutdown
-  "Shuts down Link system - disconnects from Carabiner.
-   Returns cleaned up state."
-  [link-state]
-  (disconnect-carabiner! link-state))

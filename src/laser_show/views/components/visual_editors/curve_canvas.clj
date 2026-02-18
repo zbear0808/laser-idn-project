@@ -5,10 +5,9 @@
    - 280x280 pixel canvas with grid display
    - NORMALIZED 0.0-1.0 input (X) and output (Y) axes
    - Draggable points with real-time updates"
-  (:require [cljfx.api :as fx]
-            [laser-show.events.core :as events]
-            [laser-show.animation.effects.curves :as curves]
-            [laser-show.views.components.visual-editors.canvas-interaction :as ci])
+  (:require
+   [laser-show.animation.effects.curves :as curves]
+   [laser-show.views.components.visual-editors.canvas-interaction :as ci])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.input MouseButton MouseEvent]
            [javafx.scene.paint Color]

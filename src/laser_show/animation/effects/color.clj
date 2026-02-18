@@ -1,32 +1,5 @@
 (ns laser-show.animation.effects.color
   "Color effects for laser frames.
-   Includes hue shift, saturation, set hue, color filter, color replace, set color, and more.
-   
-   NOTE: All color values are NORMALIZED (0.0-1.0), not 8-bit (0-255).
-   This provides full precision for color calculations.
-   
-   Note: For grayscale effect, use :saturation with amount=0.
-   For brightness control, use :intensity effect from intensity.clj.
-   
-   All effects support both static values and modulators:
-   ;; Static
-   {:effect-id :hue-shift :params {:degrees 30}}
-   
-   ;; Modulated (using modulation.clj)
-   (require '[laser-show.animation.modulation :as mod])
-   {:effect-id :hue-shift :params {:degrees (mod/sine-mod -30 30 2.0)}}
-   
-   For animated hue rotation, use:
-   {:effect-id :hue-shift :params {:degrees (mod/sawtooth-mod 0 360 1.0)}}
-   
-   Per-point modulation (rainbow gradient):
-   {:effect-id :set-hue :params {:hue {:type :pos-x :min 0 :max 360}}}
-   {:effect-id :set-hue :params {:hue {:type :point-index :min 0 :max 360}}}
-   
-   Implementation uses make-param-resolver for efficient per-point handling:
-   - Static values: resolved once, no per-point overhead
-   - Global modulators: resolved once, cached
-   - Per-point modulators: evaluated per-point with (fn [x y idx] -> value)
    
    Points are 5-element vectors [x y r g b]. Access via t/X, t/Y, t/R, t/G, t/B.
    Use t/update-point-rgb for color updates."
@@ -38,8 +11,6 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
-
-;; Hue Shift Effect
 
 
 (defn- hue-shift-xf [time-ms bpm params ctx]
@@ -72,8 +43,6 @@
   :apply-transducer hue-shift-xf})
 
 
-;; Saturation Effect
-
 
 (defn- saturation-xf [time-ms bpm params ctx]
   (let [get-amount (effects/make-param-resolver :amount params time-ms bpm ctx)]
@@ -102,8 +71,6 @@
                 :max 2.0}]
   :apply-transducer saturation-xf})
 
-
-;; Color Filter Effect
 
 
 (defn- color-filter-xf [time-ms bpm params ctx]
@@ -148,9 +115,6 @@
   :apply-transducer color-filter-xf})
 
 
-;; Set Hue Effect (sets all points to specific hue, preserving saturation/value)
-
-
 (defn- set-hue-xf [time-ms bpm params ctx]
   (let [get-hue (effects/make-param-resolver :hue params time-ms bpm ctx)]
     (map-indexed
@@ -180,16 +144,6 @@
                 :min 0.0
                 :max 360.0}]
   :apply-transducer set-hue-xf})
-
-
-;; Color Replace Effect
-
-
-
-
-
-;; Set Color Effect (replaces color of ALL points)
-
 
 (defn- set-color-xf [time-ms bpm params ctx]
   (let [get-red (effects/make-param-resolver :red params time-ms bpm ctx)
@@ -231,24 +185,6 @@
                 :min 0.0
                 :max 1.0}]
   :apply-transducer set-color-xf})
-
-
-;; SPECIAL EFFECTS
-;; These are more complex effects kept for specific use cases.
-;; Consider using modulators with basic effects for more flexibility.
-
-
-
-;; Rainbow Position Effect (Special)
-;; Creates a rainbow effect based on point position.
-;; For more control, use hue-shift with rainbow-hue modulator.
-
-
-
-
-
-;; Oklab Hue Shift
-
 
 (defn- oklab-hue-shift-xf [time-ms bpm params ctx]
   (let [get-degrees (effects/make-param-resolver :degrees params time-ms bpm ctx)]

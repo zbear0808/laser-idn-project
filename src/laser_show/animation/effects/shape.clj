@@ -1,32 +1,9 @@
 (ns laser-show.animation.effects.shape
-  "Shape effects - geometric transformations for laser frames.
-   Includes scale, translate, rotate, corner-pin, and distortion effects.
-   These effects can be used at any level (cue, zone group, zone, projector).
-   
-   Note: Scale supports negative values for mirroring (e.g., x-scale -1 = mirror X).
-   
-   All effects support both static values and modulators:
-   ;; Static
-   {:effect-id :scale :params {:x-scale 1.5 :y-scale 1.5}}
-   
-   ;; Modulated (using modulation.clj)
-   (require '[laser-show.animation.modulation :as mod])
-   {:effect-id :scale :params {:x-scale (mod/sine-mod 0.8 1.2 2.0)
-                               :y-scale (mod/sine-mod 0.8 1.2 2.0)}}
-   
-   For animated rotation, use modulators:
-   {:effect-id :rotation :params {:angle (mod/sawtooth-mod 0 360 1.0)}}
-   
-   Points are 5-element vectors [x y r g b]. Access via t/X, t/Y, t/R, t/G, t/B.
-   Use t/update-point-xy for position updates."
   (:require [laser-show.animation.effects :as effects]
             [laser-show.animation.types :as t]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
-
-
-;; Scale Effect
 
 
 (defn- scale-xf [time-ms bpm params ctx]
@@ -68,10 +45,6 @@
              :default-mode :visual}
   :apply-transducer scale-xf})
 
-
-;; Translate Effect
-
-
 (defn- translate-xf [time-ms bpm params ctx]
   (let [get-x (effects/make-param-resolver :x params time-ms bpm ctx)
         get-y (effects/make-param-resolver :y params time-ms bpm ctx)]
@@ -107,10 +80,6 @@
              :default-mode :visual}
   :apply-transducer translate-xf})
 
-
-;; Rotation Effect
-
-
 (defn- rotation-xf [time-ms bpm params ctx]
   (let [get-angle (effects/make-param-resolver :angle params time-ms bpm ctx)]
     (map-indexed
@@ -140,14 +109,6 @@
              :params [:angle]
              :default-mode :visual}
   :apply-transducer rotation-xf})
-
-
-
-
-
-
-
-;; Corner Pin Effect (4-corner perspective/bilinear transform)
 
 
 (defn- corner-pin-xf
@@ -253,9 +214,6 @@
                        :br [:br-x :br-y]}
              :default-mode :visual}
   :apply-transducer corner-pin-xf})
-
-
-;; Lens Distortion Effect (barrel/pincushion)
 
 
 (defn- lens-distortion-xf [time-ms bpm params ctx]

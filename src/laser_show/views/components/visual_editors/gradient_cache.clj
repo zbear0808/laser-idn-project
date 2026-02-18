@@ -88,9 +88,3 @@
       (.drawImage gc img
                   0.0 0.0 left-portion-width 1.0
                   (+ x (* right-portion-width scale-x)) y (* left-portion-width scale-x) h))))
-
-(defn reset-caches!
-  "Reset gradient caches. Useful during development when changing color math."
-  []
-  (reset! !hsv-gradient nil)
-  (reset! !oklab-gradient nil))
