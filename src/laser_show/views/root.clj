@@ -16,7 +16,7 @@
    │   └── preview-panel
    ├── status-bar
    └── dialogs (via refs)"
-(:require
+  (:require
    [cljfx.api :as fx]
    [laser-show.subs :as subs]
    [laser-show.css.core :as css]
@@ -25,6 +25,7 @@
    [laser-show.views.components.tabs :as tabs]
    [laser-show.views.dialogs.effect-chain-editor :as effect-chain-editor]
    [laser-show.views.dialogs.cue-chain-editor :as cue-chain-editor]
+   [laser-show.views.dialogs.timeline-cue-editor :as timeline-cue-editor]
    [laser-show.views.dialogs.add-projector-manual :as add-projector-dialog]
    [laser-show.views.dialogs.zone-group-editor :as zone-group-editor]
    [laser-show.views.status-bar :as status-bar]
@@ -142,42 +143,47 @@
         stylesheets (fx/sub-ctx context subs/stylesheet-urls)
         effect-editor-open? (fx/sub-ctx context subs/dialog-open? :effect-chain-editor)
         cue-editor-open? (fx/sub-ctx context subs/dialog-open? :cue-chain-editor)
+        timeline-editor-open? (fx/sub-ctx context subs/dialog-open? :timeline-cue-editor)
         add-projector-open? (fx/sub-ctx context subs/dialog-open? :add-projector-manual)
         zone-group-editor-open? (fx/sub-ctx context subs/dialog-open? :zone-group-editor)]
     {:fx/type fx/ext-set-env
      :env {::layout-config layout-config}  ; For any components that need spacing/fonts
      :desc {:fx/type fx/ext-many
             :desc (filterv
-                    some?
-                    [;; Main application window with extended style for title bar integration
-                     ;; IMPORTANT: Each component in fx/ext-many needs :fx/key to prevent
-                     ;; position-based matching when dialogs open/close
-                     {:fx/type :stage
-                      :fx/key :main-window
-                      :title title
-                      :style :extended
-                      :width (:width window-config 1200)
-                      :height (:height window-config 800)
-                      :showing true
-                      :on-close-request (fn [_]
-                                          ;; TODO: Check for unsaved changes
-                                          (System/exit 0))
-                      :scene {:fx/type :scene
-                              :stylesheets stylesheets
-                              :root {:fx/type main-layout}}}
-                     ;; Effect chain editor dialog
-                     (when effect-editor-open?
-                       {:fx/type effect-chain-editor/effect-chain-editor-dialog
-                        :fx/key :effect-chain-editor-dialog})
-                     ;; Cue chain editor dialog
-                     (when cue-editor-open?
-                       {:fx/type cue-chain-editor/cue-chain-editor-dialog
-                        :fx/key :cue-chain-editor-dialog})
-                     ;; Add projector manually dialog
-                     (when add-projector-open?
-                       {:fx/type add-projector-dialog/add-projector-manual-dialog
-                        :fx/key :add-projector-manual-dialog})
-                     ;; Zone group editor dialog
-                     (when zone-group-editor-open?
-                       {:fx/type zone-group-editor/zone-group-editor-dialog
-                        :fx/key :zone-group-editor-dialog})])}}))
+                   some?
+                   [;; Main application window with extended style for title bar integration
+                    ;; IMPORTANT: Each component in fx/ext-many needs :fx/key to prevent
+                    ;; position-based matching when dialogs open/close
+                    {:fx/type :stage
+                     :fx/key :main-window
+                     :title title
+                     :style :extended
+                     :width (:width window-config 1200)
+                     :height (:height window-config 800)
+                     :showing true
+                     :on-close-request (fn [_]
+                                         ;; TODO: Check for unsaved changes
+                                         (System/exit 0))
+                     :scene {:fx/type :scene
+                             :stylesheets stylesheets
+                             :root {:fx/type main-layout}}}
+                    ;; Effect chain editor dialog
+                    (when effect-editor-open?
+                      {:fx/type effect-chain-editor/effect-chain-editor-dialog
+                       :fx/key :effect-chain-editor-dialog})
+                    ;; Cue chain editor dialog
+                    (when cue-editor-open?
+                      {:fx/type cue-chain-editor/cue-chain-editor-dialog
+                       :fx/key :cue-chain-editor-dialog})
+                    ;; Timeline cue editor dialog (alternate timeline-based view)
+                    (when timeline-editor-open?
+                      {:fx/type timeline-cue-editor/timeline-cue-editor-dialog
+                       :fx/key :timeline-cue-editor-dialog})
+                    ;; Add projector manually dialog
+                    (when add-projector-open?
+                      {:fx/type add-projector-dialog/add-projector-manual-dialog
+                       :fx/key :add-projector-manual-dialog})
+                    ;; Zone group editor dialog
+                    (when zone-group-editor-open?
+                      {:fx/type zone-group-editor/zone-group-editor-dialog
+                       :fx/key :zone-group-editor-dialog})])}}))
