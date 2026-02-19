@@ -16,7 +16,8 @@
    [laser-show.events.handlers.list :as list]
    [laser-show.events.handlers.modulator :as modulator]
    [laser-show.events.handlers.keyframe :as keyframe]
-   [laser-show.events.handlers.input :as input]))
+   [laser-show.events.handlers.input :as input]
+   [laser-show.events.handlers.timeline :as timeline]))
 
 (defn handle-event
   "Main event dispatcher - PURE FUNCTION.
@@ -55,6 +56,7 @@
       "modulator" (modulator/handle event)
       "keyframe" (keyframe/handle event)
       "input" (input/handle event)  ; MIDI and OSC input management
+      "timeline" (timeline/handle event)  ; Timeline editor operations
       ;; Unknown domain
       (do
         (log/error "Unknown event domain:" domain "type:" type)
