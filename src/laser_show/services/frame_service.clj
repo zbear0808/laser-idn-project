@@ -54,15 +54,15 @@
 ;; This cache stores the zone frame map and returns it if still valid.
 
 (defonce ^:private !zone-frame-cache
- (atom {:frames {}
-        :cache-key nil
-        :timestamp 0}))
+  (atom {:frames {}
+         :cache-key nil
+         :timestamp 0}))
 
 (defn- compute-zone-cache-key
- "Compute cache key from inputs for zone frame caching.
+  "Compute cache key from inputs for zone frame caching.
   Buckets elapsed-ms to 16ms intervals to allow cache hits across a frame period."
- [items elapsed-ms bpm]
- (hash [items (quot elapsed-ms 16) bpm]))
+  [items elapsed-ms bpm]
+  (hash [items (quot elapsed-ms 16) bpm]))
 
 
 ;; Beat Accumulation
@@ -88,30 +88,30 @@
         bpm (ex/bpm raw-state)
         resync-rate (ex/resync-rate raw-state)]
     (state/swap-state!
-      (fn [s]
-        (-> s
-            ;; 1. Update global clock (always, for BPM visualization)
-            (update-in [:timing :global-clock]
-                       (fn [gc]
-                         (cue-timing/update-global-clock
-                           (or gc {:accumulated-beats 0.0
-                                   :accumulated-ms 0.0
-                                   :last-frame-time 0})
-                           current-time-ms
-                           bpm)))
-            ;; 2. Update all active cues' timing
-            (update-in [:playback :active-cues]
-                       (fn [cues]
-                         (reduce-kv
-                           (fn [acc cell-key cue-timing-state]
-                             (assoc acc cell-key
-                                    (cue-timing/update-cue-timing
-                                      cue-timing-state
-                                      current-time-ms
-                                      bpm
-                                      resync-rate)))
-                           {}
-                           (or cues {})))))))))
+     (fn [s]
+       (-> s
+           ;; 1. Update global clock (always, for BPM visualization)
+           (update-in [:timing :global-clock]
+                      (fn [gc]
+                        (cue-timing/update-global-clock
+                         (or gc {:accumulated-beats 0.0
+                                 :accumulated-ms 0.0
+                                 :last-frame-time 0})
+                         current-time-ms
+                         bpm)))
+           ;; 2. Update all active cues' timing
+           (update-in [:playback :active-cues]
+                      (fn [cues]
+                        (reduce-kv
+                         (fn [acc cell-key cue-timing-state]
+                           (assoc acc cell-key
+                                  (cue-timing/update-cue-timing
+                                   cue-timing-state
+                                   current-time-ms
+                                   bpm
+                                   resync-rate)))
+                         {}
+                         (or cues {})))))))))
 
 
 ;; Frame Generation
@@ -236,6 +236,11 @@
 ;; 3. Concatenating all point sequences with blanking points between them
 ;; 4. The galvo will draw all shapes rapidly, creating persistence of vision
 ;;
+;; Timeline Support:
+;; Items and effects may have :timeline/start and :timeline/duration (in beats).
+;; If present, they only render when effective-beats is within [start, start+duration).
+;; If absent, they default to "always on" (backward compatible).
+;;
 ;; Effect Pipeline: Preset Effects → Group Effects → Concatenate → Grid Effects
 ;;
 ;; For IDN output, the combined points are sent as a single frame.
@@ -250,10 +255,33 @@
       (presets/generate-frame-with-params preset-id params)
       (presets/generate-frame preset-id))))
 
+(defn- in-timeline-window?
+  "Check if the current beat position falls within an item's timeline window.
+   Returns true if the item should be active at `current-beats`.
+
+   Rules:
+   - If :timeline/start is nil → start defaults to 0.
+   - If :timeline/duration is nil → item is active from start onward (infinite).
+   - Active when: start <= current-beats < start + duration.
+   - Items without any timeline keys are always active (backward compatible)."
+  [item current-beats]
+  (let [start (:timeline/start item)
+        duration (:timeline/duration item)]
+    (if (and (nil? start) (nil? duration))
+      true ;; no timeline keys → always on
+      (let [s (or start 0.0)]
+        (and (>= current-beats s)
+             (or (nil? duration)
+                 (< current-beats (+ s duration))))))))
+
 (defn- apply-item-effects
-  "Apply an item's (preset or group) effect chain to a frame."
+  "Apply an item's (preset or group) effect chain to a frame.
+   Effects with :timeline/start and :timeline/duration are filtered
+   so only those active at the current beat position are applied."
   [frame item elapsed-ms bpm trigger-time timing-ctx]
-  (let [item-effects (:effects item [])]
+  (let [current-beats (:effective-beats timing-ctx 0.0)
+        item-effects (->> (:effects item [])
+                          (filterv #(in-timeline-window? % current-beats)))]
     (if (seq item-effects)
       (try
         (effects/apply-effect-chain frame {:effects item-effects} elapsed-ms bpm trigger-time timing-ctx)
@@ -286,50 +314,57 @@
   [frames _elapsed-ms]
   (when (seq frames)
     (let [combined-points (reduce
-                            (fn [acc frame]
-                              (if (empty? frame)
-                                acc
-                                (if (empty? acc)
-                                  ;; First frame - just add points
-                                  (vec frame)
-                                  ;; Subsequent frames - add blanking jump then points
-                                  (let [last-point (peek acc)
-                                        first-new-point (first frame)
-                                        blanking (create-blanking-jump last-point first-new-point)]
-                                    (-> acc
-                                        (into blanking)
-                                        (into frame))))))
-                            []
-                            frames)]
+                           (fn [acc frame]
+                             (if (empty? frame)
+                               acc
+                               (if (empty? acc)
+                                 ;; First frame - just add points
+                                 (vec frame)
+                                 ;; Subsequent frames - add blanking jump then points
+                                 (let [last-point (peek acc)
+                                       first-new-point (first frame)
+                                       blanking (create-blanking-jump last-point first-new-point)]
+                                   (-> acc
+                                       (into blanking)
+                                       (into frame))))))
+                           []
+                           frames)]
       (when (seq combined-points)
         combined-points))))
 
 (defn- render-item-with-effects
   "Recursively render a cue chain item (preset or group) applying effects at each level.
    
+   Timeline gating:
+   - Checks :timeline/start and :timeline/duration on the item.
+   - If the current beat position is outside the item's window, returns nil.
+   - Items without timeline keys are always rendered (backward compatible).
+   
    Effect Pipeline:
    - For presets: render → apply preset effects
    - For groups: render children → concatenate → apply group effects
    
-   Returns a frame (vector of points) or nil if disabled/empty."
+   Returns a frame (vector of points) or nil if disabled/empty/outside timeline."
   [item elapsed-ms bpm trigger-time timing-ctx]
-  (when (:enabled? item true)
-    (cond
-      ;; Preset: render and apply its effects
-      (= :preset (:type item))
-      (when-let [frame (render-preset-instance item elapsed-ms)]
-        (apply-item-effects frame item elapsed-ms bpm trigger-time timing-ctx))
-      
-      ;; Group: render children, concatenate, then apply group effects
-      (chains/group? item)
-      (let [;; Use eager u/keepv to avoid lazy evaluation in frame rendering hot path
-            child-frames (u/keepv #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx)
-                                  (:items item []))
-            concatenated (concatenate-frames child-frames elapsed-ms)]
-        (when concatenated
-          (apply-item-effects concatenated item elapsed-ms bpm trigger-time timing-ctx)))
-      
-      :else nil)))
+  (let [current-beats (:effective-beats timing-ctx 0.0)]
+    (when (and (:enabled? item true)
+               (in-timeline-window? item current-beats))
+      (cond
+        ;; Preset: render and apply its effects
+        (= :preset (:type item))
+        (when-let [frame (render-preset-instance item elapsed-ms)]
+          (apply-item-effects frame item elapsed-ms bpm trigger-time timing-ctx))
+
+        ;; Group: render children, concatenate, then apply group effects
+        (chains/group? item)
+        (let [;; Use eager u/keepv to avoid lazy evaluation in frame rendering hot path
+              child-frames (u/keepv #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx)
+                                    (:items item []))
+              concatenated (concatenate-frames child-frames elapsed-ms)]
+          (when concatenated
+            (apply-item-effects concatenated item elapsed-ms bpm trigger-time timing-ctx)))
+
+        :else nil))))
 
 (defn- generate-frame-from-cue-chain
   "Generate a frame from a cue chain using recursive item rendering.
@@ -399,13 +434,13 @@
         raw-state (state/get-raw-state)
         items-by-zone (ze/group-items-by-zone items destination timing-ctx)]
     (reduce-kv
-      (fn [acc zone-id zone-items]
-        (if-let [zone-frame (render-zone-items zone-items elapsed-ms bpm trigger-time timing-ctx)]
-          (let [frame-with-effects (apply-global-effects-to-frame zone-frame raw-state bpm)]
-            (assoc acc zone-id frame-with-effects))
-          acc))
-      {}
-      items-by-zone)))
+     (fn [acc zone-id zone-items]
+       (if-let [zone-frame (render-zone-items zone-items elapsed-ms bpm trigger-time timing-ctx)]
+         (let [frame-with-effects (apply-global-effects-to-frame zone-frame raw-state bpm)]
+           (assoc acc zone-id frame-with-effects))
+         acc))
+     {}
+     items-by-zone)))
 
 (defn generate-frames-by-zone-cached
   "Generate zone frames with per-frame caching to avoid redundant computation.
@@ -481,36 +516,36 @@
          (let [raw-state (state/get-raw-state)
                bpm (get-bpm)
                current-time (System/currentTimeMillis)
-               
+
                ;; Measure base frame generation
                base-start (timing/nanotime)
-               
+
                ;; Generate frame for each active cue using PER-ITEM zone routing
                ;; Always process ALL cues - no filtering based on preview zone
                ;; Each item routes to its own destination based on its zone effects
                cue-results (mapv
-                             (fn [{:keys [cell cue-chain cue-timing]}]
-                               (let [trigger-time (:trigger-time cue-timing)
-                                     elapsed (- current-time trigger-time)
-                                     timing-ctx (cue-timing/get-cue-timing-context cue-timing bpm)
-                                     ;; Generate frames separated by zone
-                                     zone-frames (generate-frames-by-zone cue-chain elapsed bpm trigger-time timing-ctx)
-                                     ;; Track all zones this cue routes to
-                                     cue-zone-targets (set (keys zone-frames))
-                                     ;; Always combine all zone frames (master view)
-                                     ;; Multi-cell preview handles zone filtering visually
-                                     frame (combine-all-zone-frames zone-frames)]
-                                 {:cell cell
-                                  :frame frame
-                                  :targets cue-zone-targets
-                                  :zone-frames zone-frames}))
-                             all-cues)
-               
+                            (fn [{:keys [cell cue-chain cue-timing]}]
+                              (let [trigger-time (:trigger-time cue-timing)
+                                    elapsed (- current-time trigger-time)
+                                    timing-ctx (cue-timing/get-cue-timing-context cue-timing bpm)
+                                    ;; Generate frames separated by zone
+                                    zone-frames (generate-frames-by-zone cue-chain elapsed bpm trigger-time timing-ctx)
+                                    ;; Track all zones this cue routes to
+                                    cue-zone-targets (set (keys zone-frames))
+                                    ;; Always combine all zone frames (master view)
+                                    ;; Multi-cell preview handles zone filtering visually
+                                    frame (combine-all-zone-frames zone-frames)]
+                                {:cell cell
+                                 :frame frame
+                                 :targets cue-zone-targets
+                                 :zone-frames zone-frames}))
+                            all-cues)
+
                ;; Concatenate all cue frames with blanking between them
                ;; Filter out nil frames but include all in cue-destinations
                all-frames (u/keepv :frame cue-results)
                base-frame (concatenate-frames all-frames 0)
-               
+
                ;; Build cue-destinations map from ALL cues (not just those with frames)
                ;; This ensures preview cells can correctly identify which zones are active
                cue-destinations (into {}
@@ -518,24 +553,24 @@
                                               (when (seq targets)
                                                 [cell targets])))
                                       cue-results)
-               
+
                ;; Aggregate zone frames across all cues: zone-id -> combined points
                ;; This allows preview cells to display points for their zone directly
                zone-frames-aggregated (reduce #(merge-with into %1 %2)
                                               {}
                                               (u/keepv :zone-frames cue-results))
                base-end (timing/nanotime)]
-           
+
            (when base-frame
              (let [effect-chain (get-active-global-effects)
-                   
+
                    ;; Measure effect chain application (from effects grid)
                    ;; Use GLOBAL CLOCK timing for global effects - not cue timing!
                    ;; This ensures global effects continue smoothly when cues are retriggered
                    global-clock (get-in raw-state [:timing :global-clock])
                    global-timing-ctx (cue-timing/get-global-timing-context global-clock bpm)
                    global-elapsed (long (or (:accumulated-ms global-clock) 0))
-                   
+
                    effects-start (timing/nanotime)
                    final-frame (if effect-chain
                                  (try
@@ -546,7 +581,7 @@
                                      base-frame))
                                  base-frame)
                    effects-end (timing/nanotime)]
-               
+
                ;; Record timing (profiler adds timestamp and calculates total)
                (let [base-time-us (timing/nanos->micros (- base-end base-start))
                      effects-time-us (if effect-chain
@@ -554,20 +589,20 @@
                                        0)
                      effect-count (if effect-chain (count (:effects effect-chain)) 0)
                      point-count (count final-frame)]
-                 
+
                  ;; Frame profiler (always-on stats)
                  (profiler/record-frame-timing!
-                   {:base-time-us base-time-us
-                    :effects-time-us effects-time-us
-                    :effect-count effect-count})
-                 
+                  {:base-time-us base-time-us
+                   :effects-time-us effects-time-us
+                   :effect-count effect-count})
+
                  ;; JFR event (low-overhead, for continuous recording and spike detection)
                  (jfr/emit-frame-event!
-                   {:base-time-us base-time-us
-                    :effects-time-us effects-time-us
-                    :effect-count effect-count
-                    :point-count point-count}))
-               
+                  {:base-time-us base-time-us
+                   :effects-time-us effects-time-us
+                   :effect-count effect-count
+                   :point-count point-count}))
+
                ;; Return frame data with destinations and zone-frames for preview grid filtering
                {:points final-frame
                 :cue-destinations cue-destinations
@@ -627,7 +662,7 @@
   []
   ;; Update timing accumulators FIRST, before generating frame
   (update-timing-accumulators! (System/currentTimeMillis))
-  
+
   (let [frame (get-preview-frame)
         ;; Get recent profiler stats (last 30 frames = ~1 second at 30fps)
         recent-stats (profiler/get-recent-stats 30)
@@ -643,10 +678,10 @@
                                 :p95-idn-us (:p95-idn-us recent-stats)
                                 :max-idn-us (:max-idn-us recent-stats)})))]
     (state/swap-state!
-      (fn [s]
-        (cond-> s
-          true (assoc-in [:backend :streaming :current-frame] frame)
-          frame-stats (assoc-in [:backend :streaming :frame-stats] frame-stats))))))
+     (fn [s]
+       (cond-> s
+         true (assoc-in [:backend :streaming :current-frame] frame)
+         frame-stats (assoc-in [:backend :streaming :frame-stats] frame-stats))))))
 
 
 ;; Preview Update Timer
