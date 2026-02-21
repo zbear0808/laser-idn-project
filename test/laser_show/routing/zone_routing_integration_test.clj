@@ -126,9 +126,9 @@
   (state/init-state! (domains/build-initial-state))
   ;; Set up minimal zone groups
   (state/assoc-in-state! [:zone-groups] {:left {:id :left :name "Left"}
-                                          :center {:id :center :name "Center"}
-                                          :right {:id :right :name "Right"}
-                                          :all {:id :all :name "All"}})
+                                         :center {:id :center :name "Center"}
+                                         :right {:id :right :name "Right"}
+                                         :all {:id :all :name "All"}})
   (f))
 
 (use-fixtures :each setup-test-state)
@@ -147,9 +147,7 @@
    :trigger-time 0})
 
 
-;; ============================================================================
 ;; Unit Tests: evaluate-zone
-;; ============================================================================
 
 
 (deftest evaluate-zone-test
@@ -179,23 +177,23 @@
   (testing "extract-zone-effects filters to enabled zone effects only"
     ;; No effects
     (is (= [] (ze/extract-zone-effects [])))
-    
+
     ;; Only zone-selector, enabled
     (is (= [{:effect-id :zone-selector :enabled? true :params {}}]
-           (ze/extract-zone-effects [{:effect-id :zone-selector 
-                                      :enabled? true 
+           (ze/extract-zone-effects [{:effect-id :zone-selector
+                                      :enabled? true
                                       :params {}}])))
-    
+
     ;; Zone-selector disabled
-    (is (= [] (ze/extract-zone-effects [{:effect-id :zone-selector 
-                                         :enabled? false 
+    (is (= [] (ze/extract-zone-effects [{:effect-id :zone-selector
+                                         :enabled? false
                                          :params {}}])))
-    
+
     ;; Mixed effects - only returns zone effects
     (is (= [{:effect-id :zone-selector :enabled? true :params {:target-zone :left}}]
            (ze/extract-zone-effects [{:effect-id :scale :enabled? true :params {}}
-                                     {:effect-id :zone-selector 
-                                      :enabled? true 
+                                     {:effect-id :zone-selector
+                                      :enabled? true
                                       :params {:target-zone :left}}
                                      {:effect-id :color-shift :enabled? true :params {}}])))))
 
@@ -213,7 +211,7 @@
                            :params {:target-zone :left}}]}
           cue-chain-dest {:zone-group-id :all}
           timing-ctx (make-timing-ctx 0.0)]
-      (is (= :left (ze/resolve-item-zone-destination item cue-chain-dest timing-ctx))))))
+      (is (= :left (ze/resolve-item-zone-destination item timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)}))))))
 
 
 (deftest resolve-item-zone-destination-no-zone-effect-test
@@ -222,7 +220,7 @@
                 :effects [{:effect-id :scale :enabled? true :params {}}]}
           cue-chain-dest {:zone-group-id :center}
           timing-ctx (make-timing-ctx 0.0)]
-      (is (= :center (ze/resolve-item-zone-destination item cue-chain-dest timing-ctx))))))
+      (is (= :center (ze/resolve-item-zone-destination item timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)}))))))
 
 
 (deftest resolve-item-zone-destination-disabled-effect-test
@@ -233,7 +231,7 @@
                            :params {:target-zone :right}}]}
           cue-chain-dest {:zone-group-id :left}
           timing-ctx (make-timing-ctx 0.0)]
-      (is (= :left (ze/resolve-item-zone-destination item cue-chain-dest timing-ctx))))))
+      (is (= :left (ze/resolve-item-zone-destination item timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)}))))))
 
 
 ;; ============================================================================
@@ -250,8 +248,8 @@
                              :params {:target-zone :left}}]}]
           cue-chain-dest {:zone-group-id :all}
           timing-ctx (make-timing-ctx 0.0)
-          result (ze/group-items-by-zone items cue-chain-dest timing-ctx)]
-      
+          result (ze/group-items-by-zone items timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)})]
+
       (is (= #{:left} (set (keys result))))
       (is (= 1 (count (:left result))))
       (is (= "item-1" (:id (first (:left result))))))))
@@ -276,8 +274,8 @@
                              :params {:target-zone :center}}]}]
           cue-chain-dest {:zone-group-id :all}
           timing-ctx (make-timing-ctx 0.0)
-          result (ze/group-items-by-zone items cue-chain-dest timing-ctx)]
-      
+          result (ze/group-items-by-zone items timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)})]
+
       (is (= #{:left :right :center} (set (keys result))))
       (is (= 1 (count (:left result))))
       (is (= 1 (count (:right result))))
@@ -298,8 +296,8 @@
                              :params {:target-zone :right}}]}]
           cue-chain-dest {:zone-group-id :all}
           timing-ctx (make-timing-ctx 0.0)
-          result (ze/group-items-by-zone items cue-chain-dest timing-ctx)]
-      
+          result (ze/group-items-by-zone items timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)})]
+
       (is (= #{:left} (set (keys result))))
       (is (nil? (:right result))))))
 
@@ -311,8 +309,8 @@
                   :effects []}]
           cue-chain-dest {:zone-group-id :center}
           timing-ctx (make-timing-ctx 0.0)
-          result (ze/group-items-by-zone items cue-chain-dest timing-ctx)]
-      
+          result (ze/group-items-by-zone items timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)})]
+
       (is (= #{:center} (set (keys result))))
       (is (= 1 (count (:center result)))))))
 
@@ -325,16 +323,16 @@
 (deftest zone-selector-static-frame-routing-test
   (testing "Static zone-selector routes frames to specified zone"
     (let [frames-by-zone (fs/generate-frames-by-zone
-                           test-cue-chain-static-zone-selector
-                           0 120.0 0
-                           (make-timing-ctx 0.0))]
-      
+                          test-cue-chain-static-zone-selector
+                          0 120.0 0
+                          (make-timing-ctx 0.0))]
+
       ;; Should have frames for :left only
       (is (contains? frames-by-zone :left)
           "Should have frame for :left zone")
       (is (pos? (count (:left frames-by-zone)))
           ":left frame should contain points")
-      
+
       ;; Other zones should be empty
       (is (or (not (contains? frames-by-zone :right))
               (nil? (:right frames-by-zone)))
@@ -347,16 +345,16 @@
 (deftest no-zone-effect-uses-default-test
   (testing "Cue chain without zone-selector uses default destination"
     (let [frames-by-zone (fs/generate-frames-by-zone
-                           test-cue-chain-no-zone-effect
-                           0 120.0 0
-                           (make-timing-ctx 0.0))]
-      
+                          test-cue-chain-no-zone-effect
+                          0 120.0 0
+                          (make-timing-ctx 0.0))]
+
       ;; Should route to :center (the cue chain default)
       (is (contains? frames-by-zone :center)
           "Should have frame for :center (default destination)")
       (is (pos? (count (:center frames-by-zone)))
           ":center should have points")
-      
+
       ;; Other zones should be empty
       (is (or (not (contains? frames-by-zone :left))
               (nil? (:left frames-by-zone)))
@@ -366,20 +364,20 @@
 (deftest multiple-items-different-zones-test
   (testing "Multiple items with different zone-selectors route correctly"
     (let [frames-by-zone (fs/generate-frames-by-zone
-                           test-cue-chain-multiple-items
-                           0 120.0 0
-                           (make-timing-ctx 0.0))]
-      
+                          test-cue-chain-multiple-items
+                          0 120.0 0
+                          (make-timing-ctx 0.0))]
+
       ;; Should have frames for :left, :right, and :center
       (is (contains? frames-by-zone :left))
       (is (contains? frames-by-zone :right))
       (is (contains? frames-by-zone :center))
-      
+
       ;; Each zone should have content
       (is (pos? (count (:left frames-by-zone))))
       (is (pos? (count (:right frames-by-zone))))
       (is (pos? (count (:center frames-by-zone))))
-      
+
       ;; Frame sizes should differ (circle 20 pts, square 12 pts, triangle 3 pts)
       (is (not= (count (:left frames-by-zone))
                 (count (:right frames-by-zone)))
@@ -394,28 +392,28 @@
 (deftest group-zone-selector-overrides-children-test
   (testing "Group's zone-selector routes all children to group's destination"
     (let [frames-by-zone (fs/generate-frames-by-zone
-                           test-cue-chain-group-with-zone-selector
-                           0 120.0 0
-                           (make-timing-ctx 0.0))]
-      
+                          test-cue-chain-group-with-zone-selector
+                          0 120.0 0
+                          (make-timing-ctx 0.0))]
+
       ;; All content should go to :center (group's destination)
       (is (contains? frames-by-zone :center)
           "Should have frame for :center (group's destination)")
-      
+
       ;; Combined frame should have content from both children
       (is (pos? (count (:center frames-by-zone)))
           ":center should have combined content")
-      
+
       ;; The combined frame should have more points than either child alone
       ;; Circle has 24 points, Square has 12 points, plus blanking
       (is (> (count (:center frames-by-zone)) 24)
           ":center should have combined content (> 24 points)")
-      
+
       ;; :right should NOT have any content (child's zone effect ignored)
       (is (or (not (contains? frames-by-zone :right))
               (nil? (:right frames-by-zone)))
           ":right should be empty - child's zone effect was ignored")
-      
+
       ;; :all should NOT have content (default was overridden)
       (is (or (not (contains? frames-by-zone :all))
               (nil? (:all frames-by-zone)))
@@ -448,20 +446,20 @@
                                :effects []}]}
           cue-chain-dest {:zone-group-id :all}
           timing-ctx (make-timing-ctx 0.0)
-          result (ze/group-items-by-zone [group-item] cue-chain-dest timing-ctx)]
-      
+          result (ze/group-items-by-zone [group-item] timing-ctx {:default-zone-id (:zone-group-id cue-chain-dest)})]
+
       ;; All content should go to :center (group's destination)
       (is (= #{:center} (set (keys result)))
           "All content should route to :center only")
-      
+
       ;; The group should be in :center
       (is (= 1 (count (:center result)))
           "Should have exactly one item (the group) in :center")
-      
+
       ;; Verify the group is in :center
       (is (= "group-1" (:id (first (:center result))))
           "The group should be routed to :center")
-      
+
       ;; Other zones should be empty
       (is (nil? (:right result))
           ":right should be empty - child's effect was ignored")
@@ -477,12 +475,12 @@
 (deftest projector-receives-zone-frames-test
   (testing "Projector frame extraction works with zone-based frames"
     (let [frames-by-zone (fs/generate-frames-by-zone
-                           test-cue-chain-multiple-items
-                           0 120.0 0
-                           (make-timing-ctx 0.0))
+                          test-cue-chain-multiple-items
+                          0 120.0 0
+                          (make-timing-ctx 0.0))
           left-frame (:left frames-by-zone)
           right-frame (:right frames-by-zone)]
-      
+
       ;; Both zones should have content
       (is (some? left-frame))
       (is (pos? (count left-frame)))
@@ -493,28 +491,28 @@
 (deftest projector-multi-zone-concatenation-test
   (testing "Projector in multiple zones receives concatenated frames"
     (let [frames-by-zone (fs/generate-frames-by-zone
-                           test-cue-chain-multiple-items
-                           0 120.0 0
-                           (make-timing-ctx 0.0))
+                          test-cue-chain-multiple-items
+                          0 120.0 0
+                          (make-timing-ctx 0.0))
           left-frame (:left frames-by-zone)
           center-frame (:center frames-by-zone)
-          
+
           ;; Simulate projector frame extraction for projector in [:left :center]
           projector-zone-groups [:left :center]
           projector-frames (#'me/extract-frames-for-zones frames-by-zone projector-zone-groups)
           combined-frame (#'me/combine-zone-frames projector-frames)]
-      
+
       ;; Both zones should have content
       (is (some? left-frame))
       (is (pos? (count left-frame)))
       (is (some? center-frame))
       (is (pos? (count center-frame)))
-      
+
       ;; Combined frame should exist and be larger than individuals
       (is (some? combined-frame))
       (is (> (count combined-frame) (count left-frame)))
       (is (> (count combined-frame) (count center-frame)))
-      
+
       ;; Combined should be at least sum of both (may have blanking)
       (is (>= (count combined-frame)
               (+ (count left-frame) (count center-frame)))))))
@@ -538,15 +536,15 @@
                                          :enabled? false  ;; DISABLED
                                          :params {:target-zone :right}}]}]}
           frames-by-zone (fs/generate-frames-by-zone
-                           cue-chain
-                           0 120.0 0
-                           (make-timing-ctx 0.0))]
-      
+                          cue-chain
+                          0 120.0 0
+                          (make-timing-ctx 0.0))]
+
       ;; Should route to :left (default) since zone effect is disabled
       (is (contains? frames-by-zone :left)
           "Should have frame for :left (default)")
       (is (pos? (count (:left frames-by-zone))))
-      
+
       ;; :right should NOT have content
       (is (or (not (contains? frames-by-zone :right))
               (nil? (:right frames-by-zone)))
@@ -572,14 +570,14 @@
                                          :enabled? true
                                          :params {:target-zone :right}}]}]}
           frames-by-zone (fs/generate-frames-by-zone
-                           cue-chain
-                           0 120.0 0
-                           (make-timing-ctx 0.0))]
-      
+                          cue-chain
+                          0 120.0 0
+                          (make-timing-ctx 0.0))]
+
       ;; Only enabled preset should generate frames
       (is (contains? frames-by-zone :left))
       (is (pos? (count (:left frames-by-zone))))
-      
+
       ;; :right should NOT have content (disabled preset excluded)
       (is (or (not (contains? frames-by-zone :right))
               (nil? (:right frames-by-zone)))
@@ -592,24 +590,12 @@
                      :destination-zone {:zone-group-id :all}
                      :items []}
           frames-by-zone (fs/generate-frames-by-zone
-                           cue-chain
-                           0 120.0 0
-                           (make-timing-ctx 0.0))]
-      
+                          cue-chain
+                          0 120.0 0
+                          (make-timing-ctx 0.0))]
+
       ;; Should be empty or have no content in any zone
       (is (or (empty? frames-by-zone)
               (every? #(or (nil? %) (empty? %)) (vals frames-by-zone)))
           "Empty cue chain should produce no frames"))))
 
-
-(deftest nil-destination-defaults-to-all-test
-  (testing "Nil destination zone defaults to :all"
-    (let [item {:id "test-item"
-                :enabled? true
-                :effects []}  ;; No zone-selector
-          cue-chain-dest {:zone-group-id nil}  ;; Nil destination
-          timing-ctx (make-timing-ctx 0.0)
-          result (ze/resolve-item-zone-destination item cue-chain-dest timing-ctx)]
-      
-      (is (= :all result)
-          "Nil destination should default to :all"))))

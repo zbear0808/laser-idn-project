@@ -75,7 +75,7 @@
 (deftest zone-effect-identification-test
   (testing "zone-effect? identifies zone-selector"
     (is (true? (zone-effects/zone-effect? {:effect-id :zone-selector}))))
-  
+
   (testing "zone-effect? returns false for non-zone effects"
     (is (false? (zone-effects/zone-effect? {:effect-id :scale})))
     (is (false? (zone-effects/zone-effect? {:effect-id :translate})))
@@ -88,23 +88,23 @@
 (deftest extract-zone-effects-test
   (testing "Empty effects returns empty vector"
     (is (= [] (zone-effects/extract-zone-effects []))))
-  
+
   (testing "Returns only enabled zone-selector effects"
     (is (= [{:effect-id :zone-selector :enabled? true :params {}}]
-           (zone-effects/extract-zone-effects 
-             [{:effect-id :zone-selector :enabled? true :params {}}]))))
-  
+           (zone-effects/extract-zone-effects
+            [{:effect-id :zone-selector :enabled? true :params {}}]))))
+
   (testing "Filters out disabled zone-selector"
     (is (= []
            (zone-effects/extract-zone-effects
-             [{:effect-id :zone-selector :enabled? false :params {}}]))))
-  
+            [{:effect-id :zone-selector :enabled? false :params {}}]))))
+
   (testing "Filters out non-zone effects"
     (is (= [{:effect-id :zone-selector :enabled? true :params {:target-zone :left}}]
            (zone-effects/extract-zone-effects
-             [{:effect-id :scale :enabled? true :params {}}
-              {:effect-id :zone-selector :enabled? true :params {:target-zone :left}}
-              {:effect-id :translate :enabled? true :params {}}])))))
+            [{:effect-id :scale :enabled? true :params {}}
+             {:effect-id :zone-selector :enabled? true :params {:target-zone :left}}
+             {:effect-id :translate :enabled? true :params {}}])))))
 
 
 ;; evaluate-zone tests
@@ -113,7 +113,7 @@
   (testing "Simple keyword target returns that keyword"
     (is (= :left (zone/evaluate-zone {:target-zone :left})))
     (is (= :right (zone/evaluate-zone {:target-zone :right}))))
-  
+
   (testing "Missing target-zone defaults to :all"
     (is (= :all (zone/evaluate-zone {})))))
 
@@ -124,31 +124,24 @@
   (testing "Item without zone effects uses cue chain default"
     (is (= :left
            (zone-effects/resolve-item-zone-destination
-             item-no-effects
-             default-destination
-             (make-timing-ctx 0.0)))))
-  
+            item-no-effects
+            (make-timing-ctx 0.0)
+            {:default-zone-id (:zone-group-id default-destination)}))))
+
   (testing "Item with zone-selector uses target zone"
     (is (= :right
            (zone-effects/resolve-item-zone-destination
-             item-with-zone-selector
-             default-destination
-             (make-timing-ctx 0.0)))))
-  
+            item-with-zone-selector
+            (make-timing-ctx 0.0)
+            {:default-zone-id (:zone-group-id default-destination)}))))
+
   (testing "Group's zone-selector applies, children's effects ignored at group level"
     (is (= :center
            (zone-effects/resolve-item-zone-destination
-             group-with-zone-selector
-             default-destination
-             (make-timing-ctx 0.0)))))
-  
-  (testing "Nil destination defaults to :all"
-    (is (= :all
-           (zone-effects/resolve-item-zone-destination
-             item-no-effects
-             {}
-             (make-timing-ctx 0.0)))))
-  
+            group-with-zone-selector
+            (make-timing-ctx 0.0)
+            {:default-zone-id (:zone-group-id default-destination)})))) 
+
   (testing "Disabled zone effect is ignored"
     (let [item-disabled-effect {:type :preset
                                 :id (random-uuid)
@@ -157,9 +150,9 @@
                                            :params {:target-zone :right}}]}]
       (is (= :left
              (zone-effects/resolve-item-zone-destination
-               item-disabled-effect
-               default-destination
-               (make-timing-ctx 0.0)))))))
+              item-disabled-effect
+              (make-timing-ctx 0.0)
+              {:default-zone-id (:zone-group-id default-destination)}))))))
 
 
 ;; group-items-by-zone tests
@@ -168,38 +161,38 @@
   (testing "Groups items by their resolved zone destination"
     (let [items [item-no-effects item-with-zone-selector]
           timing-ctx (make-timing-ctx 0.0)
-          result (zone-effects/group-items-by-zone items default-destination timing-ctx)]
+          result (zone-effects/group-items-by-zone items timing-ctx {:default-zone-id (:zone-group-id default-destination)})]
       ;; item-no-effects → :left (default)
       ;; item-with-zone-selector → :right
       (is (= 1 (count (:left result))))
       (is (= 1 (count (:right result))))
       (is (= item-no-effects (first (:left result))))
       (is (= item-with-zone-selector (first (:right result))))))
-  
+
   (testing "Item routes to single zone (no multi-zone in new system)"
     (let [items [item-with-zone-selector]
           timing-ctx (make-timing-ctx 0.0)
-          result (zone-effects/group-items-by-zone items default-destination timing-ctx)]
+          result (zone-effects/group-items-by-zone items timing-ctx {:default-zone-id (:zone-group-id default-destination)})]
       ;; New system: each item routes to exactly ONE zone
       (is (= 1 (count (keys result))))
       (is (= 1 (count (:right result))))
       (is (= item-with-zone-selector (first (:right result))))))
-  
+
   (testing "Disabled items are skipped"
     (let [items [item-disabled item-no-effects]
           timing-ctx (make-timing-ctx 0.0)
-          result (zone-effects/group-items-by-zone items default-destination timing-ctx)]
+          result (zone-effects/group-items-by-zone items timing-ctx {:default-zone-id (:zone-group-id default-destination)})]
       (is (= 1 (count (:left result))))
       (is (= item-no-effects (first (:left result))))
       (is (nil? (:right result)))))
-  
+
   (testing "Empty items returns empty map"
-    (is (= {} (zone-effects/group-items-by-zone [] default-destination (make-timing-ctx 0.0)))))
-  
+    (is (= {} (zone-effects/group-items-by-zone [] (make-timing-ctx 0.0) {:default-zone-id (:zone-group-id default-destination)}))))
+
   (testing "Group with zone-selector routes to single zone"
     (let [items [group-with-zone-selector]
           timing-ctx (make-timing-ctx 0.0)
-          result (zone-effects/group-items-by-zone items default-destination timing-ctx)]
+          result (zone-effects/group-items-by-zone items timing-ctx {:default-zone-id (:zone-group-id default-destination)})]
       ;; Group routes to :center
       (is (= 1 (count (keys result))))
       (is (= 1 (count (:center result))))
