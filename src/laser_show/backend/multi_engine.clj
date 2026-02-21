@@ -26,7 +26,8 @@
             [laser-show.state.extractors :as ex]
             [laser-show.animation.effects :as effects]
             [laser-show.services.frame-service :as frame-service]
-            [laser-show.idn.output-config :as output-config]))
+            [laser-show.idn.output-config :as output-config]
+            [laser-show.services.ilda-player :as ilda-player]))
 
 
 ;; Routing Debug Logging
@@ -151,12 +152,16 @@
     (try
       (let [raw-state (state/get-raw-state)
             playing? (get-in raw-state [:playback :playing?])
+            ilda-playing? (ilda-player/is-playing?)
             
-            _ (when-not playing? (throw (ex-info "Not playing" {:skip true})))
+            _ (when-not (or playing? ilda-playing?) (throw (ex-info "Not playing" {:skip true})))
             
             ;; Get ALL active cues (multi-cue support)
             all-cues (get-active-cues-data raw-state)
-            _ (when (empty? all-cues) (throw (ex-info "No active cues" {:skip true})))
+
+            ;; If neither cues nor ILDA available, skip
+            _ (when (and (empty? all-cues) (not ilda-playing?))
+                (throw (ex-info "No active cues or ILDA" {:skip true})))
             
             projector-zone-groups (get-projector-zone-groups raw-state projector-id)
             bpm (get-in raw-state [:timing :bpm] 120.0)
@@ -182,11 +187,25 @@
             ;; Combine frames from all cues
             combined-frame (combine-zone-frames all-projector-frames)
             
-            ;; Get timing info for projector effects (use first cue's timing)
-            first-cue-timing (:cue-timing (first all-cues))
-            trigger-time (:trigger-time first-cue-timing 0)
-            elapsed (- current-time trigger-time)
-            timing-ctx (frame-service/get-timing-context)
+            ;; Get ILDA frame if playing
+            ilda-frame (ilda-player/get-current-frame)
+
+            ;; Combine cue frames with ILDA frame
+            final-frame (let [frames (filterv some? [combined-frame ilda-frame])]
+                          (when (seq frames)
+                            (frame-service/concatenate-frames frames 0)))
+
+            ;; Get timing info for projector effects (use first cue's timing or default)
+            timing-info (if (seq all-cues)
+                          (let [first-cue-timing (:cue-timing (first all-cues))]
+                            {:trigger-time (:trigger-time first-cue-timing 0)
+                             :elapsed (- current-time (:trigger-time first-cue-timing 0))
+                             :timing-ctx (frame-service/get-timing-context)})
+                          {:trigger-time 0
+                           :elapsed 0
+                           :timing-ctx (frame-service/get-timing-context)})
+
+            {:keys [elapsed trigger-time timing-ctx]} timing-info
             
             log-count (swap! routing-log-counter inc)]
         
@@ -196,10 +215,10 @@
                              projector-id
                              (pr-str projector-zone-groups)
                              (count all-cues)
-                             (if combined-frame (count combined-frame) "nil"))))
+                             (if final-frame (count final-frame) "nil"))))
         
-        (when combined-frame
-          (apply-projector-effects combined-frame projector-id elapsed bpm trigger-time timing-ctx)))
+        (when final-frame
+          (apply-projector-effects final-frame projector-id elapsed bpm trigger-time timing-ctx)))
       
       (catch clojure.lang.ExceptionInfo e
         (when-not (:skip (ex-data e))
