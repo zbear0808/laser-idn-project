@@ -155,9 +155,9 @@
         active? (contains? active-cues [col row])
         ;; Flatten to get all presets (excluding groups)
         flat-items (filter #(= :preset (:type %))
-                          (tree-seq #(= :group (:type %))
-                                   #(:items % [])
-                                   {:type :group :items items}))
+                           (tree-seq #(= :group (:type %))
+                                     #(:items % [])
+                                     {:type :group :items items}))
         first-preset (first flat-items)
         preset-count (count flat-items)]
     {:col col
@@ -272,7 +272,7 @@
    - :status-text - human-readable status"
   [context]
   (let [{:keys [connected? connecting? target error] :as i} (fx/sub-val context ex/idn-data)]
-    (u/->map& connected? connecting? target error 
+    (u/->map& connected? connecting? target error
               :status-text (cond
                              connected? (str "Connected: " target)
                              connecting? "Connecting..."
@@ -637,6 +637,22 @@
    Depends on: backend domain"
   [context]
   (boolean (fx/sub-val context get-in [:backend :input :osc :learn-mode])))
+
+
+;; Level 2: Generic Input Subscriptions
+
+
+(defn input-trigger-map
+  "Get the global trigger mapping for generalized inputs.
+   Depends on: config domain"
+  [context]
+  (fx/sub-val context get-in [:config :input :trigger-map] {}))
+
+(defn input-learning-target
+  "Get the current learning target for generalized inputs, if any.
+   Depends on: backend domain"
+  [context]
+  (fx/sub-val context get-in [:backend :input :learning-target]))
 
 
 ;; Level 2: Link Subscriptions

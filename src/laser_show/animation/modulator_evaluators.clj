@@ -169,18 +169,31 @@
 
 
 (defn- eval-midi
-  "Evaluate MIDI CC modulator."
-  [{:keys [channel cc min max]} {:keys [midi-state]}]
-  (let [cc-val (double (get-in midi-state [[channel cc]] 0))
+  "Evaluate MIDI CC modulator.
+   Reads from generic input-values."
+  [{:keys [channel cc min max]} {:keys [input-values]}]
+  (let [cc-val (double (get input-values [:midi channel cc] 0))
         range-v (- (double max) (double min))]
     (+ (double min) (* (/ cc-val 127.0) range-v))))
 
 (defn- eval-osc
-  "Evaluate OSC parameter modulator."
-  [{:keys [path min max]} {:keys [osc-state]}]
-  (let [osc-val (double (get osc-state path 0.0))
+  "Evaluate OSC parameter modulator.
+   Reads from generic input-values."
+  [{:keys [path min max]} {:keys [input-values]}]
+  (let [osc-val (double (get input-values [:osc path] 0.0))
         range-v (- (double max) (double min))]
     (+ (double min) (* osc-val range-v))))
+
+(defn- eval-input
+  "Evaluate generic input modulator."
+  [{:keys [source-key min max raw-min raw-max]} {:keys [input-values]}]
+  (let [raw-min (double (or raw-min 0.0))
+        raw-max (double (or raw-max 1.0))
+        raw-val (double (get input-values source-key raw-min))
+        raw-range (if (zero? (- raw-max raw-min)) 1.0 (- raw-max raw-min))
+        norm-val (/ (- raw-val raw-min) raw-range)
+        range-v (- (double max) (double min))]
+    (+ (double min) (* norm-val range-v))))
 
 
 ;; Per-Point Modulators
@@ -257,7 +270,7 @@
         y (double y)
         point-index (long point-index)
         point-count (long point-count)]
-     (double
+    (double
      (case driver
        :point-index (let [pc (double point-count)
                           denom (- pc 1.0)]
@@ -278,19 +291,19 @@
     (cond
       (= n 1)
       [(first sorted-keyframes) (first sorted-keyframes)]
-      
+
       (<= position (double (:position (first sorted-keyframes))))
       [(first sorted-keyframes) (first sorted-keyframes)]
-      
+
       (>= position (double (:position (last sorted-keyframes))))
       [(last sorted-keyframes) (last sorted-keyframes)]
-      
+
       :else
       (let [after-idx (->> sorted-keyframes
-                          (map-indexed vector)
-                          (filter (fn [[_ kf]] (> (double (:position kf)) position)))
-                          first
-                          first)]
+                           (map-indexed vector)
+                           (filter (fn [[_ kf]] (> (double (:position kf)) position)))
+                           first
+                           first)]
         (if after-idx
           [(nth sorted-keyframes (dec (long after-idx)))
            (nth sorted-keyframes after-idx)]
@@ -356,6 +369,7 @@
    :random       eval-random
    :midi         eval-midi
    :osc          eval-osc
+   :input        eval-input
    :point-index  eval-point-index
    :pos-x        eval-pos-x
    :pos-y        eval-pos-y
@@ -485,12 +499,12 @@
         {:keys [keyframes driver normalize?]
          :or {driver :point-index normalize? true}} keyframe-mod
         point-count' (long point-count)]
-    
+
     (if (seq keyframes)
       (let [;; Pre-sort keyframes by position
             sorted-keyframes (vec (sort-by :position keyframes))
             n (count sorted-keyframes)
-            
+
             ;; Pre-compute position calculation fn based on driver
             ;; Note: denom is pre-computed outside the fn for primitive performance
             pos-fn (case driver
@@ -502,49 +516,49 @@
                          (if (<= pc 1.0)
                            0.0
                            (/ (double idx) denom))))
-                     
+
                      :pos-x
                      (fn ^double [^double x ^double _y ^long _idx ^long _pc]
                        (/ (+ x 1.0) 2.0))
-                     
+
                      :pos-y
                      (fn ^double [^double _x ^double y ^long _idx ^long _pc]
                        (/ (+ y 1.0) 2.0))
-                     
+
                      :radial
                      (let [max-dist (double (if normalize? sqrt-2 1.0))]
                        (fn ^double [^double x ^double y ^long _idx ^long _pc]
                          (let [dist (Math/sqrt (+ (* x x) (* y y)))]
                            (clojure.core/min 1.0 (/ dist max-dist)))))
-                     
+
                      ;; Default
                      (constantly 0.0))
-            
+
             ;; Pre-extract positions array for fast lookup
             positions (double-array (map :position sorted-keyframes))
-            
+
             ;; Pre-extract param values for this param-key
             param-values (double-array
                           (map #(double (get-in % [:params param-key] 0.0))
                                sorted-keyframes))
-            
+
             ;; Pre-extract interpolation modes
             interp-modes (mapv #(or (:interpolation %) :linear) sorted-keyframes)]
-        
+
         (fn ^double [^double x ^double y ^long idx]
           (let [position (double (pos-fn x y idx point-count'))
                 first-pos (aget positions 0)
                 last-pos (aget positions (dec n))]
-            
+
             (cond
               ;; Before first keyframe - clamp to first
               (<= position first-pos)
               (aget param-values 0)
-              
+
               ;; After last keyframe - clamp to last
               (>= position last-pos)
               (aget param-values (dec n))
-              
+
               :else
               ;; Find surrounding keyframes
               (let [after-idx (loop [i (int 0)]
@@ -554,22 +568,22 @@
                                     i
                                     (recur (inc i)))))
                     before-idx (long (if after-idx (dec (long after-idx)) (dec n)))
-                    
+
                     ;; Calculate interpolation factor
                     p1 (aget positions before-idx)
                     p2 (aget positions (long (or after-idx 0)))
                     range-val (- p2 p1)
                     t (if (zero? range-val) 0.0 (/ (- position p1) range-val))
-                    
+
                     ;; Apply interpolation curve
                     curved-t (interp/apply-interpolation t (nth interp-modes before-idx))
-                    
+
                     ;; Get values
                     v1 (aget param-values before-idx)
                     v2 (aget param-values (long (or after-idx 0)))]
-                
+
                 (interp/interpolate-value v1 v2 curved-t))))))
-      
+
       ;; No keyframes - return constant 0.0
       (constantly 0.0))))
 

@@ -46,8 +46,8 @@
    - time-ms: Current time in milliseconds
    - bpm: Current BPM
    - trigger-time: Time when the cue/effect was triggered (optional, for once-mode modulators)
-   - midi-state: Map of {[channel cc] -> value} (optional)
-   - osc-state: Map of {path -> value} (optional)
+   - trigger-time: Time when the cue/effect was triggered (optional, for once-mode modulators)
+   - input-values: Map of input values from generic router (optional)
    
    Per-Point Parameters (for position-based modulators):
    - x: Normalized x coordinate (-1.0 to 1.0)
@@ -60,18 +60,18 @@
    - accumulated-ms: Running total of ms since cue trigger (incremental)
    - phase-offset: Current smoothed phase correction offset
    - effective-beats: accumulated-beats + phase-offset (use for looping modulators)"
-  [{:keys [time-ms bpm trigger-time midi-state osc-state
+  [{:keys [time-ms bpm trigger-time input-values
            x y point-index point-count
            accumulated-beats accumulated-ms phase-offset]
-    :or {midi-state {} osc-state {}
+    :or {input-values {}
          accumulated-beats 0.0 accumulated-ms 0.0 phase-offset 0.0}}]
-  (u/->map& 
-   time-ms bpm trigger-time midi-state osc-state x y point-index 
+  (u/->map&
+   time-ms bpm trigger-time input-values x y point-index
    point-count accumulated-beats accumulated-ms phase-offset
    :effective-beats (+ (double (or accumulated-beats 0.0)) (double (or phase-offset 0.0)))))
 
 (defn make-base-context
- "Create a base modulation context optimized for per-point iteration.
+  "Create a base modulation context optimized for per-point iteration.
   This creates the context once without per-point fields, which can then
   be efficiently updated with with-point-context for each point.
   
@@ -83,22 +83,22 @@
   - bpm: Current BPM
   - point-count: Total number of points in frame
   - timing-ctx: Optional map with accumulated-beats, accumulated-ms, phase-offset"
- [{:keys [time-ms bpm point-count trigger-time midi-state osc-state
-          accumulated-beats accumulated-ms phase-offset]
-   :or {midi-state {} osc-state {}}}]
- (let [acc-beats (double (or accumulated-beats 0.0))
-       acc-ms (double (or accumulated-ms 0.0))
-       phase-off (double (or phase-offset 0.0))]
-   (u/->map&
-    time-ms bpm trigger-time midi-state osc-state point-count
-    :accumulated-beats acc-beats
-    :accumulated-ms acc-ms
-    :phase-offset phase-off
-    :effective-beats (+ acc-beats phase-off)
-    ;; Pre-set per-point fields to nil - will be updated via assoc
-    :x nil
-    :y nil
-    :point-index nil)))
+  [{:keys [time-ms bpm point-count trigger-time input-values
+           accumulated-beats accumulated-ms phase-offset]
+    :or {input-values {}}}]
+  (let [acc-beats (double (or accumulated-beats 0.0))
+        acc-ms (double (or accumulated-ms 0.0))
+        phase-off (double (or phase-offset 0.0))]
+    (u/->map&
+     time-ms bpm trigger-time input-values point-count
+     :accumulated-beats acc-beats
+     :accumulated-ms acc-ms
+     :phase-offset phase-off
+     :effective-beats (+ acc-beats phase-off)
+     ;; Pre-set per-point fields to nil - will be updated via assoc
+     :x nil
+     :y nil
+     :point-index nil)))
 
 (defn with-point-context
   "Efficiently update a base context with per-point data.
@@ -195,7 +195,7 @@
     (not (modulator-config? param))
     param
 
-    (get param :active? true) 
+    (get param :active? true)
     (evaluate-modulator param context)
 
     :else

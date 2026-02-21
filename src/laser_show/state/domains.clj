@@ -50,7 +50,7 @@
                    :doc "Total beats elapsed since start"}
    :quantization {:default :beat
                   :doc "Quantization mode (:beat :bar :none)"}
-   
+
    ;; Global clock for BPM visualization
    :global-clock {:default {:accumulated-beats 0.0
                             :accumulated-ms 0.0
@@ -70,7 +70,7 @@
                 :doc "Currently active cue data (legacy, may remove)"}
    :cue-queue {:default []
                :doc "Queue of pending cues for quantized triggering"}
-   
+
    ;; Multi-cue timing state
    :active-cues {:default {}
                  :doc "Map of [col row] -> cue timing state. Each cue has:
@@ -80,7 +80,7 @@
                         :phase-offset double
                         :phase-offset-target double
                         :last-frame-time long}"}
-   
+
    ;; Shared timing settings
    :resync-rate {:default 4.0
                  :doc "Beats to reach ~63% of target phase correction (shared across all cues)"}})
@@ -111,28 +111,28 @@
                     :data nil}
           :doc "current drag operation state"}
    :dialogs {:default {:projector-config {:open? false}
-                         :cue-chain-editor {:open? false
-                                            :col nil
-                                            :row nil
-                                            :clipboard nil
-                                            :active-preset-tab :geometric
-                                            :selected-effect-id nil
-                                            :item-effects-ui {}}
-                         :effect-chain-editor {:open? false
-                                               :col nil
-                                               :row nil
-                                               :active-bank-tab :shape}
-                         :add-projector-manual {:open? false}
-                         :add-virtual-projector {:open? false}
-                         :zone-group-editor {:open? false
-                                             :editing? false
-                                             :group-id nil
-                                             :name ""
-                                             :description ""
-                                             :color "#808080"}
-                         :about {:open? false}
-                         :settings {:open? false}}
-               :doc "dialog visibility and data states (fields alongside :open?, no nested :data key)"}
+                       :cue-chain-editor {:open? false
+                                          :col nil
+                                          :row nil
+                                          :clipboard nil
+                                          :active-preset-tab :geometric
+                                          :selected-effect-id nil
+                                          :item-effects-ui {}}
+                       :effect-chain-editor {:open? false
+                                             :col nil
+                                             :row nil
+                                             :active-bank-tab :shape}
+                       :add-projector-manual {:open? false}
+                       :add-virtual-projector {:open? false}
+                       :zone-group-editor {:open? false
+                                           :editing? false
+                                           :group-id nil
+                                           :name ""
+                                           :description ""
+                                           :color "#808080"}
+                       :about {:open? false}
+                       :settings {:open? false}}
+             :doc "dialog visibility and data states (fields alongside :open?, no nested :data key)"}
    :preview {:default {:frame nil
                        :last-render-time 0}
              :doc "preview panel state"}
@@ -201,6 +201,8 @@
          :doc "OSC server settings"}
    :midi {:default {:enabled? false :device nil}
           :doc "MIDI input settings"}
+   :input {:default {:trigger-map {}}
+           :doc "Map of generic input triggers (MIDI/OSC/Key -> actions)"}
    :cue {:default {:trigger-mode :default}
          :doc "Cue playback settings. :trigger-mode can be :default (use per-cue setting), :toggle (click ON/OFF), or :retrigger (always restart)"}})
 
@@ -387,7 +389,8 @@
                                 :attached-components #{}}
                      :router {:handlers {}
                               :event-log []
-                              :enabled? true}}
+                              :enabled? true}
+                     :values {}}
            :doc "Input handling state for MIDI, OSC, and keyboard"}
    :logging {:default {:enabled? false
                        :file nil
@@ -416,7 +419,7 @@
    not application domain state)."
   []
   (merge
-    (build-initial-state-from-domains)
-    ;; Styles: stored in context for hot-reload reactivity
-    ;; Initialized to nil, set at app startup with actual CSS URLs
-    {:styles {:menu-theme nil}}))
+   (build-initial-state-from-domains)
+   ;; Styles: stored in context for hot-reload reactivity
+   ;; Initialized to nil, set at app startup with actual CSS URLs
+   {:styles {:menu-theme nil}}))

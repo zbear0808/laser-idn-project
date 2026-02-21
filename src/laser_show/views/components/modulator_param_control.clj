@@ -160,6 +160,7 @@
                  ;; Event map pattern: add mod-param-key to template
                  :on-action (assoc on-change-event
                                    :mod-param-key key
+                                   :text-field-type :text
                                    :text-field? true)}]}))
 
 (defn- modulator-param-boolean

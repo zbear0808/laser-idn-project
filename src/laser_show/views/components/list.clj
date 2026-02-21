@@ -512,92 +512,106 @@
 (defn- list-sidebar
   "INTERNAL: Low-level list rendering component.
    External code should use list-editor instead, which wraps this
-   with keyboard handling and proper state management."
+   with keyboard handling and proper state management.
+   
+   When :compact? is true, the header/toolbar chrome is hidden.
+   When :scrollable? is false, the items VBox is rendered directly
+   (parent manages scrolling)."
   [{:keys [fx/context items get-item-label
            on-copy clipboard-items header-label empty-text allow-groups?
-           component-id on-change-event on-change-params items-path]
+           component-id on-change-event on-change-params items-path
+           compact? scrollable?]
     :or {header-label "LIST"
          empty-text "No items"
-         allow-groups? true}
+         allow-groups? true
+         compact? false
+         scrollable? true}
     :as props}]
   (let [ui-state (fx/sub-ctx context subs/list-ui-state component-id)
         {:keys [selected-ids dragging-ids drop-target-id drop-position renaming-id]} ui-state
         selection-count (count selected-ids)
         chain-depth (chains/nesting-depth items)
         can-create-group? (and allow-groups? (< chain-depth chains/max-nesting-depth))
-        can-paste? (boolean (seq clipboard-items))]
+        can-paste? (boolean (seq clipboard-items))
+        items-vbox {:fx/type :v-box
+                    :spacing 4
+                    :children (u/mapv-indexed
+                               (fn [idx item]
+                                 {:fx/type render-list-item
+                                  :fx/key [(:id item) idx]
+                                  :component-id component-id
+                                  :items items
+                                  :props props
+                                  :item item
+                                  :depth 0
+                                  :selected-ids selected-ids
+                                  :dragging-ids dragging-ids
+                                  :drop-target-id drop-target-id
+                                  :drop-position drop-position
+                                  :renaming-id renaming-id
+                                  :parent-disabled? false
+                                  :get-item-label get-item-label})
+                               items)}
+        items-content (if (empty? items)
+                        {:fx/type :label
+                         :text empty-text
+                         :style-class "chain-empty-text"}
+                        (if scrollable?
+                          {:fx/type :scroll-pane
+                           :fit-to-width true
+                           :fit-to-height false
+                           :hbar-policy :as-needed
+                           :v-box/vgrow :always
+                           :style-class "scroll-pane-base"
+                           :content items-vbox}
+                          (assoc items-vbox :v-box/vgrow :always)))]
     {:fx/type :v-box
      :style-class "chain-sidebar"
-     :children [{:fx/type :h-box
-                 :alignment :center-left
-                 :children (filterv some?
-                                    [{:fx/type :label
-                                      :text header-label
-                                      :style-class "header-section"}
-                                     {:fx/type :region :h-box/hgrow :always}
-                                     (when (pos? selection-count)
-                                       {:fx/type :label
-                                        :text (str selection-count " selected")
-                                        :style-class "chain-selection-count"})])}
-                {:fx/type :label
-                 :text "Ctrl+Click multi-select • Drag to reorder • Ctrl+G group"
-                 :style-class "chain-hint-text"}
+     :children
+     (if compact?
+       [items-content]
+       [{:fx/type :h-box
+         :alignment :center-left
+         :children (filterv some?
+                            [{:fx/type :label
+                              :text header-label
+                              :style-class "header-section"}
+                             {:fx/type :region :h-box/hgrow :always}
+                             (when (pos? selection-count)
+                               {:fx/type :label
+                                :text (str selection-count " selected")
+                                :style-class "chain-selection-count"})])}
+        {:fx/type :label
+         :text "Ctrl+Click multi-select • Drag to reorder • Ctrl+G group"
+         :style-class "chain-hint-text"}
 
-                (when allow-groups?
-                  {:fx/type group-toolbar
-                   :props props
-                   :selection-count selection-count
-                   :can-create-group? can-create-group?})
+        (when allow-groups?
+          {:fx/type group-toolbar
+           :props props
+           :selection-count selection-count
+           :can-create-group? can-create-group?})
 
-                {:fx/type :h-box
-                 :spacing 4
-                 :children [{:fx/type :button
-                             :text "Copy"
-                             :graphic {:fx/type fa/icon :name :copy :style :regular :size 8}
-                             :disable (zero? selection-count)
-                             :style-class "chain-toolbar-btn"
-                             :on-action (fn [_] (dispatch-copy-selected! props))}
-                            {:fx/type :button
-                             :text "Paste"
-                             :graphic {:fx/type fa/icon :name :clipboard :size 8}
-                             :disable (not can-paste?)
-                             :style-class "chain-toolbar-btn"
-                             :on-action (fn [_] (dispatch-paste-items! props))}
-                            {:fx/type :button
-                             :text "Del"
-                             :graphic {:fx/type fa/icon :name :trash-can :size 8}
-                             :disable (zero? selection-count)
-                             :style-class "chain-toolbar-btn-danger"
-                             :on-action (fn [_] (dispatch-delete-selected! props))}]}
-                (if (empty? items)
-                  {:fx/type :label
-                   :text empty-text
-                   :style-class "chain-empty-text"}
-                  {:fx/type :scroll-pane
-                   :fit-to-width true
-                   :fit-to-height false
-                   :hbar-policy :as-needed
-                   :v-box/vgrow :always
-                   :style-class "scroll-pane-base"
-                   :content {:fx/type :v-box
-                             :spacing 4
-                             :children (u/mapv-indexed
-                                        (fn [idx item]
-                                          {:fx/type render-list-item
-                                           :fx/key [(:id item) idx]
-                                           :component-id component-id
-                                           :items items
-                                           :props props
-                                           :item item
-                                           :depth 0
-                                           :selected-ids selected-ids
-                                           :dragging-ids dragging-ids
-                                           :drop-target-id drop-target-id
-                                           :drop-position drop-position
-                                           :renaming-id renaming-id
-                                           :parent-disabled? false
-                                           :get-item-label get-item-label})
-                                        items)}})]}))
+        {:fx/type :h-box
+         :spacing 4
+         :children [{:fx/type :button
+                     :text "Copy"
+                     :graphic {:fx/type fa/icon :name :copy :style :regular :size 8}
+                     :disable (zero? selection-count)
+                     :style-class "chain-toolbar-btn"
+                     :on-action (fn [_] (dispatch-copy-selected! props))}
+                    {:fx/type :button
+                     :text "Paste"
+                     :graphic {:fx/type fa/icon :name :clipboard :size 8}
+                     :disable (not can-paste?)
+                     :style-class "chain-toolbar-btn"
+                     :on-action (fn [_] (dispatch-paste-items! props))}
+                    {:fx/type :button
+                     :text "Del"
+                     :graphic {:fx/type fa/icon :name :trash-can :size 8}
+                     :disable (zero? selection-count)
+                     :style-class "chain-toolbar-btn-danger"
+                     :on-action (fn [_] (dispatch-delete-selected! props))}]}
+        items-content])}))
 
 
 ;; Label Function Factories
@@ -747,16 +761,21 @@
    - :header-label - Header text (default 'LIST')
    - :empty-text - Empty state text
    - :allow-groups? - Enable grouping (default true)
-   - :fallback-label - Label for unknown items (default \"Unknown\")"
+   - :fallback-label - Label for unknown items (default \"Unknown\")
+   - :compact? - If true, hide toolbar/header chrome (default false)
+   - :scrollable? - If true, wrap items in ScrollPane (default true)"
   [{:keys [fx/context items component-id
            get-item-label item-id-key item-registry-fn
            on-change-event on-change-params items-path
            on-copy-fn clipboard-items
-           header-label empty-text allow-groups? fallback-label]
+           header-label empty-text allow-groups? fallback-label
+           compact? scrollable?]
     :or {header-label "LIST"
          empty-text "No items"
          allow-groups? true
-         fallback-label "Unknown"}}]
+         fallback-label "Unknown"
+         compact? false
+         scrollable? true}}]
   #_(log/debug "list-editor render"
                {:component-id component-id
                 :items-count (count items)
@@ -804,6 +823,7 @@
             :children [(u/->map&
                         items clipboard-items header-label
                         empty-text allow-groups? component-id on-change-event on-change-params items-path
+                        compact? scrollable?
                         :fx/type list-sidebar
                         :fx/context context
                         :v-box/vgrow :always

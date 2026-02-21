@@ -74,6 +74,14 @@
    {:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
    {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}])
 
+(def ^:private generic-input-params
+  "Generic Input (MIDI/OSC/Keyboard) modulator parameters."
+  [{:key :source-key :label "Input Source Key" :type :text :default "[:midi 1 1]"}
+   {:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
+   {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}
+   {:key :raw-min :label "Raw Min" :type :float :min -1000.0 :max 1000.0 :default 0.0}
+   {:key :raw-max :label "Raw Max" :type :float :min -1000.0 :max 1000.0 :default 1.0}])
+
 (def ^:private point-index-params
   "Point index modulator parameters."
   [{:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}

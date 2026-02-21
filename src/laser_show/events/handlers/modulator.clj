@@ -16,6 +16,8 @@
    - :effect-path - Path to the effect within the chain
    - :param-key - The parameter being modulated"
   (:require
+   [clojure.edn :as edn]
+   [clojure.string :as str]
    [clojure.tools.logging :as log]
    [laser-show.animation.modulation :as mod]
    [laser-show.animation.modulator-defs :as mod-defs]))
@@ -179,9 +181,18 @@
                                      (when (instance? javafx.scene.control.TextField source)
                                        (.getText ^javafx.scene.control.TextField source)))
                                    :else (str raw-val))
-                        min-val (or (:mod-param-min event) -10.0)
-                        max-val (or (:mod-param-max event) 10.0)]
-                    (parse-text-value text-val min-val max-val))
+                        text-type (:text-field-type event)]
+                    (if (= :text text-type)
+                      (try
+                        (if (or (str/starts-with? text-val "[")
+                                (str/starts-with? text-val "{")
+                                (str/starts-with? text-val ":"))
+                          (edn/read-string text-val)
+                          text-val)
+                        (catch Exception _ text-val))
+                      (let [min-val (or (:mod-param-min event) -10.0)
+                            max-val (or (:mod-param-max event) 10.0)]
+                        (parse-text-value text-val min-val max-val))))
                   raw-val)]
     (log/trace "modulator/update-param - param-key:" param-key "mod-param-key:" mod-param-key "new-val:" new-val "text-field?:" text-field?)
     (when new-val

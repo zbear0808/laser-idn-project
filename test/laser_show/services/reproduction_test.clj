@@ -22,12 +22,15 @@
 
 (deftest reproduction-test
   (testing "Reproduce user scenario"
-    (let [cue-chain
+    (let [track-id #uuid "00000000-0000-0000-0000-000000000001"
+          cue-chain
           {:type :cue-chain-items,
+           :tracks [{:id track-id, :name "Track 1", :zone-group-id :all}]
            :items
            [{:type :group,
              :id #uuid "e99e1510-227b-43b0-b311-83f723561f50",
              :name "New Group",
+             :track-id track-id
              :items
              [{:type :preset,
                :id #uuid "2471b1ef-70e0-4534-b475-9b19056d9da8",
@@ -59,7 +62,7 @@
           trigger-time 0
           timing-ctx {:accumulated-beats 2.0 :accumulated-ms 1000.0 :phase-offset 0.0 :effective-beats 2.0 :bpm bpm :trigger-time trigger-time}
 
-          full-cue-chain {:items (:items cue-chain) :destination-zone {:zone-group-id :all}}
+          full-cue-chain {:items (:items cue-chain) :tracks (:tracks cue-chain) :destination-zone {:zone-group-id :all}}
 
           frames-by-zone (frame-service/generate-frames-by-zone full-cue-chain elapsed-ms bpm trigger-time timing-ctx)
           generated-frame (get frames-by-zone :all)]

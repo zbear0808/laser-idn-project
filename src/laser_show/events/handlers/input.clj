@@ -10,6 +10,7 @@
   (:require [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc]
             [laser-show.input.router :as router]
+            [laser-show.input.events :as input-events]
             [laser-show.state.core :as state]))
 
 
@@ -55,10 +56,10 @@
   (let [midi-state (get-midi-state state)
         ;; Use state/get-raw-state for background thread access
         updated-midi (midi/connect-device
-                       midi-state
-                       device-name
-                       router/dispatch!
-                       #(get-midi-state (state/get-raw-state)))]
+                      midi-state
+                      device-name
+                      router/dispatch!
+                      #(get-midi-state (state/get-raw-state)))]
     {:state (assoc-in state (midi-path) updated-midi)}))
 
 (defn- handle-midi-disconnect-device
@@ -93,11 +94,11 @@
     ;; Register a global handler to catch the next MIDI event
     (when learn-promise
       (router/register-global-handler! ::midi-learn
-        (fn [event]
-          (when (and learn-promise 
-                     (= :midi (:source event)))
-            (deliver learn-promise event)
-            (router/unregister-handler! ::midi-learn)))))
+                                       (fn [event]
+                                         (when (and learn-promise
+                                                    (= :midi (:source event)))
+                                           (deliver learn-promise event)
+                                           (router/unregister-handler! ::midi-learn)))))
     {:state (assoc-in state (midi-path) updated-midi)
      :learn-promise learn-promise}))
 
@@ -114,9 +115,9 @@
   [{:keys [state]}]
   (let [midi-state (get-midi-state state)
         updated-midi (midi/auto-connect
-                       midi-state
-                       router/dispatch!
-                       #(get-midi-state (state/get-raw-state)))]
+                      midi-state
+                      router/dispatch!
+                      #(get-midi-state (state/get-raw-state)))]
     {:state (assoc-in state (midi-path) updated-midi)}))
 
 
@@ -139,10 +140,10 @@
   (let [osc-state (get-osc-state state)
         server-port (or port (:port osc-state 9000))
         updated-osc (osc/start-server
-                      osc-state
-                      server-port
-                      router/dispatch!
-                      #(get-osc-state (state/get-raw-state)))]
+                     osc-state
+                     server-port
+                     router/dispatch!
+                     #(get-osc-state (state/get-raw-state)))]
     {:state (assoc-in state (osc-path) updated-osc)}))
 
 (defn- handle-osc-stop-server
@@ -180,11 +181,11 @@
     ;; Register a global handler to catch the next OSC event
     (when learn-promise
       (router/register-global-handler! ::osc-learn
-        (fn [event]
-          (when (and learn-promise 
-                     (= :osc (:source event)))
-            (deliver learn-promise event)
-            (router/unregister-handler! ::osc-learn)))))
+                                       (fn [event]
+                                         (when (and learn-promise
+                                                    (= :osc (:source event)))
+                                           (deliver learn-promise event)
+                                           (router/unregister-handler! ::osc-learn)))))
     {:state (assoc-in state (osc-path) updated-osc)
      :learn-promise learn-promise}))
 
@@ -195,6 +196,59 @@
   (let [osc-state (get-osc-state state)
         updated-osc (osc/cancel-learn osc-state)]
     {:state (assoc-in state (osc-path) updated-osc)}))
+
+
+;; Generalized Trigger Handlers
+
+
+(defn- handle-input-start-learn
+  "Start generic input learn mode for a target action.
+   Registers a temporary global handler to capture the next input event
+   and bind it to the target action."
+  [{:keys [state target-action]}]
+  (let [;; Use a global promise mapped in state
+        learn-promise (promise)]
+    ;; Register a global handler to catch the next trigger event
+    (router/register-global-handler! ::generalized-input-learn
+                                     (fn [event]
+                                       ;; Only capture discrete triggers (NoteOn or Trigger type)
+                                       (when (or (input-events/note-on? event)
+                                                 (input-events/trigger? event))
+                                         (deliver learn-promise event)
+                                         (router/unregister-handler! ::generalized-input-learn))))
+
+    ;; A real app would track this promise and process it, but since we are in
+    ;; the synchronous event loop, we can just process it asynchronously
+    (future
+      (let [event @learn-promise]
+        (when event
+          ;; Dispatch event to map this input to the action
+          (state/swap-state!
+           (fn [s]
+             (let [lookup-key (cond
+                                (input-events/note-on? event)
+                                {:source :midi :channel (:channel event) :note (:note event)}
+
+                                (input-events/trigger? event)
+                                {:source (:source event) :id (:id event)})]
+               (if lookup-key
+                 (assoc-in s [:config :input :trigger-map lookup-key] target-action)
+                 s)))))))
+
+    ;; Update state to indicate learning is active (for UI)
+    {:state (assoc-in state [:backend :input :learning-target] target-action)}))
+
+(defn- handle-input-cancel-learn
+  "Cancel generic input learn mode."
+  [{:keys [state]}]
+  (router/unregister-handler! ::generalized-input-learn)
+  ;; Remove learning indicator
+  {:state (update-in state [:backend :input] dissoc :learning-target)})
+
+(defn- handle-input-remove-trigger
+  "Removes a generic trigger from the mapping."
+  [{:keys [state trigger-key]}]
+  {:state (update-in state [:config :input :trigger-map] dissoc trigger-key)})
 
 
 ;; Public API
@@ -217,7 +271,7 @@
     :input/midi-start-learn (handle-midi-start-learn event)
     :input/midi-cancel-learn (handle-midi-cancel-learn event)
     :input/midi-auto-connect (handle-midi-auto-connect event)
-    
+
     ;; OSC events
     :input/osc-enable (handle-osc-enable event)
     :input/osc-disable (handle-osc-disable event)
@@ -228,6 +282,11 @@
     :input/osc-load-default-mappings (handle-osc-load-default-mappings event)
     :input/osc-start-learn (handle-osc-start-learn event)
     :input/osc-cancel-learn (handle-osc-cancel-learn event)
-    
+
+    ;; Generalized triggers
+    :input/start-learn (handle-input-start-learn event)
+    :input/cancel-learn (handle-input-cancel-learn event)
+    :input/remove-trigger (handle-input-remove-trigger event)
+
     ;; Unknown event
     {}))

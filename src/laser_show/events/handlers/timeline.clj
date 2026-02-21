@@ -5,15 +5,19 @@
    - View controls: zoom, scroll, snap
    - Item selection within the timeline
    - Item timing updates (start/duration)
+   - Track CRUD: add, delete, update, move, init
+   - Item-to-track assignment
    - Track expand/collapse for sub-effects
    - Nudge and resize of selected items
    
    State paths:
    - Timeline UI: [:ui :timeline]
+   - Tracks: [:chains :cue-chains [col row] :tracks]
    - Item timing: [:chains :cue-chains [col row] :items ... :timeline/start :timeline/duration]"
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
-            [laser-show.animation.chains :as chains]))
+            [laser-show.animation.chains :as chains]
+            [laser-show.views.components.visual-editors.timeline.track-logic :as tl]))
 
 
 ;; Constants
@@ -60,6 +64,27 @@
   (let [current (get-in state [:ui :timeline :scroll-x] 0.0)]
     {:state (assoc-in state [:ui :timeline :scroll-x]
                       (max 0.0 (+ current delta-x)))}))
+
+(defonce ^:private scroll-panes (atom {}))
+
+(defn- handle-register-scroll-pane
+  "Store the ScrollPane instances for synchronized scrolling."
+  [{:keys [pane instance]}]
+  (if instance
+    (swap! scroll-panes assoc pane instance)
+    (swap! scroll-panes dissoc pane))
+  {})
+
+(defn- handle-sync-scroll
+  "Link the vertical scroll between the left list sidebar and the right timeline canvas."
+  [{:keys [pane state]}]
+  (when-let [source-sp (get @scroll-panes pane)]
+    (let [vval (.getVvalue source-sp)
+          target-pane (if (= pane :left) :right :left)]
+      (when-let [target-sp (get @scroll-panes target-pane)]
+        (when (not= (.getVvalue target-sp) vval)
+          (.setVvalue target-sp vval)))
+      {:state (assoc-in state [:ui :timeline :sync-scroll-y] vval)})))
 
 (defn- handle-set-snap
   "Configure snap-to-grid settings."
@@ -202,6 +227,75 @@
                         (conj expanded id)))}))
 
 
+;; Track CRUD
+
+
+(defn- handle-update-tracks
+  "Replaces the entire tracks vector for a cue chain.
+   This is the callback fired by the `list-editor` component when tracks
+   are grouped, reordered, deleted, or pasted."
+  [{:keys [col row items state]}]
+  (let [tracks-path [:chains :cue-chains [col row] :tracks]]
+    {:state (-> state
+                (assoc-in tracks-path (vec items))
+                h/mark-dirty)}))
+
+(defn- handle-move-item-to-track
+  "Reassign an item to a different track.
+   This effectively changes the item's zone routing."
+  [{:keys [col row item-id track-id state]}]
+  (let [items-path [:chains :cue-chains [col row] :items]
+        items (get-in state items-path [])
+        updated-items (update-item-at-id
+                       items item-id
+                       #(assoc % :track-id track-id))]
+    {:state (-> state
+                (assoc-in items-path updated-items)
+                h/mark-dirty)}))
+
+(defn- handle-init-tracks
+  "Auto-initialize tracks for a cue chain that has none.
+   Uses auto-initialize-tracks from track-logic."
+  [{:keys [col row zone-groups state]}]
+  (let [chain-path [:chains :cue-chains [col row]]
+        cue-chain (get-in state chain-path)]
+    (if (seq (:tracks cue-chain))
+      {:state state} ;; Already has tracks, no-op
+      (let [updated-chain (tl/auto-initialize-tracks cue-chain (or zone-groups {}))]
+        {:state (-> state
+                    (assoc-in chain-path updated-chain)
+                    h/mark-dirty)}))))
+
+(defn- handle-add-track
+  "Appends a new regular track to the cue chain's tracks."
+  [{:keys [col row state]}]
+  (let [tracks-path [:chains :cue-chains [col row] :tracks]
+        tracks (get-in state tracks-path [])
+        new-track {:id (str (random-uuid))
+                   :type :track
+                   :name "New Track"}
+        updated-tracks (conj tracks new-track)]
+    {:state (-> state
+                (assoc-in tracks-path updated-tracks)
+                h/mark-dirty)}))
+
+(defn- handle-add-folder
+  "Appends a new track folder to the cue chain's tracks."
+  [{:keys [col row state]}]
+  (let [tracks-path [:chains :cue-chains [col row] :tracks]
+        tracks (get-in state tracks-path [])
+        new-folder {:id (str (random-uuid))
+                    :type :group
+                    :name "New Folder"
+                    :collapsed? false
+                    :items []}
+        updated-tracks (conj tracks new-folder)]
+    {:state (-> state
+                (assoc-in tracks-path updated-tracks)
+                h/mark-dirty)}))
+
+
+
 ;; Public API
 
 
@@ -215,6 +309,8 @@
     :timeline/set-zoom (handle-set-zoom event)
     :timeline/scroll (handle-scroll event)
     :timeline/set-snap (handle-set-snap event)
+    :timeline/register-scroll-pane (handle-register-scroll-pane event)
+    :timeline/sync-scroll (handle-sync-scroll event)
 
     ;; Selection
     :timeline/select-items (handle-select-items event)
@@ -227,6 +323,13 @@
 
     ;; Track expand/collapse
     :timeline/toggle-track-expand (handle-toggle-track-expand event)
+
+    ;; Track CRUD
+    :timeline/update-tracks (handle-update-tracks event)
+    :timeline/move-item-to-track (handle-move-item-to-track event)
+    :timeline/init-tracks (handle-init-tracks event)
+    :timeline/add-track (handle-add-track event)
+    :timeline/add-folder (handle-add-folder event)
 
     ;; Unknown event in this domain
     (do

@@ -128,6 +128,11 @@
   [event]
   (from-source? event :keyboard))
 
+(defn gamepad-event?
+  "Returns true if event is from gamepad."
+  [event]
+  (from-source? event :gamepad))
+
 
 ;; Event Matching
 

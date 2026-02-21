@@ -11,7 +11,7 @@
    - Editable chain name"
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
-            [laser-show.animation.chains :as chains]
+            [laser-show.animation.presets :as presets]
             [laser-show.events.core :as events]
             [laser-show.css.core :as css]
             [laser-show.views.components.inline-edit :as inline-edit]
@@ -85,7 +85,7 @@
 (defn- timeline-cue-editor-content
   "Main content of the timeline-based cue chain editor.
    Header: editable name
-   Center: timeline-editor component
+   Center: timeline-editor component with list sidebar
    Footer: destination zone, trigger mode, close button"
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :timeline-cue-editor)
@@ -105,6 +105,9 @@
 
         ;; Beats elapsed from global clock
         beats-elapsed (fx/sub-val context ex/global-accumulated-beats)
+
+        ;; Clipboard for list-editor
+        clipboard-items (fx/sub-val context get-in [:ui :clipboard :cue-chain-items])
 
         ;; Chain name
         chain-name (:name cue-chain)
@@ -133,16 +136,29 @@
                    :on-cancel {:event/type :ui/update-dialog-data
                                :dialog-id :timeline-cue-editor
                                :editing-name? false}}]}
-      ;; Timeline editor (center)
+      ;; Timeline editor (center) with list sidebar
       {:fx/type timeline-editor/timeline-editor
+       :fx/context context
        :v-box/vgrow :always
        :col col
        :row row
        :items items
+       :track-defs (:tracks cue-chain)
        :zone-groups (into {} (map (juxt :id identity)) zone-groups)
        :destination-zone-id destination-zone-id
        :timeline-ui timeline-ui
-       :beats-elapsed (or beats-elapsed 0.0)}
+       :beats-elapsed (or beats-elapsed 0.0)
+       :list-props {:component-id [:timeline-cue-chain col row]
+                    :item-id-key :preset-id
+                    :item-registry-fn presets/presets-by-id
+                    :fallback-label "Unknown Preset"
+                    :on-change-event :chain/set-items
+                    :on-change-params {:domain :cue-chains :entity-key [col row]}
+                    :items-path [:chains :cue-chains [col row] :items]
+                    :on-copy-fn (fn [copied-items]
+                                  (events/dispatch! {:event/type :cue-chain/set-clipboard
+                                                     :items copied-items}))
+                    :clipboard-items clipboard-items}}
 
       ;; Footer
       {:fx/type :h-box

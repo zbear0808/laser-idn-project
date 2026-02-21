@@ -16,7 +16,8 @@
   "Tab definitions for the preset bank categories."
   [{:id :geometric :label "Geometric"}
    {:id :wave :label "Wave"}
-   {:id :beam :label "Beam"}])
+   {:id :beam :label "Beam"}
+   {:id :triggers :label "Triggers"}])
 
 
 ;; Pre-computed items by category (computed once at load time)

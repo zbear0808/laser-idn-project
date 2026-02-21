@@ -21,7 +21,9 @@
             [laser-show.events.core :as events]
             [laser-show.views.root :as root]
             [laser-show.services.frame-service :as frame-service]
+            [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.link :as link]
+            [laser-show.input.gamepad :as gamepad]
             [laser-show.css.title-bar :as menus]
             [laser-show.dev-config :as dev-config]
             [clojure.pprint :as pprint])
@@ -112,8 +114,8 @@
   ;; Configure Timbre logging levels (used by beat-carabiner transitive dependency)
   ;; Suppress DEBUG logs from beat-carabiner (read timeout messages are normal)
   (timbre/merge-config!
-    {:min-level [["beat-carabiner.*" :info]  ;; INFO and above for beat-carabiner
-                 ["*" :debug]]})              ;; DEBUG for everything else
+   {:min-level [["beat-carabiner.*" :info]  ;; INFO and above for beat-carabiner
+                ["*" :debug]]})              ;; DEBUG for everything else
 
   ;; In dev mode: Allow closing windows without exiting JVM (for REPL development)
   ;; In prod mode: Closing the window exits the application normally
@@ -146,6 +148,12 @@
   ;; Auto-scan for IDN devices on startup
   (log/info "Starting automatic device discovery...")
   (events/dispatch! {:event/type :projectors/scan-network})
+
+  ;; Start fast-path global input mapper for Midi/OSC/Keyboard events
+  (input-mapper/start-mapper!)
+
+  ;; Start Gamepad input parsing thread
+  (gamepad/start! events/dispatch!)
 
   (log/info "Laser Show application started.")
   @*app)

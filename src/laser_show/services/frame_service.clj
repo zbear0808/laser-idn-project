@@ -395,7 +395,9 @@
   (let [effect-chain (get-active-global-effects)]
     (if effect-chain
       (let [global-clock (get-in raw-state [:timing :global-clock])
-            global-timing-ctx (cue-timing/get-global-timing-context global-clock bpm)
+            input-values (get-in raw-state [:backend :input :values] {})
+            global-timing-ctx (assoc (cue-timing/get-global-timing-context global-clock bpm)
+                                     :input-values input-values)
             global-elapsed (long (or (:accumulated-ms global-clock) 0))]
         (try
           (effects/apply-effect-chain frame effect-chain global-elapsed bpm 0 global-timing-ctx)
@@ -430,9 +432,14 @@
                        (double (:effective-beats timing-ctx 0.0))
                        (count (:items cue-chain []))))
   (let [items (:items cue-chain [])
-        destination (:destination-zone cue-chain)
+        destination-id (get-in cue-chain [:destination-zone :zone-group-id] :all)
+        tracks (:tracks cue-chain)
         raw-state (state/get-raw-state)
-        items-by-zone (ze/group-items-by-zone items destination timing-ctx)]
+        items-by-zone (ze/group-items-by-zone
+                       items
+                       timing-ctx
+                       (merge {:default-zone-id destination-id}
+                              (when (seq tracks) {:tracks tracks})))]
     (reduce-kv
      (fn [acc zone-id zone-items]
        (if-let [zone-frame (render-zone-items zone-items elapsed-ms bpm trigger-time timing-ctx)]
@@ -527,7 +534,9 @@
                             (fn [{:keys [cell cue-chain cue-timing]}]
                               (let [trigger-time (:trigger-time cue-timing)
                                     elapsed (- current-time trigger-time)
-                                    timing-ctx (cue-timing/get-cue-timing-context cue-timing bpm)
+                                    input-values (get-in raw-state [:backend :input :values] {})
+                                    timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing bpm)
+                                                      :input-values input-values)
                                     ;; Generate frames separated by zone
                                     zone-frames (generate-frames-by-zone cue-chain elapsed bpm trigger-time timing-ctx)
                                     ;; Track all zones this cue routes to
@@ -568,7 +577,9 @@
                    ;; Use GLOBAL CLOCK timing for global effects - not cue timing!
                    ;; This ensures global effects continue smoothly when cues are retriggered
                    global-clock (get-in raw-state [:timing :global-clock])
-                   global-timing-ctx (cue-timing/get-global-timing-context global-clock bpm)
+                   input-values (get-in raw-state [:backend :input :values] {})
+                   global-timing-ctx (assoc (cue-timing/get-global-timing-context global-clock bpm)
+                                            :input-values input-values)
                    global-elapsed (long (or (:accumulated-ms global-clock) 0))
 
                    effects-start (timing/nanotime)

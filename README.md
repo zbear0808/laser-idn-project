@@ -110,7 +110,15 @@ A timeline system for fully pre-recorded shows:
 
 
 
-**Status**: Not planned for the near term. The current focus is on live performance capabilities.
+**Status**: very rough demo in progress
+can open it through the repl 
+
+```clojure
+(laser-show.events.core/dispatch!
+  {:event/type :ui/open-dialog
+   :dialog-id :timeline-cue-editor
+   :data {:col 0 :row 0}})
+```
 
 
 
