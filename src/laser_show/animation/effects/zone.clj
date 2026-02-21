@@ -1,14 +1,43 @@
 (ns laser-show.animation.effects.zone
-  "Zone selector effect logic.
-   Allows an individual item to override its track or chain-level zone destination."
+  "Zone group routing effects - modify where cues are sent.
+   
+   Zone effects operate at the routing level, not frame generation level.
+   The zone-selector effect allows selecting which zone group a cue chain
+   item routes to.
+   
+   SIMPLIFIED ARCHITECTURE:
+   Only zone groups exist - projectors are assigned directly to zone groups.
+   A single zone-selector effect with a simple :target-zone parameter
+   determines routing destination."
   (:require [laser-show.animation.effects :as effects]))
 
-;; The zone-selector effect is unique because it doesn't modify points.
-;; Instead, it acts as metadata that the routing system (zone-effects.clj)
-;; looks for when determining where to send the item's rendered frames.
+(set! *warn-on-reflection* true)
+(set! *unchecked-math* :warn-on-boxed)
+
+
+;; Zone Selection
+
+
+(defn evaluate-zone
+  "Get which zone group is selected from effect params.
+   
+   Parameters:
+   - params: Effect params containing :target-zone keyword
+   
+   Returns: Zone group keyword (e.g., :left, :right, :all, :center)"
+  [params]
+  (:target-zone params :all))
+
+
+;; Zone Selector Effect
+
+
 (defn- zone-selector-xf
-  [params _ctx]
-  ;; This effect is a no-op on the actual points
+  "Identity transducer - zone selection affects routing, not frame data.
+   
+   The actual zone resolution happens in the routing layer (zone_effects.clj)
+   which reads the :target-zone parameter directly."
+  [_time-ms _bpm _params _ctx]
   (map identity))
 
 (effects/register-effect!
