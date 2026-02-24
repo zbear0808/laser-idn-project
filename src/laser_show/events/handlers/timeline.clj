@@ -17,6 +17,7 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
             [laser-show.animation.chains :as chains]
+            [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.views.components.visual-editors.timeline.track-logic :as tl]))
 
 
@@ -327,6 +328,70 @@
                 h/mark-dirty)}))
 
 
+;; Add Panel (preset/effect addition from timeline)
+
+
+(defn- handle-toggle-add-panel
+  "Toggle the bottom add-content panel open/closed."
+  [{:keys [state]}]
+  (let [current (get-in state [:ui :timeline :add-panel-open?] false)]
+    {:state (assoc-in state [:ui :timeline :add-panel-open?] (not current))}))
+
+(defn- handle-set-add-panel-tab
+  "Set the active tab in the add panel's preset or effect bank.
+   :panel is :preset or :effect, :tab-id is the category keyword."
+  [{:keys [panel tab-id state]}]
+  (let [k (if (= panel :effect)
+            :add-panel-effect-tab
+            :add-panel-preset-tab)]
+    {:state (assoc-in state [:ui :timeline k] tab-id)}))
+
+(defn- handle-add-preset-to-track
+  "Add a preset item to a specific track in the timeline.
+   Creates the preset, assigns it to the given track, and sets
+   default timeline position and duration.
+   
+   If no :track-id is provided, uses the first available track."
+  [{:keys [col row item-id track-id state]}]
+  (let [items-path [:chains :cue-chains [col row] :items]
+        tracks (get-in state [:chains :cue-chains [col row] :tracks] [])
+        resolved-track-id (or track-id
+                              (:id (first (remove tl/track-group? tracks))))
+        new-preset (-> (cue-chains/create-preset-instance item-id {})
+                       (h/ensure-item-fields)
+                       (assoc :track-id resolved-track-id
+                              :timeline/start 0.0
+                              :timeline/duration 4.0))
+        new-id (:id new-preset)]
+    {:state (-> state
+                (update-in items-path (fnil conj []) new-preset)
+                h/mark-dirty)
+     ;; Select the newly added item on the timeline
+     :dispatch {:event/type :timeline/select-items
+                :ids [new-id]
+                :mode :replace}}))
+
+(defn- handle-add-effect-to-timeline-item
+  "Add an effect to a timeline item identified by :target-item-id.
+   Builds default params from the effect definition."
+  [{:keys [col row item item-id target-item-id state]}]
+  (let [items-path [:chains :cue-chains [col row] :items]
+        items (get-in state items-path [])
+        effect-id (or item-id (:id item))
+        params-map (reduce (fn [acc {:keys [key default]}]
+                             (assoc acc key default))
+                           {}
+                           (:parameters item []))
+        new-effect (h/ensure-item-fields {:effect-id effect-id
+                                          :params params-map})
+        updated-items (if-let [path (chains/find-path-by-id items target-item-id)]
+                        (update-in (vec items) (conj path :effects)
+                                   (fnil conj []) new-effect)
+                        items)]
+    {:state (-> state
+                (assoc-in items-path updated-items)
+                h/mark-dirty)}))
+
 
 ;; Public API
 
@@ -366,6 +431,12 @@
     :timeline/init-tracks (handle-init-tracks event)
     :timeline/add-track (handle-add-track event)
     :timeline/add-folder (handle-add-folder event)
+
+    ;; Add panel
+    :timeline/toggle-add-panel (handle-toggle-add-panel event)
+    :timeline/set-add-panel-tab (handle-set-add-panel-tab event)
+    :timeline/add-preset-to-track (handle-add-preset-to-track event)
+    :timeline/add-effect-to-item (handle-add-effect-to-timeline-item event)
 
     ;; Unknown event in this domain
     (do

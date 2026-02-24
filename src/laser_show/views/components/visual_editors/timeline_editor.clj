@@ -13,7 +13,9 @@
             [laser-show.events.core :as events]
             [laser-show.views.components.visual-editors.canvas-interaction :as ci]
             [laser-show.views.components.visual-editors.timeline.track-logic :as tl]
-            [laser-show.views.components.list :as list])
+            [laser-show.views.components.list :as list]
+            [laser-show.views.components.preset-bank :as preset-bank]
+            [laser-show.views.components.effect-bank :as effect-bank])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.paint Color]
            [javafx.scene.control ScrollPane]
@@ -494,7 +496,7 @@
 
 (defn timeline-toolbar
   "Toolbar component with zoom slider and snap controls."
-  [{:keys [zoom-x snap-enabled? snap-value col row loop-config]}]
+  [{:keys [zoom-x snap-enabled? snap-value col row loop-config add-panel-open?]}]
   {:fx/type :h-box
    :spacing 12
    :padding {:top 4 :bottom 4 :left 8 :right 8}
@@ -512,6 +514,11 @@
      :style-class "button-secondary"
      :on-action {:event/type :timeline/add-folder
                  :col col :row row}}
+    {:fx/type :toggle-button
+     :text "Add Content"
+     :style-class "button-secondary"
+     :selected (boolean add-panel-open?)
+     :on-action {:event/type :timeline/toggle-add-panel}}
 
     ;; Spacer
     {:fx/type :region
@@ -594,6 +601,78 @@
      :compact? true}]})
 
 
+(defn timeline-add-panel
+  "Collapsible bottom panel for adding presets and effects to the timeline.
+   Shows preset-bank (always) and effect-bank (when a clip is selected)."
+  [{:keys [col row add-panel-open? add-panel-preset-tab add-panel-effect-tab
+           selected-item-id selected-track-id]}]
+  (when add-panel-open?
+    {:fx/type :v-box
+     :style "-fx-background-color: #1A1A1A; -fx-border-color: #333333; -fx-border-width: 1 0 0 0;"
+     :pref-height 180
+     :children
+     [{:fx/type :h-box
+       :alignment :center-left
+       :padding {:top 4 :bottom 4 :left 8 :right 8}
+       :style "-fx-background-color: #222222;"
+       :children [{:fx/type :label
+                   :text "ADD CONTENT"
+                   :style "-fx-text-fill: #999999; -fx-font-size: 11; -fx-font-weight: bold;"}
+                  {:fx/type :region :h-box/hgrow :always}
+                  {:fx/type :label
+                   :text (if selected-item-id
+                           "Clip selected — effect bank enabled"
+                           "Select a clip to add effects")
+                   :style "-fx-text-fill: #666666; -fx-font-size: 10;"}]}
+      {:fx/type :h-box
+       :v-box/vgrow :always
+       :spacing 1
+       :children
+       [;; Preset bank (always available)
+        {:fx/type :v-box
+         :h-box/hgrow :always
+         :style "-fx-background-color: #1E1E1E;"
+         :children [{:fx/type :label
+                     :text "PRESETS"
+                     :padding {:top 4 :bottom 2 :left 8}
+                     :style "-fx-text-fill: #777777; -fx-font-size: 10; -fx-font-weight: bold;"}
+                    {:fx/type preset-bank/preset-bank
+                     :cell [col row]
+                     :active-tab (or add-panel-preset-tab :geometric)
+                     :on-tab-change {:event/type :timeline/set-add-panel-tab
+                                     :panel :preset}
+                     ;; Override event template to use timeline-specific handler
+                     :item-event-template {:event/type :timeline/add-preset-to-track
+                                           :col col
+                                           :row row
+                                           :track-id selected-track-id}}]}
+        ;; Effect bank (only when a clip is selected)
+        {:fx/type :v-box
+         :h-box/hgrow :always
+         :style "-fx-background-color: #1E1E1E;"
+         :children
+         (if selected-item-id
+           [{:fx/type :label
+             :text "EFFECTS"
+             :padding {:top 4 :bottom 2 :left 8}
+             :style "-fx-text-fill: #777777; -fx-font-size: 10; -fx-font-weight: bold;"}
+            {:fx/type effect-bank/effect-bank
+             :active-tab (or add-panel-effect-tab :shape)
+             :on-tab-change {:event/type :timeline/set-add-panel-tab
+                             :panel :effect}
+             :item-event-template {:event/type :timeline/add-effect-to-item
+                                   :col col
+                                   :row row
+                                   :target-item-id selected-item-id}
+             :include-zone? true}]
+           [{:fx/type :v-box
+             :v-box/vgrow :always
+             :alignment :center
+             :children [{:fx/type :label
+                         :text "Select a clip to add effects"
+                         :style "-fx-text-fill: #555555; -fx-font-size: 11;"}]}])}]}]}))
+
+
 (defn timeline-canvas
   "The interactive canvas that shows the timeline grid, clips, and playhead."
   [{:keys [col row tracks zoom-x scroll-x selection
@@ -642,14 +721,25 @@
   [{:keys [fx/context col row items track-defs zone-groups destination-zone-id
            timeline-ui beats-elapsed loop-config list-props]}]
   (let [{:keys [zoom-x scroll-x selection snap-enabled?
-                snap-value expanded-tracks sync-scroll-y]
+                snap-value expanded-tracks sync-scroll-y
+                add-panel-open? add-panel-preset-tab add-panel-effect-tab]
          :or {zoom-x default-zoom
               scroll-x 0.0
               selection #{}
               snap-enabled? true
               snap-value 0.25
               expanded-tracks #{}}} timeline-ui
-        tracks (build-tracks (or track-defs []) (or items []) (or expanded-tracks #{}))]
+        tracks (build-tracks (or track-defs []) (or items []) (or expanded-tracks #{}))
+        ;; Determine selected item ID for the effect bank
+        selected-item-id (when (= 1 (count selection)) (first selection))
+        ;; Determine selected track-id: from the selected clip or first non-group track
+        selected-track-id (or (when selected-item-id
+                                (let [found-track (some (fn [t]
+                                                          (when (some (fn [it] (= (:id it) selected-item-id)) (:items t))
+                                                            t))
+                                                        tracks)]
+                                  (:id found-track)))
+                              (:id (first (remove #(= :group (:type %)) tracks))))]
     {:fx/type :border-pane
      :style "-fx-background-color: #121212;"
      :top {:fx/type timeline-toolbar
@@ -657,8 +747,17 @@
            :snap-enabled? snap-enabled?
            :snap-value snap-value
            :loop-config loop-config
+           :add-panel-open? add-panel-open?
            :col col
            :row row}
+     :bottom {:fx/type timeline-add-panel
+              :col col
+              :row row
+              :add-panel-open? add-panel-open?
+              :add-panel-preset-tab add-panel-preset-tab
+              :add-panel-effect-tab add-panel-effect-tab
+              :selected-item-id selected-item-id
+              :selected-track-id selected-track-id}
      :center
      {:fx/type :split-pane
       :divider-positions [0.2]
