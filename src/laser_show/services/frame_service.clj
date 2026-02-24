@@ -86,7 +86,8 @@
   [current-time-ms]
   (let [raw-state (state/get-raw-state)
         bpm (ex/bpm raw-state)
-        resync-rate (ex/resync-rate raw-state)]
+        resync-rate (ex/resync-rate raw-state)
+        cue-chains (get-in raw-state [:chains :cue-chains])]
     (state/swap-state!
      (fn [s]
        (-> s
@@ -104,12 +105,14 @@
                       (fn [cues]
                         (reduce-kv
                          (fn [acc cell-key cue-timing-state]
-                           (assoc acc cell-key
-                                  (cue-timing/update-cue-timing
-                                   cue-timing-state
-                                   current-time-ms
-                                   bpm
-                                   resync-rate)))
+                           (let [loop-config (get-in cue-chains [cell-key :loop] {:enabled? false :start 0.0 :duration 4.0})]
+                             (assoc acc cell-key
+                                    (cue-timing/update-cue-timing
+                                     cue-timing-state
+                                     current-time-ms
+                                     bpm
+                                     resync-rate
+                                     loop-config))))
                          {}
                          (or cues {})))))))))
 

@@ -136,10 +136,28 @@
 ;; Canvas Drawing
 ;; ============================================================
 
+(def ^:private loop-brace-color-active (Color/web "#00FFFF" 0.8))
+(def ^:private loop-brace-color-inactive (Color/web "#00FFFF" 0.3))
+(def ^:private loop-brace-height 8)
+
+(defn- draw-loop-brace!
+  "Draw the loop brace in the ruler area."
+  [^GraphicsContext gc zoom-x scroll-x loop-config]
+  (when loop-config
+    (let [{:keys [enabled? start duration]} loop-config
+          x (- (* start zoom-x) scroll-x)
+          w (* duration zoom-x)
+          y (- ruler-height loop-brace-height 2)
+          color (if enabled? loop-brace-color-active loop-brace-color-inactive)]
+      (.setFill gc color)
+      ;; Draw a top bar and small side ticks to look like a brace [...]
+      (.fillRect gc x y w 4) ;; top bar
+      (.fillRect gc x y 4 loop-brace-height) ;; left tick
+      (.fillRect gc (- (+ x w) 4) y 4 loop-brace-height))))
 
 (defn- draw-ruler!
   "Draw the beat ruler at the top."
-  [^GraphicsContext gc width zoom-x scroll-x]
+  [^GraphicsContext gc width zoom-x scroll-x loop-config]
   (.setFill gc ruler-bg-color)
   (.fillRect gc 0 0 width ruler-height)
   ;; Grid lines and beat labels
@@ -166,7 +184,8 @@
                            grid-line-color))
           (.setLineWidth gc (if (zero? (mod beat 4.0)) 1.5 0.5))
           (.strokeLine gc x ruler-height x (- ruler-height 4)))
-        (recur (+ beat subdivisions))))))
+        (recur (+ beat subdivisions))))
+    (draw-loop-brace! gc zoom-x scroll-x loop-config)))
 
 
 (defn- draw-grid!
@@ -254,7 +273,7 @@
    Called by interactive-canvas with current value and drag-info."
   [^Canvas canvas value drag-info]
   (let [{:keys [tracks zoom-x scroll-x selection
-                beats-elapsed zone-groups]} value
+                beats-elapsed zone-groups loop-config]} value
         gc (.getGraphicsContext2D canvas)
         width (.getWidth canvas)
         height (.getHeight canvas)]
@@ -264,7 +283,7 @@
     ;; Draw layers
     (draw-track-backgrounds! gc width tracks)
     (draw-grid! gc width height zoom-x scroll-x)
-    (draw-ruler! gc width zoom-x scroll-x)
+    (draw-ruler! gc width zoom-x scroll-x loop-config)
     ;; Draw clips — each track row can have multiple items
     (doseq [[idx {:keys [items track zone-group-id]}] (map-indexed vector tracks)]
       (let [color (if track
@@ -286,28 +305,42 @@
   "Find which clip is under the mouse.
    Returns {:track-idx int :item map :edge :left/:right/:center} or nil.
    Scans all items within the hovered track row."
-  [mx my tracks zoom-x scroll-x scroll-y]
+  [mx my tracks zoom-x scroll-x scroll-y loop-config]
   (let [scroll-y (or scroll-y 0.0)
-        scroll-x (or scroll-x 0.0)
-        track-idx (int (/ (+ (- my ruler-height) scroll-y) track-height))]
-    (when (and (>= track-idx 0) (< track-idx (count tracks)))
-      (let [{:keys [items]} (nth tracks track-idx)]
-        ;; Check each item in this track row for a hit
-        (some (fn [item]
-                (let [start (:timeline/start item 0.0)
-                      duration (:timeline/duration item default-duration)
-                      clip-x (- (* start zoom-x) scroll-x)
-                      clip-w (max min-clip-width (* duration zoom-x))
-                      clip-end (+ clip-x clip-w)]
-                  (when (and (>= mx clip-x) (<= mx clip-end))
-                    (let [edge (cond
-                                 (< mx (+ clip-x edge-grab-px)) :left
-                                 (> mx (- clip-end edge-grab-px)) :right
-                                 :else :center)]
-                      {:track-idx track-idx
-                       :item item
-                       :edge edge}))))
-              items)))))
+        scroll-x (or scroll-x 0.0)]
+    (if (and loop-config (<= my ruler-height))
+      ;; Check loop brace hit
+      (let [{:keys [start duration]} loop-config
+            x (- (* start zoom-x) scroll-x)
+            w (* duration zoom-x)]
+        (when (and (>= mx x) (<= mx (+ x w)))
+          (let [edge (cond
+                       (< mx (+ x edge-grab-px)) :left
+                       (> mx (- (+ x w) edge-grab-px)) :right
+                       :else :center)]
+            {:type :loop-brace
+             :edge edge})))
+      ;; Otherwise check clips
+      (let [track-idx (int (/ (+ (- my ruler-height) scroll-y) track-height))]
+        (when (and (>= track-idx 0) (< track-idx (count tracks)))
+          (let [{:keys [items]} (nth tracks track-idx)]
+            ;; Check each item in this track row for a hit
+            (some (fn [item]
+                    (let [start (:timeline/start item 0.0)
+                          duration (:timeline/duration item default-duration)
+                          clip-x (- (* start zoom-x) scroll-x)
+                          clip-w (max min-clip-width (* duration zoom-x))
+                          clip-end (+ clip-x clip-w)]
+                      (when (and (>= mx clip-x) (<= mx clip-end))
+                        (let [edge (cond
+                                     (< mx (+ clip-x edge-grab-px)) :left
+                                     (> mx (- clip-end edge-grab-px)) :right
+                                     :else :center)]
+                          {:type :clip
+                           :track-idx track-idx
+                           :item item
+                           :edge edge}))))
+                  items)))))))
 
 
 ;; ============================================================
@@ -318,91 +351,120 @@
 (defn- on-press
   "Handle mouse press. Select item or begin drag."
   [mx my button value drag-info]
-  (let [{:keys [tracks zoom-x scroll-x scroll-y col row]} value
-        hit (hit-test mx my tracks zoom-x scroll-x scroll-y)]
+  (let [{:keys [tracks zoom-x scroll-x scroll-y col row loop-config]} value
+        hit (hit-test mx my tracks zoom-x scroll-x scroll-y loop-config)]
     (when (= button MouseButton/PRIMARY)
       (if hit
-        (let [{:keys [item edge track-idx]} hit
-              item-id (:id item)]
-          {:drag-start true
-           :drag-id item-id
-           :dispatch {:event/type :timeline/select-items
-                      :ids [item-id]
-                      :mode :replace}
-           :drag-updates {:edge edge
-                          :start-mx mx
-                          :original-start (:timeline/start item 0.0)
-                          :original-duration (:timeline/duration item default-duration)
-                          :original-track-idx track-idx
-                          :col col
-                          :row row}})
+        (if (= (:type hit) :loop-brace)
+          (let [{:keys [edge]} hit
+                {:keys [start duration]} loop-config]
+            {:drag-start true
+             :drag-id :loop-brace
+             :drag-updates {:edge edge
+                            :start-mx mx
+                            :original-start start
+                            :original-duration duration
+                            :col col
+                            :row row}})
+          (let [{:keys [item edge track-idx]} hit
+                item-id (:id item)]
+            {:drag-start true
+             :drag-id item-id
+             :dispatch {:event/type :timeline/select-items
+                        :ids [item-id]
+                        :mode :replace}
+             :drag-updates {:edge edge
+                            :start-mx mx
+                            :original-start (:timeline/start item 0.0)
+                            :original-duration (:timeline/duration item default-duration)
+                            :original-track-idx track-idx
+                            :col col
+                            :row row}}))
         ;; Clicked empty space - clear selection
         {:dispatch {:event/type :timeline/clear-selection}}))))
 
 
 (defn- on-drag
-  "Handle mouse drag. Move or resize the currently-dragged clip.
+  "Handle mouse drag. Move or resize the currently-dragged clip or loop brace.
    Dispatches cross-track transfers when dragged vertically to new rows."
   [mx my value drag-info]
   (let [{:keys [zoom-x scroll-y tracks col row]} value
         {:keys [edge start-mx original-start original-duration original-track-idx drag-id]} drag-info
         scroll-y (or scroll-y 0.0)
         delta-px (- mx start-mx)
-        delta-beats (/ delta-px zoom-x)
-        current-track-idx (int (/ (+ (- my ruler-height) scroll-y) track-height))
-        ;; Determine if we crossed into a new valid track row that isn't a folder
-        track-changed? (and (not= edge :left)
-                            (not= edge :right)
-                            (not= current-track-idx original-track-idx)
-                            (>= current-track-idx 0)
-                            (< current-track-idx (count tracks)))
-        destination-track (when track-changed? (nth tracks current-track-idx nil))
-        valid-destination? (and destination-track
-                                (not (tl/track-group? destination-track)))
-        base-events (case edge
-                      :center
-                      [{:event/type :timeline/update-item-timing
-                        :col col :row row :id drag-id
-                        :start (+ original-start delta-beats)}]
-                      :right
-                      [{:event/type :timeline/update-item-timing
-                        :col col :row row :id drag-id
-                        :duration (+ original-duration delta-beats)}]
-                      :left
-                      (let [new-start (+ original-start delta-beats)
-                            start-delta (- new-start original-start)
-                            new-dur (- original-duration start-delta)]
-                        [{:event/type :timeline/update-item-timing
-                          :col col :row row :id drag-id
-                          :start new-start
-                          :duration new-dur}])
-                      [])
+        delta-beats (/ delta-px zoom-x)]
+    (if (= drag-id :loop-brace)
+      (case edge
+        :center
+        {:dispatch [{:event/type :timeline/update-loop-timing
+                     :col col :row row
+                     :start (+ original-start delta-beats)}]}
+        :right
+        {:dispatch [{:event/type :timeline/update-loop-timing
+                     :col col :row row
+                     :duration (+ original-duration delta-beats)}]}
+        :left
+        (let [new-start (+ original-start delta-beats)
+              start-delta (- new-start original-start)
+              new-dur (- original-duration start-delta)]
+          {:dispatch [{:event/type :timeline/update-loop-timing
+                       :col col :row row
+                       :start new-start
+                       :duration new-dur}]}))
+      (let [current-track-idx (int (/ (+ (- my ruler-height) scroll-y) track-height))
+            ;; Determine if we crossed into a new valid track row that isn't a folder
+            track-changed? (and (not= edge :left)
+                                (not= edge :right)
+                                (not= current-track-idx original-track-idx)
+                                (>= current-track-idx 0)
+                                (< current-track-idx (count tracks)))
+            destination-track (when track-changed? (nth tracks current-track-idx nil))
+            valid-destination? (and destination-track
+                                    (not (tl/track-group? destination-track)))
+            base-events (case edge
+                          :center
+                          [{:event/type :timeline/update-item-timing
+                            :col col :row row :id drag-id
+                            :start (+ original-start delta-beats)}]
+                          :right
+                          [{:event/type :timeline/update-item-timing
+                            :col col :row row :id drag-id
+                            :duration (+ original-duration delta-beats)}]
+                          :left
+                          (let [new-start (+ original-start delta-beats)
+                                start-delta (- new-start original-start)
+                                new-dur (- original-duration start-delta)]
+                            [{:event/type :timeline/update-item-timing
+                              :col col :row row :id drag-id
+                              :start new-start
+                              :duration new-dur}])
+                          [])
 
-        events (if valid-destination?
-                 (conj base-events {:event/type :timeline/move-item-to-track
-                                    :col col :row row
-                                    :item-id drag-id
-                                    :track-id (:id destination-track)})
-                 base-events)]
+            events (if valid-destination?
+                     (conj base-events {:event/type :timeline/move-item-to-track
+                                        :col col :row row
+                                        :item-id drag-id
+                                        :track-id (:id destination-track)})
+                     base-events)]
 
-    (when (seq events)
-      {:dispatch events
-       ;; Update drag state if track changed so we don't dispatch continuously
-       :drag-updates (when valid-destination?
-                       {:original-track-idx current-track-idx})})))
+        (when (seq events)
+          {:dispatch events
+           ;; Update drag state if track changed so we don't dispatch continuously
+           :drag-updates (when valid-destination?
+                           {:original-track-idx current-track-idx})})))))
 
 
 (defn- on-hover
   "Handle mouse hover. Update cursor based on edge proximity."
   [mx my value drag-info]
-  (let [{:keys [tracks zoom-x scroll-x scroll-y]} value
-        hit (hit-test mx my tracks zoom-x scroll-x scroll-y)]
+  (let [{:keys [tracks zoom-x scroll-x scroll-y loop-config]} value
+        hit (hit-test mx my tracks zoom-x scroll-x scroll-y loop-config)]
     (if hit
-      {:hover-id (:id (:item hit))
+      {:hover-id (if (= (:type hit) :loop-brace) :loop-brace (:id (:item hit)))
        :cursor (case (:edge hit)
                  :left "w-resize"
                  :right "e-resize"
-                 :center "move")}
+                 :center (if (= (:type hit) :loop-brace) "hand" "move"))}
       {:hover-id nil
        :cursor "crosshair"})))
 
@@ -432,7 +494,7 @@
 
 (defn timeline-toolbar
   "Toolbar component with zoom slider and snap controls."
-  [{:keys [zoom-x snap-enabled? snap-value col row]}]
+  [{:keys [zoom-x snap-enabled? snap-value col row loop-config]}]
   {:fx/type :h-box
    :spacing 12
    :padding {:top 4 :bottom 4 :left 8 :right 8}
@@ -454,6 +516,13 @@
     ;; Spacer
     {:fx/type :region
      :h-box/hgrow :always}
+
+    ;; Loop toggle
+    {:fx/type :toggle-button
+     :text "Loop"
+     :selected (boolean (:enabled? loop-config true))
+     :on-action {:event/type :timeline/toggle-loop
+                 :col col :row row}}
 
     ;; Snap toggle
     {:fx/type :check-box
@@ -528,7 +597,7 @@
 (defn timeline-canvas
   "The interactive canvas that shows the timeline grid, clips, and playhead."
   [{:keys [col row tracks zoom-x scroll-x selection
-           beats-elapsed zone-groups]}]
+           beats-elapsed loop-config zone-groups]}]
   (let [canvas-height (total-canvas-height (count tracks))
         canvas-width (max 800 (* 32 (or zoom-x default-zoom)))]
     {:fx/type ci/interactive-canvas
@@ -540,6 +609,7 @@
              :scroll-x (or scroll-x 0.0)
              :selection (or selection #{})
              :beats-elapsed (or beats-elapsed 0.0)
+             :loop-config loop-config
              :col col
              :row row
              :zone-groups zone-groups}
@@ -567,9 +637,10 @@
    - :destination-zone-id — The cue chain's :destination-zone :zone-group-id
    - :timeline-ui   — Map from [:ui :timeline] state
    - :beats-elapsed — Current beat position from active cue timing
+   - :loop-config   — Map with {:enabled? :start :duration}
    - :list-props    — Map of props to forward to list-editor sidebar"
   [{:keys [fx/context col row items track-defs zone-groups destination-zone-id
-           timeline-ui beats-elapsed list-props]}]
+           timeline-ui beats-elapsed loop-config list-props]}]
   (let [{:keys [zoom-x scroll-x selection snap-enabled?
                 snap-value expanded-tracks sync-scroll-y]
          :or {zoom-x default-zoom
@@ -585,6 +656,7 @@
            :zoom-x zoom-x
            :snap-enabled? snap-enabled?
            :snap-value snap-value
+           :loop-config loop-config
            :col col
            :row row}
      :center
@@ -638,4 +710,5 @@
           :scroll-x scroll-x
           :selection selection
           :beats-elapsed beats-elapsed
+          :loop-config loop-config
           :zone-groups zone-groups}}}]}}))

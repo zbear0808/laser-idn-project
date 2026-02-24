@@ -15,7 +15,7 @@
             [laser-show.events.core :as events]
             [laser-show.state.core :as state])
   (:import [javafx.scene.canvas Canvas]
-           [javafx.scene.input KeyEvent KeyCode]))
+           [javafx.scene.input KeyEvent KeyCode MouseEvent]))
 
 (defn- dispatch-result!
   "Dispatch event maps from a callback result.
@@ -40,6 +40,25 @@
   "Read the current drag state for a canvas from global state."
   [canvas-id]
   (get-in (state/get-raw-state) [:ui :canvas-drag canvas-id]))
+
+(defn- extract-event-info
+  "Extracts common information from a JavaFX canvas interaction event into a hashmap."
+  [^javafx.event.Event e]
+  (let [canvas ^Canvas (.getSource e)
+        canvas-id (:canvas-id (.getUserData canvas))
+        drag-state (or (get-drag-state canvas-id) {})]
+    (cond-> {:e e
+             :canvas canvas
+             :canvas-id canvas-id
+             :drag-state drag-state}
+      (instance? MouseEvent e)
+      (assoc :x (.getX ^MouseEvent e)
+             :y (.getY ^MouseEvent e)
+             :button (.getButton ^MouseEvent e))
+
+      (instance? KeyEvent e)
+      (assoc :key-code (.getCode ^KeyEvent e)
+             :shift? (.isShiftDown ^KeyEvent e)))))
 
 (defn- update-drag-state!
   "Dispatch a canvas drag state update to global state."
@@ -143,120 +162,81 @@
 
           :on-mouse-pressed
           (fn [e]
-            (when on-press
-              (let [canvas-id (get-canvas-id e)
-                    drag-state (get-drag-state canvas-id)
-                    result (on-press (.getX e) (.getY e) (.getButton e)
-                                     value drag-state)]
-                (when result
-                  (let [new-drag (cond-> (or drag-state {})
-                                   (:drag-start result)
-                                   (assoc :dragging? true
-                                          :drag-id (:drag-id result))
-                                   (:drag-updates result)
-                                   (merge (:drag-updates result)))]
-                    (update-drag-state! canvas-id new-drag :start)
-                    (dispatch-result! (:dispatch result) :start)
-                    (render! (.getSource e)
-                             (or (:preview-value new-drag) value)
-                             new-drag))))))
+            (let [{:keys [canvas canvas-id drag-state x y button]} (extract-event-info e)]
+              (when-let [result (and on-press (on-press x y button value drag-state))]
+                (let [new-drag (cond-> drag-state
+                                 (:drag-start result) (assoc :dragging? true :drag-id (:drag-id result))
+                                 (:drag-updates result) (merge (:drag-updates result)))]
+                  (update-drag-state! canvas-id new-drag :start)
+                  (dispatch-result! (:dispatch result) :start)
+                  (render! canvas (or (:preview-value new-drag) value) new-drag)))))
 
           :on-mouse-dragged
           (fn [e]
-            (when on-drag
-              (let [canvas-id (get-canvas-id e)
-                    drag-state (get-drag-state canvas-id)]
-                (when (:dragging? drag-state)
-                  (let [result (on-drag (.getX e) (.getY e)
-                                        value drag-state)]
-                    (when result
-                      (let [new-drag (cond-> drag-state
-                                       (contains? result :drag-id)
-                                       (assoc :drag-id (:drag-id result))
-                                       (:preview-value result)
-                                       (assoc :preview-value (:preview-value result))
-                                       (:drag-updates result)
-                                       (merge (:drag-updates result)))]
-                        (update-drag-state! canvas-id new-drag :drag)
-                        (dispatch-result! (:dispatch result) :drag)
-                        (render! (.getSource e)
-                                 (or (:preview-value new-drag) value)
-                                 new-drag))))))))
+            (let [{:keys [canvas canvas-id drag-state x y]} (extract-event-info e)]
+              (when-let [result (and on-drag
+                                     (:dragging? drag-state)
+                                     (on-drag x y value drag-state))]
+                (let [new-drag (cond-> drag-state
+                                 (contains? result :drag-id) (assoc :drag-id (:drag-id result))
+                                 (:preview-value result) (assoc :preview-value (:preview-value result))
+                                 (:drag-updates result) (merge (:drag-updates result)))]
+                  (update-drag-state! canvas-id new-drag :drag)
+                  (dispatch-result! (:dispatch result) :drag)
+                  (render! canvas (or (:preview-value new-drag) value) new-drag)))))
 
           :on-mouse-released
           (fn [e]
-            (let [canvas-id (get-canvas-id e)
-                  drag-state (get-drag-state canvas-id)]
-              (when on-release
-                (let [result (on-release value drag-state)]
-                  (dispatch-result! (:dispatch result) :stop)))
-              (let [new-drag (assoc (or drag-state {})
-                                    :dragging? false
-                                    :drag-id nil
-                                    :preview-value nil)]
-                (update-drag-state! canvas-id new-drag :stop)
-                (render! (.getSource e) value new-drag))))
+            (let [{:keys [canvas canvas-id drag-state]} (extract-event-info e)
+                  result (when on-release (on-release value drag-state))
+                  new-drag (assoc drag-state
+                                  :dragging? false
+                                  :drag-id nil
+                                  :preview-value nil)]
+              (update-drag-state! canvas-id new-drag :stop)
+              (dispatch-result! (:dispatch result) :stop)
+              (render! canvas value new-drag)))
 
           :on-mouse-moved
           (fn [e]
-            (let [canvas-id (get-canvas-id e)
-                  canvas (.getSource e)
-                  drag-state (get-drag-state canvas-id)]
-              (when on-hover
-                (let [result (on-hover (.getX e) (.getY e)
-                                       value drag-state)
-                      new-hover (:hover-id result)
+            (let [{:keys [canvas canvas-id drag-state x y]} (extract-event-info e)]
+              (when-let [result (and on-hover (on-hover x y value drag-state))]
+                (let [new-hover (:hover-id result)
                       old-hover (:hover-id drag-state)]
                   (when (not= new-hover old-hover)
-                    (let [new-drag (assoc (or drag-state {}) :hover-id new-hover)]
+                    (let [new-drag (assoc drag-state :hover-id new-hover)]
                       (update-drag-state! canvas-id new-drag)
-                      (render! canvas
-                               (or (:preview-value new-drag) value)
-                               new-drag)))
+                      (render! canvas (or (:preview-value new-drag) value) new-drag)))
                   (when-let [c (:cursor result)]
                     (.setStyle canvas (str "-fx-cursor: " c ";")))))))
 
           :on-mouse-entered
           (fn [e]
-            (let [canvas-id (get-canvas-id e)
-                  drag-state (get-drag-state canvas-id)
-                  new-drag (assoc (or drag-state {}) :mouse-over? true)]
+            (let [{:keys [canvas-id drag-state]} (extract-event-info e)
+                  new-drag (assoc drag-state :mouse-over? true)]
               (update-drag-state! canvas-id new-drag)))
 
           :on-mouse-exited
           (fn [e]
-            (let [canvas-id (get-canvas-id e)
-                  canvas (.getSource e)
-                  drag-state (get-drag-state canvas-id)
-                  new-drag (assoc (or drag-state {})
+            (let [{:keys [canvas canvas-id drag-state]} (extract-event-info e)
+                  new-drag (assoc drag-state
                                   :hover-id nil
                                   :mouse-over? false
                                   :preview-value nil)]
               (update-drag-state! canvas-id new-drag)
-              (when on-exit
-                (on-exit value new-drag))
+              (when on-exit (on-exit value new-drag))
               (render! canvas value new-drag)))
 
           :on-key-pressed
           (fn [e]
-            (when on-key
-              (let [^KeyEvent ke e
-                    canvas (.getSource ke)
-                    canvas-id (:canvas-id (.getUserData canvas))
-                    drag-state (get-drag-state canvas-id)
-                    result (on-key (.getCode ke)
-                                   (.isShiftDown ke)
-                                   value
-                                   drag-state)]
-                (when result
-                  (let [new-drag (if-let [du (:drag-updates result)]
-                                   (merge (or drag-state {}) du)
-                                   drag-state)]
-                    (when (:drag-updates result)
-                      (update-drag-state! canvas-id new-drag))
-                    (dispatch-result! (:dispatch result))
-                    (render! canvas
-                             (or (:preview-value new-drag) value)
-                             new-drag)
-                    (when (:consumed? result)
-                      (.consume ke)))))))}})
+            (let [{:keys [canvas canvas-id drag-state key-code shift?]} (extract-event-info e)]
+              (when-let [result (and on-key (on-key key-code shift? value drag-state))]
+                (let [new-drag (if-let [du (:drag-updates result)]
+                                 (merge drag-state du)
+                                 drag-state)]
+                  (when (:drag-updates result)
+                    (update-drag-state! canvas-id new-drag))
+                  (dispatch-result! (:dispatch result))
+                  (render! canvas (or (:preview-value new-drag) value) new-drag)
+                  (when (:consumed? result)
+                    (.consume e))))))}})

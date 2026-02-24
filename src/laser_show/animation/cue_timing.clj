@@ -24,20 +24,19 @@
    
    Returns: Updated global clock state"
   [{:keys [accumulated-beats accumulated-ms last-frame-time] :as gc} current-time-ms bpm]
-  (let [last-time (or last-frame-time 0)]
-    (if (pos? last-time)
-      (let [delta-ms (- current-time-ms last-time)]
-        ;; Guard against unreasonable deltas (>1 second = probably pause/resume)
-        (if (> delta-ms 1000)
-          ;; Skip accumulation, just update timestamp
-          (assoc gc :last-frame-time current-time-ms)
-          ;; Normal accumulation
-          (let [delta-beats (* delta-ms (/ bpm 60000.0))]
-            {:accumulated-beats (+ (or accumulated-beats 0.0) delta-beats)
-             :accumulated-ms (+ (or accumulated-ms 0.0) delta-ms)
-             :last-frame-time current-time-ms})))
-      ;; First frame - just initialize timestamp
-      (assoc gc :last-frame-time current-time-ms))))
+  (if last-frame-time
+    (let [delta-ms (- current-time-ms last-frame-time)]
+      ;; Guard against unreasonable deltas (>1 second = probably pause/resume)
+      (if (> delta-ms 1000)
+        ;; Skip accumulation, just update timestamp
+        (assoc gc :last-frame-time current-time-ms)
+        ;; Normal accumulation
+        (let [delta-beats (* delta-ms (/ bpm 60000.0))]
+          {:accumulated-beats (+ accumulated-beats delta-beats)
+           :accumulated-ms (+ accumulated-ms delta-ms)
+           :last-frame-time current-time-ms})))
+    ;; First frame - just initialize timestamp
+    (assoc gc :last-frame-time current-time-ms)))
 
 
 (def ^:private ^:const snap-threshold
@@ -55,35 +54,43 @@
    - current-time-ms: Current time in milliseconds
    - bpm: Current BPM
    - resync-rate: Beats to reach ~63% of phase correction (decay rate)
+   - loop-config: Map with {:enabled? :start :duration} for arrangement looping
    
    Returns: Updated cue timing state"
   [{:keys [accumulated-beats accumulated-ms phase-offset phase-offset-target
            last-frame-time trigger-time] :as ct}
-   current-time-ms bpm resync-rate]
-  (let [last-time (or last-frame-time 0)]
-    (if (pos? last-time)
-      (let [delta-ms (- current-time-ms last-time)]
-        ;; Guard against unreasonable deltas
-        (if (> delta-ms 1000)
-          ;; Skip accumulation, just update timestamp
-          (assoc ct :last-frame-time current-time-ms)
-          ;; Normal accumulation with phase decay
-          (let [delta-beats (* delta-ms (/ bpm 60000.0))
-                current-phase (or phase-offset 0.0)
-                target (or phase-offset-target 0.0)
-                diff (- current-phase target)
-                ;; Snap to target when within threshold, else decay
-                new-phase (if (< (Math/abs diff) snap-threshold)
-                            target
-                            (let [decay (Math/exp (- (/ delta-beats (max 0.1 resync-rate))))]
-                              (+ target (* diff decay))))]
-            (assoc ct
-                   :accumulated-beats (+ (or accumulated-beats 0.0) delta-beats)
-                   :accumulated-ms (+ (or accumulated-ms 0.0) delta-ms)
-                   :phase-offset new-phase
-                   :last-frame-time current-time-ms))))
-      ;; First frame - just initialize timestamp
-      (assoc ct :last-frame-time current-time-ms))))
+   current-time-ms bpm resync-rate {:keys [enabled? start duration] :as loop-config}]
+  (if last-frame-time
+    (let [delta-ms (- current-time-ms last-frame-time)]
+      ;; Guard against unreasonable deltas
+      (if (> delta-ms 1000)
+        ;; Skip accumulation, just update timestamp
+        (assoc ct :last-frame-time current-time-ms)
+        ;; Normal accumulation with phase decay
+        (let [delta-beats (* delta-ms (/ bpm 60000.0))
+              diff (- phase-offset phase-offset-target)
+              ;; Snap to target when within threshold, else decay
+              new-phase (if (< (Math/abs diff) snap-threshold)
+                          phase-offset-target
+                          (let [decay (Math/exp (- (/ delta-beats (max 0.1 resync-rate))))]
+                            (+ phase-offset-target (* diff decay))))
+
+              new-accumulated-beats (+ accumulated-beats delta-beats)
+
+              ;; Wrap beats if we crossed the loop end
+              wrapped-beats (if (and enabled?
+                                     (pos? duration)
+                                     (>= new-accumulated-beats (+ start duration)))
+                              (let [overshoot (- new-accumulated-beats (+ start duration))]
+                                (+ start (mod overshoot duration)))
+                              new-accumulated-beats)]
+          (assoc ct
+                 :accumulated-beats wrapped-beats
+                 :accumulated-ms (+ accumulated-ms delta-ms)
+                 :phase-offset new-phase
+                 :last-frame-time current-time-ms))))
+    ;; First frame - just initialize timestamp
+    (assoc ct :last-frame-time current-time-ms)))
 
 
 (defn get-cue-timing-context
@@ -102,13 +109,13 @@
    - :bpm - Current BPM
    - :trigger-time - When this cue was triggered"
   [{:keys [accumulated-beats accumulated-ms phase-offset trigger-time]} bpm]
-  {:accumulated-beats (or accumulated-beats 0.0)
-   :accumulated-ms (or accumulated-ms 0.0)
-   :phase-offset (or phase-offset 0.0)
-   :effective-beats (+ (or accumulated-beats 0.0) (or phase-offset 0.0))
-   :time-ms (or accumulated-ms 0)
-   :bpm (or bpm 120.0)
-   :trigger-time (or trigger-time 0)})
+  {:accumulated-beats accumulated-beats
+   :accumulated-ms accumulated-ms
+   :phase-offset phase-offset
+   :effective-beats (+ accumulated-beats phase-offset)
+   :time-ms accumulated-ms
+   :bpm bpm
+   :trigger-time trigger-time})
 
 
 (defn get-global-timing-context
@@ -132,12 +139,12 @@
    - :bpm - Current BPM
    - :trigger-time - Always 0 (global effects don't have a trigger time)"
   [{:keys [accumulated-beats accumulated-ms]} bpm]
-  {:accumulated-beats (or accumulated-beats 0.0)
-   :accumulated-ms (or accumulated-ms 0.0)
+  {:accumulated-beats accumulated-beats
+   :accumulated-ms accumulated-ms
    :phase-offset 0.0
-   :effective-beats (or accumulated-beats 0.0)
-   :time-ms (or accumulated-ms 0)
-   :bpm (or bpm 120.0)
+   :effective-beats accumulated-beats
+   :time-ms accumulated-ms
+   :bpm bpm
    :trigger-time 0})
 
 
@@ -153,7 +160,7 @@
    
    Returns: Initial cue timing state map"
   [current-time-ms global-clock-beats]
-  (let [target-phase (mod (or global-clock-beats 0.0) 1.0)]
+  (let [target-phase (mod global-clock-beats 1.0)]
     {:trigger-time current-time-ms
      :accumulated-beats 0.0
      :accumulated-ms 0.0

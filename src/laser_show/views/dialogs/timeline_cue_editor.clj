@@ -148,6 +148,7 @@
        :destination-zone-id destination-zone-id
        :timeline-ui timeline-ui
        :beats-elapsed (or beats-elapsed 0.0)
+       :loop-config (:loop cue-chain {:enabled? false :start 0.0 :duration 4.0})
        :list-props {:component-id [:timeline-cue-chain col row]
                     :item-id-key :preset-id
                     :item-registry-fn presets/presets-by-id

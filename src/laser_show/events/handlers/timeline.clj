@@ -126,6 +126,38 @@
   {:state (assoc-in state [:ui :timeline :selection] #{})})
 
 
+;; Loop Timing
+
+(defn- handle-update-loop-timing
+  "Update the loop brace timing.
+   Accepts :col :row and :start / :duration."
+  [{:keys [col row start duration state]}]
+  (let [loop-path [:chains :cue-chains [col row] :loop]
+        snap-enabled? (get-in state [:ui :timeline :snap-enabled?] true)
+        snap-size (get-in state [:ui :timeline :snap-value] 0.25)
+        current-loop (get-in state loop-path {:enabled? true :start 0.0 :duration 4.0})
+        new-start (if (some? start)
+                    (max 0.0 (snap-value start snap-size snap-enabled?))
+                    (:start current-loop 0.0))
+        new-duration (if (some? duration)
+                       (max min-duration (snap-value duration snap-size snap-enabled?))
+                       (:duration current-loop 4.0))
+        updated-loop (assoc current-loop :start new-start :duration new-duration)]
+    {:state (-> state
+                (assoc-in loop-path updated-loop)
+                h/mark-dirty)}))
+
+(defn- handle-toggle-loop
+  "Toggle the loop enabled state for a cue-chain."
+  [{:keys [col row state]}]
+  (let [loop-path [:chains :cue-chains [col row] :loop]
+        current-loop (get-in state loop-path {:enabled? false :start 0.0 :duration 4.0})
+        updated-loop (update current-loop :enabled? not)]
+    {:state (-> state
+                (assoc-in loop-path updated-loop)
+                h/mark-dirty)}))
+
+
 ;; Item Timing
 
 
@@ -320,6 +352,10 @@
     :timeline/update-item-timing (handle-update-item-timing event)
     :timeline/nudge-selection (handle-nudge-selection event)
     :timeline/resize-selection (handle-resize-selection event)
+
+    ;; Loop timing
+    :timeline/update-loop-timing (handle-update-loop-timing event)
+    :timeline/toggle-loop (handle-toggle-loop event)
 
     ;; Track expand/collapse
     :timeline/toggle-track-expand (handle-toggle-track-expand event)
