@@ -356,7 +356,7 @@
   (let [items-path [:chains :cue-chains [col row] :items]
         tracks (get-in state [:chains :cue-chains [col row] :tracks] [])
         resolved-track-id (or track-id
-                              (:id (first (remove tl/track-group? tracks))))
+                              (:id (tl/first-leaf-track tracks)))
         new-preset (-> (cue-chains/create-preset-instance item-id {})
                        (h/ensure-item-fields)
                        (assoc :track-id resolved-track-id
@@ -391,6 +391,53 @@
     {:state (-> state
                 (assoc-in items-path updated-items)
                 h/mark-dirty)}))
+
+
+;; Open Editor (initialize timeline data on first open)
+
+
+(defn- timeline-ready?
+  "Check if any item in the cue chain already has timeline-namespaced keys.
+   A quick check to avoid re-initializing items that already have timing data."
+  [items]
+  (some #(contains? % :timeline/start) items))
+
+(defn- ensure-item-timeline-fields
+  "Add :timeline/start and :timeline/duration to an item if missing."
+  [item]
+  (cond-> item
+    (not (contains? item :timeline/start))    (assoc :timeline/start 0.0)
+    (not (contains? item :timeline/duration)) (assoc :timeline/duration 4.0)))
+
+(defn- handle-open-editor
+  "Open the timeline cue editor for a cell.
+   If the cue chain's items are not yet timeline-ready, initializes:
+   - :timeline/start and :timeline/duration on every item
+   - Tracks from :destination-zone via auto-initialize-tracks
+   Then chains into :ui/open-dialog to actually show the dialog."
+  [{:keys [col row state]}]
+  (let [chain-path [:chains :cue-chains [col row]]
+        cue-chain  (get-in state chain-path)
+        items      (:items cue-chain [])
+        zone-groups (get state :zone-groups {})
+        ready?     (timeline-ready? items)
+        has-tracks? (seq (:tracks cue-chain))
+
+        updated-state
+        (if (and ready? has-tracks?)
+          state
+          (let [updated-items (if ready? items (mapv ensure-item-timeline-fields items))
+                chain-with-items (assoc cue-chain :items updated-items)
+                final-chain (if has-tracks?
+                              chain-with-items
+                              (tl/auto-initialize-tracks chain-with-items zone-groups))]
+            (-> state
+                (assoc-in chain-path final-chain)
+                h/mark-dirty)))]
+    {:state updated-state
+     :dispatch {:event/type :ui/open-dialog
+                :dialog-id :timeline-cue-editor
+                :data {:col col :row row}}}))
 
 
 ;; Public API
@@ -437,6 +484,9 @@
     :timeline/set-add-panel-tab (handle-set-add-panel-tab event)
     :timeline/add-preset-to-track (handle-add-preset-to-track event)
     :timeline/add-effect-to-item (handle-add-effect-to-timeline-item event)
+
+    ;; Open editor (timeline-cue-editor domain routed here)
+    :timeline-cue-editor/open (handle-open-editor event)
 
     ;; Unknown event in this domain
     (do

@@ -57,6 +57,7 @@
       "keyframe" (keyframe/handle event)
       "input" (input/handle event)  ; MIDI and OSC input management
       "timeline" (timeline/handle event)  ; Timeline editor operations
+      "timeline-cue-editor" (timeline/handle event)  ; Timeline open with initialization
       ;; Unknown domain
       (do
         (log/error "Unknown event domain:" domain "type:" type)

@@ -397,8 +397,8 @@
   [event]
   (if-let [dispatch @*dispatch-fn]
     (do
-      (when-not (= :drag (:interaction/type event))
-        (log/debug "dispatch! using app dispatch-fn for event:" (:event/type event)))
+      #_(when-not (= :drag (:interaction/type event))
+          (log/debug "dispatch! using app dispatch-fn for event:" (:event/type event)))
       (dispatch event))
     ;; Fallback: Manually inject co-effects and process effects
     ;; (used during testing or before app is initialized)

@@ -36,6 +36,7 @@
   [{:keys [zone-group-id name color]}]
   (u/assoc-some
    {:id (random-uuid)
+    :type :track
     :zone-group-id (or zone-group-id :all)
     :name (or name (clojure.core/name (or zone-group-id :all)))
     :visible? true
@@ -162,23 +163,36 @@
 ;; Auto-initialization (migration from legacy chains)
 ;; ============================================================
 
+(defn first-leaf-track
+  "Find the first track that is a leaf (not a group) by traversing
+   the tracks tree recursively (depth-first). Returns the track or nil."
+  [tracks]
+  (some (fn [track]
+          (if (track-group? track)
+            (first-leaf-track (:items track []))
+            track))
+        tracks))
+
 
 (defn auto-initialize-tracks
   "Generate default tracks for a CueChain that has no :tracks yet.
    
    Strategy:
    1. Collect unique zone-group-ids from items' :zone-selector effects.
-   2. Fall back to a single track using the chain's :destination-zone.
-   3. Assign each item a :track-id matching its resolved zone.
+   2. Fall back to the chain's :destination-zone.
+   3. For each unique zone-group-id, create a group folder.
+   4. Inside each group folder, create a single default track.
+   5. Assign each item a :track-id matching the default track for its zone.
    
    Parameters:
    - cue-chain: The cue chain map (:items, :destination-zone)
    - zone-groups: Map of zone-group-id -> zone config (for names/colors)
    
-   Returns: Updated cue-chain with :tracks and items having :track-id."
+   Returns: Updated cue-chain with structured :tracks and items having :track-id."
   [cue-chain zone-groups]
   (let [default-zone (get-in cue-chain [:destination-zone :zone-group-id] :all)
         items (:items cue-chain [])
+
         ;; Collect per-item zone destinations
         item-zones (mapv (fn [item]
                            (let [zone-effect (u/seek #(= :zone-selector (:effect-id %))
@@ -187,17 +201,34 @@
                                (get-in zone-effect [:params :target-zone] default-zone)
                                default-zone)))
                          items)
-        ;; Unique zones encountered
-        unique-zones (distinct item-zones)
-        ;; Create one track per unique zone
-        tracks-vec (mapv (fn [zone-id]
-                           (let [zg (get zone-groups zone-id)]
-                             (create-track
-                              {:zone-group-id zone-id
-                               :name (or (:name zg) (clojure.core/name zone-id))
-                               :color (:color zg)})))
-                         unique-zones)
-        zone->track-id (into {} (map (fn [t] [(:zone-group-id t) (:id t)]) tracks-vec))
+
+        ;; Unique zones encountered (always include the default zone)
+        unique-zones (distinct (cons default-zone item-zones))
+
+        ;; Create the folder structure and track mapping
+        ;; Result: {zone-id {:folder-track {...} :child-track {...}}}
+        zone-structures (into {}
+                              (map (fn [zone-id]
+                                     (let [zg (get zone-groups zone-id)
+                                           name-str (or (:name zg) (clojure.core/name zone-id))
+                                           child-track (create-track {:zone-group-id zone-id
+                                                                      :name (str name-str " 1")
+                                                                      :color (:color zg)})
+                                           folder (assoc (create-track {:zone-group-id zone-id
+                                                                        :name name-str
+                                                                        :color (:color zg)})
+                                                         :type :group
+                                                         :collapsed? false
+                                                         :items [child-track])]
+                                       [zone-id {:folder folder :child-track child-track}])))
+                              unique-zones)
+
+        ;; The new tracks tree is just the folders
+        tracks-vec (mapv #(get-in zone-structures [% :folder]) unique-zones)
+
+        ;; Mapping from zone to the ID of the child track inside that zone's folder
+        zone->track-id (update-vals zone-structures #(-> % :child-track :id))
+
         updated-items (mapv (fn [item zone-id]
                               (assoc item :track-id (get zone->track-id zone-id)))
                             items item-zones)]

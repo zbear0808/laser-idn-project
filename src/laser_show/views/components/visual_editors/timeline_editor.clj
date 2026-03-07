@@ -13,6 +13,7 @@
             [laser-show.events.core :as events]
             [laser-show.views.components.visual-editors.canvas-interaction :as ci]
             [laser-show.views.components.visual-editors.timeline.track-logic :as tl]
+            [laser-show.subs :as subs]
             [laser-show.views.components.list :as list]
             [laser-show.views.components.preset-bank :as preset-bank]
             [laser-show.views.components.effect-bank :as effect-bank])
@@ -29,13 +30,11 @@
 
 
 (def ^:private track-height 32)
-(def ^:private sub-track-height 24)
 (def ^:private ruler-height 24)
 (def ^:private header-width 180)
 (def ^:private min-clip-width 4)
 (def ^:private edge-grab-px 6)
 (def ^:private default-zoom 50.0)  ; pixels per beat
-(def ^:private default-duration 4.0)
 
 
 ;; ============================================================
@@ -47,7 +46,6 @@
 
 (def ^:private clip-color-default (Color/web "#3A7BD5" 0.85))
 (def ^:private clip-color-selected (Color/web "#5BA5F5" 0.95))
-(def ^:private clip-color-effect (Color/web "#6B5B8C" 0.75))
 (def ^:private grid-line-color (Color/web "#333333"))
 (def ^:private grid-line-major-color (Color/web "#555555"))
 (def ^:private ruler-bg-color (Color/web "#1A1A1A"))
@@ -86,7 +84,7 @@
    
    Folders are flattened into single rows that act as separators or global effects lines.
    Visible tracks are derived using tl/flatten-visible-tracks."
-  [track-defs items expanded-tracks]
+  [track-defs items _]
   (if (seq track-defs)
     (let [grouped (tl/items-by-track items)
           flat-tracks (tl/flatten-visible-tracks track-defs)
@@ -231,7 +229,7 @@
    Uses the track's resolved color as the clip fill."
   [^GraphicsContext gc track-idx item zoom-x scroll-x selection ^Color color]
   (let [start (:timeline/start item 0.0)
-        duration (:timeline/duration item default-duration)
+        duration (:timeline/duration item 4.0)
         x (- (* start zoom-x) scroll-x)
         w (max min-clip-width (* duration zoom-x))
         y (+ (track-y track-idx) 2)
@@ -273,7 +271,7 @@
 (defn- render-timeline!
   "Main canvas render function.
    Called by interactive-canvas with current value and drag-info."
-  [^Canvas canvas value drag-info]
+  [^Canvas canvas value _]
   (let [{:keys [tracks zoom-x scroll-x selection
                 beats-elapsed zone-groups loop-config]} value
         gc (.getGraphicsContext2D canvas)
@@ -329,7 +327,7 @@
             ;; Check each item in this track row for a hit
             (some (fn [item]
                     (let [start (:timeline/start item 0.0)
-                          duration (:timeline/duration item default-duration)
+                          duration (:timeline/duration item 4.0)
                           clip-x (- (* start zoom-x) scroll-x)
                           clip-w (max min-clip-width (* duration zoom-x))
                           clip-end (+ clip-x clip-w)]
@@ -352,7 +350,7 @@
 
 (defn- on-press
   "Handle mouse press. Select item or begin drag."
-  [mx my button value drag-info]
+  [mx my button value _]
   (let [{:keys [tracks zoom-x scroll-x scroll-y col row loop-config]} value
         hit (hit-test mx my tracks zoom-x scroll-x scroll-y loop-config)]
     (when (= button MouseButton/PRIMARY)
@@ -378,7 +376,7 @@
              :drag-updates {:edge edge
                             :start-mx mx
                             :original-start (:timeline/start item 0.0)
-                            :original-duration (:timeline/duration item default-duration)
+                            :original-duration (:timeline/duration item 4.0)
                             :original-track-idx track-idx
                             :col col
                             :row row}}))
@@ -458,7 +456,7 @@
 
 (defn- on-hover
   "Handle mouse hover. Update cursor based on edge proximity."
-  [mx my value drag-info]
+  [mx my value _]
   (let [{:keys [tracks zoom-x scroll-x scroll-y loop-config]} value
         hit (hit-test mx my tracks zoom-x scroll-x scroll-y loop-config)]
     (if hit
@@ -473,7 +471,7 @@
 
 (defn- on-key
   "Handle keyboard shortcuts."
-  [^KeyCode key-code shift? value drag-info]
+  [^KeyCode key-code shift? value _]
   (let [{:keys [col row]} value]
     (case (.getName key-code)
       "Delete" {:dispatch {:event/type :timeline/clear-selection}
@@ -564,10 +562,7 @@
   "Custom list-editor label renderer for tracks.
    Displays the track name and its assigned zone group."
   [zone-groups item]
-  (let [zone-hex (or (:color item)
-                     (get-in zone-groups [(:zone-group-id item) :color])
-                     zone-color-fallback)
-        zone-name (or (get-in zone-groups [(:zone-group-id item) :name])
+  (let [zone-name (or (get-in zone-groups [(:zone-group-id item) :name])
                       (when-let [gid (:zone-group-id item)] (name gid)))]
     (if zone-name
       (str (:name item "Track") " [" zone-name "]")
@@ -575,7 +570,7 @@
 
 (defn timeline-sidebar
   "Left pane: track list managed by list-editor."
-  [{:keys [context track-defs col row zone-groups list-props items-path]}]
+  [{:keys [context track-defs col row zone-groups items-path]}]
   {:fx/type :v-box
    :pref-width header-width
    :min-width header-width
@@ -713,12 +708,11 @@
    - :items         — Cue chain items vector
    - :track-defs    — Explicit Track definitions vector (from CueChain :tracks)
    - :zone-groups   — Map of zone-group-id -> group config
-   - :destination-zone-id — The cue chain's :destination-zone :zone-group-id
    - :timeline-ui   — Map from [:ui :timeline] state
    - :beats-elapsed — Current beat position from active cue timing
    - :loop-config   — Map with {:enabled? :start :duration}
    - :list-props    — Map of props to forward to list-editor sidebar"
-  [{:keys [fx/context col row items track-defs zone-groups destination-zone-id
+  [{:keys [fx/context col row items track-defs zone-groups
            timeline-ui beats-elapsed loop-config list-props]}]
   (let [{:keys [zoom-x scroll-x selection snap-enabled?
                 snap-value expanded-tracks sync-scroll-y
@@ -729,85 +723,84 @@
               snap-enabled? true
               snap-value 0.25
               expanded-tracks #{}}} timeline-ui
-        tracks (build-tracks (or track-defs []) (or items []) (or expanded-tracks #{}))
+        tracks (build-tracks (or track-defs []) (or items []) expanded-tracks)
         ;; Determine selected item ID for the effect bank
         selected-item-id (when (= 1 (count selection)) (first selection))
-        ;; Determine selected track-id: from the selected clip or first non-group track
-        selected-track-id (or (when selected-item-id
-                                (let [found-track (some (fn [t]
-                                                          (when (some (fn [it] (= (:id it) selected-item-id)) (:items t))
-                                                            t))
-                                                        tracks)]
-                                  (:id found-track)))
-                              (:id (first (remove #(= :group (:type %)) tracks))))]
-    {:fx/type :border-pane
-     :style "-fx-background-color: #121212;"
-     :top {:fx/type timeline-toolbar
-           :zoom-x zoom-x
-           :snap-enabled? snap-enabled?
-           :snap-value snap-value
-           :loop-config loop-config
-           :add-panel-open? add-panel-open?
+        ;; Determine explicit selected track from the track list sidebar
+        tracks-ui-state (fx/sub-ctx context subs/list-ui-state :timeline-tracks)
+        explicit-selected-track-id (first (:selected-ids tracks-ui-state))
+        ;; Determine selected track-id: explicit track > first leaf track
+        selected-track-id (or explicit-selected-track-id
+                              (:id (tl/first-leaf-track track-defs)))]
+    (cond->
+     {:fx/type :border-pane
+      :style "-fx-background-color: #121212;"
+      :top {:fx/type timeline-toolbar
+            :zoom-x zoom-x
+            :snap-enabled? snap-enabled?
+            :snap-value snap-value
+            :loop-config loop-config
+            :add-panel-open? add-panel-open?
+            :col col
+            :row row}
+      :center
+      {:fx/type :split-pane
+       :divider-positions [0.2]
+       :items
+       [{:fx/type fx/ext-on-instance-lifecycle
+         :on-created (fn [^ScrollPane sp]
+                       (events/dispatch! {:event/type :timeline/register-scroll-pane
+                                          :pane :left :instance sp}))
+         :on-deleted (fn [_]
+                       (events/dispatch! {:event/type :timeline/register-scroll-pane
+                                          :pane :left :instance nil}))
+         :desc
+         {:fx/type :scroll-pane
+          :fit-to-width true
+          :fit-to-height true
+          :hbar-policy :never
+          :vbar-policy :never
+          :vvalue (or sync-scroll-y 0.0)
+          :on-vvalue-changed {:event/type :timeline/sync-scroll :y 0.0} ;; Fallback, usually bound
+          :content {:fx/type timeline-sidebar
+                    :context context
+                    :track-defs track-defs
+                    :zone-groups zone-groups
+                    :col col
+                    :row row
+                    :items-path [:chains :cue-chains [col row] :tracks]}}}
+        {:fx/type fx/ext-on-instance-lifecycle
+         :on-created (fn [^ScrollPane sp]
+                       (events/dispatch! {:event/type :timeline/register-scroll-pane
+                                          :pane :right :instance sp}))
+         :on-deleted (fn [_]
+                       (events/dispatch! {:event/type :timeline/register-scroll-pane
+                                          :pane :right :instance nil}))
+         :desc
+         {:fx/type :scroll-pane
+          :fit-to-height true
+          :hbar-policy :always
+          :vbar-policy :as-needed
+          :vvalue (or sync-scroll-y 0.0)
+          :on-vvalue-changed {:event/type :timeline/sync-scroll :pane :right}
+          :style "-fx-background-color: transparent; -fx-background: transparent;"
+          :content
+          {:fx/type timeline-canvas
            :col col
-           :row row}
-     :bottom {:fx/type timeline-add-panel
-              :col col
-              :row row
-              :add-panel-open? add-panel-open?
-              :add-panel-preset-tab add-panel-preset-tab
-              :add-panel-effect-tab add-panel-effect-tab
-              :selected-item-id selected-item-id
-              :selected-track-id selected-track-id}
-     :center
-     {:fx/type :split-pane
-      :divider-positions [0.2]
-      :items
-      [{:fx/type fx/ext-on-instance-lifecycle
-        :on-created (fn [^ScrollPane sp]
-                      (events/dispatch! {:event/type :timeline/register-scroll-pane
-                                         :pane :left :instance sp}))
-        :on-deleted (fn [_]
-                      (events/dispatch! {:event/type :timeline/register-scroll-pane
-                                         :pane :left :instance nil}))
-        :desc
-        {:fx/type :scroll-pane
-         :fit-to-width true
-         :fit-to-height true
-         :hbar-policy :never
-         :vbar-policy :never
-         :vvalue (or sync-scroll-y 0.0)
-         :on-vvalue-changed {:event/type :timeline/sync-scroll :y 0.0} ;; Fallback, usually bound
-         :content {:fx/type timeline-sidebar
-                   :context context
-                   :track-defs track-defs
-                   :zone-groups zone-groups
-                   :col col
-                   :row row
-                   :items-path [:grid :cues col row :tracks]
-                   :list-props list-props}}}
-       {:fx/type fx/ext-on-instance-lifecycle
-        :on-created (fn [^ScrollPane sp]
-                      (events/dispatch! {:event/type :timeline/register-scroll-pane
-                                         :pane :right :instance sp}))
-        :on-deleted (fn [_]
-                      (events/dispatch! {:event/type :timeline/register-scroll-pane
-                                         :pane :right :instance nil}))
-        :desc
-        {:fx/type :scroll-pane
-         :fit-to-height true
-         :hbar-policy :always
-         :vbar-policy :as-needed
-         :vvalue (or sync-scroll-y 0.0)
-         :on-vvalue-changed {:event/type :timeline/sync-scroll :pane :right}
-         :style "-fx-background-color: transparent; -fx-background: transparent;"
-         :content
-         {:fx/type timeline-canvas
-          :col col
-          :row row
-          :tracks tracks
-          :zoom-x zoom-x
-          :scroll-x scroll-x
-          :selection selection
-          :beats-elapsed beats-elapsed
-          :loop-config loop-config
-          :zone-groups zone-groups}}}]}}))
+           :row row
+           :tracks tracks
+           :zoom-x zoom-x
+           :scroll-x scroll-x
+           :selection selection
+           :beats-elapsed beats-elapsed
+           :loop-config loop-config
+           :zone-groups zone-groups}}}]}}
+      add-panel-open?
+      (assoc :bottom {:fx/type timeline-add-panel
+                      :col col
+                      :row row
+                      :add-panel-open? add-panel-open?
+                      :add-panel-preset-tab add-panel-preset-tab
+                      :add-panel-effect-tab add-panel-effect-tab
+                      :selected-item-id selected-item-id
+                      :selected-track-id selected-track-id}))))

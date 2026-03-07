@@ -86,6 +86,7 @@
    - :on-right-click - Event map for right-click (augmented with :col, :row)
    - :drag-config - Map with :drag-type and :on-drop event
    - :label-fn - Function (fn [display-data] -> string)
+   - :context-menu-items - Optional sequence of menu items for context menu. Displayed only when cell is empty.
    
    Example:
    {:fx/type generic-grid-cell
@@ -96,76 +97,87 @@
     :on-right-click {:event/type :cue-chain/open-editor}
     :drag-config {:drag-type :grid-cell
                   :on-drop {:event/type :grid/move-cell}}
-    :label-fn cell-label}"
-  [{:keys [col row cell-type display-data on-click on-right-click 
-           drag-config label-fn]}]
+    :label-fn cell-label
+    :context-menu-items [{:fx/type :menu-item :text \"Create Cue\" ...}]}
+    "
+  [{:keys [col row cell-type display-data on-click on-right-click
+           drag-config label-fn context-menu-items]}]
   (let [{:keys [active? has-content?]} display-data
         label-text (label-fn display-data)
         style-classes (build-style-classes cell-type display-data)
         ;; Create drag handlers with current values (re-created on each render)
         drag-type (:drag-type drag-config)
-        on-drop (:on-drop drag-config)]
-    {:fx/type :stack-pane
-     :pick-on-bounds true  ; Ensure mouse events are captured by parent, not children
-     :pref-width 80
-     :pref-height 60
-     :style-class style-classes
-     
-     ;; Mouse click handler - handle left/right click and double-click
-     :on-mouse-clicked (fn [^MouseEvent e]
-                         (let [button (.getButton e)
-                               click-count (.getClickCount e)]
-                           (cond
-                             (= button MouseButton/SECONDARY)
-                             (do
-                               (log/debug "Grid cell right-click/double-click"
-                                          {:cell-type cell-type
-                                           :col col
-                                           :row row
-                                           :event-type (:event/type on-right-click)
-                                           :button (str button)
-                                           :click-count click-count})
-                               (events/dispatch! (assoc on-right-click
-                                                        :col col :row row)))
-                             
-                             ;; Single left-click: dispatch click event
-                             :else
-                             (events/dispatch! (assoc on-click
-                                                      :col col :row row
-                                                      :has-content? has-content?)))))
-     
-     ;; Drag handlers - use inline handlers that are re-created on each render
-     ;; This ensures has-content? and other values are always current
-     :on-drag-detected (when drag-config
-                         (drag-drop/make-drag-detected-handler
-                           {:drag-type drag-type
-                            :col col
-                            :row row
-                            :has-content? has-content?}))
-     
-     :on-drag-over (when drag-config
-                     (drag-drop/make-drag-over-handler
-                       {:drag-type drag-type}))
-     
-     :on-drag-dropped (when drag-config
-                        (drag-drop/make-drag-dropped-handler
-                          {:drag-type drag-type
-                           :col col
-                           :row row
-                           :on-drop on-drop}))
-     
-     :children [{:fx/type :v-box
-                 :alignment :center
-                 :spacing 4
-                 :children (filterv some?
-                                   [{:fx/type :label
-                                     :text label-text
-                                     :style-class "grid-cell-label"}
-                                    (when active?
-                                      {:fx/type :region
-                                       :pref-width 8
-                                       :pref-height 8
-                                       :style-class "grid-cell-active-indicator"})])}]}))
+        on-drop (:on-drop drag-config)
+        has-context-menu? (boolean (and (not has-content?) (seq context-menu-items)))
+        node {:fx/type :stack-pane
+              :pick-on-bounds true  ; Ensure mouse events are captured by parent, not children
+              :pref-width 80
+              :pref-height 60
+              :style-class style-classes
+
+              ;; Mouse click handler - handle left/right click and double-click
+              :on-mouse-clicked (fn [^MouseEvent e]
+                                  (let [button (.getButton e)
+                                        click-count (.getClickCount e)]
+                                    (cond
+                                      (= button MouseButton/SECONDARY)
+                                      (when-not has-context-menu?
+                                        (log/debug "Grid cell right-click/double-click"
+                                                   {:cell-type cell-type
+                                                    :col col
+                                                    :row row
+                                                    :event-type (:event/type on-right-click)
+                                                    :button (str button)
+                                                    :click-count click-count})
+                                        (events/dispatch! (assoc on-right-click
+                                                                 :col col :row row)))
+
+                                      ;; Single left-click: dispatch click event
+                                      :else
+                                      (events/dispatch! (assoc on-click
+                                                               :col col :row row
+                                                               :has-content? has-content?)))))
+
+              ;; Drag handlers - use inline handlers that are re-created on each render
+              ;; This ensures has-content? and other values are always current
+              :on-drag-detected (when drag-config
+                                  (drag-drop/make-drag-detected-handler
+                                   {:drag-type drag-type
+                                    :col col
+                                    :row row
+                                    :has-content? has-content?}))
+
+              :on-drag-over (when drag-config
+                              (drag-drop/make-drag-over-handler
+                               {:drag-type drag-type}))
+
+              :on-drag-dropped (when drag-config
+                                 (drag-drop/make-drag-dropped-handler
+                                  {:drag-type drag-type
+                                   :col col
+                                   :row row
+                                   :on-drop on-drop}))
+
+              :children [{:fx/type :v-box
+                          :alignment :center
+                          :spacing 4
+                          :children (filterv some?
+                                             [{:fx/type :label
+                                               :text label-text
+                                               :style-class "grid-cell-label"}
+                                              (when active?
+                                                {:fx/type :region
+                                                 :pref-width 8
+                                                 :pref-height 8
+                                                 :style-class "grid-cell-active-indicator"})])}]}]
+    (if has-context-menu?
+      {:fx/type :label
+       :content-display :graphic-only
+       :padding 0
+       :context-menu {:fx/type :context-menu
+                      :items context-menu-items}
+       :graphic node}
+      node)))
 
 
 ;; Cue Grid Cell
@@ -196,7 +208,13 @@
      :on-right-click {:event/type :cue-chain/open-editor}
      :drag-config {:drag-type :grid-cell
                    :on-drop {:event/type :grid/move-cell}}
-     :label-fn cell-label}))
+     :label-fn cell-label
+     :context-menu-items [{:fx/type :menu-item
+                           :text "Create Cue"
+                           :on-action {:event/type :cue-chain/open-editor :col col :row row}}
+                          {:fx/type :menu-item
+                           :text "Create Timeline Cue"
+                           :on-action {:event/type :timeline-cue-editor/open :col col :row row}}]}))
 
 
 ;; Effects Grid Cell

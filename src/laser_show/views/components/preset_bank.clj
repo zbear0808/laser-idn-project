@@ -41,9 +41,15 @@
    Props:
    - :cell - [col row] of the cell being edited
    - :active-tab - Currently active category tab (default: :geometric)
-   - :on-tab-change - Event map or function for tab changes"
-  [{:keys [cell active-tab on-tab-change]}]
-  (let [[col row] cell]
+   - :on-tab-change - Event map or function for tab changes
+   - :item-event-template - Optional override for the event dispatched on item click.
+                            Defaults to {:event/type :cue-chain/add-preset :col col :row row}"
+  [{:keys [cell active-tab on-tab-change item-event-template]}]
+  (let [[col row] cell
+        event-template (or item-event-template
+                           {:event/type :cue-chain/add-preset
+                            :col col
+                            :row row})]
     {:fx/type tabbed-bank/tabbed-bank
      :tab-definitions preset-bank-tab-definitions
      :active-tab (or active-tab :geometric)
@@ -51,9 +57,7 @@
      ;; Data-driven: pass items map instead of function
      :items-by-category presets-by-category
      ;; Data-driven event template - handler will receive :item-id and :item
-     :item-event-template {:event/type :cue-chain/add-preset
-                           :col col
-                           :row row}
+     :item-event-template event-template
      :item-name-key :name
      :item-id-key :id
      :button-style-class "bank-item-btn"
