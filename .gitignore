@@ -51,3 +51,9 @@ test-*.log
 /plans
 
 /cljfx cljfx 1.10.6 examples/
+
+
+# blocking stuff from other branches
+/backend/build/
+/frontend/node_modules/
+/legacy/
