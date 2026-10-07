@@ -44,7 +44,8 @@
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
             [laser-show.animation.effects.calibration]
-            [laser-show.animation.effects.zone]))
+            [laser-show.animation.effects.zone]
+            [laser-show.services.ilda-player :as ilda-player]))
 
 
 ;; Zone Frame Cache
@@ -164,9 +165,10 @@
   (get-in (state/get-raw-state) [:timing :bpm] 120.0))
 
 (defn is-playing?
-  "Check if playback is active."
+  "Check if playback is active (global transport or ILDA)."
   []
-  (get-in (state/get-raw-state) [:playback :playing?] false))
+  (or (get-in (state/get-raw-state) [:playback :playing?] false)
+      (ilda-player/is-playing?)))
 
 (defn get-preview-zone-filter
   "Get the current preview zone group filter from state.
@@ -522,8 +524,9 @@
   ([] (generate-current-frame {}))
   ([{:keys [_for-preview? _skip-zone-filter?] :or {_for-preview? true _skip-zone-filter? false}}]
    (when (is-playing?)
-     (let [all-cues (get-all-active-cues-data)]
-       (when (seq all-cues)
+     (let [all-cues (get-all-active-cues-data)
+           ilda-frame (ilda-player/get-current-frame)]
+       (when (or (seq all-cues) ilda-frame)
          (let [raw-state (state/get-raw-state)
                bpm (get-bpm)
                current-time (System/currentTimeMillis)
@@ -557,6 +560,11 @@
                ;; Concatenate all cue frames with blanking between them
                ;; Filter out nil frames but include all in cue-destinations
                all-frames (u/keepv :frame cue-results)
+
+               ;; Include ILDA frame if available
+               all-frames (cond-> all-frames
+                            ilda-frame (conj ilda-frame))
+
                base-frame (concatenate-frames all-frames 0)
 
                ;; Build cue-destinations map from ALL cues (not just those with frames)
