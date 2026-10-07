@@ -26,7 +26,7 @@
   {:state (assoc-in state [:timing :bpm] (double bpm))})
 
 (defn- handle-timing-tap-tempo
-  "Record a tap for tap-tempo calculation.
+  "Record a tap for tap-tempo calculation and smoothly align beat phase.
    Clears old taps if the last tap was more than 2 seconds ago,
    preventing stale tap data from affecting BPM calculation."
   [{:keys [state] :as event}]
@@ -38,7 +38,10 @@
                               (> (- now last-tap) 2000))
                         [now]
                         (conj old-tap-times now))]
-    {:state (assoc-in state [:timing :tap-times] new-tap-times)
+    {:state (-> state
+                (assoc-in [:timing :tap-times] new-tap-times)
+                (update-in [:timing :global-clock] cue-timing/align-global-clock-phase)
+                (update-in [:playback :active-cues] cue-timing/align-all-active-cues-phase))
      :timing/calculate-bpm true}))
 
 
@@ -112,7 +115,22 @@
   "Set the phase offset target for beat alignment.
    Used by external sync and tap-tempo resync."
   [{:keys [state offset]}]
-  {:state (assoc-in state [:playback :phase-offset-target] offset)})
+  (let [offset' (double (or offset 0.0))]
+    {:state (-> state
+                (assoc-in [:playback :phase-offset-target] offset')
+                (update-in [:timing :global-clock]
+                           (fn [gc]
+                             (let [cur (double (or (:phase-offset gc) 0.0))]
+                               (assoc gc :phase-offset-target (+ cur offset')))))
+                (update-in [:playback :active-cues]
+                           (fn [cues]
+                             (when cues
+                               (reduce-kv
+                                (fn [acc k v]
+                                  (let [cur (double (or (:phase-offset v) 0.0))]
+                                    (assoc acc k (assoc v :phase-offset-target (+ cur offset')))))
+                                {}
+                                cues)))))}))
 
 
 ;; Link Settings Events

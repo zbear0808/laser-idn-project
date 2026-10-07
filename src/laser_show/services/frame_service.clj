@@ -99,7 +99,8 @@
                                  :accumulated-ms 0.0
                                  :last-frame-time 0})
                          current-time-ms
-                         bpm)))
+                         bpm
+                         resync-rate)))
            ;; 2. Update all active cues' timing
            (update-in [:playback :active-cues]
                       (fn [cues]

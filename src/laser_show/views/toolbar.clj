@@ -115,7 +115,9 @@
              :size 16}
    :style-class "transport-btn"
    :tooltip {:fx/type :tooltip :text "Tap to set BPM"}
-   :on-action {:event/type :timing/tap-tempo}})
+   :on-action (fn [_]
+                {:event/type :timing/tap-tempo
+                 :time (System/currentTimeMillis)})})
 
 (defn beat-square
   "Individual beat square in the indicator."

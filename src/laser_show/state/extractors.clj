@@ -42,10 +42,14 @@
   (get-in state [:timing :global-clock]))
 
 (defn global-accumulated-beats
-  "Get accumulated beats from global clock.
+  "Get accumulated beats from global clock, including smooth phase offset.
    Use for BPM visualization and phase calculations."
   [state]
-  (or (:accumulated-beats (global-clock state)) 0.0))
+  (let [gc (global-clock state)]
+    (or (:effective-beats gc)
+        (when-let [beats (:accumulated-beats gc)]
+          (+ (double beats) (double (or (:phase-offset gc) 0.0))))
+        0.0)))
 
 
 ;; Playback Extractors

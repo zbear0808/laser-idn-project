@@ -3,6 +3,7 @@
    
    Tests timing/transport handlers."
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.events.handlers.timing :as timing]))
 
 
@@ -147,3 +148,63 @@
         (is (= 0.0 (:accumulated-ms cue-1-0)))
         (is (= 0.0 (:phase-offset cue-1-0)))
         (is (= 0.0 (:phase-offset-target cue-1-0)))))))
+
+
+(deftest timing-tap-tempo-phase-alignment-test
+  (testing "Tap tempo sets target phase to align to nearest integer beat without snapping"
+    (let [state {:timing {:tap-times []
+                          :global-clock {:accumulated-beats 12.35
+                                         :accumulated-ms 6175.0
+                                         :phase-offset 0.0
+                                         :phase-offset-target 0.0
+                                         :last-frame-time 1000}}
+                 :playback {:active-cues {[0 0] {:accumulated-beats 4.35
+                                                 :phase-offset 0.0
+                                                 :phase-offset-target 0.0}}}}
+          event {:event/type :timing/tap-tempo
+                 :state state
+                 :time 2000}
+          result (timing/handle event)
+          new-state (:state result)
+          gc (get-in new-state [:timing :global-clock])
+          cue (get-in new-state [:playback :active-cues [0 0]])]
+      ;; Current phase-offset must NOT snap immediately at tap time (smooth alignment)
+      (is (= 0.0 (:phase-offset gc)))
+      (is (= 0.0 (:phase-offset cue)))
+      ;; Target phase offset must pull backward by -0.35 to align with integer beat
+      (is (< (Math/abs (- -0.35 (:phase-offset-target gc))) 0.001))
+      (is (< (Math/abs (- -0.35 (:phase-offset-target cue))) 0.001))))
+
+  (testing "Tap tempo pulls forward when past half-beat boundary"
+    (let [state {:timing {:tap-times []
+                          :global-clock {:accumulated-beats 12.80
+                                         :accumulated-ms 6400.0
+                                         :phase-offset 0.0
+                                         :phase-offset-target 0.0
+                                         :last-frame-time 1000}}}
+          event {:event/type :timing/tap-tempo
+                 :state state
+                 :time 2000}
+          result (timing/handle event)
+          gc (get-in result [:state :timing :global-clock])]
+      (is (= 0.0 (:phase-offset gc)))
+      ;; 12.80 -> nearest beat is 13.0, correction is +0.20
+      (is (< (Math/abs (- 0.20 (:phase-offset-target gc))) 0.001)))))
+
+(deftest global-clock-smooth-decay-test
+  (testing "update-global-clock smoothly glides phase-offset toward target across frames"
+    (let [initial-clock {:accumulated-beats 10.0
+                         :accumulated-ms 5000.0
+                         :phase-offset 0.0
+                         :phase-offset-target 0.25
+                         :last-frame-time 1000}
+          ;; Advance 1 beat (500ms at 120 BPM) with resync-rate 4.0
+          frame-1 (cue-timing/update-global-clock initial-clock 1500 120.0 4.0)]
+      ;; Accumulated beats increased by 1 beat
+      (is (< (Math/abs (- 11.0 (:accumulated-beats frame-1))) 0.001))
+      ;; Phase offset decayed towards 0.25 smoothly, not 0.0 and not snapped to 0.25 yet
+      (is (> (:phase-offset frame-1) 0.0))
+      (is (< (:phase-offset frame-1) 0.25))
+      ;; Effective beats is continuous
+      (is (= (:effective-beats frame-1)
+             (+ (:accumulated-beats frame-1) (:phase-offset frame-1)))))))
