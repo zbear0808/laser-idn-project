@@ -33,8 +33,9 @@
    Base class 'grid-cell' is always included.
    Cell type adds 'grid-cell-<type>' (e.g., grid-cell-effects).
    State classes are added based on display-data."
-  [cell-type {:keys [active? has-content?]}]
+  [cell-type {:keys [active? has-content? selected?]}]
   (cond-> ["grid-cell" (str "grid-cell-" (name cell-type))]
+    selected? (conj "grid-cell-selected")
     active? (conj "grid-cell-active")
     has-content? (conj "grid-cell-content")
     (not has-content?) (conj "grid-cell-empty")))
@@ -45,13 +46,14 @@
 
 (defn cell-label
   "Display text for a cue cell.
-   Shows custom name if set, otherwise first preset name, or preset count if multiple."
-  [{:keys [name first-preset-id preset-count]}]
+   Shows custom name if set, otherwise first preset name, or preset count if multiple.
+   Shows 'Timeline' for timeline cues that do not yet have presets."
+  [{:keys [name first-preset-id preset-count timeline?]}]
   (cond
     ;; Custom name takes priority
     (seq name) name
-    ;; No content
-    (nil? first-preset-id) ""
+    ;; No presets
+    (nil? first-preset-id) (if timeline? "Timeline" "")
     ;; Single preset - show preset name
     (= preset-count 1) (-> first-preset-id clojure.core/name (str/replace "-" " "))
     ;; Multiple presets - show first + count
@@ -108,7 +110,7 @@
         ;; Create drag handlers with current values (re-created on each render)
         drag-type (:drag-type drag-config)
         on-drop (:on-drop drag-config)
-        has-context-menu? (boolean (and (not has-content?) (seq context-menu-items)))
+        has-context-menu? (boolean (seq context-menu-items))
         node {:fx/type :stack-pane
               :pick-on-bounds true  ; Ensure mouse events are captured by parent, not children
               :pref-width 80
@@ -120,20 +122,24 @@
                                   (let [button (.getButton e)
                                         click-count (.getClickCount e)]
                                     (cond
-                                      (= button MouseButton/SECONDARY)
-                                      (when-not has-context-menu?
-                                        (log/debug "Grid cell right-click/double-click"
+                                      ;; Double-click left: open editor directly
+                                      (and (= button MouseButton/PRIMARY) (>= click-count 2))
+                                      (events/dispatch! (assoc on-right-click
+                                                               :col col :row row))
+
+                                      ;; Secondary click when no context menu (fallback)
+                                      (and (= button MouseButton/SECONDARY) (not has-context-menu?))
+                                      (do
+                                        (log/debug "Grid cell right-click"
                                                    {:cell-type cell-type
                                                     :col col
                                                     :row row
-                                                    :event-type (:event/type on-right-click)
-                                                    :button (str button)
-                                                    :click-count click-count})
+                                                    :event-type (:event/type on-right-click)})
                                         (events/dispatch! (assoc on-right-click
                                                                  :col col :row row)))
 
-                                      ;; Single left-click: dispatch click event
-                                      :else
+                                      ;; Single left-click: dispatch click event (trigger / select)
+                                      (= button MouseButton/PRIMARY)
                                       (events/dispatch! (assoc on-click
                                                                :col col :row row
                                                                :has-content? has-content?)))))
@@ -192,29 +198,50 @@
    
    Behavior:
    - Left-click: Trigger the cell (if has content) or select (if empty)
-   - Right-click/Double-click: Open cue chain editor
+   - Double-click: Open appropriate editor (timeline or cue chain)
+   - Right-click: Context menu with Copy/Paste/Edit/Clear actions
    - Drag from cell: Start dragging cell content
    - Drop on cell: Move cell content"
   [{:keys [fx/context col row]}]
   (let [display-data (fx/sub-ctx context subs/cell-display-data col row)
-        ;; Map the subscription data to the generic component's expected format
-        adapted-data (assoc display-data :has-content? (:has-content? display-data))]
+        has-content? (:has-content? display-data)
+        timeline? (:timeline? display-data)
+        open-editor-event (if timeline?
+                            {:event/type :timeline-cue-editor/open}
+                            {:event/type :cue-chain/open-editor})]
     {:fx/type generic-grid-cell
      :col col
      :row row
      :cell-type :grid
-     :display-data adapted-data
+     :display-data display-data
      :on-click {:event/type :grid/cell-clicked}
-     :on-right-click {:event/type :cue-chain/open-editor}
+     :on-right-click open-editor-event
      :drag-config {:drag-type :grid-cell
                    :on-drop {:event/type :grid/move-cell}}
      :label-fn cell-label
-     :context-menu-items [{:fx/type :menu-item
-                           :text "Create Cue"
-                           :on-action {:event/type :cue-chain/open-editor :col col :row row}}
-                          {:fx/type :menu-item
-                           :text "Create Timeline Cue"
-                           :on-action {:event/type :timeline-cue-editor/open :col col :row row}}]}))
+     :context-menu-items (if has-content?
+                           [{:fx/type :menu-item
+                             :text "Copy Cue (Ctrl+C)"
+                             :on-action {:event/type :grid/copy-cell :col col :row row}}
+                            {:fx/type :menu-item
+                             :text "Paste Cue (Ctrl+V)"
+                             :on-action {:event/type :grid/paste-cell :col col :row row}}
+                            {:fx/type :menu-item
+                             :text "Edit Cue..."
+                             :on-action (assoc open-editor-event :col col :row row)}
+                            {:fx/type :separator-menu-item}
+                            {:fx/type :menu-item
+                             :text "Clear Cell"
+                             :on-action {:event/type :grid/clear-cell :col col :row row}}]
+                           [{:fx/type :menu-item
+                             :text "Create Cue"
+                             :on-action {:event/type :cue-chain/open-editor :col col :row row}}
+                            {:fx/type :menu-item
+                             :text "Create Timeline Cue"
+                             :on-action {:event/type :timeline-cue-editor/open :col col :row row}}
+                            {:fx/type :menu-item
+                             :text "Paste Cue (Ctrl+V)"
+                             :on-action {:event/type :grid/paste-cell :col col :row row}}])}))
 
 
 ;; Effects Grid Cell
@@ -229,16 +256,19 @@
    
    Behavior:
    - Left-click: Toggle the effect cell
-   - Right-click: Open effect chain editor dialog
+   - Double-click: Open effect chain editor dialog
+   - Right-click: Context menu with Copy/Paste/Edit/Clear actions
    - Drag from cell: Start dragging effects
    - Drop on cell: Move effects"
   [{:keys [fx/context col row]}]
   (let [display-data (fx/sub-ctx context subs/effect-cell-display-data col row)
+        has-effects? (:has-effects? display-data)
         ;; Map the subscription data - effects cells use has-effects? instead of has-content?
         adapted-data {:active? (:active? display-data)
-                      :has-content? (:has-effects? display-data)
+                      :selected? (:selected? display-data)
+                      :has-content? has-effects?
                       :effect-count (:effect-count display-data)
-                      :has-effects? (:has-effects? display-data)
+                      :has-effects? has-effects?
                       :name (:name display-data)}]
     {:fx/type generic-grid-cell
      :col col
@@ -249,4 +279,17 @@
      :on-right-click {:event/type :effect-chain/open-editor}
      :drag-config {:drag-type :effects-cell
                    :on-drop {:event/type :effects/move-cell}}
-     :label-fn effects-label}))
+     :label-fn effects-label
+     :context-menu-items [{:fx/type :menu-item
+                           :text "Copy Effects (Ctrl+C)"
+                           :on-action {:event/type :effects/copy-cell :col col :row row}}
+                          {:fx/type :menu-item
+                           :text "Paste Effects (Ctrl+V)"
+                           :on-action {:event/type :effects/paste-cell :col col :row row}}
+                          {:fx/type :menu-item
+                           :text "Edit Effect Chain..."
+                           :on-action {:event/type :effect-chain/open-editor :col col :row row}}
+                          {:fx/type :separator-menu-item}
+                          {:fx/type :menu-item
+                           :text "Clear Cell"
+                           :on-action {:event/type :effects/clear-cell :col col :row row}}]}))

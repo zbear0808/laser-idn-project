@@ -36,7 +36,9 @@
         new-active (if (some? explicit-value)
                      explicit-value
                      (not current-active))]
-    {:state (assoc-in state [:chains :effect-chains [col row] :active?] new-active)}))
+    {:state (-> state
+                (assoc-in [:chains :effect-chains [col row] :active?] new-active)
+                (assoc-in [:effects :selected-cell] [col row]))}))
 
 (defn- handle-effects-clear-cell
   "Clear all effects from a cell."

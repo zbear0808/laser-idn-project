@@ -178,6 +178,15 @@
                   {:fx/type :region
                    :h-box/hgrow :always}
                   {:fx/type :button
+                   :text "Open in Cue Chain Editor"
+                   :style-class "button-secondary"
+                   :on-action (fn [_]
+                                (events/dispatch! {:event/type :ui/close-dialog
+                                                   :dialog-id :timeline-cue-editor})
+                                (events/dispatch! {:event/type :cue-chain/open-editor
+                                                   :col col
+                                                   :row row}))}
+                  {:fx/type :button
                    :text "Close"
                    :style-class "button-primary"
                    :on-action {:event/type :ui/close-dialog

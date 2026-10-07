@@ -40,6 +40,11 @@
        ;; State-Based Background Colors
        
        
+       ;; Selected cell (accent border)
+       ".grid-cell-selected"
+       {:-fx-border-color blue
+        :-fx-border-width 2}
+       
        ;; Cell with content (cues/effects assigned)
        ".grid-cell-content"
        {:-fx-background-color cell-content}

@@ -9,7 +9,9 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.dev-config :as dev-config]
             [laser-show.routing.zone-effects :as ze]
-            [laser-show.state.persistent :as persistent]))
+            [laser-show.state.persistent :as persistent]
+            [laser-show.events.handlers.grid :as grid]
+            [laser-show.events.handlers.effects :as effects]))
 
 
 
@@ -125,28 +127,29 @@
 
 (defn- handle-edit-copy
   "Copy selected cell to clipboard.
-   NOTE: This handler delegates to domain-specific handlers based on active tab.
-   It will need to require grid-handlers and effects-handlers modules."
+   Delegates to grid or effects handler depending on active tab.
+   Falls back to active playing cue on grid tab if no cell is explicitly selected."
   [{:keys [state]}]
   (let [active-tab (get-in state [:ui :active-tab])
         selected-cell (case active-tab
-                        :grid (get-in state [:grid :selected-cell])
+                        :grid (or (get-in state [:grid :selected-cell])
+                                  (first (keys (get-in state [:playback :active-cues]))))
                         :effects (get-in state [:effects :selected-cell])
                         nil)]
     (if selected-cell
       (let [[col row] selected-cell]
-        ;; TODO: Import and call appropriate handler when modules are refactored
-        ;; For now, return empty effects to avoid breaking compilation
-        (log/debug "Edit > Copy: delegating to" active-tab "handler")
-        {:state state})
+        (log/debug "Edit > Copy: delegating to" active-tab "handler" {:col col :row row})
+        (case active-tab
+          :grid (grid/handle {:event/type :grid/copy-cell :col col :row row :state state})
+          :effects (effects/handle {:event/type :effects/copy-cell :col col :row row :state state})
+          {:state state}))
       (do
         (log/debug "Edit > Copy: No cell selected")
         {:state state}))))
 
 (defn- handle-edit-paste
   "Paste clipboard to selected cell.
-   NOTE: This handler delegates to domain-specific handlers based on active tab.
-   It will need to require grid-handlers and effects-handlers modules."
+   Delegates to grid or effects handler depending on active tab."
   [{:keys [state]}]
   (let [active-tab (get-in state [:ui :active-tab])
         selected-cell (case active-tab
@@ -155,17 +158,18 @@
                         nil)]
     (if selected-cell
       (let [[col row] selected-cell]
-        ;; TODO: Import and call appropriate handler when modules are refactored
-        (log/debug "Edit > Paste: delegating to" active-tab "handler")
-        {:state state})
+        (log/debug "Edit > Paste: delegating to" active-tab "handler" {:col col :row row})
+        (case active-tab
+          :grid (grid/handle {:event/type :grid/paste-cell :col col :row row :state state})
+          :effects (effects/handle {:event/type :effects/paste-cell :col col :row row :state state})
+          {:state state}))
       (do
         (log/debug "Edit > Paste: No cell selected")
         {:state state}))))
 
 (defn- handle-edit-clear-cell
   "Clear the selected cell.
-   NOTE: This handler delegates to domain-specific handlers based on active tab.
-   It will need to require grid-handlers and effects-handlers modules."
+   Delegates to grid or effects handler depending on active tab."
   [{:keys [state]}]
   (let [active-tab (get-in state [:ui :active-tab])
         selected-cell (case active-tab
@@ -174,9 +178,11 @@
                         nil)]
     (if selected-cell
       (let [[col row] selected-cell]
-        ;; TODO: Import and call appropriate handler when modules are refactored
-        (log/debug "Edit > Clear Cell: delegating to" active-tab "handler")
-        {:state state})
+        (log/debug "Edit > Clear Cell: delegating to" active-tab "handler" {:col col :row row})
+        (case active-tab
+          :grid (grid/handle {:event/type :grid/clear-cell :col col :row row :state state})
+          :effects (effects/handle {:event/type :effects/clear-cell :col col :row row :state state})
+          {:state state}))
       (do
         (log/debug "Edit > Clear Cell: No cell selected")
         {:state state}))))

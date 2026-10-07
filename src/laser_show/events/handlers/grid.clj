@@ -8,6 +8,7 @@
   (:require [laser-show.events.helpers :as h]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.state.extractors :as ex]
+            [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.cue-timing :as cue-timing]
             [clojure.tools.logging :as log]))
 
@@ -59,6 +60,11 @@
   (log/error "TODO: Handler not implemented for :grid/trigger-cell" event)
   {})
 
+(defn- handle-grid-select-cell
+  "Select a cell in the grid without triggering playback."
+  [{:keys [col row state]}]
+  {:state (assoc-in state [:grid :selected-cell] [col row])})
+
 (defn- handle-grid-cell-clicked
   "Handle grid cell click - dispatches to trigger or select.
    
@@ -69,27 +75,28 @@
    Note: Button detection is handled in grid_cell.clj before dispatching.
    This handler receives only single left-clicks."
   [{:keys [col row has-content? state]}]
-  (if has-content?
-    (let [trigger-mode (resolve-trigger-mode state col row)
-          cue-active? (contains? (get-in state [:playback :active-cues]) [col row])]
-      (log/info "Grid cell clicked:"
-                {:col col :row row
-                 :trigger-mode trigger-mode
-                 :cue-active? cue-active?})
-      (case trigger-mode
-        :toggle (if cue-active?
-                  (do
-                    (log/info "Toggle mode: Turning OFF cue" {:col col :row row})
-                    {:state (untrigger-cue state col row)})
-                  (do
-                    (log/info "Toggle mode: Turning ON cue" {:col col :row row})
-                    {:state (trigger-cue state col row)}))
-        ;; :retrigger or any other value - always trigger/restart
-        (do
-          (log/info "Retrigger mode: Always triggering cue" {:col col :row row})
-          {:state (trigger-cue state col row)})))
-    ;; Left click on empty - select
-    {:state (assoc-in state [:grid :selected-cell] [col row])}))
+  (let [state-with-selected (assoc-in state [:grid :selected-cell] [col row])]
+    (if has-content?
+      (let [trigger-mode (resolve-trigger-mode state-with-selected col row)
+            cue-active? (contains? (get-in state-with-selected [:playback :active-cues]) [col row])]
+        (log/info "Grid cell clicked:"
+                  {:col col :row row
+                   :trigger-mode trigger-mode
+                   :cue-active? cue-active?})
+        (case trigger-mode
+          :toggle (if cue-active?
+                    (do
+                      (log/info "Toggle mode: Turning OFF cue" {:col col :row row})
+                      {:state (untrigger-cue state-with-selected col row)})
+                    (do
+                      (log/info "Toggle mode: Turning ON cue" {:col col :row row})
+                      {:state (trigger-cue state-with-selected col row)}))
+          ;; :retrigger or any other value - always trigger/restart
+          (do
+            (log/info "Retrigger mode: Always triggering cue" {:col col :row row})
+            {:state (trigger-cue state-with-selected col row)})))
+      ;; Left click on empty - select
+      {:state state-with-selected})))
 
 (defn- handle-grid-move-cell
   "Move a cell's cue chain from one position to another."
@@ -121,6 +128,26 @@
                                  [:chains :cue-chains [col row]]
                                  :cue-chain))
 
+(defn- handle-grid-clear-cell
+  "Clear a cell's cue chain."
+  [{:keys [col row state]}]
+  {:state (-> state
+              (update-in [:chains :cue-chains] dissoc [col row])
+              (cond-> (= (get-in state [:playback :active-cell]) [col row])
+                (assoc-in [:playback :active-cell] nil))
+              (update-in [:playback :active-cues] dissoc [col row])
+              h/mark-dirty)})
+
+(defn- handle-grid-open-cell-editor
+  "Open the appropriate editor for a cell based on its cue configuration.
+   Dispatches :timeline-cue-editor/open for timeline cues,
+   or :cue-chain/open-editor for standard cues."
+  [{:keys [col row state]}]
+  (let [cue-chain (get-in state [:chains :cue-chains [col row]])]
+    {:dispatch (if (cue-chains/timeline-cue? cue-chain)
+                 {:event/type :timeline-cue-editor/open :col col :row row}
+                 {:event/type :cue-chain/open-editor :col col :row row})}))
+
 
 ;; Public API
 
@@ -133,9 +160,12 @@
   (case type
     :grid/trigger-cell (handle-grid-trigger-cell event)
     :grid/cell-clicked (handle-grid-cell-clicked event)
+    :grid/select-cell (handle-grid-select-cell event)
+    :grid/open-cell-editor (handle-grid-open-cell-editor event)
     :grid/move-cell (handle-grid-move-cell event)
     :grid/copy-cell (handle-grid-copy-cell event)
     :grid/paste-cell (handle-grid-paste-cell event)
+    :grid/clear-cell (handle-grid-clear-cell event)
     
     ;; Unknown event in this domain
     {}))

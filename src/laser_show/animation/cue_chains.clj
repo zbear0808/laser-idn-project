@@ -54,3 +54,21 @@
       :params merged-params
       :effects effects
       :enabled? enabled?})))
+
+(defn timeline-cue?
+  "Check whether a cue-chain map is configured as a timeline cue.
+   Returns true if :editor-type is explicitly :timeline,
+   or if :editor-type is not :cue-chain and the cue has tracks or timeline items."
+  [cue-chain]
+  (boolean
+   (and (map? cue-chain)
+        (case (:editor-type cue-chain)
+          :timeline true
+          :cue-chain false
+          ;; Default when :editor-type is not set:
+          (or (seq (:tracks cue-chain))
+              (some (fn [item]
+                      (or (contains? item :timeline/start)
+                          (contains? item :timeline/duration)
+                          (contains? item :track-id)))
+                    (:items cue-chain [])))))))

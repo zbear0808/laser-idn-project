@@ -411,9 +411,10 @@
 
 (defn- handle-open-editor
   "Open the timeline cue editor for a cell.
-   If the cue chain's items are not yet timeline-ready, initializes:
-   - :timeline/start and :timeline/duration on every item
-   - Tracks from :destination-zone via auto-initialize-tracks
+   Initializes timeline configuration:
+   - Sets :editor-type to :timeline
+   - Ensures :timeline/start and :timeline/duration on every item
+   - Tracks from :destination-zone via auto-initialize-tracks if missing
    Then chains into :ui/open-dialog to actually show the dialog."
   [{:keys [col row state]}]
   (let [chain-path [:chains :cue-chains [col row]]
@@ -422,15 +423,17 @@
         zone-groups (get state :zone-groups {})
         ready?     (timeline-ready? items)
         has-tracks? (seq (:tracks cue-chain))
+        timeline-type? (= (:editor-type cue-chain) :timeline)
 
         updated-state
-        (if (and ready? has-tracks?)
+        (if (and ready? has-tracks? timeline-type?)
           state
           (let [updated-items (if ready? items (mapv ensure-item-timeline-fields items))
-                chain-with-items (assoc cue-chain :items updated-items)
-                final-chain (if has-tracks?
-                              chain-with-items
-                              (tl/auto-initialize-tracks chain-with-items zone-groups))]
+                chain-with-items (assoc (or cue-chain {}) :items updated-items)
+                final-chain (cond-> (if has-tracks?
+                                      chain-with-items
+                                      (tl/auto-initialize-tracks chain-with-items zone-groups))
+                              true (assoc :editor-type :timeline))]
             (-> state
                 (assoc-in chain-path final-chain)
                 h/mark-dirty)))]

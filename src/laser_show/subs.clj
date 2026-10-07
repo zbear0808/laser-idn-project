@@ -27,6 +27,7 @@
   (:require [cljfx.api :as fx]
             [laser-show.state.extractors :as ex]
             [laser-show.css.core :as css]
+            [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.chains :as chains]
             [laser-show.common.util :as u]))
 
@@ -73,6 +74,16 @@
 
 (defn grid-size [context]
   (fx/sub-val context ex/grid-size))
+
+(defn selected-grid-cell
+  "Get the currently selected grid cell coordinates [col row] or nil."
+  [context]
+  (fx/sub-val context get-in [:grid :selected-cell]))
+
+(defn selected-effects-cell
+  "Get the currently selected effects cell coordinates [col row] or nil."
+  [context]
+  (fx/sub-val context get-in [:effects :selected-cell]))
 
 
 ;; --- UI ---
@@ -144,7 +155,9 @@
    - :preset-count - number of presets in the cue chain
    - :first-preset-id - id of first preset (for display)
    - :active? - is this cell playing?
-   - :has-content? - does cell have any presets?"
+   - :selected? - is this cell currently selected?
+   - :timeline? - is this a timeline cue?
+   - :has-content? - does cell have any presets or timeline configuration?"
   [context col row]
   (let [;; Read cue chain from unified :chains domain
         chains-data (fx/sub-val context :chains)
@@ -153,13 +166,16 @@
         ;; Check if this cell is in the active-cues map (multi-cue support)
         active-cues (fx/sub-val context ex/active-cues)
         active? (contains? active-cues [col row])
+        selected? (= (fx/sub-ctx context selected-grid-cell) [col row])
         ;; Flatten to get all presets (excluding groups)
-        flat-items (filter #(= :preset (:type %))
-                           (tree-seq #(= :group (:type %))
-                                     #(:items % [])
-                                     {:type :group :items items}))
+        flat-items (filterv #(= :preset (:type %))
+                            (tree-seq #(= :group (:type %))
+                                      #(:items % [])
+                                      {:type :group :items items}))
         first-preset (first flat-items)
-        preset-count (count flat-items)]
+        preset-count (count flat-items)
+        timeline? (cue-chains/timeline-cue? cue-chain-data)
+        has-content? (or (pos? preset-count) timeline?)]
     {:col col
      :row row
      :name (:name cue-chain-data)
@@ -167,7 +183,9 @@
      :preset-count preset-count
      :first-preset-id (:preset-id first-preset)
      :active? active?
-     :has-content? (pos? preset-count)}))
+     :selected? selected?
+     :timeline? timeline?
+     :has-content? has-content?}))
 
 (defn active-cell-preset
   "Get the preset ID of the currently active cell.
@@ -204,6 +222,7 @@
    - :effect-count - number of actual effects in chain (flattened, excludes groups)
    - :first-effect-id - id of first effect (not group)
    - :active? - is effect chain active?
+   - :selected? - is effect chain cell selected?
    - :has-effects? - does cell have any effects?
    - :display-text - text to display in the cell"
   [context col row]
@@ -215,13 +234,15 @@
         ;; Flatten the chain to get actual effects (not groups)
         flattened-effects (chains/flatten-chain effect-chain)
         first-effect (first flattened-effects)
-        effect-count (count flattened-effects)]
+        effect-count (count flattened-effects)
+        selected? (= (fx/sub-ctx context selected-effects-cell) [col row])]
     {:col col
      :row row
      :name (:name cell-data)
      :effect-count effect-count
      :first-effect-id (:effect-id first-effect)
      :active? (:active? cell-data false)
+     :selected? selected?
      :has-effects? (pos? effect-count)
      :display-text (when first-effect
                      (str (name (:effect-id first-effect))

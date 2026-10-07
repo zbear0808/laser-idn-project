@@ -1,7 +1,8 @@
 (ns laser-show.events.grid-handlers-test
   "Tests for grid event handlers focusing on complex state transitions."
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [laser-show.state.core :as state]
    [laser-show.events.handlers.grid :as grid]
    [laser-show.state.domains :refer [build-initial-state]]))
 
@@ -13,6 +14,12 @@
 (def base-state
   "Base state using actual app initial state structure."
   (build-initial-state))
+
+(defn init-state-fixture [f]
+  (state/init-state! base-state)
+  (f))
+
+(use-fixtures :each init-state-fixture)
 
 (def sample-state-empty
   "Empty grid state - clear out default cue chains from initial state."
@@ -149,7 +156,7 @@
 
 
 (deftest handle-grid-cell-clicked-with-content
-  (testing "Clicking cell with content triggers playback"
+  (testing "Clicking cell with content triggers playback and selects cell"
     (let [event {:event/type :grid/cell-clicked
                  :col 0
                  :row 0
@@ -158,6 +165,7 @@
                  :time 5000}
           result (grid/handle event)]
       (is (= [0 0] (get-in result [:state :playback :active-cell])))
+      (is (= [0 0] (get-in result [:state :grid :selected-cell])))
       (is (true? (get-in result [:state :playback :playing?])))
       ;; Trigger time should be set (not checking exact value since handler uses System/currentTimeMillis)
       (is (some? (get-in result [:state :playback :trigger-time]))))))
@@ -174,3 +182,80 @@
       ;; Should not start playback
       (is (false? (get-in result [:state :playback :playing?])))
       (is (nil? (get-in result [:state :playback :active-cell]))))))
+
+(deftest handle-grid-copy-cell-test
+  (testing "Copying cell saves cue-chain to internal clipboard"
+    (let [event {:event/type :grid/copy-cell
+                 :col 0
+                 :row 0
+                 :state sample-state-with-content}
+          result (grid/handle event)]
+      (is (= :cue-chain (get-in result [:state :ui :clipboard :type])))
+      (is (= {:items [{:preset-id :circle}]}
+             (get-in result [:state :ui :clipboard :data]))))))
+
+(deftest handle-grid-clear-cell-test
+  (testing "Clearing cell removes cue-chain from state"
+    (let [event {:event/type :grid/clear-cell
+                 :col 0
+                 :row 0
+                 :state sample-state-with-content}
+          result (grid/handle event)]
+      (is (nil? (get-in result [:state :chains :cue-chains [0 0]])))
+      (is (true? (get-in result [:state :project :dirty?]))))))
+
+(deftest handle-grid-select-cell-test
+  (testing "Selecting cell updates grid selected-cell"
+    (let [event {:event/type :grid/select-cell
+                 :col 1
+                 :row 3
+                 :state sample-state-empty}
+          result (grid/handle event)]
+      (is (= [1 3] (get-in result [:state :grid :selected-cell]))))))
+
+
+;; Grid Open Cell Editor Tests
+
+
+(deftest handle-grid-open-cell-editor-test
+  (testing "Dispatches to timeline editor for timeline cues"
+    (let [state-with-timeline (assoc-in sample-state-empty
+                                        [:chains :cue-chains [1 1]]
+                                        {:editor-type :timeline :items []})
+          event {:event/type :grid/open-cell-editor
+                 :col 1
+                 :row 1
+                 :state state-with-timeline}
+          result (grid/handle event)]
+      (is (= {:event/type :timeline-cue-editor/open :col 1 :row 1}
+             (:dispatch result)))))
+
+  (testing "Dispatches to timeline editor for cues with tracks"
+    (let [state-with-tracks (assoc-in sample-state-empty
+                                      [:chains :cue-chains [1 1]]
+                                      {:tracks [{:id "t1"}] :items []})
+          event {:event/type :grid/open-cell-editor
+                 :col 1
+                 :row 1
+                 :state state-with-tracks}
+          result (grid/handle event)]
+      (is (= {:event/type :timeline-cue-editor/open :col 1 :row 1}
+             (:dispatch result)))))
+
+  (testing "Dispatches to cue chain editor for standard cues"
+    (let [event {:event/type :grid/open-cell-editor
+                 :col 0
+                 :row 0
+                 :state sample-state-with-content}
+          result (grid/handle event)]
+      (is (= {:event/type :cue-chain/open-editor :col 0 :row 0}
+             (:dispatch result)))))
+
+  (testing "Dispatches to cue chain editor for empty cells"
+    (let [event {:event/type :grid/open-cell-editor
+                 :col 3
+                 :row 3
+                 :state sample-state-empty}
+          result (grid/handle event)]
+      (is (= {:event/type :cue-chain/open-editor :col 3 :row 3}
+             (:dispatch result))))))
