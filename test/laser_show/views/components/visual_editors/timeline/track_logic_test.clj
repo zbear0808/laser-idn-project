@@ -56,6 +56,19 @@
       (is (nil? (tl/first-leaf-track [])))
       (is (nil? (tl/first-leaf-track [{:id "g" :type :group :items []}]))))))
 
+(deftest ensure-leaf-track-test
+  (testing "resolves candidate track or falls back to first leaf track"
+    (let [tracks [{:id "g1"
+                   :type :group
+                   :items [{:id "t1" :type :track}
+                           {:id "t2" :type :track}]}
+                  {:id "t3" :type :track}]]
+      (is (= "t1" (tl/ensure-leaf-track tracks "t1")) "Already leaf track")
+      (is (= "t1" (tl/ensure-leaf-track tracks "g1")) "Folder resolves to child track")
+      (is (= "t3" (tl/ensure-leaf-track tracks "t3")) "Other leaf track")
+      (is (= "t1" (tl/ensure-leaf-track tracks nil)) "Nil resolves to first leaf track")
+      (is (= "t1" (tl/ensure-leaf-track tracks "unknown")) "Unknown resolves to first leaf track"))))
+
 (deftest auto-initialize-tracks-test
   (testing "creates zone-group folders with child tracks"
     (let [zone-groups {:all {:name "All" :color "#FFFFFF"}

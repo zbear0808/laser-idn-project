@@ -86,7 +86,9 @@
                           ;; It's a folder. We include the folder itself as a row, 
                           ;; then conditionally include its children
                           (into [track-with-zone]
-                                (when (contains? expanded-tracks (:id track))
+                                (when (if (seq expanded-tracks)
+                                        (contains? expanded-tracks (:id track))
+                                        (not (:collapsed? track false)))
                                   (flatten-level (:items track []) effective-zone)))
                           ;; Regular track
                           [track-with-zone])))
@@ -172,6 +174,24 @@
             (first-leaf-track (:items track []))
             track))
         tracks))
+
+(defn leaf-track?
+  "Returns true if the track is a leaf track (not a group)."
+  [track]
+  (not (track-group? track)))
+
+(defn ensure-leaf-track
+  "Given a tracks hierarchy and a candidate track-id, returns a leaf track ID.
+   If candidate-id points to a leaf track, returns candidate-id.
+   If candidate-id points to a group folder, returns the first leaf track within that folder.
+   If candidate-id is nil or not found, returns the first leaf track in the tracks tree."
+  [tracks candidate-id]
+  (if-let [candidate (when candidate-id (find-track-by-id tracks candidate-id))]
+    (if (leaf-track? candidate)
+      candidate-id
+      (or (:id (first-leaf-track (:items candidate [])))
+          (:id (first-leaf-track tracks))))
+    (:id (first-leaf-track tracks))))
 
 
 (defn auto-initialize-tracks

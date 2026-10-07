@@ -83,8 +83,8 @@
                  (:target-zone (:params first-zone-fx))
                  ;; 2. Track definition
                  (if-let [tid (:track-id item)]
-                   (if-let [track (u/seek #(= (:id %) tid) tracks)]
-                     (:zone-group-id track)
+                   (if-let [path (chains/find-path-by-id tracks tid)]
+                     (get-in (vec tracks) (conj path :zone-group-id) default-zone-id)
                      default-zone-id)
                    ;; 3. Fallback
                    default-zone-id))]

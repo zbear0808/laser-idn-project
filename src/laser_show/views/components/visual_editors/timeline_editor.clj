@@ -88,6 +88,7 @@
   (if (seq track-defs)
     (let [grouped (tl/items-by-track items)
           flat-tracks (tl/flatten-visible-tracks track-defs expanded-tracks)
+          visible-track-ids (set (map :id flat-tracks))
           track-rows (mapv (fn [track]
                              {:id (:id track)
                               :label (:name track)
@@ -96,14 +97,20 @@
                               :items (get grouped (:id track) [])
                               :zone-group-id (:zone-group-id track)})
                            flat-tracks)
-          unassigned (get grouped ::tl/unassigned)]
+          ;; Collect unassigned items or items on tracks that are not visible
+          unassigned (into (get grouped ::tl/unassigned [])
+                           (mapcat (fn [[tid t-items]]
+                                     (when (and (not= tid ::tl/unassigned)
+                                                (not (contains? visible-track-ids tid)))
+                                       t-items))
+                                   grouped))]
       (if (seq unassigned)
         (conj track-rows
               {:id ::unassigned
                :label "Unassigned"
                :type :track
                :track nil
-               :items unassigned
+               :items (vec unassigned)
                :zone-group-id :all})
         track-rows))
     ;; Legacy fallback: one row per item (no track definitions)
@@ -130,6 +137,22 @@
   "Calculate total canvas height for the given number of tracks."
   [track-count]
   (+ ruler-height (* track-count track-height) 20))
+
+
+(defn- calculate-canvas-width
+  "Calculate canvas width based on maximum item reach, loop boundaries, and zoom level."
+  [items loop-config zoom-x]
+  (let [max-item-end (reduce (fn [m item]
+                               (max m (+ (double (:timeline/start item 0.0))
+                                         (double (:timeline/duration item 4.0)))))
+                             0.0
+                             items)
+        loop-end (if (:enabled? loop-config true)
+                   (+ (double (:start loop-config 0.0))
+                      (double (:duration loop-config 4.0)))
+                   0.0)
+        total-beats (max 32.0 (+ (max max-item-end loop-end) 8.0))]
+    (max 800.0 (* total-beats zoom-x))))
 
 
 ;; ============================================================
@@ -260,9 +283,9 @@
 
 (defn- draw-playhead!
   "Draw the playhead vertical line."
-  [^GraphicsContext gc height zoom-x scroll-x beats-elapsed]
+  [^GraphicsContext gc width height zoom-x scroll-x beats-elapsed]
   (let [x (- (* beats-elapsed zoom-x) scroll-x)]
-    (when (and (>= x 0) (<= x 2000))  ;; Only draw if visible
+    (when (and (>= x 0) (<= x width))
       (.setStroke gc playhead-color)
       (.setLineWidth gc 2.0)
       (.strokeLine gc x 0 x height))))
@@ -273,10 +296,11 @@
    Called by interactive-canvas with current value and drag-info."
   [^Canvas canvas value _]
   (let [{:keys [tracks zoom-x scroll-x selection
-                beats-elapsed zone-groups loop-config]} value
+                beats-elapsed cursor-beat zone-groups loop-config]} value
         gc (.getGraphicsContext2D canvas)
         width (.getWidth canvas)
-        height (.getHeight canvas)]
+        height (.getHeight canvas)
+        playhead-beat (or beats-elapsed cursor-beat 0.0)]
     ;; Clear
     (.setFill gc bg-color)
     (.fillRect gc 0 0 width height)
@@ -292,8 +316,8 @@
                       (zone-group-color zone-groups zone-group-id)))]
         (doseq [item items]
           (draw-clip! gc idx item zoom-x scroll-x selection color))))
-    ;; Playhead
-    (draw-playhead! gc height zoom-x scroll-x (or beats-elapsed 0.0))))
+    ;; Playhead / Cursor
+    (draw-playhead! gc width height zoom-x scroll-x playhead-beat)))
 
 
 ;; ============================================================
@@ -305,9 +329,8 @@
   "Find which clip is under the mouse.
    Returns {:track-idx int :item map :edge :left/:right/:center} or nil.
    Scans all items within the hovered track row."
-  [mx my tracks zoom-x scroll-x scroll-y loop-config]
-  (let [scroll-y (or scroll-y 0.0)
-        scroll-x (or scroll-x 0.0)]
+  [mx my tracks zoom-x scroll-x loop-config]
+  (let [scroll-x (or scroll-x 0.0)]
     (if (and loop-config (<= my ruler-height))
       ;; Check loop brace hit
       (let [{:keys [start duration]} loop-config
@@ -321,7 +344,7 @@
             {:type :loop-brace
              :edge edge})))
       ;; Otherwise check clips
-      (let [track-idx (int (/ (+ (- my ruler-height) scroll-y) track-height))]
+      (let [track-idx (int (/ (- my ruler-height) track-height))]
         (when (and (>= track-idx 0) (< track-idx (count tracks)))
           (let [{:keys [items]} (nth tracks track-idx)]
             ;; Check each item in this track row for a hit
@@ -349,10 +372,11 @@
 
 
 (defn- on-press
-  "Handle mouse press. Select item or begin drag."
+  "Handle mouse press. Select item or begin drag.
+   Clicking empty space clears selection, sets cursor beat, and selects clicked track."
   [mx my button value _]
-  (let [{:keys [tracks zoom-x scroll-x scroll-y col row loop-config]} value
-        hit (hit-test mx my tracks zoom-x scroll-x scroll-y loop-config)]
+  (let [{:keys [tracks zoom-x scroll-x col row loop-config]} value
+        hit (hit-test mx my tracks zoom-x scroll-x loop-config)]
     (when (= button MouseButton/PRIMARY)
       (if hit
         (if (= (:type hit) :loop-brace)
@@ -380,17 +404,26 @@
                             :original-track-idx track-idx
                             :col col
                             :row row}}))
-        ;; Clicked empty space - clear selection
-        {:dispatch {:event/type :timeline/clear-selection}}))))
+        ;; Clicked empty space - clear selection, move cursor, select track if clicked
+        (let [clicked-beat (max 0.0 (/ (+ mx (or scroll-x 0.0)) zoom-x))
+              track-idx (int (/ (- my ruler-height) track-height))
+              clicked-track (when (and (>= my ruler-height)
+                                       (>= track-idx 0)
+                                       (< track-idx (count tracks)))
+                              (nth tracks track-idx nil))
+              events (cond-> [{:event/type :timeline/clear-selection}
+                              {:event/type :timeline/set-cursor-beat :beat clicked-beat}]
+                       (and clicked-track (not (tl/track-group? clicked-track)))
+                       (conj {:event/type :timeline/select-track :track-id (:id clicked-track)}))]
+          {:dispatch events})))))
 
 
 (defn- on-drag
   "Handle mouse drag. Move or resize the currently-dragged clip or loop brace.
    Dispatches cross-track transfers when dragged vertically to new rows."
   [mx my value drag-info]
-  (let [{:keys [zoom-x scroll-y tracks col row]} value
+  (let [{:keys [zoom-x tracks col row]} value
         {:keys [edge start-mx original-start original-duration original-track-idx drag-id]} drag-info
-        scroll-y (or scroll-y 0.0)
         delta-px (- mx start-mx)
         delta-beats (/ delta-px zoom-x)]
     (if (= drag-id :loop-brace)
@@ -411,7 +444,7 @@
                        :col col :row row
                        :start new-start
                        :duration new-dur}]}))
-      (let [current-track-idx (int (/ (+ (- my ruler-height) scroll-y) track-height))
+      (let [current-track-idx (int (/ (- my ruler-height) track-height))
             ;; Determine if we crossed into a new valid track row that isn't a folder
             track-changed? (and (not= edge :left)
                                 (not= edge :right)
@@ -457,8 +490,8 @@
 (defn- on-hover
   "Handle mouse hover. Update cursor based on edge proximity."
   [mx my value _]
-  (let [{:keys [tracks zoom-x scroll-x scroll-y loop-config]} value
-        hit (hit-test mx my tracks zoom-x scroll-x scroll-y loop-config)]
+  (let [{:keys [tracks zoom-x scroll-x loop-config]} value
+        hit (hit-test mx my tracks zoom-x scroll-x loop-config)]
     (if hit
       {:hover-id (if (= (:type hit) :loop-brace) :loop-brace (:id (:item hit)))
        :cursor (case (:edge hit)
@@ -600,7 +633,7 @@
   "Collapsible bottom panel for adding presets and effects to the timeline.
    Shows preset-bank (always) and effect-bank (when a clip is selected)."
   [{:keys [col row add-panel-open? add-panel-preset-tab add-panel-effect-tab
-           selected-item-id selected-track-id beats-elapsed]}]
+           selected-item-id selected-track-id cursor-beat beats-elapsed]}]
   (when add-panel-open?
     {:fx/type :v-box
      :style "-fx-background-color: #1A1A1A; -fx-border-color: #333333; -fx-border-width: 1 0 0 0;"
@@ -641,7 +674,7 @@
                                            :col col
                                            :row row
                                            :track-id selected-track-id
-                                           :start (or beats-elapsed 0.0)}}]}
+                                           :start (or cursor-beat beats-elapsed 0.0)}}]}
         ;; Effect bank (only when a clip is selected)
         {:fx/type :v-box
          :h-box/hgrow :always
@@ -671,10 +704,10 @@
 
 (defn timeline-canvas
   "The interactive canvas that shows the timeline grid, clips, and playhead."
-  [{:keys [col row tracks zoom-x scroll-x selection
-           beats-elapsed loop-config zone-groups]}]
+  [{:keys [col row tracks items zoom-x scroll-x selection
+           beats-elapsed cursor-beat loop-config zone-groups]}]
   (let [canvas-height (total-canvas-height (count tracks))
-        canvas-width (max 800 (* 32 (or zoom-x default-zoom)))]
+        canvas-width (calculate-canvas-width items loop-config (or zoom-x default-zoom))]
     {:fx/type ci/interactive-canvas
      :width canvas-width
      :height canvas-height
@@ -683,7 +716,8 @@
              :zoom-x (or zoom-x default-zoom)
              :scroll-x (or scroll-x 0.0)
              :selection (or selection #{})
-             :beats-elapsed (or beats-elapsed 0.0)
+             :beats-elapsed beats-elapsed
+             :cursor-beat cursor-beat
              :loop-config loop-config
              :col col
              :row row
@@ -713,13 +747,13 @@
    - :track-defs    — Explicit Track definitions vector (from CueChain :tracks)
    - :zone-groups   — Map of zone-group-id -> group config
    - :timeline-ui   — Map from [:ui :timeline] state
-   - :beats-elapsed — Current beat position from active cue timing
+   - :beats-elapsed — Current beat position from active cue timing (nil if stopped)
    - :loop-config   — Map with {:enabled? :start :duration}
    - :list-props    — Map of props to forward to list-editor sidebar"
   [{:keys [fx/context col row items track-defs zone-groups
            timeline-ui beats-elapsed loop-config list-props]}]
   (let [{:keys [zoom-x scroll-x selection snap-enabled?
-                snap-value expanded-tracks sync-scroll-y
+                snap-value expanded-tracks sync-scroll-y cursor-beat
                 add-panel-open? add-panel-preset-tab add-panel-effect-tab]
          :or {zoom-x default-zoom
               scroll-x 0.0
@@ -730,12 +764,13 @@
         tracks (build-tracks (or track-defs []) (or items []) expanded-tracks)
         ;; Determine selected item ID for the effect bank
         selected-item-id (when (= 1 (count selection)) (first selection))
-        ;; Determine explicit selected track from the track list sidebar
+        ;; Determine explicit selected track from sidebar or canvas
         tracks-ui-state (fx/sub-ctx context subs/list-ui-state :timeline-tracks)
-        explicit-selected-track-id (first (:selected-ids tracks-ui-state))
-        ;; Determine selected track-id: explicit track > first leaf track
-        selected-track-id (or explicit-selected-track-id
-                              (:id (tl/first-leaf-track track-defs)))]
+        sidebar-selected-track-id (first (:selected-ids tracks-ui-state))
+        selected-track-id (tl/ensure-leaf-track
+                           (or track-defs [])
+                           (or (:selected-track-id timeline-ui)
+                               sidebar-selected-track-id))]
     (cond->
      {:fx/type :border-pane
       :style "-fx-background-color: #121212;"
@@ -765,7 +800,7 @@
           :hbar-policy :never
           :vbar-policy :never
           :vvalue (or sync-scroll-y 0.0)
-          :on-vvalue-changed {:event/type :timeline/sync-scroll :y 0.0} ;; Fallback, usually bound
+          :on-vvalue-changed {:event/type :timeline/sync-scroll :pane :left}
           :content {:fx/type timeline-sidebar
                     :context context
                     :track-defs track-defs
@@ -793,10 +828,12 @@
            :col col
            :row row
            :tracks tracks
+           :items items
            :zoom-x zoom-x
            :scroll-x scroll-x
            :selection selection
            :beats-elapsed beats-elapsed
+           :cursor-beat cursor-beat
            :loop-config loop-config
            :zone-groups zone-groups}}}]}}
       add-panel-open?
@@ -808,4 +845,5 @@
                       :add-panel-effect-tab add-panel-effect-tab
                       :selected-item-id selected-item-id
                       :selected-track-id selected-track-id
+                      :cursor-beat cursor-beat
                       :beats-elapsed beats-elapsed}))))

@@ -304,12 +304,14 @@
   [{:keys [col row state]}]
   (let [tracks-path [:chains :cue-chains [col row] :tracks]
         tracks (get-in state tracks-path [])
-        new-track {:id (str (random-uuid))
-                   :type :track
-                   :name "New Track"}
+        dest-zone (get-in state [:chains :cue-chains [col row] :destination-zone :zone-group-id] :all)
+        new-track (tl/create-track {:zone-group-id dest-zone
+                                    :name (str "Track " (inc (count tracks)))})
+        new-track-id (:id new-track)
         updated-tracks (conj tracks new-track)]
     {:state (-> state
                 (assoc-in tracks-path updated-tracks)
+                (assoc-in [:ui :timeline :selected-track-id] new-track-id)
                 h/mark-dirty)}))
 
 (defn- handle-add-folder
@@ -317,15 +319,29 @@
   [{:keys [col row state]}]
   (let [tracks-path [:chains :cue-chains [col row] :tracks]
         tracks (get-in state tracks-path [])
-        new-folder {:id (str (random-uuid))
-                    :type :group
-                    :name "New Folder"
-                    :collapsed? false
-                    :items []}
+        dest-zone (get-in state [:chains :cue-chains [col row] :destination-zone :zone-group-id] :all)
+        new-folder (assoc (tl/create-track {:zone-group-id dest-zone
+                                            :name (str "Folder " (inc (count tracks)))})
+                          :type :group
+                          :collapsed? false
+                          :items [])
         updated-tracks (conj tracks new-folder)]
     {:state (-> state
                 (assoc-in tracks-path updated-tracks)
                 h/mark-dirty)}))
+
+(defn- handle-select-track
+  "Set the currently selected track ID."
+  [{:keys [track-id state]}]
+  {:state (assoc-in state [:ui :timeline :selected-track-id] track-id)})
+
+(defn- handle-set-cursor-beat
+  "Set the timeline cursor beat position, snapping if enabled."
+  [{:keys [beat state]}]
+  (let [snap-enabled? (get-in state [:ui :timeline :snap-enabled?] true)
+        snap-size (get-in state [:ui :timeline :snap-value] 0.25)
+        snapped (max 0.0 (snap-value (or beat 0.0) snap-size snap-enabled?))]
+    {:state (assoc-in state [:ui :timeline :cursor-beat] snapped)}))
 
 
 ;; Add Panel (preset/effect addition from timeline)
@@ -351,20 +367,34 @@
    Creates the preset, assigns it to the given track, and sets
    default timeline position and duration.
    
-   If no :track-id is provided, uses the first available track."
+   If no :track-id is provided or points to a folder, uses a valid leaf track."
   [{:keys [col row item-id track-id start state]}]
   (let [items-path [:chains :cue-chains [col row] :items]
-        tracks (get-in state [:chains :cue-chains [col row] :tracks] [])
-        resolved-track-id (or track-id
-                              (:id (tl/first-leaf-track tracks)))
+        tracks-path [:chains :cue-chains [col row] :tracks]
+        tracks (get-in state tracks-path [])
+        dest-zone (get-in state [:chains :cue-chains [col row] :destination-zone :zone-group-id] :all)
+        [tracks state-with-tracks] (if (empty? tracks)
+                                     (let [default-tr (tl/create-track {:zone-group-id dest-zone :name "Track 1"})]
+                                       [[default-tr] (assoc-in state tracks-path [default-tr])])
+                                     [tracks state])
+        resolved-track-id (tl/ensure-leaf-track tracks track-id)
+        snap-enabled? (get-in state-with-tracks [:ui :timeline :snap-enabled?] true)
+        snap-size (get-in state-with-tracks [:ui :timeline :snap-value] 0.25)
+        cursor-beat (get-in state-with-tracks [:ui :timeline :cursor-beat] 0.0)
+        raw-start (or start cursor-beat 0.0)
+        start-beat (max 0.0 (snap-value raw-start snap-size snap-enabled?))
+        duration-beats 4.0
         new-preset (-> (cue-chains/create-preset-instance item-id {})
                        (h/ensure-item-fields)
                        (assoc :track-id resolved-track-id
-                              :timeline/start (or start 0.0)
-                              :timeline/duration 4.0))
-        new-id (:id new-preset)]
-    {:state (-> state
+                              :timeline/start start-beat
+                              :timeline/duration duration-beats))
+        new-id (:id new-preset)
+        next-cursor (+ start-beat duration-beats)]
+    {:state (-> state-with-tracks
                 (update-in items-path (fnil conj []) new-preset)
+                (assoc-in [:ui :timeline :cursor-beat] next-cursor)
+                (assoc-in [:ui :timeline :selected-track-id] resolved-track-id)
                 h/mark-dirty)
      ;; Select the newly added item on the timeline
      :dispatch {:event/type :timeline/select-items
@@ -462,6 +492,8 @@
     ;; Selection
     :timeline/select-items (handle-select-items event)
     :timeline/clear-selection (handle-clear-selection event)
+    :timeline/select-track (handle-select-track event)
+    :timeline/set-cursor-beat (handle-set-cursor-beat event)
 
     ;; Item timing
     :timeline/update-item-timing (handle-update-item-timing event)

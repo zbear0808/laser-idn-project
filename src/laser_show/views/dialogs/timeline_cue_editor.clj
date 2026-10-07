@@ -103,8 +103,10 @@
         ;; Timeline UI state
         timeline-ui (fx/sub-val context get-in [:ui :timeline])
 
-        ;; Beats elapsed from global clock
-        beats-elapsed (fx/sub-val context ex/global-accumulated-beats)
+        ;; Beats elapsed: check if cue is currently active/playing
+        active-cues-map (fx/sub-val context ex/active-cues)
+        active-cue-timing (get active-cues-map [col row])
+        beats-elapsed (:accumulated-beats active-cue-timing)
 
         ;; Clipboard for list-editor
         clipboard-items (fx/sub-val context get-in [:ui :clipboard :cue-chain-items])
@@ -147,7 +149,7 @@
        :zone-groups (into {} (map (juxt :id identity)) zone-groups)
        :destination-zone-id destination-zone-id
        :timeline-ui timeline-ui
-       :beats-elapsed (or beats-elapsed 0.0)
+       :beats-elapsed beats-elapsed
        :loop-config (:loop cue-chain {:enabled? false :start 0.0 :duration 4.0})
        :list-props {:component-id [:timeline-cue-chain col row]
                     :item-id-key :preset-id
