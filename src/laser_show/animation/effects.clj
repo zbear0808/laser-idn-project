@@ -405,3 +405,7 @@
       (let [context (mod/make-context (merge {:time-ms time-ms :bpm bpm} timing-ctx))
             resolved (mod/resolve-param param-val context)]
         (constantly resolved)))))
+
+(set! *warn-on-reflection* false)
+(set! *unchecked-math* false)
+

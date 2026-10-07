@@ -433,6 +433,27 @@
 
 
 
+(def ^:private frame-event-method
+  (delay
+    (try
+      (let [cls (Class/forName "laser_show.profiling.FrameGenerationEvent")]
+        (.getMethod cls "emit" (into-array Class [Long/TYPE Long/TYPE Integer/TYPE Integer/TYPE])))
+      (catch Throwable _ nil))))
+
+(def ^:private effect-chain-event-method
+  (delay
+    (try
+      (let [cls (Class/forName "laser_show.profiling.EffectChainEvent")]
+        (.getMethod cls "emit" (into-array Class [Long/TYPE Integer/TYPE Integer/TYPE])))
+      (catch Throwable _ nil))))
+
+(def ^:private idn-streaming-event-method
+  (delay
+    (try
+      (let [cls (Class/forName "laser_show.profiling.IdnStreamingEvent")]
+        (.getMethod cls "emit" (into-array Class [Long/TYPE Long/TYPE Integer/TYPE String])))
+      (catch Throwable _ nil))))
+
 (defn emit-frame-event!
   "Emit a FrameGenerationEvent to the JFR recording.
    
@@ -454,15 +475,15 @@
    ```"
   [{:keys [base-time-us effects-time-us effect-count point-count]
     :or {base-time-us 0 effects-time-us 0 effect-count 0 point-count 0}}]
-  (try
-    (laser_show.profiling.FrameGenerationEvent/emit
-      (long base-time-us)
-      (long effects-time-us)
-      (int effect-count)
-      (int point-count))
-    (catch Exception e
-      ;; Silently ignore if events not registered (e.g., JFR not started)
-      nil)))
+  (when-let [^java.lang.reflect.Method m @frame-event-method]
+    (try
+      (.invoke m nil (to-array [(long base-time-us)
+                                (long effects-time-us)
+                                (int effect-count)
+                                (int point-count)]))
+      (catch Exception _
+        ;; Silently ignore if events not registered (e.g., JFR not started)
+        nil))))
 
 (defn emit-effect-chain-event!
   "Emit an EffectChainEvent to the JFR recording.
@@ -480,13 +501,13 @@
    ```"
   [{:keys [duration-us effect-count point-count]
     :or {duration-us 0 effect-count 0 point-count 0}}]
-  (try
-    (laser_show.profiling.EffectChainEvent/emit
-      (long duration-us)
-      (int effect-count)
-      (int point-count))
-    (catch Exception e
-      nil)))
+  (when-let [^java.lang.reflect.Method m @effect-chain-event-method]
+    (try
+      (.invoke m nil (to-array [(long duration-us)
+                                (int effect-count)
+                                (int point-count)]))
+      (catch Exception _
+        nil))))
 
 (defn emit-idn-streaming-event!
   "Emit an IdnStreamingEvent to the JFR recording.
@@ -506,11 +527,12 @@
    ```"
   [{:keys [interval-us packet-bytes point-count target-host]
     :or {interval-us 0 packet-bytes 0 point-count 0 target-host ""}}]
-  (try
-    (laser_show.profiling.IdnStreamingEvent/emit
-      (long interval-us)
-      (long packet-bytes)
-      (int point-count)
-      (str target-host))
-    (catch Exception e
-      nil)))
+  (when-let [^java.lang.reflect.Method m @idn-streaming-event-method]
+    (try
+      (.invoke m nil (to-array [(long interval-us)
+                                (long packet-bytes)
+                                (int point-count)
+                                (str target-host)]))
+      (catch Exception _
+        nil))))
+

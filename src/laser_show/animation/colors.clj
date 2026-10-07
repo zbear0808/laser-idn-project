@@ -205,3 +205,6 @@
   [L C h]
   (let [h-rad (Math/toRadians (double h))]
     [L (* (double C) (Math/cos h-rad)) (* (double C) (Math/sin h-rad))]))
+
+(set! *warn-on-reflection* false)
+(set! *unchecked-math* false)

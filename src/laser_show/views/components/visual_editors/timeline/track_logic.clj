@@ -74,10 +74,10 @@
   "Takes a nested vector of tracks and returns a flat view of all tracks
    that should be visible on the canvas. 
    
-   If a track-group is marked as :collapsed? true, its children are OUT of the view.
+   If a track-group is marked as expanded in expanded-tracks, its children are IN the view.
    Also propagates inherited :zone-group-id down from parents to children if 
    the children do not have their own explicit zone."
-  [tracks]
+  [tracks expanded-tracks]
   (letfn [(flatten-level [level-tracks parent-zone-id]
             (mapcat (fn [track]
                       (let [effective-zone (or (:zone-group-id track) parent-zone-id)
@@ -86,7 +86,7 @@
                           ;; It's a folder. We include the folder itself as a row, 
                           ;; then conditionally include its children
                           (into [track-with-zone]
-                                (when-not (:collapsed? track)
+                                (when (contains? expanded-tracks (:id track))
                                   (flatten-level (:items track []) effective-zone)))
                           ;; Regular track
                           [track-with-zone])))

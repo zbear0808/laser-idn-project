@@ -352,7 +352,7 @@
    default timeline position and duration.
    
    If no :track-id is provided, uses the first available track."
-  [{:keys [col row item-id track-id state]}]
+  [{:keys [col row item-id track-id start state]}]
   (let [items-path [:chains :cue-chains [col row] :items]
         tracks (get-in state [:chains :cue-chains [col row] :tracks] [])
         resolved-track-id (or track-id
@@ -360,7 +360,7 @@
         new-preset (-> (cue-chains/create-preset-instance item-id {})
                        (h/ensure-item-fields)
                        (assoc :track-id resolved-track-id
-                              :timeline/start 0.0
+                              :timeline/start (or start 0.0)
                               :timeline/duration 4.0))
         new-id (:id new-preset)]
     {:state (-> state

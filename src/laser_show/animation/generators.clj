@@ -330,4 +330,7 @@
                                         (t/blanked-point x y))))))
          t/make-frame)))
 
+(set! *warn-on-reflection* false)
+(set! *unchecked-math* false)
+
 

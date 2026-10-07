@@ -163,3 +163,5 @@
   "Convert frame interval in milliseconds to FPS."
   ^double [^double interval-ms]
   (/ 1000.0 interval-ms))
+
+(set! *unchecked-math* false)

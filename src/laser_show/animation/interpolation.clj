@@ -48,3 +48,7 @@
                           (interpolate-value v1 v2 curved-t)
                           v1)]))
                  params1)))))
+
+(set! *warn-on-reflection* false)
+(set! *unchecked-math* false)
+

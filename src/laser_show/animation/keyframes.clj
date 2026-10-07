@@ -271,4 +271,8 @@
 
        (interp/interpolate-params (:params before) (:params after) t interpolation)))))
 
+(set! *warn-on-reflection* false)
+(set! *unchecked-math* false)
+
+
 

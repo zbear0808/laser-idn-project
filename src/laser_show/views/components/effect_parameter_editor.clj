@@ -221,11 +221,13 @@
                         [;; Keyframe modulator panel (always shown for effects that could use it)
                          (when effect-def
                            {:fx/type keyframe-panel/keyframe-modulator-panel
+                            :fx/context context
                             :keyframe-modulator keyframe-mod
                             :domain domain
                             :entity-key entity-key
                             :effect-path full-effect-path
-                            :current-phase current-phase})
+                            :current-phase current-phase
+                            :effect-def effect-def})
 
                          ;; Section header with effect name and keyframe indicator
                          {:fx/type :label

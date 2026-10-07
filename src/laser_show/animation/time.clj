@@ -236,4 +236,8 @@
        (let [beats (double (get-beats-from-context context))]
          (+ (* beats frequency) phase-param))))))
 
+(set! *warn-on-reflection* false)
+(set! *unchecked-math* false)
+
+
 

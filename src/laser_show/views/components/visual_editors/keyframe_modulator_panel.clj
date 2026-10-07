@@ -34,6 +34,9 @@
    - Shows zone dropdown instead of numeric spinner for value editing
    - Timeline shows colored segments instead of line curves"
   (:require
+   [cljfx.api :as fx]
+   [laser-show.subs :as subs]
+   [laser-show.common.util :as u]
    [laser-show.views.components.visual-editors.keyframe-timeline :as timeline]))
 
 
@@ -333,9 +336,13 @@
    - :selected-idx - Index of selected keyframe
    - :current-phase - Current playback position (0.0-1.0)
    - :on-select, :on-add, :on-move, :on-delete - Event templates
-   - :enabled? - Whether interactions are enabled"
+   - :enabled? - Whether interactions are enabled
+   - :param-type - Type of parameter
+   - :param-key - Key of parameter
+   - :zone-groups - List of zone groups"
   [{:keys [keyframes selected-idx current-phase
-           on-select on-add on-move on-delete enabled?]}]
+           on-select on-add on-move on-delete enabled?
+           param-type param-key zone-groups]}]
   {:fx/type :v-box
    :style-class "keyframe-panel-timeline"
    :children [{:fx/type :label
@@ -347,6 +354,9 @@
                :keyframes keyframes
                :selected-idx selected-idx
                :current-phase current-phase
+               :param-type param-type
+               :param-key param-key
+               :zone-groups zone-groups
                :on-select on-select
                :on-add on-add
                :on-move on-move
@@ -355,25 +365,84 @@
 (defn- actions-row
   "Row with keyframe info.
    Props:
+   - :fx/context - cljfx context
    - :keyframes - Vector of keyframe maps
    - :selected-idx - Index of selected keyframe
-   - :enabled? - Whether interactions are enabled"
-  [{:keys [keyframes selected-idx enabled?]}]
+   - :enabled? - Whether interactions are enabled
+   - :param-type - Type of parameter (e.g. :numeric, :zone-group-id)
+   - :param-key - Key of the parameter to edit
+   - :on-update-param - Event for parameter changes
+   - :on-set-interpolation - Event for setting interpolation"
+  [{:keys [fx/context keyframes selected-idx enabled? param-type param-key
+           on-update-param on-set-interpolation]}]
   (let [selected-kf (when (and selected-idx
                                (>= selected-idx 0)
                                (< selected-idx (count keyframes)))
-                      (nth keyframes selected-idx))]
+                      (nth keyframes selected-idx))
+        zone-groups (when (= param-type :zone-group-id)
+                      (fx/sub-ctx context subs/zone-groups-list))]
     {:fx/type :h-box
      :alignment :center-left
      :spacing 10
      :style-class "keyframe-panel-actions"
      :disable (not enabled?)
-     :children [{:fx/type :label
-                 :text (if selected-kf
-                         (str "Selected: Keyframe " (inc selected-idx)
-                              " @ " (format-position (:position selected-kf)))
-                         "Click timeline to select")
-                 :style-class "label-secondary"}]}))
+     :children (filterv some?
+                [{:fx/type :label
+                  :text (if selected-kf
+                          (str "Selected: Keyframe " (inc selected-idx)
+                               " @ " (format-position (:position selected-kf)))
+                          "Click timeline to select")
+                  :style-class "label-secondary"}
+                 
+                 ;; Value Editor
+                 (when (and selected-kf param-key)
+                   (if (= param-type :zone-group-id)
+                     ;; Zone Group Value Editor
+                     (let [current-val (get-in selected-kf [:params param-key] :all)
+                           all-option {:id :all :name "All"}
+                           items (into [all-option] zone-groups)
+                           selected-item (or (u/seek #(= (:id %) current-val) items) all-option)]
+                       {:fx/type :h-box
+                        :alignment :center-left
+                        :spacing 5
+                        :children [{:fx/type :label :text "Value:"}
+                                   {:fx/type :combo-box
+                                    :value selected-item
+                                    :items items
+                                    :button-cell (fn [item] {:text (or (:name item) "Select Zone")})
+                                    :cell-factory {:fx/cell-type :list-cell
+                                                   :describe (fn [item] {:text (or (:name item) "")})}
+                                    :on-value-changed (fn [new-item]
+                                                        (when new-item
+                                                          (assoc on-update-param :value (:id new-item))))}]})
+                     
+                     ;; Numeric Value Editor
+                     {:fx/type :h-box
+                      :alignment :center-left
+                      :spacing 5
+                      :children [{:fx/type :label :text "Value:"}
+                                 {:fx/type :spinner
+                                  :pref-width 80
+                                  :value-factory {:fx/type :double-spinner-value-factory
+                                                  :min -9999.0 :max 9999.0
+                                                  :amount-to-step-by 0.1
+                                                  :value (get-in selected-kf [:params param-key] 0.0)}
+                                  :on-value-changed (fn [v] (assoc on-update-param :value v))}]}))
+                 
+                 ;; Interpolation Dropdown
+                 (when (and selected-kf (not= param-type :zone-group-id))
+                   {:fx/type :h-box
+                    :alignment :center-left
+                    :spacing 5
+                    :children [{:fx/type :label :text "Interp:"}
+                               {:fx/type :combo-box
+                                :pref-width 100
+                                :value (:interpolation selected-kf :linear)
+                                :items interpolation-modes
+                                :button-cell (fn [item] {:text (interpolation-display-name item)})
+                                :cell-factory {:fx/cell-type :list-cell
+                                               :describe (fn [item] {:text (interpolation-display-name item)})}
+                                :on-value-changed (fn [mode] (assoc on-set-interpolation :interpolation mode))}]})])}))
 
 
 ;; Main Panel Component
@@ -407,7 +476,7 @@
    - :effect-path - Path to effect within chain
    - :param-key - Parameter key (e.g. :hue)
    - :current-phase - Current playback position for preview (optional, time-based only)"
-  [{:keys [keyframe-modulator domain entity-key effect-path param-key current-phase]}]
+  [{:keys [fx/context effect-def keyframe-modulator domain entity-key effect-path param-key current-phase]}]
   (let [driver (or (:driver keyframe-modulator) :time)
         spatial? (spatial-driver? driver)
         enabled? (:enabled? keyframe-modulator false)
@@ -420,6 +489,10 @@
         loop-mode (:loop-mode keyframe-modulator :loop)
         edge-behavior (:edge-behavior keyframe-modulator :clamp)
         normalize? (:normalize? keyframe-modulator false)
+        
+        actual-param-key (or param-key (-> effect-def :parameters first :key))
+        param-spec (u/seek #(= (:key %) actual-param-key) (:parameters effect-def))
+        param-type (:type param-spec)
         
         ;; Base event params
         base-event {:domain domain
@@ -478,6 +551,10 @@
                                  :selected-idx selected-idx
                                  :current-phase (when-not spatial? current-phase)
                                  :enabled? enabled?
+                                 :param-type param-type
+                                 :param-key actual-param-key
+                                 :zone-groups (when (= param-type :zone-group-id)
+                                                (fx/sub-ctx context subs/zone-groups-list))
                                  :on-select (assoc base-event
                                                    :event/type :keyframe/select)
                                  :on-add (assoc base-event
@@ -488,6 +565,16 @@
                                                    :event/type :keyframe/delete)}
                                 
                                 {:fx/type actions-row
+                                 :fx/context context
                                  :keyframes keyframes
                                  :selected-idx selected-idx
-                                 :enabled? enabled?}])})])}))
+                                 :enabled? enabled?
+                                 :param-type param-type
+                                 :param-key actual-param-key
+                                 :on-update-param (assoc base-event
+                                                         :event/type :keyframe/update-param
+                                                         :keyframe-idx selected-idx
+                                                         :param-key actual-param-key)
+                                 :on-set-interpolation (assoc base-event
+                                                              :event/type :keyframe/set-interpolation
+                                                              :keyframe-idx selected-idx)}])})])}))

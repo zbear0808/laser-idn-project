@@ -16,7 +16,6 @@
                   {:id "g1"
                    :type :group
                    :zone-group-id :z2
-                   :collapsed? false
                    :items [{:id "t2"
                             :type :track} ;; Should inherit :z2
                            {:id "t3"
@@ -25,10 +24,10 @@
                   {:id "g2"
                    :type :group
                    :zone-group-id :z4
-                   :collapsed? true
                    :items [{:id "t4"
                             :type :track}]}] ;; Children omitted, but group row remains
-          result (tl/flatten-visible-tracks tracks)]
+          expanded-tracks #{"g1"}
+          result (tl/flatten-visible-tracks tracks expanded-tracks)]
 
       (is (= 5 (count result)) "t1, g1, t2, t3, g2")
       (is (= "t1" (:id (nth result 0))))

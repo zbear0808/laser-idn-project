@@ -84,10 +84,10 @@
    
    Folders are flattened into single rows that act as separators or global effects lines.
    Visible tracks are derived using tl/flatten-visible-tracks."
-  [track-defs items _]
+  [track-defs items expanded-tracks]
   (if (seq track-defs)
     (let [grouped (tl/items-by-track items)
-          flat-tracks (tl/flatten-visible-tracks track-defs)
+          flat-tracks (tl/flatten-visible-tracks track-defs expanded-tracks)
           track-rows (mapv (fn [track]
                              {:id (:id track)
                               :label (:name track)
@@ -600,7 +600,7 @@
   "Collapsible bottom panel for adding presets and effects to the timeline.
    Shows preset-bank (always) and effect-bank (when a clip is selected)."
   [{:keys [col row add-panel-open? add-panel-preset-tab add-panel-effect-tab
-           selected-item-id selected-track-id]}]
+           selected-item-id selected-track-id beats-elapsed]}]
   (when add-panel-open?
     {:fx/type :v-box
      :style "-fx-background-color: #1A1A1A; -fx-border-color: #333333; -fx-border-width: 1 0 0 0;"
@@ -640,7 +640,8 @@
                      :item-event-template {:event/type :timeline/add-preset-to-track
                                            :col col
                                            :row row
-                                           :track-id selected-track-id}}]}
+                                           :track-id selected-track-id
+                                           :start (or beats-elapsed 0.0)}}]}
         ;; Effect bank (only when a clip is selected)
         {:fx/type :v-box
          :h-box/hgrow :always
@@ -691,8 +692,11 @@
      :on-press on-press
      :on-drag on-drag
      :on-hover on-hover
-     :on-key on-key}))
-
+     :on-key on-key
+     :on-scroll (fn [delta-x delta-y _ _]
+                  {:dispatch {:event/type :timeline/scroll
+                              :delta-x delta-x
+                              :delta-y delta-y}})}))
 
 ;; ============================================================
 ;; Main Component
@@ -803,4 +807,5 @@
                       :add-panel-preset-tab add-panel-preset-tab
                       :add-panel-effect-tab add-panel-effect-tab
                       :selected-item-id selected-item-id
-                      :selected-track-id selected-track-id}))))
+                      :selected-track-id selected-track-id
+                      :beats-elapsed beats-elapsed}))))

@@ -49,6 +49,10 @@ test-*.log
 # Local configuration (not committed)
 /config/
 /plans
+.env
+
+# UI test artifacts
+/test-results/
 
 /cljfx cljfx 1.10.6 examples/
 

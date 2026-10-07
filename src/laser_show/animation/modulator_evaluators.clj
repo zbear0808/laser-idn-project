@@ -603,3 +603,7 @@
    :point-index             compile-point-index
    :angle                   compile-angle
    :unified-keyframe-param  compile-unified-keyframe-param})
+
+(set! *warn-on-reflection* false)
+(set! *unchecked-math* false)
+

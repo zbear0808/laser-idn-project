@@ -77,8 +77,9 @@
    Creates two keyframes at positions 0.0 and 1.0 with identical params.
    Each keyframe includes :interpolation :linear for the transition to the next keyframe."
   [params]
-  [{:position 0.0 :params params :interpolation :linear}
-   {:position 1.0 :params params :interpolation :linear}])
+  (let [interp (if (contains? params :target-zone) :step :linear)]
+    [{:position 0.0 :params params :interpolation interp}
+     {:position 1.0 :params params :interpolation interp}]))
 
 (defn- clamp-position
   "Clamp a position to valid range [0.0, 1.0]."
@@ -229,11 +230,12 @@
         keyframes (:keyframes keyframe-mod [])
         clamped-pos (clamp-position position)
         ;; Use provided params or interpolate/copy from nearest keyframe
+        nearest-kf (when (seq keyframes) (first (sort-by #(Math/abs (- (:position %) clamped-pos)) keyframes)))
         kf-params (or params
-                      (if (seq keyframes)
-                        (:params (first (sort-by #(Math/abs (- (:position %) clamped-pos)) keyframes)))
+                      (if nearest-kf
+                        (:params nearest-kf)
                         (get-effect-params state config effect-path)))
-        new-keyframe {:position clamped-pos :params kf-params :interpolation :linear}
+        new-keyframe {:position clamped-pos :params kf-params :interpolation (:interpolation nearest-kf :linear)}
         new-keyframes (sort-keyframes (conj keyframes new-keyframe))
         new-idx (.indexOf new-keyframes new-keyframe)]
     (-> state
@@ -519,6 +521,12 @@
                                             (:x event)
                                             (:y event)
                                             (:param-map event))}
+                                            
+      :keyframe/set-zone-value
+      {:state (handle-update-keyframe-param state config effect-path
+                                            (:keyframe-idx event)
+                                            (:param-key event)
+                                            (or (:value event) (:fx/event event)))}
 
       :keyframe/set-interpolation
       {:state (handle-set-interpolation state config effect-path

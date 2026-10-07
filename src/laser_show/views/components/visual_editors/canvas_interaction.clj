@@ -58,7 +58,11 @@
 
       (instance? KeyEvent e)
       (assoc :key-code (.getCode ^KeyEvent e)
-             :shift? (.isShiftDown ^KeyEvent e)))))
+             :shift? (.isShiftDown ^KeyEvent e))
+
+      (instance? javafx.scene.input.ScrollEvent e)
+      (assoc :delta-x (.getDeltaX ^javafx.scene.input.ScrollEvent e)
+             :delta-y (.getDeltaY ^javafx.scene.input.ScrollEvent e)))))
 
 (defn- update-drag-state!
   "Dispatch a canvas drag state update to global state."
@@ -123,11 +127,13 @@
                            :drag-updates - extra keys merge
 
    Optional:
+     :on-scroll              - (fn [delta-x delta-y value drag-info])
+                               Returns map with :dispatch
      :initial-drag-state     - extra keys for initial drag state map
      :cursor                 - default cursor CSS value (default \"crosshair\")
      :focus-traversable?     - enable focus traversal"
   [{:keys [width height value render!
-           on-press on-drag on-release on-hover on-key on-exit
+           on-press on-drag on-release on-hover on-key on-exit on-scroll
            initial-drag-state
            cursor focus-traversable?]
     :or {cursor "crosshair"
@@ -239,4 +245,12 @@
                   (dispatch-result! (:dispatch result))
                   (render! canvas (or (:preview-value new-drag) value) new-drag)
                   (when (:consumed? result)
-                    (.consume e))))))}})
+                    (.consume e)))))
+
+          :on-scroll
+          (fn [e]
+            (let [{:keys [canvas canvas-id drag-state delta-x delta-y]} (extract-event-info e)]
+              (when-let [result (and on-scroll (on-scroll delta-x delta-y value drag-state))]
+                (dispatch-result! (:dispatch result))
+                (when (:consumed? result)
+                  (.consume e))))))}})

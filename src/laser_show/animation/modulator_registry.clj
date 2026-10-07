@@ -224,3 +224,6 @@
    Returns: Compiler function or nil"
   [mod-type]
   (get @!compilers mod-type))
+
+(set! *warn-on-reflection* false)
+

@@ -238,3 +238,7 @@
     (let [defaults (get-defaults-for-type (:type config))
           full-config (merge defaults config)]
       (compiler full-config point-count))))
+
+(set! *warn-on-reflection* false)
+(set! *unchecked-math* false)
+

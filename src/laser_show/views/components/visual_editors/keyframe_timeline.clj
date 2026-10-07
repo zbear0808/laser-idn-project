@@ -12,6 +12,7 @@
    
    Refactored to Stateless Interactive Canvas."
   (:require
+   [laser-show.common.util :as u]
    [laser-show.css.theme :as theme]
    [laser-show.views.components.visual-editors.canvas-interaction :as ci])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
@@ -176,6 +177,35 @@
           (.fillText gc text tx ty))))))
 
 
+(defn- get-zone-color [zone-id zone-groups]
+  (if (= zone-id :all)
+    "#888888"
+    (or (some #(when (= (:id %) zone-id) (:color %)) zone-groups) "#666666")))
+
+(defn- draw-step-segments
+  "Draw colored block segments for step interpolation (like zones)."
+  [^GraphicsContext gc {:keys [width keyframes selected-idx param-key zone-groups]}]
+  (let [width (double width)
+        bar-y (+ padding-top 5)
+        bar-height 8
+        bar-x padding-left
+        usable-width (- width padding-left padding-right)]
+    (doseq [[idx kf] (map-indexed vector keyframes)]
+      (let [x1 (position-to-x (:position kf) width)
+            next-kf (nth keyframes (inc idx) nil)
+            x2 (if next-kf (position-to-x (:position next-kf) width) (+ padding-left usable-width))
+            seg-width (- x2 x1)
+            zone-id (get-in kf [:params param-key] :all)
+            color (get-zone-color zone-id zone-groups)
+            selected? (= idx selected-idx)]
+        (when (> seg-width 0)
+          (.setFill gc (Color/web color (if selected? 1.0 0.7)))
+          (.fillRect gc x1 bar-y seg-width bar-height)
+          ;; border
+          (.setStroke gc (Color/web (if selected? "#FFFFFF" "#333333")))
+          (.setLineWidth gc (if selected? 1.5 1.0))
+          (.strokeRect gc x1 bar-y seg-width bar-height))))))
+
 ;; Hit Testing
 
 
@@ -196,6 +226,20 @@
              first
              :idx)))))
 
+(defn- find-keyframe-segment
+  "Find the keyframe segment that contains the mouse x coordinate."
+  [mx my keyframes width height threshold]
+  (let [bar-y (+ padding-top 5)
+        bar-height 8]
+    (when (and (seq keyframes)
+               (>= my (- bar-y threshold))
+               (<= my (+ bar-y bar-height threshold)))
+      (let [pos (x-to-position mx width)]
+        (->> (map-indexed vector keyframes)
+             (filter (fn [[_ kf]] (<= (:position kf) pos)))
+             last
+             first)))))
+
 
 ;; Main Canvas Component
 
@@ -209,11 +253,15 @@
    - :keyframes - Vector of {:position :params} maps
    - :selected-idx - Index of currently selected keyframe
    - :current-phase - Current playback position (0.0-1.0) for preview
+   - :param-type - Type of parameter
+   - :param-key - Key of parameter
+   - :zone-groups - List of zone groups
    - :on-select - Event template for selecting keyframe (receives :keyframe-idx)
    - :on-add - Event template for adding keyframe (receives :position)
    - :on-move - Event template for moving keyframe (receives :keyframe-idx :new-position)
    - :on-delete - Event template for deleting keyframe (receives :keyframe-idx)"
   [{:keys [width height keyframes selected-idx current-phase
+           param-type param-key zone-groups
            on-select on-add on-move on-delete]
     :or {width 400 height 60}}]
 
@@ -229,6 +277,8 @@
             hover-idx (:hover-idx drag-info)]
         (draw-background gc width height)
         (draw-timeline-bar gc width height)
+        (when (= param-type :zone-group-id)
+          (draw-step-segments gc (u/->map width keyframes selected-idx param-key zone-groups)))
         (draw-tick-marks gc width height)
         (draw-keyframe-markers gc width height keyframes selected-idx hover-idx)
         (draw-playhead gc width height current-phase)
@@ -236,7 +286,10 @@
 
     :on-press
     (fn [mx my button keyframes drag-info]
-      (let [hit-idx (find-closest-keyframe mx my keyframes width height 15)]
+      (let [hit-marker-idx (find-closest-keyframe mx my keyframes width height 15)
+            hit-segment-idx (when (= param-type :zone-group-id)
+                              (find-keyframe-segment mx my keyframes width height 5))
+            hit-idx (or hit-marker-idx hit-segment-idx)]
         (cond
           ;; Right-click on keyframe - delete unique (if more than 1)
           (and (= button MouseButton/SECONDARY) hit-idx)

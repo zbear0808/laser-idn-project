@@ -224,3 +224,6 @@
               (dotimes [_ step] (.removeFirst a))
               (rf result v))
             result)))))))
+
+(set! *warn-on-reflection* false)
+(set! *unchecked-math* false)
