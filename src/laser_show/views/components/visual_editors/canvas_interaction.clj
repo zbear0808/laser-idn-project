@@ -173,6 +173,10 @@
                 (let [new-drag (cond-> drag-state
                                  (:drag-start result) (assoc :dragging? true :drag-id (:drag-id result))
                                  (:drag-updates result) (merge (:drag-updates result)))]
+                  (when (:drag-start result)
+                    (events/dispatch! {:event/type :history/begin-transaction
+                                       :label (or (:transaction-label result) "Canvas Edit")
+                                       :source-id [:canvas canvas-id]}))
                   (update-drag-state! canvas-id new-drag :start)
                   (dispatch-result! (:dispatch result) :start)
                   (render! canvas (or (:preview-value new-drag) value) new-drag)))))
@@ -194,11 +198,15 @@
           :on-mouse-released
           (fn [e]
             (let [{:keys [canvas canvas-id drag-state]} (extract-event-info e)
+                  was-dragging? (:dragging? drag-state)
                   result (when on-release (on-release value drag-state))
                   new-drag (assoc drag-state
                                   :dragging? false
                                   :drag-id nil
                                   :preview-value nil)]
+              (when was-dragging?
+                (events/dispatch! {:event/type :history/commit-transaction
+                                   :source-id [:canvas canvas-id]}))
               (update-drag-state! canvas-id new-drag :stop)
               (dispatch-result! (:dispatch result) :stop)
               (render! canvas value new-drag)))

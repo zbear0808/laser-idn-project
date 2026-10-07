@@ -22,7 +22,8 @@
             [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.views.components.effect-parameter-editor :as param-editor]
             [laser-show.views.components.inline-edit :as inline-edit]
-            [laser-show.views.components.list :as list])
+            [laser-show.views.components.list :as list]
+            [laser-show.events.core :as events])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
 
@@ -186,12 +187,28 @@
 ;; NOTE: Dialog CSS is now defined in laser-show.css.dialogs
 ;; The CSS string literal has been moved to the centralized CSS system
 
+(defn- handle-scene-key-pressed
+  "Handles undo/redo keyboard shortcuts at the scene level."
+  [^KeyEvent e]
+  (let [code (.getCode e)
+        shortcut? (or (.isShortcutDown e) (.isControlDown e))
+        shift? (.isShiftDown e)]
+    (when shortcut?
+      (cond
+        (and (= code KeyCode/Z) shift?)
+        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
+        (= code KeyCode/Y)
+        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
+        (= code KeyCode/Z)
+        (do (.consume e) (events/dispatch! {:event/type :edit/undo}))))))
+
 (defn- effect-chain-editor-scene
   "Scene component for the effect chain editor.
-   Keyboard shortcuts are handled by the list component."
+   Keyboard shortcuts are handled by the list component and scene accelerators."
   [{:keys [stylesheets]}]
   {:fx/type :scene
    :stylesheets stylesheets
+   :on-key-pressed handle-scene-key-pressed
    :root {:fx/type effect-chain-editor-content}})
 
 (defn effect-chain-editor-dialog

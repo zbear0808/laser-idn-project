@@ -34,6 +34,7 @@
             [laser-show.state.core :as state]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.events.handlers :as handlers]
+            [laser-show.events.handlers.history :as history-handlers]
             [laser-show.backend.multi-engine :as multi-engine]
             [laser-show.common.util :as u]
             [laser-show.idn.hello :as idn-hello])
@@ -312,6 +313,10 @@
 
 ;; Wrapped Event Handler
 
+(def handle-event-pipeline
+  "Event handler pipeline wrapped with history tracking for discrete document edits."
+  (history-handlers/wrap-history handlers/handle-event))
+
 (def event-handler
   "Main event handler wrapped with co-effects and effects.
    
@@ -336,7 +341,7 @@
    - :clipboard/paste-effects - paste effects from clipboard (effects grid)
    - :clipboard/paste-projector-effects - paste effects from clipboard (projector chain)
    - :projectors/scan - scan network for IDN devices"
-  (-> handlers/handle-event
+  (-> handle-event-pipeline
 
       ;; Inject co-effects into events
       (fx/wrap-co-effects
@@ -407,7 +412,7 @@
           enriched-event (assoc event
                                 :state (state/get-raw-state)
                                 :time (System/currentTimeMillis))
-          effects (handlers/handle-event enriched-event)]
+          effects (handle-event-pipeline enriched-event)]
       (log/debug "dispatch! fallback - effects keys:" (keys effects))
       ;; Apply state effect if present
       (when-let [new-state (:state effects)]

@@ -95,17 +95,23 @@
   "Create Edit menu items."
   [context]
   (let [clipboard (fx/sub-ctx context subs/clipboard)
-        has-clipboard? (some? clipboard)]
+        has-clipboard? (some? clipboard)
+        can-undo? (fx/sub-ctx context subs/can-undo?)
+        can-redo? (fx/sub-ctx context subs/can-redo?)
+        undo-label (fx/sub-ctx context subs/undo-label)
+        redo-label (fx/sub-ctx context subs/redo-label)
+        undo-text (if undo-label (str "Undo " undo-label) "Undo")
+        redo-text (if redo-label (str "Redo " redo-label) "Redo")]
     [{:fx/type :menu-item
-      :text "Undo"
+      :text undo-text
       :accelerator [:shortcut :z]
-      :disable true
+      :disable (not can-undo?)
       :on-action {:event/type :edit/undo}}
      
      {:fx/type :menu-item
-      :text "Redo"
+      :text redo-text
       :accelerator [:shortcut :shift :z]
-      :disable true
+      :disable (not can-redo?)
       :on-action {:event/type :edit/redo}}
      
      {:fx/type :separator-menu-item}

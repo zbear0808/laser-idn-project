@@ -407,6 +407,18 @@
           :doc "Ableton Link state. Carabiner auto-connects on startup. Button toggles Link sync mode."}})
 
 
+(defstate history
+  "Undo and redo history management.
+   Stores stack of pre-action document snapshots and in-progress transactions.
+   Transient domain (not saved to project files)."
+  {:undo-stack {:default []
+                :doc "Vector of HistorySnapshot maps available for undo"}
+   :redo-stack {:default []
+                :doc "Vector of HistorySnapshot maps available for redo"}
+   :transaction {:default nil
+                 :doc "Active continuous interaction transaction ({:baseline-snapshot ... :label ... :source-id ...}) or nil"}})
+
+
 ;; State Builder
 
 

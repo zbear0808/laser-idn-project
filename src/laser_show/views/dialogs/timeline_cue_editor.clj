@@ -17,7 +17,8 @@
             [laser-show.views.components.inline-edit :as inline-edit]
             [laser-show.views.components.visual-editors.timeline-editor :as timeline-editor]
             [laser-show.state.extractors :as ex]
-            [laser-show.common.util :as u]))
+            [laser-show.common.util :as u])
+  (:import [javafx.scene.input KeyCode KeyEvent]))
 
 
 ;; Destination Zone Picker (shared with cue-chain-editor)
@@ -198,10 +199,26 @@
 ;; Dialog Window
 
 
+(defn- handle-scene-key-pressed
+  "Handles undo/redo keyboard shortcuts at the scene level."
+  [^KeyEvent e]
+  (let [code (.getCode e)
+        shortcut? (or (.isShortcutDown e) (.isControlDown e))
+        shift? (.isShiftDown e)]
+    (when shortcut?
+      (cond
+        (and (= code KeyCode/Z) shift?)
+        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
+        (= code KeyCode/Y)
+        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
+        (= code KeyCode/Z)
+        (do (.consume e) (events/dispatch! {:event/type :edit/undo}))))))
+
 (defn- timeline-cue-editor-scene
   [{:keys [stylesheets]}]
   {:fx/type :scene
    :stylesheets stylesheets
+   :on-key-pressed handle-scene-key-pressed
    :root {:fx/type timeline-cue-editor-content}})
 
 (defn timeline-cue-editor-dialog

@@ -86,7 +86,12 @@
                  :pref-width 150
                  :snap-to-ticks is-int?
                  :major-tick-unit (if is-int? 1.0 (/ (- max min) 10.0))
-                 :on-value-changed (assoc on-change-event :param-key param-key)}
+                 :on-value-changed (assoc on-change-event :param-key param-key)
+                 :on-mouse-pressed {:event/type :history/begin-transaction
+                                    :label (str "Adjust " display-label)
+                                    :source-id [:slider param-key]}
+                 :on-mouse-released {:event/type :history/commit-transaction
+                                     :source-id [:slider param-key]}}
                 {:fx/type :text-field
                  :text (if is-int?
                          (str (int value))

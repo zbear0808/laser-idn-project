@@ -105,6 +105,30 @@
 (defn project-dirty? [context]
   (fx/sub-val context ex/project-dirty?))
 
+
+;; --- History ---
+
+(defn can-undo?
+  "Check if undo is available."
+  [context]
+  (boolean (seq (fx/sub-val context get-in [:history :undo-stack]))))
+
+(defn can-redo?
+  "Check if redo is available."
+  [context]
+  (boolean (seq (fx/sub-val context get-in [:history :redo-stack]))))
+
+(defn undo-label
+  "Get the description of the action that will be undone, or nil."
+  [context]
+  (:description (peek (fx/sub-val context get-in [:history :undo-stack]))))
+
+(defn redo-label
+  "Get the description of the action that will be redone, or nil."
+  [context]
+  (:description (peek (fx/sub-val context get-in [:history :redo-stack]))))
+
+
 ;; --- Config ---
 
 

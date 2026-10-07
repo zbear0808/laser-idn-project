@@ -454,12 +454,28 @@
 ;; Dialog Window
 
 
+(defn- handle-scene-key-pressed
+  "Handles undo/redo keyboard shortcuts at the scene level."
+  [^KeyEvent e]
+  (let [code (.getCode e)
+        shortcut? (or (.isShortcutDown e) (.isControlDown e))
+        shift? (.isShiftDown e)]
+    (when shortcut?
+      (cond
+        (and (= code KeyCode/Z) shift?)
+        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
+        (= code KeyCode/Y)
+        (do (.consume e) (events/dispatch! {:event/type :edit/redo}))
+        (= code KeyCode/Z)
+        (do (.consume e) (events/dispatch! {:event/type :edit/undo}))))))
+
 (defn- cue-chain-editor-scene
   "Scene component for the cue chain editor.
-   Keyboard shortcuts are handled by the list components."
+   Keyboard shortcuts are handled by the list components and scene accelerators."
   [{:keys [stylesheets]}]
   {:fx/type :scene
    :stylesheets stylesheets
+   :on-key-pressed handle-scene-key-pressed
    :root {:fx/type cue-chain-editor-content}})
 
 (defn cue-chain-editor-dialog

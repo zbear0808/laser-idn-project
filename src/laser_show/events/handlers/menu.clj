@@ -10,8 +10,10 @@
             [laser-show.dev-config :as dev-config]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.state.persistent :as persistent]
+            [laser-show.state.core :as state]
             [laser-show.events.handlers.grid :as grid]
-            [laser-show.events.handlers.effects :as effects]))
+            [laser-show.events.handlers.effects :as effects]
+            [laser-show.events.handlers.history :as history]))
 
 
 
@@ -24,7 +26,7 @@
   (log/info "File > New Project")
   ;; TODO: Show confirmation dialog if project is dirty
   (persistent/new-project!)
-  {:state state})
+  {:state (state/get-raw-state)})
 
 (defn- handle-file-open
   "Open a project from disk using file chooser dialog."
@@ -45,7 +47,10 @@
     (do
       (log/info "Opening project:" file-path)
       (persistent/load-project! file-path)
-      {:state state})
+      (let [fresh-state (state/get-raw-state)
+            cleared (assoc fresh-state :history {:undo-stack [] :redo-stack [] :transaction nil})]
+        (state/reset-state! cleared)
+        {:state cleared}))
     {:state state}))
 
 (defn- handle-file-save-as
@@ -112,18 +117,16 @@
 
 
 (defn- handle-edit-undo
-  "Undo the last action (TODO: Implement undo stack)."
-  [{:keys [state]}]
+  "Undo the last action via history handler."
+  [event]
   (log/debug "Edit > Undo")
-  ;; TODO: Implement undo/redo system
-  {:state state})
+  (history/handle-undo event))
 
 (defn- handle-edit-redo
-  "Redo the last undone action (TODO: Implement redo stack)."
-  [{:keys [state]}]
+  "Redo the last undone action via history handler."
+  [event]
   (log/debug "Edit > Redo")
-  ;; TODO: Implement undo/redo system
-  {:state state})
+  (history/handle-redo event))
 
 (defn- handle-edit-copy
   "Copy selected cell to clipboard.

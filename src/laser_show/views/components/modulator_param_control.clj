@@ -95,7 +95,12 @@
                  :value (double value)
                  :pref-width 80
                  ;; Event map pattern: add mod-param-key to template
-                 :on-value-changed (assoc on-change-event :mod-param-key key)}
+                 :on-value-changed (assoc on-change-event :mod-param-key key)
+                 :on-mouse-pressed {:event/type :history/begin-transaction
+                                    :label (str "Adjust " (or label (name key)))
+                                    :source-id [:modulator-slider key]}
+                 :on-mouse-released {:event/type :history/commit-transaction
+                                     :source-id [:modulator-slider key]}}
                 {:fx/type :text-field
                  :text (format "%.2f" (double value))
                  :pref-width 50
