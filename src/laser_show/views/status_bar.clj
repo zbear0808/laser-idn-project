@@ -11,16 +11,23 @@
 
 (defn status-item
   "A single status bar item with label and value."
-  [{:keys [label value]}]
+  [{:keys [label value value-width monospace? alignment]
+    :or {alignment :center-left}}]
   {:fx/type :h-box
    :spacing 4
    :alignment :center-left
    :children [{:fx/type :label
                :text (str label ":")
                :style (str "-fx-text-fill: " (css/text-muted) "; -fx-font-size: 11;")}
-              {:fx/type :label
-               :text (str value)
-               :style (str "-fx-text-fill: " (css/text-secondary) "; -fx-font-size: 11;")}]})
+              (cond-> {:fx/type :label
+                       :text (str value)
+                       :style (str "-fx-text-fill: " (css/text-secondary) "; "
+                                   "-fx-font-size: 11;"
+                                   (when monospace?
+                                     " -fx-font-family: 'Consolas', 'Monaco', monospace;"))}
+                value-width (assoc :min-width value-width
+                                   :pref-width value-width
+                                   :alignment alignment))]})
 
 
 ;; Cell Status
@@ -29,12 +36,11 @@
 (defn cell-status
   "Status showing active cell."
   [{:keys [fx/context]}]
-  (let [active-cell (fx/sub-ctx context subs/active-cell)]
-    (if active-cell
-      {:fx/type status-item
-       :label "Active"
-       :value (str "[" (first active-cell) "," (second active-cell) "]")}
-      {:fx/type :label :text "" :pref-width 0})))
+  (if-let [active-cell (fx/sub-ctx context subs/active-cell)]
+    {:fx/type status-item
+     :label "Active"
+     :value (str "[" (first active-cell) "," (second active-cell) "]")}
+    {:fx/type :label :text "" :pref-width 0}))
 
 
 ;; Preset Status
@@ -43,12 +49,11 @@
 (defn preset-status
   "Status showing active preset."
   [{:keys [fx/context]}]
-  (let [preset (fx/sub-ctx context subs/active-preset)]
-    (if preset
-      {:fx/type status-item
-       :label "Preset"
-       :value (name preset)}
-      {:fx/type :label :text "" :pref-width 0})))
+  (if-let [preset (fx/sub-ctx context subs/active-preset)]
+    {:fx/type status-item
+     :label "Preset"
+     :value (name preset)}
+    {:fx/type :label :text "" :pref-width 0}))
 
 
 ;; Frame Stats
@@ -62,32 +67,46 @@
 (defn frame-stats-status
   "Status showing frame generation latency stats and IDN streaming stats."
   [{:keys [fx/context]}]
-  (let [stats (fx/sub-ctx context subs/frame-stats)]
-    (if (and stats (:avg-latency-us stats))
+  (let [{:keys [avg-base-us avg-effects-us avg-latency-us
+                p95-latency-us max-latency-us
+                avg-idn-us p95-idn-us max-idn-us] :as stats}
+        (fx/sub-ctx context subs/frame-stats)]
+    (if (and stats avg-latency-us)
       {:fx/type :h-box
        :spacing 16
        :children (cond-> [{:fx/type status-item
                            :label "Base"
-                           :value (format-us (:avg-base-us stats))}
+                           :value (format-us avg-base-us)
+                           :value-width 56
+                           :monospace? true}
                           {:fx/type status-item
                            :label "Effects"
-                           :value (format-us (:avg-effects-us stats))}
+                           :value (format-us avg-effects-us)
+                           :value-width 56
+                           :monospace? true}
                           {:fx/type status-item
                            :label "Total (avg)"
-                           :value (format-us (:avg-latency-us stats))}
+                           :value (format-us avg-latency-us)
+                           :value-width 56
+                           :monospace? true}
                           {:fx/type status-item
                            :label "p95"
-                           :value (format-us (:p95-latency-us stats))}
+                           :value (format-us p95-latency-us)
+                           :value-width 56
+                           :monospace? true}
                           {:fx/type status-item
                            :label "max"
-                           :value (format-us (:max-latency-us stats))}]
-                  ;; Add IDN stats when streaming is active
-                  (:avg-idn-us stats)
+                           :value (format-us max-latency-us)
+                           :value-width 56
+                           :monospace? true}]
+                  avg-idn-us
                   (conj {:fx/type status-item
                          :label "IDN"
-                         :value (str (format-us (:avg-idn-us stats))
-                                     " (p95: " (format-us (:p95-idn-us stats))
-                                     ", max: " (format-us (:max-idn-us stats)) ")")}))}
+                         :value (str (format-us avg-idn-us)
+                                     " (p95: " (format-us p95-idn-us)
+                                     ", max: " (format-us max-idn-us) ")")
+                         :value-width 245
+                         :monospace? true}))}
       {:fx/type :label :text "" :pref-width 0})))
 
 
