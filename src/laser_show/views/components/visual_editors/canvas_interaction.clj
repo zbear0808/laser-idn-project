@@ -5,7 +5,7 @@
    drag state management, and render orchestration.
 
    GLOBAL STATE VERSION:
-   1. Canvas node is reused across renders (via ext-on-instance-lifecycle).
+   1. Canvas node is reused across renders, using :draw prop for declarative redraws.
    2. Does NOT maintain internal value state — renders whatever :value is in props.
    3. Interaction state (drag, hover) stored in global state at
       [:ui :canvas-drag <canvas-id>], not in a local atom.
@@ -73,18 +73,12 @@
                               :updates updates}
                        interaction-type (assoc :interaction/type interaction-type)))))
 
-(defn- update-interactive-canvas!
-  "Called on every render cycle. Triggers render! callback."
+(defn- draw-interactive-canvas!
+  "Called on every render cycle via cljfx Canvas :draw prop. Triggers render! callback."
   [^Canvas canvas props]
-  (let [{:keys [render! value cursor focus-traversable? on-key]} props
+  (let [{:keys [render! value]} props
         canvas-id (:canvas-id (.getUserData canvas))
-        drag-state (get-drag-state canvas-id)
-        has-keyboard? (some? on-key)
-        focus? (if (some? focus-traversable?) focus-traversable? has-keyboard?)]
-    (when focus?
-      (.setFocusTraversable canvas true))
-    (when cursor
-      (.setStyle canvas (str "-fx-cursor: " cursor ";")))
+        drag-state (when canvas-id (get-drag-state canvas-id))]
     (when render!
       (let [render-value (or (:preview-value drag-state) value)]
         (render! canvas render-value drag-state)))))
@@ -150,9 +144,7 @@
                                                :drag-id       nil
                                                :preview-value nil}
                                               initial-drag-state))
-                   (update-interactive-canvas! canvas props)))
-   :on-advanced (fn [^Canvas canvas]
-                  (update-interactive-canvas! canvas props))
+                   (draw-interactive-canvas! canvas props)))
    :on-deleted (fn [^Canvas canvas]
                  (let [canvas-id (:canvas-id (.getUserData canvas))]
                    (events/dispatch! {:event/type :canvas/clear-drag
@@ -165,6 +157,8 @@
                                (if (some? focus-traversable?)
                                  focus-traversable?
                                  has-keyboard?))
+          :draw (fn [^Canvas canvas]
+                  (draw-interactive-canvas! canvas props))
 
           :on-mouse-pressed
           (fn [e]
