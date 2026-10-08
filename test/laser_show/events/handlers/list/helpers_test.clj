@@ -368,3 +368,138 @@
       (is (= 4 (count result)))
       (is (= id-c (:id (last result))))
       (is (= [id-d] (mapv :id (get-in result [1 :items])))))))
+
+
+;; calculate-selection tests
+
+
+(def chain-12
+  (mapv (fn [i] {:id (java.util.UUID/fromString (format "00000000-0000-0000-0000-%012d" i))
+                 :name (str "Item " i)})
+        (range 12)))
+
+(def chain-ids (mapv :id chain-12))
+
+
+(deftest calculate-selection-test
+  (testing "single selection mode"
+    (let [s0 (h/calculate-selection {} chain-12 (nth chain-ids 3) :single)]
+      (is (= #{(nth chain-ids 3)} (:selected-ids s0)))
+      (is (= (nth chain-ids 3) (:last-selected-id s0))))
+    (testing "single selection replaces previous multi-selection"
+      (let [initial {:selected-ids (set chain-ids) :last-selected-id (nth chain-ids 0)}
+            result (h/calculate-selection initial chain-12 (nth chain-ids 5) :single)]
+        (is (= #{(nth chain-ids 5)} (:selected-ids result)))
+        (is (= (nth chain-ids 5) (:last-selected-id result))))))
+
+  (testing "bottom-to-top shift selection (regression test: selecting 10th then 2nd element)"
+    (let [initial (h/calculate-selection {} chain-12 (nth chain-ids 9) :single)
+          shift-result (h/calculate-selection initial chain-12 (nth chain-ids 1) :shift)
+          expected-ids (set (subvec chain-ids 1 10))]
+      (is (= expected-ids (:selected-ids shift-result)))
+      (is (= 9 (count (:selected-ids shift-result))))
+      (is (= (nth chain-ids 9) (:last-selected-id shift-result))
+          "Anchor must remain at original selection (item 9) for further shift clicks")))
+
+  (testing "top-to-bottom shift selection"
+    (let [initial (h/calculate-selection {} chain-12 (nth chain-ids 1) :single)
+          shift-result (h/calculate-selection initial chain-12 (nth chain-ids 9) :shift)
+          expected-ids (set (subvec chain-ids 1 10))]
+      (is (= expected-ids (:selected-ids shift-result)))
+      (is (= 9 (count (:selected-ids shift-result))))
+      (is (= (nth chain-ids 1) (:last-selected-id shift-result))
+          "Anchor must remain at original selection (item 1) for further shift clicks")))
+
+  (testing "consecutive shift-clicks maintain the original anchor"
+    (let [s0 (h/calculate-selection {} chain-12 (nth chain-ids 5) :single)
+          s1 (h/calculate-selection s0 chain-12 (nth chain-ids 2) :shift)
+          s2 (h/calculate-selection s1 chain-12 (nth chain-ids 8) :shift)
+          s3 (h/calculate-selection s2 chain-12 (nth chain-ids 5) :shift)]
+      ;; First shift click: 2..5 (4 items)
+      (is (= (set (subvec chain-ids 2 6)) (:selected-ids s1)))
+      (is (= (nth chain-ids 5) (:last-selected-id s1)))
+      ;; Second shift click: 5..8 (4 items) - anchor did not move to 2
+      (is (= (set (subvec chain-ids 5 9)) (:selected-ids s2)))
+      (is (= (nth chain-ids 5) (:last-selected-id s2)))
+      ;; Third shift click back to anchor: only 5 selected
+      (is (= #{(nth chain-ids 5)} (:selected-ids s3)))
+      (is (= (nth chain-ids 5) (:last-selected-id s3)))))
+
+  (testing "ctrl-click toggle behavior"
+    (let [s0 (h/calculate-selection {} chain-12 (nth chain-ids 2) :single)
+          s1 (h/calculate-selection s0 chain-12 (nth chain-ids 6) :ctrl)
+          s2 (h/calculate-selection s1 chain-12 (nth chain-ids 2) :ctrl)]
+      (is (= #{(nth chain-ids 2) (nth chain-ids 6)} (:selected-ids s1)))
+      (is (= (nth chain-ids 6) (:last-selected-id s1)))
+      (is (= #{(nth chain-ids 6)} (:selected-ids s2)))
+      (is (= (nth chain-ids 2) (:last-selected-id s2)))))
+
+  (testing "ctrl-shift range unions with existing selection (both directions)"
+    ;; Top-to-bottom range union
+    (let [s0 {:selected-ids #{(nth chain-ids 0)} :last-selected-id (nth chain-ids 3)}
+          s1 (h/calculate-selection s0 chain-12 (nth chain-ids 6) :ctrl-shift)]
+      (is (= #{(nth chain-ids 0) (nth chain-ids 3) (nth chain-ids 4) (nth chain-ids 5) (nth chain-ids 6)}
+             (:selected-ids s1)))
+      (is (= (nth chain-ids 3) (:last-selected-id s1))))
+    ;; Bottom-to-top range union
+    (let [s0 {:selected-ids #{(nth chain-ids 0)} :last-selected-id (nth chain-ids 8)}
+          s1 (h/calculate-selection s0 chain-12 (nth chain-ids 5) :ctrl-shift)]
+      (is (= #{(nth chain-ids 0) (nth chain-ids 5) (nth chain-ids 6) (nth chain-ids 7) (nth chain-ids 8)}
+             (:selected-ids s1)))
+      (is (= (nth chain-ids 8) (:last-selected-id s1)))))
+
+  (testing "nested tree shift-selection preserves document order"
+    ;; Top-to-bottom across group: [id-a, id-f(group), id-c, id-d, id-e]
+    (let [s0 {:selected-ids #{id-a} :last-selected-id id-a}
+          s1 (h/calculate-selection s0 nested-tree id-d :shift)]
+      (is (= #{id-a id-f id-c id-d} (:selected-ids s1)))
+      (is (= id-a (:last-selected-id s1))))
+    ;; Bottom-to-top across group
+    (let [s0 {:selected-ids #{id-e} :last-selected-id id-e}
+          s1 (h/calculate-selection s0 nested-tree id-c :shift)]
+      (is (= #{id-c id-d id-e} (:selected-ids s1)))
+      (is (= id-e (:last-selected-id s1))))
+    ;; Bottom-to-top from inside group to top level
+    (let [s0 {:selected-ids #{id-d} :last-selected-id id-d}
+          s1 (h/calculate-selection s0 nested-tree id-a :shift)]
+      (is (= #{id-a id-f id-c id-d} (:selected-ids s1)))
+      (is (= id-d (:last-selected-id s1)))))
+
+  (testing "edge cases and resilience"
+    (testing "nil last-selected-id falls back to selecting target item"
+      (let [result (h/calculate-selection {:selected-ids #{}} chain-12 (nth chain-ids 4) :shift)]
+        (is (= #{(nth chain-ids 4)} (:selected-ids result)))
+        (is (= (nth chain-ids 4) (:last-selected-id result)))))
+
+    (testing "stale/invalid anchor ID resets anchor and selects target item"
+      (let [stale-id (java.util.UUID/randomUUID)
+            result (h/calculate-selection {:selected-ids #{stale-id} :last-selected-id stale-id}
+                                          chain-12
+                                          (nth chain-ids 4)
+                                          :shift)]
+        (is (= #{(nth chain-ids 4)} (:selected-ids result)))
+        (is (= (nth chain-ids 4) (:last-selected-id result)))))
+
+    (testing "target ID not found in tree does not throw exception"
+      (let [unknown-id (java.util.UUID/randomUUID)
+            result (h/calculate-selection {:selected-ids #{} :last-selected-id (nth chain-ids 2)}
+                                          chain-12
+                                          unknown-id
+                                          :shift)]
+        (is (= #{unknown-id} (:selected-ids result)))))
+
+    (testing "nil current-selection parameter map"
+      (let [result (h/calculate-selection nil chain-12 (nth chain-ids 2) :single)]
+        (is (= #{(nth chain-ids 2)} (:selected-ids result)))
+        (is (= (nth chain-ids 2) (:last-selected-id result)))))
+
+    (testing "parameter map overload and thread-first chaining"
+      (let [result (-> {}
+                       (h/calculate-selection chain-12 (nth chain-ids 1) :single)
+                       (h/calculate-selection chain-12 (nth chain-ids 4) :shift))]
+        (is (= (set (subvec chain-ids 1 5)) (:selected-ids result)))
+        (is (= (nth chain-ids 1) (:last-selected-id result))))
+      (let [param-result (h/calculate-selection {} {:items chain-12
+                                                    :item-id (nth chain-ids 3)
+                                                    :mode :single})]
+        (is (= #{(nth chain-ids 3)} (:selected-ids param-result)))))))

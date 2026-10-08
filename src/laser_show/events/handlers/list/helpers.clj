@@ -71,6 +71,47 @@
      selected-ids)))
 
 
+;; Selection Calculation
+
+
+(defn calculate-selection
+  "Pure calculation of new selection state given current selection state,
+   items tree, clicked item ID, and selection mode (:single, :ctrl, :shift, :ctrl-shift).
+   Returns updated selection map {:selected-ids #{...} :last-selected-id <id>}."
+  ([current-selection params]
+   (let [{:keys [items item-id mode]} params]
+     (calculate-selection current-selection items item-id mode)))
+  ([current-selection items item-id mode]
+   (let [{:keys [selected-ids last-selected-id]
+          :or {selected-ids #{}}} current-selection]
+     (case mode
+       :ctrl
+       {:selected-ids (if (contains? selected-ids item-id)
+                        (disj selected-ids item-id)
+                        (conj selected-ids item-id))
+        :last-selected-id item-id}
+
+       (:shift :ctrl-shift)
+       (let [all-ids (chains/collect-all-ids items)
+             anchor-id (or last-selected-id item-id)
+             anchor-idx (.indexOf all-ids anchor-id)
+             target-idx (.indexOf all-ids item-id)
+             valid-anchor? (>= anchor-idx 0)
+             valid-target? (>= target-idx 0)
+             range-ids (if (and valid-anchor? valid-target?)
+                         (set (subvec all-ids (min anchor-idx target-idx) (inc (max anchor-idx target-idx))))
+                         #{item-id})
+             new-selected (if (= mode :ctrl-shift)
+                            (into selected-ids range-ids)
+                            range-ids)]
+         {:selected-ids new-selected
+          :last-selected-id (if valid-anchor? anchor-id item-id)})
+
+       ;; Default to :single
+       {:selected-ids #{item-id}
+        :last-selected-id item-id}))))
+
+
 ;; ID-Based Removal
 
 

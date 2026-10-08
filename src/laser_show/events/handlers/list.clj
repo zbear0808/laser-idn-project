@@ -43,40 +43,11 @@
    is no longer relevant."
   [{:keys [component-id item-id mode selected-ids-override last-id-override state] :as event}]
   (let [current-state (get-in state [:list-ui component-id] {})
-        {:keys [selected-ids last-selected-id]} current-state
-        new-state (case mode
-                    ;; Ctrl+Click - toggle selection
-                    :ctrl
-                    {:selected-ids (if (contains? selected-ids item-id)
-                                     (disj selected-ids item-id)
-                                     (conj selected-ids item-id))
-                     :last-selected-id item-id}
-
-                    ;; Shift+Click and Ctrl+Shift+Click - range select
-                    (:shift :ctrl-shift)
-                    (if selected-ids-override
-                      {:selected-ids selected-ids-override
-                       :last-selected-id (or last-id-override last-selected-id)}
-                      (let [items (resolve-items event state)
-                            all-ids (chains/collect-all-ids items)
-                            anchor-id (or last-selected-id item-id)
-                            anchor-idx (.indexOf all-ids anchor-id)
-                            target-idx (.indexOf all-ids item-id)
-                            start (min anchor-idx target-idx)
-                            end (max anchor-idx target-idx)
-                            range-ids (if (and (>= anchor-idx 0) (>= target-idx 0))
-                                        (set (subvec all-ids start (inc end)))
-                                        #{item-id})
-                            new-selected (if (= mode :ctrl-shift)
-                                           (into (or selected-ids #{}) range-ids)
-                                           range-ids)]
-                        {:selected-ids new-selected
-                         :last-selected-id anchor-id}))
-
-                    ;; Single click - replace selection
-                    :single
-                    {:selected-ids #{item-id}
-                     :last-selected-id item-id})
+        new-state (if selected-ids-override
+                    {:selected-ids selected-ids-override
+                     :last-selected-id (or last-id-override (:last-selected-id current-state))}
+                    (let [items (resolve-items event state)]
+                      (helpers/calculate-selection current-state items item-id mode)))
         state-with-selection (update-in state [:list-ui component-id] merge new-state)
         ;; If this is a cue-chain component, clear the item-effects selection
         ;; The item-effects list shows effects for the selected cue item, so
