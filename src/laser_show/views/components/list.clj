@@ -62,22 +62,30 @@
 ;; Selection Logic (Event Dispatching)
 
 (defn- handle-selection!
-  "Handle selection based on click modifiers."
-  [component-id item-id ctrl? shift? items]
-  (let [mode (cond ctrl? :ctrl
-                   shift? :shift
+  "Handle selection based on click modifiers.
+   Reads items from component atoms at event time to avoid stale closures.
+   Supports single click, Ctrl+click toggle, Shift+click range, and Ctrl+Shift+click range add."
+  [component-id item-id ctrl? shift?]
+  (let [mode (cond shift? :shift
+                   ctrl? :ctrl
                    :else :single)
         event (if shift?
-                (let [{:keys [last-selected-id]} (get-ui-state component-id)
+                (let [{:keys [last-selected-id selected-ids]} (get-ui-state component-id)
+                      items (if-let [items-atom (:items-atom (get @!component-atoms component-id))]
+                              @items-atom
+                              [])
                       all-ids (chains/collect-all-ids items)
                       anchor-id (or last-selected-id item-id)
                       anchor-idx (.indexOf all-ids anchor-id)
                       target-idx (.indexOf all-ids item-id)
                       start (min anchor-idx target-idx)
                       end (max anchor-idx target-idx)
-                      new-selected (if (and (>= anchor-idx 0) (>= target-idx 0))
-                                     (set (subvec all-ids start (inc end)))
-                                     #{item-id})]
+                      range-ids (if (and (>= anchor-idx 0) (>= target-idx 0))
+                                  (set (subvec all-ids start (inc end)))
+                                  #{item-id})
+                      new-selected (if ctrl?
+                                     (into (or selected-ids #{}) range-ids)
+                                     range-ids)]
                   (u/->map& component-id item-id mode
                             :event/type :list/select-item
                             :selected-ids-override new-selected
@@ -296,7 +304,7 @@
 
 (defn- setup-click-handler!
   "Setup click handler on a node for selection and double-click rename."
-  [^javafx.scene.Node node component-id item-id items]
+  [^javafx.scene.Node node component-id item-id]
   (.setOnMouseClicked node
                       (on-fx-event
                        (fn [event]
@@ -305,7 +313,7 @@
                                shift? (.isShiftDown event)]
                            (if (= click-count 2)
                              (start-rename! component-id item-id)
-                             (do (handle-selection! component-id item-id ctrl? shift? items)
+                             (do (handle-selection! component-id item-id ctrl? shift?)
                                  (request-list-focus! node)))
                            (.consume event))))))
 
@@ -359,7 +367,7 @@
                    (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
                      (dnd/setup-drag-source! node group-id component-id)
                      (dnd/setup-drag-target! node group-id true component-id drop-props)
-                     (setup-click-handler! node component-id group-id items)))
+                     (setup-click-handler! node component-id group-id)))
      :desc {:fx/type :h-box
             :style-class header-classes
             :children [{:fx/type :button
@@ -426,7 +434,7 @@
                    (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
                      (dnd/setup-drag-source! node item-id component-id)
                      (dnd/setup-drag-target! node item-id false component-id drop-props)
-                     (setup-click-handler! node component-id item-id items)))
+                     (setup-click-handler! node component-id item-id)))
      :desc {:fx/type :h-box
             :style-class item-classes
             :children [{:fx/type :check-box
@@ -629,16 +637,16 @@
 
 ;; Keyboard Handler Setup
 
-(defonce ^:private keyboard-handler-atoms (atom {}))
+(defonce ^:private !component-atoms (atom {}))
 
 (defn- get-or-create-handler-atoms!
   "Get or create atoms for a component's keyboard handler state."
   [component-id]
-  (or (get @keyboard-handler-atoms component-id)
+  (or (get @!component-atoms component-id)
       (let [new-atoms {:items-atom (atom [])
                        :props-atom (atom {})}]
         (log/debug "Creating new handler atoms for component" {:component-id component-id})
-        (swap! keyboard-handler-atoms assoc component-id new-atoms)
+        (swap! !component-atoms assoc component-id new-atoms)
         new-atoms)))
 
 (defn- update-handler-atoms!

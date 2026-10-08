@@ -55,7 +55,8 @@
       (is (= 0.0 (:timeline/start added)))
       (is (= 4.0 (:timeline/duration added)))
       (is (= 4.0 (get-in add-res [:state :ui :timeline :cursor-beat])))
-      (is (= #{(:id added)} (get-in add-res [:dispatch :ids])))))
+      (is (= [(:id added)] (get-in add-res [:dispatch :ids])))
+      (is (= #{(:track-id added)} (get-in add-res [:state :list-ui :timeline-tracks :selected-ids])))))
 
   (testing "advances cursor beat for successive additions"
     (let [open-res (timeline/handle {:event/type :timeline-cue-editor/open
@@ -73,3 +74,49 @@
       (is (= 0.0 (:timeline/start (first items))))
       (is (= 4.0 (:timeline/start (second items))))
       (is (= 8.0 (get-in s2 [:ui :timeline :cursor-beat]))))))
+
+(deftest handle-select-track-test
+  (testing "sets selected-ids and last-selected-id in canonical list-ui state"
+    (let [track-id (random-uuid)
+          result (timeline/handle {:event/type :timeline/select-track
+                                   :track-id track-id
+                                   :state base-state})
+          ui-state (get-in result [:state :list-ui :timeline-tracks])]
+      (is (= #{track-id} (:selected-ids ui-state)))
+      (is (= track-id (:last-selected-id ui-state))))))
+
+(deftest handle-add-track-test
+  (testing "appends track and selects it in canonical list-ui state"
+    (let [open-res (timeline/handle {:event/type :timeline-cue-editor/open
+                                     :col 0 :row 0 :state base-state})
+          result (timeline/handle {:event/type :timeline/add-track
+                                   :col 0 :row 0
+                                   :state (:state open-res)})
+          tracks (get-in result [:state :chains :cue-chains [0 0] :tracks])
+          new-track (last tracks)
+          ui-state (get-in result [:state :list-ui :timeline-tracks])]
+      (is (seq tracks))
+      (is (= #{(:id new-track)} (:selected-ids ui-state)))
+      (is (= (:id new-track) (:last-selected-id ui-state))))))
+
+(deftest handle-move-item-to-track-test
+  (testing "moves item to target track without affecting other fields"
+    (let [open-res (timeline/handle {:event/type :timeline-cue-editor/open
+                                     :col 0 :row 0 :state base-state})
+          add-res (timeline/handle {:event/type :timeline/add-preset-to-track
+                                    :col 0 :row 0
+                                    :item-id :circle
+                                    :state (:state open-res)})
+          item (first (get-in add-res [:state :chains :cue-chains [0 0] :items]))
+          item-id (:id item)
+          target-track-id (random-uuid)
+          move-res (timeline/handle {:event/type :timeline/move-item-to-track
+                                     :col 0 :row 0
+                                     :item-id item-id
+                                     :track-id target-track-id
+                                     :state (:state add-res)})
+          updated-item (first (get-in move-res [:state :chains :cue-chains [0 0] :items]))]
+      (is (= target-track-id (:track-id updated-item)))
+      (is (= (:timeline/start item) (:timeline/start updated-item)))
+      (is (= (:timeline/duration item) (:timeline/duration updated-item))))))
+

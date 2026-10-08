@@ -311,7 +311,8 @@
         updated-tracks (conj tracks new-track)]
     {:state (-> state
                 (assoc-in tracks-path updated-tracks)
-                (assoc-in [:ui :timeline :selected-track-id] new-track-id)
+                (assoc-in [:list-ui :timeline-tracks :selected-ids] #{new-track-id})
+                (assoc-in [:list-ui :timeline-tracks :last-selected-id] new-track-id)
                 h/mark-dirty)}))
 
 (defn- handle-add-folder
@@ -333,7 +334,9 @@
 (defn- handle-select-track
   "Set the currently selected track ID."
   [{:keys [track-id state]}]
-  {:state (assoc-in state [:ui :timeline :selected-track-id] track-id)})
+  {:state (-> state
+              (assoc-in [:list-ui :timeline-tracks :selected-ids] (if track-id #{track-id} #{}))
+              (assoc-in [:list-ui :timeline-tracks :last-selected-id] track-id))})
 
 (defn- handle-set-cursor-beat
   "Set the timeline cursor beat position, snapping if enabled."
@@ -394,7 +397,8 @@
     {:state (-> state-with-tracks
                 (update-in items-path (fnil conj []) new-preset)
                 (assoc-in [:ui :timeline :cursor-beat] next-cursor)
-                (assoc-in [:ui :timeline :selected-track-id] resolved-track-id)
+                (assoc-in [:list-ui :timeline-tracks :selected-ids] #{resolved-track-id})
+                (assoc-in [:list-ui :timeline-tracks :last-selected-id] resolved-track-id)
                 h/mark-dirty)
      ;; Select the newly added item on the timeline
      :dispatch {:event/type :timeline/select-items

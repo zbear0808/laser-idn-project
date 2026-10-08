@@ -193,6 +193,31 @@
           (:id (first-leaf-track tracks))))
     (:id (first-leaf-track tracks))))
 
+(defn droppable-track?
+  "Returns true if a canvas track row or track definition is a valid drop target
+   for clips and track selection (i.e. is an actual leaf track, not a group folder
+   or synthetic unassigned row)."
+  [track-or-row]
+  (boolean
+   (and (some? track-or-row)
+        (= :track (:type track-or-row :track))
+        (not= ::unassigned (:id track-or-row))
+        (some? (:id track-or-row))
+        (if-let [t (:track track-or-row)]
+          (leaf-track? t)
+          (not= :group (:type track-or-row))))))
+
+(defn resolve-active-track
+  "Given a tracks hierarchy and an optional candidate track ID (such as from
+   sidebar selection), returns the resolved leaf track UUID for content addition.
+   
+   If selected-track-id points to a leaf track, returns that ID.
+   If selected-track-id points to a group folder, returns the first leaf track within it.
+   If selected-track-id is nil, empty, or not found in track-defs, falls back to
+   the first leaf track in the tracks hierarchy."
+  [{:keys [track-defs selected-track-id]}]
+  (ensure-leaf-track (or track-defs []) selected-track-id))
+
 
 (defn auto-initialize-tracks
   "Generate default tracks for a CueChain that has no :tracks yet.

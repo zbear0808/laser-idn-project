@@ -391,12 +391,17 @@
                             :col col
                             :row row}})
           (let [{:keys [item edge track-idx]} hit
-                item-id (:id item)]
+                item-id (:id item)
+                clicked-track (when (and (>= track-idx 0) (< track-idx (count tracks)))
+                                (nth tracks track-idx nil))]
             {:drag-start true
              :drag-id item-id
-             :dispatch {:event/type :timeline/select-items
-                        :ids [item-id]
-                        :mode :replace}
+             :dispatch (cond-> [{:event/type :timeline/select-items
+                                 :ids [item-id]
+                                 :mode :replace}]
+                         (tl/droppable-track? clicked-track)
+                         (conj {:event/type :timeline/select-track
+                                :track-id (:id clicked-track)}))
              :drag-updates {:edge edge
                             :start-mx mx
                             :original-start (:timeline/start item 0.0)
@@ -413,7 +418,7 @@
                               (nth tracks track-idx nil))
               events (cond-> [{:event/type :timeline/clear-selection}
                               {:event/type :timeline/set-cursor-beat :beat clicked-beat}]
-                       (and clicked-track (not (tl/track-group? clicked-track)))
+                       (tl/droppable-track? clicked-track)
                        (conj {:event/type :timeline/select-track :track-id (:id clicked-track)}))]
           {:dispatch events})))))
 
@@ -452,8 +457,7 @@
                                 (>= current-track-idx 0)
                                 (< current-track-idx (count tracks)))
             destination-track (when track-changed? (nth tracks current-track-idx nil))
-            valid-destination? (and destination-track
-                                    (not (tl/track-group? destination-track)))
+            valid-destination? (tl/droppable-track? destination-track)
             base-events (case edge
                           :center
                           [{:event/type :timeline/update-item-timing
@@ -474,10 +478,13 @@
                           [])
 
             events (if valid-destination?
-                     (conj base-events {:event/type :timeline/move-item-to-track
-                                        :col col :row row
-                                        :item-id drag-id
-                                        :track-id (:id destination-track)})
+                     (into base-events
+                           [{:event/type :timeline/move-item-to-track
+                             :col col :row row
+                             :item-id drag-id
+                             :track-id (:id destination-track)}
+                            {:event/type :timeline/select-track
+                             :track-id (:id destination-track)}])
                      base-events)]
 
         (when (seq events)
@@ -764,13 +771,12 @@
         tracks (build-tracks (or track-defs []) (or items []) expanded-tracks)
         ;; Determine selected item ID for the effect bank
         selected-item-id (when (= 1 (count selection)) (first selection))
-        ;; Determine explicit selected track from sidebar or canvas
+        ;; Determine explicit selected track from canonical list-ui state
         tracks-ui-state (fx/sub-ctx context subs/list-ui-state :timeline-tracks)
         sidebar-selected-track-id (first (:selected-ids tracks-ui-state))
-        selected-track-id (tl/ensure-leaf-track
-                           (or track-defs [])
-                           (or (:selected-track-id timeline-ui)
-                               sidebar-selected-track-id))]
+        selected-track-id (tl/resolve-active-track
+                           {:track-defs track-defs
+                            :selected-track-id sidebar-selected-track-id})]
     (cond->
      {:fx/type :border-pane
       :style "-fx-background-color: #121212;"

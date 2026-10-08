@@ -110,3 +110,35 @@
         (is (= all-track-id (:track-id (nth items 0))) "Item 1 goes to default zone child track")
         (is (= front-track-id (:track-id (nth items 1))) "Item 2 goes to front zone child track")
         (is (= front-track-id (:track-id (nth items 2))) "Item 3 goes to front zone child track")))))
+
+(deftest droppable-track?-test
+  (testing "validates leaf track rows with and without clips"
+    (is (tl/droppable-track? {:id "t1" :type :track :items []}))
+    (is (tl/droppable-track? {:id "t1" :type :track :items [{:id "c1" :timeline/start 0.0}]}))
+    (is (tl/droppable-track? {:id "t1" :type :track :track {:id "t1" :type :track} :items [{:id "c1"}]})))
+
+  (testing "rejects group folders"
+    (is (not (tl/droppable-track? {:id "g1" :type :group :items []})))
+    (is (not (tl/droppable-track? {:id "g1" :type :group :track {:id "g1" :type :group :items []} :items []}))))
+
+  (testing "rejects unassigned synthetic rows and invalid inputs"
+    (is (not (tl/droppable-track? {:id :laser-show.views.components.visual-editors.timeline.track-logic/unassigned
+                                   :type :track
+                                   :track nil
+                                   :items []})))
+    (is (not (tl/droppable-track? nil)))
+    (is (not (tl/droppable-track? {})))))
+
+(deftest resolve-active-track-test
+  (testing "resolves leaf track or falls back according to hierarchy"
+    (let [tracks [{:id "g1"
+                   :type :group
+                   :items [{:id "t1" :type :track}
+                           {:id "t2" :type :track}]}
+                  {:id "t3" :type :track}]]
+      (is (= "t2" (tl/resolve-active-track {:track-defs tracks :selected-track-id "t2"})))
+      (is (= "t1" (tl/resolve-active-track {:track-defs tracks :selected-track-id "g1"})))
+      (is (= "t1" (tl/resolve-active-track {:track-defs tracks :selected-track-id nil})))
+      (is (= "t1" (tl/resolve-active-track {:track-defs tracks :selected-track-id "deleted-id"})))
+      (is (nil? (tl/resolve-active-track {:track-defs [] :selected-track-id "t1"}))))))
+

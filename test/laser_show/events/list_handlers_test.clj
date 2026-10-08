@@ -69,6 +69,22 @@
       (is (= :a (get-in result [:state :list-ui :test-list :last-selected-id]))))))
 
 
+(deftest select-item-ctrl-shift-range-test
+  (testing "Ctrl+Shift+click applies unioned range and preserves anchor"
+    (let [state {:list-ui {:test-list {:selected-ids #{:z :a}
+                                       :last-selected-id :a}}}
+          event {:event/type :list/select-item
+                 :component-id :test-list
+                 :item-id :d
+                 :mode :shift
+                 :selected-ids-override #{:z :a :b :c :d}
+                 :last-id-override :a
+                 :state state}
+          result (list-handlers/handle event)]
+      (is (= #{:z :a :b :c :d} (get-in result [:state :list-ui :test-list :selected-ids])))
+      (is (= :a (get-in result [:state :list-ui :test-list :last-selected-id]))))))
+
+
 (deftest select-item-cue-chain-clears-item-effects-test
   (testing "Selecting in cue-chain clears item-effects selection"
     (let [state {:list-ui {[:cue-chain 0 0] {:selected-ids #{:preset-1}
