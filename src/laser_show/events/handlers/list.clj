@@ -17,13 +17,31 @@
 ;; Selection Handlers
 
 
+(defn- resolve-items
+  "Resolve items either directly from event :items, by reading :items-path from state,
+   or from :on-change-params / :component-id."
+  [{:keys [items items-path on-change-params component-id]} state]
+  (or items
+      (when items-path
+        (get-in state items-path))
+      (when-let [{:keys [domain entity-key]} on-change-params]
+        (get-in state [:chains domain entity-key :items]))
+      (when (and (vector? component-id) (= :projector-effects (first component-id)))
+        (let [[_ proj-id] component-id]
+          (get-in state [:chains :projector-effects proj-id :items])))
+      []))
+
+
 (defn- handle-select-item
-  "Handle item selection with different modes (single/ctrl/shift).
+  "Handle item selection with different modes (single/ctrl/shift/ctrl-shift).
+   
+   Supports pre-computed ranges via :selected-ids-override, or computes
+   ranges directly from items in state via :items-path.
    
    When selecting in a cue-chain component, also clears the item-effects
    selection since the selected cue item changed and old effects selection
    is no longer relevant."
-  [{:keys [component-id item-id mode selected-ids-override last-id-override state]}]
+  [{:keys [component-id item-id mode selected-ids-override last-id-override state] :as event}]
   (let [current-state (get-in state [:list-ui component-id] {})
         {:keys [selected-ids last-selected-id]} current-state
         new-state (case mode
@@ -34,10 +52,26 @@
                                      (conj selected-ids item-id))
                      :last-selected-id item-id}
 
-                    ;; Shift+Click - range select (pre-computed by component)
-                    :shift
-                    {:selected-ids selected-ids-override
-                     :last-selected-id (or last-id-override last-selected-id)}
+                    ;; Shift+Click and Ctrl+Shift+Click - range select
+                    (:shift :ctrl-shift)
+                    (if selected-ids-override
+                      {:selected-ids selected-ids-override
+                       :last-selected-id (or last-id-override last-selected-id)}
+                      (let [items (resolve-items event state)
+                            all-ids (chains/collect-all-ids items)
+                            anchor-id (or last-selected-id item-id)
+                            anchor-idx (.indexOf all-ids anchor-id)
+                            target-idx (.indexOf all-ids item-id)
+                            start (min anchor-idx target-idx)
+                            end (max anchor-idx target-idx)
+                            range-ids (if (and (>= anchor-idx 0) (>= target-idx 0))
+                                        (set (subvec all-ids start (inc end)))
+                                        #{item-id})
+                            new-selected (if (= mode :ctrl-shift)
+                                           (into (or selected-ids #{}) range-ids)
+                                           range-ids)]
+                        {:selected-ids new-selected
+                         :last-selected-id anchor-id}))
 
                     ;; Single click - replace selection
                     :single
@@ -59,10 +93,13 @@
 
 (defn- handle-select-all
   "Select all items in the component."
-  [{:keys [component-id all-ids state]}]
-  {:state (update-in state [:list-ui component-id]
-                     merge {:selected-ids (set all-ids)
-                            :last-selected-id (first all-ids)})})
+  [{:keys [component-id all-ids state] :as event}]
+  (let [ids (or all-ids
+                (let [items (resolve-items event state)]
+                  (chains/collect-all-ids items)))]
+    {:state (update-in state [:list-ui component-id]
+                       merge {:selected-ids (set ids)
+                              :last-selected-id (first ids)})}))
 
 (defn- handle-clear-selection
   "Clear selection and cancel rename."

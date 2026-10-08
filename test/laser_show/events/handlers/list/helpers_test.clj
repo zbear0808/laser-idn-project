@@ -286,3 +286,85 @@
           tree [item-a empty-group item-e]
           result (h/ungroup-by-id tree id-f)]
       (is (= [id-a id-e] (mapv :id result))))))
+
+
+;; collect-by-ids tests
+
+
+(deftest collect-by-ids-test
+  (testing "collect does not duplicate group children when both group and children IDs are selected"
+    (let [all-ids (chains/collect-all-ids nested-tree)
+          collected (h/collect-by-ids nested-tree all-ids)]
+      (is (= 3 (count collected)))
+      (is (= [id-a id-f id-e] (mapv :id collected)))
+      (is (= [id-c id-d] (mapv :id (:items (second collected)))))))
+
+  (testing "collect only children when group itself is not in ids set"
+    (let [collected (h/collect-by-ids nested-tree #{id-c id-d})]
+      (is (= [id-c id-d] (mapv :id collected))))))
+
+
+;; normalize-selected-ids tests
+
+
+(deftest normalize-selected-ids-test
+  (testing "removes descendant IDs when group and all descendants are selected"
+    (let [selected-ids #{id-f id-c id-d}
+          normalized (h/normalize-selected-ids selected-ids nested-tree)]
+      (is (= #{id-f} normalized))))
+
+  (testing "removes descendant IDs even when only some descendants are selected alongside group"
+    (let [selected-ids #{id-f id-c}
+          normalized (h/normalize-selected-ids selected-ids nested-tree)]
+      (is (= #{id-f} normalized))))
+
+  (testing "preserves descendant IDs when group is not selected"
+    (let [selected-ids #{id-c id-d}
+          normalized (h/normalize-selected-ids selected-ids nested-tree)]
+      (is (= #{id-c id-d} normalized))))
+
+  (testing "deeply nested group descendant removal"
+    (let [selected-ids #{id-f id-g2-val id-d}
+          normalized (h/normalize-selected-ids selected-ids doubly-nested-tree)]
+      (is (= #{id-f} normalized)))))
+
+
+;; move-items-advanced tests
+
+
+(deftest move-items-advanced-test
+  (testing "pull nested group out before parent group to make it top level"
+    (let [result (h/move-items doubly-nested-tree #{id-g2-val} id-f :before)]
+      (is (= 4 (count result)))
+      (is (= [id-a id-g2-val id-f id-e] (mapv :id result)))
+      (is (= [id-c] (mapv :id (get-in result [2 :items]))))
+      (is (= [id-d] (mapv :id (get-in result [1 :items]))))))
+
+  (testing "pull nested group out after parent group to make it top level"
+    (let [result (h/move-items doubly-nested-tree #{id-g2-val} id-f :after)]
+      (is (= 4 (count result)))
+      (is (= [id-a id-f id-g2-val id-e] (mapv :id result)))
+      (is (= [id-c] (mapv :id (get-in result [1 :items]))))))
+
+  (testing "pull nested group out to :root-end via :append"
+    (let [result (h/move-items doubly-nested-tree #{id-g2-val} :root-end :append)]
+      (is (= 4 (count result)))
+      (is (= [id-a id-f id-e id-g2-val] (mapv :id result)))
+      (is (= [id-c] (mapv :id (get-in result [1 :items]))))))
+
+  (testing "prevent moving a group into itself (no data loss)"
+    (let [result (h/move-items nested-tree #{id-f} id-f :into)]
+      (is (= nested-tree result))))
+
+  (testing "prevent moving a group into its own descendant (no data loss)"
+    (let [result (h/move-items doubly-nested-tree #{id-f} id-g2-val :into)]
+      (is (= doubly-nested-tree result)))
+    (let [result (h/move-items doubly-nested-tree #{id-f} id-d :before)]
+      (is (= doubly-nested-tree result))))
+
+  (testing "fallback to append when target-id is not found (no items lost)"
+    (let [fake-id (java.util.UUID/randomUUID)
+          result (h/move-items nested-tree #{id-c} fake-id :after)]
+      (is (= 4 (count result)))
+      (is (= id-c (:id (last result))))
+      (is (= [id-d] (mapv :id (get-in result [1 :items])))))))

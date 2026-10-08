@@ -510,6 +510,7 @@
      :fx/context context  ;; Required for list-sidebar to subscribe to list-ui-state
      :items (or effects [])
      :component-id [:projector-effects projector-id]
+     :items-path [:chains :projector-effects projector-id :items]
      ;; Custom label function that looks up effect-id in calibration-effect-labels
      :get-item-label (fn [item]
                        (get labels (:effect-id item) "Unknown Effect"))

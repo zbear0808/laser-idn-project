@@ -85,6 +85,57 @@
       (is (= :a (get-in result [:state :list-ui :test-list :last-selected-id]))))))
 
 
+(deftest select-item-shift-state-items-range-test
+  (let [items [{:id :item-1} {:id :item-2} {:id :item-3} {:id :item-4}
+               {:id :item-5} {:id :item-6} {:id :item-7} {:id :item-8}
+               {:id :item-9} {:id :item-10}]
+        base-state {:chains {:cue-chains {[0 0] {:items items}}}
+                    :list-ui {[:cue-chain 0 0] {:selected-ids #{:item-10}
+                                                :last-selected-id :item-10}}}]
+    (testing "Shift+click bottom-to-top resolves range from state items"
+      (let [event {:event/type :list/select-item
+                   :component-id [:cue-chain 0 0]
+                   :item-id :item-2
+                   :mode :shift
+                   :items-path [:chains :cue-chains [0 0] :items]
+                   :state base-state}
+            result (list-handlers/handle event)]
+        (is (= #{:item-2 :item-3 :item-4 :item-5 :item-6 :item-7 :item-8 :item-9 :item-10}
+               (get-in result [:state :list-ui [:cue-chain 0 0] :selected-ids])))
+        ;; Anchor remains :item-10
+        (is (= :item-10 (get-in result [:state :list-ui [:cue-chain 0 0] :last-selected-id])))))
+
+    (testing "Shift+click top-to-bottom resolves range from state items"
+      (let [top-anchor-state (assoc-in base-state [:list-ui [:cue-chain 0 0]]
+                                       {:selected-ids #{:item-1}
+                                        :last-selected-id :item-1})
+            event {:event/type :list/select-item
+                   :component-id [:cue-chain 0 0]
+                   :item-id :item-5
+                   :mode :shift
+                   :items-path [:chains :cue-chains [0 0] :items]
+                   :state top-anchor-state}
+            result (list-handlers/handle event)]
+        (is (= #{:item-1 :item-2 :item-3 :item-4 :item-5}
+               (get-in result [:state :list-ui [:cue-chain 0 0] :selected-ids])))
+        (is (= :item-1 (get-in result [:state :list-ui [:cue-chain 0 0] :last-selected-id])))))
+
+    (testing "Ctrl+Shift+click unions range with existing selection"
+      (let [multi-state (assoc-in base-state [:list-ui [:cue-chain 0 0]]
+                                  {:selected-ids #{:extra :item-10}
+                                   :last-selected-id :item-10})
+            event {:event/type :list/select-item
+                   :component-id [:cue-chain 0 0]
+                   :item-id :item-8
+                   :mode :ctrl-shift
+                   :items-path [:chains :cue-chains [0 0] :items]
+                   :state multi-state}
+            result (list-handlers/handle event)]
+        (is (= #{:extra :item-8 :item-9 :item-10}
+               (get-in result [:state :list-ui [:cue-chain 0 0] :selected-ids])))
+        (is (= :item-10 (get-in result [:state :list-ui [:cue-chain 0 0] :last-selected-id])))))))
+
+
 (deftest select-item-cue-chain-clears-item-effects-test
   (testing "Selecting in cue-chain clears item-effects selection"
     (let [state {:list-ui {[:cue-chain 0 0] {:selected-ids #{:preset-1}
@@ -114,6 +165,19 @@
           result (list-handlers/handle event)]
       (is (= #{:a :b :c :d} (get-in result [:state :list-ui :test-list :selected-ids])))
       (is (= :a (get-in result [:state :list-ui :test-list :last-selected-id]))))))
+
+
+(deftest select-all-state-items-test
+  (testing "Select all resolves IDs from items-path in state"
+    (let [state {:chains {:cue-chains {[0 0] {:items [{:id :x} {:id :y} {:id :z}]}}}
+                 :list-ui {[:cue-chain 0 0] {:selected-ids #{}}}}
+          event {:event/type :list/select-all
+                 :component-id [:cue-chain 0 0]
+                 :items-path [:chains :cue-chains [0 0] :items]
+                 :state state}
+          result (list-handlers/handle event)]
+      (is (= #{:x :y :z} (get-in result [:state :list-ui [:cue-chain 0 0] :selected-ids])))
+      (is (= :x (get-in result [:state :list-ui [:cue-chain 0 0] :last-selected-id]))))))
 
 
 (deftest clear-selection-test

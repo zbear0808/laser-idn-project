@@ -50,39 +50,6 @@
   (or (:selected-ids (get-ui-state component-id)) #{}))
 
 
-;; Component State Atoms (shared between click and keyboard handlers)
-
-(defonce ^:private !component-atoms (atom {}))
-
-(defn- get-or-create-handler-atoms!
-  "Get or create atoms for a component's handler state."
-  [component-id]
-  (or (get @!component-atoms component-id)
-      (let [new-atoms {:items-atom (atom [])
-                       :props-atom (atom {})}]
-        (log/debug "Creating new handler atoms for component" {:component-id component-id})
-        (swap! !component-atoms assoc component-id new-atoms)
-        new-atoms)))
-
-(defn- update-handler-atoms!
-  "Update the atoms with current items and props values."
-  [component-id items props]
-  (let [{:keys [items-atom props-atom]} (get-or-create-handler-atoms! component-id)]
-    #_(log/debug "Updating handler atoms"
-                 {:component-id component-id
-                  :items-count (count items)
-                  :props-keys (keys props)})
-    (reset! items-atom items)
-    (reset! props-atom props)))
-
-(defn- get-component-items
-  "Get the latest items vector for a component from its atoms."
-  [component-id]
-  (if-let [items-atom (:items-atom (get @!component-atoms component-id))]
-    @items-atom
-    []))
-
-
 ;; JavaFX Event Handler Helper
 
 (defn- on-fx-event
@@ -96,41 +63,23 @@
 
 (defn- handle-selection!
   "Handle selection based on click modifiers.
-   Reads items from component atoms at event time to avoid stale closures.
+   Dispatches selection event to handler to resolve directly from application state.
    Supports single click, Ctrl+click toggle, Shift+click range, and Ctrl+Shift+click range add."
-  [component-id item-id ctrl? shift?]
-  (let [mode (cond shift? :shift
-                   ctrl? :ctrl
-                   :else :single)
-        event (if shift?
-                (let [{:keys [last-selected-id selected-ids]} (get-ui-state component-id)
-                      items (get-component-items component-id)
-                      all-ids (chains/collect-all-ids items)
-                      anchor-id (or last-selected-id item-id)
-                      anchor-idx (.indexOf all-ids anchor-id)
-                      target-idx (.indexOf all-ids item-id)
-                      start (min anchor-idx target-idx)
-                      end (max anchor-idx target-idx)
-                      range-ids (if (and (>= anchor-idx 0) (>= target-idx 0))
-                                  (set (subvec all-ids start (inc end)))
-                                  #{item-id})
-                      new-selected (if ctrl?
-                                     (into (or selected-ids #{}) range-ids)
-                                     range-ids)]
-                  (u/->map& component-id item-id mode
-                            :event/type :list/select-item
-                            :selected-ids-override new-selected
-                            :last-id-override last-selected-id))
-                (u/->map& component-id item-id mode
-                          :event/type :list/select-item))]
-    (events/dispatch! event)))
+  [component-id item-id ctrl? shift? items-path]
+  (let [mode (cond
+               (and ctrl? shift?) :ctrl-shift
+               shift? :shift
+               ctrl? :ctrl
+               :else :single)]
+    (events/dispatch!
+     (u/->map& component-id item-id mode items-path
+               :event/type :list/select-item))))
 
 (defn- select-all!
-  "Select all items in the component."
-  [component-id items]
-  (let [all-ids (chains/collect-all-ids items)]
-    (events/dispatch! (u/->map& component-id all-ids
-                                :event/type :list/select-all))))
+  "Select all items in the component by delegating to event handler with items-path."
+  [component-id items-path]
+  (events/dispatch! (u/->map& component-id items-path
+                              :event/type :list/select-all)))
 
 (defn- clear-selection!
   "Clear selection and cancel rename."
@@ -336,7 +285,7 @@
 
 (defn- setup-click-handler!
   "Setup click handler on a node for selection and double-click rename."
-  [^javafx.scene.Node node component-id item-id]
+  [^javafx.scene.Node node component-id item-id items-path]
   (.setOnMouseClicked node
                       (on-fx-event
                        (fn [event]
@@ -345,7 +294,7 @@
                                shift? (.isShiftDown event)]
                            (if (= click-count 2)
                              (start-rename! component-id item-id)
-                             (do (handle-selection! component-id item-id ctrl? shift?)
+                             (do (handle-selection! component-id item-id ctrl? shift? items-path)
                                  (request-list-focus! node)))
                            (.consume event))))))
 
@@ -400,7 +349,7 @@
                    (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
                      (dnd/setup-drag-source! node group-id component-id (:items-path props))
                      (dnd/setup-drag-target! node group-id true component-id drop-props)
-                     (setup-click-handler! node component-id group-id)))
+                     (setup-click-handler! node component-id group-id (:items-path props))))
      :desc {:fx/type :h-box
             :style-class header-classes
             :children [{:fx/type :button
@@ -428,8 +377,8 @@
                           :style-class name-classes})
 
                        {:fx/type :label
-                        :text (str "(" item-count ")")
-                        :style-class "group-count-badge"}
+                          :text (str "(" item-count ")")
+                          :style-class "group-count-badge"}
 
                        {:fx/type :region :h-box/hgrow :always}
 
@@ -467,7 +416,7 @@
                    (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
                      (dnd/setup-drag-source! node item-id component-id (:items-path props))
                      (dnd/setup-drag-target! node item-id false component-id drop-props)
-                     (setup-click-handler! node component-id item-id)))
+                     (setup-click-handler! node component-id item-id (:items-path props))))
      :desc {:fx/type :h-box
             :style-class item-classes
             :children [{:fx/type :check-box
@@ -679,9 +628,25 @@
 
 ;; Keyboard Handler Setup
 
+(defonce ^:private !keyboard-handler-props (atom {}))
+
+(defn- get-or-create-props-atom!
+  "Get or create atom for a component's keyboard handler props."
+  [component-id]
+  (or (get @!keyboard-handler-props component-id)
+      (let [new-atom (atom {})]
+        (swap! !keyboard-handler-props assoc component-id new-atom)
+        new-atom)))
+
+(defn- update-props-atom!
+  "Update the atom with current props."
+  [component-id props]
+  (let [props-atom (get-or-create-props-atom! component-id)]
+    (reset! props-atom props)))
+
 (defn- setup-keyboard-handlers!
   "Setup keyboard handlers on a parent node for a hierarchical list component."
-  [^javafx.scene.Node node component-id items-atom props-atom]
+  [^javafx.scene.Node node component-id props-atom]
   (log/info "Setting up keyboard handlers"
             {:component-id component-id
              :node-class (.getSimpleName (class node))
@@ -695,7 +660,6 @@
             ctrl? (.isShortcutDown event)
             shift? (.isShiftDown event)
             alt? (.isAltDown event)
-            items @items-atom
             props @props-atom
             focused? (.isFocused node)
             scene (.getScene node)
@@ -708,7 +672,6 @@
                     :alt? alt?
                     :node-focused? focused?
                     :focus-owner-class (when focus-owner (.getSimpleName (class focus-owner)))
-                    :items-count (count items)
                     :props-keys (keys props)
                     :selected-ids (get-selected-ids component-id)})
         ;; Only handle keyboard shortcuts when this node has focus
@@ -734,7 +697,7 @@
 
                            (and ctrl? (= code javafx.scene.input.KeyCode/A))
                            (do (log/debug "Handling Ctrl+A (select all)")
-                               (select-all! component-id items)
+                               (select-all! component-id (:items-path props))
                                true)
 
                            (and ctrl? (= code javafx.scene.input.KeyCode/G))
@@ -825,14 +788,14 @@
                        :clipboard-type (get on-change-params :clipboard-type :cue-chain-items)
                        :on-copy on-copy-fn}
 
-        {:keys [items-atom props-atom]} (get-or-create-handler-atoms! component-id)
-        _ (update-handler-atoms! component-id items handler-props)]
+        props-atom (get-or-create-props-atom! component-id)
+        _ (update-props-atom! component-id handler-props)]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [^javafx.scene.Node node]
                    (log/info "list-editor on-created"
                              {:component-id component-id
                               :node-class (.getSimpleName (class node))})
-                   (setup-keyboard-handlers! node component-id items-atom props-atom)
+                   (setup-keyboard-handlers! node component-id props-atom)
                    (.setFocusTraversable node true)
                    ;; NOTE: Don't auto-request focus on creation!
                    ;; Focus should be determined by user interaction (clicking items).
