@@ -17,14 +17,16 @@
 
 (defn- collect-items-in-order
   "Walk a tree and collect items matching `pred` in document order.
+   If a group matches `pred`, the entire group is collected and its
+   children are not traversed separately to avoid duplicating them as siblings.
    Returns a vector of items."
   [items pred]
   (reduce
    (fn [acc item]
-     (let [acc (if (pred item) (conj acc item) acc)]
-       (if (chains/group? item)
-         (into acc (collect-items-in-order (:items item []) pred))
-         acc)))
+     (cond
+       (pred item) (conj acc item)
+       (chains/group? item) (into acc (collect-items-in-order (:items item []) pred))
+       :else acc))
    []
    items))
 
@@ -52,22 +54,18 @@
 
 
 (defn normalize-selected-ids
-  "Remove redundant descendant IDs when a group AND all its descendants
-   are selected. Returns the normalized set of IDs.
-   
-   When a group and ALL its children are selected, the children are
-   removed from the selected set (the group represents them)."
+  "Remove redundant descendant IDs from `selected-ids`.
+   If a group is in `selected-ids`, all of its descendant IDs are removed
+   since the group already encompasses them."
   [selected-ids items]
   (let [selected-ids (set selected-ids)]
     (reduce
      (fn [ids id]
        (let [item (find-by-id items id)]
          (if (and item (chains/group? item))
-           (let [descendant-ids (chains/collect-descendant-ids item)]
-             (if (and (seq descendant-ids)
-                      (every? #(contains? selected-ids %) descendant-ids))
-               (apply disj ids descendant-ids)
-               ids))
+           (if-let [descendant-ids (seq (chains/collect-descendant-ids item))]
+             (apply disj ids descendant-ids)
+             ids)
            ids)))
      selected-ids
      selected-ids)))
@@ -216,45 +214,89 @@
 ;; Compound Operations
 
 
+(defn- descendant-of-any?
+  "Check if target-id is a descendant of any item in source-items."
+  [source-items target-id]
+  (boolean
+   (some
+    (fn [item]
+      (when (chains/group? item)
+        (contains? (or (chains/collect-descendant-ids item) #{}) target-id)))
+    source-items)))
+
+
 (defn move-items
   "Move items with `source-ids` to `target-id` at `position`.
 
    Algorithm:
-   1. Collect source items in document order (preserves visual ordering)
-   2. Remove source items from tree
-   3. Insert collected items at target position
-
-   If target-id is in source-ids with :before/:after position, the target
-   is excluded from the move set so it remains as an anchor point.
+   1. Normalize source-ids (strip descendants of already-selected groups)
+   2. Collect source items in document order
+   3. Check for illegal moves:
+      - target-id is inside source-ids for :into
+      - target-id is a descendant of any source item (cyclic move)
+      If illegal, returns items unchanged.
+   4. Remove source items from tree
+   5. Insert collected items at target:
+      - :append or target-id = :root-end -> append to root items
+      - :before / :after / :into -> insert at target
+      If target-id is not found in the remaining tree, appends items to root
+      so items are never deleted.
 
    Parameters:
    - items: Vector of items (the tree)
-   - source-ids: Set of UUIDs to move
-   - target-id: UUID of the target item
-   - position: :before, :after, or :into
+   - source-ids: Collection of UUIDs to move
+   - target-id: UUID of the target item, or :root-end
+   - position: :before, :after, :into, or :append
 
    Returns: Updated tree with items moved"
   [items source-ids target-id position]
-  (let [source-ids (set source-ids)
+  (let [normalized-sources (normalize-selected-ids source-ids items)
+        ;; If single item is moved before/after itself, it's a no-op
+        self-move? (and (= 1 (count normalized-sources))
+                        (contains? normalized-sources target-id)
+                        (#{:before :after} position))
         ;; If target is in sources with relative positioning, keep target as anchor
-        source-ids (if (and (contains? source-ids target-id)
-                            (#{:before :after} position))
-                     (disj source-ids target-id)
-                     source-ids)
-        ;; 1. Collect items to move in document order
-        items-to-move (collect-items-in-order items #(contains? source-ids (:id %)))
-        ;; 2. Remove source items
-        after-remove (remove-by-ids items source-ids)]
-    (if (seq items-to-move)
-      ;; 3. Insert at target
-      (case position
-        :before (insert-before-id after-remove target-id items-to-move)
-        :after (insert-after-id after-remove target-id items-to-move)
-        :into (insert-into-group after-remove target-id items-to-move)
-        ;; Fallback: append to end
-        (into after-remove items-to-move))
-      ;; Nothing to move
-      items)))
+        effective-sources (if (and (contains? normalized-sources target-id)
+                                   (#{:before :after} position))
+                            (disj normalized-sources target-id)
+                            normalized-sources)
+        items-to-move (collect-items-in-order items #(contains? effective-sources (:id %)))
+        into-self? (and (contains? effective-sources target-id)
+                        (= :into position))
+        into-descendant? (descendant-of-any? items-to-move target-id)]
+    (cond
+      self-move?
+      items
+
+      (or into-self? into-descendant?)
+      items
+
+      (empty? items-to-move)
+      items
+
+      :else
+      (let [after-remove (remove-by-ids items effective-sources)]
+        (cond
+          (or (= position :append) (= target-id :root-end))
+          (into after-remove items-to-move)
+
+          (= position :before)
+          (if (find-by-id after-remove target-id)
+            (insert-before-id after-remove target-id items-to-move)
+            (into after-remove items-to-move))
+
+          (= position :after)
+          (if (find-by-id after-remove target-id)
+            (insert-after-id after-remove target-id items-to-move)
+            (into after-remove items-to-move))
+
+          (= position :into)
+          (if (find-by-id after-remove target-id)
+            (insert-into-group after-remove target-id items-to-move)
+            (into after-remove items-to-move))
+
+          :else
+          (into after-remove items-to-move))))))
 
 
 (defn- find-ids-at-level

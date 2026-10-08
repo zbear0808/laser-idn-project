@@ -169,6 +169,8 @@
           :on-mouse-pressed
           (fn [e]
             (let [{:keys [canvas canvas-id drag-state x y button]} (extract-event-info e)]
+              (when (.isFocusTraversable canvas)
+                (.requestFocus canvas))
               (when-let [result (and on-press (on-press x y button value drag-state))]
                 (let [new-drag (cond-> drag-state
                                  (:drag-start result) (assoc :dragging? true :drag-id (:drag-id result))

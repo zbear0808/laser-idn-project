@@ -143,6 +143,13 @@
          :-fx-background-color drop-target-bg
          :-fx-effect (str "dropshadow(three-pass-box, " drop-target-glow ", 8, 0, 0, -3)")}
         
+        ;; Drop-after indicator - enhanced with glow
+        ".group-header-drop-after"
+        {:-fx-border-color drop-target-border
+         :-fx-border-width ["0px" "0px" "3px" "3px"]
+         :-fx-background-color drop-target-bg
+         :-fx-effect (str "dropshadow(three-pass-box, " drop-target-glow ", 8, 0, 0, 3)")}
+        
         ;; Dragging group - looks "lifted"
         ".group-header-dragging"
         {:-fx-opacity 0.5
@@ -150,6 +157,24 @@
         
         ".group-header-disabled"
         {:-fx-opacity 0.6}}
+       
+       ".group-header.group-header-drop-before"
+       {:-fx-border-color drop-target-border
+        :-fx-border-width ["3px" "0px" "0px" "3px"]
+        :-fx-background-color drop-target-bg
+        :-fx-effect (str "dropshadow(three-pass-box, " drop-target-glow ", 8, 0, 0, -3)")}
+
+       ".group-header.group-header-drop-after"
+       {:-fx-border-color drop-target-border
+        :-fx-border-width ["0px" "0px" "3px" "3px"]
+        :-fx-background-color drop-target-bg
+        :-fx-effect (str "dropshadow(three-pass-box, " drop-target-glow ", 8, 0, 0, 3)")}
+
+       ".group-header.group-header-drop-into"
+       {:-fx-background-color drop-target-bg
+        :-fx-border-color drop-target-border
+        :-fx-border-width "2px"
+        :-fx-effect (str "dropshadow(three-pass-box, " drop-target-glow ", 12, 0, 0, 0)")}
        
        
        

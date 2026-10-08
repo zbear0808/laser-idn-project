@@ -1,6 +1,7 @@
 (ns laser-show.events.handlers.list.helpers-test
   "Tests for ID-based tree manipulation helpers."
   (:require [clojure.test :refer [deftest testing is]]
+            [laser-show.animation.chains :as chains]
             [laser-show.events.handlers.list.helpers :as h]))
 
 (def id-a (java.util.UUID/fromString "00000000-0000-0000-0000-00000000000a"))

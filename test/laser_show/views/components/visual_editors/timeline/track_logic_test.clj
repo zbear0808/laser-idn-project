@@ -142,3 +142,24 @@
       (is (= "t1" (tl/resolve-active-track {:track-defs tracks :selected-track-id "deleted-id"})))
       (is (nil? (tl/resolve-active-track {:track-defs [] :selected-track-id "t1"}))))))
 
+(deftest track-at-y-test
+  (testing "calculates track row and index from y coordinate"
+    (let [tracks [{:id "t1" :type :track}
+                  {:id "t2" :type :track}
+                  {:id "t3" :type :track}]]
+      ;; In ruler
+      (is (nil? (tl/track-at-y {:y 10 :ruler-height 24 :track-height 32 :track-rows tracks})))
+      ;; First track lane (y between 24 and 56)
+      (let [res (tl/track-at-y {:y 30 :ruler-height 24 :track-height 32 :track-rows tracks})]
+        (is (= 0 (:track-idx res)))
+        (is (= "t1" (:id (:track res)))))
+      ;; Second track lane (y between 56 and 88)
+      (let [res (tl/track-at-y {:y 60 :ruler-height 24 :track-height 32 :track-rows tracks})]
+        (is (= 1 (:track-idx res)))
+        (is (= "t2" (:id (:track res)))))
+      ;; Out of bounds below tracks
+      (is (nil? (tl/track-at-y {:y 200 :ruler-height 24 :track-height 32 :track-rows tracks})))
+      ;; Nil input
+      (is (nil? (tl/track-at-y {:y nil :track-rows tracks}))))))
+
+

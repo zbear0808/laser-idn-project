@@ -78,12 +78,16 @@
 
 (defn- handle-start-drag
   "Start a drag operation."
-  [{:keys [component-id item-id state]}]
+  [{:keys [component-id item-id items-path state]}]
   (let [current-state (get-in state [:list-ui component-id] {})
         selected-ids (:selected-ids current-state #{})
-        dragging-ids (if (contains? selected-ids item-id)
-                       selected-ids
-                       #{item-id})
+        items (when items-path (get-in state items-path []))
+        initial-dragging (if (contains? selected-ids item-id)
+                           selected-ids
+                           #{item-id})
+        dragging-ids (if (seq items)
+                       (helpers/normalize-selected-ids initial-dragging items)
+                       initial-dragging)
         new-selected (if (contains? selected-ids item-id)
                        selected-ids
                        #{item-id})]
@@ -182,7 +186,8 @@
   (let [items (get-in state items-path [])
         selected-ids (get-in state [:list-ui component-id :selected-ids] #{})]
     (if (seq selected-ids)
-      (let [new-items (helpers/remove-by-ids items selected-ids)
+      (let [normalized-ids (helpers/normalize-selected-ids selected-ids items)
+            new-items (helpers/remove-by-ids items normalized-ids)
             cleared-state (assoc-in state [:list-ui component-id]
                                     {:selected-ids #{}
                                      :last-selected-id nil
@@ -200,7 +205,8 @@
   (let [items (get-in state items-path [])
         selected-ids (get-in state [:list-ui component-id :selected-ids] #{})]
     (if (seq selected-ids)
-      (let [selected-items (helpers/collect-by-ids items selected-ids)
+      (let [normalized-ids (helpers/normalize-selected-ids selected-ids items)
+            selected-items (helpers/collect-by-ids items normalized-ids)
             copied-items (chains/deep-copy-items selected-items)]
         (case clipboard-type
           :item-effects (clipboard/copy-item-effects! copied-items)

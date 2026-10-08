@@ -234,17 +234,29 @@
 
 
 (def ^:private group-bg-color (Color/web "#2A2A2A"))
+(def ^:private track-bg-selected (Color/web "#282E38"))
 
 (defn- draw-track-backgrounds!
   "Draw alternating track lane backgrounds.
-   Group tracks get a distinct darker background."
-  [^GraphicsContext gc width tracks]
+   Group tracks get a distinct darker background.
+   The currently selected track lane is subtly highlighted."
+  [^GraphicsContext gc width tracks selected-track-id]
   (doseq [[idx track] (map-indexed vector tracks)]
-    (let [y (track-y idx)]
-      (.setFill gc (if (= :group (:type track))
-                     group-bg-color
-                     (if (even? idx) track-bg-even track-bg-odd)))
-      (.fillRect gc 0 y width track-height))))
+    (let [y (track-y idx)
+          selected? (and selected-track-id
+                         (= (:id track) selected-track-id)
+                         (not= :group (:type track)))]
+      (.setFill gc (cond
+                     (= :group (:type track)) group-bg-color
+                     selected?                track-bg-selected
+                     (even? idx)              track-bg-even
+                     :else                    track-bg-odd))
+      (.fillRect gc 0 y width track-height)
+      (when selected?
+        (.setStroke gc selection-border-color)
+        (.setLineWidth gc 1.0)
+        (.strokeLine gc 0 y width y)
+        (.strokeLine gc 0 (+ y track-height) width (+ y track-height))))))
 
 
 (defn- draw-clip!
@@ -296,7 +308,8 @@
    Called by interactive-canvas with current value and drag-info."
   [^Canvas canvas value _]
   (let [{:keys [tracks zoom-x scroll-x selection
-                beats-elapsed cursor-beat zone-groups loop-config]} value
+                beats-elapsed cursor-beat zone-groups loop-config
+                selected-track-id]} value
         gc (.getGraphicsContext2D canvas)
         width (.getWidth canvas)
         height (.getHeight canvas)
@@ -305,7 +318,7 @@
     (.setFill gc bg-color)
     (.fillRect gc 0 0 width height)
     ;; Draw layers
-    (draw-track-backgrounds! gc width tracks)
+    (draw-track-backgrounds! gc width tracks selected-track-id)
     (draw-grid! gc width height zoom-x scroll-x)
     (draw-ruler! gc width zoom-x scroll-x loop-config)
     ;; Draw clips — each track row can have multiple items
@@ -344,26 +357,28 @@
             {:type :loop-brace
              :edge edge})))
       ;; Otherwise check clips
-      (let [track-idx (int (/ (- my ruler-height) track-height))]
-        (when (and (>= track-idx 0) (< track-idx (count tracks)))
-          (let [{:keys [items]} (nth tracks track-idx)]
-            ;; Check each item in this track row for a hit
-            (some (fn [item]
-                    (let [start (:timeline/start item 0.0)
-                          duration (:timeline/duration item 4.0)
-                          clip-x (- (* start zoom-x) scroll-x)
-                          clip-w (max min-clip-width (* duration zoom-x))
-                          clip-end (+ clip-x clip-w)]
-                      (when (and (>= mx clip-x) (<= mx clip-end))
-                        (let [edge (cond
-                                     (< mx (+ clip-x edge-grab-px)) :left
-                                     (> mx (- clip-end edge-grab-px)) :right
-                                     :else :center)]
-                          {:type :clip
-                           :track-idx track-idx
-                           :item item
-                           :edge edge}))))
-                  items)))))))
+      (when-let [{:keys [track-idx track]} (tl/track-at-y {:y my
+                                                           :ruler-height ruler-height
+                                                           :track-height track-height
+                                                           :track-rows tracks})]
+        (let [{:keys [items]} track]
+          ;; Check each item in this track row for a hit
+          (some (fn [item]
+                  (let [start (:timeline/start item 0.0)
+                        duration (:timeline/duration item 4.0)
+                        clip-x (- (* start zoom-x) scroll-x)
+                        clip-w (max min-clip-width (* duration zoom-x))
+                        clip-end (+ clip-x clip-w)]
+                    (when (and (>= mx clip-x) (<= mx clip-end))
+                      (let [edge (cond
+                                   (< mx (+ clip-x edge-grab-px)) :left
+                                   (> mx (- clip-end edge-grab-px)) :right
+                                   :else :center)]
+                        {:type :clip
+                         :track-idx track-idx
+                         :item item
+                         :edge edge}))))
+                items))))))
 
 
 ;; ============================================================
@@ -411,11 +426,10 @@
                             :row row}}))
         ;; Clicked empty space - clear selection, move cursor, select track if clicked
         (let [clicked-beat (max 0.0 (/ (+ mx (or scroll-x 0.0)) zoom-x))
-              track-idx (int (/ (- my ruler-height) track-height))
-              clicked-track (when (and (>= my ruler-height)
-                                       (>= track-idx 0)
-                                       (< track-idx (count tracks)))
-                              (nth tracks track-idx nil))
+              clicked-track (:track (tl/track-at-y {:y my
+                                                    :ruler-height ruler-height
+                                                    :track-height track-height
+                                                    :track-rows tracks}))
               events (cond-> [{:event/type :timeline/clear-selection}
                               {:event/type :timeline/set-cursor-beat :beat clicked-beat}]
                        (tl/droppable-track? clicked-track)
@@ -449,14 +463,15 @@
                        :col col :row row
                        :start new-start
                        :duration new-dur}]}))
-      (let [current-track-idx (int (/ (- my ruler-height) track-height))
-            ;; Determine if we crossed into a new valid track row that isn't a folder
+      (let [{:keys [track-idx track]} (tl/track-at-y {:y my
+                                                      :ruler-height ruler-height
+                                                      :track-height track-height
+                                                      :track-rows tracks})
             track-changed? (and (not= edge :left)
                                 (not= edge :right)
-                                (not= current-track-idx original-track-idx)
-                                (>= current-track-idx 0)
-                                (< current-track-idx (count tracks)))
-            destination-track (when track-changed? (nth tracks current-track-idx nil))
+                                (some? track-idx)
+                                (not= track-idx original-track-idx))
+            destination-track (when track-changed? track)
             valid-destination? (tl/droppable-track? destination-track)
             base-events (case edge
                           :center
@@ -491,7 +506,7 @@
           {:dispatch events
            ;; Update drag state if track changed so we don't dispatch continuously
            :drag-updates (when valid-destination?
-                           {:original-track-idx current-track-idx})})))))
+                           {:original-track-idx track-idx})})))))
 
 
 (defn- on-hover
@@ -711,7 +726,7 @@
 
 (defn timeline-canvas
   "The interactive canvas that shows the timeline grid, clips, and playhead."
-  [{:keys [col row tracks items zoom-x scroll-x selection
+  [{:keys [col row tracks items zoom-x scroll-x selection selected-track-id
            beats-elapsed cursor-beat loop-config zone-groups]}]
   (let [canvas-height (total-canvas-height (count tracks))
         canvas-width (calculate-canvas-width items loop-config (or zoom-x default-zoom))]
@@ -723,6 +738,7 @@
              :zoom-x (or zoom-x default-zoom)
              :scroll-x (or scroll-x 0.0)
              :selection (or selection #{})
+             :selected-track-id selected-track-id
              :beats-elapsed beats-elapsed
              :cursor-beat cursor-beat
              :loop-config loop-config
@@ -838,6 +854,7 @@
            :zoom-x zoom-x
            :scroll-x scroll-x
            :selection selection
+           :selected-track-id selected-track-id
            :beats-elapsed beats-elapsed
            :cursor-beat cursor-beat
            :loop-config loop-config

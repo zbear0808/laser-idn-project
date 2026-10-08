@@ -50,6 +50,39 @@
   (or (:selected-ids (get-ui-state component-id)) #{}))
 
 
+;; Component State Atoms (shared between click and keyboard handlers)
+
+(defonce ^:private !component-atoms (atom {}))
+
+(defn- get-or-create-handler-atoms!
+  "Get or create atoms for a component's handler state."
+  [component-id]
+  (or (get @!component-atoms component-id)
+      (let [new-atoms {:items-atom (atom [])
+                       :props-atom (atom {})}]
+        (log/debug "Creating new handler atoms for component" {:component-id component-id})
+        (swap! !component-atoms assoc component-id new-atoms)
+        new-atoms)))
+
+(defn- update-handler-atoms!
+  "Update the atoms with current items and props values."
+  [component-id items props]
+  (let [{:keys [items-atom props-atom]} (get-or-create-handler-atoms! component-id)]
+    #_(log/debug "Updating handler atoms"
+                 {:component-id component-id
+                  :items-count (count items)
+                  :props-keys (keys props)})
+    (reset! items-atom items)
+    (reset! props-atom props)))
+
+(defn- get-component-items
+  "Get the latest items vector for a component from its atoms."
+  [component-id]
+  (if-let [items-atom (:items-atom (get @!component-atoms component-id))]
+    @items-atom
+    []))
+
+
 ;; JavaFX Event Handler Helper
 
 (defn- on-fx-event
@@ -71,9 +104,7 @@
                    :else :single)
         event (if shift?
                 (let [{:keys [last-selected-id selected-ids]} (get-ui-state component-id)
-                      items (if-let [items-atom (:items-atom (get @!component-atoms component-id))]
-                              @items-atom
-                              [])
+                      items (get-component-items component-id)
                       all-ids (chains/collect-all-ids items)
                       anchor-id (or last-selected-id item-id)
                       anchor-idx (.indexOf all-ids anchor-id)
@@ -260,13 +291,14 @@
 
 (defn- group-header-style-classes
   "Build style class vector for group header based on state."
-  [{:keys [depth selected? dragging? drop-before? drop-into? effectively-disabled?]}]
+  [{:keys [depth selected? dragging? drop-before? drop-into? drop-after? effectively-disabled?]}]
   (let [d (depth->class depth)]
     (build-style-classes
      ["group-header" (str "group-depth-" d) (str "group-indent-" d)]
      [[selected? "group-header-selected"]
       [drop-into? "group-header-drop-into"]
       [drop-before? "group-header-drop-before"]
+      [drop-after? "group-header-drop-after"]
       [dragging? "group-header-dragging"]
       [effectively-disabled? "group-header-disabled"]])))
 
@@ -357,15 +389,16 @@
         drop-target? (= group-id drop-target-id)
         drop-before? (and drop-target? (= drop-position :before))
         drop-into? (and drop-target? (= drop-position :into))
+        drop-after? (and drop-target? (= drop-position :after))
 
         header-classes (group-header-style-classes
-                        (u/->map depth selected? dragging? drop-before? drop-into? effectively-disabled?))
+                        (u/->map depth selected? dragging? drop-before? drop-into? drop-after? effectively-disabled?))
         name-classes (group-name-style-classes
                       (u/->map depth selected? effectively-disabled?))]
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
                    (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
-                     (dnd/setup-drag-source! node group-id component-id)
+                     (dnd/setup-drag-source! node group-id component-id (:items-path props))
                      (dnd/setup-drag-target! node group-id true component-id drop-props)
                      (setup-click-handler! node component-id group-id)))
      :desc {:fx/type :h-box
@@ -432,7 +465,7 @@
     {:fx/type fx/ext-on-instance-lifecycle
      :on-created (fn [node]
                    (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
-                     (dnd/setup-drag-source! node item-id component-id)
+                     (dnd/setup-drag-source! node item-id component-id (:items-path props))
                      (dnd/setup-drag-target! node item-id false component-id drop-props)
                      (setup-click-handler! node component-id item-id)))
      :desc {:fx/type :h-box
@@ -475,6 +508,7 @@
          :children (into
                     [(assoc common-props
                             :fx/type group-header
+                            :fx/key [item-id :header]
                             :group item
                             :renaming? (= item-id renaming-id))]
                     (when-not collapsed?
@@ -560,19 +594,27 @@
                                   :parent-disabled? false
                                   :get-item-label get-item-label})
                                items)}
+        drop-props (select-keys props [:on-change-event :on-change-params :items-path])
         items-content (if (empty? items)
-                        {:fx/type :label
-                         :text empty-text
-                         :style-class "chain-empty-text"}
-                        (if scrollable?
-                          {:fx/type :scroll-pane
-                           :fit-to-width true
-                           :fit-to-height false
-                           :hbar-policy :as-needed
-                           :v-box/vgrow :always
-                           :style-class "scroll-pane-base"
-                           :content items-vbox}
-                          (assoc items-vbox :v-box/vgrow :always)))]
+                        {:fx/type fx/ext-on-instance-lifecycle
+                         :on-created (fn [node]
+                                       (dnd/setup-container-drop-target! node component-id drop-props))
+                         :desc {:fx/type :label
+                                :text empty-text
+                                :style-class "chain-empty-text"}}
+                        (let [pane-desc (if scrollable?
+                                          {:fx/type :scroll-pane
+                                           :fit-to-width true
+                                           :fit-to-height false
+                                           :hbar-policy :as-needed
+                                           :v-box/vgrow :always
+                                           :style-class "scroll-pane-base"
+                                           :content items-vbox}
+                                          (assoc items-vbox :v-box/vgrow :always))]
+                          {:fx/type fx/ext-on-instance-lifecycle
+                           :on-created (fn [node]
+                                         (dnd/setup-container-drop-target! node component-id drop-props))
+                           :desc pane-desc}))]
     {:fx/type :v-box
      :style-class "chain-sidebar"
      :children
@@ -636,29 +678,6 @@
 
 
 ;; Keyboard Handler Setup
-
-(defonce ^:private !component-atoms (atom {}))
-
-(defn- get-or-create-handler-atoms!
-  "Get or create atoms for a component's keyboard handler state."
-  [component-id]
-  (or (get @!component-atoms component-id)
-      (let [new-atoms {:items-atom (atom [])
-                       :props-atom (atom {})}]
-        (log/debug "Creating new handler atoms for component" {:component-id component-id})
-        (swap! !component-atoms assoc component-id new-atoms)
-        new-atoms)))
-
-(defn- update-handler-atoms!
-  "Update the atoms with current items and props values."
-  [component-id items props]
-  (let [{:keys [items-atom props-atom]} (get-or-create-handler-atoms! component-id)]
-    #_(log/debug "Updating handler atoms"
-                 {:component-id component-id
-                  :items-count (count items)
-                  :props-keys (keys props)})
-    (reset! items-atom items)
-    (reset! props-atom props)))
 
 (defn- setup-keyboard-handlers!
   "Setup keyboard handlers on a parent node for a hierarchical list component."

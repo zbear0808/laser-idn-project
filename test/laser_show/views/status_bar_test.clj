@@ -1,7 +1,8 @@
 (ns laser-show.views.status-bar-test
   "Unit tests for status bar view components."
   (:require [clojure.test :refer [deftest testing is]]
-            [laser-show.views.status-bar :as status-bar]))
+            [laser-show.views.status-bar :as status-bar]
+            [clojure.string :as str]))
 
 (def format-us #'laser-show.views.status-bar/format-us)
 
@@ -34,5 +35,5 @@
       (is (= 56 (:min-width val-label)))
       (is (= 56 (:pref-width val-label)))
       (is (= :center-left (:alignment val-label)))
-      (is (clojure.string/includes? (:style val-label) "Consolas")))))
+      (is (str/includes? (:style val-label) "Consolas")))))
 

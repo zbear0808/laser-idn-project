@@ -218,6 +218,24 @@
   [{:keys [track-defs selected-track-id]}]
   (ensure-leaf-track (or track-defs []) selected-track-id))
 
+(defn track-at-y
+  "Resolve the track row and index at a canvas vertical coordinate y.
+   
+   Parameters map:
+   - :y            - Canvas vertical coordinate (Number)
+   - :ruler-height - Top ruler height in pixels (Number, default 24)
+   - :track-height - Height per track lane in pixels (Number, default 32)
+   - :track-rows   - Vector of canvas track display rows
+   
+   Returns {:track-idx int :track row} or nil if y is in the ruler or out of bounds."
+  [{:keys [y ruler-height track-height track-rows]
+    :or {ruler-height 24 track-height 32}}]
+  (when (and (some? y) (>= y ruler-height))
+    (let [idx (int (/ (- y ruler-height) track-height))]
+      (when (and (>= idx 0) (< idx (count track-rows)))
+        {:track-idx idx
+         :track (nth track-rows idx)}))))
+
 
 (defn auto-initialize-tracks
   "Generate default tracks for a CueChain that has no :tracks yet.
