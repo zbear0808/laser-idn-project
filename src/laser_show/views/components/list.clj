@@ -581,6 +581,7 @@
         drop-props (select-keys sidebar-props [:on-change-event :on-change-params :items-path])
         items-content (if (empty? items)
                         {:fx/type fx/ext-on-instance-lifecycle
+                         :v-box/vgrow :always
                          :on-created (fn [node]
                                        (dnd/setup-container-drop-target! node component-id drop-props))
                          :desc {:fx/type :label
@@ -591,11 +592,11 @@
                                            :fit-to-width true
                                            :fit-to-height false
                                            :hbar-policy :as-needed
-                                           :v-box/vgrow :always
                                            :style-class "scroll-pane-base"
                                            :content items-vbox}
-                                          (assoc items-vbox :v-box/vgrow :always))]
+                                          items-vbox)]
                           {:fx/type fx/ext-on-instance-lifecycle
+                           :v-box/vgrow :always
                            :on-created (fn [node]
                                          (dnd/setup-container-drop-target! node component-id drop-props))
                            :desc pane-desc}))]
