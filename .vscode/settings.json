@@ -13,6 +13,16 @@
     }
   ],
 
+  "calva.jackInEnv": {
+    "JAVA_HOME": "C:\\Program Files\\Eclipse Adoptium\\jdk-25.0.4.101-hotspot",
+    "PATH": "C:\\Program Files\\Eclipse Adoptium\\jdk-25.0.4.101-hotspot\\bin;${env:PATH}"
+  },
+
+  "terminal.integrated.env.windows": {
+    "JAVA_HOME": "C:\\Program Files\\Eclipse Adoptium\\jdk-25.0.4.101-hotspot",
+    "PATH": "C:\\Program Files\\Eclipse Adoptium\\jdk-25.0.4.101-hotspot\\bin;${env:PATH}"
+  },
+
   "files.exclude": {
     ".clj-kondo/": false,
     ".calva/": true,

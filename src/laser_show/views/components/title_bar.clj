@@ -11,6 +11,8 @@
   (:require [cljfx.api :as fx]
             [cljfx.composite :as composite]
             [cljfx.lifecycle :as lifecycle]
+            [cljfx.mutator :as mutator]
+            [cljfx.prop :as prop]
             [cljfx.fx.region :as fx.region]
             [laser-show.subs :as subs]
             [clojure.java.io :as io])
@@ -18,29 +20,36 @@
            [javafx.scene.image Image]))
 
 
-;; HeaderBar Lifecycle (JavaFX 26 Preview Feature)
+;; HeaderBar Lifecycle (JavaFX 28 Feature)
 
 
 (def header-bar-props
   "Property map for HeaderBar component.
    
    HeaderBar extends Region, so we inherit all Region props (style, padding, etc.)
-   plus HeaderBar-specific slots: leading, center, and trailing."
+   plus HeaderBar-specific slots: left, center, right, and system padding properties."
   (merge
     fx.region/props
     (composite/props HeaderBar
-      :leading [:setter lifecycle/dynamic]
+      :left [:setter lifecycle/dynamic]
       :center [:setter lifecycle/dynamic]
-      :trailing [:setter lifecycle/dynamic])))
+      :right [:setter lifecycle/dynamic]
+      :left-system-padding [:setter lifecycle/scalar]
+      :right-system-padding [:setter lifecycle/scalar])
+    ;; Backward-compatibility aliases for earlier drafts (:leading -> :left, :trailing -> :right)
+    {:leading (prop/make (mutator/setter (fn [^HeaderBar hb val] (.setLeft hb val)))
+                         lifecycle/dynamic)
+     :trailing (prop/make (mutator/setter (fn [^HeaderBar hb val] (.setRight hb val)))
+                          lifecycle/dynamic)}))
 
 (def header-bar-lifecycle
   "Cljfx lifecycle for HeaderBar.
    
    Use this as the :fx/type value:
    {:fx/type header/header-bar-lifecycle
-    :leading {...}
+    :left {...}
     :center {...}
-    :trailing {...}}"
+    :right {...}}"
   (composite/describe HeaderBar
     :ctor []
     :props header-bar-props))
@@ -326,7 +335,7 @@
 (defn header-view
   "Application header component.
    
-   Uses JavaFX 26 HeaderBar to integrate the menu bar into the window title bar.
+   Uses JavaFX 28 HeaderBar to integrate the menu bar into the window title bar.
    Requires :style :extended on the Stage for proper title bar integration.
    
    Props:
@@ -334,5 +343,5 @@
   [{:keys [fx/context]}]
   {:fx/type header-bar-lifecycle
    :style-class "header-bar"
-   :leading {:fx/type menu-bar}
+   :left {:fx/type menu-bar}
    :center {:fx/type window-title}})

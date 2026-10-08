@@ -4,7 +4,7 @@
 
 1. **Install Java** (if not already installed)
    - Download from https://adoptium.net/
-   - JDK 24+ supported, but JDK 24 is recommended (VisualVM external profiling tool is incompatible with JDK 25+)
+   - JDK 25+ is required (for JavaFX 28-ea compatibility)
 
 2. **Install Clojure CLI tools**
    - Windows: https://clojure.org/guides/install_clojure#_windows

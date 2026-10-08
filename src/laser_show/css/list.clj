@@ -16,6 +16,7 @@
    
    Usage:
    Include (::css/url list) in your scene's :stylesheets vector."
+  (:refer-clojure :exclude [list])
   (:require [cljfx.css :as css]
             [laser-show.css.theme :as theme]))
 

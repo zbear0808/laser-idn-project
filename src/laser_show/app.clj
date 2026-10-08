@@ -55,20 +55,24 @@
                 lifecycle to ensure proper context propagation.
    In prod mode: Uses standard cljfx lifecycle lookup"
   []
-  (if (dev-config/dev-mode?)
-    ;; Dev mode: Use dev validation for keywords, standard lifecycle for functions
-    (let [dev-lifecycle @(requiring-resolve 'cljfx.dev/type->lifecycle)]
-      (log/info "🔧 Dev mode enabled - cljfx dev tools active (Press F12 for inspector)")
-      (fn [type]
-        (if (keyword? type)
-          ;; Use dev validation for keyword types (JavaFX components)
-          (dev-lifecycle type)
-          ;; Use standard context-aware lifecycle for function components
-          ;; This ensures fx/context is properly passed through
-          (fx/fn->lifecycle-with-context type))))
-    ;; Prod mode: Use standard lifecycle
-    #(or (fx/keyword->lifecycle %)
-         (fx/fn->lifecycle-with-context %))))
+  (let [std-lifecycle #(or (fx/keyword->lifecycle %)
+                           (fx/fn->lifecycle-with-context %))]
+    (if (dev-config/dev-mode?)
+      (if-let [dev-lifecycle (try
+                               @(requiring-resolve 'cljfx.dev/type->lifecycle)
+                               (catch Throwable t
+                                 (log/warn t "Could not load cljfx.dev tools; falling back to standard lifecycle")
+                                 nil))]
+        (do
+          (log/info "🔧 Dev mode enabled - cljfx dev tools active (Press F12 for inspector)")
+          (fn [type]
+            (if (keyword? type)
+              (dev-lifecycle type)
+              (fx/fn->lifecycle-with-context type))))
+        (do
+          (log/info "🔧 Dev mode enabled - using standard cljfx lifecycle")
+          std-lifecycle))
+      std-lifecycle)))
 
 (defn- agent-error-handler
   "Error handler for the event processing agent.

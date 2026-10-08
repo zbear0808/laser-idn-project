@@ -28,7 +28,7 @@ A Clojure project for controlling laser shows with multiple projectors using the
 I partially tested mac or linux builds, they're just generated from my github action, almost all of my dev testing is done on windows.
 
 → Try the universal JAR: `java -jar laser-show-X.X.X-standalone.jar`
-this should work regardless of your OS, but you'd need JDK23+ installed
+this should work regardless of your OS, but you'd need JDK 25+ installed
 
 ## Animation System
 
