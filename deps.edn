@@ -86,38 +86,38 @@
   ;; Note: $classifier syntax required by newer Clojure CLI versions
 
   :win
-  {:extra-deps {org.openjfx/javafx-base$win {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-controls$win {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-graphics$win {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-media$win {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-swing$win {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-web$win {:mvn/version "26-ea+19"}}}
+  {:extra-deps {org.openjfx/javafx-base$win {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-controls$win {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-graphics$win {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-media$win {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-swing$win {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-web$win {:mvn/version "28-ea+11"}}}
 
   ;; macOS Intel (x86_64)
   :mac
-  {:extra-deps {org.openjfx/javafx-base$mac {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-controls$mac {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-graphics$mac {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-media$mac {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-swing$mac {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-web$mac {:mvn/version "26-ea+19"}}}
+  {:extra-deps {org.openjfx/javafx-base$mac {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-controls$mac {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-graphics$mac {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-media$mac {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-swing$mac {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-web$mac {:mvn/version "28-ea+11"}}}
 
   ;; macOS Apple Silicon (ARM64)
   :mac-arm
-  {:extra-deps {org.openjfx/javafx-base$mac-aarch64 {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-controls$mac-aarch64 {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-graphics$mac-aarch64 {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-media$mac-aarch64 {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-swing$mac-aarch64 {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-web$mac-aarch64 {:mvn/version "26-ea+19"}}}
+  {:extra-deps {org.openjfx/javafx-base$mac-aarch64 {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-controls$mac-aarch64 {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-graphics$mac-aarch64 {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-media$mac-aarch64 {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-swing$mac-aarch64 {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-web$mac-aarch64 {:mvn/version "28-ea+11"}}}
 
   :linux
-  {:extra-deps {org.openjfx/javafx-base$linux {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-controls$linux {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-graphics$linux {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-media$linux {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-swing$linux {:mvn/version "26-ea+19"}
-                org.openjfx/javafx-web$linux {:mvn/version "26-ea+19"}}}
+  {:extra-deps {org.openjfx/javafx-base$linux {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-controls$linux {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-graphics$linux {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-media$linux {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-swing$linux {:mvn/version "28-ea+11"}
+                org.openjfx/javafx-web$linux {:mvn/version "28-ea+11"}}}
 
   :test
   {:extra-paths ["test"]
