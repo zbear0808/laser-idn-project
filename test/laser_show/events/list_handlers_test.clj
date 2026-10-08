@@ -136,6 +136,55 @@
         (is (= :item-10 (get-in result [:state :list-ui [:cue-chain 0 0] :last-selected-id])))))))
 
 
+(deftest select-item-shift-with-all-ids-test
+  (let [all-ids [:id-1 :id-2 :id-3 :id-4 :id-5 :id-6 :id-7 :id-8]
+        base-state {:list-ui {:my-list {:selected-ids #{:id-2}
+                                        :last-selected-id :id-2}}}]
+    (testing "Shift+click top-to-bottom using explicit :all-ids vector"
+      (let [event {:event/type :list/select-item
+                   :component-id :my-list
+                   :item-id :id-6
+                   :mode :shift
+                   :all-ids all-ids
+                   :state base-state}
+            result (list-handlers/handle event)]
+        (is (= #{:id-2 :id-3 :id-4 :id-5 :id-6}
+               (get-in result [:state :list-ui :my-list :selected-ids])))
+        (is (= :id-2 (get-in result [:state :list-ui :my-list :last-selected-id])))))
+
+    (testing "Shift+click bottom-to-top using explicit :all-ids vector"
+      (let [bottom-state (assoc-in base-state [:list-ui :my-list]
+                                   {:selected-ids #{:id-7}
+                                    :last-selected-id :id-7})
+            event {:event/type :list/select-item
+                   :component-id :my-list
+                   :item-id :id-3
+                   :mode :shift
+                   :all-ids all-ids
+                   :state bottom-state}
+            result (list-handlers/handle event)]
+        (is (= #{:id-3 :id-4 :id-5 :id-6 :id-7}
+               (get-in result [:state :list-ui :my-list :selected-ids])))
+        (is (= :id-7 (get-in result [:state :list-ui :my-list :last-selected-id])))))))
+
+
+(deftest select-item-shift-fallback-to-component-id-test
+  (let [items [{:id :cue-1} {:id :cue-2} {:id :cue-3} {:id :cue-4} {:id :cue-5}]
+        base-state {:chains {:cue-chains {[1 2] {:items items}}}
+                    :list-ui {[:cue-chain 1 2] {:selected-ids #{:cue-5}
+                                                :last-selected-id :cue-5}}}]
+    (testing "Shift+click resolves range directly from component-id in state without items-path or all-ids"
+      (let [event {:event/type :list/select-item
+                   :component-id [:cue-chain 1 2]
+                   :item-id :cue-2
+                   :mode :shift
+                   :state base-state}
+            result (list-handlers/handle event)]
+        (is (= #{:cue-2 :cue-3 :cue-4 :cue-5}
+               (get-in result [:state :list-ui [:cue-chain 1 2] :selected-ids])))
+        (is (= :cue-5 (get-in result [:state :list-ui [:cue-chain 1 2] :last-selected-id])))))))
+
+
 (deftest select-item-cue-chain-clears-item-effects-test
   (testing "Selecting in cue-chain clears item-effects selection"
     (let [state {:list-ui {[:cue-chain 0 0] {:selected-ids #{:preset-1}

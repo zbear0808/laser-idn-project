@@ -11,6 +11,7 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.animation.chains :as chains]
             [laser-show.events.handlers.list.helpers :as helpers]
+            [laser-show.state.extractors :as ex]
             [laser-show.state.clipboard :as clipboard]))
 
 
@@ -18,36 +19,59 @@
 
 
 (defn- resolve-items
-  "Resolve items either directly from event :items, by reading :items-path from state,
-   or from :on-change-params / :component-id."
+  "Resolve items directly from event :items, :items-path, :on-change-params, or :component-id."
   [{:keys [items items-path on-change-params component-id]} state]
   (or items
       (when items-path
         (get-in state items-path))
       (when-let [{:keys [domain entity-key]} on-change-params]
         (get-in state [:chains domain entity-key :items]))
-      (when (and (vector? component-id) (= :projector-effects (first component-id)))
-        (let [[_ proj-id] component-id]
-          (get-in state [:chains :projector-effects proj-id :items])))
+      (when component-id
+        (ex/chain-items state component-id))
       []))
+
+
+(defn- resolve-ordered-ids
+  "Resolve ordered vector of item IDs from event or state."
+  [{:keys [all-ids items items-path on-change-params component-id] :as event} state]
+  (or all-ids
+      (when (seq items)
+        (chains/collect-all-ids items))
+      (when items-path
+        (let [extracted (ex/chain-ordered-ids state items-path)]
+          (when (seq extracted) extracted)))
+      (when-let [{:keys [domain entity-key]} on-change-params]
+        (let [domain-items (get-in state [:chains domain entity-key :items])]
+          (when (seq domain-items)
+            (chains/collect-all-ids domain-items))))
+      (when component-id
+        (let [extracted (ex/chain-ordered-ids state component-id)]
+          (when (seq extracted) extracted)))
+      (chains/collect-all-ids (resolve-items event state))))
 
 
 (defn- handle-select-item
   "Handle item selection with different modes (single/ctrl/shift/ctrl-shift).
    
    Supports pre-computed ranges via :selected-ids-override, or computes
-   ranges directly from items in state via :items-path.
+   ranges directly from ordered IDs via subscription, items-path, or component-id.
    
    When selecting in a cue-chain component, also clears the item-effects
    selection since the selected cue item changed and old effects selection
    is no longer relevant."
   [{:keys [component-id item-id mode selected-ids-override last-id-override state] :as event}]
   (let [current-state (get-in state [:list-ui component-id] {})
-        new-state (if selected-ids-override
+        new-state (cond
+                    selected-ids-override
                     {:selected-ids selected-ids-override
                      :last-selected-id (or last-id-override (:last-selected-id current-state))}
-                    (let [items (resolve-items event state)]
-                      (helpers/calculate-selection current-state items item-id mode)))
+
+                    (#{:single :ctrl} mode)
+                    (helpers/calculate-selection current-state nil item-id mode)
+
+                    :else
+                    (let [all-ids (resolve-ordered-ids event state)]
+                      (helpers/calculate-selection current-state all-ids item-id mode)))
         state-with-selection (update-in state [:list-ui component-id] merge new-state)
         ;; If this is a cue-chain component, clear the item-effects selection
         ;; The item-effects list shows effects for the selected cue item, so
@@ -65,9 +89,7 @@
 (defn- handle-select-all
   "Select all items in the component."
   [{:keys [component-id all-ids state] :as event}]
-  (let [ids (or all-ids
-                (let [items (resolve-items event state)]
-                  (chains/collect-all-ids items)))]
+  (let [ids (or all-ids (resolve-ordered-ids event state))]
     {:state (update-in state [:list-ui component-id]
                        merge {:selected-ids (set ids)
                               :last-selected-id (first ids)})}))

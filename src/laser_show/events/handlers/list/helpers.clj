@@ -76,12 +76,14 @@
 
 (defn calculate-selection
   "Pure calculation of new selection state given current selection state,
-   items tree, clicked item ID, and selection mode (:single, :ctrl, :shift, :ctrl-shift).
+   items tree or pre-flattened ordered IDs vector, clicked item ID,
+   and selection mode (:single, :ctrl, :shift, :ctrl-shift).
    Returns updated selection map {:selected-ids #{...} :last-selected-id <id>}."
   ([current-selection params]
-   (let [{:keys [items item-id mode]} params]
-     (calculate-selection current-selection items item-id mode)))
-  ([current-selection items item-id mode]
+   (let [{:keys [items all-ids item-id mode]} params
+         ids (or all-ids items)]
+     (calculate-selection current-selection ids item-id mode)))
+  ([current-selection items-or-ids item-id mode]
    (let [{:keys [selected-ids last-selected-id]
           :or {selected-ids #{}}} current-selection]
      (case mode
@@ -92,7 +94,9 @@
         :last-selected-id item-id}
 
        (:shift :ctrl-shift)
-       (let [all-ids (chains/collect-all-ids items)
+       (let [all-ids (if (and (coll? items-or-ids) (not-any? map? items-or-ids))
+                       (vec items-or-ids)
+                       (chains/collect-all-ids items-or-ids))
              anchor-id (or last-selected-id item-id)
              anchor-idx (.indexOf all-ids anchor-id)
              target-idx (.indexOf all-ids item-id)

@@ -502,4 +502,22 @@
       (let [param-result (h/calculate-selection {} {:items chain-12
                                                     :item-id (nth chain-ids 3)
                                                     :mode :single})]
-        (is (= #{(nth chain-ids 3)} (:selected-ids param-result)))))))
+        (is (= #{(nth chain-ids 3)} (:selected-ids param-result))))
+
+      (testing "pre-flattened all-ids vector passed directly (top-to-bottom and bottom-to-top)"
+        (let [top-down (-> {}
+                           (h/calculate-selection chain-ids (nth chain-ids 2) :single)
+                           (h/calculate-selection chain-ids (nth chain-ids 7) :shift))
+              bottom-up (-> {}
+                            (h/calculate-selection chain-ids (nth chain-ids 8) :single)
+                            (h/calculate-selection chain-ids (nth chain-ids 3) :shift))
+              param-all-ids (h/calculate-selection {:selected-ids #{(nth chain-ids 1)}
+                                                    :last-selected-id (nth chain-ids 1)}
+                                                   {:all-ids chain-ids
+                                                    :item-id (nth chain-ids 5)
+                                                    :mode :shift})]
+          (is (= (set (subvec chain-ids 2 8)) (:selected-ids top-down)))
+          (is (= (nth chain-ids 2) (:last-selected-id top-down)))
+          (is (= (set (subvec chain-ids 3 9)) (:selected-ids bottom-up)))
+          (is (= (nth chain-ids 8) (:last-selected-id bottom-up)))
+          (is (= (set (subvec chain-ids 1 6)) (:selected-ids param-all-ids))))))))

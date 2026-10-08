@@ -50,6 +50,31 @@
   (or (:selected-ids (get-ui-state component-id)) #{}))
 
 
+;; Component Handler Props Atoms (shared for dynamic event dispatch and keyboard shortcuts)
+
+(defonce ^:private !component-handler-props (atom {}))
+
+(defn- get-or-create-props-atom!
+  "Get or create atom for a component's handler props."
+  [component-id]
+  (or (get @!component-handler-props component-id)
+      (let [new-atom (atom {})]
+        (swap! !component-handler-props assoc component-id new-atom)
+        new-atom)))
+
+(defn- update-props-atom!
+  "Update the atom with current props."
+  [component-id props]
+  (let [props-atom (get-or-create-props-atom! component-id)]
+    (reset! props-atom props)))
+
+(defn- get-handler-props
+  "Get latest props for a component from atom."
+  [component-id]
+  (when-let [p-atom (get @!component-handler-props component-id)]
+    @p-atom))
+
+
 ;; JavaFX Event Handler Helper
 
 (defn- on-fx-event
@@ -65,21 +90,25 @@
   "Handle selection based on click modifiers.
    Dispatches selection event to handler to resolve directly from application state.
    Supports single click, Ctrl+click toggle, Shift+click range, and Ctrl+Shift+click range add."
-  [component-id item-id ctrl? shift? items-path]
-  (let [mode (cond
-               (and ctrl? shift?) :ctrl-shift
-               shift? :shift
-               ctrl? :ctrl
-               :else :single)]
-    (events/dispatch!
-     (u/->map& component-id item-id mode items-path
-               :event/type :list/select-item))))
+  ([component-id item-id ctrl? shift? items-path]
+   (handle-selection! component-id item-id ctrl? shift? items-path nil))
+  ([component-id item-id ctrl? shift? items-path all-ids]
+   (let [mode (cond
+                (and ctrl? shift?) :ctrl-shift
+                shift? :shift
+                ctrl? :ctrl
+                :else :single)]
+     (events/dispatch!
+      (u/->map& component-id item-id mode items-path all-ids
+                :event/type :list/select-item)))))
 
 (defn- select-all!
   "Select all items in the component by delegating to event handler with items-path."
-  [component-id items-path]
-  (events/dispatch! (u/->map& component-id items-path
-                              :event/type :list/select-all)))
+  ([component-id items-path]
+   (select-all! component-id items-path nil))
+  ([component-id items-path all-ids]
+   (events/dispatch! (u/->map& component-id items-path all-ids
+                               :event/type :list/select-all))))
 
 (defn- clear-selection!
   "Clear selection and cancel rename."
@@ -291,10 +320,13 @@
                        (fn [event]
                          (let [click-count (.getClickCount event)
                                ctrl? (.isShortcutDown event)
-                               shift? (.isShiftDown event)]
+                               shift? (.isShiftDown event)
+                               dynamic-props (get-handler-props component-id)
+                               effective-path (or items-path (:items-path dynamic-props))
+                               all-ids (:ordered-ids dynamic-props)]
                            (if (= click-count 2)
                              (start-rename! component-id item-id)
-                             (do (handle-selection! component-id item-id ctrl? shift? items-path)
+                             (do (handle-selection! component-id item-id ctrl? shift? effective-path all-ids)
                                  (request-list-focus! node)))
                            (.consume event))))))
 
@@ -518,7 +550,10 @@
          compact? false
          scrollable? true}
     :as props}]
-  (let [ui-state (fx/sub-ctx context subs/list-ui-state component-id)
+  (let [ordered-ids (fx/sub-ctx context subs/list-ordered-ids component-id items-path)
+        sidebar-props (assoc props :ordered-ids ordered-ids)
+        _ (update-props-atom! component-id sidebar-props)
+        ui-state (fx/sub-ctx context subs/list-ui-state component-id)
         {:keys [selected-ids dragging-ids drop-target-id drop-position renaming-id]} ui-state
         selection-count (count selected-ids)
         chain-depth (chains/nesting-depth items)
@@ -532,7 +567,7 @@
                                   :fx/key [(:id item) idx]
                                   :component-id component-id
                                   :items items
-                                  :props props
+                                  :props sidebar-props
                                   :item item
                                   :depth 0
                                   :selected-ids selected-ids
@@ -543,7 +578,7 @@
                                   :parent-disabled? false
                                   :get-item-label get-item-label})
                                items)}
-        drop-props (select-keys props [:on-change-event :on-change-params :items-path])
+        drop-props (select-keys sidebar-props [:on-change-event :on-change-params :items-path])
         items-content (if (empty? items)
                         {:fx/type fx/ext-on-instance-lifecycle
                          :on-created (fn [node]
@@ -586,7 +621,7 @@
 
         (when allow-groups?
           {:fx/type group-toolbar
-           :props props
+           :props sidebar-props
            :selection-count selection-count
            :can-create-group? can-create-group?})
 
@@ -597,19 +632,19 @@
                      :graphic {:fx/type fa/icon :name :copy :style :regular :size 8}
                      :disable (zero? selection-count)
                      :style-class "chain-toolbar-btn"
-                     :on-action (fn [_] (dispatch-copy-selected! props))}
+                     :on-action (fn [_] (dispatch-copy-selected! sidebar-props))}
                     {:fx/type :button
                      :text "Paste"
                      :graphic {:fx/type fa/icon :name :clipboard :size 8}
                      :disable (not can-paste?)
                      :style-class "chain-toolbar-btn"
-                     :on-action (fn [_] (dispatch-paste-items! props))}
+                     :on-action (fn [_] (dispatch-paste-items! sidebar-props))}
                     {:fx/type :button
                      :text "Del"
                      :graphic {:fx/type fa/icon :name :trash-can :size 8}
                      :disable (zero? selection-count)
                      :style-class "chain-toolbar-btn-danger"
-                     :on-action (fn [_] (dispatch-delete-selected! props))}]}
+                     :on-action (fn [_] (dispatch-delete-selected! sidebar-props))}]}
         items-content])}))
 
 
@@ -627,22 +662,6 @@
 
 
 ;; Keyboard Handler Setup
-
-(defonce ^:private !keyboard-handler-props (atom {}))
-
-(defn- get-or-create-props-atom!
-  "Get or create atom for a component's keyboard handler props."
-  [component-id]
-  (or (get @!keyboard-handler-props component-id)
-      (let [new-atom (atom {})]
-        (swap! !keyboard-handler-props assoc component-id new-atom)
-        new-atom)))
-
-(defn- update-props-atom!
-  "Update the atom with current props."
-  [component-id props]
-  (let [props-atom (get-or-create-props-atom! component-id)]
-    (reset! props-atom props)))
 
 (defn- setup-keyboard-handlers!
   "Setup keyboard handlers on a parent node for a hierarchical list component."
@@ -697,7 +716,7 @@
 
                            (and ctrl? (= code javafx.scene.input.KeyCode/A))
                            (do (log/debug "Handling Ctrl+A (select all)")
-                               (select-all! component-id (:items-path props))
+                               (select-all! component-id (:items-path props) (:ordered-ids props))
                                true)
 
                            (and ctrl? (= code javafx.scene.input.KeyCode/G))

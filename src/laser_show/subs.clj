@@ -529,6 +529,21 @@
         :drop-position nil
         :renaming-id nil}))
 
+(defn list-ordered-ids
+  "Get the ordered vector of item IDs for a hierarchical list component or items-path.
+   Calculates visual document-order IDs directly from the state context.
+   Returns an eager vector of UUIDs in document order."
+  ([context component-id]
+   (list-ordered-ids context component-id nil))
+  ([context component-id items-path]
+   (let [target (or items-path (ex/resolve-items-path component-id))]
+     (if (and (vector? target) (= :chains (first target)))
+       (let [chains (fx/sub-val context :chains)
+             sub-path (subvec target 1)]
+         (chains/collect-all-ids (get-in chains sub-path [])))
+       (let [state (fx/sub-val context identity)]
+         (ex/chain-ordered-ids state (or target component-id)))))))
+
 
 ;; Level 2: Virtual Projector Subscriptions
 

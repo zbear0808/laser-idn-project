@@ -13,7 +13,70 @@
      (ex/bpm (state/get-raw-state))
    
    Example UI subscription:
-     (fx/sub-val context ex/bpm)")
+     (fx/sub-val context ex/bpm)"
+  (:require [laser-show.animation.chains :as chains]))
+
+
+(defn resolve-items-path
+  "Resolve canonical path in state to the items vector for a component-id."
+  [component-id]
+  (cond
+    (vector? component-id)
+    (case (first component-id)
+      :cue-chain
+      (let [[_ col row] component-id]
+        [:chains :cue-chains [col row] :items])
+
+      :effect-chain
+      (let [[_ col row] component-id]
+        [:chains :effect-chains [col row] :items])
+
+      :projector-effects
+      (let [[_ proj-id] component-id]
+        [:chains :projector-effects proj-id :items])
+
+      :timeline-cue-chain
+      (let [[_ col row] component-id]
+        [:chains :cue-chains [col row] :items])
+
+      nil)
+
+    :else nil))
+
+
+(defn chain-items
+  "Extract raw chain items vector from state at items-path or component-id."
+  [state path-or-component-id]
+  (cond
+    (nil? path-or-component-id)
+    []
+
+    ;; Already a collection of item maps
+    (and (vector? path-or-component-id)
+         (seq path-or-component-id)
+         (map? (first path-or-component-id)))
+    path-or-component-id
+
+    ;; Direct path in state
+    (and (vector? path-or-component-id)
+         (contains? state (first path-or-component-id)))
+    (get-in state path-or-component-id [])
+
+    ;; Component-id that maps to a path in state
+    :else
+    (if-let [p (resolve-items-path path-or-component-id)]
+      (get-in state p [])
+      (if (sequential? path-or-component-id)
+        (get-in state path-or-component-id [])
+        []))))
+
+
+(defn chain-ordered-ids
+  "Extract ordered vector of item IDs from state for a given items-path or component-id.
+   Returns an eager vector of UUIDs in visual document order."
+  [state path-or-component-id]
+  (let [items (chain-items state path-or-component-id)]
+    (chains/collect-all-ids items)))
 
 
 (defn config [state]
