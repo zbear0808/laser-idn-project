@@ -32,7 +32,7 @@
      :spacing 8
      :alignment :center-left
      :children [{:fx/type :label
-                 :text "Destination Zone:"
+                 :text "Default Zone (Chain Fallback):"
                  :style-class "zone-picker-label"}
                 {:fx/type :combo-box
                  :value current-group

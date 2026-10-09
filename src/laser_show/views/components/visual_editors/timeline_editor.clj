@@ -10,13 +10,17 @@
    - timeline-toolbar     : Zoom, snap, grid controls
    - timeline-headers     : Track names / zone indicators (left sidebar)"
   (:require [cljfx.api :as fx]
+            [laser-show.animation.chains :as chains]
+            [laser-show.animation.presets :as presets]
+            [laser-show.common.util :as u]
             [laser-show.events.core :as events]
-            [laser-show.views.components.visual-editors.canvas-interaction :as ci]
-            [laser-show.views.components.visual-editors.timeline.track-logic :as tl]
+            [laser-show.routing.zone-effects :as ze]
             [laser-show.subs :as subs]
+            [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.views.components.list :as list]
             [laser-show.views.components.preset-bank :as preset-bank]
-            [laser-show.views.components.effect-bank :as effect-bank])
+            [laser-show.views.components.visual-editors.canvas-interaction :as ci]
+            [laser-show.views.components.visual-editors.timeline.track-logic :as tl])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.paint Color]
            [javafx.scene.control ScrollPane]
@@ -678,13 +682,69 @@
 
 (defn track-label-renderer
   "Custom list-editor label renderer for tracks.
-   Displays the track name and its assigned zone group."
-  [zone-groups item]
-  (let [zone-name (or (get-in zone-groups [(:zone-group-id item) :name])
-                      (when-let [gid (:zone-group-id item)] (name gid)))]
-    (if zone-name
+   Displays the track name and its assigned or inherited zone group."
+  [zone-groups track-defs item]
+  (let [direct-zone (:zone-group-id item)
+        effective-zone (ze/resolve-track-effective-zone track-defs (:id item) :all)
+        zone-name (or (get-in zone-groups [effective-zone :name])
+                      (when effective-zone (name effective-zone))
+                      "All")]
+    (cond
+      direct-zone
       (str (:name item "Track") " [" zone-name "]")
-      (:name item "Track"))))
+
+      (not= effective-zone :all)
+      (str (:name item "Track") " [" zone-name " (Folder)]")
+
+      :else
+      (str (:name item "Track") " [" zone-name "]"))))
+
+(defn track-group-label-renderer
+  "Custom list-editor label renderer for track folders.
+   Displays the folder name and its assigned zone group."
+  [zone-groups folder]
+  (let [direct-zone (:zone-group-id folder)
+        zone-name (when direct-zone
+                    (or (get-in zone-groups [direct-zone :name])
+                        (name direct-zone)))]
+    (if zone-name
+      (str (:name folder "Folder") " [" zone-name "]")
+      (str (:name folder "Folder") " [All]"))))
+
+(defn- track-context-menu
+  "Builds a context menu for a track or folder with zone routing options."
+  [col row zone-groups track-or-folder]
+  (let [track-id (:id track-or-folder)
+        current-zone (:zone-group-id track-or-folder)
+        is-folder? (or (= :group (:type track-or-folder)) (contains? track-or-folder :items))
+        zone-items (mapv
+                    (fn [zg]
+                      (let [zid (:id zg)
+                            active? (= zid current-zone)]
+                        {:fx/type :check-menu-item
+                         :text (str (if active? "✓ " "   ") (:name zg (name zid)))
+                         :selected active?
+                         :on-action {:event/type :timeline/set-track-zone
+                                     :col col
+                                     :row row
+                                     :track-id track-id
+                                     :zone-group-id zid}}))
+                    (vals zone-groups))
+        inherit-item (when-not is-folder?
+                       [{:fx/type :check-menu-item
+                         :text (str (if (nil? current-zone) "✓ " "   ") "Inherit from Folder")
+                         :selected (nil? current-zone)
+                         :on-action {:event/type :timeline/set-track-zone
+                                     :col col
+                                     :row row
+                                     :track-id track-id
+                                     :zone-group-id nil}}
+                        {:fx/type :separator-menu-item}])
+        all-zone-items (into (vec inherit-item) zone-items)]
+    {:fx/type :context-menu
+     :items [{:fx/type :menu
+              :text "Assign Zone"
+              :items all-zone-items}]}))
 
 (defn timeline-sidebar
   "Left pane: track list managed by list-editor."
@@ -703,7 +763,10 @@
      :fx/context context
      :items (or track-defs [])
      :component-id :timeline-tracks
-     :get-item-label (partial track-label-renderer zone-groups)
+     :get-item-label (partial track-label-renderer zone-groups (or track-defs []))
+     :get-group-label (partial track-group-label-renderer zone-groups)
+     :get-context-menu (partial track-context-menu col row zone-groups)
+     :get-group-context-menu (partial track-context-menu col row zone-groups)
      :items-path items-path
      :on-change-event :timeline/update-tracks ;; Requires custom handler or alias
      :on-change-params {:col col :row row}
@@ -714,11 +777,179 @@
      :compact? true}]})
 
 
+(defn- timeline-inspector-panel
+  "Inspector panel for the selected clip or selected track in the timeline."
+  [{:keys [col row items track-defs zone-groups selected-item-id selected-track-id]}]
+  (let [;; Check for selected clip
+        selected-clip (when selected-item-id
+                        (u/seek #(= (:id %) selected-item-id) (chains/flatten-chain items)))
+        ;; Check for selected track
+        selected-track (when (and (not selected-clip) selected-track-id)
+                         (tl/find-track-by-id track-defs selected-track-id))]
+    (cond
+      ;; 1. Clip Inspector
+      selected-clip
+      (let [assigned-track (tl/find-track-by-id track-defs (:track-id selected-clip))
+            track-zone (when assigned-track
+                         (ze/resolve-track-effective-zone track-defs (:id assigned-track) :all))
+            track-zone-name (or (get-in zone-groups [track-zone :name])
+                                (when track-zone (name track-zone))
+                                "All")
+            clip-zone (:zone-group-id selected-clip)
+            preset-def (presets/presets-by-id (:preset-id selected-clip))
+            leaf-tracks (filterv tl/leaf-track? (chains/flatten-chain track-defs))
+            ;; Zone combo options
+            zone-options (into [{:id :inherit :name (str "Inherit from Track (" track-zone-name ")")}]
+                               (mapv (fn [zg] {:id (:id zg) :name (:name zg (name (:id zg)))}) (vals zone-groups)))
+            current-zone-val (or (u/seek #(= (:id %) (or clip-zone :inherit)) zone-options)
+                                 (first zone-options))
+            current-track-val (or (u/seek #(= (:id %) (:id assigned-track)) leaf-tracks)
+                                  assigned-track)]
+        {:fx/type :v-box
+         :pref-width 280
+         :min-width 240
+         :style "-fx-background-color: #1E1E1E; -fx-border-color: #333333; -fx-border-width: 0 0 0 1;"
+         :children
+         [{:fx/type :label
+           :text "CLIP PROPERTIES"
+           :padding {:top 4 :bottom 2 :left 8}
+           :style "-fx-text-fill: #777777; -fx-font-size: 10; -fx-font-weight: bold;"}
+          {:fx/type :v-box
+           :padding 8
+           :spacing 8
+           :children
+           [{:fx/type :label
+             :text (str "Preset: " (or (:name selected-clip) (:name preset-def "Preset")))
+             :style "-fx-text-fill: #DDDDDD; -fx-font-weight: bold;"}
+
+            ;; Track assignment
+            {:fx/type :v-box
+             :spacing 2
+             :children
+             [{:fx/type :label
+               :text "Assigned Track"
+               :style "-fx-text-fill: #888888; -fx-font-size: 10;"}
+              {:fx/type :combo-box
+               :items leaf-tracks
+               :value current-track-val
+               :pref-width 260
+               :button-cell (fn [t] {:text (or (:name t) "Unassigned")})
+               :cell-factory {:fx/cell-type :list-cell
+                              :describe (fn [t] {:text (or (:name t) "Unassigned")})}
+               :on-value-changed (fn [t]
+                                   (when (and t (not= (:id t) (:track-id selected-clip)))
+                                     (events/dispatch!
+                                      {:event/type :timeline/move-item-to-track
+                                       :col col
+                                       :row row
+                                       :item-id selected-item-id
+                                       :track-id (:id t)})))}]}
+
+            ;; Zone Override
+            {:fx/type :v-box
+             :spacing 2
+             :children
+             [{:fx/type :label
+               :text "Zone Destination"
+               :style "-fx-text-fill: #888888; -fx-font-size: 10;"}
+              {:fx/type :combo-box
+               :items zone-options
+               :value current-zone-val
+               :pref-width 260
+               :button-cell (fn [opt] {:text (:name opt)})
+               :cell-factory {:fx/cell-type :list-cell
+                              :describe (fn [opt] {:text (:name opt)})}
+               :on-value-changed (fn [opt]
+                                   (when opt
+                                     (let [new-zone (when-not (= (:id opt) :inherit) (:id opt))]
+                                       (when (not= new-zone clip-zone)
+                                         (events/dispatch!
+                                          {:event/type :timeline/set-clip-zone
+                                           :col col
+                                           :row row
+                                           :item-id selected-item-id
+                                           :zone-group-id new-zone})))))}]}
+
+            ;; Attached effects count
+            (let [effect-count (count (:effects selected-clip []))]
+              {:fx/type :label
+               :text (str "Attached Effects: " effect-count)
+               :style "-fx-text-fill: #666666; -fx-font-size: 10;"})]}]})
+
+      ;; 2. Track Inspector
+      selected-track
+      (let [is-folder? (or (= :group (:type selected-track)) (contains? selected-track :items))
+            track-zone (:zone-group-id selected-track)
+            parent-path (last (:path selected-track))
+            parent-folder (when parent-path (tl/find-track-by-id track-defs parent-path))
+            parent-zone (when parent-folder (:zone-group-id parent-folder :all))
+            parent-zone-name (when parent-zone
+                               (or (get-in zone-groups [parent-zone :name]) (name parent-zone)))
+            inherit-opt (when (and (not is-folder?) parent-folder)
+                          [{:id :inherit :name (str "Inherit from Folder (" (or parent-zone-name "All") ")")}])
+            zone-options (into (vec inherit-opt)
+                               (mapv (fn [zg] {:id (:id zg) :name (:name zg (name (:id zg)))}) (vals zone-groups)))
+            current-zone-val (or (u/seek #(= (:id %) (or track-zone :inherit)) zone-options)
+                                 (first zone-options))]
+        {:fx/type :v-box
+         :pref-width 280
+         :min-width 240
+         :style "-fx-background-color: #1E1E1E; -fx-border-color: #333333; -fx-border-width: 0 0 0 1;"
+         :children
+         [{:fx/type :label
+           :text (if is-folder? "FOLDER PROPERTIES" "TRACK PROPERTIES")
+           :padding {:top 4 :bottom 2 :left 8}
+           :style "-fx-text-fill: #777777; -fx-font-size: 10; -fx-font-weight: bold;"}
+          {:fx/type :v-box
+           :padding 8
+           :spacing 8
+           :children
+           [{:fx/type :label
+             :text (:name selected-track (if is-folder? "Folder" "Track"))
+             :style "-fx-text-fill: #DDDDDD; -fx-font-weight: bold;"}
+
+            {:fx/type :v-box
+             :spacing 2
+             :children
+             [{:fx/type :label
+               :text "Assigned Zone"
+               :style "-fx-text-fill: #888888; -fx-font-size: 10;"}
+              {:fx/type :combo-box
+               :items zone-options
+               :value current-zone-val
+               :pref-width 260
+               :button-cell (fn [opt] {:text (:name opt)})
+               :cell-factory {:fx/cell-type :list-cell
+                              :describe (fn [opt] {:text (:name opt)})}
+               :on-value-changed (fn [opt]
+                                   (when opt
+                                     (let [new-zone (when-not (= (:id opt) :inherit) (:id opt))]
+                                       (when (not= new-zone track-zone)
+                                         (events/dispatch!
+                                          {:event/type :timeline/set-track-zone
+                                           :col col
+                                           :row row
+                                           :track-id (:id selected-track)
+                                           :zone-group-id new-zone})))))}]}]}]})
+
+      ;; 3. No selection placeholder
+      :else
+      {:fx/type :v-box
+       :pref-width 240
+       :min-width 200
+       :style "-fx-background-color: #1E1E1E; -fx-border-color: #333333; -fx-border-width: 0 0 0 1;"
+       :alignment :center
+       :children
+       [{:fx/type :label
+         :text "Select a track or clip\nto inspect routing"
+         :style "-fx-text-fill: #555555; -fx-font-size: 10; -fx-text-alignment: center;"}]})))
+
 (defn timeline-add-panel
-  "Collapsible bottom panel for adding presets and effects to the timeline.
-   Shows preset-bank (always) and effect-bank (when a clip is selected)."
+  "Collapsible bottom panel for adding presets and effects to the timeline,
+   and inspecting clip and track properties."
   [{:keys [col row add-panel-open? add-panel-preset-tab add-panel-effect-tab
-           selected-item-id selected-track-id cursor-beat beats-elapsed]}]
+           selected-item-id selected-track-id cursor-beat beats-elapsed
+           items track-defs zone-groups]}]
   (when add-panel-open?
     {:fx/type :v-box
      :style "-fx-background-color: #1A1A1A; -fx-border-color: #333333; -fx-border-width: 1 0 0 0;"
@@ -729,13 +960,13 @@
        :padding {:top 4 :bottom 4 :left 8 :right 8}
        :style "-fx-background-color: #222222;"
        :children [{:fx/type :label
-                   :text "ADD CONTENT"
+                   :text "ADD CONTENT & PROPERTIES"
                    :style "-fx-text-fill: #999999; -fx-font-size: 11; -fx-font-weight: bold;"}
                   {:fx/type :region :h-box/hgrow :always}
                   {:fx/type :label
                    :text (if selected-item-id
-                           "Clip selected — effect bank enabled"
-                           "Select a clip to add effects")
+                           "Clip selected — effect bank & properties enabled"
+                           "Select a clip to add effects or inspect routing")
                    :style "-fx-text-fill: #666666; -fx-font-size: 10;"}]}
       {:fx/type :h-box
        :v-box/vgrow :always
@@ -784,7 +1015,16 @@
              :alignment :center
              :children [{:fx/type :label
                          :text "Select a clip to add effects"
-                         :style "-fx-text-fill: #555555; -fx-font-size: 11;"}]}])}]}]}))
+                         :style "-fx-text-fill: #555555; -fx-font-size: 11;"}]}])}
+        ;; Inspector panel (Clip / Track Properties & Zone Routing)
+        {:fx/type timeline-inspector-panel
+         :col col
+         :row row
+         :items items
+         :track-defs track-defs
+         :zone-groups zone-groups
+         :selected-item-id selected-item-id
+         :selected-track-id selected-track-id}]}]}))
 
 
 (defn timeline-canvas
@@ -935,4 +1175,7 @@
                       :selected-item-id selected-item-id
                       :selected-track-id selected-track-id
                       :cursor-beat cursor-beat
-                      :beats-elapsed beats-elapsed}))))
+                      :beats-elapsed beats-elapsed
+                      :items items
+                      :track-defs track-defs
+                      :zone-groups zone-groups}))))

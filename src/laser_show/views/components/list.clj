@@ -405,7 +405,9 @@
                           :current-name (:name group)
                           :style-class "group-name-input"}
                          {:fx/type :label
-                          :text (or (:name group) "Group")
+                          :text (if-let [label-fn (:get-group-label props)]
+                                  (label-fn group)
+                                  (or (:name group) "Group"))
                           :style-class name-classes})
 
                        {:fx/type :label
@@ -417,7 +419,10 @@
                        {:fx/type :button
                         :text "⊗"
                         :style-class "group-ungroup-btn"
-                        :on-action (fn [_] (dispatch-ungroup! props group-id))}]}}))
+                        :on-action (fn [_] (dispatch-ungroup! props group-id))}]
+            :context-menu (when-let [cm-fn (or (:get-group-context-menu props)
+                                               (:get-context-menu props))]
+                            (cm-fn group))}}))
 
 
 ;; ============================================================================
@@ -465,7 +470,9 @@
                           :style-class "list-item-name-input"}
                          {:fx/type :label
                           :text (or item-label "Unknown")
-                          :style-class name-classes})]}}))
+                          :style-class name-classes})]
+            :context-menu (when-let [cm-fn (:get-context-menu props)]
+                            (cm-fn item))}}))
 
 
 ;; Recursive List Item Renderer
@@ -775,7 +782,9 @@
    - :compact? - If true, hide toolbar/header chrome (default false)
    - :scrollable? - If true, wrap items in ScrollPane (default true)"
   [{:keys [fx/context items component-id
-           get-item-label item-id-key item-registry-fn
+           get-item-label get-group-label
+           get-context-menu get-group-context-menu
+           item-id-key item-registry-fn
            on-change-event on-change-params items-path
            on-copy-fn clipboard-items
            header-label empty-text allow-groups? fallback-label
@@ -833,7 +842,7 @@
             :children [(u/->map&
                         items clipboard-items header-label
                         empty-text allow-groups? component-id on-change-event on-change-params items-path
-                        compact? scrollable?
+                        compact? scrollable? get-group-label get-context-menu get-group-context-menu
                         :fx/type list-sidebar
                         :fx/context context
                         :v-box/vgrow :always

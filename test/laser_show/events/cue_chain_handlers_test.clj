@@ -374,3 +374,80 @@
           result (cue-chain/handle event)]
       (is (empty? (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects])))
       (is (true? (get-in result [:state :project :dirty?]))))))
+
+
+;; Destination Zone Routing Tests
+
+
+(deftest handle-set-item-zone-explicit
+  (testing "Setting explicit zone on a cue chain preset item"
+    (let [event {:event/type :cue-chain/set-item-zone
+                 :col 0 :row 0
+                 :item-path [0]
+                 :zone-group-id :left
+                 :state sample-state-with-item}
+          result (cue-chain/handle event)]
+      (is (= :left (get-in result [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
+      (is (true? (get-in result [:state :project :dirty?]))))))
+
+(deftest handle-set-item-zone-inherit
+  (testing "Setting :inherit or nil zone clears :zone-group-id so item inherits"
+    (let [state-with-zone (assoc-in sample-state-with-item
+                                    [:chains :cue-chains [0 0] :items 0 :zone-group-id]
+                                    :left)
+          event-inherit {:event/type :cue-chain/set-item-zone
+                         :col 0 :row 0
+                         :item-path [0]
+                         :zone-group-id :inherit
+                         :state state-with-zone}
+          result-inherit (cue-chain/handle event-inherit)
+          event-nil {:event/type :cue-chain/set-item-zone
+                     :col 0 :row 0
+                     :item-path [0]
+                     :zone-group-id nil
+                     :state state-with-zone}
+          result-nil (cue-chain/handle event-nil)]
+      (is (nil? (get-in result-inherit [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
+      (is (false? (contains? (get-in result-inherit [:state :chains :cue-chains [0 0] :items 0]) :zone-group-id)))
+      (is (nil? (get-in result-nil [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
+      (is (false? (contains? (get-in result-nil [:state :chains :cue-chains [0 0] :items 0]) :zone-group-id))))))
+
+(deftest handle-set-item-zone-from-combo-box-event
+  (testing "Setting zone using fx/event map from combo-box selection"
+    (let [event {:event/type :cue-chain/set-item-zone
+                 :col 0 :row 0
+                 :item-path [0]
+                 :fx/event {:id :stage :name "Stage"}
+                 :state sample-state-with-item}
+          result (cue-chain/handle event)]
+      (is (= :stage (get-in result [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
+      (is (true? (get-in result [:state :project :dirty?]))))))
+
+(deftest handle-set-item-zone-nested-group-and-child
+  (testing "Setting zone on a group and its nested child independently"
+    (let [group-id (java.util.UUID/randomUUID)
+          child-id (java.util.UUID/randomUUID)
+          state-with-group (assoc-in sample-state-with-item
+                                     [:chains :cue-chains [0 0] :items]
+                                     [{:type :group
+                                       :id group-id
+                                       :name "Test Group"
+                                       :items [{:type :preset
+                                                :id child-id
+                                                :preset-id :circle
+                                                :params {}}]}])
+          ;; 1. Set zone on the group itself (path [0])
+          res-group (cue-chain/handle {:event/type :cue-chain/set-item-zone
+                                       :col 0 :row 0
+                                       :item-path [0]
+                                       :zone-group-id :front
+                                       :state state-with-group})
+          ;; 2. Set zone on the nested child (path [0 :items 0])
+          res-child (cue-chain/handle {:event/type :cue-chain/set-item-zone
+                                       :col 0 :row 0
+                                       :item-path [0 :items 0]
+                                       :zone-group-id :left
+                                       :state (:state res-group)})]
+      (is (= :front (get-in res-group [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
+      (is (= :front (get-in res-child [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
+      (is (= :left (get-in res-child [:state :chains :cue-chains [0 0] :items 0 :items 0 :zone-group-id]))))))

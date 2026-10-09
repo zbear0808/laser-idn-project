@@ -197,6 +197,22 @@
                 h/mark-dirty)}))
 
 
+(defn- handle-cue-chain-set-item-zone
+  "Set or clear the first-class :zone-group-id on a preset or group in a cue chain.
+   Accepts :item-path (vector into :items) and :zone-group-id (keyword or nil).
+   Can also extract :id from fx/event when triggered from a combo-box.
+   If :zone-group-id is nil or :inherit, removes the key so the item inherits."
+  [{:keys [col row item-path zone-group-id fx/event state]}]
+  (let [selected-zone (or zone-group-id (:id event))
+        target-path (into [:chains :cue-chains [col row] :items] (vec item-path))]
+    (if (get-in state target-path)
+      (let [updated-state (if (and selected-zone (not= selected-zone :inherit))
+                            (assoc-in state (conj target-path :zone-group-id) selected-zone)
+                            (update-in state target-path dissoc :zone-group-id))]
+        {:state (h/mark-dirty updated-state)})
+      {:state state})))
+
+
 ;; Name Operations
 
 
@@ -269,6 +285,7 @@
     
     ;; Destination zone routing
     :cue-chain/set-destination-zone-group (handle-cue-chain-set-destination-zone-group event)
+    :cue-chain/set-item-zone (handle-cue-chain-set-item-zone event)
     
     ;; Name
     :cue-chain/set-name (handle-cue-chain-set-name event)

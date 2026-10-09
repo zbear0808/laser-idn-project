@@ -388,12 +388,44 @@
                     (assoc-in chain-path updated-chain)
                     h/mark-dirty)}))))
 
+(defn- handle-set-track-zone
+  "Set or clear the zone group assignment on a track or folder.
+   If :zone-group-id is nil or :inherit, removes the key so the track inherits from its parent folder."
+  [{:keys [col row track-id zone-group-id state]}]
+  (let [tracks-path [:chains :cue-chains [col row] :tracks]
+        tracks (get-in state tracks-path [])]
+    (if-let [path (chains/find-path-by-id tracks track-id)]
+      (let [updated-tracks (if (and zone-group-id (not= zone-group-id :inherit))
+                             (assoc-in (vec tracks) (conj path :zone-group-id) zone-group-id)
+                             (update-in (vec tracks) path dissoc :zone-group-id))]
+        {:state (-> state
+                    (assoc-in tracks-path updated-tracks)
+                    h/mark-dirty)})
+      {:state state})))
+
+(defn- handle-set-clip-zone
+  "Set or clear an explicit zone override on a clip/item.
+   If :zone-group-id is nil or :inherit, removes the key so the clip inherits from its assigned track."
+  [{:keys [col row item-id zone-group-id state]}]
+  (let [items-path [:chains :cue-chains [col row] :items]
+        items (get-in state items-path [])]
+    (if-let [path (chains/find-path-by-id items item-id)]
+      (let [updated-items (if (and zone-group-id (not= zone-group-id :inherit))
+                            (assoc-in (vec items) (conj path :zone-group-id) zone-group-id)
+                            (update-in (vec items) path dissoc :zone-group-id))]
+        {:state (-> state
+                    (assoc-in items-path updated-items)
+                    h/mark-dirty)})
+      {:state state})))
+
 (defn- handle-add-track
-  "Appends a new regular track to the cue chain's tracks."
-  [{:keys [col row state]}]
+  "Appends a new regular track to the cue chain's tracks.
+   Optional :zone-group-id sets initial zone, falling back to chain default."
+  [{:keys [col row zone-group-id state]}]
   (let [tracks-path [:chains :cue-chains [col row] :tracks]
         tracks (get-in state tracks-path [])
-        dest-zone (get-in state [:chains :cue-chains [col row] :destination-zone :zone-group-id] :all)
+        dest-zone (or zone-group-id
+                      (get-in state [:chains :cue-chains [col row] :destination-zone :zone-group-id] :all))
         new-track (tl/create-track {:zone-group-id dest-zone
                                     :name (str "Track " (inc (count tracks)))})
         new-track-id (:id new-track)
@@ -405,11 +437,13 @@
                 h/mark-dirty)}))
 
 (defn- handle-add-folder
-  "Appends a new track folder to the cue chain's tracks."
-  [{:keys [col row state]}]
+  "Appends a new track folder to the cue chain's tracks.
+   Optional :zone-group-id sets initial zone, falling back to chain default."
+  [{:keys [col row zone-group-id state]}]
   (let [tracks-path [:chains :cue-chains [col row] :tracks]
         tracks (get-in state tracks-path [])
-        dest-zone (get-in state [:chains :cue-chains [col row] :destination-zone :zone-group-id] :all)
+        dest-zone (or zone-group-id
+                      (get-in state [:chains :cue-chains [col row] :destination-zone :zone-group-id] :all))
         new-folder (assoc (tl/create-track {:zone-group-id dest-zone
                                             :name (str "Folder " (inc (count tracks)))})
                           :type :group
@@ -609,6 +643,8 @@
     :timeline/init-tracks (handle-init-tracks event)
     :timeline/add-track (handle-add-track event)
     :timeline/add-folder (handle-add-folder event)
+    :timeline/set-track-zone (handle-set-track-zone event)
+    :timeline/set-clip-zone (handle-set-clip-zone event)
 
     ;; Add panel
     :timeline/toggle-add-panel (handle-toggle-add-panel event)
