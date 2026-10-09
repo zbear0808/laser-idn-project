@@ -15,7 +15,7 @@
             [laser-show.events.core :as events]
             [laser-show.state.core :as state])
   (:import [javafx.scene.canvas Canvas]
-           [javafx.scene.input KeyEvent KeyCode MouseEvent]))
+           [javafx.scene.input KeyEvent KeyCode MouseEvent ScrollEvent]))
 
 (defn- dispatch-result!
   "Dispatch event maps from a callback result.
@@ -60,9 +60,15 @@
       (assoc :key-code (.getCode ^KeyEvent e)
              :shift? (.isShiftDown ^KeyEvent e))
 
-      (instance? javafx.scene.input.ScrollEvent e)
-      (assoc :delta-x (.getDeltaX ^javafx.scene.input.ScrollEvent e)
-             :delta-y (.getDeltaY ^javafx.scene.input.ScrollEvent e)))))
+      (instance? ScrollEvent e)
+      (assoc :x (.getX ^ScrollEvent e)
+             :y (.getY ^ScrollEvent e)
+             :delta-x (.getDeltaX ^ScrollEvent e)
+             :delta-y (.getDeltaY ^ScrollEvent e)
+             :alt? (.isAltDown ^ScrollEvent e)
+             :control? (or (.isControlDown ^ScrollEvent e)
+                           (.isShortcutDown ^ScrollEvent e))
+             :shift? (.isShiftDown ^ScrollEvent e)))))
 
 (defn- update-drag-state!
   "Dispatch a canvas drag state update to global state."
@@ -121,8 +127,8 @@
                            :drag-updates - extra keys merge
 
    Optional:
-     :on-scroll              - (fn [delta-x delta-y value drag-info])
-                               Returns map with :dispatch
+     :on-scroll              - (fn [{:keys [delta-x delta-y x y alt? control? shift? value drag-state]}])
+                               Returns map with :dispatch, optional :consumed? boolean
      :initial-drag-state     - extra keys for initial drag state map
      :cursor                 - default cursor CSS value (default \"crosshair\")
      :focus-traversable?     - enable focus traversal"
@@ -253,8 +259,14 @@
 
           :on-scroll
           (fn [e]
-            (let [{:keys [canvas canvas-id drag-state delta-x delta-y]} (extract-event-info e)]
-              (when-let [result (and on-scroll (on-scroll delta-x delta-y value drag-state))]
+            (let [info (extract-event-info e)
+                  scroll-params (assoc info :value value)]
+              (when-let [result (and on-scroll
+                                     (try
+                                       (on-scroll scroll-params)
+                                       (catch clojure.lang.ArityException _
+                                         (let [{:keys [delta-x delta-y drag-state]} info]
+                                           (on-scroll delta-x delta-y value drag-state)))))]
                 (dispatch-result! (:dispatch result))
                 (when (:consumed? result)
                   (.consume e))))))}})

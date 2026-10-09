@@ -120,3 +120,65 @@
       (is (= (:timeline/start item) (:timeline/start updated-item)))
       (is (= (:timeline/duration item) (:timeline/duration updated-item))))))
 
+(deftest handle-set-hvalue-test
+  (testing "sets and clamps scroll-hvalue in state"
+    (let [res (timeline/handle {:event/type :timeline/set-hvalue
+                                :hvalue 0.65
+                                :state base-state})]
+      (is (== 0.65 (get-in res [:state :ui :timeline :scroll-hvalue]))))
+
+    (let [res (timeline/handle {:event/type :timeline/set-hvalue
+                                :hvalue 1.5
+                                :state base-state})]
+      (is (== 1.0 (get-in res [:state :ui :timeline :scroll-hvalue]))))
+
+    (let [res (timeline/handle {:event/type :timeline/set-hvalue
+                                :hvalue -0.2
+                                :state base-state})]
+      (is (== 0.0 (get-in res [:state :ui :timeline :scroll-hvalue]))))))
+
+(deftest handle-scroll-horizontal-test
+  (testing "preserves scroll-hvalue in state when scroll-pane is not registered (headless)"
+    (let [s0 (assoc-in base-state [:ui :timeline :scroll-hvalue] 0.4)
+          res (timeline/handle {:event/type :timeline/scroll-horizontal
+                                :delta-y 40.0
+                                :state s0})]
+      (is (== 0.4 (get-in res [:state :ui :timeline :scroll-hvalue]))))))
+
+(deftest handle-zoom-at-cursor-test
+  (testing "zooms in and out centered at cursor"
+    (let [s0 (assoc-in base-state [:ui :timeline :zoom-x] 50.0)
+          ;; Zoom in
+          res-in (timeline/handle {:event/type :timeline/zoom-at-cursor
+                                  :x 200.0
+                                  :delta-y 40.0
+                                  :col 0 :row 0
+                                  :state s0})
+          zoom-in (get-in res-in [:state :ui :timeline :zoom-x])]
+      (is (> zoom-in 50.0))
+      ;; Zoom out
+      (let [res-out (timeline/handle {:event/type :timeline/zoom-at-cursor
+                                     :x 200.0
+                                     :delta-y -40.0
+                                     :col 0 :row 0
+                                     :state (:state res-in)})
+            zoom-out (get-in res-out [:state :ui :timeline :zoom-x])]
+        (is (< zoom-out zoom-in)))))
+
+  (testing "enforces zoom bounds"
+    (let [s-max (assoc-in base-state [:ui :timeline :zoom-x] 190.0)
+          res (timeline/handle {:event/type :timeline/zoom-at-cursor
+                               :x 100.0
+                               :delta-y 40.0
+                               :col 0 :row 0
+                               :state s-max})]
+      (is (== 200.0 (get-in res [:state :ui :timeline :zoom-x]))))
+
+    (let [s-min (assoc-in base-state [:ui :timeline :zoom-x] 11.0)
+          res (timeline/handle {:event/type :timeline/zoom-at-cursor
+                               :x 100.0
+                               :delta-y -40.0
+                               :col 0 :row 0
+                               :state s-min})]
+      (is (== 10.0 (get-in res [:state :ui :timeline :zoom-x]))))))
+

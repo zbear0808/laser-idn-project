@@ -18,14 +18,17 @@
             [laser-show.events.helpers :as h]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.cue-chains :as cue-chains]
-            [laser-show.views.components.visual-editors.timeline.track-logic :as tl]))
+            [laser-show.views.components.visual-editors.timeline.track-logic :as tl])
+  (:import [javafx.scene.control ScrollPane]
+           [javafx.scene Node]
+           [javafx.application Platform]))
 
 
 ;; Constants
 
 
 (def ^:private min-zoom 10.0)
-(def ^:private max-zoom 500.0)
+(def ^:private max-zoom 200.0)
 (def ^:private min-duration 0.0625) ;; 1/16 beat
 
 
@@ -76,6 +79,16 @@
     (swap! scroll-panes dissoc pane))
   {})
 
+(defn- run-on-fx!
+  "Run function on JavaFX application thread safely."
+  [f]
+  (try
+    (if (Platform/isFxApplicationThread)
+      (f)
+      (Platform/runLater f))
+    (catch Exception _
+      (try (f) (catch Exception _ nil)))))
+
 (defn- handle-sync-scroll
   "Link the vertical scroll between the left list sidebar and the right timeline canvas."
   [{:keys [pane state]}]
@@ -84,8 +97,84 @@
           target-pane (if (= pane :left) :right :left)]
       (when-let [target-sp (get @scroll-panes target-pane)]
         (when (not= (.getVvalue target-sp) vval)
-          (.setVvalue target-sp vval)))
+          (run-on-fx! #(.setVvalue target-sp vval))))
       {:state (assoc-in state [:ui :timeline :sync-scroll-y] vval)})))
+
+(defn- handle-set-hvalue
+  "Set normalized horizontal scroll position (0.0 to 1.0)."
+  [{:keys [hvalue fx/event state]}]
+  (let [val (or hvalue event 0.0)
+        clamped (-> (double val) (max 0.0) (min 1.0))]
+    (when-let [^ScrollPane sp (get @scroll-panes :right)]
+      (when (not= (.getHvalue sp) clamped)
+        (run-on-fx! #(.setHvalue sp clamped))))
+    {:state (assoc-in state [:ui :timeline :scroll-hvalue] clamped)}))
+
+(defn- handle-scroll-horizontal
+  "Update horizontal scroll position from mouse wheel scroll delta.
+   Negative delta-y scrolls right (forward in time); positive scrolls left (backward in time)."
+  [{:keys [delta-x delta-y state]}]
+  (let [raw-delta (if (and (number? delta-x) (not (zero? delta-x)))
+                    (double delta-x)
+                    (double (or delta-y 0.0)))
+        delta-px (- raw-delta)]
+    (if-let [^ScrollPane sp (get @scroll-panes :right)]
+      (let [content-node ^Node (.getContent sp)
+            content-width (if content-node (.getWidth (.getLayoutBounds content-node)) 0.0)
+            viewport-bounds (.getViewportBounds sp)
+            viewport-width (if viewport-bounds (.getWidth viewport-bounds) 0.0)
+            cur-h (.getHvalue sp)
+            new-h (tl/calculate-horizontal-scroll
+                   {:current-hvalue cur-h
+                    :delta-px delta-px
+                    :content-width content-width
+                    :viewport-width viewport-width})]
+        (run-on-fx! #(.setHvalue sp new-h))
+        {:state (assoc-in state [:ui :timeline :scroll-hvalue] new-h)})
+      (let [cur-h (get-in state [:ui :timeline :scroll-hvalue] 0.0)]
+        {:state (assoc-in state [:ui :timeline :scroll-hvalue] cur-h)}))))
+
+(defn- handle-zoom-at-cursor
+  "Zoom timeline horizontally centered on the mouse cursor beat position.
+   Positive delta-y zooms in; negative delta-y zooms out."
+  [{:keys [focal-beat viewport-x cursor-x x delta-y col row state]}]
+  (let [current-zoom (get-in state [:ui :timeline :zoom-x] 50.0)
+        zoom-factor (if (pos? (double (or delta-y 0.0))) 1.15 (/ 1.0 1.15))]
+    (if-let [^ScrollPane sp (get @scroll-panes :right)]
+      (let [content-node ^Node (.getContent sp)
+            content-width (if content-node (.getWidth (.getLayoutBounds content-node)) 0.0)
+            viewport-bounds (.getViewportBounds sp)
+            viewport-width (if viewport-bounds (.getWidth viewport-bounds) 0.0)
+            cur-h (.getHvalue sp)
+            items (get-in state [:chains :cue-chains [col row] :items] [])
+            loop-config (get-in state [:chains :cue-chains [col row] :loop])
+            candidate-zoom (-> (* current-zoom zoom-factor) (max min-zoom) (min max-zoom))
+            new-content-width (tl/calculate-canvas-width
+                               {:items items
+                                :loop-config loop-config
+                                :zoom-x candidate-zoom})
+            {:keys [new-zoom new-hvalue]} (tl/calculate-zoom-at-cursor
+                                           {:current-zoom current-zoom
+                                            :zoom-factor zoom-factor
+                                            :focal-beat focal-beat
+                                            :viewport-x viewport-x
+                                            :cursor-x (or cursor-x x)
+                                            :current-hvalue cur-h
+                                            :content-width content-width
+                                            :viewport-width viewport-width
+                                            :new-content-width new-content-width
+                                            :min-zoom min-zoom
+                                            :max-zoom max-zoom})]
+        (run-on-fx! #(.setHvalue sp new-hvalue))
+        {:state (-> state
+                    (assoc-in [:ui :timeline :zoom-x] new-zoom)
+                    (assoc-in [:ui :timeline :scroll-hvalue] new-hvalue))})
+      ;; Fallback if scroll pane not registered (e.g. headless unit tests)
+      (let [new-zoom (-> (* current-zoom zoom-factor) (max min-zoom) (min max-zoom))
+            cur-h (get-in state [:ui :timeline :scroll-hvalue] 0.0)]
+        {:state (-> state
+                    (assoc-in [:ui :timeline :zoom-x] new-zoom)
+                    (assoc-in [:ui :timeline :scroll-hvalue] cur-h))}))))
 
 (defn- handle-set-snap
   "Configure snap-to-grid settings."
@@ -489,6 +578,9 @@
     ;; View controls
     :timeline/set-zoom (handle-set-zoom event)
     :timeline/scroll (handle-scroll event)
+    :timeline/scroll-horizontal (handle-scroll-horizontal event)
+    :timeline/zoom-at-cursor (handle-zoom-at-cursor event)
+    :timeline/set-hvalue (handle-set-hvalue event)
     :timeline/set-snap (handle-set-snap event)
     :timeline/register-scroll-pane (handle-register-scroll-pane event)
     :timeline/sync-scroll (handle-sync-scroll event)

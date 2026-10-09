@@ -162,4 +162,116 @@
       ;; Nil input
       (is (nil? (tl/track-at-y {:y nil :track-rows tracks}))))))
 
+(deftest calculate-canvas-width-test
+  (testing "enforces minimum canvas width"
+    (is (== 1600.0 (tl/calculate-canvas-width {:items [] :loop-config nil :zoom-x 50.0})))
+    (is (== 800.0 (tl/calculate-canvas-width {:items [] :loop-config nil :zoom-x 10.0}))))
+
+  (testing "scales with item reach"
+    (let [items [{:timeline/start 10.0 :timeline/duration 40.0}]
+          res (tl/calculate-canvas-width {:items items :loop-config nil :zoom-x 50.0})]
+      ;; 50.0 + 8.0 = 58 beats * 50 = 2900.0
+      (is (== 2900.0 res))))
+
+  (testing "scales with loop boundaries"
+    (let [loop-config {:enabled? true :start 0.0 :duration 100.0}
+          res (tl/calculate-canvas-width {:items [] :loop-config loop-config :zoom-x 50.0})]
+      ;; 100.0 + 8.0 = 108 beats * 50 = 5400.0
+      (is (== 5400.0 res)))))
+
+(deftest calculate-horizontal-scroll-test
+  (testing "scrolls forward and backward with clamping"
+    ;; content 2000, viewport 1000 => scrollable 1000
+    (let [res (tl/calculate-horizontal-scroll
+               {:current-hvalue 0.5
+                :delta-px 100.0
+                :content-width 2000.0
+                :viewport-width 1000.0})]
+      (is (== 0.6 res)))
+
+    (let [res (tl/calculate-horizontal-scroll
+               {:current-hvalue 0.1
+                :delta-px -200.0
+                :content-width 2000.0
+                :viewport-width 1000.0})]
+      (is (== 0.0 res)))
+
+    (let [res (tl/calculate-horizontal-scroll
+               {:current-hvalue 0.9
+                :delta-px 200.0
+                :content-width 2000.0
+                :viewport-width 1000.0})]
+      (is (== 1.0 res))))
+
+  (testing "returns 0.0 when content fits entirely in viewport"
+    (is (== 0.0 (tl/calculate-horizontal-scroll
+                 {:current-hvalue 0.5
+                  :delta-px 50.0
+                  :content-width 500.0
+                  :viewport-width 800.0})))))
+
+(deftest calculate-zoom-at-cursor-test
+  (testing "keeps focal beat at identical viewport pixel position when zooming in and out"
+    ;; Setup:
+    ;; current-zoom: 50.0 px/beat
+    ;; cursor-x on canvas: 400.0 px => beat under cursor is 8.0
+    ;; content-width: 2000.0, viewport-width: 800.0 => scrollable-old = 1200.0
+    ;; current-hvalue: 0.25 => scroll-px-old = 300.0
+    ;; cursor viewport position before = 400.0 - 300.0 = 100.0 px
+    (let [res (tl/calculate-zoom-at-cursor
+               {:current-zoom 50.0
+                :zoom-factor 1.5
+                :cursor-x 400.0
+                :current-hvalue 0.25
+                :content-width 2000.0
+                :viewport-width 800.0
+                :new-content-width 3000.0
+                :min-zoom 10.0
+                :max-zoom 500.0})
+          {:keys [new-zoom new-hvalue]} res
+          ;; new-zoom: 75.0
+          ;; new cursor-x: 8.0 * 75.0 = 600.0 px
+          ;; scrollable-new: 3000.0 - 800.0 = 2200.0
+          ;; new scroll-px: new-hvalue * 2200.0
+          ;; cursor viewport position after: 600.0 - (new-hvalue * 2200.0)
+          viewport-pos-after (- (* 8.0 new-zoom) (* new-hvalue (- 3000.0 800.0)))]
+      (is (== 75.0 new-zoom))
+      (is (< (Math/abs (- 100.0 viewport-pos-after)) 1e-6)
+          "Focal beat must stay at exactly 100.0 px from viewport left")))
+
+  (testing "pins focal beat precisely using :focal-beat and :viewport-x"
+    (let [res (tl/calculate-zoom-at-cursor
+               {:current-zoom 50.0
+                :zoom-factor 1.5
+                :focal-beat 8.0
+                :viewport-x 100.0
+                :viewport-width 800.0
+                :new-content-width 3000.0})]
+      (is (== 75.0 (:new-zoom res)))
+      ;; beat 8.0 * 75.0 = 600.0. target scroll = 600.0 - 100.0 = 500.0.
+      ;; scrollable = 3000.0 - 800.0 = 2200.0. hvalue = 500.0 / 2200.0.
+      ;; Viewport position after = 600.0 - (500/2200 * 2200) = 100.0.
+      (let [vp-pos-after (- (* 8.0 (:new-zoom res)) (* (:new-hvalue res) (- 3000.0 800.0)))]
+        (is (< (Math/abs (- 100.0 vp-pos-after)) 1e-6)))))
+
+  (testing "clamps zoom to default max-zoom bounds 200.0"
+    (let [res (tl/calculate-zoom-at-cursor
+               {:current-zoom 180.0
+                :zoom-factor 1.5
+                :focal-beat 10.0
+                :viewport-x 100.0
+                :viewport-width 800.0
+                :new-content-width 3000.0})]
+      (is (== 200.0 (:new-zoom res))))
+
+    (let [res (tl/calculate-zoom-at-cursor
+               {:current-zoom 12.0
+                :zoom-factor 0.5
+                :focal-beat 10.0
+                :viewport-x 100.0
+                :viewport-width 800.0
+                :new-content-width 2000.0})]
+      (is (== 10.0 (:new-zoom res))))))
+
+
 

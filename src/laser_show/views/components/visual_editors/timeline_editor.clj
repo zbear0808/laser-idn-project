@@ -21,7 +21,8 @@
            [javafx.scene.paint Color]
            [javafx.scene.control ScrollPane]
            [javafx.scene.text Font TextAlignment]
-           [javafx.scene.input MouseButton KeyCode]))
+           [javafx.scene.input MouseButton KeyCode ScrollEvent]
+           [javafx.event EventHandler]))
 
 
 ;; ============================================================
@@ -142,17 +143,7 @@
 (defn- calculate-canvas-width
   "Calculate canvas width based on maximum item reach, loop boundaries, and zoom level."
   [items loop-config zoom-x]
-  (let [max-item-end (reduce (fn [m item]
-                               (max m (+ (double (:timeline/start item 0.0))
-                                         (double (:timeline/duration item 4.0)))))
-                             0.0
-                             items)
-        loop-end (if (:enabled? loop-config true)
-                   (+ (double (:start loop-config 0.0))
-                      (double (:duration loop-config 4.0)))
-                   0.0)
-        total-beats (max 32.0 (+ (max max-item-end loop-end) 8.0))]
-    (max 800.0 (* total-beats zoom-x))))
+  (tl/calculate-canvas-width {:items items :loop-config loop-config :zoom-x zoom-x}))
 
 
 ;; ============================================================
@@ -188,25 +179,34 @@
         end-beat (/ (+ scroll-x width) zoom-x)
         ;; Determine grid subdivision based on zoom level
         subdivisions (cond
-                       (> zoom-x 100) 0.25
-                       (> zoom-x 40)  1.0
-                       (> zoom-x 15)  4.0
-                       :else          8.0)
+                       (>= zoom-x 120) 0.0625
+                       (>= zoom-x 60)  0.125
+                       (>= zoom-x 30)  0.25
+                       (>= zoom-x 15)  1.0
+                       :else           4.0)
         first-beat (* (Math/floor (/ start-beat subdivisions)) subdivisions)]
     (.setFont gc (Font. "Inter" 10))
     (.setTextAlign gc TextAlignment/CENTER)
     (loop [beat first-beat]
       (when (<= beat end-beat)
-        (let [x (- (* beat zoom-x) scroll-x)]
-          (when (zero? (mod beat 1.0))
+        (let [x (- (* beat zoom-x) scroll-x)
+              rounded (Math/round (double beat))
+              int-beat? (< (Math/abs (- (double beat) (double rounded))) 1e-4)
+              measure? (and int-beat? (zero? (mod rounded 4)))]
+          (when int-beat?
             (.setFill gc ruler-text-color)
-            (.fillText gc (str (int beat)) x (- ruler-height 6)))
+            (.fillText gc (str (int rounded)) x (- ruler-height 6)))
           ;; Tick marks
-          (.setStroke gc (if (zero? (mod beat 4.0))
-                           grid-line-major-color
-                           grid-line-color))
-          (.setLineWidth gc (if (zero? (mod beat 4.0)) 1.5 0.5))
-          (.strokeLine gc x ruler-height x (- ruler-height 4)))
+          (.setStroke gc (cond
+                           measure?  grid-line-major-color
+                           int-beat? ruler-text-color
+                           :else     grid-line-color))
+          (.setLineWidth gc (if measure? 1.5 0.5))
+          (let [tick-h (cond
+                         measure?  8
+                         int-beat? 6
+                         :else     3)]
+            (.strokeLine gc x ruler-height x (- ruler-height tick-h))))
         (recur (+ beat subdivisions))))
     (draw-loop-brace! gc zoom-x scroll-x loop-config)))
 
@@ -217,18 +217,23 @@
   (let [start-beat (/ scroll-x zoom-x)
         end-beat (/ (+ scroll-x width) zoom-x)
         subdivisions (cond
-                       (> zoom-x 100) 0.25
-                       (> zoom-x 40)  1.0
-                       (> zoom-x 15)  4.0
-                       :else          8.0)
+                       (>= zoom-x 120) 0.0625  ;; 1/16 beat
+                       (>= zoom-x 60)  0.125   ;; 1/8 beat
+                       (>= zoom-x 30)  0.25    ;; 1/4 beat
+                       (>= zoom-x 15)  1.0     ;; 1 beat
+                       :else           4.0)
         first-beat (* (Math/floor (/ start-beat subdivisions)) subdivisions)]
     (loop [beat first-beat]
       (when (<= beat end-beat)
-        (let [x (- (* beat zoom-x) scroll-x)]
-          (.setStroke gc (if (zero? (mod beat 4.0))
-                           grid-line-major-color
-                           grid-line-color))
-          (.setLineWidth gc (if (zero? (mod beat 4.0)) 1.0 0.3))
+        (let [x (- (* beat zoom-x) scroll-x)
+              rounded (Math/round (double beat))
+              int-beat? (< (Math/abs (- (double beat) (double rounded))) 1e-4)
+              measure? (and int-beat? (zero? (mod rounded 4)))]
+          (.setStroke gc (cond
+                           measure?  grid-line-major-color
+                           int-beat? (Color/web "#444444")
+                           :else     grid-line-color))
+          (.setLineWidth gc (if measure? 1.0 0.3))
           (.strokeLine gc x ruler-height x height))
         (recur (+ beat subdivisions))))))
 
@@ -542,6 +547,64 @@
       nil)))
 
 
+(def ^:private scroll-filter
+  "Event filter attached to the timeline ScrollPane during the capturing phase.
+   Intercepts mouse wheel events before ScrollPaneSkin consumes them:
+   - Ctrl + Scroll: zooms in/out centered at the mouse cursor beat position.
+   - Alt + Scroll: scrolls the timeline horizontally.
+   Default scrolling (vertical tracks, or Shift+scroll horizontal) passes through."
+  (reify EventHandler
+    (handle [_ event]
+      (try
+        (let [e ^ScrollEvent event
+              alt? (.isAltDown e)
+              control? (or (.isControlDown e) (.isShortcutDown e))]
+          (when (or alt? control?)
+            (let [sp ^ScrollPane (.getSource e)
+                  content (.getContent sp)]
+              (cond
+                control?
+                (let [{:keys [col row zoom-x]} (.getUserData sp)
+                      local (when content (.sceneToLocal content (.getSceneX e) (.getSceneY e)))
+                      canvas-x (if local (.getX local) (.getX e))
+                      vp-point (.sceneToLocal sp (.getSceneX e) (.getSceneY e))
+                      insets (.getInsets sp)
+                      insets-left (if insets (.getLeft insets) 0.0)
+                      viewport-x (- (if vp-point (.getX vp-point) (.getX e)) insets-left)
+                      cur-rendered-zoom (double (or zoom-x default-zoom))
+                      focal-beat (/ (double canvas-x) cur-rendered-zoom)
+                      delta-y (.getDeltaY e)]
+                  (events/dispatch! {:event/type :timeline/zoom-at-cursor
+                                     :focal-beat focal-beat
+                                     :viewport-x viewport-x
+                                     :delta-y delta-y
+                                     :col col
+                                     :row row})
+                  (.consume e))
+
+                alt?
+                (let [delta-x (.getDeltaX e)
+                      delta-y (.getDeltaY e)
+                      raw-delta (if (and (number? delta-x) (not (zero? delta-x)))
+                                  (double delta-x)
+                                  (double (or delta-y 0.0)))
+                      delta-px (- raw-delta)
+                      viewport-bounds (.getViewportBounds sp)
+                      viewport-width (if viewport-bounds (.getWidth viewport-bounds) 0.0)
+                      content-width (if content (.getWidth (.getLayoutBounds content)) 0.0)
+                      cur-h (.getHvalue sp)
+                      new-h (tl/calculate-horizontal-scroll
+                             {:current-hvalue cur-h
+                              :delta-px delta-px
+                              :content-width content-width
+                              :viewport-width viewport-width})]
+                  (.setHvalue sp new-h)
+                  (events/dispatch! {:event/type :timeline/set-hvalue
+                                     :hvalue new-h})
+                  (.consume e))))))
+        (catch Throwable _ nil)))))
+
+
 ;; ============================================================
 ;; Sub-Components
 ;; ============================================================
@@ -606,7 +669,7 @@
      :style "-fx-text-fill: #999999;"}
     ;; Zoom slider
     {:fx/type :slider
-     :min 10 :max 500
+     :min 10 :max 200
      :value (or zoom-x default-zoom)
      :pref-width 140
      :on-value-changed {:event/type :timeline/set-zoom
@@ -748,12 +811,7 @@
      :render! render-timeline!
      :on-press on-press
      :on-drag on-drag
-     :on-hover on-hover
-     :on-key on-key
-     :on-scroll (fn [delta-x delta-y _ _]
-                  {:dispatch {:event/type :timeline/scroll
-                              :delta-x delta-x
-                              :delta-y delta-y}})}))
+     :on-hover on-hover}))
 
 ;; ============================================================
 ;; Main Component
@@ -775,11 +833,12 @@
    - :list-props    — Map of props to forward to list-editor sidebar"
   [{:keys [fx/context col row items track-defs zone-groups
            timeline-ui beats-elapsed loop-config list-props]}]
-  (let [{:keys [zoom-x scroll-x selection snap-enabled?
+  (let [{:keys [zoom-x scroll-x scroll-hvalue selection snap-enabled?
                 snap-value expanded-tracks sync-scroll-y cursor-beat
                 add-panel-open? add-panel-preset-tab add-panel-effect-tab]
          :or {zoom-x default-zoom
               scroll-x 0.0
+              scroll-hvalue 0.0
               selection #{}
               snap-enabled? true
               snap-value 0.25
@@ -832,18 +891,25 @@
                     :items-path [:chains :cue-chains [col row] :tracks]}}}
         {:fx/type fx/ext-on-instance-lifecycle
          :on-created (fn [^ScrollPane sp]
+                       (.addEventFilter sp ScrollEvent/SCROLL scroll-filter)
+                       (.setUserData sp {:col col :row row :zoom-x zoom-x})
                        (events/dispatch! {:event/type :timeline/register-scroll-pane
                                           :pane :right :instance sp}))
-         :on-deleted (fn [_]
+         :on-deleted (fn [^ScrollPane sp]
+                       (when sp
+                         (.removeEventFilter sp ScrollEvent/SCROLL scroll-filter))
                        (events/dispatch! {:event/type :timeline/register-scroll-pane
                                           :pane :right :instance nil}))
          :desc
          {:fx/type :scroll-pane
+          :user-data {:col col :row row :zoom-x zoom-x}
           :fit-to-height true
           :hbar-policy :always
           :vbar-policy :as-needed
           :vvalue (or sync-scroll-y 0.0)
           :on-vvalue-changed {:event/type :timeline/sync-scroll :pane :right}
+          :hvalue (or scroll-hvalue 0.0)
+          :on-hvalue-changed {:event/type :timeline/set-hvalue}
           :style "-fx-background-color: transparent; -fx-background: transparent;"
           :content
           {:fx/type timeline-canvas
