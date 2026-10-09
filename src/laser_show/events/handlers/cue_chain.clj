@@ -51,7 +51,7 @@
    
    Selection state is now stored in list-ui domain at [:list-ui [:cue-chain col row]].
    Uses :list/auto-select-single-item to auto-select if only 1 item exists."
-  [{:keys [col row state]}]
+  [{:keys [col row state initial-tab]}]
   (log/debug "Opening cue chain editor" {:col col :row row})
   {:state (-> state
               (update-in [:ui :dialogs :cue-chain-editor] merge
@@ -59,7 +59,7 @@
                           :col col
                           :row row
                           :clipboard nil
-                          :active-preset-tab :geometric
+                          :active-preset-tab (or initial-tab :geometric)
                           :selected-effect-id nil
                           :item-effects-ui {}}))
    :dispatch {:event/type :list/auto-select-single-item

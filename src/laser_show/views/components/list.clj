@@ -35,7 +35,8 @@
    [laser-show.events.core :as events]
    [laser-show.state.core :as state]
    [laser-show.subs :as subs]
-   [laser-show.views.components.list-dnd :as dnd]))
+   [laser-show.views.components.list-dnd :as dnd])
+  (:import [javafx.scene.input MouseButton]))
 
 ;; State Access Helpers
 
@@ -318,17 +319,29 @@
   (.setOnMouseClicked node
                       (on-fx-event
                        (fn [event]
-                         (let [click-count (.getClickCount event)
+                         (let [button (.getButton event)
+                               click-count (.getClickCount event)
                                ctrl? (.isShortcutDown event)
                                shift? (.isShiftDown event)
                                dynamic-props (get-handler-props component-id)
                                effective-path (or items-path (:items-path dynamic-props))
-                               all-ids (:ordered-ids dynamic-props)]
-                           (if (= click-count 2)
-                             (start-rename! component-id item-id)
-                             (do (handle-selection! component-id item-id ctrl? shift? effective-path all-ids)
-                                 (request-list-focus! node)))
-                           (.consume event))))))
+                               all-ids (:ordered-ids dynamic-props)
+                               selected-ids (:selected-ids dynamic-props)]
+                           (cond
+                             (= button MouseButton/PRIMARY)
+                             (do
+                               (if (= click-count 2)
+                                 (start-rename! component-id item-id)
+                                 (handle-selection! component-id item-id ctrl? shift? effective-path all-ids))
+                               (request-list-focus! node)
+                               (.consume event))
+
+                             (= button MouseButton/SECONDARY)
+                             (do
+                               ;; If item not already selected, select it on right-click
+                               (when-not (contains? (or selected-ids #{}) item-id)
+                                 (handle-selection! component-id item-id false false effective-path all-ids))
+                               (request-list-focus! node))))))))
 
 
 ;; Shared UI Helpers - Rename Text Field
@@ -375,54 +388,64 @@
         header-classes (group-header-style-classes
                         (u/->map depth selected? dragging? drop-before? drop-into? drop-after? effectively-disabled?))
         name-classes (group-name-style-classes
-                      (u/->map depth selected? effectively-disabled?))]
-    {:fx/type fx/ext-on-instance-lifecycle
-     :on-created (fn [node]
-                   (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
-                     (dnd/setup-drag-source! node group-id component-id (:items-path props))
-                     (dnd/setup-drag-target! node group-id true component-id drop-props)
-                     (setup-click-handler! node component-id group-id (:items-path props))))
-     :desc {:fx/type :h-box
-            :style-class header-classes
-            :children [{:fx/type :button
-                        :graphic {:fx/type fa/icon
-                                  :name (if collapsed? :circle-chevron-right :circle-chevron-down)
-                                  :size 14
-                                  :style-class "group-collapse-icon"}
-                        :style-class "group-collapse-btn"
-                        :on-action (fn [_] (dispatch-toggle-collapse! props group-id))}
+                      (u/->map depth selected? effectively-disabled?))
+        header-node {:fx/type fx/ext-on-instance-lifecycle
+                     :on-created (fn [node]
+                                   (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
+                                     (dnd/setup-drag-source! node group-id component-id (:items-path props))
+                                     (dnd/setup-drag-target! node group-id true component-id drop-props)
+                                     (setup-click-handler! node component-id group-id (:items-path props))))
+                     :desc {:fx/type :h-box
+                            :style-class header-classes
+                            :alignment "CENTER_LEFT"
+                            :children [{:fx/type :button
+                                        :graphic {:fx/type fa/icon
+                                                  :name (if collapsed? :circle-chevron-right :circle-chevron-down)
+                                                  :size 14
+                                                  :style-class "group-collapse-icon"}
+                                        :style-class "group-collapse-btn"
+                                        :on-action (fn [_] (dispatch-toggle-collapse! props group-id))}
 
-                       {:fx/type :check-box
-                        :selected enabled?
-                        :on-selected-changed (fn [new-enabled?]
-                                               (dispatch-set-enabled! props group-id new-enabled?))}
+                                       {:fx/type :check-box
+                                        :selected enabled?
+                                        :on-selected-changed (fn [new-enabled?]
+                                                               (dispatch-set-enabled! props group-id new-enabled?))}
 
-                       (if renaming?
-                         {:fx/type rename-text-field
-                          :component-id component-id
-                          :props props
-                          :item-id group-id
-                          :current-name (:name group)
-                          :style-class "group-name-input"}
-                         {:fx/type :label
-                          :text (if-let [label-fn (:get-group-label props)]
-                                  (label-fn group)
-                                  (or (:name group) "Group"))
-                          :style-class name-classes})
+                                       (if renaming?
+                                         {:fx/type rename-text-field
+                                          :component-id component-id
+                                          :props props
+                                          :item-id group-id
+                                          :current-name (:name group)
+                                          :style-class "group-name-input"}
+                                         {:fx/type :label
+                                          :text (if-let [label-fn (:get-group-label props)]
+                                                  (label-fn group)
+                                                  (or (:name group) "Group"))
+                                          :style-class name-classes})
 
-                       {:fx/type :label
-                          :text (str "(" item-count ")")
-                          :style-class "group-count-badge"}
+                                       {:fx/type :label
+                                        :text (str "(" item-count ")")
+                                        :style-class "group-count-badge"}
 
-                       {:fx/type :region :h-box/hgrow :always}
+                                       {:fx/type :region :h-box/hgrow :always}
 
-                       {:fx/type :button
-                        :text "⊗"
-                        :style-class "group-ungroup-btn"
-                        :on-action (fn [_] (dispatch-ungroup! props group-id))}]
-            :context-menu (when-let [cm-fn (or (:get-group-context-menu props)
-                                               (:get-context-menu props))]
-                            (cm-fn group))}}))
+                                       {:fx/type :button
+                                        :text "⊗"
+                                        :style-class "group-ungroup-btn"
+                                        :on-action (fn [_] (dispatch-ungroup! props group-id))}]}}
+        cm-fn (or (:get-group-context-menu props)
+                  (:get-context-menu props))
+        context-menu (when cm-fn (cm-fn group))]
+    (if context-menu
+      {:fx/type :label
+       :content-display :graphic-only
+       :padding 0
+       :max-width Double/MAX_VALUE
+       :style "-fx-background-color: transparent;"
+       :context-menu context-menu
+       :graphic header-node}
+      header-node)))
 
 
 ;; ============================================================================
@@ -447,32 +470,41 @@
                        :effectively-disabled? effectively-disabled?})
         name-classes (list-item-name-style-classes
                       {:selected? selected?
-                       :effectively-disabled? effectively-disabled?})]
-    {:fx/type fx/ext-on-instance-lifecycle
-     :on-created (fn [node]
-                   (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
-                     (dnd/setup-drag-source! node item-id component-id (:items-path props))
-                     (dnd/setup-drag-target! node item-id false component-id drop-props)
-                     (setup-click-handler! node component-id item-id (:items-path props))))
-     :desc {:fx/type :h-box
-            :style-class item-classes
-            :children [{:fx/type :check-box
-                        :selected enabled?
-                        :on-selected-changed (fn [new-enabled?]
-                                               (dispatch-set-enabled! props item-id new-enabled?))}
+                       :effectively-disabled? effectively-disabled?})
+        card-node {:fx/type fx/ext-on-instance-lifecycle
+                   :on-created (fn [node]
+                                 (let [drop-props (select-keys props [:on-change-event :on-change-params :items-path])]
+                                   (dnd/setup-drag-source! node item-id component-id (:items-path props))
+                                   (dnd/setup-drag-target! node item-id false component-id drop-props)
+                                   (setup-click-handler! node component-id item-id (:items-path props))))
+                   :desc {:fx/type :h-box
+                          :style-class item-classes
+                          :children [{:fx/type :check-box
+                                      :selected enabled?
+                                      :on-selected-changed (fn [new-enabled?]
+                                                             (dispatch-set-enabled! props item-id new-enabled?))}
 
-                       (if renaming?
-                         {:fx/type rename-text-field
-                          :component-id component-id
-                          :props props
-                          :item-id item-id
-                          :current-name item-label
-                          :style-class "list-item-name-input"}
-                         {:fx/type :label
-                          :text (or item-label "Unknown")
-                          :style-class name-classes})]
-            :context-menu (when-let [cm-fn (:get-context-menu props)]
-                            (cm-fn item))}}))
+                                     (if renaming?
+                                       {:fx/type rename-text-field
+                                        :component-id component-id
+                                        :props props
+                                        :item-id item-id
+                                        :current-name item-label
+                                        :style-class "list-item-name-input"}
+                                       {:fx/type :label
+                                        :text (or item-label "Unknown")
+                                        :style-class name-classes})]}}
+        context-menu (when-let [cm-fn (:get-context-menu props)]
+                       (cm-fn item))]
+    (if context-menu
+      {:fx/type :label
+       :content-display :graphic-only
+       :padding 0
+       :max-width Double/MAX_VALUE
+       :style "-fx-background-color: transparent;"
+       :context-menu context-menu
+       :graphic card-node}
+      card-node)))
 
 
 ;; Recursive List Item Renderer

@@ -12,7 +12,8 @@
             [laser-show.state.core :as state]
             [laser-show.input.router :as router]
             [laser-show.input.events :as input-events]
-            [laser-show.events.handlers.grid :as grid-handlers]))
+            [laser-show.events.handlers.grid :as grid-handlers]
+            [laser-show.events.handlers.effects :as effects-handlers]))
 
 
 ;; --- State Update Helpers ---
@@ -33,21 +34,26 @@
 (defn- handle-trigger-action!
   "Executes the mapped action for a triggered input."
   [action]
-  (let [st (state/get-raw-state)
-        type (:type action)]
+  (let [type (:type action)]
     (case type
       :trigger-cue
       (let [[col row] (:target action)]
-        ;; Use grid handler's cell-clicked logic but adapt it for direct state manip
-        ;; We don't have the standard `{:state state}` return format here easily because
-        ;; we are outside the event loop, so we execute it via swap-state!
         (state/swap-state!
          (fn [s]
-           (let [res (grid-handlers/handle {:event/type :grid/cell-clicked
+           (let [res (grid-handlers/handle {:event/type :grid/trigger-cell
                                             :col col
                                             :row row
-                                            :has-content? true
                                             :state s})]
+             (:state res s)))))
+
+      :trigger-effect
+      (let [[col row] (:target action)]
+        (state/swap-state!
+         (fn [s]
+           (let [res (effects-handlers/handle {:event/type :effects/toggle-cell
+                                               :col col
+                                               :row row
+                                               :state s})]
              (:state res s)))))
 
       ;; Default
@@ -63,30 +69,22 @@
   (cond
     ;; Continuous Events
     (input-events/control-change? event)
-    (let [val (:value event)
-          ch (:channel event)
-          cc (:control event)]
-      (update-input-value! [:midi ch cc] val))
-
-    ;; OSC continuous events could be added here
-    ;; ...
+    (let [{:keys [value channel control]} event]
+      (update-input-value! [:midi channel control] value))
 
     ;; Discrete Triggers (Note ON, Keys)
     (or (input-events/note-on? event)
         (input-events/trigger? event))
     (let [st (state/get-raw-state)
-          trigger-map (get-in st [:config :input :trigger-map] {})]
+          trigger-map (get-in st [:config :input :trigger-map] {})
+          lookup-key (cond
+                       (input-events/note-on? event)
+                       {:source (:source event) :channel (:channel event) :note (:note event)}
 
-      ;; Construct lookup key
-      (let [lookup-key (cond
-                         (input-events/note-on? event)
-                         {:source :midi :channel (:channel event) :note (:note event)}
-
-                         (input-events/trigger? event)
-                         {:source (:source event) :id (:id event)})]
-
-        (when-let [action (get trigger-map lookup-key)]
-          (handle-trigger-action! action))))))
+                       (input-events/trigger? event)
+                       {:source (:source event) :id (:id event)})]
+      (when-let [action (get trigger-map lookup-key)]
+        (handle-trigger-action! action)))))
 
 ;; --- Lifecycle ---
 

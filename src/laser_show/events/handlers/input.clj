@@ -227,13 +227,15 @@
            (fn [s]
              (let [lookup-key (cond
                                 (input-events/note-on? event)
-                                {:source :midi :channel (:channel event) :note (:note event)}
+                                {:source (:source event) :channel (:channel event) :note (:note event)}
 
                                 (input-events/trigger? event)
                                 {:source (:source event) :id (:id event)})]
                (if lookup-key
-                 (assoc-in s [:config :input :trigger-map lookup-key] target-action)
-                 s)))))))
+                 (-> s
+                     (assoc-in [:config :input :trigger-map lookup-key] target-action)
+                     (update-in [:backend :input] dissoc :learning-target))
+                 (update-in s [:backend :input] dissoc :learning-target))))))))
 
     ;; Update state to indicate learning is active (for UI)
     {:state (assoc-in state [:backend :input :learning-target] target-action)}))
@@ -249,6 +251,18 @@
   "Removes a generic trigger from the mapping."
   [{:keys [state trigger-key]}]
   {:state (update-in state [:config :input :trigger-map] dissoc trigger-key)})
+
+(defn- handle-input-clear-cell-triggers
+  "Removes all triggers targeting a specific cell."
+  [{:keys [state target-action]}]
+  (let [{:keys [type target]} target-action]
+    {:state (update-in state [:config :input :trigger-map]
+                       (fn [m]
+                         (into {}
+                               (remove (fn [[_ v]]
+                                         (and (= (:type v) type)
+                                              (= (:target v) target))))
+                               m)))}))
 
 
 ;; Public API
@@ -287,6 +301,7 @@
     :input/start-learn (handle-input-start-learn event)
     :input/cancel-learn (handle-input-cancel-learn event)
     :input/remove-trigger (handle-input-remove-trigger event)
+    :input/clear-cell-triggers (handle-input-clear-cell-triggers event)
 
     ;; Unknown event
     {}))

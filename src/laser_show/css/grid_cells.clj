@@ -24,7 +24,7 @@
                   selection-bg border-default]} theme/semantic-colors
           {:keys [cell-content cell-content-hover
                   selection-hover]} theme/computed-colors
-          {:keys [blue]} theme/base-colors]
+          {:keys [blue orange]} theme/base-colors]
       
       {;; Base Grid Cell
        ;; Structural styles that apply to all cells
@@ -44,6 +44,12 @@
        ".grid-cell-selected"
        {:-fx-border-color blue
         :-fx-border-width 2}
+
+       ;; Actively learning cell (orange border & glow)
+       ".grid-cell-learning"
+       {:-fx-border-color orange
+        :-fx-border-width 2
+        :-fx-effect (str "dropshadow(gaussian, " orange ", 8, 0.4, 0, 0)")}
        
        ;; Cell with content (cues/effects assigned)
        ".grid-cell-content"
@@ -86,11 +92,20 @@
         :-fx-opacity 0.85}
        
        
-       ;; Grid Cell Labels
+       ;; Grid Cell Labels & Indicators
        
        
        ".grid-cell-label"
        {:-fx-text-fill text-primary
         :-fx-font-size 10
         :-fx-wrap-text true
-        :-fx-text-alignment "center"}})))
+        :-fx-text-alignment "center"}
+
+       ".grid-cell-learning-badge"
+       {:-fx-text-fill orange
+        :-fx-font-size 8
+        :-fx-font-weight "bold"}
+
+       ".grid-cell-trigger-indicator"
+       {:-fx-text-fill blue
+        :-fx-font-size 9}})))

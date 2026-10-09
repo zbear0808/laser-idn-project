@@ -151,28 +151,39 @@
                            {:fx/type :v-box
                             :spacing 0
                             :h-box/hgrow :always
-                            :children [;; Effect bank tabs (top)
-                                       {:fx/type effect-bank-tabs
-                                        :col col :row row
-                                        :active-bank-tab active-bank-tab}
-                                       
-                                       ;; Parameter editor (bottom) - shows first selected
-                                       {:fx/type parameter-editor
-                                        :fx/context context
-                                        :col col :row row
-                                        :selected-effect-path first-selected-path
-                                        :effect-chain effect-chain
-                                        :dialog-data dialog-data}]}]}
+                            :children (filterv
+                                       some?
+                                       [;; Effect bank tabs (top)
+                                        {:fx/type effect-bank-tabs
+                                         :col col :row row
+                                         :active-bank-tab active-bank-tab}
+
+                                        ;; Parameter editor (bottom)
+                                        {:fx/type parameter-editor
+                                         :fx/context context
+                                         :col col :row row
+                                         :selected-effect-path first-selected-path
+                                         :effect-chain effect-chain
+                                         :dialog-data dialog-data}])}]}
                
-               ;; Footer with Active checkbox and close button
+               ;; Footer with Active checkbox, triggers button, and close button
                {:fx/type :h-box
                 :alignment :center-left
+                :spacing 12
                 :style-class "dialog-footer"
                 :children [{:fx/type :check-box
                             :text "Active"
                             :selected active?
                             :on-selected-changed {:event/type :effects/toggle-cell
                                                   :col col :row row}}
+                           {:fx/type :button
+                            :text "⚡ Triggers..."
+                            :style-class "button-secondary"
+                            :on-action {:event/type :ui/open-dialog
+                                        :dialog-id :trigger-editor
+                                        :data {:col col
+                                               :row row
+                                               :cell-mode :effects}}}
                            {:fx/type :region :h-box/hgrow :always}
                            {:fx/type :button
                             :text "Close"

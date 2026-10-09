@@ -8,6 +8,8 @@
    [laser-show.events.handlers.cue-chain :as cue-chain]
    [laser-show.events.handlers.chain :as chain]
    [laser-show.events.handlers.list :as list]
+   [laser-show.views.components.list :as list-comp]
+   [laser-show.views.dialogs.cue-chain-editor :as cue-chain-editor]
    [laser-show.state.domains :refer [build-initial-state]]))
 
 
@@ -451,3 +453,20 @@
       (is (= :front (get-in res-group [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
       (is (= :front (get-in res-child [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
       (is (= :left (get-in res-child [:state :chains :cue-chains [0 0] :items 0 :items 0 :zone-group-id]))))))
+
+(deftest list-editor-component-rendering-test
+  (testing "list-editor component description can be constructed with context menu"
+    (let [items [{:id (java.util.UUID/randomUUID) :preset-id :circle}
+                 {:type :group :id (java.util.UUID/randomUUID) :name "Group" :items []}]
+          desc {:fx/type list-comp/list-editor
+                :items items
+                :component-id [:test-list 0 0]
+                :get-context-menu (fn [item]
+                                    {:fx/type :context-menu
+                                     :items [{:fx/type :menu-item :text "Action"}]})
+                :get-group-context-menu (fn [group]
+                                          {:fx/type :context-menu
+                                           :items [{:fx/type :menu-item :text "Group Action"}]})
+                :header-label "TEST"}]
+      (is (map? desc))
+      (is (= list-comp/list-editor (:fx/type desc))))))

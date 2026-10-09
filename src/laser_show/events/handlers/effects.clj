@@ -40,11 +40,36 @@
                 (assoc-in [:chains :effect-chains [col row] :active?] new-active)
                 (assoc-in [:effects :selected-cell] [col row]))}))
 
+(defn- migrate-cell-triggers
+  "Migrates target coordinates for triggers mapped to from-pos."
+  [trigger-map from-pos to-pos target-type]
+  (if (seq trigger-map)
+    (into {}
+          (map (fn [[k v]]
+                 [k (if (and (= (:type v) target-type)
+                             (= (:target v) from-pos))
+                      (assoc v :target to-pos)
+                      v)]))
+          trigger-map)
+    trigger-map))
+
+(defn- remove-cell-triggers
+  "Removes all triggers targeting pos for target-type."
+  [trigger-map pos target-type]
+  (if (seq trigger-map)
+    (into {}
+          (remove (fn [[_ v]]
+                    (and (= (:type v) target-type)
+                         (= (:target v) pos))))
+          trigger-map)
+    trigger-map))
+
 (defn- handle-effects-clear-cell
-  "Clear all effects from a cell."
+  "Clear all effects from a cell and remove associated triggers."
   [{:keys [col row state]}]
   {:state (-> state
               (update-in [:chains :effect-chains] dissoc [col row])
+              (update-in [:config :input :trigger-map] remove-cell-triggers [col row] :trigger-effect)
               h/mark-dirty)})
 
 (defn- handle-effects-copy-cell
@@ -71,6 +96,8 @@
       {:state (-> state
                   (update-in [:chains :effect-chains] dissoc [from-col from-row])
                   (assoc-in [:chains :effect-chains [to-col to-row]] cell-data)
+                  (update-in [:config :input :trigger-map]
+                             migrate-cell-triggers [from-col from-row] [to-col to-row] :trigger-effect)
                   h/mark-dirty)}
       {:state state})))
 
@@ -81,14 +108,15 @@
 
 (defn- handle-effect-chain-open-editor
   "Open the effect chain editor for a specific cell.
-   
+   Optionally accepts :initial-tab.
    Uses :list/auto-select-single-item to auto-select if only 1 effect exists."
-  [{:keys [col row state]}]
+  [{:keys [col row state initial-tab]}]
   {:state (-> state
               (update-in [:ui :dialogs :effect-chain-editor] merge
                          {:open? true
                           :col col
-                          :row row}))
+                          :row row
+                          :active-bank-tab (or initial-tab :shape)}))
    :dispatch {:event/type :list/auto-select-single-item
               :component-id [:effect-chain col row]
               :items-path [:chains :effect-chains [col row] :items]}})

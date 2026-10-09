@@ -25,7 +25,6 @@
             [laser-show.views.components.preset-param-editor :as preset-param-editor]
             [laser-show.views.components.effect-parameter-editor :as effect-param-editor]
             [laser-show.views.components.effect-bank :as effect-bank]
-            [laser-show.views.components.trigger-bank :as trigger-bank]
             [laser-show.routing.zone-effects :as zone-effects]
             [laser-show.common.util :as u])
   (:import [javafx.scene.input KeyCode KeyEvent]))
@@ -346,15 +345,6 @@
                   :active-tab active-preset-tab
                   :on-tab-change {:event/type :cue-chain/set-preset-tab}}
 
-                 ;; Optional: Trigger Bank when selected
-                 (when (= active-preset-tab :triggers)
-                   (let [trigger-map (fx/sub-ctx context subs/input-trigger-map)
-                         learning-target (fx/sub-ctx context subs/input-learning-target)]
-                     {:fx/type trigger-bank/trigger-bank
-                      :col col
-                      :row row
-                      :trigger-map trigger-map
-                      :learning-target learning-target}))
 
                  ;; Preset/Group parameter editor (bottom)
                  (if is-preset?
@@ -617,6 +607,14 @@
                              :col col
                              :row row
                              :trigger-mode (:trigger-mode cue-chain)}
+                            {:fx/type :button
+                             :text "⚡ Triggers..."
+                             :style-class "button-secondary"
+                             :on-action {:event/type :ui/open-dialog
+                                         :dialog-id :trigger-editor
+                                         :data {:col col
+                                                :row row
+                                                :cell-mode :cue}}}
                             {:fx/type :region
                              :h-box/hgrow :always}
                             {:fx/type :button

@@ -80,7 +80,7 @@
   (let [address (:path msg)
         args (:args msg)
         mapping (get address-mappings address)]
-    (when mapping
+    (if mapping
       (let [value (parse-osc-value (first args))
             channel 0]
         (case (:type mapping)
@@ -102,7 +102,11 @@
           [(events/trigger :osc (:id mapping) 
                           (if (pos? value) :pressed :released))]
           
-          [])))))
+          []))
+      (let [value (if (seq args) (parse-osc-value (first args)) 1.0)]
+        (if (pos? value)
+          [(events/trigger :osc address :pressed)]
+          [(events/trigger :osc address :released)])))))
 
 
 ;; OSC Handler Creation

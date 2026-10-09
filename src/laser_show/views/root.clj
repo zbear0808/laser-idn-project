@@ -28,6 +28,7 @@
    [laser-show.views.dialogs.timeline-cue-editor :as timeline-cue-editor]
    [laser-show.views.dialogs.add-projector-manual :as add-projector-dialog]
    [laser-show.views.dialogs.zone-group-editor :as zone-group-editor]
+   [laser-show.views.dialogs.cell-trigger-editor :as cell-trigger-editor]
    [laser-show.views.status-bar :as status-bar]
    [laser-show.views.tabs.effects :as effects-tab]
    [laser-show.views.tabs.grid :as grid-tab]
@@ -145,7 +146,8 @@
         cue-editor-open? (fx/sub-ctx context subs/dialog-open? :cue-chain-editor)
         timeline-editor-open? (fx/sub-ctx context subs/dialog-open? :timeline-cue-editor)
         add-projector-open? (fx/sub-ctx context subs/dialog-open? :add-projector-manual)
-        zone-group-editor-open? (fx/sub-ctx context subs/dialog-open? :zone-group-editor)]
+        zone-group-editor-open? (fx/sub-ctx context subs/dialog-open? :zone-group-editor)
+        trigger-editor-open? (fx/sub-ctx context subs/dialog-open? :trigger-editor)]
     {:fx/type fx/ext-set-env
      :env {::layout-config layout-config}  ; For any components that need spacing/fonts
      :desc {:fx/type fx/ext-many
@@ -186,4 +188,8 @@
                     ;; Zone group editor dialog
                     (when zone-group-editor-open?
                       {:fx/type zone-group-editor/zone-group-editor-dialog
-                       :fx/key :zone-group-editor-dialog})])}}))
+                       :fx/key :zone-group-editor-dialog})
+                    ;; Cell trigger editor dialog
+                    (when trigger-editor-open?
+                      {:fx/type cell-trigger-editor/cell-trigger-editor-dialog
+                       :fx/key :cell-trigger-editor-dialog})])}}))

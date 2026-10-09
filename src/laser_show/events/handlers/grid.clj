@@ -46,7 +46,7 @@
   "Remove a cue from active-cues. Sets playing? to false if no cues remain."
   [state col row]
   (let [remaining-cues (dissoc (get-in state [:playback :active-cues]) [col row])
-        any-remaining? (seq remaining-cues)]
+        any-remaining? (boolean (seq remaining-cues))]
     (-> state
         (assoc-in [:playback :active-cues] remaining-cues)
         (assoc-in [:playback :playing?] any-remaining?)
@@ -54,11 +54,51 @@
         (cond-> (= (get-in state [:playback :active-cell]) [col row])
           (assoc-in [:playback :active-cell] (first (keys remaining-cues)))))))
 
-;; TODO: Implement :grid/trigger-cell handler - trigger cell from external input (MIDI/OSC)
+(defn- migrate-cell-triggers
+  "Migrates target coordinates for triggers mapped to from-pos."
+  [trigger-map from-pos to-pos target-type]
+  (if (seq trigger-map)
+    (into {}
+          (map (fn [[k v]]
+                 [k (if (and (= (:type v) target-type)
+                             (= (:target v) from-pos))
+                      (assoc v :target to-pos)
+                      v)]))
+          trigger-map)
+    trigger-map))
+
+(defn- remove-cell-triggers
+  "Removes all triggers targeting pos for target-type."
+  [trigger-map pos target-type]
+  (if (seq trigger-map)
+    (into {}
+          (remove (fn [[_ v]]
+                    (and (= (:type v) target-type)
+                         (= (:target v) pos))))
+          trigger-map)
+    trigger-map))
+
 (defn- handle-grid-trigger-cell
-  [event]
-  (log/error "TODO: Handler not implemented for :grid/trigger-cell" event)
-  {})
+  "Trigger a grid cell from external input (MIDI/OSC).
+   Respects cue trigger mode (:toggle or :retrigger)."
+  [{:keys [col row state]}]
+  (let [has-content? (boolean (get-in state [:chains :cue-chains [col row]]))
+        state-with-selected (assoc-in state [:grid :selected-cell] [col row])]
+    (if has-content?
+      (let [trigger-mode (resolve-trigger-mode state-with-selected col row)
+            cue-active? (contains? (get-in state-with-selected [:playback :active-cues]) [col row])]
+        (log/info "External trigger cell:"
+                  {:col col :row row
+                   :trigger-mode trigger-mode
+                   :cue-active? cue-active?})
+        (case trigger-mode
+          :toggle (if cue-active?
+                    {:state (untrigger-cue state-with-selected col row)}
+                    {:state (trigger-cue state-with-selected col row)})
+          ;; :retrigger or any other value - always trigger/restart
+          {:state (trigger-cue state-with-selected col row)}))
+      ;; Triggering an empty cell just selects it
+      {:state state-with-selected})))
 
 (defn- handle-grid-select-cell
   "Select a cell in the grid without triggering playback."
@@ -107,6 +147,8 @@
             state* (-> state
                        (update-in [:chains :cue-chains] dissoc [from-col from-row])
                        (assoc-in [:chains :cue-chains [to-col to-row]] cue-chain-data)
+                       (update-in [:config :input :trigger-map]
+                                  migrate-cell-triggers [from-col from-row] [to-col to-row] :trigger-cue)
                        ;; Move active cell if it was the source
                        (cond-> (= (get-in state [:playback :active-cell]) [from-col from-row])
                          (assoc-in [:playback :active-cell] [to-col to-row]))
@@ -136,10 +178,11 @@
                                  :cue-chain))
 
 (defn- handle-grid-clear-cell
-  "Clear a cell's cue chain."
+  "Clear a cell's cue chain and associated triggers."
   [{:keys [col row state]}]
   {:state (-> state
               (update-in [:chains :cue-chains] dissoc [col row])
+              (update-in [:config :input :trigger-map] remove-cell-triggers [col row] :trigger-cue)
               (cond-> (= (get-in state [:playback :active-cell]) [col row])
                 (assoc-in [:playback :active-cell] nil))
               (update-in [:playback :active-cues] dissoc [col row])
