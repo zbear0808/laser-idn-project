@@ -13,6 +13,7 @@
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
    [laser-show.animation.effects.zone :as zone]
+   [laser-show.animation.types :as t]
    [laser-show.routing.zone-effects :as ze]
    [laser-show.services.frame-service :as fs]
    [laser-show.backend.multi-engine :as me]
@@ -84,7 +85,7 @@
                        :params {:target-zone :center}}]}]})
 
 (def test-cue-chain-group-with-zone-selector
-  "Cue chain with a group that has zone-selector - children's effects are ignored."
+  "Cue chain with a group that has zone-selector - child 1 overrides with :right, child 2 inherits :center."
   {:id "cue-chain-group"
    :name "Group Zone Selector Test"
    :destination-zone {:zone-group-id :all}
@@ -95,17 +96,17 @@
             :effects [{:effect-id :zone-selector
                        :enabled? true
                        :params {:target-zone :center}}]
-            :items [;; Child 1: has its own zone effect (should be IGNORED)
+            :items [;; Child 1: has its own zone effect (routes to :right)
                     {:id "child-1"
                      :type :preset
-                     :name "Circle trying to go to :right"
+                     :name "Circle going to :right"
                      :enabled? true
                      :preset-id :circle
                      :params {:radius 0.3 :num-points 24 :red 1.0 :green 1.0 :blue 0.0}
                      :effects [{:effect-id :zone-selector
                                 :enabled? true
                                 :params {:target-zone :right}}]}
-                    ;; Child 2: no zone effect
+                    ;; Child 2: no zone effect (inherits group's :center)
                     {:id "child-2"
                      :type :preset
                      :name "Square"
@@ -389,35 +390,149 @@
 ;; ============================================================================
 
 
-(deftest group-zone-selector-overrides-children-test
-  (testing "Group's zone-selector routes all children to group's destination"
+(deftest group-children-zone-override-and-inheritance-test
+  (testing "Child can override zone while non-overridden child inherits group zone"
     (let [frames-by-zone (fs/generate-frames-by-zone
                           test-cue-chain-group-with-zone-selector
                           0 120.0 0
                           (make-timing-ctx 0.0))]
 
-      ;; All content should go to :center (group's destination)
+      ;; Child 2 had no zone effect -> inherits group's :center destination
       (is (contains? frames-by-zone :center)
-          "Should have frame for :center (group's destination)")
-
-      ;; Combined frame should have content from both children
+          "Should have frame for :center (child-2 inherited group's destination)")
       (is (pos? (count (:center frames-by-zone)))
-          ":center should have combined content")
+          ":center should have content from child-2")
 
-      ;; The combined frame should have more points than either child alone
-      ;; Circle has 24 points, Square has 12 points, plus blanking
-      (is (> (count (:center frames-by-zone)) 24)
-          ":center should have combined content (> 24 points)")
+      ;; Child 1 had zone override -> routes to :right
+      (is (contains? frames-by-zone :right)
+          ":right should have frame from child-1 override")
+      (is (pos? (count (:right frames-by-zone)))
+          ":right should have content from child-1")
 
-      ;; :right should NOT have any content (child's zone effect ignored)
-      (is (or (not (contains? frames-by-zone :right))
-              (nil? (:right frames-by-zone)))
-          ":right should be empty - child's zone effect was ignored")
+      ;; Circle and Square both have content, and point counts differ
+      (is (pos? (count (:right frames-by-zone)))
+          ":right should have content from circle")
+      (is (pos? (count (:center frames-by-zone)))
+          ":center should have content from square")
+      (is (not= (count (:right frames-by-zone))
+                (count (:center frames-by-zone)))
+          "Different shapes should have different point counts")
 
       ;; :all should NOT have content (default was overridden)
       (is (or (not (contains? frames-by-zone :all))
               (nil? (:all frames-by-zone)))
           ":all should be empty - default was overridden"))))
+
+
+(deftest group-all-children-inherit-group-zone-test
+  (testing "When no children specify zones, all inherit the group destination"
+    (let [cue-chain {:id "cue-chain-group-inherit"
+                     :destination-zone {:zone-group-id :all}
+                     :items [{:id "group-1"
+                              :type :group
+                              :enabled? true
+                              :effects [{:effect-id :zone-selector
+                                         :enabled? true
+                                         :params {:target-zone :left}}]
+                              :items [{:id "child-1"
+                                       :type :preset
+                                       :enabled? true
+                                       :preset-id :circle
+                                       :params {:radius 0.3 :num-points 24}}
+                                      {:id "child-2"
+                                       :type :preset
+                                       :enabled? true
+                                       :preset-id :square
+                                       :params {:size 0.3 :num-points 12}}]}]}
+          frames-by-zone (fs/generate-frames-by-zone
+                          cue-chain 0 120.0 0 (make-timing-ctx 0.0))]
+      (is (contains? frames-by-zone :left) "All children routed to :left")
+      (is (> (count (:left frames-by-zone)) 24) "Combined frame has both children plus blanking")
+      (is (nil? (:all frames-by-zone)) ":all is empty")
+      (is (nil? (:right frames-by-zone)) ":right is empty"))))
+
+
+(deftest group-effects-applied-across-multiple-zones-test
+  (testing "Group effects are applied to child frames even when partitioned across different zones"
+    (let [cue-chain {:id "cue-chain-group-fx"
+                     :destination-zone {:zone-group-id :all}
+                     :items [{:id "group-1"
+                              :type :group
+                              :enabled? true
+                              :effects [{:effect-id :set-color
+                                         :enabled? true
+                                         :params {:red 1.0 :green 0.0 :blue 0.0}}]
+                              :items [{:id "child-1"
+                                       :type :preset
+                                       :enabled? true
+                                       :preset-id :circle
+                                       :zone-group-id :left
+                                       :params {:radius 0.3 :num-points 4 :red 0.0 :green 1.0 :blue 0.0}}
+                                      {:id "child-2"
+                                       :type :preset
+                                       :enabled? true
+                                       :preset-id :square
+                                       :zone-group-id :right
+                                       :params {:size 0.3 :num-points 4 :red 0.0 :green 1.0 :blue 0.0}}]}]}
+          frames-by-zone (fs/generate-frames-by-zone
+                          cue-chain 0 120.0 0 (make-timing-ctx 0.0))]
+      (is (contains? frames-by-zone :left) "Child 1 routed to :left")
+      (is (contains? frames-by-zone :right) "Child 2 routed to :right")
+      ;; Both zones should have points with color overridden to red (r=1.0, g=0.0) by group effect
+      (let [left-pts (filterv #(not (t/blanked? %)) (:left frames-by-zone))
+            right-pts (filterv #(not (t/blanked? %)) (:right frames-by-zone))]
+        (is (pos? (count left-pts)) "Left has visible points")
+        (is (pos? (count right-pts)) "Right has visible points")
+        (is (every? (fn [pt] (and (== 1.0 (nth pt 2)) (== 0.0 (nth pt 3)))) left-pts)
+            "Group color effect applied to left partition")
+        (is (every? (fn [pt] (and (== 1.0 (nth pt 2)) (== 0.0 (nth pt 3)))) right-pts)
+            "Group color effect applied to right partition")))))
+
+
+(deftest track-folder-zone-inheritance-test
+  (testing "Track in a folder inherits the folder's zone assignment"
+    (let [cue-chain {:id "cue-chain-tracks"
+                     :destination-zone {:zone-group-id :all}
+                     :tracks [{:id "folder-1"
+                               :name "Folder 1"
+                               :type :folder
+                               :zone-group-id :left
+                               :path []}
+                              {:id "track-1"
+                               :name "Track in Folder"
+                               :type :track
+                               :path ["folder-1"]}]
+                     :items [{:id "item-1"
+                              :type :preset
+                              :enabled? true
+                              :track-id "track-1"
+                              :preset-id :circle
+                              :params {:radius 0.3 :num-points 10}}]}
+          frames-by-zone (fs/generate-frames-by-zone
+                          cue-chain 0 120.0 0 (make-timing-ctx 0.0))]
+      (is (contains? frames-by-zone :left) "Item on track inside folder-1 inherits :left")
+      (is (pos? (count (:left frames-by-zone))))
+      (is (nil? (:all frames-by-zone))))))
+
+
+(deftest item-zone-overrides-track-zone-test
+  (testing "Item zone override takes precedence over track zone"
+    (let [cue-chain {:id "cue-chain-override"
+                     :destination-zone {:zone-group-id :all}
+                     :tracks [{:id "track-1"
+                               :name "Track 1"
+                               :zone-group-id :left}]
+                     :items [{:id "item-1"
+                              :type :preset
+                              :enabled? true
+                              :track-id "track-1"
+                              :zone-group-id :right
+                              :preset-id :circle
+                              :params {:radius 0.3 :num-points 10}}]}
+          frames-by-zone (fs/generate-frames-by-zone
+                          cue-chain 0 120.0 0 (make-timing-ctx 0.0))]
+      (is (contains? frames-by-zone :right) "Item zone override :right beats track's :left")
+      (is (nil? (:left frames-by-zone))))))
 
 
 (deftest group-items-by-zone-sealed-unit-behavior-test

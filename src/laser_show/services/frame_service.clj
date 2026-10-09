@@ -53,16 +53,19 @@
 ;; we would recompute identical frames multiple times per render cycle.
 ;; This cache stores the zone frame map and returns it if still valid.
 
-(defonce ^:private !zone-frame-cache
-  (atom {:frames {}
-         :cache-key nil
-         :timestamp 0}))
+(defonce ^:private !zone-frame-cache (atom {}))
 
 (defn- compute-zone-cache-key
   "Compute cache key from inputs for zone frame caching.
-  Buckets elapsed-ms to 16ms intervals to allow cache hits across a frame period."
-  [items elapsed-ms bpm]
-  (hash [items (quot elapsed-ms 16) bpm]))
+   Includes cue-chain identity, items, tracks, destination-zone, BPM, and time bucket.
+   Buckets elapsed-ms to 16ms intervals to allow cache hits across a frame period."
+  [cue-chain elapsed-ms bpm]
+  (hash [(:id cue-chain)
+         (:destination-zone cue-chain)
+         (:tracks cue-chain)
+         (:items cue-chain)
+         (quot (long elapsed-ms) 16)
+         bpm]))
 
 
 ;; Beat Accumulation
@@ -387,11 +390,77 @@
         rendered-frames (u/keepv #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx) items)]
     (concatenate-frames rendered-frames elapsed-ms)))
 
-(defn- render-zone-items
-  "Render a collection of items and concatenate them into a single frame."
-  [items elapsed-ms bpm trigger-time timing-ctx]
-  (let [rendered-frames (u/keepv #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx) items)]
-    (concatenate-frames rendered-frames elapsed-ms)))
+(defn- render-item-tree-by-zone
+  "Recursively render a cue chain item (preset or group) partitioned by destination zone.
+   Applies effects at each level (preset effects on presets, group effects on group zone sub-frames).
+   
+   Args:
+   - item: A preset or group map
+   - parent-zone-id: Inherited zone group keyword from parent container (or nil)
+   - elapsed-ms: Elapsed ms since cue trigger
+   - bpm: Current BPM
+   - trigger-time: Cue trigger timestamp
+   - timing-ctx: Timing context map
+   - tracks: Cue chain tracks vector (optional)
+   - default-zone-id: Fallback zone group keyword
+   
+   Returns: Map of zone-group-id → LaserFrame (vector of points)"
+  [item parent-zone-id elapsed-ms bpm trigger-time timing-ctx tracks default-zone-id]
+  (let [current-beats (:effective-beats timing-ctx 0.0)]
+    (if-not (and (:enabled? item true)
+                 (in-timeline-window? item current-beats))
+      {}
+      (cond
+        ;; Preset: render and apply preset effects, assign to resolved zone
+        (= :preset (:type item))
+        (let [zone-id (ze/resolve-item-zone-destination
+                       item timing-ctx
+                       {:tracks tracks
+                        :default-zone-id default-zone-id
+                        :inherited-zone parent-zone-id})]
+          (if-let [frame (render-preset-instance item elapsed-ms)]
+            (let [frame-with-fx (apply-item-effects frame item elapsed-ms bpm trigger-time timing-ctx)]
+              (if (seq frame-with-fx)
+                {zone-id frame-with-fx}
+                {}))
+            {}))
+
+        ;; Group: resolve group's effective zone, recursively render children,
+        ;; then apply group effects to each zone partition
+        (chains/group? item)
+        (let [group-zone (ze/resolve-item-zone-destination
+                          item timing-ctx
+                          {:tracks tracks
+                           :default-zone-id default-zone-id
+                           :inherited-zone parent-zone-id})
+              children (:items item [])
+              child-zone-maps (u/keepv
+                               #(render-item-tree-by-zone
+                                 % group-zone elapsed-ms bpm trigger-time timing-ctx tracks default-zone-id)
+                               children)
+              merged-child-frames (reduce
+                                   (fn [acc child-map]
+                                     (reduce-kv
+                                      (fn [m zone-id frame]
+                                        (update m zone-id
+                                                (fn [existing]
+                                                  (if existing
+                                                    (concatenate-frames [existing frame] elapsed-ms)
+                                                    frame))))
+                                      acc
+                                      child-map))
+                                   {}
+                                   child-zone-maps)]
+          (reduce-kv
+           (fn [acc zone-id sub-frame]
+             (let [processed-frame (apply-item-effects sub-frame item elapsed-ms bpm trigger-time timing-ctx)]
+               (if (seq processed-frame)
+                 (assoc acc zone-id processed-frame)
+                 acc)))
+           {}
+           merged-child-frames))
+
+        :else {}))))
 
 (defn- apply-global-effects-to-frame
   "Apply global effects from the effects grid to a frame using global clock timing."
@@ -413,12 +482,12 @@
 (defn generate-frames-by-zone
   "Generate frames organized by destination zone group.
    
-   Uses group-items-by-zone to classify top-level items by their
-   resolved zone destination at the current beat position, then renders
-   each group separately and applies global effects to each zone's frame.
+   Recursively evaluates cue chain items and groups by resolved zone destination,
+   applies preset- and group-level effects at each level, and applies global effects
+   to each zone's frame.
    
    Args:
-   - cue-chain: The cue chain data with :items and :destination-zone
+   - cue-chain: The cue chain data with :items, :destination-zone, and optional :tracks
    - elapsed-ms: Elapsed time since cue trigger in milliseconds
    - bpm: Current beats per minute
    - trigger-time: Timestamp when cue was triggered
@@ -429,7 +498,6 @@
    Only zones with rendered content are included.
    Empty map if no items render successfully."
   [cue-chain elapsed-ms bpm trigger-time timing-ctx]
-  ;; Debug: trigger one-shot logging for zone resolution
   (ze/log-once :frame-service-generate
                (format "[zone-debug] generate-frames-by-zone: destination-zone=%s effective-beats=%.2f item-count=%d"
                        (pr-str (:destination-zone cue-chain))
@@ -439,19 +507,31 @@
         destination-id (get-in cue-chain [:destination-zone :zone-group-id] :all)
         tracks (:tracks cue-chain)
         raw-state (state/get-raw-state)
-        items-by-zone (ze/group-items-by-zone
-                       items
-                       timing-ctx
-                       (merge {:default-zone-id destination-id}
-                              (when (seq tracks) {:tracks tracks})))]
+        item-zone-maps (u/keepv
+                        #(render-item-tree-by-zone
+                          % nil elapsed-ms bpm trigger-time timing-ctx tracks destination-id)
+                        items)
+        combined-by-zone (reduce
+                          (fn [acc item-map]
+                            (reduce-kv
+                             (fn [m zone-id frame]
+                               (update m zone-id
+                                       (fn [existing]
+                                         (if existing
+                                           (concatenate-frames [existing frame] elapsed-ms)
+                                           frame))))
+                             acc
+                             item-map))
+                          {}
+                          item-zone-maps)]
     (reduce-kv
-     (fn [acc zone-id zone-items]
-       (if-let [zone-frame (render-zone-items zone-items elapsed-ms bpm trigger-time timing-ctx)]
+     (fn [acc zone-id zone-frame]
+       (if (seq zone-frame)
          (let [frame-with-effects (apply-global-effects-to-frame zone-frame raw-state bpm)]
            (assoc acc zone-id frame-with-effects))
          acc))
      {}
-     items-by-zone)))
+     combined-by-zone)))
 
 (defn generate-frames-by-zone-cached
   "Generate zone frames with per-frame caching to avoid redundant computation.
@@ -461,9 +541,9 @@
    This function caches the zone frame map and returns it if still valid.
    
    Cache Strategy:
-   - Cache key: Hash of cue-chain items structure, elapsed-ms bucket, and BPM
+   - Cache key: Hash of cue-chain structure (id, dest-zone, tracks, items), elapsed-ms bucket, and BPM
    - Cache validity: ~16ms (one frame period at 60fps)
-   - elapsed-ms is bucketed to 16ms intervals to allow cache hits
+   - Bounded cache map with automatic pruning
    
    Args:
    - cue-chain: The cue chain data with :items and :destination-zone
@@ -476,18 +556,19 @@
    Map of zone-group-id → frame (same as generate-frames-by-zone).
    May return cached result if cache is valid."
   [cue-chain elapsed-ms bpm trigger-time timing-ctx]
-  (let [items (:items cue-chain [])
-        new-cache-key (compute-zone-cache-key items elapsed-ms bpm)
+  (let [new-cache-key (compute-zone-cache-key cue-chain elapsed-ms bpm)
         current-time (System/currentTimeMillis)
-        {:keys [frames cache-key timestamp]} @!zone-frame-cache
-        cache-valid? (and (= cache-key new-cache-key)
-                          (< (- current-time timestamp) 16))]
-    (if cache-valid?
-      frames
+        cached-entry (get @!zone-frame-cache new-cache-key)]
+    (if (and cached-entry (< (- current-time (:timestamp cached-entry)) 16))
+      (:frames cached-entry)
       (let [new-frames (generate-frames-by-zone cue-chain elapsed-ms bpm trigger-time timing-ctx)]
-        (reset! !zone-frame-cache {:frames new-frames
-                                   :cache-key new-cache-key
-                                   :timestamp current-time})
+        (swap! !zone-frame-cache
+               (fn [cache]
+                 (let [pruned (if (> (count cache) 32)
+                                (into {} (filter (fn [[_ v]] (< (- current-time (:timestamp v)) 50))) cache)
+                                cache)]
+                   (assoc pruned new-cache-key {:frames new-frames
+                                                :timestamp current-time}))))
         new-frames))))
 
 (defn- combine-all-zone-frames
@@ -576,32 +657,11 @@
 
            (when base-frame
              (let [effect-chain (get-active-global-effects)
-
-                   ;; Measure effect chain application (from effects grid)
-                   ;; Use GLOBAL CLOCK timing for global effects - not cue timing!
-                   ;; This ensures global effects continue smoothly when cues are retriggered
-                   global-clock (get-in raw-state [:timing :global-clock])
-                   input-values (get-in raw-state [:backend :input :values] {})
-                   global-timing-ctx (assoc (cue-timing/get-global-timing-context global-clock bpm)
-                                            :input-values input-values)
-                   global-elapsed (long (or (:accumulated-ms global-clock) 0))
-
-                   effects-start (timing/nanotime)
-                   final-frame (if effect-chain
-                                 (try
-                                   (effects/apply-effect-chain base-frame effect-chain global-elapsed bpm 0 global-timing-ctx)
-                                   (catch Exception e
-                                     (log/error "generate-current-frame: Effect chain failed:" (.getMessage e))
-                                     (log/debug "  effect-chain:" effect-chain)
-                                     base-frame))
-                                 base-frame)
-                   effects-end (timing/nanotime)]
+                   final-frame base-frame]
 
                ;; Record timing (profiler adds timestamp and calculates total)
                (let [base-time-us (timing/nanos->micros (- base-end base-start))
-                     effects-time-us (if effect-chain
-                                       (timing/nanos->micros (- effects-end effects-start))
-                                       0)
+                     effects-time-us 0
                      effect-count (if effect-chain (count (:effects effect-chain)) 0)
                      point-count (count final-frame)]
 

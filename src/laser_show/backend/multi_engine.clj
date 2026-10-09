@@ -25,6 +25,7 @@
             [laser-show.state.core :as state]
             [laser-show.state.extractors :as ex]
             [laser-show.animation.effects :as effects]
+            [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.idn.output-config :as output-config]))
 
@@ -169,7 +170,9 @@
                     (fn [{:keys [cue-chain cue-timing]}]
                       (let [trigger-time (:trigger-time cue-timing 0)
                             elapsed (- current-time trigger-time)
-                            timing-ctx (frame-service/get-timing-context)
+                            input-values (get-in raw-state [:backend :input :values] {})
+                            timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing bpm)
+                                              :input-values input-values)
                             ;; Generate zone frames for this cue
                             zone-frames-map (frame-service/generate-frames-by-zone-cached
                                               cue-chain elapsed bpm trigger-time timing-ctx)
@@ -186,7 +189,9 @@
             first-cue-timing (:cue-timing (first all-cues))
             trigger-time (:trigger-time first-cue-timing 0)
             elapsed (- current-time trigger-time)
-            timing-ctx (frame-service/get-timing-context)
+            input-values (get-in raw-state [:backend :input :values] {})
+            timing-ctx (assoc (cue-timing/get-cue-timing-context first-cue-timing bpm)
+                              :input-values input-values)
             
             log-count (swap! routing-log-counter inc)]
         

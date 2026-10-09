@@ -142,6 +142,62 @@
             (make-timing-ctx 0.0)
             {:default-zone-id (:zone-group-id default-destination)})))) 
 
+  (testing "Item with direct :zone-group-id uses that zone"
+    (let [item-direct-zone {:type :preset
+                            :id (random-uuid)
+                            :zone-group-id :right
+                            :preset-id :circle
+                            :effects []
+                            :enabled? true}]
+      (is (= :right
+             (zone-effects/resolve-item-zone-destination
+              item-direct-zone
+              (make-timing-ctx 0.0)
+              {:default-zone-id (:zone-group-id default-destination)})))))
+
+  (testing "Item inherits zone from parent group when item has no explicit zone"
+    (let [item-child {:type :preset
+                      :id (random-uuid)
+                      :preset-id :circle
+                      :effects []
+                      :enabled? true}]
+      (is (= :center
+             (zone-effects/resolve-item-zone-destination
+              item-child
+              (make-timing-ctx 0.0)
+              {:default-zone-id (:zone-group-id default-destination)
+               :inherited-zone :center})))))
+
+  (testing "Item zone override takes precedence over inherited zone"
+    (let [item-override {:type :preset
+                         :id (random-uuid)
+                         :zone-group-id :right
+                         :preset-id :circle
+                         :effects []
+                         :enabled? true}]
+      (is (= :right
+             (zone-effects/resolve-item-zone-destination
+              item-override
+              (make-timing-ctx 0.0)
+              {:default-zone-id (:zone-group-id default-destination)
+               :inherited-zone :center})))))
+
+  (testing "Item resolves zone from track and folder hierarchy"
+    (let [tracks [{:id "folder-1" :type :folder :zone-group-id :left :path []}
+                  {:id "track-1" :type :track :path ["folder-1"]}]
+          item-on-track {:type :preset
+                         :id (random-uuid)
+                         :track-id "track-1"
+                         :preset-id :circle
+                         :effects []
+                         :enabled? true}]
+      (is (= :left
+             (zone-effects/resolve-item-zone-destination
+              item-on-track
+              (make-timing-ctx 0.0)
+              {:tracks tracks
+               :default-zone-id :all})))))
+
   (testing "Disabled zone effect is ignored"
     (let [item-disabled-effect {:type :preset
                                 :id (random-uuid)
@@ -153,6 +209,31 @@
               item-disabled-effect
               (make-timing-ctx 0.0)
               {:default-zone-id (:zone-group-id default-destination)}))))))
+
+;; resolve-track-effective-zone tests
+
+(deftest resolve-track-effective-zone-test
+  (let [tracks [{:id "folder-root" :name "Root" :zone-group-id :left :path []}
+                {:id "sub-folder" :name "Sub" :path ["folder-root"]}
+                {:id "track-inherited" :name "Child Track" :path ["folder-root" "sub-folder"]}
+                {:id "track-override" :name "Overriding Track" :zone-group-id :right :path ["folder-root"]}
+                {:id "track-no-zone" :name "Standalone Track" :path []}]]
+
+    (testing "Returns direct track zone if set"
+      (is (= :right (zone-effects/resolve-track-effective-zone "track-override" tracks))))
+
+    (testing "Traverses parent folders to find inherited zone"
+      (is (= :left (zone-effects/resolve-track-effective-zone "track-inherited" tracks))))
+
+    (testing "Returns nil if neither track nor ancestors have zone"
+      (is (nil? (zone-effects/resolve-track-effective-zone "track-no-zone" tracks))))
+
+    (testing "Returns nil for nonexistent track id"
+      (is (nil? (zone-effects/resolve-track-effective-zone "unknown" tracks))))
+
+    (testing "Returns nil when tracks vector is empty or nil"
+      (is (nil? (zone-effects/resolve-track-effective-zone "track-1" [])))
+      (is (nil? (zone-effects/resolve-track-effective-zone "track-1" nil))))))
 
 
 ;; group-items-by-zone tests

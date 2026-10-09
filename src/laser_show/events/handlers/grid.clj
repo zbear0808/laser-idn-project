@@ -99,17 +99,24 @@
       {:state state-with-selected})))
 
 (defn- handle-grid-move-cell
-  "Move a cell's cue chain from one position to another."
+  "Move a cell's cue chain from one position to another, preserving any active cue state."
   [{:keys [from-col from-row to-col to-row state]}]
   (let [cue-chain-data (get-in state [:chains :cue-chains [from-col from-row]])]
     (if cue-chain-data
-      {:state (-> state
-                  (update-in [:chains :cue-chains] dissoc [from-col from-row])
-                  (assoc-in [:chains :cue-chains [to-col to-row]] cue-chain-data)
-                  ;; Update playback if moving active cell
-                  (cond-> (= (get-in state [:playback :active-cell]) [from-col from-row])
-                    (assoc-in [:playback :active-cell] [to-col to-row]))
-                  h/mark-dirty)}
+      (let [active? (contains? (get-in state [:playback :active-cues]) [from-col from-row])
+            state* (-> state
+                       (update-in [:chains :cue-chains] dissoc [from-col from-row])
+                       (assoc-in [:chains :cue-chains [to-col to-row]] cue-chain-data)
+                       ;; Move active cell if it was the source
+                       (cond-> (= (get-in state [:playback :active-cell]) [from-col from-row])
+                         (assoc-in [:playback :active-cell] [to-col to-row]))
+                       ;; Move active cue entry if present
+                       (cond-> active?
+                         (-> (update-in [:playback :active-cues] dissoc [from-col from-row])
+                             (assoc-in [:playback :active-cues [to-col to-row]]
+                               (get-in state [:playback :active-cues [from-col from-row]]))))
+                       h/mark-dirty)]
+        {:state state*})
       {:state state})))
 
 (defn- handle-grid-copy-cell
