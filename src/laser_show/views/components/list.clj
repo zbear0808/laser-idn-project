@@ -397,7 +397,7 @@
                                      (setup-click-handler! node component-id group-id (:items-path props))))
                      :desc {:fx/type :h-box
                             :style-class header-classes
-                            :alignment "CENTER_LEFT"
+                            :alignment :center-left
                             :children [{:fx/type :button
                                         :graphic {:fx/type fa/icon
                                                   :name (if collapsed? :circle-chevron-right :circle-chevron-down)
