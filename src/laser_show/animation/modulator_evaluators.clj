@@ -170,17 +170,31 @@
 
 (defn- eval-midi
   "Evaluate MIDI CC modulator.
-   Reads from generic input-values."
-  [{:keys [channel cc min max]} {:keys [input-values]}]
-  (let [cc-val (double (get input-values [:midi channel cc] 0))
+   Reads from generic input-values (already normalized to 0.0-1.0)."
+  [{:keys [channel cc min max] :or {min 0.0 max 1.0}} {:keys [input-values]}]
+  (let [ch (or channel 0)
+        cc-num (or cc 0)
+        val (or (get input-values [:midi ch cc-num])
+                ;; Support 1-based channel fallback if ch is 1
+                (when (and (number? ch) (== (long ch) 1))
+                  (get input-values [:midi 0 cc-num]))
+                ;; Support 0-based channel fallback if ch is 0
+                (when (and (number? ch) (zero? (long ch)))
+                  (get input-values [:midi 1 cc-num]))
+                0.0)
+        cc-val (double val)
         range-v (- (double max) (double min))]
-    (+ (double min) (* (/ cc-val 127.0) range-v))))
+    (+ (double min) (* cc-val range-v))))
 
 (defn- eval-osc
   "Evaluate OSC parameter modulator.
    Reads from generic input-values."
-  [{:keys [path min max]} {:keys [input-values]}]
-  (let [osc-val (double (get input-values [:osc path] 0.0))
+  [{:keys [path channel control min max] :or {min 0.0 max 1.0}} {:keys [input-values]}]
+  (let [val (or (when path (get input-values [:osc path]))
+                (when (some? control)
+                  (get input-values [:osc (or channel 0) control]))
+                0.0)
+        osc-val (double val)
         range-v (- (double max) (double min))]
     (+ (double min) (* osc-val range-v))))
 

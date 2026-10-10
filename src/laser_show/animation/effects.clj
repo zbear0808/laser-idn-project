@@ -378,7 +378,7 @@
    ```"
   [param-key params time-ms bpm ctx]
   (let [param-val (get params param-key)
-        timing-ctx (:timing-ctx ctx)
+        timing-ctx (if (contains? ctx :timing-ctx) (:timing-ctx ctx) ctx)
         point-count (:point-count ctx)]
     (cond
       ;; Static value (number, keyword, boolean, etc.) - return constant fn
@@ -405,6 +405,10 @@
       (let [context (mod/make-context (merge {:time-ms time-ms :bpm bpm} timing-ctx))
             resolved (mod/resolve-param param-val context)]
         (constantly resolved)))))
+
+(def resolve-param-fn
+  "Alias for make-param-resolver for compatibility with modulation architecture."
+  make-param-resolver)
 
 (set! *warn-on-reflection* false)
 (set! *unchecked-math* false)

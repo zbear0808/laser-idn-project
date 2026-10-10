@@ -1,9 +1,11 @@
 (ns laser-show.animation.modulation-test
   "Tests for the parameter modulation system."
   (:require [clojure.test :refer [deftest testing is]]
+            [laser-show.animation.effects :as effects]
             [laser-show.animation.interpolation :as interp]
+            [laser-show.animation.keyframes :as kf]
             [laser-show.animation.modulation :as mod]
-            [laser-show.animation.keyframes :as kf]))
+            [laser-show.animation.modulator-evaluators :as mod-eval]))
 
 
 ;; Helper Functions
@@ -805,3 +807,94 @@
       ;; At phase 0.75 (between keyframe at 0.5 with step interpolation and wrap to 0.0)
       ;; Step should hold the value from keyframe at 0.5 (scale=1.0)
       (is (approx= 1.0 (:scale result) 0.05) "Step interpolation should hold during wrap-around"))))
+
+
+;; External Input (MIDI / OSC) Modulator Evaluation Tests
+
+
+(deftest midi-modulator-evaluation-test
+  (testing "MIDI CC modulator evaluation with normalized input values"
+    (let [eval-midi (get mod-eval/modulator-evaluators :midi)
+          config {:type :midi :channel 0 :cc 1 :min 10.0 :max 50.0}]
+      ;; Min bound (0.0 -> 10.0)
+      (is (approx= 10.0 (eval-midi config {:input-values {[:midi 0 1] 0.0}})))
+      ;; Midpoint (0.5 -> 30.0)
+      (is (approx= 30.0 (eval-midi config {:input-values {[:midi 0 1] 0.5}})))
+      ;; Max bound (1.0 -> 50.0)
+      (is (approx= 50.0 (eval-midi config {:input-values {[:midi 0 1] 1.0}})))
+      ;; Missing input falls back to :min
+      (is (approx= 10.0 (eval-midi config {:input-values {}})))
+      (is (approx= 10.0 (eval-midi config {})))
+
+      ;; Fallback between 0-based and 1-based channels
+      (let [config-ch1 {:type :midi :channel 1 :cc 1 :min 10.0 :max 50.0}
+            config-ch0 {:type :midi :channel 0 :cc 1 :min 10.0 :max 50.0}]
+        (is (approx= 50.0 (eval-midi config-ch1 {:input-values {[:midi 0 1] 1.0}})))
+        (is (approx= 50.0 (eval-midi config-ch0 {:input-values {[:midi 1 1] 1.0}})))))))
+
+(deftest osc-modulator-evaluation-test
+  (testing "OSC modulator evaluation with path and channel/control routing"
+    (let [eval-osc (get mod-eval/modulator-evaluators :osc)
+          config {:type :osc :path "/fader1" :min -1.0 :max 1.0}]
+      ;; Min bound (0.0 -> -1.0)
+      (is (approx= -1.0 (eval-osc config {:input-values {[:osc "/fader1"] 0.0}})))
+      ;; Midpoint (0.5 -> 0.0)
+      (is (approx= 0.0 (eval-osc config {:input-values {[:osc "/fader1"] 0.5}})))
+      ;; Max bound (1.0 -> 1.0)
+      (is (approx= 1.0 (eval-osc config {:input-values {[:osc "/fader1"] 1.0}})))
+      ;; Missing input falls back to :min
+      (is (approx= -1.0 (eval-osc config {:input-values {}})))
+      (is (approx= -1.0 (eval-osc config {})))
+
+      ;; Fallback to [:osc channel control]
+      (let [config-ctrl {:type :osc :channel 0 :control 5 :min 0.0 :max 100.0}]
+        (is (approx= 75.0 (eval-osc config-ctrl {:input-values {[:osc 0 5] 0.75}})))))))
+
+
+;; Parameter Resolution & Effect Binding Tests
+
+
+(deftest resolve-param-modulation-test
+  (testing "Static numeric values pass through unchanged"
+    (let [ctx (mod/make-context {})]
+      (is (= 42.0 (mod/resolve-param 42.0 ctx)))
+      (is (= 0 (mod/resolve-param 0 ctx)))))
+
+  (testing "Inactive modulators return static :value or midpoint without evaluating context"
+    (let [ctx (mod/make-context {:input-values {[:midi 0 1] 1.0}})
+          config-with-val {:type :midi :channel 0 :cc 1 :min 10.0 :max 50.0 :active? false :value 25.0}
+          config-without-val {:type :midi :channel 0 :cc 1 :min 10.0 :max 50.0 :active? false}]
+      ;; Returns explicit :value even if MIDI input is at max (1.0 -> 50.0)
+      (is (= 25.0 (mod/resolve-param config-with-val ctx)))
+      ;; Returns midpoint when :value is omitted
+      (is (approx= 30.0 (mod/resolve-param config-without-val ctx)))))
+
+  (testing "Active modulators resolve according to context input-values"
+    (let [ctx (mod/make-context {:input-values {[:midi 0 1] 0.5
+                                                [:osc "/fader1"] 0.8}})
+          midi-config {:type :midi :channel 0 :cc 1 :min 10.0 :max 50.0 :active? true}
+          osc-config {:type :osc :path "/fader1" :min 0.0 :max 10.0 :active? true}]
+      (is (approx= 30.0 (mod/resolve-param midi-config ctx)))
+      (is (approx= 8.0 (mod/resolve-param osc-config ctx))))))
+
+(deftest param-resolver-fn-test
+  (testing "effects/resolve-param-fn and effects/make-param-resolver return constant fn for static & global modulators"
+    ;; Static parameter
+    (let [resolver (effects/resolve-param-fn :amount {:amount 5.0} 0 120 {})]
+      (is (= 5.0 (resolver 0.0 0.0 0)))
+      (is (= 5.0 (resolver 1.0 1.0 99))))
+
+    ;; Active MIDI modulator evaluated once at frame level, returning constant fn
+    (let [params {:amount {:type :midi :channel 0 :cc 1 :min 10.0 :max 50.0}}
+          ctx {:timing-ctx {:input-values {[:midi 0 1] 0.5}}}
+          resolver (effects/resolve-param-fn :amount params 0 120 ctx)]
+      (is (approx= 30.0 (resolver 0.1 0.2 0)))
+      (is (approx= 30.0 (resolver 0.9 0.9 99))))
+
+    ;; Inactive MIDI modulator returns static :value
+    (let [params {:amount {:type :midi :channel 0 :cc 1 :min 10.0 :max 50.0 :active? false :value 15.0}}
+          ctx {:timing-ctx {:input-values {[:midi 0 1] 1.0}}}
+          resolver (effects/resolve-param-fn :amount params 0 120 ctx)]
+      (is (= 15.0 (resolver 0.0 0.0 0)))
+      (is (= 15.0 (resolver 1.0 1.0 10))))))
+

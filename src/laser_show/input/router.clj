@@ -2,7 +2,33 @@
   "Event router for dispatching input events to registered handlers.
    Supports pattern-based subscriptions and multiple handlers per event type."
   (:require [clojure.tools.logging :as log]
-            [laser-show.input.events :as events]))
+            [laser-show.input.events :as events]
+            [laser-show.input.store :as store]))
+
+;; Continuous Input Store Integration
+
+(defn set-continuous-value!
+  "Sets a continuous input value in the fast store."
+  [source-key value]
+  (store/set-continuous-value! source-key value))
+
+(defn get-continuous-value
+  "Gets a continuous input value from the fast store."
+  ([source-key]
+   (store/get-continuous-value source-key))
+  ([source-key default-val]
+   (store/get-continuous-value source-key default-val)))
+
+(defn get-all-continuous-values
+  "Returns all continuous input values as a snapshot map."
+  []
+  (store/get-all-continuous-values))
+
+(defn clear-continuous-values!
+  "Clears all continuous input values."
+  []
+  (store/clear-continuous-values!))
+
 
 
 ;; Router State

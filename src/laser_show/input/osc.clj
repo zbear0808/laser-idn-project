@@ -85,28 +85,35 @@
             channel 0]
         (case (:type mapping)
           :control-change
-          (let [evts [(events/control-change :osc channel (:control mapping) value)]]
+          (let [evts [(assoc (events/control-change :osc channel (:control mapping) value)
+                             :path address)]]
             ;; Handle XY pads with second control
             (if (and (:second-control mapping) (second args))
-              (conj evts (events/control-change :osc channel 
-                                                 (:second-control mapping) 
-                                                 (parse-osc-value (second args))))
+              (conj evts (assoc (events/control-change :osc channel 
+                                                       (:second-control mapping) 
+                                                       (parse-osc-value (second args)))
+                                :path (str address "/y")))
               evts))
           
           :note
           (if (pos? value)
-            [(events/note-on :osc channel (:note mapping) value)]
-            [(events/note-off :osc channel (:note mapping))])
+            [(assoc (events/note-on :osc channel (:note mapping) value) :path address)]
+            [(assoc (events/note-off :osc channel (:note mapping)) :path address)])
           
           :trigger
-          [(events/trigger :osc (:id mapping) 
-                          (if (pos? value) :pressed :released))]
+          [(assoc (events/trigger :osc (:id mapping) 
+                                  (if (pos? value) :pressed :released))
+                  :path address)]
           
           []))
-      (let [value (if (seq args) (parse-osc-value (first args)) 1.0)]
-        (if (pos? value)
-          [(events/trigger :osc address :pressed)]
-          [(events/trigger :osc address :released)])))))
+      (let [first-arg (first args)]
+        (if (and (seq args) (number? first-arg) (not (boolean? first-arg)))
+          [(assoc (events/control-change :osc 0 0 (parse-osc-value first-arg))
+                  :path address)]
+          (let [value (if (seq args) (parse-osc-value first-arg) 1.0)]
+            (if (pos? value)
+              [(events/trigger :osc address :pressed)]
+              [(events/trigger :osc address :released)])))))))
 
 
 ;; OSC Handler Creation

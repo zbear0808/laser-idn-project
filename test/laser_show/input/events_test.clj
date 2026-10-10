@@ -1,7 +1,9 @@
 (ns laser-show.input.events-test
   "Unit tests for the input events system."
   (:require [clojure.test :refer [deftest testing is]]
-            [laser-show.input.events :as events]))
+            [laser-show.input.events :as events]
+            [laser-show.input.midi :as midi]
+            [laser-show.input.osc :as osc]))
 
 
 ;; Event Creation Tests
@@ -157,3 +159,61 @@
     (is (= 0.0 (events/unscale-value 0.0 0.0 100.0)))
     (is (= 1.0 (events/unscale-value 100.0 0.0 100.0)))
     (is (= 0.5 (events/unscale-value 50.0 0.0 100.0)))))
+
+
+;; MIDI Message Conversion & Normalization Tests
+
+(deftest midi-msg->event-normalization-test
+  (testing "MIDI CC messages normalized to 0.0-1.0 float range"
+    (let [msg-min {:status 176 :channel 0 :data1 1 :data2 0}
+          evt-min (midi/midi-msg->event msg-min)]
+      (is (= :control-change (:type evt-min)))
+      (is (= :midi (:source evt-min)))
+      (is (= 0 (:channel evt-min)))
+      (is (= 1 (:control evt-min)))
+      (is (= 0.0 (:value evt-min))))
+
+    (let [msg-mid {:status 176 :channel 0 :data1 1 :data2 64}
+          evt-mid (midi/midi-msg->event msg-mid)]
+      (is (= :control-change (:type evt-mid)))
+      (is (= :midi (:source evt-mid)))
+      (is (< 0.503 (:value evt-mid) 0.505)))
+
+    (let [msg-max {:status 176 :channel 0 :data1 1 :data2 127}
+          evt-max (midi/midi-msg->event msg-max)]
+      (is (= :control-change (:type evt-max)))
+      (is (= :midi (:source evt-max)))
+      (is (= 1.0 (:value evt-max))))
+
+    (let [msg-kw {:status :control-change :channel 2 :data1 7 :data2 127}
+          evt-kw (midi/midi-msg->event msg-kw)]
+      (is (= :control-change (:type evt-kw)))
+      (is (= 2 (:channel evt-kw)))
+      (is (= 7 (:control evt-kw)))
+      (is (= 1.0 (:value evt-kw))))))
+
+
+;; OSC Message Conversion & Path Preservation Tests
+
+(deftest osc-msg->events-normalization-and-path-test
+  (testing "Mapped OSC faders preserve address path and produce normalized control-change"
+    (doseq [[raw-val expected] [[0.0 0.0] [0.5 0.5] [1.0 1.0]]]
+      (let [events (osc/osc-msg->events {:path "/fader1" :args [raw-val]} osc/default-mappings)
+            evt (first events)]
+        (is (= 1 (count events)))
+        (is (= :control-change (:type evt)))
+        (is (= :osc (:source evt)))
+        (is (= 1 (:control evt)))
+        (is (= "/fader1" (:path evt)))
+        (is (= expected (:value evt))))))
+
+  (testing "Unmapped float messages produce valid continuous events with address preserved"
+    (doseq [[raw-val expected] [[0.0 0.0] [0.5 0.5] [1.0 1.0]]]
+      (let [events (osc/osc-msg->events {:path "/custom/fader" :args [raw-val]} {})
+            evt (first events)]
+        (is (= 1 (count events)))
+        (is (= :control-change (:type evt)))
+        (is (= :osc (:source evt)))
+        (is (= "/custom/fader" (:path evt)))
+        (is (= expected (:value evt)))))))
+

@@ -1,10 +1,11 @@
-* [ ] 
+* [ ]
 
 # Low-Latency MIDI & OSC Modulation Architecture Plan
 
 ## 1. Analysis: Why Point Data is Already Efficient
 
 * [ ] The previous suggestion to introduce a mutable Java record for per-point modulation context was fundamentally incorrect for the laser-show engine:
+
 
 1. **Laser Points Are Already Compact Primitive Vectors**:
 
@@ -154,8 +155,8 @@ To ensure robustness, all data conversion, normalization, and evaluation functio
 ## 5. Architectural Checklist Before Implementation
 
 - [X] Verify point data structure: 5-element vector, transducer pipeline (no changes needed).
-- [ ] Decouple continuous inputs from root cljfx `!state` atom to a fast concurrent input registry.
-- [ ] Fix double normalization in `eval-midi`.
-- [ ] Fix OSC path key routing in `input-mapper` and `eval-osc`.
-- [ ] Read `input-values` for frame rendering directly from the fast input store.
-- [ ] Add comprehensive pure-function unit tests covering input parsing, normalization, and evaluation.
+- [X] Decouple continuous inputs from root cljfx `!state` atom to a fast concurrent input registry.
+- [X] Fix double normalization in `eval-midi`.
+- [X] Fix OSC path key routing in `input-mapper` and `eval-osc`.
+- [X] Read `input-values` for frame rendering directly from the fast input store.
+- [X] Add comprehensive pure-function unit tests covering input parsing, normalization, and evaluation.

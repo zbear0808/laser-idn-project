@@ -2,7 +2,7 @@
   "High-performance generic input mapper.
    
    Listens to all global input events from the generic router and:
-   1. Continuous events (MIDI CC, OSC floats) -> updates `[:backend :input :values]`
+   1. Continuous events (MIDI CC, OSC floats) -> updates fast input store (`laser-show.input.store`)
    2. Discrete events (Note ON, Key pressed) -> performs O(1) lookup in `[:config :input :trigger-map]`
       and invokes the mapped action.
    
@@ -11,6 +11,7 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
             [laser-show.input.router :as router]
+            [laser-show.input.store :as store]
             [laser-show.input.events :as input-events]
             [laser-show.events.handlers.grid :as grid-handlers]
             [laser-show.events.handlers.effects :as effects-handlers]))
@@ -19,11 +20,10 @@
 ;; --- State Update Helpers ---
 
 (defn- update-input-value!
-  "Updates a continuous input value in global state.
+  "Updates a continuous input value in the fast store.
    e.g. source-key `[:midi 0 10]` -> value `0.5`"
   [source-key value]
-  ;; Use fast swap! without ui updating
-  (state/assoc-in-state! [:backend :input :values source-key] value))
+  (store/set-continuous-value! source-key value))
 
 
 ;; --- Trigger Action Handlers ---
@@ -69,8 +69,25 @@
   (cond
     ;; Continuous Events
     (input-events/control-change? event)
-    (let [{:keys [value channel control]} event]
-      (update-input-value! [:midi channel control] value))
+    (let [{:keys [source channel control path value]} event
+          val (double (or value 0.0))]
+      (case source
+        :midi
+        (update-input-value! [:midi (or channel 0) control] val)
+
+        :osc
+        (do
+          (when path
+            (update-input-value! [:osc path] val))
+          (when (some? control)
+            (update-input-value! [:osc (or channel 0) control] val)))
+
+        ;; Default / other sources
+        (do
+          (when path
+            (update-input-value! [:input path] val))
+          (when (some? control)
+            (update-input-value! [source (or channel 0) control] val)))))
 
     ;; Discrete Triggers (Note ON, Keys)
     (or (input-events/note-on? event)

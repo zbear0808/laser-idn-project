@@ -27,6 +27,7 @@
             [laser-show.animation.effects :as effects]
             [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.services.frame-service :as frame-service]
+            [laser-show.input.store :as input-store]
             [laser-show.idn.output-config :as output-config]))
 
 
@@ -162,6 +163,7 @@
             projector-zone-groups (get-projector-zone-groups raw-state projector-id)
             bpm (get-in raw-state [:timing :bpm] 120.0)
             current-time (System/currentTimeMillis)
+            input-values (input-store/get-all-continuous-values)
             
             ;; Generate frames for each active cue and extract this projector's zones
             all-projector-frames
@@ -170,7 +172,6 @@
                     (fn [{:keys [cue-chain cue-timing]}]
                       (let [trigger-time (:trigger-time cue-timing 0)
                             elapsed (- current-time trigger-time)
-                            input-values (get-in raw-state [:backend :input :values] {})
                             timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing bpm)
                                               :input-values input-values)
                             ;; Generate zone frames for this cue
@@ -189,7 +190,6 @@
             first-cue-timing (:cue-timing (first all-cues))
             trigger-time (:trigger-time first-cue-timing 0)
             elapsed (- current-time trigger-time)
-            input-values (get-in raw-state [:backend :input :values] {})
             timing-ctx (assoc (cue-timing/get-cue-timing-context first-cue-timing bpm)
                               :input-values input-values)
             

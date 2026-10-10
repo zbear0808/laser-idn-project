@@ -40,6 +40,7 @@
             [laser-show.profiling.frame-profiler :as profiler]
             [laser-show.profiling.jfr-profiler :as jfr]
             [laser-show.routing.zone-effects :as ze]
+            [laser-show.input.store :as input-store]
             [laser-show.animation.effects.shape]
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
@@ -468,7 +469,7 @@
   (let [effect-chain (get-active-global-effects)]
     (if effect-chain
       (let [global-clock (get-in raw-state [:timing :global-clock])
-            input-values (get-in raw-state [:backend :input :values] {})
+            input-values (input-store/get-all-continuous-values)
             global-timing-ctx (assoc (cue-timing/get-global-timing-context global-clock bpm)
                                      :input-values input-values)
             global-elapsed (long (or (:accumulated-ms global-clock) 0))]
@@ -619,7 +620,7 @@
                             (fn [{:keys [cell cue-chain cue-timing]}]
                               (let [trigger-time (:trigger-time cue-timing)
                                     elapsed (- current-time trigger-time)
-                                    input-values (get-in raw-state [:backend :input :values] {})
+                                    input-values (input-store/get-all-continuous-values)
                                     timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing bpm)
                                                       :input-values input-values)
                                     ;; Generate frames separated by zone
