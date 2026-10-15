@@ -27,6 +27,7 @@
    
    Styling is defined in laser-show.css.list."
   (:require
+   [clojure.string :as str]
    [clj-font-awesome.core :as fa]
    [cljfx.api :as fx]
    [clojure.tools.logging :as log]
@@ -557,11 +558,13 @@
   {:fx/type :h-box
    :spacing 4
    :children [{:fx/type :button
-               :text "New"
+    :id "chain-new-group"
+    :text "New"
                :graphic {:fx/type fa/icon :name :folder-open :size 8}
                :style-class "chain-toolbar-btn"
                :on-action (fn [_] (dispatch-create-empty-group! props))}
               {:fx/type :button
+               :id "chain-group-selection"
                :text "Group"
                :graphic {:fx/type fa/icon :name :folder-tree :size 8}
                :disable (or (zero? selection-count) (not can-create-group?))
@@ -680,7 +683,8 @@
                      :style-class "chain-toolbar-btn"
                      :on-action (fn [_] (dispatch-paste-items! sidebar-props))}
                     {:fx/type :button
-                     :text "Del"
+                                :id "chain-delete-selection"
+                                :text "Del"
                      :graphic {:fx/type fa/icon :name :trash-can :size 8}
                      :disable (zero? selection-count)
                      :style-class "chain-toolbar-btn-danger"
@@ -871,6 +875,12 @@
                                                  :old-focused? old-val
                                                  :new-focused? new-val})))))
      :desc {:fx/type :v-box
+            :id (str "list-editor-"
+                     (str/join "-"
+                               (map #(if (keyword? %) (name %) (str %))
+                                    (if (sequential? component-id)
+                                      component-id
+                                      [component-id]))))
             :children [(u/->map&
                         items clipboard-items header-label
                         empty-text allow-groups? component-id on-change-event on-change-params items-path

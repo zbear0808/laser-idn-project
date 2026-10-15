@@ -103,6 +103,11 @@
                        (not (.isDisabled ^Control %)))
                  (query-all selector))))
 
+(defn has-style-class?
+  [selector style-class]
+  (boolean (some #(contains? (set (.getStyleClass ^Node %)) style-class)
+                 (query-all selector))))
+
 (defn selected?
   [selector]
   (boolean
@@ -166,6 +171,49 @@
   (wait-for! #(some? (query selector)))
   (.clickOn ^FxRobotInterface robot-instance selector
             (into-array MouseButton [MouseButton/PRIMARY]))
+  (sync-fx!)
+  robot-instance)
+
+(defn click-node!
+  "Click a specific node returned by query-all."
+  [^FxRobot robot-instance ^Node node]
+  (.clickOn ^FxRobotInterface robot-instance node
+            (into-array MouseButton [MouseButton/PRIMARY]))
+  (sync-fx!)
+  robot-instance)
+
+(defn modifier-click!
+  "Click a selector while holding a keyboard modifier."
+  [^FxRobot robot-instance ^String selector ^KeyCode modifier]
+  (wait-for! #(some? (query selector)))
+  (.press ^FxRobotInterface robot-instance
+          (into-array KeyCode [modifier]))
+  (.clickOn ^FxRobotInterface robot-instance selector
+            (into-array MouseButton [MouseButton/PRIMARY]))
+  (.release ^FxRobotInterface robot-instance
+            (into-array KeyCode [modifier]))
+  (sync-fx!)
+  robot-instance)
+
+(defn modifier-click-node!
+  "Click a specific node while holding a keyboard modifier."
+  [^FxRobot robot-instance ^Node node ^KeyCode modifier]
+  (.press ^FxRobotInterface robot-instance
+          (into-array KeyCode [modifier]))
+  (.clickOn ^FxRobotInterface robot-instance node
+            (into-array MouseButton [MouseButton/PRIMARY]))
+  (.release ^FxRobotInterface robot-instance
+            (into-array KeyCode [modifier]))
+  (sync-fx!)
+  robot-instance)
+
+(defn drag-node!
+  "Drag one queried node onto another node using TestFX mouse movement."
+  [^FxRobot robot-instance ^Node source ^Node target]
+  (.moveTo ^FxRobotInterface robot-instance source)
+  (.drag ^FxRobotInterface robot-instance
+         (into-array MouseButton [MouseButton/PRIMARY]))
+  (.dropTo ^FxRobotInterface robot-instance target)
   (sync-fx!)
   robot-instance)
 

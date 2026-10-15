@@ -233,6 +233,7 @@
   {:fx/type :menu
    :text ""
    :graphic {:fx/type :label
+             :id "file-menu"
              :text "File"
              :style-class "menu-label"}
    :items (file-menu-items context)})
@@ -242,6 +243,7 @@
   {:fx/type :menu
    :text ""
    :graphic {:fx/type :label
+             :id "edit-menu"
              :text "Edit"
              :style-class "menu-label"}
    :items (edit-menu-items context)})
@@ -251,6 +253,7 @@
   {:fx/type :menu
    :text ""
    :graphic {:fx/type :label
+             :id "transport-menu"
              :text "Transport"
              :style-class "menu-label"}
    :items (transport-menu-items context)})
@@ -260,6 +263,7 @@
   {:fx/type :menu
    :text ""
    :graphic {:fx/type :label
+             :id "view-menu"
              :text "View"
              :style-class "menu-label"}
    :items (view-menu-items context)})
@@ -269,6 +273,7 @@
   {:fx/type :menu
    :text ""
    :graphic {:fx/type :label
+             :id "help-menu"
              :text "Help"
              :style-class "menu-label"}
    :items (help-menu-items context)})

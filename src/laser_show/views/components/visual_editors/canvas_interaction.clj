@@ -135,7 +135,7 @@
   [{:keys [width height value render!
            on-press on-drag on-release on-hover on-key on-exit on-scroll
            initial-drag-state
-           cursor focus-traversable?]
+           cursor focus-traversable? id style-class]
     :or {cursor "crosshair"
          value nil}
     :as props}]
@@ -156,6 +156,8 @@
                    (events/dispatch! {:event/type :canvas/clear-drag
                                       :canvas-id canvas-id})))
    :desc {:fx/type :canvas
+          :id id
+          :style-class style-class
           :width width
           :height height
           :style (str "-fx-cursor: " cursor ";")

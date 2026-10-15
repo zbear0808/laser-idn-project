@@ -174,6 +174,8 @@
   "Single item in the zone selector popup menu."
   [{:keys [cell-index zone-id zone-name zone-color selected?]}]
   {:fx/type :h-box
+   :id (str "preview-zone-option-" cell-index "-"
+            (if zone-id (name zone-id) "all"))
    :spacing 6
    :alignment :center-left
    :padding {:left 8 :right 8 :top 6 :bottom 6}
@@ -280,6 +282,7 @@
      :children (filterv some?
                         [(when show-labels?
                            {:fx/type :stack-pane
+                            :id (str "preview-zone-label-" cell-index)
                             :alignment :top-left
                             :children (filterv some?
                                                [{:fx/type zone-selector-label
@@ -291,6 +294,7 @@
                                                   {:fx/type zone-selector-popup
                                                    :cell-index cell-index})])})
                          {:fx/type :canvas
+                          :id (str "preview-canvas-" cell-index)
                           :width (- width 4)
                           :height canvas-height
                           :draw #(draw-preview % display-frame)}])}))
@@ -335,6 +339,7 @@
                  :style "-fx-text-fill: white; -fx-font-size: 12; -fx-font-weight: bold;"}
                 {:fx/type :region :h-box/hgrow :always}
                 {:fx/type :combo-box
+                 :id "preview-layout-selector"
                  :value (str cols "x" rows)
                  :items ["1x1" "2x1" "1x2" "2x2" "3x2"]
                  :on-value-changed {:event/type :preview/set-grid-layout}

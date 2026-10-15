@@ -625,16 +625,19 @@
    :children
    [;; Add buttons
     {:fx/type :button
+     :id "timeline-add-track"
      :text "Add Track"
      :style-class "button-primary"
      :on-action {:event/type :timeline/add-track
                  :col col :row row}}
     {:fx/type :button
+     :id "timeline-add-folder"
      :text "Add Folder"
      :style-class "button-secondary"
      :on-action {:event/type :timeline/add-folder
                  :col col :row row}}
     {:fx/type :toggle-button
+     :id "timeline-add-content"
      :text "Add Content"
      :style-class "button-secondary"
      :selected (boolean add-panel-open?)
@@ -646,6 +649,7 @@
 
     ;; Loop toggle
     {:fx/type :toggle-button
+     :id "timeline-loop-toggle"
      :text "Loop"
      :selected (boolean (:enabled? loop-config true))
      :on-action {:event/type :timeline/toggle-loop
@@ -653,12 +657,14 @@
 
     ;; Snap toggle
     {:fx/type :check-box
+     :id "timeline-snap-toggle"
      :text "Snap"
      :selected (boolean snap-enabled?)
      :on-selected-changed {:event/type :timeline/set-snap
                            :enabled? (not snap-enabled?)}}
     ;; Snap value selector
     {:fx/type :combo-box
+     :id "timeline-snap-value"
      :value (str snap-value)
      :items ["0.0625" "0.125" "0.25" "0.5" "1.0" "2.0" "4.0"]
      :on-value-changed (fn [v]
@@ -673,6 +679,7 @@
      :style "-fx-text-fill: #999999;"}
     ;; Zoom slider
     {:fx/type :slider
+     :id "timeline-zoom-slider"
      :min 10 :max 200
      :value (or zoom-x default-zoom)
      :pref-width 140
@@ -1034,6 +1041,8 @@
   (let [canvas-height (total-canvas-height (count tracks))
         canvas-width (calculate-canvas-width items loop-config (or zoom-x default-zoom))]
     {:fx/type ci/interactive-canvas
+     :id "timeline-canvas"
+     :style-class ["timeline-canvas"]
      :width canvas-width
      :height canvas-height
      :cursor "crosshair"
