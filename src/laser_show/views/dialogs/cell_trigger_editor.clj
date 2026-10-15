@@ -23,6 +23,7 @@
         cell-coord-str (str "[" (char (+ 65 (or row 0))) ", " (inc (or col 0)) "]")
         mode-title (if (= cell-mode :effects) "Effect Cell" "Cue Cell")]
     {:fx/type :v-box
+     :id "trigger-editor-dialog"
      :spacing 12
      :padding 16
      :style-class ["dialog-content"]
@@ -58,6 +59,7 @@
        :style-class "dialog-footer"
        :children
        [{:fx/type :button
+         :id "trigger-editor-done"
          :text "Done"
          :style-class ["button-primary"]
          :on-action {:event/type :ui/close-dialog
@@ -82,4 +84,3 @@
      :scene {:fx/type :scene
              :stylesheets stylesheets
              :root {:fx/type cell-trigger-editor-content}}}))
-

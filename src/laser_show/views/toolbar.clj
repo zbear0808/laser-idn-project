@@ -2,6 +2,7 @@
   "Toolbar component with transport controls, BPM, beat indicator, and connection status."
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
+            [laser-show.events.core :as events]
             [clj-font-awesome.core :as fa]
             [cljfx-svg.core :as svg]
             [laser-show.common.util :as u]))
@@ -69,6 +70,7 @@
                  :text "Trigger:"
                  :style-class "label-secondary"}
                 {:fx/type :combo-box
+                 :id "trigger-mode-selector"
                  :value current-option
                  :pref-width 90
                  :items trigger-mode-options
@@ -102,9 +104,10 @@
                               (let [text (.getText (.getSource e))]
                                 (try
                                   (let [new-bpm (Double/parseDouble text)]
-                                    {:event/type :timing/set-bpm :bpm new-bpm})
-                                  (catch NumberFormatException _
-                                    nil))))}]}))
+                                   (events/dispatch! {:event/type :timing/set-bpm
+                                                      :bpm new-bpm}))
+                                 (catch NumberFormatException _
+                                   nil))))}]}))
 
 (defn tap-tempo-button
   "Tap tempo button."

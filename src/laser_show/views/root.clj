@@ -121,6 +121,7 @@
   "Main application layout with HeaderBar in title bar area."
   [{:keys [fx/context]}]
   {:fx/type :border-pane
+   :id "main-layout"
    :style (str "-fx-background-color: " (css/bg-primary) ";")
    :top {:fx/type :v-box
          :children [{:fx/type title-bar/header-view}

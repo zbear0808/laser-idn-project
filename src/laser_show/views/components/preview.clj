@@ -348,6 +348,7 @@
   "Complete preview panel with grid header and cells."
   [{:keys [fx/context]}]
   {:fx/type :v-box
+   :id "preview-panel"
    :style "-fx-background-color: #121212;"
    :children [{:fx/type preview-grid-header}
               {:fx/type :border-pane

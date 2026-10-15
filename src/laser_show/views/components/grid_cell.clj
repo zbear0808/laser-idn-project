@@ -114,6 +114,7 @@
         on-drop (:on-drop drag-config)
         has-context-menu? (boolean (seq context-menu-items))
         node {:fx/type :stack-pane
+              :id (format "%s-cell-%d-%d" (name cell-type) col row)
               :pick-on-bounds true  ; Ensure mouse events are captured by parent, not children
               :pref-width 80
               :pref-height 60
@@ -268,6 +269,7 @@
                                         :on-action {:event/type :input/clear-cell-triggers
                                                     :target-action {:type :trigger-cue :target [col row]}}})
                                      {:fx/type :menu-item
+                                      :id "configure-triggers-menu-item"
                                       :text "Configure Triggers..."
                                       :on-action {:event/type :ui/open-dialog
                                                   :dialog-id :trigger-editor

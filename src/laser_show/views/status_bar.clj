@@ -140,6 +140,7 @@
   "Main status bar component."
   [{:keys [fx/context]}]
   {:fx/type :h-box
+   :id "status-bar"
    :style (str "-fx-background-color: " (css/bg-surface) "; "
                "-fx-padding: 4 16; "
                "-fx-border-color: " (css/border-default) "; "
