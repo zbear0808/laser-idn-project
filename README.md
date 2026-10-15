@@ -59,6 +59,31 @@ Run all tests:
 clj -M:test
 ```
 
+Run the TestFX UI suite locally with a visible window:
+
+```bash
+clj -M:test-ui:win
+```
+
+Run the UI suite locally with the TestFX headless JVM flags. On Windows this
+still uses the native display, so the window may be visible:
+
+```bash
+clj -M:test-ui:win:test-ui-headless
+```
+
+GitHub Actions runs the UI suite inside Xvfb with the Linux JavaFX
+dependencies using:
+
+```bash
+xvfb-run -a --server-args="-screen 0 1280x800x24" \
+  clojure -M:linux:test-ui:test-ui-headless
+```
+
+The current project uses JavaFX 28, while the available TestFX Monocle
+artifact targets JavaFX 21, so CI uses Xvfb instead of forcing an incompatible
+Monocle backend.
+
 **Test Suite is pretty bad**
 
 Decent coverage of IDN protocol implementation, packet logging

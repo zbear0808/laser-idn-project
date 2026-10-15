@@ -80,7 +80,32 @@ clj -M:win:dev:laser-show
 ### Testing
 ```bash
 clj -M:test  # Note: test coverage is incomplete
+
+# Local TestFX UI tests (visible JavaFX window)
+clj -M:test-ui:win
+
+# TestFX UI tests with headless JVM flags (requires Xvfb on Linux)
+clj -M:test-ui:win:test-ui-headless
 ```
+
+### UI Regression Requirement
+
+Any change to `src/laser_show/views/`, UI event handlers, subscriptions, state
+used by the UI, CSS, or application lifecycle must preserve the headless
+TestFX suite. GitHub Actions runs it inside Xvfb so JavaFX has no physical
+display to show windows on. The Windows command above still uses the local
+desktop display; use the Linux/Xvfb command documented in `README.md` when
+verifying the exact CI behavior. Before considering UI work complete:
+
+1. Run the relevant unit tests.
+2. Run `clj -M:test-ui:win:test-ui-headless` locally when JavaFX is available.
+3. Ensure the GitHub Actions `Run headless UI tests` job passes.
+
+New interactive controls should have stable JavaFX `:id` values so they can be
+queried by CSS selectors. Add or update a TestFX regression test for every
+new user workflow, dialog, navigation path, or interaction whose behavior
+could regress. Keep hardware, network discovery, MIDI, OSC, Link, and gamepad
+services disabled or mocked in UI tests.
 
 ### REPL Utilities (in `user` namespace)
 ```clojure

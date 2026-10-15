@@ -162,6 +162,37 @@
   (log/info "Laser Show application started.")
   @*app)
 
+(defn stop!
+  "Stop the mounted cljfx application and release application-owned services.
+
+   This is intentionally idempotent so UI fixtures can safely call it from
+   `finally` blocks after a failed startup or test."
+  []
+  (when-let [{:keys [renderer]} @*app]
+    (fx/unmount-renderer (state/get-context-atom) renderer))
+  (reset! *app nil)
+  (when (dev-config/dev-mode?)
+    (Platform/setImplicitExit false))
+  nil)
+
+(defn start-test!
+  "Mount the application UI without starting hardware or background services.
+
+   This is intended for TestFX and other UI integration tests. The supplied
+   state is isolated at the cljfx context level, while the normal event
+   handler and production root view remain in use."
+  ([]
+   (start-test! (-> (domains/build-initial-state)
+                    (templates/apply-starter-cue-chains))))
+  ([initial-state]
+   (stop!)
+   (state/init-state! initial-state)
+   (init-styles!)
+   (let [app (create-app)]
+     (reset! *app app)
+     (events/set-dispatch-fn! (:handler app))
+     app)))
+
 
 
 

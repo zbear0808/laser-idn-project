@@ -32,6 +32,7 @@
    Uses CSS classes: .tab-btn, .tab-btn-active"
   [{:keys [tab-id label active? on-action]}]
   {:fx/type :button
+   :id (str (name tab-id) "-tab")
    :text label
    ;; Use CSS classes from buttons.clj
    :style-class (if active? "tab-btn-active" "tab-btn")

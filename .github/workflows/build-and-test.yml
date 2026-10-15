@@ -48,6 +48,13 @@ jobs:
     
     - name: Run all tests
       run: clojure -M:linux:test-all
+
+    - name: Install virtual display
+      run: sudo apt-get update && sudo apt-get install -y xvfb
+
+    # Run TestFX UI coverage inside an invisible virtual X display.
+    - name: Run headless UI tests
+      run: xvfb-run -a --server-args="-screen 0 1280x800x24" clojure -M:linux:test-ui:test-ui-headless
     
     # Build application (platform-specific JAR)
     - name: Build JAR

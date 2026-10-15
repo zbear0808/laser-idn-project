@@ -158,8 +158,25 @@
   {:extra-paths ["test"]
    :jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"
-              "--enable-native-access=ALL-UNNAMED"]
-   :extra-deps {org.clojure/data.json {:mvn/version "2.5.1"}}}
+              "--enable-native-access=ALL-UNNAMED"
+              "--add-exports=javafx.graphics/com.sun.javafx.application=ALL-UNNAMED"
+              "--add-exports=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED"
+              "--add-opens=javafx.graphics/com.sun.glass.ui=ALL-UNNAMED"]
+   :extra-deps {org.clojure/data.json {:mvn/version "2.5.1"}
+                io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"
+                                                      :git/sha "dfb30dd"}
+                org.testfx/testfx-core {:mvn/version "4.0.18"}}
+   :main-opts ["-m" "cognitect.test-runner"
+               "-d" "test/laser_show/ui_test"]}
+
+  ;; Add this alias for CI or any display-less environment. CI wraps this
+  ;; command with Xvfb because Monocle 21.0.2 is incompatible with JavaFX 28.
+  :test-ui-headless
+  {:jvm-opts ["-Dtestfx.robot=glass"
+              "-Dtestfx.headless=true"
+              "-Dprism.order=sw"
+              "-Dprism.text=t2k"
+              "-Djava.awt.headless=true"]}
 
 
   ;; Build alias - builds platform-specific uberjars

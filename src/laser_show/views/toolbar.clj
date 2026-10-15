@@ -15,6 +15,7 @@
    Uses style-class for base styling, inline :style only for dynamic active state."
   [{:keys [icon tooltip on-action active?]}]
   {:fx/type :button
+   :id (if (= icon :stop) "stop-btn" "play-btn")
    :graphic {:fx/type fa/icon
              :name icon
              :size 12}
@@ -93,6 +94,7 @@
                  :text "BPM:"
                  :style-class "label-secondary"}
                 {:fx/type :text-field
+                 :id "bpm-input"
                  :text (format "%.1f" (double bpm))
                  :pref-width 60
                  :style-class "text-field-dark-sm"
