@@ -101,11 +101,36 @@
                    :time time})
     {:state state}))
 
+(defn- handle-group-toggle-lock
+  [{:keys [state group-id]}]
+  (let [current (get-in state [:trigger-runtime :active-groups group-id])
+        next-state (if (= :locked (:state current)) :active :locked)]
+    {:state (assoc-in state [:trigger-runtime :active-groups group-id]
+                      (assoc (or current {}) :state next-state))}))
+
+(defn- handle-tick
+  [{:keys [state time]}]
+  (let [settings (get-in state [:triggers :settings] {})
+        duration-ms (* 1000 (long (or (:group-duration-secs settings) 45)))
+        groups (get-in state [:trigger-runtime :active-groups] {})
+        updated (reduce-kv
+                 (fn [result group-id group]
+                   (if (and (= :active (:state group))
+                            (:entered-at group)
+                            (>= (- time (:entered-at group)) duration-ms))
+                     (assoc result group-id (assoc group :state :armed))
+                     (assoc result group-id group)))
+                 {}
+                 groups)]
+    {:state (assoc-in state [:trigger-runtime :active-groups] updated)}))
+
 (defn handle
   [{:keys [event/type] :as event}]
   (case type
     :trigger/input (handle-input event)
     :trigger/fire (handle-fire event)
+    :trigger-group/toggle-lock (handle-group-toggle-lock event)
+    :trigger/tick (handle-tick event)
     :trigger/tap-tempo
     {:dispatch {:event/type :timing/tap-tempo}}
     {}))

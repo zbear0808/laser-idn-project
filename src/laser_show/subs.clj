@@ -729,6 +729,11 @@
   [context]
   (count (fx/sub-val context get-in [:trigger-runtime :active-triggers] {})))
 
+(defn trigger-group-state
+  "Get the runtime state for a trigger group."
+  [context group-id]
+  (fx/sub-val context get-in [:trigger-runtime :active-groups group-id]))
+
 
 ;; Level 2: Link Subscriptions
 

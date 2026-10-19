@@ -27,3 +27,16 @@
                                  :input-event input
                                  :time 1100})]
     (is (empty? (get-in result [:state :trigger-runtime :held-inputs])))))
+
+(deftest trigger-group-lock-and-expiry
+  (let [state {:triggers {:settings {:group-duration-secs 1}}
+               :trigger-runtime {:active-groups
+                                 {:rhythm {:state :active :entered-at 0}}}}
+        armed (:state (triggers/handle {:event/type :trigger/tick
+                                        :state state
+                                        :time 1000}))
+        locked (:state (triggers/handle {:event/type :trigger-group/toggle-lock
+                                         :state armed
+                                         :group-id :rhythm}))]
+    (is (= :armed (get-in armed [:trigger-runtime :active-groups :rhythm :state])))
+    (is (= :locked (get-in locked [:trigger-runtime :active-groups :rhythm :state])))))

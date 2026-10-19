@@ -264,6 +264,26 @@
                                               (= (:target v) target))))
                                m)))}))
 
+(defn- handle-input-update-cell-trigger-action
+  "Updates behavior metadata for all bindings targeting a cell."
+  [{:keys [state target-action updates] :as event}]
+  (let [{:keys [type target]} target-action]
+    (let [selected (or (:fx/event event) (:event event))
+          behavior (cond
+                     (keyword? selected) selected
+                     (map? selected) (or (:behavior selected) (:id selected))
+                     :else nil)
+          updates (merge updates (when behavior {:behavior behavior}))]
+      {:state (update-in state [:config :input :trigger-map]
+                         (fn [m]
+                           (into {}
+                                 (map (fn [[k action]]
+                                        [k (if (and (= (:type action) type)
+                                                    (= (:target action) target))
+                                             (merge action updates)
+                                             action)]))
+                                 m)))})))
+
 
 ;; Public API
 
@@ -302,6 +322,7 @@
     :input/cancel-learn (handle-input-cancel-learn event)
     :input/remove-trigger (handle-input-remove-trigger event)
     :input/clear-cell-triggers (handle-input-clear-cell-triggers event)
+    :input/update-cell-trigger-action (handle-input-update-cell-trigger-action event)
 
     ;; Unknown event
     {}))

@@ -98,3 +98,15 @@
       (is (nil? (get res-map key2)))
       (is (= {:type :trigger-cue :target [1 1]} (get res-map key3))))))
 
+(deftest trigger-behavior-update-test
+  (let [key {:source :keyboard :id :space}
+        initial-state {:config {:input {:trigger-map
+                                        {key {:type :trigger-cue
+                                              :target [0 0]}}}}}
+        result (input-handlers/handle
+                {:event/type :input/update-cell-trigger-action
+                 :state initial-state
+                 :target-action {:type :trigger-cue :target [0 0]}
+                 :fx/event :momentary})
+        action (get-in (:state result) [:config :input :trigger-map key])]
+    (is (= :momentary (:behavior action)))))

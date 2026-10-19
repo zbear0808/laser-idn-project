@@ -25,12 +25,20 @@
                                     (when (and (= (:type v) target-type)
                                                (= (:target v) [col row]))
                                       k)))
-                            trigger-map)]
+                            trigger-map)
+        current-action (some (fn [[_ action]]
+                               (when (and (= (:type action) target-type)
+                                            (= (:target action) [col row]))
+                                 action))
+                             trigger-map)
+        behavior (or (:behavior current-action) :retrigger)
+        decay-beats (or (:decay-beats current-action) 1.0)]
     {:fx/type :v-box
      :spacing 10
      :padding 10
      :children
      [{:fx/type :label
+       :id "trigger-configuration-title"
        :text "Trigger Configuration"
        :style-class "header-section"}
 
@@ -41,6 +49,7 @@
       ;; Mapped Triggers List
       (if (seq cell-triggers)
         {:fx/type :v-box
+         :id "trigger-mapped-list"
          :spacing 5
          :children
          (u/concatv
@@ -62,12 +71,14 @@
                       {:fx/type :region
                        :h-box/hgrow :always}
                       {:fx/type :button
+                       :id (str "trigger-remove-" (hash trigger-key))
                        :text "Remove"
                        :style-class "button-danger"
                        :on-action {:event/type :input/remove-trigger
                                    :trigger-key trigger-key}}]}))
                 cell-triggers)
           [{:fx/type :button
+            :id "trigger-clear-all"
             :text "Clear All Triggers"
             :style-class "button-secondary"
             :on-action {:event/type :input/clear-cell-triggers
@@ -77,18 +88,43 @@
          :text "No triggers assigned yet"
          :style-class "dialog-placeholder-text"})
 
+      {:fx/type :h-box
+       :id "trigger-behavior-controls"
+       :spacing 8
+       :alignment :center-left
+       :children
+       [{:fx/type :label :text "Behavior:"}
+        {:fx/type :combo-box
+         :id "trigger-behavior-selector"
+         :value behavior
+         :items [:toggle :retrigger :momentary :quantized-decay :one-shot]
+         :on-value-changed {:event/type :input/update-cell-trigger-action
+                            :target-action current-target
+                            :updates {}}}
+        {:fx/type :label :text "Decay (beats):"}
+        {:fx/type :text-field
+         :id "trigger-decay-beats"
+         :text (str decay-beats)
+         :pref-width 60
+         :on-action {:event/type :input/update-cell-trigger-action
+                     :target-action current-target
+                     :updates {:decay-beats decay-beats}}}]}
+
       (if learning?
         {:fx/type :v-box
+         :id "trigger-learning-panel"
          :spacing 5
          :children
          [{:fx/type :label
            :text "Waiting for input..."
            :style-class "status-text"}
           {:fx/type :button
+           :id "trigger-cancel-learn-button"
            :text "Cancel Learning"
            :style-class "button-danger"
            :on-action {:event/type :input/cancel-learn}}]}
         {:fx/type :button
+         :id "trigger-learn-button"
          :text "Learn Next Input"
          :style-class "button-primary"
          :on-action {:event/type :input/start-learn
