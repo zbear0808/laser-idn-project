@@ -84,6 +84,12 @@ clj -M:test  # Note: test coverage is incomplete
 # Local TestFX UI tests (visible JavaFX window)
 clj -M:test-ui:win
 
+# Run one UI namespace while developing
+clj -M:test-ui:win -n laser-show.ui-test.e2e-test
+
+# Run one UI test var while iterating
+clj -M:test-ui:win -v laser-show.ui-test.e2e-test/user-can-type-and-switch-tabs
+
 # TestFX UI tests with headless JVM flags (requires Xvfb on Linux)
 clj -M:test-ui:win:test-ui-headless
 ```
@@ -95,11 +101,15 @@ used by the UI, CSS, or application lifecycle must preserve the headless
 TestFX suite. GitHub Actions runs it inside Xvfb so JavaFX has no physical
 display to show windows on. The Windows command above still uses the local
 desktop display; use the Linux/Xvfb command documented in `README.md` when
-verifying the exact CI behavior. Before considering UI work complete:
+verifying the exact CI behavior. During development, first run the smallest
+relevant UI test namespace or test var, along with related unit tests. Do not
+rerun the complete TestFX suite after every edit when a focused test can cover
+the change. Before considering UI work complete, after focused checks pass:
 
 1. Run the relevant unit tests.
 2. Run `clj -M:test-ui:win:test-ui-headless` locally when JavaFX is available.
-3. Ensure the GitHub Actions `Run headless UI tests` job passes.
+3. Run `clj -M:test` for the complete unit suite.
+4. Ensure the GitHub Actions `Run headless UI tests` job passes.
 
 New interactive controls should have stable JavaFX `:id` values so they can be
 queried by CSS selectors. Add or update a TestFX regression test for every

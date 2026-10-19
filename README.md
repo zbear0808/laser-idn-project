@@ -65,6 +65,18 @@ Run the TestFX UI suite locally with a visible window:
 clj -M:test-ui:win
 ```
 
+Run one UI namespace while developing:
+
+```bash
+clj -M:test-ui:win -n laser-show.ui-test.e2e-test
+```
+
+Run one UI test var while iterating on a specific workflow:
+
+```bash
+clj -M:test-ui:win -v laser-show.ui-test.e2e-test/user-can-type-and-switch-tabs
+```
+
 Run the UI suite locally with the TestFX headless JVM flags. On Windows this
 still uses the native display, so the window may be visible:
 
