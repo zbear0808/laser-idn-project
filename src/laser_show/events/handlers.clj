@@ -17,6 +17,7 @@
    [laser-show.events.handlers.modulator :as modulator]
    [laser-show.events.handlers.keyframe :as keyframe]
    [laser-show.events.handlers.input :as input]
+   [laser-show.events.handlers.triggers :as triggers]
    [laser-show.events.handlers.timeline :as timeline]
    [laser-show.events.handlers.history :as history]))
 
@@ -57,6 +58,7 @@
       "modulator" (modulator/handle event)
       "keyframe" (keyframe/handle event)
       "input" (input/handle event)  ; MIDI and OSC input management
+      "trigger" (triggers/handle event)
       "timeline" (timeline/handle event)  ; Timeline editor operations
       "timeline-cue-editor" (timeline/handle event)  ; Timeline open with initialization
       "history" (history/handle event)

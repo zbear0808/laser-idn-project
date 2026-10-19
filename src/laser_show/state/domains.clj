@@ -85,6 +85,34 @@
    :resync-rate {:default 4.0
                  :doc "Beats to reach ~63% of target phase correction (shared across all cues)"}})
 
+(defstate triggers
+  "Persisted internal trigger definitions, groups, and global settings."
+  {:definitions {:default {}
+                 :doc "Map of trigger ID to trigger definition"}
+   :groups {:default {}
+            :doc "Map of trigger-group ID to group configuration"}
+   :settings {:default {:enabled? true
+                        :quick-tap-threshold-ms 150
+                        :default-decay-beats 1.0
+                        :pause-beats-to-switch 2.0
+                        :group-duration-secs 45}
+              :doc "Global internal trigger behavior settings"}})
+
+(defstate trigger-runtime
+  "Transient runtime state for active internal triggers and groups."
+  {:active-triggers {:default {}
+                     :doc "Map of trigger ID to runtime timing state"}
+   :active-groups {:default {}
+                   :doc "Map of group ID to active/armed/locked state"}
+   :tap-history {:default []
+                 :doc "Recent internal trigger timestamps"}
+   :shuffle-bags {:default {}
+                  :doc "Per-group shuffle-bag state"}
+   :held-inputs {:default #{}
+                 :doc "Input identities currently held"}
+   :last-input-time {:default nil
+                     :doc "Timestamp of the most recent discrete input"}})
+
 (defstate grid
   "Cue grid state - the main trigger interface.
    

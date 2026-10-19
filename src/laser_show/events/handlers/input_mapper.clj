@@ -9,12 +9,16 @@
    State updates bypass cljfx's event queue to ensure the lowest possible latency
    and avoid blocking the UI."
   (:require [clojure.tools.logging :as log]
-            [laser-show.state.core :as state]
             [laser-show.input.router :as router]
             [laser-show.input.store :as store]
-            [laser-show.input.events :as input-events]
-            [laser-show.events.handlers.grid :as grid-handlers]
-            [laser-show.events.handlers.effects :as effects-handlers]))
+            [laser-show.input.events :as input-events]))
+
+(defonce ^:private *dispatch-fn (atom nil))
+
+(defn set-dispatch-fn!
+  "Sets the application event dispatcher used for discrete trigger events."
+  [dispatch-fn]
+  (reset! *dispatch-fn dispatch-fn))
 
 
 ;; --- State Update Helpers ---
@@ -24,40 +28,6 @@
    e.g. source-key `[:midi 0 10]` -> value `0.5`"
   [source-key value]
   (store/set-continuous-value! source-key value))
-
-
-;; --- Trigger Action Handlers ---
-
-;; Fast-path action dispatch to bypass regular fx dispatch overhead.
-;; Because these happen outside the UI event loop, they update state directly.
-
-(defn- handle-trigger-action!
-  "Executes the mapped action for a triggered input."
-  [action]
-  (let [type (:type action)]
-    (case type
-      :trigger-cue
-      (let [[col row] (:target action)]
-        (state/swap-state!
-         (fn [s]
-           (let [res (grid-handlers/handle {:event/type :grid/trigger-cell
-                                            :col col
-                                            :row row
-                                            :state s})]
-             (:state res s)))))
-
-      :trigger-effect
-      (let [[col row] (:target action)]
-        (state/swap-state!
-         (fn [s]
-           (let [res (effects-handlers/handle {:event/type :effects/toggle-cell
-                                               :col col
-                                               :row row
-                                               :state s})]
-             (:state res s)))))
-
-      ;; Default
-      (log/warn "Unknown input trigger action:" action))))
 
 
 ;; --- Main Event Processor ---
@@ -89,19 +59,17 @@
           (when (some? control)
             (update-input-value! [source (or channel 0) control] val)))))
 
-    ;; Discrete Triggers (Note ON, Keys)
+    ;; Discrete triggers are resolved by the normal application event pipeline.
     (or (input-events/note-on? event)
-        (input-events/trigger? event))
-    (let [st (state/get-raw-state)
-          trigger-map (get-in st [:config :input :trigger-map] {})
-          lookup-key (cond
-                       (input-events/note-on? event)
-                       {:source (:source event) :channel (:channel event) :note (:note event)}
-
-                       (input-events/trigger? event)
-                       {:source (:source event) :id (:id event)})]
-      (when-let [action (get trigger-map lookup-key)]
-        (handle-trigger-action! action)))))
+        (input-events/note-off? event)
+        (input-events/trigger? event)
+        (input-events/trigger-release? event))
+    (if-let [dispatch @*dispatch-fn]
+      (dispatch {:event/type :trigger/input
+                 :input-event event
+                 :time (:timestamp event)})
+      (log/warn "No application dispatch function configured for input trigger"
+                event))))
 
 ;; --- Lifecycle ---
 

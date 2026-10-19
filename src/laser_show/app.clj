@@ -138,7 +138,8 @@
   (let [app (create-app)]
     (reset! *app app)
     ;; Wire dispatch! to use app's handler (wrapped with async agent)
-    (events/set-dispatch-fn! (:handler app)))
+    (events/set-dispatch-fn! (:handler app))
+    (input-mapper/set-dispatch-fn! events/dispatch!))
 
   ;; Start Carabiner service (auto-connect for Link support)
   (let [link-state (get-in (state/get-raw-state) [:backend :link])
@@ -170,6 +171,7 @@
   []
   (when-let [{:keys [renderer]} @*app]
     (fx/unmount-renderer (state/get-context-atom) renderer))
+  (input-mapper/stop-mapper!)
   (reset! *app nil)
   (when (dev-config/dev-mode?)
     (Platform/setImplicitExit false))

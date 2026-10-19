@@ -714,6 +714,21 @@
   [context]
   (fx/sub-val context get-in [:backend :input :learning-target]))
 
+(defn trigger-definitions
+  "Get configured internal trigger definitions."
+  [context]
+  (fx/sub-val context get-in [:triggers :definitions] {}))
+
+(defn trigger-runtime
+  "Get transient internal trigger runtime state."
+  [context]
+  (fx/sub-val context :trigger-runtime))
+
+(defn active-trigger-count
+  "Get the number of currently active internal triggers."
+  [context]
+  (count (fx/sub-val context get-in [:trigger-runtime :active-triggers] {})))
+
 
 ;; Level 2: Link Subscriptions
 
