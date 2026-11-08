@@ -106,14 +106,15 @@
                   :path address)]
           
           []))
-      (let [first-arg (first args)]
-        (if (and (seq args) (number? first-arg) (not (boolean? first-arg)))
-          [(assoc (events/control-change :osc 0 0 (parse-osc-value first-arg))
-                  :path address)]
-          (let [value (if (seq args) (parse-osc-value first-arg) 1.0)]
-            (if (pos? value)
-              [(events/trigger :osc address :pressed)]
-              [(events/trigger :osc address :released)])))))))
+      ;; Unmapped address: always a trigger keyed by the address (see
+      ;; plans/v3/plan-grid-trigger-v2.md §1.4), so any button can be learned.
+      ;; The numeric value rides along so the input mapper can store it under
+      ;; [:osc address] for modulators; no shared CC number is invented.
+      (let [first-arg (first args)
+            value (if (seq args) (parse-osc-value first-arg) 1.0)]
+        [(assoc (events/trigger :osc address (if (pos? value) :pressed :released))
+                :path address
+                :value value)]))))
 
 
 ;; OSC Handler Creation

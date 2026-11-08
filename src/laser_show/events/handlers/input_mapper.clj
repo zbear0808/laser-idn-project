@@ -64,12 +64,18 @@
         (input-events/note-off? event)
         (input-events/trigger? event)
         (input-events/trigger-release? event))
-    (if-let [dispatch @*dispatch-fn]
-      (dispatch {:event/type :trigger/input
-                 :input-event event
-                 :time (:timestamp event)})
-      (log/warn "No application dispatch function configured for input trigger"
-                event))))
+    (do
+      ;; Unmapped OSC addresses arrive as triggers carrying their raw value;
+      ;; keep it available to modulators under [:osc path].
+      (when (and (= :osc (:source event)) (:path event) (number? (:value event)))
+        (update-input-value! [:osc (:path event)]
+                             (max 0.0 (min 1.0 (double (:value event))))))
+      (if-let [dispatch @*dispatch-fn]
+        (dispatch {:event/type :trigger/input
+                   :input-event event
+                   :time (:timestamp event)})
+        (log/warn "No application dispatch function configured for input trigger"
+                  event)))))
 
 ;; --- Lifecycle ---
 
