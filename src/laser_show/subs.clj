@@ -801,8 +801,9 @@
    - Layout (toolbar, status bar, panels)
    - Dialogs (dialog-specific styles)
    - Menus (context menu styling)"
-  [_context]
-  ;; Use centralized CSS system
+  [context]
+  ;; Depend on the reload trigger so Help > Reload Styles invalidates this cached sub.
+  (fx/sub-val context get-in [:styles :reload-trigger])
   (css/all-stylesheet-urls))
 
 
