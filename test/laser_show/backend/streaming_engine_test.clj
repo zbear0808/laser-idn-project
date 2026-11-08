@@ -51,6 +51,26 @@
           (is (nil? (:payload rt-close)) "Graceful close is sent without payload"))))))
 
 
+(deftest target-address-resolved-once-test
+  (testing "Engine resolves its host once and reuses the address for every packet"
+    (with-open [receiver (DatagramSocket. 0 (InetAddress/getLoopbackAddress))]
+      (let [engine (se/create-engine "127.0.0.1" (fn [] (t/empty-frame))
+                                     :port (.getLocalPort receiver))
+            lookups (atom 0)
+            addresses (atom #{})
+            orig-send hello/send-packet-to]
+        (with-redefs [hello/send-packet (fn [& _] (swap! lookups inc))
+                      hello/send-packet-to (fn [socket data address port]
+                                             (swap! addresses conj (System/identityHashCode address))
+                                             (orig-send socket data address port))]
+          (se/start! engine)
+          (Thread/sleep 100)
+          (se/stop! engine))
+        (is (zero? @lookups) "No per-packet host-name send path")
+        (is (= 1 (count @addresses)) "Same InetAddress instance for every packet")
+        (is (>= (count (receive-all receiver 300)) 3))))))
+
+
 ;; Behavioral Tests (not testing internal structure)
 
 
