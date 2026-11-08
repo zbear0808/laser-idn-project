@@ -538,7 +538,8 @@
   [^KeyCode key-code shift? value _]
   (let [{:keys [col row]} value]
     (case (.getName key-code)
-      "Delete" {:dispatch {:event/type :timeline/clear-selection}
+      "Delete" {:dispatch {:event/type :timeline/delete-selection
+                           :col col :row row}
                 :consumed? true}
       "Left"   {:dispatch {:event/type :timeline/nudge-selection
                            :col col :row row
@@ -1060,7 +1061,8 @@
      :render! render-timeline!
      :on-press on-press
      :on-drag on-drag
-     :on-hover on-hover}))
+     :on-hover on-hover
+     :on-key on-key}))
 
 ;; ============================================================
 ;; Main Component

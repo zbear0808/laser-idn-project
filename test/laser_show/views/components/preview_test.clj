@@ -1,7 +1,7 @@
 (ns laser-show.views.components.preview-test
   "Unit tests for preview.clj helper functions."
   (:require [clojure.test :refer [deftest testing is]]
-            [laser-show.views.components.preview]))
+            [laser-show.views.components.preview :as preview]))
 
 ;; Access the private function via var
 (def get-zone-filtered-points
@@ -50,3 +50,11 @@
           result (get-zone-filtered-points frame-data :left)]
       (is (= [:a :b :c :d] result)
           "zone-frames already contains aggregated points from all cues"))))
+
+(deftest frame-stats-label-test
+  (testing "shows average frame latency from the stats the frame service provides"
+    (is (= "123µs/frame" (preview/frame-stats-label {:avg-latency-us 123.4
+                                                     :p95-latency-us 200}))))
+  (testing "blank before any stats exist"
+    (is (= "" (preview/frame-stats-label nil)))
+    (is (= "" (preview/frame-stats-label {})))))
