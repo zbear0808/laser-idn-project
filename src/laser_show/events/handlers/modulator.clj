@@ -20,7 +20,8 @@
    [clojure.string :as str]
    [clojure.tools.logging :as log]
    [laser-show.animation.modulation :as mod]
-   [laser-show.animation.modulator-defs :as mod-defs]))
+   [laser-show.animation.modulator-defs :as mod-defs]
+   [laser-show.events.handlers.chain.helpers :as chain-helpers]))
 
 
 ;; Handler Functions
@@ -30,16 +31,9 @@
   "Check if keyframe modulator is enabled for the given effect.
    Returns true if the effect has an active keyframe modulator."
   [state domain entity-key effect-path]
-  (let [;; Build path to effect based on domain
-        base-path (case domain
-                    :effect-chains [:grid :effect-chains entity-key]
-                    :cue-chains [:grid :cue-chains entity-key :items]
-                    :projector-effects [:projectors entity-key :effects]
-                    ;; Fallback - may not work for all domains
-                    [:grid domain entity-key])
-        effect-full-path (into base-path (vec effect-path))
-        effect (get-in state effect-full-path)]
-    (get-in effect [:keyframe-modulator :enabled?] false)))
+  (let [items-path (:items-path (chain-helpers/chain-config domain entity-key))
+        effect (get-in state (into items-path effect-path))]
+    (boolean (get-in effect [:keyframe-modulator :enabled?] false))))
 
 (defn- handle-toggle
   "Handle toggling between static value and modulator.

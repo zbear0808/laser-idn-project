@@ -179,6 +179,48 @@
       (is (= {} result)))))
 
 
+;; Keyframe Mutual Exclusion Tests
+
+
+(defn- state-with-keyframes [domain entity-key enabled?]
+  {:chains {domain {entity-key {:items [{:effect-id :test
+                                         :params {:test-param 1.0}
+                                         :keyframe-modulator {:enabled? enabled?}}]}}}})
+
+(deftest test-toggle-on-disables-active-keyframes
+  (doseq [[domain entity-key] [[:effect-chains [0 0]]
+                               [:cue-chains [2 1]]
+                               [:projector-effects :proj-1]]]
+    (testing (str "keyframes enabled in " domain)
+      (let [event (merge sample-event-base
+                         {:event/type :modulator/toggle
+                          :domain domain
+                          :entity-key entity-key
+                          :param-spec sample-param-spec
+                          :current-value 1.0
+                          :fx/event true
+                          :state (state-with-keyframes domain entity-key true)})
+            result (modulator/handle event)]
+        (is (= {:event/type :keyframe/toggle-enabled
+                :domain domain
+                :entity-key entity-key
+                :effect-path [0]
+                :enabled? false}
+               (:dispatch result)))
+        (is (= :chain/update-param (get-in result [:dispatch-later :event :event/type])))))))
+
+(deftest test-toggle-on-without-keyframes-just-updates
+  (let [event (merge sample-event-base
+                     {:event/type :modulator/toggle
+                      :param-spec sample-param-spec
+                      :current-value 1.0
+                      :fx/event true
+                      :state (state-with-keyframes :effect-chains [0 0] false)})
+        result (modulator/handle event)]
+    (is (= :chain/update-param (get-in result [:dispatch :event/type])))
+    (is (not (contains? result :dispatch-later)))))
+
+
 ;; Unknown Event Type Test
 
 
