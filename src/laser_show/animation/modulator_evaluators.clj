@@ -151,16 +151,42 @@
 ;; Random Modulators
 
 
+(def ^:private ^:const splitmix-gamma (unchecked-long 0x9E3779B97F4A7C15N))
+(def ^:private ^:const splitmix-mul-1 (unchecked-long 0xBF58476D1CE4E5B9N))
+(def ^:private ^:const splitmix-mul-2 (unchecked-long 0x94D049BB133111EBN))
+
+(defn hash-unit
+  "Deterministic, well-distributed hash of a long to a double in [0, 1).
+   Uses the SplitMix64 finaliser, so consecutive inputs give unrelated outputs
+   (unlike the first nextDouble of java.util.Random seeded with consecutive
+   integers, which are nearly identical)."
+  ^double [^long n]
+  (let [z (unchecked-add n splitmix-gamma)
+        z (unchecked-multiply (bit-xor z (unsigned-bit-shift-right z 30)) splitmix-mul-1)
+        z (unchecked-multiply (bit-xor z (unsigned-bit-shift-right z 27)) splitmix-mul-2)
+        z (bit-xor z (unsigned-bit-shift-right z 31))]
+    (/ (double (unsigned-bit-shift-right z 11)) 9007199254740992.0)))
+
 (defn- eval-random
   "Evaluate random modulator.
-   In once mode, generates random values through once-periods cycles then holds at the final position.
-   Uses effective-beats for smooth BPM-change animation in loop mode."
-  [{:keys [min max period changes-per-beat] :as config} context]
+   Holds a new random value for each period (or for each 1/changes-per-beat
+   beats, when the legacy :changes-per-beat key is set). Values are a pure
+   function of the step number, so they're deterministic for a given time.
+   In once mode, steps through once-periods values then holds the last one."
+  [{:keys [min max period changes-per-beat loop-mode once-periods] :as config} context]
   (let [phase (calculate-random-phase config context)
-        changes-in-period (double (or changes-per-beat (/ 1.0 (double period))))
-        seed (long (* phase changes-in-period))
-        rng (java.util.Random. seed)
-        t (.nextDouble ^java.util.Random rng)
+        steps-per-period (if changes-per-beat
+                           (* (double changes-per-beat) (double period))
+                           1.0)
+        step (long (Math/floor (* phase steps-per-period)))
+        ;; Once mode reports phase = once-periods when done; hold the last
+        ;; step's value instead of jumping to a new one
+        step (if (= loop-mode :once)
+               (clojure.core/min step
+                                 (dec (long (Math/ceil (* (double (or once-periods 1.0))
+                                                          steps-per-period)))))
+               step)
+        t (hash-unit step)
         range-v (- (double max) (double min))]
     (+ (double min) (* t range-v))))
 

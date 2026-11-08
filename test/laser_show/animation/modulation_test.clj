@@ -205,6 +205,26 @@
       (is (= (mod/resolve-param config context)
              (mod/resolve-param config context))))))
 
+(deftest random-mod-spread-test
+  (testing "consecutive random steps are well spread over [min, max]"
+    (let [config {:type :random :min 2.0 :max 4.0 :period 1.0}
+          ms-per-beat 500.0
+          ;; Sample mid-step of 64 consecutive one-beat steps
+          values (mapv #(mod/resolve-param config (make-test-context (* (+ % 0.5) ms-per-beat) 120))
+                       (range 64))]
+      (is (every? #(<= 2.0 % 4.0) values))
+      (is (>= (- (apply max values) (apply min values)) (* 0.8 2.0))
+          (str "random values should cover >= 80% of range, got " values))
+      (is (> (count (distinct values)) 60) "consecutive steps should differ")))
+  (testing "value is held within a period and changes between periods"
+    (let [config {:type :random :min 0.0 :max 1.0 :period 2.0}
+          at-beat #(mod/resolve-param config {:effective-beats % :bpm 120.0})]
+      (is (= (at-beat 0.1) (at-beat 1.9)))
+      (is (not= (at-beat 1.9) (at-beat 2.1)))))
+  (testing "hash-unit stays in [0, 1)"
+    (is (every? #(let [v (mod-eval/hash-unit %)] (and (>= v 0.0) (< v 1.0)))
+                (concat (range -1000 1000) [Long/MIN_VALUE Long/MAX_VALUE])))))
+
 ;; Per-Point Context Detection Tests
 
 
