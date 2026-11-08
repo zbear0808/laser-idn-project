@@ -5,7 +5,8 @@
             [laser-show.animation.interpolation :as interp]
             [laser-show.animation.keyframes :as kf]
             [laser-show.animation.modulation :as mod]
-            [laser-show.animation.modulator-evaluators :as mod-eval]))
+            [laser-show.animation.modulator-evaluators :as mod-eval]
+            [laser-show.animation.modulator-registry :as mod-reg]))
 
 
 ;; Helper Functions
@@ -184,6 +185,21 @@
       (is (not (approx= (mod/resolve-param config (make-test-context 250 60))
                         (mod/resolve-param config (make-test-context 250 120))
                         0.1))))))
+
+
+;; UI Modulator List Tests
+
+
+(deftest ui-modulator-list-test
+  (let [ids (set (map :id (mod-reg/all-ui-modulators)))]
+    (testing "internal modulators are hidden from the dropdown"
+      (is (not (contains? ids :unified-keyframe-param)))
+      (is (not-any? #(= :internal (:category %)) (mod-reg/all-ui-modulators))))
+    (testing "user-facing modulators, including MIDI/OSC, are listed"
+      (is (every? ids [:sine :triangle :sawtooth :square :random :decay
+                       :pos-x :pos-y :radial :point-index :angle :midi :osc])))
+    (testing "internal modulator is still registered for keyframe evaluation"
+      (is (mod-reg/valid-modulator-type? :unified-keyframe-param)))))
 
 
 ;; Decay Modulator Tests
