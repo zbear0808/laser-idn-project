@@ -207,13 +207,16 @@
         (is (= "/fader1" (:path evt)))
         (is (= expected (:value evt))))))
 
-  (testing "Unmapped float messages produce valid continuous events with address preserved"
-    (doseq [[raw-val expected] [[0.0 0.0] [0.5 0.5] [1.0 1.0]]]
+  (testing "Unmapped float messages produce address triggers that keep the path and value"
+    (doseq [[raw-val expected expected-type] [[0.0 0.0 :trigger-release]
+                                              [0.5 0.5 :trigger]
+                                              [1.0 1.0 :trigger]]]
       (let [events (osc/osc-msg->events {:path "/custom/fader" :args [raw-val]} {})
             evt (first events)]
         (is (= 1 (count events)))
-        (is (= :control-change (:type evt)))
+        (is (= expected-type (:type evt)))
         (is (= :osc (:source evt)))
+        (is (= "/custom/fader" (:id evt)))
         (is (= "/custom/fader" (:path evt)))
         (is (= expected (:value evt)))))))
 
