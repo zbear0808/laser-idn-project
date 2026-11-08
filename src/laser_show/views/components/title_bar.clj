@@ -181,48 +181,53 @@
   "Create Help menu items."
   [context]
   (let [idn-logging? (boolean (fx/sub-val context get-in [:debug :idn-stream-logging?]))
-        zone-routing-debug? (boolean (fx/sub-val context get-in [:debug :zone-routing-debug?]))]
-    [{:fx/type :menu-item
-      :text "Documentation"
-      :on-action {:event/type :help/documentation}}
+        zone-routing-debug? (boolean (fx/sub-val context get-in [:debug :zone-routing-debug?]))
+        dev-mode? (fx/sub-ctx context subs/dev-mode?)]
+    (into
+     [{:fx/type :menu-item
+       :text "Documentation"
+       :on-action {:event/type :help/documentation}}
+      
+      {:fx/type :separator-menu-item}
+      
+      {:fx/type :menu-item
+       :text "About"
+       :on-action {:event/type :help/about}}
+      
+      {:fx/type :menu-item
+       :text "Check for Updates"
+       :on-action {:event/type :help/check-updates}}
+      
+      {:fx/type :separator-menu-item}
+      
+      {:fx/type :check-menu-item
+       :text "IDN Stream Logging"
+       :selected idn-logging?
+       :on-action {:event/type :help/toggle-idn-stream-logging}}
+      
+      {:fx/type :check-menu-item
+       :text "Zone Routing Debug"
+       :selected zone-routing-debug?
+       :on-action {:event/type :help/toggle-zone-routing-debug}}]
      
-     {:fx/type :separator-menu-item}
-     
-     {:fx/type :menu-item
-      :text "About"
-      :on-action {:event/type :help/about}}
-     
-     {:fx/type :menu-item
-      :text "Check for Updates"
-      :on-action {:event/type :help/check-updates}}
-     
-     {:fx/type :separator-menu-item}
-     
-     {:fx/type :check-menu-item
-      :text "IDN Stream Logging"
-      :selected idn-logging?
-      :on-action {:event/type :help/toggle-idn-stream-logging}}
-     
-     {:fx/type :check-menu-item
-      :text "Zone Routing Debug"
-      :selected zone-routing-debug?
-      :on-action {:event/type :help/toggle-zone-routing-debug}}
-     
-     {:fx/type :menu-item
-      :text "Reload Styles"
-      :accelerator [:shortcut :shift :r]
-      :on-action {:event/type :help/reload-styles}}
-     
-     {:fx/type :menu-item
-      :text "Reload App Code"
-      :accelerator [:shortcut :shift :a]
-      :on-action {:event/type :help/reload-app}}
-     
-     {:fx/type :separator-menu-item}
-     
-     {:fx/type :menu-item
-      :text "Save State Debug..."
-      :on-action {:event/type :help/save-state-debug}}]))
+     (concat
+      ;; Dev-only: these need tools.namespace and the src/ tree
+      (when dev-mode?
+        [{:fx/type :menu-item
+          :text "Reload Styles"
+          :accelerator [:shortcut :shift :r]
+          :on-action {:event/type :help/reload-styles}}
+         
+         {:fx/type :menu-item
+          :text "Reload App Code"
+          :accelerator [:shortcut :shift :a]
+          :on-action {:event/type :help/reload-app}}])
+      
+      [{:fx/type :separator-menu-item}
+       
+       {:fx/type :menu-item
+        :text "Save State Debug..."
+        :on-action {:event/type :help/save-state-debug}}]))))
 
 
 ;; Menu Components

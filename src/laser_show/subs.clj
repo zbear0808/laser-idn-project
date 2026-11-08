@@ -29,7 +29,8 @@
             [laser-show.css.core :as css]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.chains :as chains]
-            [laser-show.common.util :as u]))
+            [laser-show.common.util :as u]
+            [laser-show.dev-config :as dev-config]))
 
 
 ;; Level 1: Domain Accessors (fx/sub-val wrappers)
@@ -786,3 +787,13 @@
   [_context]
   ;; Use centralized CSS system
   (css/all-stylesheet-urls))
+
+
+;; Dev Mode
+
+
+(defn dev-mode?
+  "True when running with -Dlaser-show.dev=true. Constant for the life of the
+   JVM, so it has no context dependencies."
+  [_context]
+  (dev-config/dev-mode?))
