@@ -124,6 +124,23 @@
        0.0)))
 
 
+(defn get-seconds-from-context
+  "Get elapsed real time in seconds from context.
+
+   Prefers accumulated-ms (time since cue trigger / clock start), falling back
+   to time-ms for contexts without accumulators."
+  ^double [{:keys [accumulated-ms time-ms]}]
+  (/ (double (or accumulated-ms time-ms 0.0)) 1000.0))
+
+(defn get-loop-time-from-context
+  "Get the loop-mode time base in the given unit: beats (effective-beats, BPM
+   synced) for :beats, real seconds for :seconds."
+  ^double [context time-unit]
+  (if (= time-unit :seconds)
+    (get-seconds-from-context context)
+    (get-beats-from-context context)))
+
+
 
 (defn resolve-trigger-time
   "Resolve trigger time from either a fixed value or an atom reference.
@@ -210,7 +227,7 @@
    
    Parameters:
    - context: Modulation context with timing fields
-   - period: Beats per cycle (converted to frequency internally)
+   - period: Cycle length in time-unit (converted to frequency internally)
    - phase-param: Phase offset parameter (0.0-1.0)
    - loop-mode: :loop or :once
    - duration: Duration for once-mode
@@ -231,10 +248,10 @@
        (let [effective-trigger-time (or (resolve-trigger-time trigger-override) trigger-time)
              progress (double (calculate-once-progress (or time-ms 0) effective-trigger-time duration time-unit bpm))]
          (+ (* progress frequency) phase-param))
-       ;; Loop mode: use effective-beats (with phase correction for tap resync)
-       ;; Falls back to calculating from time-ms/bpm for backward compatibility
-       (let [beats (double (get-beats-from-context context))]
-         (+ (* beats frequency) phase-param))))))
+       ;; Loop mode: :beats uses effective-beats (with phase correction for tap
+       ;; resync, falling back to time-ms/bpm); :seconds uses real elapsed time
+       (let [t (get-loop-time-from-context context time-unit)]
+         (+ (* t frequency) phase-param))))))
 
 (set! *warn-on-reflection* false)
 (set! *unchecked-math* false)

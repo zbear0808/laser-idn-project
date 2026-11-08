@@ -163,7 +163,31 @@
       (is (approx= 0.5 (mod/resolve-param config (make-test-context (* 0.5 ms-per-beat) bpm)) 0.05)))))
 
 
+;; Time Unit Tests
+
+
+(deftest seconds-time-unit-loop-mode-test
+  (testing "loop-mode :seconds ignores BPM and uses real elapsed time"
+    (let [config {:type :sine :min 0.0 :max 1.0 :period 1.0 :time-unit :seconds}
+          at (fn [bpm ctx] (mod/resolve-param config (merge {:bpm bpm} ctx)))]
+      ;; 250ms into a 1s period = quarter cycle -> cosine at 90deg -> midpoint
+      (doseq [bpm [60 120 140]]
+        (is (approx= 0.5 (at bpm {:accumulated-ms 250.0
+                                  :effective-beats (* 0.25 (/ bpm 60.0))}) 1e-9)
+            (str "accumulated-ms at bpm " bpm))
+        (is (approx= 0.5 (at bpm {:time-ms 250}) 1e-9)
+            (str "time-ms fallback at bpm " bpm)))
+      (is (= (at 60 {:accumulated-ms 400.0 :effective-beats 0.4})
+             (at 120 {:accumulated-ms 400.0 :effective-beats 0.8})))))
+  (testing "loop-mode :beats still follows BPM"
+    (let [config {:type :sine :min 0.0 :max 1.0 :period 1.0 :time-unit :beats}]
+      (is (not (approx= (mod/resolve-param config (make-test-context 250 60))
+                        (mod/resolve-param config (make-test-context 250 120))
+                        0.1))))))
+
+
 ;; Random and Step Modulator Tests
+
 
 
 (deftest random-mod-range-test

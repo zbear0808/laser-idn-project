@@ -53,14 +53,13 @@
             :or {period 1.0 time-unit :beats loop-mode :loop}}
            time-ms
            {:keys [bpm trigger-time] :as context}]
-  (let [beats (double (time/get-beats-from-context context))
-        period' (double period)]
+  (let [period' (double period)]
     (if (= loop-mode :once)
       (let [progress (double (time/calculate-once-progress (or time-ms 0) trigger-time
                                                           period' (or time-unit :beats)
                                                           (or bpm 120.0)))]
         (clojure.core/min progress 1.0))
-      (u/fmod (/ beats period') 1.0))))
+      (u/fmod (/ (time/get-loop-time-from-context context time-unit) period') 1.0))))
 
 (defn calculate-spatial-position
   "Calculate position in [0,1] based on spatial context and driver type.
