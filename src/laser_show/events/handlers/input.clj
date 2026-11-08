@@ -89,6 +89,7 @@
   "Start MIDI learn mode."
   [{:keys [state]}]
   (let [midi-state (get-midi-state state)
+        _ (some-> (midi/get-learn-promise midi-state) (deliver nil))
         updated-midi (midi/start-learn midi-state)
         learn-promise (midi/get-learn-promise updated-midi)]
     ;; Register a global handler to catch the next MIDI event
@@ -99,14 +100,14 @@
                                                     (= :midi (:source event)))
                                            (deliver learn-promise event)
                                            (router/unregister-handler! ::midi-learn)))))
-    {:state (assoc-in state (midi-path) updated-midi)
-     :learn-promise learn-promise}))
+    {:state (assoc-in state (midi-path) updated-midi)}))
 
 (defn- handle-midi-cancel-learn
   "Cancel MIDI learn mode."
   [{:keys [state]}]
   (router/unregister-handler! ::midi-learn)
   (let [midi-state (get-midi-state state)
+        _ (some-> (midi/get-learn-promise midi-state) (deliver nil))
         updated-midi (midi/cancel-learn midi-state)]
     {:state (assoc-in state (midi-path) updated-midi)}))
 
@@ -176,6 +177,7 @@
   "Start OSC learn mode."
   [{:keys [state]}]
   (let [osc-state (get-osc-state state)
+        _ (some-> (osc/get-learn-promise osc-state) (deliver nil))
         updated-osc (osc/start-learn osc-state)
         learn-promise (osc/get-learn-promise updated-osc)]
     ;; Register a global handler to catch the next OSC event
@@ -186,28 +188,36 @@
                                                     (= :osc (:source event)))
                                            (deliver learn-promise event)
                                            (router/unregister-handler! ::osc-learn)))))
-    {:state (assoc-in state (osc-path) updated-osc)
-     :learn-promise learn-promise}))
+    {:state (assoc-in state (osc-path) updated-osc)}))
 
 (defn- handle-osc-cancel-learn
   "Cancel OSC learn mode."
   [{:keys [state]}]
   (router/unregister-handler! ::osc-learn)
   (let [osc-state (get-osc-state state)
+        _ (some-> (osc/get-learn-promise osc-state) (deliver nil))
         updated-osc (osc/cancel-learn osc-state)]
     {:state (assoc-in state (osc-path) updated-osc)}))
 
 
 ;; Generalized Trigger Handlers
 
+;; The promise the current learn future is waiting on. Delivering nil to it
+;; lets that future exit when learn is cancelled or restarted.
+(defonce ^:private !pending-learn (atom nil))
+
+(defn- release-pending-learn! []
+  (when-let [p (first (reset-vals! !pending-learn nil))]
+    (deliver p nil)))
 
 (defn- handle-input-start-learn
   "Start generic input learn mode for a target action.
    Registers a temporary global handler to capture the next input event
    and bind it to the target action."
   [{:keys [state target-action]}]
-  (let [;; Use a global promise mapped in state
-        learn-promise (promise)]
+  (release-pending-learn!)
+  (let [learn-promise (promise)]
+    (reset! !pending-learn learn-promise)
     ;; Register a global handler to catch the next trigger event
     (router/register-global-handler! ::generalized-input-learn
                                      (fn [event]
@@ -244,6 +254,7 @@
   "Cancel generic input learn mode."
   [{:keys [state]}]
   (router/unregister-handler! ::generalized-input-learn)
+  (release-pending-learn!)
   ;; Remove learning indicator
   {:state (update-in state [:backend :input] dissoc :learning-target)})
 
