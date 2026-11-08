@@ -35,12 +35,12 @@
 (defn- handle-midi-enable
   "Enable MIDI input processing."
   [{:keys [state]}]
-  {:state (assoc-in state (midi-path :enabled) true)})
+  {:state (update-in state (midi-path) midi/enable)})
 
 (defn- handle-midi-disable
   "Disable MIDI input processing."
   [{:keys [state]}]
-  {:state (assoc-in state (midi-path :enabled) false)})
+  {:state (update-in state (midi-path) midi/disable)})
 
 (defn- handle-midi-refresh-devices
   "Refresh list of available MIDI devices.
@@ -127,12 +127,12 @@
 (defn- handle-osc-enable
   "Enable OSC input processing."
   [{:keys [state]}]
-  {:state (assoc-in state (osc-path :enabled) true)})
+  {:state (update-in state (osc-path) osc/enable)})
 
 (defn- handle-osc-disable
   "Disable OSC input processing."
   [{:keys [state]}]
-  {:state (assoc-in state (osc-path :enabled) false)})
+  {:state (update-in state (osc-path) osc/disable)})
 
 (defn- handle-osc-start-server
   "Start the OSC server."

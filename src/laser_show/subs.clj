@@ -636,7 +636,7 @@
   "Check if MIDI input is enabled.
    Depends on: backend domain"
   [context]
-  (fx/sub-val context get-in [:backend :input :midi :enabled]))
+  (fx/sub-val context get-in [:backend :input :midi :enabled?]))
 
 (defn midi-connected-devices
   "Get set of connected MIDI device names.
@@ -672,7 +672,7 @@
   "Check if OSC input is enabled.
    Depends on: backend domain"
   [context]
-  (fx/sub-val context get-in [:backend :input :osc :enabled]))
+  (fx/sub-val context get-in [:backend :input :osc :enabled?]))
 
 (defn osc-server-running?
   "Check if the OSC server is running.
