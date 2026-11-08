@@ -39,38 +39,49 @@
 ;; MIDI Message Conversion (pure function)
 
 
+(defn- message-command
+  "Returns the channel-voice command keyword of a midi-clj message.
+
+   overtone.midi/midi-msg puts the channel-stripped command in :command.
+   Its :status is only set for channel 0 (it looks up the full status byte),
+   so it must not be used to decide the message type. A numeric :status
+   (0x80-0xEF) is still accepted for hand-built maps."
+  [msg]
+  (let [command (:command msg)
+        status (:status msg)]
+    (cond
+      (keyword? command) command
+      (number? status) (case (bit-and (int status) 0xF0)
+                         0x80 :note-off
+                         0x90 :note-on
+                         0xB0 :control-change
+                         0xC0 :program-change
+                         nil)
+      :else nil)))
+
+(defn- message-channel
+  [msg]
+  (or (:channel msg)
+      (when (number? (:status msg))
+        (bit-and (int (:status msg)) 0x0F))
+      0))
+
 (defn midi-msg->event
   "Converts a midi-clj message to a unified input event."
   [msg]
-  (let [status (:status msg)
-        channel (:channel msg 0)
+  (let [command (message-command msg)
+        channel (message-channel msg)
         data1 (:note msg (:data1 msg))
         data2 (:velocity msg (:data2 msg))]
-    (cond
-      ;; Note On (status 144-159, or :note-on)
-      (or (= status :note-on)
-          (and (number? status) (>= status 144) (<= status 159)))
-      (if (and data2 (pos? data2))
-        (events/note-on :midi channel data1 (events/midi-to-normalized data2))
-        (events/note-off :midi channel data1))
-      
-      ;; Note Off (status 128-143, or :note-off)
-      (or (= status :note-off)
-          (and (number? status) (>= status 128) (<= status 143)))
-      (events/note-off :midi channel data1)
-      
-      ;; Control Change (status 176-191, or :control-change)
-      (or (= status :control-change)
-          (and (number? status) (>= status 176) (<= status 191)))
-      (events/control-change :midi channel data1 (events/midi-to-normalized data2))
-      
-      ;; Program Change (status 192-207, or :program-change)
-      (or (= status :program-change)
-          (and (number? status) (>= status 192) (<= status 207)))
-      (events/program-change :midi channel data1)
-      
-      ;; Unhandled message type
-      :else nil)))
+    (case command
+      ;; midi-clj already turns note-on with velocity 0 into :note-off
+      :note-on (if (and data2 (pos? data2))
+                 (events/note-on :midi channel data1 (events/midi-to-normalized data2))
+                 (events/note-off :midi channel data1))
+      :note-off (events/note-off :midi channel data1)
+      :control-change (events/control-change :midi channel data1 (events/midi-to-normalized data2))
+      :program-change (events/program-change :midi channel data1)
+      nil)))
 
 
 ;; MIDI State Operations (pure functions)
