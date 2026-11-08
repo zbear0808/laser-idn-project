@@ -38,10 +38,13 @@
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.backend.multi-engine :as multi-engine]
             [laser-show.common.util :as u]
+            [laser-show.dev-config :as dev-config]
             [laser-show.idn.hello :as idn-hello])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
            [javafx.application Platform]
-           [java.io File]))
+           [java.awt Desktop Desktop$Action]
+           [java.io File]
+           [java.net URI]))
 
 ;; Co-effects (inject data INTO events)
 ;; Co-effect functions take NO arguments and return data to inject.
@@ -188,6 +191,48 @@
         (log/debug e "Network scan stack trace")
         (dispatch {:event/type :projectors/scan-failed
                    :error (.getMessage e)})))))
+
+;; System Effects
+
+(defn- effect-system-exit
+  "Effect that exits the application.
+   In dev mode the JVM is kept alive (it hosts the REPL), so this only logs."
+  [_ _dispatch]
+  (if (dev-config/dev-mode?)
+    (log/info "File > Exit ignored in dev mode (would kill the REPL JVM). Use (laser-show.app/stop!).")
+    (do
+      (Platform/exit)
+      (System/exit 0))))
+
+(defn- effect-system-open-url
+  "Effect that opens a URL in the system browser (off the agent thread)."
+  [url _dispatch]
+  (future
+    (try
+      (if (and (Desktop/isDesktopSupported)
+               (.isSupported (Desktop/getDesktop) Desktop$Action/BROWSE))
+        (.browse (Desktop/getDesktop) (URI. url))
+        (log/warn "Opening URLs is not supported on this platform. URL:" url))
+      (catch Throwable t
+        (log/error "Could not open URL" url ":" (.getMessage t))))))
+
+(def ^:private dev-reload-fns
+  {:styles 'laser-show.css.reload/reload-all-styles!
+   :app 'laser-show.dev.reload/reload-app-code!})
+
+(defn- effect-dev-reload
+  "Effect that runs a dev-only reload (:styles or :app).
+   These namespaces need tools.namespace (only on the :dev classpath), so a
+   missing dependency is logged instead of thrown."
+  [kind _dispatch]
+  (try
+    (let [result ((requiring-resolve (dev-reload-fns kind)))]
+      (if (:success? result)
+        (log/info "Dev reload" kind "complete:" result)
+        (log/error "Dev reload" kind "failed:" (:error result))))
+    (catch Throwable t
+      (log/warn "Dev reload" kind "is unavailable (needs the :dev alias / tools.namespace):"
+                (.getMessage t)))))
 
 ;; File Chooser Effect
 
@@ -336,6 +381,9 @@
    - :project/save - write project zip to disk
    - :project/load - read project zip from disk
    - :fx/show-file-chooser - show file open/save dialog
+   - :system/exit - exit the application (no-op in dev mode)
+   - :system/open-url - open a URL in the system browser
+   - :dev/reload - reload :styles or :app code (dev only)
    - :clipboard/copy-effects - copy effects to clipboard
    - :clipboard/paste-effects - paste effects from clipboard (effects grid)
    - :clipboard/paste-projector-effects - paste effects from clipboard (projector chain)
@@ -362,6 +410,10 @@
         :project/load effect-load-project
         ;; File chooser dialog
         :fx/show-file-chooser effect-show-file-chooser
+        ;; System
+        :system/exit effect-system-exit
+        :system/open-url effect-system-open-url
+        :dev/reload effect-dev-reload
         ;; Clipboard effects for effect chain editor
         :clipboard/copy-effects effect-clipboard-copy-effects
         :clipboard/paste-effects effect-clipboard-paste-effects

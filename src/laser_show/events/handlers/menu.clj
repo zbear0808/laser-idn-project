@@ -127,10 +127,9 @@
 
 (defn- handle-file-exit
   "Exit the application."
-  [{:keys [state]}]
+  [_event]
   (log/debug "File > Exit")
   ;; TODO: Show confirmation dialog if project is dirty
-  ;; For now, just exit
   {:system/exit true})
 
 
@@ -235,13 +234,14 @@
 ;; Help Menu Events
 
 
+(def ^:private documentation-url
+  "https://github.com/zbear0808/laser-idn-project/tree/master/docs")
+
 (defn- handle-help-documentation
   "Open documentation in browser."
-  [{:keys [state]}]
+  [_event]
   (log/debug "Help > Documentation")
-  ;; TODO: Open URL in system browser
-  {:state state
-   :system/open-url "https://github.com/your-repo/docs"})
+  {:system/open-url documentation-url})
 
 (defn- handle-help-about
   "Show About dialog."
@@ -278,26 +278,18 @@
     {:state (assoc-in state [:debug :zone-routing-debug?] new-value)}))
 
 (defn- handle-help-reload-styles
-  "Reload all CSS stylesheets to pick up style changes."
-  [{:keys [state]}]
+  "Reload all CSS stylesheets (dev only). The reload bumps
+   [:styles :reload-trigger] itself, so this handler returns no :state that
+   could overwrite it."
+  [_event]
   (log/info "Help > Reload Styles")
-  (require 'laser-show.css.reload)
-  (let [result ((resolve 'laser-show.css.reload/reload-all-styles!))]
-    (if (:success? result)
-      (log/info "CSS styles reloaded successfully")
-      (log/error "Failed to reload CSS styles:" (:error result))))
-  {:state state})
+  {:dev/reload :styles})
 
 (defn- handle-help-reload-app
-  "Reload all app code to pick up code changes without restarting JVM."
-  [{:keys [state]}]
+  "Reload all app code without restarting the JVM (dev only)."
+  [_event]
   (log/info "Help > Reload App Code")
-  (require 'laser-show.dev.reload)
-  (let [result ((resolve 'laser-show.dev.reload/reload-app-code!))]
-    (if (:success? result)
-      (log/info "App code reloaded successfully")
-      (log/error "Failed to reload app code:" (:error result))))
-  {:state state})
+  {:dev/reload :app})
 
 (defn- handle-help-save-state-debug
   "Save current application state to an EDN file for debugging."
