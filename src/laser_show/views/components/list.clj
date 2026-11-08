@@ -327,7 +327,7 @@
                                dynamic-props (get-handler-props component-id)
                                effective-path (or items-path (:items-path dynamic-props))
                                all-ids (:ordered-ids dynamic-props)
-                               selected-ids (:selected-ids dynamic-props)]
+                               selected-ids (get-selected-ids component-id)]
                            (cond
                              (= button MouseButton/PRIMARY)
                              (do
