@@ -32,35 +32,59 @@
                    :behavior (:behavior definition))))
         (get-in state [:triggers :definitions] {})))
 
+(defn- pressed? [input-event]
+  (or (input-events/note-on? input-event)
+      (input-events/trigger? input-event)))
+
+(defn- momentary-event
+  "Momentary cells play while held: press starts, release stops."
+  [{:keys [type target]} input-event]
+  (when (vector? target)
+    (let [press? (pressed? input-event)
+          [col row] target]
+      (case type
+        :trigger-cue {:event/type (if press? :grid/activate-cell :grid/release-cell)
+                      :col col
+                      :row row}
+        :trigger-effect {:event/type :effects/toggle-cell
+                         :col col
+                         :row row
+                         :fx/event press?}
+        nil))))
+
 (defn- action-event [action input-event]
   (let [{:keys [type target]} action]
-    (when (or (input-events/note-on? input-event)
-              (input-events/trigger? input-event)
-              (= :momentary (:behavior action)))
-    (case type
-      :trigger-cue (when (vector? target)
-                     {:event/type :grid/trigger-cell
-                      :col (first target)
-                      :row (second target)})
-      :trigger-effect (when (vector? target)
-                        {:event/type :effects/toggle-cell
-                         :col (first target)
-                         :row (second target)})
-      :stop-all {:event/type :transport/stop}
-      :blackout {:event/type :transport/stop}
-      :tap-tempo {:event/type :timing/tap-tempo}
-      :start-timeline (when target
-                        {:event/type :timeline/start :timeline-id target})
-      :stop-timeline (when target
-                       {:event/type :timeline/stop :timeline-id target})
-      :apply-preset (when target
-                      {:event/type :preset/apply :preset-id target})
-      nil))))
+    (cond
+      (and (= :momentary (:behavior action))
+           (#{:trigger-cue :trigger-effect} type))
+      (momentary-event action input-event)
+
+      (pressed? input-event)
+      (case type
+        :trigger-cue (when (vector? target)
+                       {:event/type :grid/trigger-cell
+                        :col (first target)
+                        :row (second target)})
+        :trigger-effect (when (vector? target)
+                          {:event/type :effects/toggle-cell
+                           :col (first target)
+                           :row (second target)})
+        :stop-all {:event/type :transport/stop}
+        :blackout {:event/type :transport/stop}
+        :tap-tempo {:event/type :timing/tap-tempo}
+        :start-timeline (when target
+                          {:event/type :timeline/start :timeline-id target})
+        :stop-timeline (when target
+                         {:event/type :timeline/stop :timeline-id target})
+        :apply-preset (when target
+                        {:event/type :preset/apply :preset-id target})
+        nil)
+
+      :else nil)))
 
 (defn- update-runtime [state input-event action time]
   (let [key (lookup-key input-event)
-        pressed? (or (input-events/note-on? input-event)
-                     (input-events/trigger? input-event))
+        press? (pressed? input-event)
         trigger-id (or (:trigger-id action) key)]
     (let [state' (-> state
                      (assoc-in [:trigger-runtime :last-input-time] time)
@@ -69,13 +93,13 @@
                                   (vec (take-last 8 (conj (or history []) time))))))
           state'' (if key
                     (update-in state' [:trigger-runtime :held-inputs]
-                               (if pressed?
+                               (if press?
                                  (fnil conj #{})
                                  (fnil disj #{}))
                                key)
                     state')]
       (if trigger-id
-        (if pressed?
+        (if press?
           (assoc-in state'' [:trigger-runtime :active-triggers trigger-id]
                     {:started-at time
                      :input key
