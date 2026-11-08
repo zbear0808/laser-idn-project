@@ -33,7 +33,7 @@ sudo apt install -y libasound2-dev
 
 ## 2. Install JDK 25 (Early Access)
 
-This project requires JDK 25 for JavaFX 26-ea support.
+This project requires JDK 25 for JavaFX 28-ea support.
 
 ### Option A: Using SDKMAN (Recommended)
 
@@ -96,7 +96,7 @@ clojure -M:dev:laser-show:linux
 clojure -M:test:linux
 
 # Build uberjar
-clojure -T:build:linux uber
+clojure -T:build uber :platform :linux
 ```
 
 ---

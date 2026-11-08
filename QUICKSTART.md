@@ -17,7 +17,8 @@
 
 JavaFX requires platform-specific native libraries. Add your platform alias:
 - **`:win`** - Windows
-- **`:mac`** - macOS
+- **`:mac`** - macOS (Intel)
+- **`:mac-arm`** - macOS (Apple Silicon)
 - **`:linux`** - Linux
 
 ### Option 1: Laser Show (GUI Application)
@@ -26,7 +27,7 @@ JavaFX requires platform-specific native libraries. Add your platform alias:
 # Windows
 clj -M:win:laser-show
 
-# macOS
+# macOS (use :mac-arm on Apple Silicon)
 clj -M:mac:laser-show
 
 # Linux
@@ -65,7 +66,7 @@ clj -M:win:repl
 ```
 
 **What each alias provides:**
-- **`:win`** / **`:mac`** / **`:linux`** - Platform-specific JavaFX natives (required)
+- **`:win`** / **`:mac`** / **`:mac-arm`** / **`:linux`** - Platform-specific JavaFX natives (required)
 - **`:laser-show`** - JVM opts (ZGC, native-access) + main entry point
 - **`:dev`** - Dev mode flag, async-profiler support, extra dev dependencies
 - **`:jfr`** - Java Flight Recorder continuous recording (5min rolling buffer)
@@ -87,7 +88,7 @@ clj -M:win:repl
 For performance analysis, see [docs/PROFILING.md](docs/PROFILING.md).
 
 **Quick JFR profiling:**
-1. Start with `:jfr` alias: `clj -M:dev:laser-show:jfr`
+1. Start with `:jfr` alias: `clj -M:dev:laser-show:jfr:win` (use your platform alias)
 2. Open JDK Mission Control and connect to the running JVM
 3. The "continuous" recording is already running with 5-minute history
 4. Dump recordings from REPL:
@@ -96,16 +97,30 @@ For performance analysis, see [docs/PROFILING.md](docs/PROFILING.md).
    (jfr/dump-recording "my-recording.jfr")
    ```
 
+### Running Tests
+
+```bash
+# Unit tests (always add your platform alias)
+clj -M:win:test
+
+# One namespace
+clj -M:win:test -n laser-show.events.grid-handlers-test
+```
+
+See the Testing section of [README.md](README.md) for UI, integration and timing tests.
+
 ### Building Uber JARs
 
 ```bash
 # Build platform-specific JAR (pass platform as argument)
 clj -T:build uber :platform :win      # Windows JAR
-clj -T:build uber :platform :mac      # macOS JAR
+clj -T:build uber :platform :mac      # macOS Intel JAR
+clj -T:build uber :platform :mac-arm  # macOS Apple Silicon JAR
 clj -T:build uber :platform :linux    # Linux JAR
 ```
 
-The JAR will be created at `target/laser-show-0.1.0-standalone.jar`
+The JAR will be created at `target/laser-show-<version>-standalone.jar`, where
+`<version>` comes from the `VERSION` file (also used for installer versions).
 
 ## Troubleshooting
 btw, i've mostly tested on Windows, if you're not on it maybe it'll cause issues
