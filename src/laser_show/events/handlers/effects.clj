@@ -69,8 +69,7 @@
   [{:keys [col row state]}]
   {:state (-> state
               (update-in [:chains :effect-chains] dissoc [col row])
-              (update-in [:config :input :trigger-map] remove-cell-triggers [col row] :trigger-effect)
-              h/mark-dirty)})
+              (update-in [:config :input :trigger-map] remove-cell-triggers [col row] :trigger-effect))})
 
 (defn- handle-effects-copy-cell
   "Copy an effects cell to clipboard.
@@ -97,8 +96,7 @@
                   (update-in [:chains :effect-chains] dissoc [from-col from-row])
                   (assoc-in [:chains :effect-chains [to-col to-row]] cell-data)
                   (update-in [:config :input :trigger-map]
-                             migrate-cell-triggers [from-col from-row] [to-col to-row] :trigger-effect)
-                  h/mark-dirty)}
+                             migrate-cell-triggers [from-col from-row] [to-col to-row] :trigger-effect))}
       {:state state})))
 
 
@@ -128,8 +126,7 @@
   (let [name-path [:chains :effect-chains [col row] :name]]
     {:state (-> state
                 (assoc-in name-path (when (seq name) name))
-                (assoc-in [:ui :dialogs :effect-chain-editor :editing-name?] false)
-                h/mark-dirty)}))
+                (assoc-in [:ui :dialogs :effect-chain-editor :editing-name?] false))}))
 
 
 ;; Effect Bank (data-driven event from effect-chain editor)
@@ -158,8 +155,7 @@
         state-with-cell (ensure-cell state)
         current-effects (get-in state-with-cell [:chains :effect-chains [col row] :items] [])]
     {:state (-> state-with-cell
-                (assoc-in [:chains :effect-chains [col row] :items] (conj current-effects new-effect))
-                h/mark-dirty)
+                (assoc-in [:chains :effect-chains [col row] :items] (conj current-effects new-effect)))
      :dispatch {:event/type :list/select-item
                 :component-id [:effect-chain col row]
                 :item-id new-effect-id

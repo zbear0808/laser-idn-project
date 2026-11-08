@@ -1,8 +1,7 @@
 (ns laser-show.events.handlers.zone-groups
   "Event handlers for zone group management.
    
-   Default groups: :all, :left, :right, :center, :graphics, :crowd"
-  (:require [laser-show.events.helpers :as h]))
+   Default groups: :all, :left, :right, :center, :graphics, :crowd")
 
 
 (defn- handle-zone-groups-select
@@ -39,8 +38,7 @@
     {:state (-> state
                 (assoc-in [:zone-groups group-id] new-group)
                 (assoc-in [:zone-group-ui :selected-group] group-id)
-                (assoc-in [:ui :dialogs :zone-group-editor :open?] false)
-                h/mark-dirty)}))
+                (assoc-in [:ui :dialogs :zone-group-editor :open?] false))}))
 
 (defn- handle-zone-groups-remove
   "Remove a zone group. Also removes this group from all projectors and virtual projectors."
@@ -72,8 +70,7 @@
                 (assoc :zone-groups new-zone-groups)
                 (assoc-in [:zone-group-ui :selected-group] new-selected)
                 (assoc :projectors updated-projectors)
-                (assoc :virtual-projectors updated-vps)
-                h/mark-dirty)}))
+                (assoc :virtual-projectors updated-vps))}))
 
 
 
@@ -101,8 +98,7 @@
                          {:name name
                           :description description
                           :color color})
-              (assoc-in [:ui :dialogs :zone-group-editor :open?] false)
-              h/mark-dirty)})
+              (assoc-in [:ui :dialogs :zone-group-editor :open?] false))})
 
 (defn- handle-zone-groups-set-editor-color
   "Set color in the zone group editor dialog (from color swatch click)."

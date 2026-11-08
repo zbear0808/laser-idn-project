@@ -11,6 +11,7 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
+            [laser-show.state.history :as history]
             [laser-show.state.serialization :as ser]
             [laser-show.state.templates :as templates]))
 
@@ -99,11 +100,12 @@
         zip-filenames))
 
 (defn mark-saved
-  "Record that the project was saved to zip-path at time now."
+  "Record that the project was saved to zip-path at time now.
+   The current document becomes the saved baseline (clean)."
   [state zip-path now]
   (-> state
+      history/mark-clean
       (assoc-in [:project :current-file] zip-path)
-      (assoc-in [:project :dirty?] false)
       (assoc-in [:project :last-saved] now)))
 
 (defn- replace-at-path
@@ -163,6 +165,7 @@
     (-> state
         (replace-document initial (zip-contents->file-data zip-contents))
         (reset-session initial)
+        history/mark-clean
         (assoc-in [:project :current-file] zip-path))))
 
 (defn new-project-state
@@ -172,7 +175,8 @@
     (-> state
         (replace-document initial {})
         (templates/apply-starter-cue-chains)
-        (reset-session initial))))
+        (reset-session initial)
+        history/mark-clean)))
 
 
 ;; I/O Functions

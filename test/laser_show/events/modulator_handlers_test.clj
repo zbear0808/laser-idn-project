@@ -206,8 +206,12 @@
                 :entity-key entity-key
                 :effect-path [0]
                 :enabled? false}
-               (:dispatch result)))
-        (is (= :chain/update-param (get-in result [:dispatch-later :event :event/type])))))))
+               (dissoc (:dispatch result) :history/description :history/coalesce-key)))
+        (is (= :chain/update-param (get-in result [:dispatch-later :event :event/type])))
+        (testing "both events form one undo step"
+          (is (some? (get-in result [:dispatch :history/coalesce-key])))
+          (is (= (get-in result [:dispatch :history/coalesce-key])
+                 (get-in result [:dispatch-later :event :history/coalesce-key]))))))))
 
 (deftest test-toggle-on-without-keyframes-just-updates
   (let [event (merge sample-event-base

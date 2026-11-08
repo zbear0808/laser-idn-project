@@ -9,7 +9,6 @@
    - params: Parameter operations, UI mode"
   (:require
    [clojure.tools.logging :as log]
-   [laser-show.events.helpers :as h]
    [laser-show.events.handlers.chain.helpers :as helpers]
    [laser-show.events.handlers.chain.params :as params]))
 
@@ -33,8 +32,7 @@
         (log/trace "chain/set-items - items count:" (count (:items event))
                    "items-path:" (:items-path config))
         {:state (-> state
-                    (assoc-in (:items-path config) (:items event))
-                    (h/mark-dirty))})
+                    (assoc-in (:items-path config) (:items event)))})
       
       ;; UI mode -> params module
       :chain/set-ui-mode

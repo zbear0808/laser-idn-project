@@ -2,6 +2,7 @@
   "Tests for grid event handlers focusing on complex state transitions."
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
+   [laser-show.state.history :as history]
    [laser-show.state.core :as state]
    [laser-show.events.handlers.grid :as grid]
    [laser-show.state.domains :refer [build-initial-state]]))
@@ -55,7 +56,7 @@
       (is (nil? (get-in result [:state :chains :cue-chains [0 0]])))
       (is (= [{:preset-id :circle}]
              (get-in result [:state :chains :cue-chains [2 2] :items])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))
 
 (deftest handle-grid-move-cell-active
   (testing "Moving active cell updates playback reference"
@@ -70,7 +71,7 @@
       (is (some? (get-in result [:state :chains :cue-chains [3 3]])))
       (is (= [3 3] (get-in result [:state :playback :active-cell])))
       (is (true? (get-in result [:state :playback :playing?])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))
 
 (deftest handle-grid-move-cell-nonexistent
   (testing "Moving from empty cell does nothing"
@@ -97,7 +98,7 @@
       (is (nil? (get-in result [:state :chains :cue-chains [0 0]])))
       (is (= [{:preset-id :circle}]
              (get-in result [:state :chains :cue-chains [1 1] :items])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))
 
 
 ;; Grid Paste Cell Tests
@@ -114,7 +115,7 @@
                  :state state}
           result (grid/handle event)]
       (is (= clipboard-data (get-in result [:state :chains :cue-chains [0 0]])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))
 
 (deftest handle-grid-paste-cell-wrong-type
   (testing "Pasting non-cue-chain clipboard does nothing"
@@ -149,7 +150,7 @@
                  :state state}
           result (grid/handle event)]
       (is (= clipboard-data (get-in result [:state :chains :cue-chains [0 0]])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))
 
 
 ;; Grid Cell Clicked Tests
@@ -202,7 +203,7 @@
                  :state sample-state-with-content}
           result (grid/handle event)]
       (is (nil? (get-in result [:state :chains :cue-chains [0 0]])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))
 
 (deftest handle-grid-select-cell-test
   (testing "Selecting cell updates grid selected-cell"

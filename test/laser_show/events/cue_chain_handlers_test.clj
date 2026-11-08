@@ -5,6 +5,7 @@
    from chain.clj. Cue-chain specific operations (add-preset, etc.) use :cue-chain/*."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [laser-show.state.history :as history]
    [laser-show.events.handlers.cue-chain :as cue-chain]
    [laser-show.events.handlers.chain :as chain]
    [laser-show.events.handlers.list :as list]
@@ -322,7 +323,7 @@
           selected-ids (get-in final-state [:list-ui [:cue-chain 0 0] :selected-ids])]
       (is (= 1 (count items)))
       (is (= :circle (:preset-id (first items))))
-      (is (true? (get-in result [:state :project :dirty?])))
+      (is (history/derive-dirty (:state event) (:state result)))
       ;; Should auto-select the new preset (ID-based selection in list-ui)
       (is (= #{new-item-id} selected-ids)))))
 
@@ -364,7 +365,7 @@
           result (cue-chain/handle event)]
       (is (= 1 (count (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects]))))
       (is (= :rotate (:effect-id (first (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects])))))
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))
 
 (deftest handle-set-item-effects-empty
   (testing "Setting empty effects array clears effects"
@@ -375,7 +376,7 @@
                  :state sample-state-with-effect}
           result (cue-chain/handle event)]
       (is (empty? (get-in result [:state :chains :cue-chains [0 0] :items 0 :effects])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))
 
 
 ;; Destination Zone Routing Tests
@@ -390,7 +391,7 @@
                  :state sample-state-with-item}
           result (cue-chain/handle event)]
       (is (= :left (get-in result [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))
 
 (deftest handle-set-item-zone-inherit
   (testing "Setting :inherit or nil zone clears :zone-group-id so item inherits"
@@ -423,7 +424,7 @@
                  :state sample-state-with-item}
           result (cue-chain/handle event)]
       (is (= :stage (get-in result [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))
 
 (deftest handle-set-item-zone-nested-group-and-child
   (testing "Setting zone on a group and its nested child independently"

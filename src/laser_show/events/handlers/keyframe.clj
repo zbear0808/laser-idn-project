@@ -161,19 +161,16 @@
         (-> state
             ;; Deactivate all per-param modulators
             (update-effect-params config effect-path deactivate-all-modulators)
-            (set-keyframe-modulator config effect-path new-mod)
-            h/mark-dirty))
+            (set-keyframe-modulator config effect-path new-mod)))
       ;; Just toggle enabled state
       (if enabled?
         ;; Re-enabling existing keyframe modulator - also deactivate modulators
         (-> state
             (update-effect-params config effect-path deactivate-all-modulators)
-            (update-keyframe-modulator config effect-path assoc :enabled? enabled?)
-            h/mark-dirty)
+            (update-keyframe-modulator config effect-path assoc :enabled? enabled?))
         ;; Disabling keyframes - just toggle
         (-> state
-            (update-keyframe-modulator config effect-path assoc :enabled? enabled?)
-            h/mark-dirty)))))
+            (update-keyframe-modulator config effect-path assoc :enabled? enabled?))))))
 
 (defn handle-update-setting
   "Update a single keyframe modulator setting.
@@ -188,8 +185,7 @@
    Returns: Updated state"
   [state config effect-path setting-key value]
   (-> state
-      (update-keyframe-modulator config effect-path assoc setting-key value)
-      h/mark-dirty))
+      (update-keyframe-modulator config effect-path assoc setting-key value)))
 
 (defn handle-select-keyframe
   "Select a keyframe for editing.
@@ -242,8 +238,7 @@
         (update-keyframe-modulator config effect-path
                                    assoc
                                    :keyframes new-keyframes
-                                   :selected-keyframe new-idx)
-        h/mark-dirty)))
+                                   :selected-keyframe new-idx))))
 
 (defn handle-move-keyframe
   "Move a keyframe to a new position.
@@ -270,8 +265,7 @@
             (update-keyframe-modulator config effect-path
                                        assoc
                                        :keyframes updated-keyframes
-                                       :selected-keyframe new-idx)
-            h/mark-dirty))
+                                       :selected-keyframe new-idx)))
       state)))
 
 (defn handle-delete-keyframe
@@ -303,8 +297,7 @@
             (update-keyframe-modulator config effect-path
                                        assoc
                                        :keyframes new-keyframes
-                                       :selected-keyframe new-selected)
-            h/mark-dirty))
+                                       :selected-keyframe new-selected)))
       state)))
 
 (defn handle-update-keyframe-param
@@ -325,8 +318,7 @@
     (if (and (>= keyframe-idx 0) (< keyframe-idx (count keyframes)))
       (-> state
           (update-keyframe-modulator config effect-path
-                                     assoc-in [:keyframes keyframe-idx :params param-key] value)
-          h/mark-dirty)
+                                     assoc-in [:keyframes keyframe-idx :params param-key] value))
       state)))
 
 (defn handle-update-spatial-params
@@ -356,8 +348,7 @@
         (if (and (>= keyframe-idx 0) (< keyframe-idx (count keyframes)))
           (-> state
               (update-keyframe-modulator config effect-path
-                                         update-in [:keyframes keyframe-idx :params] merge params)
-              h/mark-dirty)
+                                         update-in [:keyframes keyframe-idx :params] merge params))
           state))
       state)))
 
@@ -381,8 +372,7 @@
     (if (and (>= keyframe-idx 0) (< keyframe-idx (count keyframes)))
       (-> state
           (update-keyframe-modulator config effect-path
-                                     assoc-in [:keyframes keyframe-idx :interpolation] interpolation)
-          h/mark-dirty)
+                                     assoc-in [:keyframes keyframe-idx :interpolation] interpolation))
       state)))
 
 (defn handle-set-driver
@@ -404,8 +394,7 @@
    Returns: Updated state"
   [state config effect-path driver]
   (-> state
-      (update-keyframe-modulator config effect-path assoc :driver driver)
-      h/mark-dirty))
+      (update-keyframe-modulator config effect-path assoc :driver driver)))
 
 (defn handle-set-edge-behavior
   "Set edge behavior (clamp/wrap) for keyframe modulator.
@@ -423,8 +412,7 @@
    Returns: Updated state"
   [state config effect-path edge-behavior]
   (-> state
-      (update-keyframe-modulator config effect-path assoc :edge-behavior edge-behavior)
-      h/mark-dirty))
+      (update-keyframe-modulator config effect-path assoc :edge-behavior edge-behavior)))
 
 (defn handle-set-normalize
   "Set normalize flag for radial driver.
@@ -442,8 +430,7 @@
    Returns: Updated state"
   [state config effect-path normalize?]
   (-> state
-      (update-keyframe-modulator config effect-path assoc :normalize? normalize?)
-      h/mark-dirty))
+      (update-keyframe-modulator config effect-path assoc :normalize? normalize?)))
 
 
 (defn handle-update-keyframe-color-param
@@ -469,8 +456,7 @@
         (-> state
             (update-keyframe-modulator config effect-path
                                        update-in [:keyframes keyframe-idx :params]
-                                       merge {:red red :green green :blue blue})
-            h/mark-dirty))
+                                       merge {:red red :green green :blue blue})))
       state)))
 
 (defn handle

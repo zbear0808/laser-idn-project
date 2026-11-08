@@ -366,8 +366,11 @@
 ;; Wrapped Event Handler
 
 (def handle-event-pipeline
-  "Event handler pipeline wrapped with history tracking for discrete document edits."
-  (history-handlers/wrap-history handlers/handle-event))
+  "Event handler pipeline: undo history for undoable document edits, then the
+   unsaved-changes flag derived for every event (see handlers/history.clj)."
+  (-> handlers/handle-event
+      history-handlers/wrap-history
+      history-handlers/wrap-dirty))
 
 (def event-handler
   "Main event handler wrapped with co-effects and effects.

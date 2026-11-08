@@ -2,6 +2,7 @@
   "Tests for menu event handlers, focusing on Edit menu clipboard operations."
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
+   [laser-show.state.history :as history]
    [laser-show.state.core :as state]
    [laser-show.events.handlers.menu :as menu]
    [laser-show.state.domains :refer [build-initial-state]]))
@@ -71,7 +72,7 @@
                  :state state}
           result (menu/handle event)]
       (is (= clipboard-data (get-in result [:state :chains :cue-chains [1 1]])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))
 
 (deftest handle-edit-clear-cell-grid-test
   (testing "Edit > Clear Cell on grid tab clears selected cell"
@@ -79,4 +80,4 @@
                  :state sample-state-with-cues}
           result (menu/handle event)]
       (is (nil? (get-in result [:state :chains :cue-chains [0 0]])))
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))

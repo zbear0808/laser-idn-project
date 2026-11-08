@@ -80,21 +80,26 @@
                "keyframe-enabled?:" keyframe-enabled?
                "has-existing-config?:" (mod/modulator-config? current-value))
     ;; If enabling modulation and keyframes are active, disable keyframes first
-    ;; (keyframes and per-param modulators are mutually exclusive)
+    ;; (keyframes and per-param modulators are mutually exclusive).
+    ;; Both events share a coalesce key so they form one undo step.
     (if (and want-modulated? keyframe-enabled?)
-      ;; Dispatch keyframe disable, then update param
-      {:dispatch {:event/type :keyframe/toggle-enabled
-                  :domain domain
-                  :entity-key entity-key
-                  :effect-path effect-path
-                  :enabled? false}
-       :dispatch-later {:event {:event/type :chain/update-param
-                                :domain domain
-                                :entity-key entity-key
-                                :effect-path effect-path
-                                :param-key param-key
-                                :value new-value}
-                        :delay-ms 10}}
+      (let [coalesce-key [:modulator/toggle domain entity-key effect-path param-key]]
+        {:dispatch {:event/type :keyframe/toggle-enabled
+                    :domain domain
+                    :entity-key entity-key
+                    :effect-path effect-path
+                    :enabled? false
+                    :history/description "Toggle Modulation"
+                    :history/coalesce-key coalesce-key}
+         :dispatch-later {:event {:event/type :chain/update-param
+                                  :domain domain
+                                  :entity-key entity-key
+                                  :effect-path effect-path
+                                  :param-key param-key
+                                  :value new-value
+                                  :history/description "Toggle Modulation"
+                                  :history/coalesce-key coalesce-key}
+                          :delay-ms 10}})
       ;; Just update the param
       {:dispatch {:event/type :chain/update-param
                   :domain domain

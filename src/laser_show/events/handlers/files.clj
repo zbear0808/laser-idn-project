@@ -5,7 +5,8 @@
    - Save timestamps
    - Project folder/file path"
   (:require [clojure.tools.logging :as log]
-            [laser-show.events.helpers :as h]))
+            [laser-show.events.helpers :as h]
+            [laser-show.state.history :as history]))
 
 
 (defn- handle-project-mark-clean
@@ -13,7 +14,7 @@
   [{:keys [state] :as event}]
   (let [now (h/current-time-ms event)]
     {:state (-> state
-                (assoc-in [:project :dirty?] false)
+                history/mark-clean
                 (assoc-in [:project :last-saved] now))}))
 
 

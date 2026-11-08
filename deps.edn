@@ -120,9 +120,13 @@
                 org.openjfx/javafx-web$linux {:mvn/version "28-ea+11"}}}
 
   ;; Unit/integration test aliases. Always combine with a platform alias,
-  ;; e.g. clj -M:win:test. laser-show.test-runner skips laser-show.ui-test.*
-  ;; (TestFX, run via :test-ui) unless -n/-r is given. Wall-clock timing tests
-  ;; tagged ^:timing / ^:performance are excluded (run them via :test-timing).
+  ;; e.g. clj -M:win:test. They skip test/laser_show/ui_test (TestFX, run via
+  ;; :test-ui). Wall-clock timing tests tagged ^:timing / ^:performance are
+  ;; excluded (run them via :test-timing).
+  ;; Every test alias takes name patterns and --list, see
+  ;; test/laser_show/test_runner.clj:
+  ;;   clj -M:win:test history         ; tests with "history" in the name
+  ;;   clj -M:win:test --list history  ; show them without running
   :test
   {:extra-paths ["test"]
    :jvm-opts ["-Djavafx.enablePreview=true"
@@ -132,6 +136,7 @@
                                                       :git/sha "dfb30dd"}}
    :main-opts ["-m" "laser-show.test-runner"
                "-d" "test/laser_show"
+               "--skip-dir" "test/laser_show/ui_test"
                "-e" ":timing"
                "-e" ":performance"]
    :exec-fn cognitect.test-runner.api/test
@@ -146,7 +151,7 @@
               "--enable-native-access=ALL-UNNAMED"]
    :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"
                                                       :git/sha "dfb30dd"}}
-   :main-opts ["-m" "cognitect.test-runner" "-d" "test/integration"]
+   :main-opts ["-m" "laser-show.test-runner" "-d" "test/integration"]
    :exec-fn cognitect.test-runner.api/test}
 
   ;; Unit + integration tests (no UI tests, no timing tests)
@@ -160,6 +165,7 @@
    :main-opts ["-m" "laser-show.test-runner"
                "-d" "test/laser_show"
                "-d" "test/integration"
+               "--skip-dir" "test/laser_show/ui_test"
                "-e" ":timing"
                "-e" ":performance"]
    :exec-fn cognitect.test-runner.api/test
@@ -178,6 +184,7 @@
                                                       :git/sha "dfb30dd"}}
    :main-opts ["-m" "laser-show.test-runner"
                "-d" "test/laser_show"
+               "--skip-dir" "test/laser_show/ui_test"
                "-i" ":timing"
                "-i" ":performance"]}
 
@@ -186,9 +193,12 @@
   {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2026.10.26"}}
    :main-opts ["-m" "clj-kondo.main"]}
 
-  ;; UI integration tests with LLM vision verification
-  ;; Combine with a platform alias: clj -M:test-ui:win
-  ;; Requires a .env file at the project root (see .env.example)
+  ;; TestFX UI tests. Combine with a platform alias. They open real windows and
+  ;; move the mouse, so run only the tests you are working on:
+  ;;   clj -M:test-ui:win --list     ; list the UI tests
+  ;;   clj -M:test-ui:win tap-tempo  ; tests with "tap-tempo" in the name
+  ;;   clj -M:test-ui:win            ; whole suite
+  ;; The LLM vision helpers (ui_test/cases) also need a .env file (see .env.example).
   :test-ui
   {:extra-paths ["test"]
    :jvm-opts ["-Djavafx.enablePreview=true"
@@ -201,7 +211,7 @@
                 io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"
                                                       :git/sha "dfb30dd"}
                 org.testfx/testfx-core {:mvn/version "4.0.18"}}
-   :main-opts ["-m" "cognitect.test-runner"
+   :main-opts ["-m" "laser-show.test-runner"
                "-d" "test/laser_show/ui_test"]}
 
   ;; Add this alias for CI or any display-less environment. CI wraps this

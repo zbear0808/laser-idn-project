@@ -17,6 +17,7 @@
             [taoensso.timbre :as timbre]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
+            [laser-show.state.history :as history]
             [laser-show.state.templates :as templates]
             [laser-show.events.core :as events]
             [laser-show.views.root :as root]
@@ -132,7 +133,8 @@
 
   ;; Initialize with base state, then apply starter templates for fresh projects
   (state/init-state! (-> (domains/build-initial-state)
-                         (templates/apply-starter-cue-chains)))
+                         (templates/apply-starter-cue-chains)
+                         (history/mark-clean)))
 
   (init-styles!)
 
@@ -204,7 +206,8 @@
    handler and production root view remain in use."
   ([]
    (start-test! (-> (domains/build-initial-state)
-                    (templates/apply-starter-cue-chains))))
+                    (templates/apply-starter-cue-chains)
+                    (history/mark-clean))))
   ([initial-state]
    (stop!)
    (state/init-state! initial-state)

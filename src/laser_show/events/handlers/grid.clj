@@ -170,8 +170,7 @@
                        (cond-> active?
                          (-> (update-in [:playback :active-cues] dissoc [from-col from-row])
                              (assoc-in [:playback :active-cues [to-col to-row]]
-                               (get-in state [:playback :active-cues [from-col from-row]]))))
-                       h/mark-dirty)]
+                               (get-in state [:playback :active-cues [from-col from-row]])))))]
         {:state state*})
       {:state state})))
 
@@ -199,8 +198,7 @@
               (update-in [:config :input :trigger-map] remove-cell-triggers [col row] :trigger-cue)
               (cond-> (= (get-in state [:playback :active-cell]) [col row])
                 (assoc-in [:playback :active-cell] nil))
-              (update-in [:playback :active-cues] dissoc [col row])
-              h/mark-dirty)})
+              (update-in [:playback :active-cues] dissoc [col row]))})
 
 (defn- handle-grid-open-cell-editor
   "Open the appropriate editor for a cell based on its cue configuration.

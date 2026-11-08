@@ -76,12 +76,13 @@
                               :previous-project (:project state)}}})
 
 (defn- handle-file-save-failed
+  "Restore the project status from before the failed save, including the
+   previous saved baseline; the pipeline then re-derives :dirty?."
   [{:keys [state file-path previous-project]}]
   (log/error "Failed to save project:" file-path)
-  {:state (-> state
-              (assoc-in [:project :current-file] (:current-file previous-project))
-              (assoc-in [:project :last-saved] (:last-saved previous-project))
-              (assoc-in [:project :dirty?] true))})
+  {:state (update state :project merge
+                  (into {} (map (fn [k] [k (get previous-project k)]))
+                        [:current-file :last-saved :saved-document :dirty?]))})
 
 (defn- handle-file-save-as
   "Save the project to a new location using file chooser dialog."

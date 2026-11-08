@@ -6,6 +6,7 @@
    Zone groups now reference projectors instead of zones."
   (:require
    [clojure.test :refer [deftest is testing]] 
+   [laser-show.state.history :as history]
    [laser-show.events.handlers.zone-groups :as zone-groups]
    [laser-show.state.domains :refer [build-initial-state]]
    [laser-show.common.util :as u]))
@@ -83,7 +84,7 @@
       ;; New group should be selected
       (is (= (first new-group) (get-in result [:state :zone-group-ui :selected-group])))
       ;; Project should be dirty
-      (is (true? (get-in result [:state :project :dirty?])))))
+      (is (history/derive-dirty (:state event) (:state result)))))
   
   (testing "Create with defaults works"
     (let [event {:event/type :zone-groups/create-new
@@ -134,7 +135,7 @@
       ;; Selection should be cleared
       (is (nil? (get-in result [:state :zone-group-ui :selected-group])))
       ;; Project should be dirty
-      (is (true? (get-in result [:state :project :dirty?]))))))
+      (is (history/derive-dirty (:state event) (:state result))))))
 
 
 ;; Edit Dialog Tests

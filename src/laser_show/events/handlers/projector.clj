@@ -162,16 +162,18 @@
    Auto-creates projector entries for all discovered devices/services:
    - Uses deterministic IDs so re-scanning doesn't create duplicates
    - New projectors are disabled by default (enabled? = false)
-   - Existing projectors are NOT overwritten (preserves user settings)"
+   - Existing projectors are NOT overwritten (preserves user settings)
+   
+   Discovery isn't a user edit: it doesn't create an undo step, and on a clean
+   project the new projectors become part of the saved baseline."
   [{:keys [devices state]}]
   (let [;; Auto-create projectors for all discovered devices
-        state-with-projectors (reduce auto-create-projectors-for-device state devices)
-        ;; Check if any new projectors were created
-        had-new-projectors? (not= (get state :projectors) (get state-with-projectors :projectors))]
+        state-with-projectors (reduce auto-create-projectors-for-device state devices)]
     {:state (-> state-with-projectors
                 (assoc-in [:projector-ui :scanning?] false)
-                (assoc-in [:projector-ui :discovered-devices] (vec devices))
-                (cond-> had-new-projectors? h/mark-dirty))}))
+                (assoc-in [:projector-ui :discovered-devices] (vec devices)))
+     :history/skip? true
+     :document/rebase? true}))
 
 
 (defn- handle-projectors-scan-failed
@@ -196,8 +198,7 @@
     (if (seq projector-ids)
       (cond-> {:state (-> (reduce #(assoc-in %1 [:projectors %2 :enabled?] true)
                                   state
-                                  projector-ids)
-                          h/mark-dirty)}
+                                  projector-ids))}
         ;; Trigger engine refresh if streaming is active
         streaming-running? (assoc :multi-engine/refresh true))
       {:state state})))
@@ -215,8 +216,7 @@
         streaming-running? (get-in state [:backend :streaming :running?])]
     (if (get-in state [:projectors projector-id])
       (cond-> {:state (-> state
-                          (assoc-in [:projectors projector-id :enabled?] enabled-bool?)
-                          h/mark-dirty)}
+                          (assoc-in [:projectors projector-id :enabled?] enabled-bool?))}
         ;; Trigger engine refresh if streaming is active
         streaming-running? (assoc :multi-engine/refresh true))
       {:state state})))
@@ -239,8 +239,7 @@
     {:state (-> state
                 (assoc-in [:projectors projector-id] projector-config)
                 (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
-                (assoc-in [:projector-ui :active-projector] projector-id)
-                h/mark-dirty)}))
+                (assoc-in [:projector-ui :active-projector] projector-id))}))
 
 
 ;; Projector Management
@@ -269,8 +268,7 @@
                     {:projector-id projector-id
                      :updates updates})))
   {:state (-> state
-              (update-in [:projectors projector-id] merge updates)
-              h/mark-dirty)})
+              (update-in [:projectors projector-id] merge updates))})
 
 
 (defn- handle-projectors-toggle-enabled
@@ -281,8 +279,7 @@
   (let [current (boolean (get-in state [:projectors projector-id :enabled?]))
         streaming-running? (get-in state [:backend :streaming :running?])]
     (cond-> {:state (-> state
-                        (assoc-in [:projectors projector-id :enabled?] (not current))
-                        h/mark-dirty)}
+                        (assoc-in [:projectors projector-id :enabled?] (not current)))}
       ;; Trigger engine refresh if streaming is active
       streaming-running? (assoc :multi-engine/refresh true))))
 
@@ -301,8 +298,7 @@
                      (vec (remove #{zone-group-id} current-groups))
                      (conj current-groups zone-group-id))]
     {:state (-> state
-                (assoc-in [:projectors projector-id :zone-groups] new-groups)
-                h/mark-dirty)}))
+                (assoc-in [:projectors projector-id :zone-groups] new-groups))}))
 
 
 
@@ -319,8 +315,7 @@
                      (vec (remove #{zone-group-id} current-groups))
                      (conj current-groups zone-group-id))]
     {:state (-> state
-                (assoc-in [:virtual-projectors vp-id :zone-groups] new-groups)
-                h/mark-dirty)}))
+                (assoc-in [:virtual-projectors vp-id :zone-groups] new-groups))}))
 
 
 
@@ -333,8 +328,7 @@
   [{:keys [projector-id effect state]}]
   (let [effect-with-fields (h/ensure-item-fields effect)]
     {:state (-> state
-                (update-in [:chains :projector-effects projector-id :items] conj effect-with-fields)
-                h/mark-dirty)}))
+                (update-in [:chains :projector-effects projector-id :items] conj effect-with-fields))}))
 
 
 ;; TODO: Implement :projectors/insert-pasted-effects handler - insert pasted effects into projector chain at position

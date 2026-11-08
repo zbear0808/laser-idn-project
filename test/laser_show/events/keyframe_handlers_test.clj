@@ -5,6 +5,7 @@
    These handlers follow the re-frame pattern: pure functions that receive
    state as part of the event map and return effect maps with :state key."
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.state.history :as history]
             [laser-show.events.handlers.keyframe :as keyframe]
             [laser-show.events.handlers.chain :as chain]
             [laser-show.common.util :as u]))
@@ -102,7 +103,7 @@
   (testing "Marks project dirty"
     (let [state (make-test-state [sample-effect])
           result (keyframe/handle-toggle-enabled state sample-config [0] true)]
-      (is (true? (get-in result [:project :dirty?])) "Project should be marked dirty"))))
+      (is (history/derive-dirty state result) "Project should be marked dirty"))))
 
 
 (deftest handle-update-setting-test
@@ -380,7 +381,7 @@
   (testing "Marks project dirty"
     (let [state (make-test-state [sample-effect-with-keyframes])
           result (keyframe/handle-set-interpolation state sample-config [0] 0 :step)]
-      (is (true? (get-in result [:project :dirty?]))))))
+      (is (history/derive-dirty state result)))))
 
 
 (deftest handle-add-keyframe-with-interpolation-test

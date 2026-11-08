@@ -2,13 +2,11 @@
   "Shared helper functions for event handlers.
    
    These utilities are used across multiple event handler modules to maintain
-   consistent behavior and avoid code duplication.")
+   consistent behavior and avoid code duplication.
+   
+   Note: handlers never set [:project :dirty?]. The event pipeline derives it
+   (laser-show.events.handlers.history/wrap-dirty).")
 
-
-(defn mark-dirty
-  "Mark project as having unsaved changes."
-  [state]
-  (assoc-in state [:project :dirty?] true))
 
 (defn current-time-ms
   "Get current time from event or system.
@@ -94,9 +92,7 @@
     (if (and cb (= expected-type (:type cb)))
       (let [data (:data cb)
             transformed-data (if transform-fn (transform-fn data) data)]
-        {:state (-> state
-                    (assoc-in target-path transformed-data)
-                    mark-dirty)})
+        {:state (assoc-in state target-path transformed-data)})
       {:state state})))
 
 (defn first-some

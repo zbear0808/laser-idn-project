@@ -10,6 +10,7 @@
    - Path-based selection with Ctrl/Shift modifiers"
   (:require
    [clojure.test :refer [deftest is testing]]
+   [laser-show.state.history :as history]
    [clojure.string :as str]
    [laser-show.events.handlers.projector :as projectors]
    [laser-show.state.domains :refer [build-initial-state]]))
@@ -118,7 +119,7 @@
         (is (true? (:enabled? new-effect))))
       
       ;; Project should be marked dirty
-      (is (true? (get-in result [:state :project :dirty?])))))
+      (is (history/derive-dirty (:state event) (:state result)))))
   
   (testing "Adds corner-pin calibration effect"
     (let [event {:event/type :projectors/add-effect

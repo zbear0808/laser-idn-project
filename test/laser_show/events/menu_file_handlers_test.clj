@@ -96,13 +96,15 @@
     (is (not (contains? result :project/save)))))
 
 (deftest save-failed-restores-project-status-test
-  (let [saved (:state (menu/handle {:event/type :file/save-as-result
-                                    :file-path test-file
-                                    :state document-state}))
-        result (menu/handle {:event/type :file/save-failed
-                             :file-path test-file
-                             :previous-project (:project document-state)
-                             :state saved})]
+  (let [pipeline events/handle-event-pipeline
+        saved (:state (pipeline {:event/type :file/save-as-result
+                                 :file-path test-file
+                                 :state document-state}))
+        result (pipeline {:event/type :file/save-failed
+                          :file-path test-file
+                          :previous-project (:project document-state)
+                          :state saved})]
+    (is (false? (get-in saved [:project :dirty?])))
     (is (nil? (get-in result [:state :project :current-file])))
     (is (true? (get-in result [:state :project :dirty?])))))
 

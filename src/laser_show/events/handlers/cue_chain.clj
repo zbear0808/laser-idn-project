@@ -84,8 +84,7 @@
   (let [new-preset (h/ensure-item-fields (cue-chains/create-preset-instance item-id {}))
         new-preset-id (:id new-preset)]
     {:state (-> state
-                (update-in (cue-chain-path col row) conj new-preset)
-                h/mark-dirty)
+                (update-in (cue-chain-path col row) conj new-preset))
      :dispatch {:event/type :list/select-item
                 :component-id [:cue-chain col row]
                 :item-id new-preset-id
@@ -113,8 +112,7 @@
         target-path (vec (concat [:chains :cue-chains [col row] :items] parent-path))
         current-effects (get-in state target-path [])]
     {:state (-> state
-                (assoc-in target-path (conj current-effects new-effect))
-                h/mark-dirty)
+                (assoc-in target-path (conj current-effects new-effect)))
      :dispatch {:event/type :list/select-item
                 :component-id [:item-effects col row]
                 :item-id new-effect-id
@@ -151,8 +149,7 @@
   [{:keys [col row item-path items state]}]
   (let [effects-path (vec (concat (cue-chain-path col row) item-path [:effects]))]
     {:state (-> state
-                (assoc-in effects-path items)
-                h/mark-dirty)}))
+                (assoc-in effects-path items))}))
 
 
 ;; Clipboard Operations
@@ -193,8 +190,7 @@
         actual-group-id (or group-id (:id event))
         dest-zone-path [:chains :cue-chains [col row] :destination-zone :zone-group-id]]
     {:state (-> state
-                (assoc-in dest-zone-path actual-group-id)
-                h/mark-dirty)}))
+                (assoc-in dest-zone-path actual-group-id))}))
 
 
 (defn- handle-cue-chain-set-item-zone
@@ -209,7 +205,7 @@
       (let [updated-state (if (and selected-zone (not= selected-zone :inherit))
                             (assoc-in state (conj target-path :zone-group-id) selected-zone)
                             (update-in state target-path dissoc :zone-group-id))]
-        {:state (h/mark-dirty updated-state)})
+        {:state updated-state})
       {:state state})))
 
 
@@ -223,8 +219,7 @@
   (let [name-path [:chains :cue-chains [col row] :name]]
     {:state (-> state
                 (assoc-in name-path (when (seq name) name))
-                (assoc-in [:ui :dialogs :cue-chain-editor :editing-name?] false)
-                h/mark-dirty)}))
+                (assoc-in [:ui :dialogs :cue-chain-editor :editing-name?] false))}))
 
 
 ;; Trigger Mode Operations
@@ -242,8 +237,7 @@
         mode-path [:chains :cue-chains [col row] :trigger-mode]]
     (log/debug "Setting per-cue trigger mode:" {:col col :row row :mode mode :fx-event event})
     {:state (-> state
-                (assoc-in mode-path mode)
-                h/mark-dirty)}))
+                (assoc-in mode-path mode))}))
 
 
 ;; Public API

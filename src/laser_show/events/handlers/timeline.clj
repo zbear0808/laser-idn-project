@@ -226,8 +226,7 @@
       {:state state}
       {:state (-> state
                   (update-in items-path #(list-helpers/remove-by-ids (or % []) selection))
-                  (assoc-in [:ui :timeline :selection] #{})
-                  h/mark-dirty)})))
+                  (assoc-in [:ui :timeline :selection] #{}))})))
 
 
 ;; Loop Timing
@@ -248,8 +247,7 @@
                        (:duration current-loop 4.0))
         updated-loop (assoc current-loop :start new-start :duration new-duration)]
     {:state (-> state
-                (assoc-in loop-path updated-loop)
-                h/mark-dirty)}))
+                (assoc-in loop-path updated-loop))}))
 
 (defn- handle-toggle-loop
   "Toggle the loop enabled state for a cue-chain."
@@ -258,8 +256,7 @@
         current-loop (get-in state loop-path {:enabled? false :start 0.0 :duration 4.0})
         updated-loop (update current-loop :enabled? not)]
     {:state (-> state
-                (assoc-in loop-path updated-loop)
-                h/mark-dirty)}))
+                (assoc-in loop-path updated-loop))}))
 
 
 ;; Item Timing
@@ -288,8 +285,7 @@
                                   (max min-duration
                                        (snap-value duration snap-size snap-enabled?))))))]
     {:state (-> state
-                (assoc-in items-path updated-items)
-                h/mark-dirty)}))
+                (assoc-in items-path updated-items))}))
 
 (defn- handle-nudge-selection
   "Move all selected items by delta-beats."
@@ -311,8 +307,8 @@
                        items
                        selection)]
     {:state (-> state
-                (assoc-in items-path updated-items)
-                h/mark-dirty)}))
+                (assoc-in items-path updated-items))
+     :history/coalesce-key [:timeline/nudge-selection col row]}))
 
 (defn- handle-resize-selection
   "Adjust duration (and optionally start) of selected items.
@@ -346,8 +342,7 @@
                        items
                        selection)]
     {:state (-> state
-                (assoc-in items-path updated-items)
-                h/mark-dirty)}))
+                (assoc-in items-path updated-items))}))
 
 
 ;; Track Expand/Collapse
@@ -373,8 +368,7 @@
   [{:keys [col row items state]}]
   (let [tracks-path [:chains :cue-chains [col row] :tracks]]
     {:state (-> state
-                (assoc-in tracks-path (vec items))
-                h/mark-dirty)}))
+                (assoc-in tracks-path (vec items)))}))
 
 (defn- handle-move-item-to-track
   "Reassign an item to a different track.
@@ -386,12 +380,12 @@
                        items item-id
                        #(assoc % :track-id track-id))]
     {:state (-> state
-                (assoc-in items-path updated-items)
-                h/mark-dirty)}))
+                (assoc-in items-path updated-items))}))
 
 (defn- handle-init-tracks
   "Auto-initialize tracks for a cue chain that has none.
-   Uses auto-initialize-tracks from track-logic."
+   Uses auto-initialize-tracks from track-logic. This is setup, not a user
+   edit: no undo step, and it doesn't make a clean project unsaved."
   [{:keys [col row zone-groups state]}]
   (let [chain-path [:chains :cue-chains [col row]]
         cue-chain (get-in state chain-path)]
@@ -399,8 +393,9 @@
       {:state state} ;; Already has tracks, no-op
       (let [updated-chain (tl/auto-initialize-tracks cue-chain (or zone-groups {}))]
         {:state (-> state
-                    (assoc-in chain-path updated-chain)
-                    h/mark-dirty)}))))
+                    (assoc-in chain-path updated-chain))
+         :history/skip? true
+         :document/rebase? true}))))
 
 (defn- handle-set-track-zone
   "Set or clear the zone group assignment on a track or folder.
@@ -413,8 +408,7 @@
                              (assoc-in (vec tracks) (conj path :zone-group-id) zone-group-id)
                              (update-in (vec tracks) path dissoc :zone-group-id))]
         {:state (-> state
-                    (assoc-in tracks-path updated-tracks)
-                    h/mark-dirty)})
+                    (assoc-in tracks-path updated-tracks))})
       {:state state})))
 
 (defn- handle-set-clip-zone
@@ -428,8 +422,7 @@
                             (assoc-in (vec items) (conj path :zone-group-id) zone-group-id)
                             (update-in (vec items) path dissoc :zone-group-id))]
         {:state (-> state
-                    (assoc-in items-path updated-items)
-                    h/mark-dirty)})
+                    (assoc-in items-path updated-items))})
       {:state state})))
 
 (defn- handle-add-track
@@ -447,8 +440,7 @@
     {:state (-> state
                 (assoc-in tracks-path updated-tracks)
                 (assoc-in [:list-ui :timeline-tracks :selected-ids] #{new-track-id})
-                (assoc-in [:list-ui :timeline-tracks :last-selected-id] new-track-id)
-                h/mark-dirty)}))
+                (assoc-in [:list-ui :timeline-tracks :last-selected-id] new-track-id))}))
 
 (defn- handle-add-folder
   "Appends a new track folder to the cue chain's tracks.
@@ -465,8 +457,7 @@
                           :items [])
         updated-tracks (conj tracks new-folder)]
     {:state (-> state
-                (assoc-in tracks-path updated-tracks)
-                h/mark-dirty)}))
+                (assoc-in tracks-path updated-tracks))}))
 
 (defn- handle-select-track
   "Set the currently selected track ID."
@@ -535,8 +526,7 @@
                 (update-in items-path (fnil conj []) new-preset)
                 (assoc-in [:ui :timeline :cursor-beat] next-cursor)
                 (assoc-in [:list-ui :timeline-tracks :selected-ids] #{resolved-track-id})
-                (assoc-in [:list-ui :timeline-tracks :last-selected-id] resolved-track-id)
-                h/mark-dirty)
+                (assoc-in [:list-ui :timeline-tracks :last-selected-id] resolved-track-id))
      ;; Select the newly added item on the timeline
      :dispatch {:event/type :timeline/select-items
                 :ids [new-id]
@@ -560,8 +550,7 @@
                                    (fnil conj []) new-effect)
                         items)]
     {:state (-> state
-                (assoc-in items-path updated-items)
-                h/mark-dirty)}))
+                (assoc-in items-path updated-items))}))
 
 
 ;; Open Editor (initialize timeline data on first open)
@@ -606,12 +595,14 @@
                                       (tl/auto-initialize-tracks chain-with-items zone-groups))
                               true (assoc :editor-type :timeline))]
             (-> state
-                (assoc-in chain-path final-chain)
-                h/mark-dirty)))]
-    {:state updated-state
-     :dispatch {:event/type :ui/open-dialog
-                :dialog-id :timeline-cue-editor
-                :data {:col col :row row}}}))
+                (assoc-in chain-path final-chain))))]
+    (cond-> {:state updated-state
+             :dispatch {:event/type :ui/open-dialog
+                        :dialog-id :timeline-cue-editor
+                        :data {:col col :row row}}}
+      ;; Initialising timeline fields is setup, not a user edit
+      (not (identical? updated-state state)) (assoc :history/skip? true
+                                                    :document/rebase? true))))
 
 
 ;; Public API

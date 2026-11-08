@@ -159,7 +159,8 @@
         {:state (update-in state [:list-ui component-id] merge clear-drag-state)
          :dispatch (assoc on-change-params
                           :event/type on-change-event
-                          :items new-items)})
+                          :items new-items
+                          :history/description "Reorder Items")})
       {:state (update-in state [:list-ui component-id] merge clear-drag-state)})))
 
 
@@ -225,7 +226,8 @@
         {:state cleared-state
          :dispatch (assoc on-change-params
                           :event/type on-change-event
-                          :items new-items)})
+                          :items new-items
+                          :history/description "Delete Item(s)")})
       {:state state})))
 
 
@@ -270,7 +272,8 @@
         {:state new-state
          :dispatch (assoc on-change-params
                           :event/type on-change-event
-                          :items new-items)})
+                          :items new-items
+                          :history/description "Paste Item(s)")})
       {:state state})))
 
 
@@ -288,7 +291,8 @@
                              :renaming-id nil})
            :dispatch (assoc on-change-params
                             :event/type on-change-event
-                            :items items)}
+                            :items items
+                            :history/description "Group Items")}
           (do
             (log/warn "group-selected - items not at same level")
             {:state state})))
@@ -315,7 +319,8 @@
     {:state new-state
      :dispatch (assoc on-change-params
                       :event/type on-change-event
-                      :items new-items)}))
+                      :items new-items
+                      :history/description "Add Group")}))
 
 
 (defn- handle-ungroup
@@ -330,7 +335,8 @@
                          :renaming-id nil})
        :dispatch (assoc on-change-params
                         :event/type on-change-event
-                        :items new-items)}
+                        :items new-items
+                        :history/description "Ungroup")}
       {:state state})))
 
 
@@ -342,7 +348,8 @@
     {:state state
      :dispatch (assoc on-change-params
                       :event/type on-change-event
-                      :items new-items)}))
+                      :items new-items
+                      :history/description "Collapse Group")}))
 
 
 (defn- handle-commit-rename
@@ -354,7 +361,8 @@
     {:state new-state
      :dispatch (assoc on-change-params
                       :event/type on-change-event
-                      :items new-items)}))
+                      :items new-items
+                      :history/description "Rename Item")}))
 
 
 (defn- handle-set-enabled
@@ -365,7 +373,8 @@
     {:state state
      :dispatch (assoc on-change-params
                       :event/type on-change-event
-                      :items new-items)}))
+                      :items new-items
+                      :history/description "Enable/Disable Item")}))
 
 
 ;; Public API
