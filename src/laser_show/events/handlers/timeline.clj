@@ -18,6 +18,7 @@
             [laser-show.events.helpers :as h]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.cue-chains :as cue-chains]
+            [laser-show.events.handlers.list.helpers :as list-helpers]
             [laser-show.views.components.visual-editors.timeline.track-logic :as tl])
   (:import [javafx.scene.control ScrollPane]
            [javafx.scene Node]
@@ -214,6 +215,19 @@
   "Clear all selected items."
   [{:keys [state]}]
   {:state (assoc-in state [:ui :timeline :selection] #{})})
+
+(defn- handle-delete-selection
+  "Delete the selected clips from the cue chain and clear the selection.
+   No-op when nothing is selected."
+  [{:keys [col row state]}]
+  (let [items-path [:chains :cue-chains [col row] :items]
+        selection (get-in state [:ui :timeline :selection] #{})]
+    (if (empty? selection)
+      {:state state}
+      {:state (-> state
+                  (update-in items-path #(list-helpers/remove-by-ids (or % []) selection))
+                  (assoc-in [:ui :timeline :selection] #{})
+                  h/mark-dirty)})))
 
 
 ;; Loop Timing
@@ -622,6 +636,7 @@
     ;; Selection
     :timeline/select-items (handle-select-items event)
     :timeline/clear-selection (handle-clear-selection event)
+    :timeline/delete-selection (handle-delete-selection event)
     :timeline/select-track (handle-select-track event)
     :timeline/set-cursor-beat (handle-set-cursor-beat event)
 
