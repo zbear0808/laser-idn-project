@@ -10,7 +10,7 @@
             [laser-show.dev-config :as dev-config]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.state.persistent :as persistent]
-            [laser-show.state.core :as state]
+            [laser-show.events.helpers :as h]
             [laser-show.events.handlers.grid :as grid]
             [laser-show.events.handlers.effects :as effects]
             [laser-show.events.handlers.history :as history]))
@@ -21,12 +21,13 @@
 
 
 (defn- handle-file-new-project
-  "Create a new project."
+  "Replace the document with a fresh starter project.
+   Backend/runtime state (streaming, Link, MIDI/OSC) is left untouched."
   [{:keys [state]}]
   (log/info "File > New Project")
   ;; TODO: Show confirmation dialog if project is dirty
-  (persistent/new-project!)
-  {:state (state/get-raw-state)})
+  {:state (persistent/new-project-state state)
+   :multi-engine/refresh true})
 
 (defn- handle-file-open
   "Open a project from disk using file chooser dialog."
@@ -41,17 +42,46 @@
                           :on-result {:event/type :file/open-result}}})
 
 (defn- handle-file-open-result
-  "Handle result from open file dialog."
-  [{:keys [state file-path]}]
+  "Handle result from open file dialog by requesting a project read."
+  [{:keys [file-path]}]
   (if file-path
     (do
       (log/info "Opening project:" file-path)
-      (persistent/load-project! file-path)
-      (let [fresh-state (state/get-raw-state)
-            cleared (assoc fresh-state :history {:undo-stack [] :redo-stack [] :transaction nil})]
-        (state/reset-state! cleared)
-        {:state cleared}))
-    {:state state}))
+      {:project/load {:file-path file-path
+                      :on-loaded {:event/type :file/project-loaded}
+                      :on-failed {:event/type :file/project-load-failed}}})
+    {}))
+
+(defn- handle-file-project-loaded
+  "Replace the document with the loaded project contents."
+  [{:keys [state file-path contents]}]
+  (log/info "Project loaded:" file-path)
+  {:state (persistent/apply-loaded-project state contents file-path)
+   :multi-engine/refresh true})
+
+(defn- handle-file-project-load-failed
+  [{:keys [file-path]}]
+  (log/error "Failed to open project:" file-path)
+  {})
+
+(defn- save-to
+  "Mark the project saved to file-path and request the zip write.
+   If the write fails, :file/save-failed restores the previous project status."
+  [{:keys [state] :as event} file-path]
+  (log/info "Saving project to:" file-path)
+  {:state (persistent/mark-saved state file-path (h/current-time-ms event))
+   :project/save {:file-path file-path
+                  :files (persistent/project-files state)
+                  :on-failed {:event/type :file/save-failed
+                              :previous-project (:project state)}}})
+
+(defn- handle-file-save-failed
+  [{:keys [state file-path previous-project]}]
+  (log/error "Failed to save project:" file-path)
+  {:state (-> state
+              (assoc-in [:project :current-file] (:current-file previous-project))
+              (assoc-in [:project :last-saved] (:last-saved previous-project))
+              (assoc-in [:project :dirty?] true))})
 
 (defn- handle-file-save-as
   "Save the project to a new location using file chooser dialog."
@@ -75,24 +105,17 @@
 
 (defn- handle-file-save
   "Save the current project."
-  [{:keys [state]}]
-  (let [current-file (get-in state [:project :current-file])]
-    (if current-file
-      (do
-        (log/info "Saving project to:" current-file)
-        (persistent/save-project! current-file)
-        {:state state})
-      ;; No current file, trigger Save As
-      (handle-file-save-as {:state state}))))
+  [{:keys [state] :as event}]
+  (if-let [current-file (get-in state [:project :current-file])]
+    (save-to event current-file)
+    ;; No current file, trigger Save As
+    (handle-file-save-as event)))
 
 (defn- handle-file-save-as-result
   "Handle result from save-as file dialog."
-  [{:keys [state file-path]}]
+  [{:keys [state file-path] :as event}]
   (if file-path
-    (do
-      (log/info "Saving project as:" file-path)
-      (persistent/save-project! file-path)
-      {:state state})
+    (save-to event file-path)
     {:state state}))
 
 (defn- handle-file-export
@@ -299,9 +322,12 @@
     :file/new-project (handle-file-new-project event)
     :file/open (handle-file-open event)
     :file/open-result (handle-file-open-result event)
+    :file/project-loaded (handle-file-project-loaded event)
+    :file/project-load-failed (handle-file-project-load-failed event)
     :file/save (handle-file-save event)
     :file/save-as (handle-file-save-as event)
     :file/save-as-result (handle-file-save-as-result event)
+    :file/save-failed (handle-file-save-failed event)
     :file/export (handle-file-export event)
     :file/exit (handle-file-exit event)
     
