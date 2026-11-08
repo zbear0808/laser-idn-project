@@ -119,6 +119,10 @@
                 org.openjfx/javafx-swing$linux {:mvn/version "28-ea+11"}
                 org.openjfx/javafx-web$linux {:mvn/version "28-ea+11"}}}
 
+  ;; Unit/integration test aliases. Always combine with a platform alias,
+  ;; e.g. clj -M:win:test. laser-show.test-runner skips laser-show.ui-test.*
+  ;; (TestFX, run via :test-ui) unless -n/-r is given. Wall-clock timing tests
+  ;; tagged ^:timing / ^:performance are excluded (run them via :test-timing).
   :test
   {:extra-paths ["test"]
    :jvm-opts ["-Djavafx.enablePreview=true"
@@ -126,10 +130,14 @@
               "--enable-native-access=ALL-UNNAMED"]
    :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"
                                                       :git/sha "dfb30dd"}}
-   :main-opts ["-m" "cognitect.test-runner"
-               "-d" "test/idn_hello"
-               "-d" "test/laser_show"]
-   :exec-fn cognitect.test-runner.api/test}
+   :main-opts ["-m" "laser-show.test-runner"
+               "-d" "test/laser_show"
+               "-e" ":timing"
+               "-e" ":performance"]
+   :exec-fn cognitect.test-runner.api/test
+   :exec-args {:dirs ["test/laser_show"]
+               :patterns ["^(?!laser-show\\.ui-test\\.).*-test$"]
+               :excludes [:timing :performance]}}
 
   :test-integration
   {:extra-paths ["test"]
@@ -141,6 +149,7 @@
    :main-opts ["-m" "cognitect.test-runner" "-d" "test/integration"]
    :exec-fn cognitect.test-runner.api/test}
 
+  ;; Unit + integration tests (no UI tests, no timing tests)
   :test-all
   {:extra-paths ["test"]
    :jvm-opts ["-Djavafx.enablePreview=true"
@@ -148,8 +157,34 @@
               "--enable-native-access=ALL-UNNAMED"]
    :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"
                                                       :git/sha "dfb30dd"}}
-   :main-opts ["-m" "cognitect.test-runner"]
-   :exec-fn cognitect.test-runner.api/test}
+   :main-opts ["-m" "laser-show.test-runner"
+               "-d" "test/laser_show"
+               "-d" "test/integration"
+               "-e" ":timing"
+               "-e" ":performance"]
+   :exec-fn cognitect.test-runner.api/test
+   :exec-args {:dirs ["test/laser_show" "test/integration"]
+               :patterns ["^(?!laser-show\\.ui-test\\.).*-test$"]
+               :excludes [:timing :performance]}}
+
+  ;; Wall-clock timing/precision tests only. Sensitive to OS timer resolution
+  ;; and machine load, so not part of :test. Use: clj -M:win:test-timing
+  :test-timing
+  {:extra-paths ["test"]
+   :jvm-opts ["-Djavafx.enablePreview=true"
+              "-Djavafx.suppressPreviewWarning=true"
+              "--enable-native-access=ALL-UNNAMED"]
+   :extra-deps {io.github.cognitect-labs/test-runner {:git/tag "v0.5.1"
+                                                      :git/sha "dfb30dd"}}
+   :main-opts ["-m" "laser-show.test-runner"
+               "-d" "test/laser_show"
+               "-i" ":timing"
+               "-i" ":performance"]}
+
+  ;; Linter. Use: clj -M:kondo --lint src test dev
+  :kondo
+  {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2026.10.26"}}
+   :main-opts ["-m" "clj-kondo.main"]}
 
   ;; UI integration tests with LLM vision verification
   ;; Combine with a platform alias: clj -M:test-ui:win
