@@ -113,6 +113,7 @@
   "Tap tempo button."
   [{:keys [fx/context]}]
   {:fx/type :button
+   :id "tap-tempo-btn"
    :pref-width 50
    :text "TAP"
    :graphic {:fx/type fa/icon
@@ -120,9 +121,7 @@
              :size 16}
    :style-class "transport-btn"
    :tooltip {:fx/type :tooltip :text "Tap to set BPM"}
-   :on-action (fn [_]
-                {:event/type :timing/tap-tempo
-                 :time (System/currentTimeMillis)})})
+   :on-action {:event/type :timing/tap-tempo}})
 
 (defn beat-square
   "Individual beat square in the indicator."
