@@ -39,7 +39,8 @@
             [laser-show.backend.multi-engine :as multi-engine]
             [laser-show.common.util :as u]
             [laser-show.dev-config :as dev-config]
-            [laser-show.idn.hello :as idn-hello])
+            [laser-show.idn.hello :as idn-hello]
+            [laser-show.input.link :as link])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
            [javafx.application Platform]
            [java.awt Desktop Desktop$Action]
@@ -191,6 +192,13 @@
         (log/debug e "Network scan stack trace")
         (dispatch {:event/type :projectors/scan-failed
                    :error (.getMessage e)})))))
+
+;; Link Effects
+
+(defn- effect-link-sync-to-downbeat
+  "Effect that queries Link's beat phase and dispatches a phase correction."
+  [{:keys [accumulated-beats]} dispatch]
+  (link/sync-to-downbeat! dispatch accumulated-beats))
 
 ;; System Effects
 
@@ -375,6 +383,7 @@
    - :dispatch - dispatch another event
    - :dispatch-later - dispatch event after delay
    - :timing/calculate-bpm - calculate BPM from taps
+   - :link/sync-to-downbeat - align phase to Link's downbeat
    - :multi-engine/start - start multi-engine streaming to all projectors
    - :multi-engine/stop - stop multi-engine streaming
    - :multi-engine/refresh - refresh engines when projectors change
@@ -401,6 +410,7 @@
         :dispatch effect-dispatch
         :dispatch-later effect-dispatch-later
         :timing/calculate-bpm effect-timing-calculate-bpm
+        :link/sync-to-downbeat effect-link-sync-to-downbeat
         ;; Multi-engine streaming (zone-aware system)
         :multi-engine/start effect-multi-engine-start
         :multi-engine/stop effect-multi-engine-stop

@@ -14,6 +14,7 @@
             [laser-show.events.helpers :as h]
             [laser-show.input.link :as link]
             [laser-show.routing.zone-effects :as ze]
+            [laser-show.state.extractors :as ex]
             [clojure.tools.logging :as log]))
 
 
@@ -105,11 +106,11 @@
 
 (defn- handle-timing-sync-to-downbeat
   "Synchronize playback to Link's next downbeat.
-   Uses phase-offset-target mechanism for smooth correction."
-  [{:keys [state dispatch-fn]}]
-  (let [accumulated-beats (get-in state [:playback :accumulated-beats] 0.0)]
-    (link/sync-to-downbeat! dispatch-fn accumulated-beats)
-    {:state state}))
+   Uses phase-offset-target mechanism for smooth correction.
+   The Link query runs in the :link/sync-to-downbeat effect, which dispatches
+   :timing/set-phase-offset-target."
+  [{:keys [state]}]
+  {:link/sync-to-downbeat {:accumulated-beats (ex/global-accumulated-beats state)}})
 
 (defn- handle-timing-set-phase-offset-target
   "Set the phase offset target for beat alignment.
