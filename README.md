@@ -53,10 +53,25 @@ See [`src/laser_show/input/`](src/laser_show/input/) for implementation details.
 
 ## Testing
 
-Run all tests:
+Run the unit tests (add your platform alias: `:win`, `:mac`, `:mac-arm` or
+`:linux`). This skips the TestFX UI namespaces and wall-clock timing tests:
 
 ```bash
-clj -M:test
+clj -M:win:test
+```
+
+Run one unit test namespace:
+
+```bash
+clj -M:win:test -n laser-show.events.grid-handlers-test
+```
+
+Other test aliases:
+
+```bash
+clj -M:win:test-integration   # test/integration only
+clj -M:win:test-all           # unit + integration
+clj -M:win:test-timing        # timing-precision tests (OS/load sensitive)
 ```
 
 Run the TestFX UI suite locally with a visible window:

@@ -23,15 +23,20 @@ Use this workflow whenever a change affects JavaFX views, UI event handlers, sub
    clj -M:test-ui:win -v laser-show.ui-test.<namespace/<test-var>
    ```
 
-5. Run the related non-UI unit tests for changed handlers, state, subscriptions, or pure view logic.
+5. Run the related non-UI unit tests for changed handlers, state, subscriptions, or pure view logic:
+
+   ```powershell
+   clj -M:win:test -n laser-show.<namespace>-test
+   ```
+
 6. Only after the focused checks pass, run the complete UI suite and the complete unit suite as the final regression check:
 
    ```powershell
    clj -M:test-ui:win:test-ui-headless
-   clj -M:test
+   clj -M:win:test
    ```
 
-On Linux/CI, run the UI command through the repository's Xvfb wrapper and include the `:linux` alias.
+Always include a platform alias (`:win`, `:mac`, `:mac-arm` or `:linux`); without one the tests run against a different JavaFX version than the app ships. On Linux/CI, run the UI command through the repository's Xvfb wrapper and include the `:linux` alias.
 
 ## Selection guidance
 

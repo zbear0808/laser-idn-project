@@ -79,7 +79,8 @@ clj -M:win:dev:laser-show
 
 ### Testing
 ```bash
-clj -M:test  # Note: test coverage is incomplete
+clj -M:win:test  # unit tests; use :mac/:mac-arm/:linux on other platforms. Coverage is incomplete
+clj -M:win:test -n laser-show.events.grid-handlers-test  # one unit test namespace
 
 # Local TestFX UI tests (visible JavaFX window)
 clj -M:test-ui:win
@@ -108,7 +109,7 @@ the change. Before considering UI work complete, after focused checks pass:
 
 1. Run the relevant unit tests.
 2. Run `clj -M:test-ui:win:test-ui-headless` locally when JavaFX is available.
-3. Run `clj -M:test` for the complete unit suite.
+3. Run `clj -M:win:test` (or your platform alias) for the complete unit suite.
 4. Ensure the GitHub Actions `Run headless UI tests` job passes.
 
 New interactive controls should have stable JavaFX `:id` values so they can be
