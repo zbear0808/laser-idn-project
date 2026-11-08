@@ -24,6 +24,9 @@
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.link :as link]
             [laser-show.input.gamepad :as gamepad]
+            [laser-show.input.midi :as midi]
+            [laser-show.input.osc :as osc]
+            [laser-show.input.router :as router]
             [laser-show.css.title-bar :as menus]
             [laser-show.dev-config :as dev-config]
             [clojure.pprint :as pprint])
@@ -157,11 +160,26 @@
   ;; Start fast-path global input mapper for Midi/OSC/Keyboard events
   (input-mapper/start-mapper!)
 
-  ;; Start Gamepad input parsing thread
-  (gamepad/start! events/dispatch!)
+  ;; Start Gamepad input parsing thread. Events go to the input router (like
+  ;; MIDI/OSC), not the cljfx event pipeline.
+  (gamepad/start! router/dispatch!
+                  #(get-in (state/get-raw-state) [:backend :input :gamepad :enabled?] true))
 
   (log/info "Laser Show application started.")
   @*app)
+
+(defn- stop-input-devices!
+  "Stop the gamepad poller and release MIDI ports and the OSC socket."
+  []
+  (gamepad/stop!)
+  (try
+    (when (get-in (state/get-raw-state) [:backend :input])
+      (state/swap-state! (fn [s]
+                           (-> s
+                               (update-in [:backend :input :midi] midi/disconnect-all)
+                               (update-in [:backend :input :osc] osc/stop-server)))))
+    (catch Exception e
+      (log/warn "Error releasing input devices:" (.getMessage e)))))
 
 (defn stop!
   "Stop the mounted cljfx application and release application-owned services.
@@ -172,6 +190,7 @@
   (when-let [{:keys [renderer]} @*app]
     (fx/unmount-renderer (state/get-context-atom) renderer))
   (input-mapper/stop-mapper!)
+  (stop-input-devices!)
   (reset! *app nil)
   (when (dev-config/dev-mode?)
     (Platform/setImplicitExit false))

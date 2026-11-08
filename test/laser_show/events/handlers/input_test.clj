@@ -84,3 +84,11 @@
         (is (nil? (pending)))))
     (finally
       (router/clear-handlers!))))
+
+(deftest gamepad-enable-disable-test
+  (let [state (initial-state)
+        disabled (run state :input/gamepad-disable)
+        enabled (run disabled :input/gamepad-enable)]
+    (is (true? (get-in state [:backend :input :gamepad :enabled?])))
+    (is (false? (get-in disabled [:backend :input :gamepad :enabled?])))
+    (is (true? (get-in enabled [:backend :input :gamepad :enabled?])))))

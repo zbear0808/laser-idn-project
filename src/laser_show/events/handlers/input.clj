@@ -200,6 +200,16 @@
     {:state (assoc-in state (osc-path) updated-osc)}))
 
 
+;; Gamepad Event Handlers
+
+
+(defn- handle-gamepad-set-enabled
+  "Enable or disable gamepad input. The poll thread checks this flag every
+   poll, so no device work happens here."
+  [{:keys [state]} enabled?]
+  {:state (assoc-in state [:backend :input :gamepad :enabled?] enabled?)})
+
+
 ;; Generalized Trigger Handlers
 
 ;; The promise the current learn future is waiting on. Delivering nil to it
@@ -327,6 +337,10 @@
     :input/osc-load-default-mappings (handle-osc-load-default-mappings event)
     :input/osc-start-learn (handle-osc-start-learn event)
     :input/osc-cancel-learn (handle-osc-cancel-learn event)
+
+    ;; Gamepad events
+    :input/gamepad-enable (handle-gamepad-set-enabled event true)
+    :input/gamepad-disable (handle-gamepad-set-enabled event false)
 
     ;; Generalized triggers
     :input/start-learn (handle-input-start-learn event)
