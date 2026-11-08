@@ -166,12 +166,29 @@
 ;; These compose from simpler subscriptions for better cache reuse.
 
 
+(defn cue-cell-chain
+  "Cue chain stored at [col row], or {:items []} when the cell is empty.
+   Only depends on this cell's entry, not the whole :chains domain."
+  [context col row]
+  (fx/sub-val context get-in [:chains :cue-chains [col row]] {:items []}))
+
+(defn- active-cue? [state cell]
+  (contains? (ex/active-cues state) cell))
+
+(defn cue-cell-active?
+  "True if the cue at [col row] is playing.
+   Returns a boolean, so the 30 Hz per-cue timing updates in active-cues
+   don't invalidate subscribers."
+  [context col row]
+  (fx/sub-val context active-cue? [col row]))
+
 (defn cell-display-data
   "Computed display data for a grid cell.
    
    Depends on:
-   - chains domain (for cue chain content)
-   - active-cell (for active state)
+   - cue-cell-chain (this cell's cue chain)
+   - cue-cell-active? (whether this cell is playing)
+   - selected-grid-cell
    
    Returns map with:
    - :col, :row - position
@@ -184,13 +201,9 @@
    - :timeline? - is this a timeline cue?
    - :has-content? - does cell have any presets or timeline configuration?"
   [context col row]
-  (let [;; Read cue chain from unified :chains domain
-        chains-data (fx/sub-val context :chains)
-        cue-chain-data (get-in chains-data [:cue-chains [col row]] {:items []})
+  (let [cue-chain-data (fx/sub-ctx context cue-cell-chain col row)
         items (:items cue-chain-data [])
-        ;; Check if this cell is in the active-cues map (multi-cue support)
-        active-cues (fx/sub-val context ex/active-cues)
-        active? (contains? active-cues [col row])
+        active? (fx/sub-ctx context cue-cell-active? col row)
         selected? (= (fx/sub-ctx context selected-grid-cell) [col row])
         ;; Flatten to get all presets (excluding groups)
         flat-items (filterv #(= :preset (:type %))
@@ -236,10 +249,16 @@
 ;; Level 2: Computed Effect Cell Subscriptions
 
 
+(defn effect-cell-chain
+  "Effect chain stored at [col row], or nil when the cell is empty.
+   Only depends on this cell's entry, not the whole :chains domain."
+  [context col row]
+  (fx/sub-val context get-in [:chains :effect-chains [col row]]))
+
 (defn effect-cell-display-data
   "Computed display data for an effects grid cell.
    
-   Depends on: chains domain (for effect chain content)
+   Depends on: effect-cell-chain (this cell's effect chain)
    
    Returns map with:
    - :col, :row - position
@@ -251,9 +270,7 @@
    - :has-effects? - does cell have any effects?
    - :display-text - text to display in the cell"
   [context col row]
-  (let [;; Read effect chain from unified :chains domain
-        chains-data (fx/sub-val context :chains)
-        cell-data (get-in chains-data [:effect-chains [col row]])
+  (let [cell-data (fx/sub-ctx context effect-cell-chain col row)
         ;; Effect chain items are stored under :items key
         effect-chain (:items cell-data [])
         ;; Flatten the chain to get actual effects (not groups)
