@@ -7,10 +7,8 @@
    - 8-bit or 16-bit color (RGB)
    - 8-bit or 16-bit position (XY)
    
-   Supports application-layer frame fragmentation per IDN-Stream spec Section 6.2.
-   Large frames are automatically split into multiple packets to avoid IP fragmentation.
-   
-   Default is standard ISP-DB25 format (8-bit color, 16-bit XY)."
+   Supports optional application-layer frame fragmentation per IDN-Stream spec Section 6.2
+   (disabled by default; see create-engine)."
   (:require [clojure.tools.logging :as log]
             [laser-show.idn.stream :as idn-stream]
             [laser-show.idn.output-config :as output-config]
@@ -61,7 +59,10 @@
      - :service-id - IDN service ID for config header (default 0) - targets specific laser output
      - :output-config - OutputConfig for bit depth (default 8-bit color, 16-bit XY)
      - :target-mtu - Target MTU for fragmentation (default 1400)
-     - :fragmentation-enabled? - Enable application-layer fragmentation (default true)
+     - :fragmentation-enabled? - Enable application-layer fragmentation (default false).
+       Off by default: frames up to the 0xFF00 message limit are sent in one message
+       (Stream spec §6.2 prefers IP fragmentation), larger frames are truncated.
+       The sequel-fragment layout has not been checked against a reference receiver.
    
    NOTE: channel-id is for logical multiplexing (0-63), service-id targets physical outputs (0-255).
    For multi-head DACs, each output has a different service-id.
@@ -75,7 +76,7 @@
                                        service-id 0
                                        output-config output-config/default-config
                                        target-mtu DEFAULT_TARGET_MTU
-                                       fragmentation-enabled? false #_true}}]
+                                       fragmentation-enabled? false}}]
   {:target-host target-host
    :target-port port
    :frame-provider frame-provider
