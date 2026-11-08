@@ -33,14 +33,19 @@
             [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
             [laser-show.state.clipboard :as clipboard]
+            [laser-show.state.persistent :as persistent]
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.backend.multi-engine :as multi-engine]
             [laser-show.common.util :as u]
-            [laser-show.idn.hello :as idn-hello])
+            [laser-show.dev-config :as dev-config]
+            [laser-show.idn.hello :as idn-hello]
+            [laser-show.input.link :as link])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
            [javafx.application Platform]
-           [java.io File]))
+           [java.awt Desktop Desktop$Action]
+           [java.io File]
+           [java.net URI]))
 
 ;; Co-effects (inject data INTO events)
 ;; Co-effect functions take NO arguments and return data to inject.
@@ -99,26 +104,24 @@
         (dispatch {:event/type :timing/set-bpm :bpm clamped-bpm})))))
 
 (defn- effect-save-project
-  "Effect that saves the project to disk."
-  [{:keys [folder]} dispatch]
-  ;; TODO: Implement actual project saving
-  (future
-    (try
-      ;; Save logic here
-      (dispatch {:event/type :project/mark-clean})
-      (catch Exception e
-        (log/error "Failed to save project:" (.getMessage e))))))
+  "Effect that writes a project zip.
+   Args: {:file-path path :files {filename data} :on-failed event}
+   The handler has already marked the project saved; on failure, dispatches
+   :on-failed with :file-path so the handler can revert that."
+  [{:keys [file-path files on-failed]} dispatch]
+  (when-not (persistent/write-project! file-path files)
+    (when on-failed
+      (dispatch (assoc on-failed :file-path file-path)))))
 
 (defn- effect-load-project
-  "Effect that loads a project from disk."
-  [{:keys [folder]} dispatch]
-  ;; TODO: Implement actual project loading
-  (future
-    (try
-      ;; Load logic here
-      (dispatch {:event/type :project/set-folder :folder folder})
-      (catch Exception e
-        (log/error "Failed to load project:" (.getMessage e))))))
+  "Effect that reads a project zip.
+   Args: {:file-path path :on-loaded event :on-failed event}
+   Dispatches :on-loaded with :file-path and :contents, or :on-failed."
+  [{:keys [file-path on-loaded on-failed]} dispatch]
+  (if-let [contents (persistent/read-project file-path)]
+    (dispatch (assoc on-loaded :file-path file-path :contents contents))
+    (when on-failed
+      (dispatch (assoc on-failed :file-path file-path)))))
 
 ;; Clipboard Effects (for effect chain editor)
 
@@ -189,6 +192,55 @@
         (log/debug e "Network scan stack trace")
         (dispatch {:event/type :projectors/scan-failed
                    :error (.getMessage e)})))))
+
+;; Link Effects
+
+(defn- effect-link-sync-to-downbeat
+  "Effect that queries Link's beat phase and dispatches a phase correction."
+  [{:keys [accumulated-beats]} dispatch]
+  (link/sync-to-downbeat! dispatch accumulated-beats))
+
+;; System Effects
+
+(defn- effect-system-exit
+  "Effect that exits the application.
+   In dev mode the JVM is kept alive (it hosts the REPL), so this only logs."
+  [_ _dispatch]
+  (if (dev-config/dev-mode?)
+    (log/info "File > Exit ignored in dev mode (would kill the REPL JVM). Use (laser-show.app/stop!).")
+    (do
+      (Platform/exit)
+      (System/exit 0))))
+
+(defn- effect-system-open-url
+  "Effect that opens a URL in the system browser (off the agent thread)."
+  [url _dispatch]
+  (future
+    (try
+      (if (and (Desktop/isDesktopSupported)
+               (.isSupported (Desktop/getDesktop) Desktop$Action/BROWSE))
+        (.browse (Desktop/getDesktop) (URI. url))
+        (log/warn "Opening URLs is not supported on this platform. URL:" url))
+      (catch Throwable t
+        (log/error "Could not open URL" url ":" (.getMessage t))))))
+
+(def ^:private dev-reload-fns
+  {:styles 'laser-show.css.reload/reload-all-styles!
+   :app 'laser-show.dev.reload/reload-app-code!})
+
+(defn- effect-dev-reload
+  "Effect that runs a dev-only reload (:styles or :app).
+   These namespaces need tools.namespace (only on the :dev classpath), so a
+   missing dependency is logged instead of thrown."
+  [kind _dispatch]
+  (try
+    (let [result ((requiring-resolve (dev-reload-fns kind)))]
+      (if (:success? result)
+        (log/info "Dev reload" kind "complete:" result)
+        (log/error "Dev reload" kind "failed:" (:error result))))
+    (catch Throwable t
+      (log/warn "Dev reload" kind "is unavailable (needs the :dev alias / tools.namespace):"
+                (.getMessage t)))))
 
 ;; File Chooser Effect
 
@@ -331,12 +383,16 @@
    - :dispatch - dispatch another event
    - :dispatch-later - dispatch event after delay
    - :timing/calculate-bpm - calculate BPM from taps
+   - :link/sync-to-downbeat - align phase to Link's downbeat
    - :multi-engine/start - start multi-engine streaming to all projectors
    - :multi-engine/stop - stop multi-engine streaming
    - :multi-engine/refresh - refresh engines when projectors change
-   - :project/save - save project to disk
-   - :project/load - load project from disk
+   - :project/save - write project zip to disk
+   - :project/load - read project zip from disk
    - :fx/show-file-chooser - show file open/save dialog
+   - :system/exit - exit the application (no-op in dev mode)
+   - :system/open-url - open a URL in the system browser
+   - :dev/reload - reload :styles or :app code (dev only)
    - :clipboard/copy-effects - copy effects to clipboard
    - :clipboard/paste-effects - paste effects from clipboard (effects grid)
    - :clipboard/paste-projector-effects - paste effects from clipboard (projector chain)
@@ -354,6 +410,7 @@
         :dispatch effect-dispatch
         :dispatch-later effect-dispatch-later
         :timing/calculate-bpm effect-timing-calculate-bpm
+        :link/sync-to-downbeat effect-link-sync-to-downbeat
         ;; Multi-engine streaming (zone-aware system)
         :multi-engine/start effect-multi-engine-start
         :multi-engine/stop effect-multi-engine-stop
@@ -363,6 +420,10 @@
         :project/load effect-load-project
         ;; File chooser dialog
         :fx/show-file-chooser effect-show-file-chooser
+        ;; System
+        :system/exit effect-system-exit
+        :system/open-url effect-system-open-url
+        :dev/reload effect-dev-reload
         ;; Clipboard effects for effect chain editor
         :clipboard/copy-effects effect-clipboard-copy-effects
         :clipboard/paste-effects effect-clipboard-paste-effects
