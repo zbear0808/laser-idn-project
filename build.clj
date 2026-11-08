@@ -3,7 +3,10 @@
             [clojure.java.io :as io]))
 
 (def lib 'laser-idn-project/laser-show)
-(def version "0.1.0")
+;; Single source of truth for the app version, also read by
+;; .github/workflows/release.yml for jpackage --app-version. jpackage needs a
+;; numeric x.y.z whose first number is > 0 (macOS rejects 0.x).
+(def version (.trim ^String (slurp "VERSION")))
 (def class-dir "target/classes")
 (def jfr-class-dir "classes")  ;; For JFR event classes used during dev
 (def uber-file (format "target/%s-%s-standalone.jar" (name lib) version))
@@ -58,7 +61,8 @@
      clj -T:build uber :platform :linux    ; Linux
    
    The :platform parameter is REQUIRED because JavaFX is platform-specific.
-   This builds a standalone JAR with all dependencies including JavaFX 26."
+   This builds a standalone JAR with all dependencies including JavaFX
+   (version pinned by the platform alias in deps.edn)."
   [{:keys [platform]}]
   (when-not platform
     (throw (ex-info "Platform is required. Use :platform :win, :mac, :mac-arm, or :linux" {})))
@@ -89,6 +93,8 @@
              :uber-file uber-file
              :basis platform-basis
              :main 'laser-show.app
+             :manifest {"Implementation-Title" (name lib)
+                        "Implementation-Version" version}
              :conflict-handlers {"META-INF/.*\\.SF$" :ignore
                                 "META-INF/.*\\.DSA$" :ignore
                                 "META-INF/.*\\.RSA$" :ignore}})

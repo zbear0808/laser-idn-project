@@ -5,6 +5,9 @@ on:
     types: [created]
   workflow_dispatch:  # Allow manual triggering for testing
 
+permissions:
+  contents: read
+
 env:
   JAVA_VERSION: '25'
   GRAALVM_VERSION: '25'
@@ -36,6 +39,7 @@ jobs:
             artifact-name: jar-linux
     
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     
     steps:
       - name: Checkout code
@@ -48,7 +52,7 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
       
       - name: Setup Clojure
-        uses: DeLaGuardo/setup-clojure@13.4
+        uses: DeLaGuardo/setup-clojure@3fe9b3ae632c6758d0b7757b0838606ef4287b08 # 13.4
         with:
           cli: '1.12.4.1582'
       
@@ -132,6 +136,7 @@ jobs:
             icon-file: resources/laser-warning-square.png
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     
     steps:
       - name: Checkout code
@@ -163,9 +168,15 @@ jobs:
       - name: Prepare JAR for jpackage
         shell: bash
         run: |
+          # Stage only the uberjar so jpackage doesn't bundle anything else
+          # that happens to be in target/.
           JAR_FILE=$(ls target/*-standalone.jar | head -1)
           JAR_NAME=$(basename "$JAR_FILE")
+          rm -rf jpackage-input
+          mkdir jpackage-input
+          cp "$JAR_FILE" jpackage-input/
           echo "JAR_NAME=$JAR_NAME" >> $GITHUB_ENV
+          echo "APP_VERSION=$(tr -d '[:space:]' < VERSION)" >> $GITHUB_ENV
           echo "Platform-specific JAR: $JAR_NAME"
       
       - name: Package installer with jpackage
@@ -176,12 +187,12 @@ jobs:
           # Build jpackage arguments
           JPACKAGE_ARGS=(
             --type "${{ matrix.installer-type }}"
-            --input target
+            --input jpackage-input
             --name LaserShow
             --main-jar "$JAR_NAME"
             --main-class laser_show.app
             --dest dist
-            --app-version "1.0.0"
+            --app-version "$APP_VERSION"
             --vendor "LaserShow"
             --description "Laser Show Control Application with bundled JRE"
             --java-options "-Xmx2048m"
@@ -217,76 +228,49 @@ jobs:
           path: dist/*
           retention-days: 30
 
+
   # ==========================================================================
-  # Upload Release Assets (COMMENTED OUT - artifacts generated only)
+  # Attach JARs and installers to the GitHub Release
   # ==========================================================================
-  # upload-release-assets:
-  #   needs: [build-jar, build-native, build-jpackage]
-  #   runs-on: ubuntu-latest
-  #   if: github.event_name == 'release'
-  #
-  #   steps:
-  #     - name: Download all artifacts
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         path: artifacts/
-  #
-  #     - name: Display artifacts
-  #       run: |
-  #         echo "Downloaded artifacts:"
-  #         find artifacts/ -type f
-  #
-  #     - name: Create release archives
-  #       run: |
-  #         cd artifacts
-  #
-  #         # Package all macOS ARM64 variants (native and compat)
-  #         for dir in laser-show-macos-arm64-*; do
-  #           if [ -d "$dir" ]; then
-  #             echo "Packaging $dir..."
-  #             cd "$dir"
-  #             chmod +x laser-show 2>/dev/null || true
-  #             zip -r "../${dir}.zip" .
-  #             cd ..
-  #           fi
-  #         done
-  #
-  #         # Package all macOS Intel variants (native and compat)
-  #         for dir in laser-show-macos-intel-*; do
-  #           if [ -d "$dir" ]; then
-  #             echo "Packaging $dir..."
-  #             cd "$dir"
-  #             chmod +x laser-show 2>/dev/null || true
-  #             zip -r "../${dir}.zip" .
-  #             cd ..
-  #           fi
-  #         done
-  #
-  #         # Package all Windows variants (native and compat)
-  #         for dir in laser-show-windows-*; do
-  #           if [ -d "$dir" ]; then
-  #             echo "Packaging $dir..."
-  #             cd "$dir"
-  #             zip -r "../${dir}.zip" .
-  #             cd ..
-  #           fi
-  #         done
-  #
-  #         # Package JAR (unchanged)
-  #         if [ -d "uber-jar" ]; then
-  #           echo "Packaging uber-jar..."
-  #           cd uber-jar
-  #           zip -r ../laser-show-jar.zip .
-  #           cd ..
-  #         fi
-  #
-  #         echo "Created archives:"
-  #         ls -la *.zip || echo "No zip files created"
-  #
-  #     - name: Upload to release
-  #       uses: softprops/action-gh-release@v1
-  #       with:
-  #         files: |
-  #           artifacts/*.zip
-  #       env:
-  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # Only runs for real release events (not workflow_dispatch). It's the only
+  # job with write access, and it uses no third-party code apart from the
+  # SHA-pinned action-gh-release.
+  upload-release-assets:
+    needs: [build-platform-jars, build-jpackage]
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      # Artifact file names collide across platforms (every platform JAR is
+      # laser-show-<version>-standalone.jar, both macOS DMGs are
+      # LaserShow-<version>.dmg), so prefix each file with its artifact name.
+      - name: Collect release files
+        shell: bash
+        run: |
+          mkdir -p release
+          for dir in artifacts/*/; do
+            name=$(basename "$dir")
+            for f in "$dir"*; do
+              [ -f "$f" ] && cp "$f" "release/${name}-$(basename "$f")"
+            done
+          done
+          ls -lh release/
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          # Keep the release's own draft/prerelease state (the action would
+          # otherwise publish a draft after uploading).
+          draft: ${{ github.event.release.draft }}
+          prerelease: ${{ github.event.release.prerelease }}
+          files: release/*
+          fail_on_unmatched_files: true
