@@ -45,13 +45,14 @@
 
    overtone.midi/midi-msg puts the channel-stripped command in :command.
    Its :status is only set for channel 0 (it looks up the full status byte),
-   so it must not be used to decide the message type. A numeric :status
-   (0x80-0xEF) is still accepted for hand-built maps."
+   so it must not be used to decide the message type. A keyword or numeric
+   :status (0x80-0xEF) is still accepted for hand-built maps."
   [msg]
   (let [command (:command msg)
         status (:status msg)]
     (cond
       (keyword? command) command
+      (keyword? status) status
       (number? status) (case (bit-and (int status) 0xF0)
                          0x80 :note-off
                          0x90 :note-on
