@@ -210,6 +210,37 @@
           "Packet size should be header + 3 points * 10 bytes each"))))
 
 
+;; Signed XY Tests (Section 3.4.7)
+
+
+(deftest signed-xy-wire-format-test
+  (testing "8-bit XY is written as signed octets (Section 3.4.7)"
+    (let [frame (t/make-frame [(t/make-point -1.0 1.0 0 0 0)
+                               (t/make-point 0.0 0.0 0 0 0)
+                               (t/make-point 0.5 -0.5 0 0 0)])
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet buf frame 0 1000 16666
+                                       :output-config output-config/compact-config)
+          bps (output-config/bytes-per-sample output-config/compact-config)
+          xy (fn [i] [(aget ^bytes packet (+ 12 (* i bps)))
+                      (aget ^bytes packet (+ 13 (* i bps)))])]
+      (is (= [-127 127] (xy 0)) "Edges are -127 (left) and 127 (right)")
+      (is (= [0 0] (xy 1)) "Centre is 0x00, not 0x80 (which decodes as -128)")
+      (is (= [64 -64] (xy 2)))))
+
+  (testing "16-bit XY is written as big-endian signed shorts (X/Y + precision tag)"
+    (let [frame (t/make-frame [(t/make-point -1.0 1.0 0 0 0)
+                               (t/make-point 0.0 0.0 0 0 0)])
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet buf frame 0 1000 16666
+                                       :output-config output-config/standard-config)]
+      (is (= -32767 (get-short packet 12)))
+      (is (= 32767 (get-short packet 14)))
+      (is (= 0x80 (get-byte packet 12)) "MSB first: high octet goes with the X tag")
+      (is (= 0 (get-short packet 20)))
+      (is (= 0 (get-short packet 22))))))
+
+
 ;; Packet Validation Tests
 
 
