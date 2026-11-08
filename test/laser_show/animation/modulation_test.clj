@@ -186,6 +186,37 @@
                         0.1))))))
 
 
+;; Decay Modulator Tests
+
+
+(deftest decay-modulator-test
+  (let [base {:type :decay :min 0.0 :max 1.0 :duration 2.0 :time-unit :beats}
+        at (fn [config ctx] (mod/resolve-param config (merge {:bpm 120.0} ctx)))]
+    (testing "linear decay goes max -> min over :duration beats, then holds"
+      (let [config (assoc base :decay-curve :linear)]
+        (is (approx= 1.0 (at config {:accumulated-beats 0.0}) 1e-9))
+        (is (approx= 0.5 (at config {:accumulated-beats 1.0}) 1e-9))
+        (is (approx= 0.0 (at config {:accumulated-beats 2.0}) 1e-9))
+        (is (approx= 0.0 (at config {:accumulated-beats 7.5}) 1e-9) "holds at min, no per-beat ramp")))
+    (testing ":exp is fast-start, :log is slow-start, both reach the end points"
+      (let [mid #(at (assoc base :decay-curve %) {:accumulated-beats 1.0})]
+        (is (< (mid :exp) 0.5))
+        (is (> (mid :log) 0.5))
+        (doseq [c [:exp :log]]
+          (is (approx= 1.0 (at (assoc base :decay-curve c) {:accumulated-beats 0.0}) 1e-9))
+          (is (approx= 0.0 (at (assoc base :decay-curve c) {:accumulated-beats 2.0}) 1e-9)))))
+    (testing ":seconds time-unit uses elapsed ms and ignores BPM"
+      (let [config (assoc base :decay-curve :linear :time-unit :seconds)]
+        (is (approx= 0.75 (at config {:accumulated-ms 500.0 :accumulated-beats 99.0}) 1e-9))
+        (is (approx= 0.75 (at config {:accumulated-ms 500.0 :bpm 60.0}) 1e-9))))
+    (testing "default curve from the registry (:exp) is applied when unset"
+      (is (< (at base {:accumulated-beats 1.0}) 0.5)))
+    (testing "falls back to time-ms - trigger-time without accumulators"
+      (let [config (assoc base :decay-curve :linear)]
+        ;; 500ms after trigger at 120 BPM = 1 beat = half of 2-beat duration
+        (is (approx= 0.5 (at config {:time-ms 10500 :trigger-time 10000}) 1e-9))))))
+
+
 ;; Random and Step Modulator Tests
 
 

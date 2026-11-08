@@ -131,21 +131,45 @@
 ;; Decay Modulators
 
 
-(defn- eval-exp-decay
-  "Evaluate exponential decay (beat-synced).
-   Uses effective-beats for smooth BPM-change animation."
-  [{:keys [min max decay-type]} context]
-  (let [beats (time/get-beats-from-context context)
-        phase (u/fmod beats 1.0)
+(def ^:private ^:const decay-curve-k 5.0)
+
+(defn- decay-elapsed
+  "Time elapsed since the cue was triggered, in time-unit.
+   Uses the raw accumulators (no phase correction); falls back to
+   time-ms - trigger-time for contexts without accumulators."
+  ^double [time-unit {:keys [accumulated-beats accumulated-ms time-ms trigger-time bpm]}]
+  (let [fallback-ms (- (double (or time-ms 0.0)) (double (or trigger-time 0.0)))]
+    (if (= time-unit :seconds)
+      (/ (double (or accumulated-ms fallback-ms)) 1000.0)
+      (double (or accumulated-beats
+                  (time/ms->beats fallback-ms (double (or bpm 120.0))))))))
+
+(defn decay-curve-factor
+  "Remaining fraction (1.0 -> 0.0) of a decay at progress p in [0, 1].
+   - :linear - constant rate
+   - :exp    - fast start, long tail (normalised to reach 0 at p = 1)
+   - :log    - slow start, fast finish (mirror of :exp)"
+  ^double [curve ^double p]
+  (let [k decay-curve-k
+        e-k (Math/exp (- k))]
+    (case curve
+      :exp (/ (- (Math/exp (- (* k p))) e-k) (- 1.0 e-k))
+      :log (- 1.0 (/ (- (Math/exp (* k p)) 1.0) (- (Math/exp k) 1.0)))
+      (- 1.0 p))))
+
+(defn- eval-decay
+  "Evaluate decay modulator: moves from :max to :min over :duration
+   (in :time-unit, beats or seconds) after the cue is triggered, shaped by
+   :decay-curve, then holds at :min until retriggered."
+  [{:keys [min max duration time-unit decay-curve]} context]
+  (let [duration (double (or duration 1.0))
+        elapsed (decay-elapsed time-unit context)
+        p (if (pos? duration)
+            (clojure.core/min 1.0 (clojure.core/max 0.0 (/ elapsed duration)))
+            1.0)
         start-v (double max)
         end-v (double min)]
-    (case decay-type
-      :exp (let [range-exp (- start-v end-v)
-                 decay-factor (Math/exp (* (- phase) 3.0))]
-             (+ end-v (* decay-factor range-exp)))
-      ;; :linear is default
-      (let [range-v (- end-v start-v)]
-        (+ start-v (* phase range-v))))))
+    (+ end-v (* (decay-curve-factor decay-curve p) (- start-v end-v)))))
 
 
 ;; Random Modulators
@@ -405,7 +429,7 @@
    :triangle     eval-triangle
    :sawtooth     eval-sawtooth
    :square       eval-square
-   :exp-decay    eval-exp-decay
+   :decay        eval-decay
    :random       eval-random
    :midi         eval-midi
    :osc          eval-osc
