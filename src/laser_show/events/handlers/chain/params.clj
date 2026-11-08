@@ -80,7 +80,7 @@
    
    Returns: Updated state"
   [state config {:keys [effect-path param-key] :as event}]
-  (let [value (or (:fx/event event) (:value event))
+  (let [value (h/first-some (:fx/event event) (:value event))
         items-path (:items-path config)
         items-vec (vec (get-in state items-path []))
         updated-items (assoc-in items-vec (conj (vec effect-path) :params param-key) value)]
