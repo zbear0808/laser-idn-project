@@ -155,7 +155,7 @@
   :name        "Decay"
   :icon        "↘"
   :category    :wave
-  :evaluator   (get eval/modulator-evaluators :exp-decay)
+  :evaluator   (get eval/modulator-evaluators :decay)
   :params      decay-params
   :per-point?  false
   :retrigger?  true})

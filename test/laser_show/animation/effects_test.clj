@@ -325,3 +325,18 @@
         (println "Corner:" (point-b (nth result 2)))
         (is (< (point-b (second result)) 0.1) "Center point should have low blue (near origin)")
         (is (> (point-b (nth result 2)) 0.9) "Corner point should have high blue (far from origin)")))))
+
+(deftest blackout-effect-test
+  (let [frame (make-test-frame [-0.5 0.0 0.5])]
+    (testing "blackout with :enabled true zeroes all RGB and keeps positions"
+      (let [result (effects/apply-effect-chain
+                    frame {:effects [{:effect-id :blackout :enabled? true
+                                      :params {:enabled true}}]}
+                    0 120.0)]
+        (is (every? #(= [0.0 0.0 0.0] [(point-r %) (point-g %) (point-b %)]) result))
+        (is (= (mapv point-x frame) (mapv point-x result)))))
+    (testing "blackout with default params (:enabled false) passes points through"
+      (let [result (effects/apply-effect-chain
+                    frame {:effects [{:effect-id :blackout :enabled? true :params {}}]}
+                    0 120.0)]
+        (is (= frame result))))))
