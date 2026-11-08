@@ -29,15 +29,28 @@
   []
   (reset! !debug-logged-keys #{}))
 
-(defn log-once
-  "Log a message only once per playback session for the given key.
-   Each unique key can log once until reset-zone-debug! is called.
-   Public so it can be used from frame-service for consistent debug logging."
-  [log-key msg]
+(defn routing-debug?
+  "True when routing debug logging is enabled."
+  []
+  @debug-enabled?)
+
+(defn log-once*
+  "Function behind log-once. msg-fn is only called if the key hasn't logged yet."
+  [log-key msg-fn]
   (when (and @debug-enabled?
              (not (contains? @!debug-logged-keys log-key)))
     (swap! !debug-logged-keys conj log-key)
-    (log/info msg)))
+    (log/info (msg-fn))))
+
+(defmacro log-once
+  "Log a message only once per playback session for the given key.
+   Each unique key can log once until reset-zone-debug! is called.
+   Neither log-key nor msg is evaluated unless routing debug is enabled,
+   so callers on the hot path can build messages with format freely.
+   Public so it can be used from frame-service for consistent debug logging."
+  [log-key msg]
+  `(when (routing-debug?)
+     (log-once* ~log-key (fn [] ~msg))))
 
 
 

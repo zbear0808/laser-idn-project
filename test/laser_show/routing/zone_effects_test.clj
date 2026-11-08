@@ -278,3 +278,27 @@
       (is (= 1 (count (keys result))))
       (is (= 1 (count (:center result))))
       (is (= group-with-zone-selector (first (:center result)))))))
+
+
+;; Debug Logging Tests
+
+
+(deftest log-once-is-lazy-test
+  (testing "log-once does not evaluate key or message when debug is off"
+    (zone-effects/disable-routing-debug!)
+    (let [evaluated (atom 0)]
+      (zone-effects/log-once (do (swap! evaluated inc) :k)
+                             (do (swap! evaluated inc) "msg"))
+      (is (zero? @evaluated))))
+
+  (testing "log-once builds the message once per key when debug is on"
+    (zone-effects/reset-zone-debug!)
+    (zone-effects/enable-routing-debug!)
+    (try
+      (let [evaluated (atom 0)]
+        (dotimes [_ 3]
+          (zone-effects/log-once ::lazy-test (do (swap! evaluated inc) "msg")))
+        (is (= 1 @evaluated)))
+      (finally
+        (zone-effects/disable-routing-debug!)
+        (zone-effects/reset-zone-debug!)))))
