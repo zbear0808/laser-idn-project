@@ -7,10 +7,8 @@
    - 8-bit or 16-bit color (RGB)
    - 8-bit or 16-bit position (XY)
    
-   Supports application-layer frame fragmentation per IDN-Stream spec Section 6.2.
-   Large frames are automatically split into multiple packets to avoid IP fragmentation.
-   
-   Default is standard ISP-DB25 format (8-bit color, 16-bit XY)."
+   Supports optional application-layer frame fragmentation per IDN-Stream spec Section 6.2
+   (disabled by default; see create-engine)."
   (:require [clojure.tools.logging :as log]
             [laser-show.idn.stream :as idn-stream]
             [laser-show.idn.output-config :as output-config]
@@ -20,7 +18,7 @@
             [laser-show.common.util :as u]
             [laser-show.dev-config :as dev-config]
             [laser-show.profiling.frame-profiler :as profiler])
-  (:import [java.net DatagramSocket]))
+  (:import [java.net DatagramSocket InetAddress]))
 
 
 ;; Constants
@@ -61,7 +59,10 @@
      - :service-id - IDN service ID for config header (default 0) - targets specific laser output
      - :output-config - OutputConfig for bit depth (default 8-bit color, 16-bit XY)
      - :target-mtu - Target MTU for fragmentation (default 1400)
-     - :fragmentation-enabled? - Enable application-layer fragmentation (default true)
+     - :fragmentation-enabled? - Enable application-layer fragmentation (default false).
+       Off by default: frames up to the 0xFF00 message limit are sent in one message
+       (Stream spec §6.2 prefers IP fragmentation), larger frames are truncated.
+       The sequel-fragment layout has not been checked against a reference receiver.
    
    NOTE: channel-id is for logical multiplexing (0-63), service-id targets physical outputs (0-255).
    For multi-head DACs, each output has a different service-id.
@@ -75,7 +76,7 @@
                                        service-id 0
                                        output-config output-config/default-config
                                        target-mtu DEFAULT_TARGET_MTU
-                                       fragmentation-enabled? false #_true}}]
+                                       fragmentation-enabled? false}}]
   {:target-host target-host
    :target-port port
    :frame-provider frame-provider
@@ -88,6 +89,8 @@
    :packet-buffer (idn-stream/create-packet-buffer)
    :running? (atom false)
    :socket (atom nil)
+   ;; Resolved InetAddress for target-host, cached so packets don't do a DNS lookup each
+   :target-address (atom nil)
    :thread (atom nil)
    :start-time-us (atom 0)
    :last-config-time-ms (atom 0)
@@ -174,6 +177,12 @@
   [engine]
   (swap! (:sequence-counter engine) #(bit-and (inc %) 0xFFFF)))
 
+(defn- target-address!
+  "Return the engine's resolved target InetAddress, resolving it on first use."
+  ^InetAddress [engine]
+  (or @(:target-address engine)
+      (reset! (:target-address engine) (InetAddress/getByName (:target-host engine)))))
+
 ;; Debug logging for streaming (controlled by dev-config/idn-stream-logging?)
 (def ^:private stream-log-counter (atom 0))
 (def ^:const STREAM_LOG_INTERVAL 300) ;; Log every N frames (~5 seconds at 60fps)
@@ -226,7 +235,7 @@
                                      target-host target-port (or service-id 0) (or channel-id 0)
                                      frame-point-count packet-count (alength hello-packet) seq-num)))
                 
-                (hello/send-packet @socket hello-packet target-host target-port)))
+                (hello/send-packet-to @socket hello-packet (target-address! engine) target-port)))
             
             ;; Record IDN streaming time (convert ns to us)
             (let [idn-time-us (/ (- (System/nanoTime) idn-start-ns) 1000.0)]
@@ -245,6 +254,8 @@
                      :actual-fps actual-fps)))
           
           (catch Exception e
+            ;; Re-resolve the host on the next frame in case its address changed
+            (reset! (:target-address engine) nil)
             (log/error "Streaming error:" (u/exception->map e))))
         
         (let [elapsed (- (System/currentTimeMillis) loop-start)
@@ -266,6 +277,7 @@
   
   (let [socket (hello/create-udp-socket)]
     (reset! (:socket engine) socket)
+    (reset! (:target-address engine) nil)
     (reset! (:running? engine) true)
     (reset! (:start-time-us engine) (* (System/currentTimeMillis) 1000))
     (reset! (:last-config-time-ms engine) 0)
@@ -288,7 +300,9 @@
 
 (defn stop!
   "Stop the streaming engine gracefully.
-   Sends channel close packet, stops the thread, and closes the socket."
+   Sends a channel close message, then an IDN-RT graceful close (0x44,
+   IDN-Hello §6.2.2), both numbered with this engine's sequence counter.
+   Then closes the socket."
   [engine]
   (when @(:running? engine)
     (reset! (:running? engine) false)
@@ -300,8 +314,13 @@
       (try
         (let [timestamp-us (current-timestamp-us engine)
               close-packet (idn-stream/close-channel-packet (:channel-id engine) timestamp-us)
-              hello-packet (hello/wrap-channel-message close-packet)]
-          (hello/send-packet socket hello-packet (:target-host engine) (:target-port engine)))
+              hello-packet (hello/wrap-channel-message close-packet
+                                                       {:sequence (get-next-sequence! engine)})
+              rt-close-packet (hello/create-packet-header hello/CMD_RT_CLOSE 0
+                                                          (get-next-sequence! engine))
+              address (target-address! engine)]
+          (hello/send-packet-to socket hello-packet address (:target-port engine))
+          (hello/send-packet-to socket rt-close-packet address (:target-port engine)))
         (catch Exception e
           (log/error "Error sending close packet:" (.getMessage e))))
       

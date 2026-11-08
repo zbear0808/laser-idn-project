@@ -210,6 +210,37 @@
           "Packet size should be header + 3 points * 10 bytes each"))))
 
 
+;; Signed XY Tests (Section 3.4.7)
+
+
+(deftest signed-xy-wire-format-test
+  (testing "8-bit XY is written as signed octets (Section 3.4.7)"
+    (let [frame (t/make-frame [(t/make-point -1.0 1.0 0 0 0)
+                               (t/make-point 0.0 0.0 0 0 0)
+                               (t/make-point 0.5 -0.5 0 0 0)])
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet buf frame 0 1000 16666
+                                       :output-config output-config/compact-config)
+          bps (output-config/bytes-per-sample output-config/compact-config)
+          xy (fn [i] [(aget ^bytes packet (+ 12 (* i bps)))
+                      (aget ^bytes packet (+ 13 (* i bps)))])]
+      (is (= [-127 127] (xy 0)) "Edges are -127 (left) and 127 (right)")
+      (is (= [0 0] (xy 1)) "Centre is 0x00, not 0x80 (which decodes as -128)")
+      (is (= [64 -64] (xy 2)))))
+
+  (testing "16-bit XY is written as big-endian signed shorts (X/Y + precision tag)"
+    (let [frame (t/make-frame [(t/make-point -1.0 1.0 0 0 0)
+                               (t/make-point 0.0 0.0 0 0 0)])
+          buf (stream/create-packet-buffer)
+          packet (stream/frame->packet buf frame 0 1000 16666
+                                       :output-config output-config/standard-config)]
+      (is (= -32767 (get-short packet 12)))
+      (is (= 32767 (get-short packet 14)))
+      (is (= 0x80 (get-byte packet 12)) "MSB first: high octet goes with the X tag")
+      (is (= 0 (get-short packet 20)))
+      (is (= 0 (get-short packet 22))))))
+
+
 ;; Packet Validation Tests
 
 
@@ -317,6 +348,58 @@
           read-timestamp (get-int packet 4)]
       (is (= (unchecked-int (bit-and overflow-timestamp 0xFFFFFFFF)) read-timestamp)
           "Close packet should handle large timestamps correctly"))))
+
+
+;; Large Message Tests (Section 2.1 - Total Size up to 0xFF00)
+
+
+(defn- n-points [n]
+  (vec (repeat n (t/make-point 0.25 -0.25 1.0 0.5 0.0))))
+
+(deftest large-message-test
+  (testing "Message over 32,767 bytes encodes with unsigned Total Size"
+    (let [buf (stream/create-packet-buffer)
+          ;; 4000 points * 10 bytes = 40,000 bytes > Short/MAX_VALUE
+          packet (stream/frame->packet buf (n-points 4000) 0 1000 16666
+                                       :output-config output-config/default-config)
+          expected (+ 12 (* 10 4000))]
+      (is (= expected (alength packet)))
+      (is (= expected (bit-and (get-short packet 0) 0xFFFF)))
+      (is (= expected (:total-size (stream/packet-info packet))))
+      (is (:valid? (stream/validate-packet packet)))))
+
+  (testing "Message with config over 32,767 bytes encodes"
+    (let [buf (stream/create-packet-buffer)
+          packet (stream/frame->packet-with-config buf (n-points 5000) 0 1000 16666
+                                                   :output-config output-config/standard-config)]
+      (is (> (alength packet) 32767))
+      (is (:valid? (stream/validate-packet packet)))))
+
+  (testing "Frames above the 0xFF00 limit are truncated to fit, never exceeding it"
+    (doseq [cfg [output-config/default-config output-config/standard-config
+                 output-config/compact-config (output-config/make-config 16 8)]
+            with-config? [true false]]
+      (let [buf (stream/create-packet-buffer)
+            max-pts (stream/max-points-per-message cfg with-config?)
+            packet (if with-config?
+                     (stream/frame->packet-with-config buf (n-points 20000) 0 1000 16666
+                                                       :output-config cfg)
+                     (stream/frame->packet buf (n-points 20000) 0 1000 16666
+                                           :output-config cfg))
+            sample-bytes (* max-pts (output-config/bytes-per-sample cfg))]
+        (is (<= (alength packet) stream/MAX_MESSAGE_SIZE))
+        (is (> (+ (alength packet) (output-config/bytes-per-sample cfg)) stream/MAX_MESSAGE_SIZE)
+            "Truncation should keep as many points as fit")
+        (is (= sample-bytes (- (alength packet) (if with-config?
+                                                  (stream/packet-size-with-config
+                                                   0 (second (stream/calculate-scwc
+                                                              (stream/get-tags-for-config cfg)))
+                                                   cfg)
+                                                  12))))
+        (is (:valid? (stream/validate-packet packet))))))
+
+  (testing "Packet buffer holds a maximum-size message"
+    (is (= 0xFF00 (.capacity (stream/create-packet-buffer))))))
 
 
 ;; Utility Function Tests

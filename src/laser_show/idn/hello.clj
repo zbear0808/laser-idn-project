@@ -68,17 +68,21 @@
   ([port]
    (DatagramSocket. port)))
 
+(defn send-packet-to
+  "Sends a byte array as a UDP datagram to an already-resolved address.
+   Use this on hot paths to avoid a DNS lookup per packet."
+  [^DatagramSocket socket ^bytes data ^InetAddress address port]
+  (.send socket (DatagramPacket. data (alength data) address (int port))))
+
 (defn send-packet
   "Sends a byte array as a UDP datagram packet to the specified host and port.
    Optional log-fn callback will be called with the packet data for logging."
   ([^DatagramSocket socket ^bytes data ^String host port]
    (send-packet socket data host port nil))
   ([^DatagramSocket socket ^bytes data ^String host port log-fn]
-   (let [address (InetAddress/getByName host)
-         packet (DatagramPacket. data (alength data) address (int port))]
-     (.send socket packet)
-     (when log-fn
-       (log-fn data)))))
+   (send-packet-to socket data (InetAddress/getByName host) port)
+   (when log-fn
+     (log-fn data))))
 
 (defn receive-packet
   "Receives a UDP packet with optional timeout (in milliseconds)."

@@ -153,62 +153,57 @@
     (try
       (let [raw-state (state/get-raw-state)
             playing? (get-in raw-state [:playback :playing?])
+            ;; Get ALL active cues (multi-cue support); idle frames return nil
+            all-cues (when playing? (get-active-cues-data raw-state))]
+        (when (seq all-cues)
+          (let [projector-zone-groups (get-projector-zone-groups raw-state projector-id)
+                bpm (get-in raw-state [:timing :bpm] 120.0)
+                current-time (System/currentTimeMillis)
+                input-values (input-store/get-all-continuous-values)
+                
+                ;; Generate frames for each active cue and extract this projector's zones
+                all-projector-frames
+                (into []
+                      (keep
+                        (fn [{:keys [cue-chain cue-timing]}]
+                          (let [trigger-time (:trigger-time cue-timing 0)
+                                elapsed (- current-time trigger-time)
+                                timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing bpm)
+                                                  :input-values input-values)
+                                ;; Generate zone frames for this cue
+                                zone-frames-map (frame-service/generate-frames-by-zone-cached
+                                                  cue-chain elapsed bpm trigger-time timing-ctx)
+                                ;; Extract frames for this projector's zones
+                                projector-frames (extract-frames-for-zones zone-frames-map projector-zone-groups)]
+                            ;; Combine this cue's zone frames
+                            (combine-zone-frames projector-frames))))
+                      all-cues)
+                
+                ;; Combine frames from all cues
+                combined-frame (combine-zone-frames all-projector-frames)
+                
+                ;; Get timing info for projector effects (use first cue's timing)
+                first-cue-timing (:cue-timing (first all-cues))
+                trigger-time (:trigger-time first-cue-timing 0)
+                elapsed (- current-time trigger-time)
+                timing-ctx (assoc (cue-timing/get-cue-timing-context first-cue-timing bpm)
+                                  :input-values input-values)
+                
+                log-count (swap! routing-log-counter inc)]
             
-            _ (when-not playing? (throw (ex-info "Not playing" {:skip true})))
+            (when (and (dev-config/idn-stream-logging?)
+                       (zero? (mod log-count ROUTING_LOG_INTERVAL)))
+              (log/debug (format "Zone routing [%s]: zone-groups=%s, active-cues=%d, combined-points=%s"
+                                 projector-id
+                                 (pr-str projector-zone-groups)
+                                 (count all-cues)
+                                 (if combined-frame (count combined-frame) "nil"))))
             
-            ;; Get ALL active cues (multi-cue support)
-            all-cues (get-active-cues-data raw-state)
-            _ (when (empty? all-cues) (throw (ex-info "No active cues" {:skip true})))
-            
-            projector-zone-groups (get-projector-zone-groups raw-state projector-id)
-            bpm (get-in raw-state [:timing :bpm] 120.0)
-            current-time (System/currentTimeMillis)
-            input-values (input-store/get-all-continuous-values)
-            
-            ;; Generate frames for each active cue and extract this projector's zones
-            all-projector-frames
-            (into []
-                  (keep
-                    (fn [{:keys [cue-chain cue-timing]}]
-                      (let [trigger-time (:trigger-time cue-timing 0)
-                            elapsed (- current-time trigger-time)
-                            timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing bpm)
-                                              :input-values input-values)
-                            ;; Generate zone frames for this cue
-                            zone-frames-map (frame-service/generate-frames-by-zone-cached
-                                              cue-chain elapsed bpm trigger-time timing-ctx)
-                            ;; Extract frames for this projector's zones
-                            projector-frames (extract-frames-for-zones zone-frames-map projector-zone-groups)]
-                        ;; Combine this cue's zone frames
-                        (combine-zone-frames projector-frames))))
-                  all-cues)
-            
-            ;; Combine frames from all cues
-            combined-frame (combine-zone-frames all-projector-frames)
-            
-            ;; Get timing info for projector effects (use first cue's timing)
-            first-cue-timing (:cue-timing (first all-cues))
-            trigger-time (:trigger-time first-cue-timing 0)
-            elapsed (- current-time trigger-time)
-            timing-ctx (assoc (cue-timing/get-cue-timing-context first-cue-timing bpm)
-                              :input-values input-values)
-            
-            log-count (swap! routing-log-counter inc)]
-        
-        (when (and (dev-config/idn-stream-logging?)
-                   (zero? (mod log-count ROUTING_LOG_INTERVAL)))
-          (log/debug (format "Zone routing [%s]: zone-groups=%s, active-cues=%d, combined-points=%s"
-                             projector-id
-                             (pr-str projector-zone-groups)
-                             (count all-cues)
-                             (if combined-frame (count combined-frame) "nil"))))
-        
-        (when combined-frame
-          (apply-projector-effects combined-frame projector-id elapsed bpm trigger-time timing-ctx)))
+            (when combined-frame
+              (apply-projector-effects combined-frame projector-id elapsed bpm trigger-time timing-ctx)))))
       
       (catch clojure.lang.ExceptionInfo e
-        (when-not (:skip (ex-data e))
-          (log/error "Frame provider error:" (.getMessage e)))
+        (log/error "Frame provider error:" (.getMessage e))
         nil)
       (catch Exception e
         (log/error "Unexpected frame provider error:" (.getMessage e))
