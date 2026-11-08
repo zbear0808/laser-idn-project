@@ -59,6 +59,7 @@
       "keyframe" (keyframe/handle event)
       "input" (input/handle event)  ; MIDI and OSC input management
       "trigger" (triggers/handle event)
+      "trigger-group" (triggers/handle event)
       "timeline" (timeline/handle event)  ; Timeline editor operations
       "timeline-cue-editor" (timeline/handle event)  ; Timeline open with initialization
       "history" (history/handle event)
