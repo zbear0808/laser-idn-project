@@ -182,6 +182,30 @@
   (sync-fx!)
   robot-instance)
 
+(defn right-click-node!
+  "Secondary-button click on a specific node returned by query-all."
+  [^FxRobot robot-instance ^Node node]
+  (.clickOn ^FxRobotInterface robot-instance node
+            (into-array MouseButton [MouseButton/SECONDARY]))
+  (sync-fx!)
+  robot-instance)
+
+(defn focus!
+  "Bring the node's window to the front and give the node keyboard focus."
+  [^FxRobot robot-instance ^String selector]
+  (wait-for! #(some? (query selector)))
+  (let [^Node node (query selector)]
+    (.interact robot-instance
+               (reify Runnable
+                 (run [_]
+                   (let [window (.getWindow (.getScene node))]
+                     (when (instance? javafx.stage.Stage window)
+                       (.toFront ^javafx.stage.Stage window))
+                     (.requestFocus window)
+                     (.requestFocus node))))))
+  (wait-for! #(run-on-fx-thread! (fn [] (.isFocused (query selector)))))
+  robot-instance)
+
 (defn modifier-click!
   "Click a selector while holding a keyboard modifier."
   [^FxRobot robot-instance ^String selector ^KeyCode modifier]
