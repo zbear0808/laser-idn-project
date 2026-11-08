@@ -15,9 +15,48 @@
                        {:drag-type :grid-cell :col 0 :row 0
                         :on-drop {:event/type :grid/move-cell}})}
    
-   These handlers are re-created on each render, so they always have current values."
-  (:require [laser-show.events.core :as events])
-  (:import [javafx.scene.input TransferMode ClipboardContent MouseEvent DragEvent]))
+   These handlers are re-created on each render, so they always have current values.
+   
+   The payload travels under an app-private DataFormat (one per drag type), so
+   text or files dragged in from other applications are never parsed or accepted."
+  (:require [clojure.edn :as edn]
+            [laser-show.events.core :as events])
+  (:import [javafx.scene.input TransferMode ClipboardContent DataFormat MouseEvent DragEvent]))
+
+
+;; Payload
+
+(def ^:private payload-marker :laser-show/cell-drag)
+
+(defn encode-payload
+  "Serialize a cell drag payload as an EDN string."
+  [drag-type col row]
+  (pr-str {payload-marker true :type drag-type :col col :row row}))
+
+(defn parse-payload
+  "Parse a cell drag payload produced by `encode-payload`.
+   Returns {:type :col :row} when `s` is a well-formed payload of `drag-type`,
+   otherwise nil. Never throws and never evaluates reader forms."
+  [s drag-type]
+  (when (and (string? s) (< (count s) 1024))
+    (let [data (try (edn/read-string s) (catch Exception _ nil))]
+      (when (and (map? data)
+                 (true? (get data payload-marker))
+                 (= drag-type (:type data))
+                 (nat-int? (:col data))
+                 (nat-int? (:row data)))
+        (select-keys data [:type :col :row])))))
+
+(defonce ^:private !formats (atom {}))
+
+(defn- data-format
+  "App-private DataFormat for a drag type, created once per type."
+  ^DataFormat [drag-type]
+  (or (get @!formats drag-type)
+      (let [mime (str "application/x-laser-show-drag+" (subs (str drag-type) 1))
+            fmt (or (DataFormat/lookupMimeType mime) (DataFormat. (into-array String [mime])))]
+        (swap! !formats assoc drag-type fmt)
+        fmt)))
 
 
 ;; Drag Source Handlers
@@ -38,7 +77,7 @@
       (let [source (.getSource e)
             db (.startDragAndDrop source (into-array TransferMode [TransferMode/MOVE]))
             content (ClipboardContent.)]
-        (.putString content (pr-str {:col col :row row :type drag-type}))
+        (.put content (data-format drag-type) (encode-payload drag-type col row))
         (.setContent db content)
         (.consume e)))))
 
@@ -55,12 +94,9 @@
    Returns a function suitable for :on-drag-over"
   [{:keys [drag-type]}]
   (fn [^DragEvent e]
-    (when (and (.getDragboard e)
-               (.hasString (.getDragboard e)))
-      (let [data (try (read-string (.getString (.getDragboard e))) 
-                     (catch Exception _ nil))]
-        (when (= drag-type (:type data))
-          (.acceptTransferModes e (into-array TransferMode [TransferMode/MOVE])))))
+    (when-let [db (.getDragboard e)]
+      (when (.hasContent db (data-format drag-type))
+        (.acceptTransferModes e (into-array TransferMode [TransferMode/MOVE]))))
     (.consume e)))
 
 
@@ -76,16 +112,16 @@
    Returns a function suitable for :on-drag-dropped"
   [{:keys [drag-type col row on-drop]}]
   (fn [^DragEvent e]
-    (let [db (.getDragboard e)]
-      (when (.hasString db)
-        (let [data (try (read-string (.getString db)) (catch Exception _ nil))]
-          (when (and data (= drag-type (:type data)))
-            (events/dispatch! (assoc on-drop
-                                    :from-col (:col data)
-                                    :from-row (:row data)
-                                    :to-col col
-                                    :to-row row))
-            (.setDropCompleted e true))))
+    (let [db (.getDragboard e)
+          fmt (data-format drag-type)]
+      (when-let [data (when (and db (.hasContent db fmt))
+                        (parse-payload (.getContent db fmt) drag-type))]
+        (events/dispatch! (assoc on-drop
+                                 :from-col (:col data)
+                                 :from-row (:row data)
+                                 :to-col col
+                                 :to-row row))
+        (.setDropCompleted e true))
       (when-not (.isDropCompleted e)
         (.setDropCompleted e false))
       (.consume e))))
