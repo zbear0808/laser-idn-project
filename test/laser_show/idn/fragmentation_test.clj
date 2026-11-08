@@ -284,6 +284,20 @@
     (let [frame (make-test-frame 10000)
           frag-count (sut/fragment-count 10000 standard-config)]
       (is (<= frag-count sut/MAX_FRAGMENTS_PER_FRAME))))
+
+  (testing "Large target MTU is capped at the 0xFF00 message limit"
+    (let [buf (idn-stream/create-packet-buffer)
+          frame (make-test-frame 10000)
+          packets (sut/frame->fragmented-packets
+                   buf frame 0 1000000 16666
+                   :output-config default-config
+                   :target-mtu 100000)]
+      (is (> (count packets) 1))
+      (doseq [pkt packets]
+        (is (<= (alength pkt) idn-stream/MAX_MESSAGE_SIZE))
+        (is (:valid? (idn-stream/validate-packet pkt))))
+      (is (some #(> (alength %) 32767) packets)
+          "Fragments over 32 KB should encode without throwing")))
   
   (testing "Custom MTU affects fragmentation"
     (let [frame (make-test-frame 300)

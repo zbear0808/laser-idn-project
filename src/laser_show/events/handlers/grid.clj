@@ -100,6 +100,20 @@
       ;; Triggering an empty cell just selects it
       {:state state-with-selected})))
 
+(defn- handle-grid-activate-cell
+  "Start a cue regardless of trigger mode (momentary press)."
+  [{:keys [col row state]}]
+  (if (get-in state [:chains :cue-chains [col row]])
+    {:state (trigger-cue (assoc-in state [:grid :selected-cell] [col row]) col row)}
+    {:state state}))
+
+(defn- handle-grid-release-cell
+  "Stop a cue if it is playing (momentary release). No-op otherwise."
+  [{:keys [col row state]}]
+  (if (contains? (get-in state [:playback :active-cues]) [col row])
+    {:state (untrigger-cue state col row)}
+    {:state state}))
+
 (defn- handle-grid-select-cell
   "Select a cell in the grid without triggering playback."
   [{:keys [col row state]}]
@@ -209,6 +223,8 @@
   [{:keys [event/type] :as event}]
   (case type
     :grid/trigger-cell (handle-grid-trigger-cell event)
+    :grid/activate-cell (handle-grid-activate-cell event)
+    :grid/release-cell (handle-grid-release-cell event)
     :grid/cell-clicked (handle-grid-cell-clicked event)
     :grid/select-cell (handle-grid-select-cell event)
     :grid/open-cell-editor (handle-grid-open-cell-editor event)

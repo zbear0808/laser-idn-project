@@ -16,20 +16,22 @@
     (is (< (Math/abs (- 16383 (oc/normalized->output-xy 0.5 16))) 2))))
 
 (deftest test-normalized-to-output-xy-8bit
-  (testing "Normalized XY to 8-bit output"
-    ;; Center (0.0) -> 127-128
-    (is (< (Math/abs (- 127 (oc/normalized->output-xy 0.0 8))) 2))
-    ;; Right edge (1.0) -> 255
-    (is (= 255 (oc/normalized->output-xy 1.0 8)))
-    ;; Left edge (-1.0) -> 0
-    (is (= 0 (oc/normalized->output-xy -1.0 8)))))
+  (testing "Normalized XY to 8-bit output is signed (IDN-Stream Section 3.4.7)"
+    ;; Center (0.0) -> 0
+    (is (= 0 (oc/normalized->output-xy 0.0 8)))
+    ;; Right edge (1.0) -> 127
+    (is (= 127 (oc/normalized->output-xy 1.0 8)))
+    ;; Left edge (-1.0) -> -127
+    (is (= -127 (oc/normalized->output-xy -1.0 8)))
+    (is (= 64 (oc/normalized->output-xy 0.5 8)))
+    (is (= -64 (oc/normalized->output-xy -0.5 8)))))
 
 (deftest test-xy-clamping
   (testing "XY values outside range are clamped"
     (is (= 32767 (oc/normalized->output-xy 2.0 16)))
     (is (= -32767 (oc/normalized->output-xy -2.0 16)))
-    (is (= 255 (oc/normalized->output-xy 2.0 8)))
-    (is (= 0 (oc/normalized->output-xy -2.0 8)))))
+    (is (= 127 (oc/normalized->output-xy 2.0 8)))
+    (is (= -127 (oc/normalized->output-xy -2.0 8)))))
 
 
 

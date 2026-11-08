@@ -133,6 +133,17 @@
       (is (= -0.15 (get-in new-state [:playback :phase-offset-target]))))))
 
 
+;; Sync To Downbeat Tests
+
+
+(deftest test-sync-to-downbeat-requests-effect
+  (testing "reads beats from the global clock and leaves the Link query to an effect"
+    (let [state (assoc-in base-state [:timing :global-clock] {:accumulated-beats 4.5
+                                                               :phase-offset 0.25})
+          result (timing/handle {:state state :event/type :timing/sync-to-downbeat})]
+      (is (= {:link/sync-to-downbeat {:accumulated-beats 4.75}} result)))))
+
+
 ;; Integration Tests
 
 

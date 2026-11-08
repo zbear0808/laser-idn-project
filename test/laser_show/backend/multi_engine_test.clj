@@ -278,3 +278,26 @@
                                        (= 0.0 (nth pt 3))
                                        (= 0.0 (nth pt 4))))]
           (is (some has-blank? combined) "Should have at least one blanking point"))))))
+
+
+;; Frame Provider Tests
+
+
+(deftest idle-frame-provider-returns-nil-without-exceptions-test
+  (let [projector {:name "Test Projector"
+                   :host "192.168.1.100"
+                   :port 7255
+                   :enabled? true
+                   :zone-groups [:all]}
+        provider (:frame-provider (me/create-engine-for-projector :test-proj projector))
+        ex-count (atom 0)
+        orig-ex-info ex-info]
+    (with-redefs [ex-info (fn [& args] (swap! ex-count inc) (apply orig-ex-info args))]
+      (testing "Not playing"
+        (state/assoc-in-state! [:playback :playing?] false)
+        (is (nil? (provider))))
+      (testing "Playing with no active cues"
+        (state/assoc-in-state! [:playback :playing?] true)
+        (state/assoc-in-state! [:playback :active-cues] {})
+        (is (nil? (provider)))))
+    (is (zero? @ex-count) "Idle frames should not build exceptions")))

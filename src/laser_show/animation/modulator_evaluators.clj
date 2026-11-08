@@ -131,36 +131,86 @@
 ;; Decay Modulators
 
 
-(defn- eval-exp-decay
-  "Evaluate exponential decay (beat-synced).
-   Uses effective-beats for smooth BPM-change animation."
-  [{:keys [min max decay-type]} context]
-  (let [beats (time/get-beats-from-context context)
-        phase (u/fmod beats 1.0)
+(def ^:private ^:const decay-curve-k 5.0)
+
+(defn- decay-elapsed
+  "Time elapsed since the cue was triggered, in time-unit.
+   Uses the raw accumulators (no phase correction); falls back to
+   time-ms - trigger-time for contexts without accumulators."
+  ^double [time-unit {:keys [accumulated-beats accumulated-ms time-ms trigger-time bpm]}]
+  (let [fallback-ms (- (double (or time-ms 0.0)) (double (or trigger-time 0.0)))]
+    (if (= time-unit :seconds)
+      (/ (double (or accumulated-ms fallback-ms)) 1000.0)
+      (double (or accumulated-beats
+                  (time/ms->beats fallback-ms (double (or bpm 120.0))))))))
+
+(defn decay-curve-factor
+  "Remaining fraction (1.0 -> 0.0) of a decay at progress p in [0, 1].
+   - :linear - constant rate
+   - :exp    - fast start, long tail (normalised to reach 0 at p = 1)
+   - :log    - slow start, fast finish (mirror of :exp)"
+  ^double [curve ^double p]
+  (let [k decay-curve-k
+        e-k (Math/exp (- k))]
+    (case curve
+      :exp (/ (- (Math/exp (- (* k p))) e-k) (- 1.0 e-k))
+      :log (- 1.0 (/ (- (Math/exp (* k p)) 1.0) (- (Math/exp k) 1.0)))
+      (- 1.0 p))))
+
+(defn- eval-decay
+  "Evaluate decay modulator: moves from :max to :min over :duration
+   (in :time-unit, beats or seconds) after the cue is triggered, shaped by
+   :decay-curve, then holds at :min until retriggered."
+  [{:keys [min max duration time-unit decay-curve]} context]
+  (let [duration (double (or duration 1.0))
+        elapsed (decay-elapsed time-unit context)
+        p (if (pos? duration)
+            (clojure.core/min 1.0 (clojure.core/max 0.0 (/ elapsed duration)))
+            1.0)
         start-v (double max)
         end-v (double min)]
-    (case decay-type
-      :exp (let [range-exp (- start-v end-v)
-                 decay-factor (Math/exp (* (- phase) 3.0))]
-             (+ end-v (* decay-factor range-exp)))
-      ;; :linear is default
-      (let [range-v (- end-v start-v)]
-        (+ start-v (* phase range-v))))))
+    (+ end-v (* (decay-curve-factor decay-curve p) (- start-v end-v)))))
 
 
 ;; Random Modulators
 
 
+(def ^:private ^:const splitmix-gamma (unchecked-long 0x9E3779B97F4A7C15N))
+(def ^:private ^:const splitmix-mul-1 (unchecked-long 0xBF58476D1CE4E5B9N))
+(def ^:private ^:const splitmix-mul-2 (unchecked-long 0x94D049BB133111EBN))
+
+(defn hash-unit
+  "Deterministic, well-distributed hash of a long to a double in [0, 1).
+   Uses the SplitMix64 finaliser, so consecutive inputs give unrelated outputs
+   (unlike the first nextDouble of java.util.Random seeded with consecutive
+   integers, which are nearly identical)."
+  ^double [^long n]
+  (let [z (unchecked-add n splitmix-gamma)
+        z (unchecked-multiply (bit-xor z (unsigned-bit-shift-right z 30)) splitmix-mul-1)
+        z (unchecked-multiply (bit-xor z (unsigned-bit-shift-right z 27)) splitmix-mul-2)
+        z (bit-xor z (unsigned-bit-shift-right z 31))]
+    (/ (double (unsigned-bit-shift-right z 11)) 9007199254740992.0)))
+
 (defn- eval-random
   "Evaluate random modulator.
-   In once mode, generates random values through once-periods cycles then holds at the final position.
-   Uses effective-beats for smooth BPM-change animation in loop mode."
-  [{:keys [min max period changes-per-beat] :as config} context]
+   Holds a new random value for each period (or for each 1/changes-per-beat
+   beats, when the legacy :changes-per-beat key is set). Values are a pure
+   function of the step number, so they're deterministic for a given time.
+   In once mode, steps through once-periods values then holds the last one."
+  [{:keys [min max period changes-per-beat loop-mode once-periods] :as config} context]
   (let [phase (calculate-random-phase config context)
-        changes-in-period (double (or changes-per-beat (/ 1.0 (double period))))
-        seed (long (* phase changes-in-period))
-        rng (java.util.Random. seed)
-        t (.nextDouble ^java.util.Random rng)
+        steps-per-period (if changes-per-beat
+                           (* (double changes-per-beat) (double period))
+                           1.0)
+        step (long (Math/floor (* phase steps-per-period)))
+        ;; Once mode reports phase = once-periods when done; hold the last
+        ;; step's value instead of jumping to a new one
+        step (if (= loop-mode :once)
+               (clojure.core/min step
+                                 (dec (long (Math/ceil (* (double (or once-periods 1.0))
+                                                          steps-per-period)))))
+               step)
+        t (hash-unit step)
         range-v (- (double max) (double min))]
     (+ (double min) (* t range-v))))
 
@@ -379,7 +429,7 @@
    :triangle     eval-triangle
    :sawtooth     eval-sawtooth
    :square       eval-square
-   :exp-decay    eval-exp-decay
+   :decay        eval-decay
    :random       eval-random
    :midi         eval-midi
    :osc          eval-osc

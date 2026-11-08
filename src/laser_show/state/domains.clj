@@ -413,6 +413,7 @@
                            :address-mappings {}        ; Map of OSC address -> event config
                            :handlers {}                ; Map of handler-id -> {:pattern :handler}
                            :learn-mode nil}            ; Promise when learning, nil otherwise
+                     :gamepad {:enabled? true}
                      :keyboard {:enabled? true
                                 :attached-components #{}}
                      :router {:handlers {}

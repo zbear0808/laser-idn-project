@@ -36,12 +36,20 @@ Fast strobe effect that flashes 8 times per beat with a 10% duty cycle.
 **Duty cycle:** 10%  
 **Use case:** High-energy strobe effects
 
+#### trace-fade.edn
+A comet trail that travels through the shape's point sequence: a bright head with a fading tail.
+
+**Effect:** `trace-fade` (static params)  
+**Period:** 1 beat  
+**Tail length:** 0.3  
+**Use case:** Chasing/drawing-on effects along a path
+
 ### Shape Effects
 
 #### x-position-oscillator.edn
 Oscillates horizontal position left and right.
 
-**Effect:** `offset` with `sine` modulator on x-axis  
+**Effect:** `translate` with `sine` modulator on `:x`  
 **Range:** -0.3 to 0.3  
 **Period:** 1 beat  
 **Use case:** Horizontal movement, side-to-side motion
@@ -49,7 +57,7 @@ Oscillates horizontal position left and right.
 #### y-position-oscillator.edn
 Oscillates vertical position up and down.
 
-**Effect:** `offset` with `sine` modulator on y-axis  
+**Effect:** `translate` with `sine` modulator on `:y`  
 **Range:** -0.3 to 0.3  
 **Period:** 1 beat  
 **Use case:** Vertical movement, bouncing motion
@@ -94,6 +102,8 @@ Modulators are specified as maps with a `:type` key:
 - `:triangle` - Linear ramp up and down
 - `:sawtooth` - Linear ramp with instant reset
 - `:square` - On/off switching with duty cycle
+- `:random` - A new random value each period
+- `:decay` - Falls from max to min over a duration after the cue is triggered
 - `:point-index` - Per-point modulation based on point position
 
 **Time units:**
@@ -102,7 +112,12 @@ Modulators are specified as maps with a `:type` key:
 
 ## Usage
 
-These presets can be loaded through the application's effect loading system. They define complete effect chains that can be applied to any cue.
+> **Note:** nothing in the application loads this directory yet. The presets are
+> validated by `test/laser_show/animation/effect_presets_test.clj` (every
+> `:effect-id` must be registered and every `:params` key must be one of that
+> effect's parameters), but a loader/browser is still to be built.
+
+These presets define complete effect chains that can be applied to any cue.
 
 ## Creating Custom Presets
 
@@ -114,4 +129,4 @@ To create your own presets:
 4. Configure parameters with either static values or modulator configs
 5. Test the preset in the application
 
-Refer to `src/laser_show/animation/effects.clj` for available effect IDs and their parameters.
+Effects are registered in `src/laser_show/animation/effects/*.clj` (`shape`, `color`, `intensity`, `calibration`, `zone`); each `register-effect!` call lists the effect ID and its `:parameters`. Modulator types and their params are in `src/laser_show/animation/modulators.clj`.

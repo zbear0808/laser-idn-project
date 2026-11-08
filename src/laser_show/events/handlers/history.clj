@@ -96,7 +96,8 @@
     :history/record-snapshot
     :file/new-project
     :file/open
-    :file/open-result})
+    :file/open-result
+    :file/project-loaded})
 
 (defn format-event-description
   "Generate a human-readable description for an event type."

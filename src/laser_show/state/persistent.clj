@@ -10,7 +10,9 @@
    This namespace decides what gets saved and loaded."
   (:require [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
-            [laser-show.state.serialization :as ser]))
+            [laser-show.state.domains :as domains]
+            [laser-show.state.serialization :as ser]
+            [laser-show.state.templates :as templates]))
 
 
 (def default-projects-dir
@@ -34,11 +36,15 @@
    - :paths - Vector of path specs to save/load for this file
    - :path - Path into the unified state map
    - :keys - nil means save whole domain, vector means select-keys for partial save
+   - :merge-defaults? - when loading, merge the file data over the domain defaults
+                        (for settings maps, so keys added after the file was saved
+                        get their default value)
    
-   When loading: data from file is merged into the state at each :path
+   When loading: the value at each :path is REPLACED by the file data. Paths
+                 missing from the file are reset to their initial value.
    When saving: if :keys is nil, save full domain; if :keys is a vector, save (select-keys)"
   {:project-metadata
-   {:paths [{:path [:config]}
+   {:paths [{:path [:config] :merge-defaults? true}
             {:path [:timing] :keys [:bpm]}
             {:path [:grid] :keys [:size]}]}
    
@@ -53,171 +59,178 @@
             {:path [:chains :projector-effects]}]}})
 
 
-;; Load Functions
+;; Pure Document Functions
+;;
+;; These work on a state map passed in, so event handlers can stay pure and
+;; return the new state from their :state effect.
 
 
-(defn- merge-data-at-paths!
-  "Merge file data into state at multiple paths.
-   
-   Parameters:
-   - file-data: Map of data loaded from file
-   - path-specs: Vector of {:path [:domain :field] :keys nil-or-vector}"
-  [file-data path-specs]
-  (doseq [{:keys [path keys]} path-specs
-          :when path
-          :let [data-from-file (get-in file-data path)
-                data-to-merge (if (and keys data-from-file)
-                                (select-keys data-from-file keys)
-                                data-from-file)]
-          :when data-to-merge]
-    (state/swap-state! #(update-in % path merge data-to-merge))))
-
-(defn- load-and-merge-paths!
-  "Load data from file and merge into state at multiple paths.
-   
-   Parameters:
-   - filepath: Path to file to load
-   - path-specs: Vector of {:path [:domain :field]-or-vector}
-   
-   Returns: true if loaded successfully, false otherwise"
-  [filepath path-specs]
-  (if-let [file-data (ser/load-from-file filepath)]
-    (do (merge-data-at-paths! file-data path-specs)
-        true)
-    false))
-
-
-
-;; Save Functions
-
+(def ^:private all-path-specs
+  (vec (mapcat :paths (vals persistent-state-mapping))))
 
 (defn- collect-data-for-paths
   "Collect data from state for multiple paths into a single map.
    
    Parameters:
+   - state: Application state map
    - path-specs: Vector of {:path [:domain :field] :keys nil-or-vector}
    
    Returns: Map with data organized by top-level domain keys"
-  [path-specs]
+  [state path-specs]
   (reduce
     (fn [acc {:keys [path keys]}]
       (if path
-        (let [domain-key (first path)
-              domain-data (state/get-in-state path)
+        (let [domain-data (get-in state path)
               data (if keys
                      (select-keys domain-data keys)
                      domain-data)]
-          (if (= 1 (count path))
-            ;; Top-level domain - merge directly
-            (assoc acc domain-key data)
-            ;; Nested path - need to preserve structure
-            (assoc-in acc path data)))
+          (assoc-in acc path data))
         acc))
     {}
     path-specs))
 
-
-
-
-
-;; Project Save/Load Helpers
-
-(defn- collect-files-for-zip
-  "Collect data for all files to be saved in zip."
-  []
+(defn project-files
+  "Build the {filename data} map written into the project zip from state."
+  [state]
   (into {}
         (keep (fn [[file-key filename]]
                 (when-let [{:keys [paths]} (get persistent-state-mapping file-key)]
-                  [filename (collect-data-for-paths paths)])))
+                  [filename (collect-data-for-paths state paths)])))
         zip-filenames))
 
-(defn- update-project-state-after-save!
-  "Update project state after successful save/load."
-  [zip-path]
-  (state/swap-state! #(-> %
-                          (assoc-in [:project :current-file] zip-path)
-                          (assoc-in [:project :dirty?] false)
-                          (assoc-in [:project :last-saved] (System/currentTimeMillis)))))
+(defn mark-saved
+  "Record that the project was saved to zip-path at time now."
+  [state zip-path now]
+  (-> state
+      (assoc-in [:project :current-file] zip-path)
+      (assoc-in [:project :dirty?] false)
+      (assoc-in [:project :last-saved] now)))
 
-(defn- load-zip-contents!
-  "Load zip contents and merge into state.
-   Returns true if successful, nil otherwise."
-  [zip-path]
-  (when-let [zip-contents (ser/load-from-zip zip-path)]
-    (doseq [[file-key filename] zip-filenames
-            :let [file-data (get zip-contents filename)
-                  {:keys [paths]} (get persistent-state-mapping file-key)]
-            :when (and file-data paths)]
-      (merge-data-at-paths! file-data paths))
-    true))
+(defn- replace-at-path
+  "Replace the value at one path spec with file data, falling back to defaults."
+  [state initial file-data {:keys [path keys merge-defaults?]}]
+  (let [loaded (get-in file-data path)
+        default (get-in initial path)]
+    (if keys
+      (reduce (fn [s k]
+                (assoc-in s (conj path k)
+                          (if (contains? loaded k) (get loaded k) (get default k))))
+              state
+              keys)
+      (assoc-in state path
+                (cond
+                  (nil? loaded) default
+                  merge-defaults? (merge default loaded)
+                  :else loaded)))))
 
+(defn- replace-document
+  "Replace every persisted path in state with file-data (a map shaped like state).
+   Paths missing from file-data are reset to their initial value."
+  [state initial file-data]
+  (reduce #(replace-at-path %1 initial file-data %2) state all-path-specs))
 
-;; Project Operations
+(defn- reset-session
+  "Reset state that refers to the previous document (playback, selection,
+   list UI, dialogs, undo history, project metadata).
+   Backend/runtime state (streaming, Link, MIDI/OSC, discovered devices) is kept."
+  [state initial]
+  (-> state
+      (assoc :playback (:playback initial))
+      (assoc :list-ui (:list-ui initial))
+      (assoc :history (:history initial))
+      (assoc :project (:project initial))
+      (assoc :zone-group-ui (:zone-group-ui initial))
+      (assoc-in [:ui :dialogs] (get-in initial [:ui :dialogs]))
+      (assoc-in [:grid :selected-cell] nil)
+      (update :projector-ui merge (select-keys (:projector-ui initial)
+                                               [:active-projector :active-virtual-projector]))
+      (cond-> (contains? state :effects) (assoc-in [:effects :selected-cell] nil))))
 
-(defn save-project!
-  "Save all state to a zip file.
-   Creates parent directories if they don't exist.
-   Updates project state with file path and marks as clean.
+(defn zip-contents->file-data
+  "Merge the per-file maps of a loaded zip into one state-shaped map."
+  [zip-contents]
+  (reduce (fn [acc [_file-key filename]]
+            (merge-with merge acc (get zip-contents filename)))
+          {}
+          zip-filenames))
+
+(defn apply-loaded-project
+  "Return state with the document replaced by the loaded zip contents.
    
-   Parameters:
-   - zip-path - Path to the zip file (should end with .zip)
-   
-   Returns: true on success, false on failure
-   
-   Example:
-   (save-project! \"/path/to/my-project.zip\")"
-  [zip-path]
+   zip-contents is the {filename data} map from serialization/load-from-zip."
+  [state zip-contents zip-path]
+  (let [initial (domains/build-initial-state)]
+    (-> state
+        (replace-document initial (zip-contents->file-data zip-contents))
+        (reset-session initial)
+        (assoc-in [:project :current-file] zip-path))))
+
+(defn new-project-state
+  "Return state with a fresh starter document. Runtime/backend state is kept."
+  [state]
+  (let [initial (domains/build-initial-state)]
+    (-> state
+        (replace-document initial {})
+        (templates/apply-starter-cue-chains)
+        (reset-session initial))))
+
+
+;; I/O Functions
+
+
+(defn write-project!
+  "Write a project-files map (see project-files) to zip-path.
+   Returns true on success, false on failure."
+  [zip-path files]
   (try
-    (when (ser/save-to-zip! zip-path (collect-files-for-zip))
-      (update-project-state-after-save! zip-path)
-      true)
+    (boolean (ser/save-to-zip! zip-path files))
     (catch Exception e
       (log/error "Error saving project:" (.getMessage e))
       false)))
 
-(defn load-project!
-  "Load all state from a zip file.
-   Merges loaded data into existing state.
-   Updates project state with file path.
-   Runs migrations to handle legacy data formats.
-   
-   Parameters:
-   - zip-path - Path to the zip file to load
-   
-   Returns: true if successful, false if file doesn't exist or load fails
-   
-   Example:
-   (load-project! \"/path/to/my-project.zip\")"
+(defn read-project
+  "Read a project zip. Returns the {filename data} map, or nil if the file is
+   missing or unreadable."
   [zip-path]
   (try
-    (if-not (.exists (java.io.File. zip-path))
+    (if-not (.exists (java.io.File. ^String zip-path))
       (do (log/warn "Project file does not exist:" zip-path)
-          false)
-      (when (load-zip-contents! zip-path)
-        (update-project-state-after-save! zip-path)
-        true))
+          nil)
+      (ser/load-from-zip zip-path))
     (catch Exception e
       (log/error "Error loading project:" (.getMessage e))
-      false)))
+      nil)))
+
+
+;; Project Operations (REPL / tests - event handlers use the pure functions above)
+
+(defn save-project!
+  "Save the current state to a zip file and mark the project clean.
+   
+   Returns: true on success, false on failure"
+  [zip-path]
+  (if (write-project! zip-path (project-files (state/get-raw-state)))
+    (do (state/swap-state! mark-saved zip-path (System/currentTimeMillis))
+        true)
+    false))
+
+(defn load-project!
+  "Load a zip file, replacing the current document.
+   
+   Returns: true if successful, false if file doesn't exist or load fails"
+  [zip-path]
+  (if-let [contents (read-project zip-path)]
+    (do (state/swap-state! apply-loaded-project contents zip-path)
+        true)
+    false))
 
 (defn new-project!
-  "Reset all state to initial values.
-   Clears current project folder and marks as clean.
-   This creates a fresh blank project.
+  "Replace the current document with a fresh starter project.
    
-   Returns: true (always succeeds)
-   
-   Example:
-   (new-project!)"
+   Returns: true"
   []
-  (try
-    ;; Reset all state to initial values from registered domains
-    (let [domains (state/get-registered-domains)]
-      (state/reset-state! (update-vals domains :initial)))
-    true
-    (catch Exception e
-      (log/error "Error creating new project:" (.getMessage e))
-      false)))
+  (state/swap-state! new-project-state)
+  true)
 
 (defn get-default-project-filename
   "Generate a default project filename with timestamp.

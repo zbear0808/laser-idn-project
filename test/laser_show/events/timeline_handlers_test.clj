@@ -182,3 +182,23 @@
                                :state s-min})]
       (is (== 10.0 (get-in res [:state :ui :timeline :zoom-x]))))))
 
+(deftest handle-delete-selection-test
+  (let [a (random-uuid) b (random-uuid) c (random-uuid)
+        s0 (-> base-state
+               (assoc-in [:chains :cue-chains [0 0] :items]
+                         [{:id a :preset-id :circle}
+                          {:id b :preset-id :square}
+                          {:id c :preset-id :line}]))]
+    (testing "removes only the selected clips and clears the selection"
+      (let [s1 (assoc-in s0 [:ui :timeline :selection] #{a c})
+            res (timeline/handle {:event/type :timeline/delete-selection
+                                  :col 0 :row 0 :state s1})]
+        (is (= [b] (mapv :id (get-in res [:state :chains :cue-chains [0 0] :items]))))
+        (is (= #{} (get-in res [:state :ui :timeline :selection])))))
+
+    (testing "is a no-op with an empty selection"
+      (let [s1 (assoc-in s0 [:ui :timeline :selection] #{})
+            res (timeline/handle {:event/type :timeline/delete-selection
+                                  :col 0 :row 0 :state s1})]
+        (is (identical? s1 (:state res)))))))
+

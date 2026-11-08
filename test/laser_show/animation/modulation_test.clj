@@ -5,7 +5,8 @@
             [laser-show.animation.interpolation :as interp]
             [laser-show.animation.keyframes :as kf]
             [laser-show.animation.modulation :as mod]
-            [laser-show.animation.modulator-evaluators :as mod-eval]))
+            [laser-show.animation.modulator-evaluators :as mod-eval]
+            [laser-show.animation.modulator-registry :as mod-reg]))
 
 
 ;; Helper Functions
@@ -163,7 +164,77 @@
       (is (approx= 0.5 (mod/resolve-param config (make-test-context (* 0.5 ms-per-beat) bpm)) 0.05)))))
 
 
+;; Time Unit Tests
+
+
+(deftest seconds-time-unit-loop-mode-test
+  (testing "loop-mode :seconds ignores BPM and uses real elapsed time"
+    (let [config {:type :sine :min 0.0 :max 1.0 :period 1.0 :time-unit :seconds}
+          at (fn [bpm ctx] (mod/resolve-param config (merge {:bpm bpm} ctx)))]
+      ;; 250ms into a 1s period = quarter cycle -> cosine at 90deg -> midpoint
+      (doseq [bpm [60 120 140]]
+        (is (approx= 0.5 (at bpm {:accumulated-ms 250.0
+                                  :effective-beats (* 0.25 (/ bpm 60.0))}) 1e-9)
+            (str "accumulated-ms at bpm " bpm))
+        (is (approx= 0.5 (at bpm {:time-ms 250}) 1e-9)
+            (str "time-ms fallback at bpm " bpm)))
+      (is (= (at 60 {:accumulated-ms 400.0 :effective-beats 0.4})
+             (at 120 {:accumulated-ms 400.0 :effective-beats 0.8})))))
+  (testing "loop-mode :beats still follows BPM"
+    (let [config {:type :sine :min 0.0 :max 1.0 :period 1.0 :time-unit :beats}]
+      (is (not (approx= (mod/resolve-param config (make-test-context 250 60))
+                        (mod/resolve-param config (make-test-context 250 120))
+                        0.1))))))
+
+
+;; UI Modulator List Tests
+
+
+(deftest ui-modulator-list-test
+  (let [ids (set (map :id (mod-reg/all-ui-modulators)))]
+    (testing "internal modulators are hidden from the dropdown"
+      (is (not (contains? ids :unified-keyframe-param)))
+      (is (not-any? #(= :internal (:category %)) (mod-reg/all-ui-modulators))))
+    (testing "user-facing modulators, including MIDI/OSC, are listed"
+      (is (every? ids [:sine :triangle :sawtooth :square :random :decay
+                       :pos-x :pos-y :radial :point-index :angle :midi :osc])))
+    (testing "internal modulator is still registered for keyframe evaluation"
+      (is (mod-reg/valid-modulator-type? :unified-keyframe-param)))))
+
+
+;; Decay Modulator Tests
+
+
+(deftest decay-modulator-test
+  (let [base {:type :decay :min 0.0 :max 1.0 :duration 2.0 :time-unit :beats}
+        at (fn [config ctx] (mod/resolve-param config (merge {:bpm 120.0} ctx)))]
+    (testing "linear decay goes max -> min over :duration beats, then holds"
+      (let [config (assoc base :decay-curve :linear)]
+        (is (approx= 1.0 (at config {:accumulated-beats 0.0}) 1e-9))
+        (is (approx= 0.5 (at config {:accumulated-beats 1.0}) 1e-9))
+        (is (approx= 0.0 (at config {:accumulated-beats 2.0}) 1e-9))
+        (is (approx= 0.0 (at config {:accumulated-beats 7.5}) 1e-9) "holds at min, no per-beat ramp")))
+    (testing ":exp is fast-start, :log is slow-start, both reach the end points"
+      (let [mid #(at (assoc base :decay-curve %) {:accumulated-beats 1.0})]
+        (is (< (mid :exp) 0.5))
+        (is (> (mid :log) 0.5))
+        (doseq [c [:exp :log]]
+          (is (approx= 1.0 (at (assoc base :decay-curve c) {:accumulated-beats 0.0}) 1e-9))
+          (is (approx= 0.0 (at (assoc base :decay-curve c) {:accumulated-beats 2.0}) 1e-9)))))
+    (testing ":seconds time-unit uses elapsed ms and ignores BPM"
+      (let [config (assoc base :decay-curve :linear :time-unit :seconds)]
+        (is (approx= 0.75 (at config {:accumulated-ms 500.0 :accumulated-beats 99.0}) 1e-9))
+        (is (approx= 0.75 (at config {:accumulated-ms 500.0 :bpm 60.0}) 1e-9))))
+    (testing "default curve from the registry (:exp) is applied when unset"
+      (is (< (at base {:accumulated-beats 1.0}) 0.5)))
+    (testing "falls back to time-ms - trigger-time without accumulators"
+      (let [config (assoc base :decay-curve :linear)]
+        ;; 500ms after trigger at 120 BPM = 1 beat = half of 2-beat duration
+        (is (approx= 0.5 (at config {:time-ms 10500 :trigger-time 10000}) 1e-9))))))
+
+
 ;; Random and Step Modulator Tests
+
 
 
 (deftest random-mod-range-test
@@ -180,6 +251,26 @@
           context (make-test-context 500 120)]
       (is (= (mod/resolve-param config context)
              (mod/resolve-param config context))))))
+
+(deftest random-mod-spread-test
+  (testing "consecutive random steps are well spread over [min, max]"
+    (let [config {:type :random :min 2.0 :max 4.0 :period 1.0}
+          ms-per-beat 500.0
+          ;; Sample mid-step of 64 consecutive one-beat steps
+          values (mapv #(mod/resolve-param config (make-test-context (* (+ % 0.5) ms-per-beat) 120))
+                       (range 64))]
+      (is (every? #(<= 2.0 % 4.0) values))
+      (is (>= (- (apply max values) (apply min values)) (* 0.8 2.0))
+          (str "random values should cover >= 80% of range, got " values))
+      (is (> (count (distinct values)) 60) "consecutive steps should differ")))
+  (testing "value is held within a period and changes between periods"
+    (let [config {:type :random :min 0.0 :max 1.0 :period 2.0}
+          at-beat #(mod/resolve-param config {:effective-beats % :bpm 120.0})]
+      (is (= (at-beat 0.1) (at-beat 1.9)))
+      (is (not= (at-beat 1.9) (at-beat 2.1)))))
+  (testing "hash-unit stays in [0, 1)"
+    (is (every? #(let [v (mod-eval/hash-unit %)] (and (>= v 0.0) (< v 1.0)))
+                (concat (range -1000 1000) [Long/MIN_VALUE Long/MAX_VALUE])))))
 
 ;; Per-Point Context Detection Tests
 

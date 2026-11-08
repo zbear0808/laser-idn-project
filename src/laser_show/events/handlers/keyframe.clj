@@ -512,7 +512,7 @@
       {:state (handle-update-keyframe-param state config effect-path
                                             (:keyframe-idx event)
                                             (:param-key event)
-                                            (or (:value event) (:fx/event event)))}
+                                            (h/first-some (:value event) (:fx/event event)))}
 
       :keyframe/update-spatial-params
       {:state (handle-update-spatial-params state config effect-path
@@ -526,7 +526,7 @@
       {:state (handle-update-keyframe-param state config effect-path
                                             (:keyframe-idx event)
                                             (:param-key event)
-                                            (or (:value event) (:fx/event event)))}
+                                            (h/first-some (:value event) (:fx/event event)))}
 
       :keyframe/set-interpolation
       {:state (handle-set-interpolation state config effect-path
@@ -541,7 +541,7 @@
       {:state (handle-set-edge-behavior state config effect-path (or (:edge-behavior event) (:fx/event event)))}
 
       :keyframe/set-normalize
-      {:state (handle-set-normalize state config effect-path (or (:normalize? event) (:fx/event event)))}
+      {:state (handle-set-normalize state config effect-path (h/first-some (:normalize? event) (:fx/event event)))}
 
       :keyframe/update-color-param
       {:state (handle-update-keyframe-color-param state config effect-path

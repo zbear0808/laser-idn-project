@@ -48,7 +48,6 @@ test-*.log
 
 # Local configuration (not committed)
 /config/
-/plans
 .env
 
 # UI test artifacts

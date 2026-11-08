@@ -76,7 +76,8 @@
                    (+ idn-stream/channel-message-header-size
                       idn-stream/frame-chunk-header-size
                       IDN_HELLO_HEADER_SIZE))
-        available-bytes (- target-mtu overhead)]
+        available-bytes (- (min target-mtu (+ idn-stream/MAX_MESSAGE_SIZE IDN_HELLO_HEADER_SIZE))
+                           overhead)]
     (max MIN_POINTS_PER_FRAGMENT
          (quot available-bytes bytes-per-pt))))
 
@@ -180,7 +181,7 @@
         cnl-byte (bit-or channel-msg-bit cclf-bit (bit-and channel-id 0x3F))
         ;; Per spec: sequel timestamp = base_timestamp + fragment_number
         sequel-timestamp (+ base-timestamp-us fragment-number)]
-    (.putShort buf (short total-size))
+    (.putShort buf (unchecked-short total-size))
     (.put buf (unchecked-byte cnl-byte))
     (.put buf (unchecked-byte idn-stream/CHUNK_TYPE_FRAME_SAMPLES_SEQUEL))
     (.putInt buf (unchecked-int (bit-and sequel-timestamp 0xFFFFFFFF)))))

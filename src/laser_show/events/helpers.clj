@@ -98,3 +98,9 @@
                     (assoc-in target-path transformed-data)
                     mark-dirty)})
       {:state state})))
+
+(defn first-some
+  "Return the first argument that is not nil. Unlike `or`, keeps `false`
+   (e.g. an unchecked checkbox's :fx/event)."
+  [& values]
+  (reduce (fn [_ v] (when (some? v) (reduced v))) nil values))

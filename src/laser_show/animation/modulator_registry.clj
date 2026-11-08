@@ -47,8 +47,8 @@
    
    - :wave      - Wave-based oscillators (sine, triangle, sawtooth, square, random)
    - :special   - Per-point/position based (pos-x, pos-y, radial, point-index)
-   - :external  - External input (midi, osc) - not exposed in UI
-   - :internal  - Hz-based variants and aliases - not exposed in UI"
+   - :external  - External input (midi, osc)
+   - :internal  - Internal helpers (e.g. :unified-keyframe-param) - not exposed in UI"
   #{:wave
     :special
     :external
@@ -124,10 +124,12 @@
 
 
 (defn all-ui-modulators
-  "Get vector of modulator maps (for dropdowns).
-   Filters out :external and :internal categories and non-visible modulators."
+  "Get modulator maps for the modulator type dropdown, sorted by category and
+   name. Excludes the :internal category (e.g. :unified-keyframe-param), which
+   is only used to wrap keyframe params and isn't user-configurable."
   []
-  (->> (vals @!modulators) 
+  (->> (vals @!modulators)
+       (remove #(= :internal (:category %)))
        (sort-by (juxt :category :name))))
 
 (defn per-point?

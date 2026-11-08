@@ -325,6 +325,14 @@
                                    :width cell-width
                                    :height cell-height})))}))}))
 
+(defn frame-stats-label
+  "Header text for the preview frame stats.
+   Frame stats carry generation latency, not a frame rate, so show that."
+  [{:keys [avg-latency-us]}]
+  (if avg-latency-us
+    (format "%dµs/frame" (long avg-latency-us))
+    ""))
+
 (defn preview-grid-header
   "Header for the preview grid panel with layout selector."
   [{:keys [fx/context]}]
@@ -346,7 +354,8 @@
                  :pref-width 80
                  :style "-fx-font-size: 10;"}
                 {:fx/type :label
-                 :text (str (:fps stats 0) " FPS")
+                 :id "preview-frame-stats"
+                 :text (frame-stats-label stats)
                  :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]}))
 
 (defn preview-grid-panel

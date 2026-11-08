@@ -2,13 +2,56 @@ name: Build and Test
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '25'
+
+    - name: Setup Clojure
+      uses: DeLaGuardo/setup-clojure@3fe9b3ae632c6758d0b7757b0838606ef4287b08 # 13.4
+      with:
+        cli: '1.12.4.1582'
+
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.m2/repository
+          ~/.gitlibs
+        key: ${{ runner.os }}-clojure-${{ hashFiles('**/deps.edn') }}
+        restore-keys: |
+          ${{ runner.os }}-clojure-
+
+    # Fails only on kondo errors; warnings are reported but don't block.
+    # dev/ is not linted yet: dev/cljfx/dev/help.clj is an in-ns override of
+    # cljfx.dev internals that kondo can't resolve.
+    - name: Lint (clj-kondo)
+      run: clojure -M:kondo --lint src test --parallel --fail-level error
+
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
     # Checkout repository
@@ -24,7 +67,7 @@ jobs:
     
     # Setup Clojure
     - name: Setup Clojure
-      uses: DeLaGuardo/setup-clojure@13.4
+      uses: DeLaGuardo/setup-clojure@3fe9b3ae632c6758d0b7757b0838606ef4287b08 # 13.4
       with:
         cli: '1.12.4.1582'
     
@@ -45,20 +88,29 @@ jobs:
     
     - name: Run integration tests
       run: clojure -M:linux:test-integration
-    
-    - name: Run all tests
-      run: clojure -M:linux:test-all
 
     - name: Install virtual display
       run: sudo apt-get update && sudo apt-get install -y xvfb
 
     # Run TestFX UI coverage inside an invisible virtual X display.
     - name: Run headless UI tests
+      timeout-minutes: 10
       run: xvfb-run -a --server-args="-screen 0 1280x800x24" clojure -M:linux:test-ui:test-ui-headless
+
+    # UI tests write screenshots and other artifacts to test-results/.
+    - name: Upload UI test results and screenshots
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ui-test-results
+        path: test-results/
+        if-no-files-found: ignore
+        retention-days: 14
     
-    # Build application (platform-specific JAR)
+    # Build application (platform-specific JAR). AOT-compiling laser-show.app
+    # loads JavaFX classes, so run under Xvfb like the release workflow does.
     - name: Build JAR
-      run: clojure -T:build uber :platform :linux
+      run: xvfb-run -a clojure -T:build uber :platform :linux
     
     # Upload JAR artifact
     - name: Upload JAR artifact

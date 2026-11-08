@@ -78,8 +78,9 @@
 ;; Per spec Section 2.2: Service ID 0x00 = connect to default service
 (def ^:const DEFAULT_SERVICE_ID 0)
 
-;; Maximum points per packet - approx limit of spec. 65 Kbytes packet size for 16 bit color/XY
-(def ^:const MAX_POINTS_PER_PACKET 9000)
+;; Per spec Section 2.1: Total Size "SHALL be in range 0x0008 to 0xFF00".
+;; The point limit per message depends on the output config, see max-points-per-message.
+(def ^:const MAX_MESSAGE_SIZE 0xFF00)
 
 
 ;; Tag Configurations for Different Bit Depths
@@ -200,17 +201,25 @@
     (quot (- max-size channel-message-header-size frame-chunk-header-size)
           bytes-per-pt)))
 
-;; Maximum packet size (16-bit XY + 16-bit RGB is largest configuration)
+;; Buffer size: the largest message the spec allows (Section 2.1).
 (def ^:const MAX_PACKET_SIZE
-  "Maximum IDN packet size for buffer pre-allocation.
-   Calculated for worst case: 16-bit XY + 16-bit RGB with max points."
-  (packet-size-with-config MAX_POINTS_PER_PACKET 
-                          tags-16bit-xy-16bit-color 
-                          {:xy-bit-depth 16 :color-bit-depth 16}))
+  "Maximum IDN message size for buffer pre-allocation (spec limit 0xFF00)."
+  MAX_MESSAGE_SIZE)
+
+(defn max-points-per-message
+  "Maximum number of samples that fit in one IDN message of at most
+   MAX_MESSAGE_SIZE bytes for the given output config."
+  [output-config include-config?]
+  (let [bytes-per-pt (output-config/bytes-per-sample output-config)
+        [_ padded-tags] (calculate-scwc (get-tags-for-config output-config))
+        overhead (if include-config?
+                   (packet-size-with-config 0 padded-tags output-config)
+                   (packet-size-without-config 0 output-config))]
+    (quot (- MAX_MESSAGE_SIZE overhead) bytes-per-pt)))
 
 (defn create-packet-buffer
   "Create a pre-allocated ByteBuffer for packet generation.
-   Buffer is sized for maximum packet (16-bit XY + RGB, max points).
+   Buffer is sized for the largest message the spec allows.
    Each streaming engine should have its own buffer."
   []
   (doto (ByteBuffer/allocate MAX_PACKET_SIZE)
@@ -237,7 +246,8 @@
   (let [channel-msg-bit 0x80               ; Bit 7 ALWAYS 1 for channel messages
         cclf-bit (if has-config? 0x40 0x00) ; Bit 6 is CCLF
         cnl-byte (bit-or channel-msg-bit cclf-bit (bit-and channel-id 0x3F))]
-    (.putShort buf (short total-size))
+    ;; Total Size is unsigned 16-bit (up to 0xFF00); checked `short` rejects > 32767
+    (.putShort buf (unchecked-short total-size))
     (.put buf (unchecked-byte cnl-byte))
     (.put buf (unchecked-byte chunk-type))
     ;; Timestamp is 32-bit unsigned per IDN-Stream spec Section 2.1
@@ -318,6 +328,23 @@
 ;; Frame to Packet Conversion
 
 
+(def ^:private last-truncation-warn-ms (atom 0))
+
+(defn- limit-points
+  "Return frame truncated to max-points, warning at most every 5 s."
+  [frame max-points]
+  (let [point-count (count frame)]
+    (if (<= point-count max-points)
+      frame
+      (let [now (System/currentTimeMillis)
+            last-ms @last-truncation-warn-ms]
+        (when (and (>= (- now last-ms) 5000)
+                   (compare-and-set! last-truncation-warn-ms last-ms now))
+          (log/warn "Frame exceeds IDN message size limit (0xFF00). Truncating from"
+                    point-count "to" max-points "points."))
+        (subvec (vec frame) 0 max-points)))))
+
+
 (defn frame->packet-with-config
   "Convert a frame (vector of points) to an IDN packet with channel configuration.
    Use this when opening a channel or when configuration needs to be sent.
@@ -342,16 +369,13 @@
                                                                      output-config output-config/default-config
                                                                      close? false
                                                                      single-scan? false}}]
-  (let [points (take MAX_POINTS_PER_PACKET frame)
+  (let [points (limit-points frame (max-points-per-message output-config true))
         point-count (count points)
         tags (get-tags-for-config output-config)
         [scwc padded-tags] (calculate-scwc tags)
         total-size (packet-size-with-config point-count padded-tags output-config)
         cfl-flags (bit-or CFL_ROUTING (if close? CFL_CLOSE 0))
         chunk-flags (if single-scan? 0x01 0x00)]
-    (when (> point-count MAX_POINTS_PER_PACKET)
-      (log/warn "Frame point count exceeds maximum per packet. Truncating from" point-count "to" MAX_POINTS_PER_PACKET "points."))
-    
     (.clear buf)
 
     (write-channel-message-header! buf total-size channel-id
@@ -386,7 +410,7 @@
   [^ByteBuffer buf frame channel-id timestamp-us duration-us & {:keys [output-config single-scan?]
                                                                 :or {output-config output-config/default-config
                                                                      single-scan? false}}]
-  (let [points (take MAX_POINTS_PER_PACKET frame)
+  (let [points (limit-points frame (max-points-per-message output-config false))
         point-count (count points)
         total-size (packet-size-without-config point-count output-config)
         chunk-flags (if single-scan? 0x01 0x00)]
@@ -445,7 +469,7 @@
   (when (>= (alength packet) 8)
     (let [buf (ByteBuffer/wrap packet)]
       (.order buf ByteOrder/BIG_ENDIAN)
-      (let [total-size (.getShort buf)
+      (let [total-size (bit-and (.getShort buf) 0xFFFF)
             cnl-byte (bit-and (.get buf) 0xFF)
             chunk-type (bit-and (.get buf) 0xFF)
             timestamp (.getInt buf)]

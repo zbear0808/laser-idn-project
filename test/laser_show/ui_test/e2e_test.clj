@@ -219,6 +219,59 @@
   (ui/wait-for! #(= (+ 1 (count item-ids))
                     (count (ui/query-all ".chain-item")))))
 
+(defn- flush-event-queue!
+  "Wait until every event dispatched so far has been processed.
+   Events are handled in order, so a marker event landing means the rest did."
+  []
+  (ui/sync-fx!)
+  (let [marker (+ 60.25 (rand-int 100))]
+    (events/dispatch! {:event/type :timing/set-bpm :bpm marker})
+    (ui/wait-for! #(= marker (get-in (state/get-raw-state) [:timing :bpm])))))
+
+(deftest tap-tempo-button-records-taps
+  (let [robot (ui/robot)]
+    (dotimes [_ 3]
+      (ui/click! robot "#tap-tempo-btn"))
+    (ui/wait-for! #(= 3 (count (get-in (state/get-raw-state) [:timing :tap-times]))))
+    (is (= 3 (count (get-in (state/get-raw-state) [:timing :tap-times]))))))
+
+(deftest grouped-list-right-click-keeps-multi-selection
+  (let [robot (ui/robot)
+        component-id [:cue-chain 0 0]]
+    (open-cue-chain-editor!)
+    (add-cue-chain-items! [:square :triangle])
+    (ui/click-node! robot (nth (ui/query-all ".chain-item") 0))
+    (ui/modifier-click-node! robot (nth (ui/query-all ".chain-item") 1) javafx.scene.input.KeyCode/CONTROL)
+    (ui/wait-for! #(= 2 (count (get-in (state/get-raw-state)
+                                        [:list-ui component-id :selected-ids]))))
+    (let [selected (get-in (state/get-raw-state) [:list-ui component-id :selected-ids])]
+      (ui/right-click-node! robot (nth (ui/query-all ".chain-item") 1))
+      (flush-event-queue!)
+      (is (= selected (get-in (state/get-raw-state)
+                              [:list-ui component-id :selected-ids])))
+      (ui/press! robot javafx.scene.input.KeyCode/ESCAPE))))
+
+(deftest timeline-delete-key-removes-selected-clip
+  (let [robot (ui/robot)
+        items-path [:chains :cue-chains [0 0] :items]]
+    (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
+    (ui/wait-for! #(some (fn [title]
+                           (and title (.startsWith ^String title "Timeline Editor")))
+                         (ui/window-titles)))
+    (ui/assert-visible! "#timeline-canvas")
+    (let [count-before (count (get-in (state/get-raw-state) items-path))]
+      (events/dispatch! {:event/type :timeline/add-preset-to-track
+                         :col 0 :row 0 :item-id :square})
+      (ui/wait-for! #(and (= (inc count-before)
+                             (count (get-in (state/get-raw-state) items-path)))
+                          (seq (get-in (state/get-raw-state) [:ui :timeline :selection]))))
+      (let [added-id (first (get-in (state/get-raw-state) [:ui :timeline :selection]))]
+        (ui/focus! robot "#timeline-canvas")
+        (ui/press! robot javafx.scene.input.KeyCode/DELETE)
+        (ui/wait-for! #(= count-before (count (get-in (state/get-raw-state) items-path))))
+        (is (not-any? #(= added-id (:id %)) (get-in (state/get-raw-state) items-path)))
+        (is (empty? (get-in (state/get-raw-state) [:ui :timeline :selection])))))))
+
 (deftest grouped-list-supports-ctrl-and-shift-selection
   (let [robot (ui/robot)]
     (open-cue-chain-editor!)

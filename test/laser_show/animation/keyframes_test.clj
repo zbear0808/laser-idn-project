@@ -75,6 +75,21 @@
       ;; Should use time driver by default
       (is (< (Math/abs (- 0.5 (kf/get-keyframe-position config 250 context))) 0.01)))))
 
+(deftest get-keyframe-position-seconds-loop-test
+  (testing ":seconds time-unit in loop mode uses real time, independent of BPM"
+    (let [config {:driver :time :period 2.0 :time-unit :seconds :loop-mode :loop}]
+      (doseq [bpm [60.0 120.0 174.0]]
+        ;; 500ms into a 2s period = 0.25, whatever the BPM / beat count
+        (is (< (Math/abs (- 0.25 (kf/get-keyframe-position
+                                  config 0 {:accumulated-ms 500.0
+                                            :effective-beats (* 0.5 (/ bpm 60.0))
+                                            :bpm bpm})))
+               1e-9)
+            (str "bpm " bpm)))
+      (testing "falls back to time-ms without accumulators"
+        (is (< (Math/abs (- 0.75 (kf/get-keyframe-position config 1500 {:time-ms 1500 :bpm 90.0})))
+               1e-9))))))
+
 (deftest get-keyframe-position-point-index-driver-test
   (testing "point-index driver uses context"
     (let [config {:driver :point-index}
