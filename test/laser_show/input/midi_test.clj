@@ -57,7 +57,7 @@
 
 (deftest handler-channel-filter-test
   (let [sent (atom [])
-        state (atom {:enabled? true :channel-filter #{2}})
+        state (atom {:enabled? true :channel-filter #{2} :connected-devices #{"Test Device"}})
         handler (midi/create-midi-handler "Test Device" #(swap! sent conj %) #(deref state))]
     (handler (fx/note-on 2 60 100))
     (handler (fx/note-on 3 60 100))
@@ -65,3 +65,43 @@
     (swap! state assoc :enabled? false)
     (handler (fx/note-on 2 61 100))
     (is (= 1 (count @sent)))))
+
+(defn- fake-midi-in
+  "A midi-in map shaped like overtone.midi/midi-in's result, with a
+   Transmitter and MidiDevice that record what was done to them."
+  [calls]
+  {:name "Test Device"
+   :transmitter (reify javax.sound.midi.Transmitter
+                  (setReceiver [_ r] (swap! calls conj [:set-receiver r]))
+                  (getReceiver [_] nil)
+                  (close [_] (swap! calls conj :close-transmitter)))
+   :device (reify javax.sound.midi.MidiDevice
+             (isOpen [_] true)
+             (close [_] (swap! calls conj :close-device)))})
+
+(deftest disconnect-detaches-and-closes-test
+  (let [calls (atom [])
+        state {:enabled? true
+               :devices {"Test Device" (fake-midi-in calls)}
+               :handlers {"Test Device" identity}
+               :connected-devices #{"Test Device"}}
+        after (midi/disconnect-device state "Test Device")]
+    (is (= [[:set-receiver nil] :close-transmitter :close-device] @calls))
+    (is (empty? (:devices after)))
+    (is (empty? (:handlers after)))
+    (is (empty? (:connected-devices after)))))
+
+(deftest disconnect-all-closes-every-device-test
+  (let [calls (atom [])
+        state {:devices {"A" (fake-midi-in calls) "B" (fake-midi-in calls)}
+               :connected-devices #{"A" "B"}}
+        after (midi/disconnect-all state)]
+    (is (= 2 (count (filter #{:close-device} @calls))))
+    (is (empty? (:connected-devices after)))))
+
+(deftest stale-handler-ignored-after-disconnect-test
+  (let [sent (atom [])
+        state (atom {:enabled? true :connected-devices #{}})
+        handler (midi/create-midi-handler "Test Device" #(swap! sent conj %) #(deref state))]
+    (handler (fx/note-on 0 60 100))
+    (is (empty? @sent))))

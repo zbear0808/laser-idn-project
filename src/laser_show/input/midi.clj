@@ -8,7 +8,8 @@
   (:require [clojure.tools.logging :as log]
             [overtone.midi :as m]
             [laser-show.input.events :as events]
-            [laser-show.common.util :as u]))
+            [laser-show.common.util :as u])
+  (:import [javax.sound.midi MidiDevice Transmitter]))
 
 
 ;; Device Discovery (pure functions - no state needed)
@@ -99,7 +100,9 @@
   [device-name dispatch-fn get-state-fn]
   (fn [msg]
     (let [midi-state (get-state-fn)]
-      (when (:enabled? midi-state)
+      (when (and (:enabled? midi-state)
+                 ;; Guard against a handler that outlives its disconnect
+                 (contains? (:connected-devices midi-state) device-name))
         (let [channel-filter (:channel-filter midi-state)
               channel (:channel msg)]
           ;; Check channel filter
@@ -135,19 +138,32 @@
       (log/error "Error connecting to MIDI device:" (.getMessage e))
       midi-state)))
 
+(defn- close-midi-in!
+  "Detaches our receiver and closes the transmitter and device opened by
+   overtone.midi/midi-in. Each step is attempted independently."
+  [{:keys [transmitter device] :as midi-in}]
+  (when transmitter
+    (try (.setReceiver ^Transmitter transmitter nil)
+         (catch Exception e (log/warn "Error detaching MIDI receiver:" (.getMessage e))))
+    (try (.close ^Transmitter transmitter)
+         (catch Exception e (log/warn "Error closing MIDI transmitter:" (.getMessage e)))))
+  (when device
+    (try (.close ^MidiDevice device)
+         (catch Exception e (log/warn "Error closing MIDI device:" (.getMessage e)))))
+  midi-in)
+
 (defn disconnect-device
-  "Disconnects from a MIDI device.
+  "Disconnects from a MIDI device: detaches the handler and closes the port.
    Returns updated state map."
   [midi-state device-name]
-  (if (get-in midi-state [:devices device-name])
+  (if-let [midi-in (get-in midi-state [:devices device-name])]
     (do
-      ;; Note: overtone.midi doesn't have a close function, 
-      ;; the device will be garbage collected
+      (close-midi-in! midi-in)
       (log/info "Disconnected from MIDI device:" device-name)
       (-> midi-state
           (update :devices dissoc device-name)
           (update :handlers dissoc device-name)
-          (update :connected-devices disj device-name)))
+          (update :connected-devices (fnil disj #{}) device-name)))
     midi-state))
 
 (defn disconnect-all
