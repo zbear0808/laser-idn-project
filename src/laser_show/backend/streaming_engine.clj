@@ -289,7 +289,9 @@
 
 (defn stop!
   "Stop the streaming engine gracefully.
-   Sends channel close packet, stops the thread, and closes the socket."
+   Sends a channel close message, then an IDN-RT graceful close (0x44,
+   IDN-Hello §6.2.2), both numbered with this engine's sequence counter.
+   Then closes the socket."
   [engine]
   (when @(:running? engine)
     (reset! (:running? engine) false)
@@ -301,8 +303,12 @@
       (try
         (let [timestamp-us (current-timestamp-us engine)
               close-packet (idn-stream/close-channel-packet (:channel-id engine) timestamp-us)
-              hello-packet (hello/wrap-channel-message close-packet)]
-          (hello/send-packet socket hello-packet (:target-host engine) (:target-port engine)))
+              hello-packet (hello/wrap-channel-message close-packet
+                                                       {:sequence (get-next-sequence! engine)})
+              rt-close-packet (hello/create-packet-header hello/CMD_RT_CLOSE 0
+                                                          (get-next-sequence! engine))]
+          (hello/send-packet socket hello-packet (:target-host engine) (:target-port engine))
+          (hello/send-packet socket rt-close-packet (:target-host engine) (:target-port engine)))
         (catch Exception e
           (log/error "Error sending close packet:" (.getMessage e))))
       
