@@ -42,6 +42,13 @@
     (is (= :armed (get-in armed [:trigger-runtime :active-groups :rhythm :state])))
     (is (= :locked (get-in locked [:trigger-runtime :active-groups :rhythm :state])))))
 
+(deftest trigger-group-events-are-routed
+  (let [state {:trigger-runtime {:active-groups {:rhythm {:state :active}}}}
+        result (handlers/handle-event {:event/type :trigger-group/toggle-lock
+                                       :state state
+                                       :group-id :rhythm})]
+    (is (= :locked (get-in result [:state :trigger-runtime :active-groups :rhythm :state])))))
+
 (def ^:private note-key {:source :midi :channel 0 :note 60})
 
 (defn- momentary-state [action-type]
