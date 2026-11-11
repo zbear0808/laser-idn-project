@@ -222,6 +222,7 @@
   "Clickable zone label that opens the zone selector popup."
   [{:keys [fx/context cell-index zone-name zone-color]}]
   {:fx/type :h-box
+   :id (str "preview-zone-label-" cell-index)
    :alignment :center-left
    :spacing 4
    :padding {:left 4 :right 4 :top 2 :bottom 2}
@@ -282,7 +283,6 @@
      :children (filterv some?
                         [(when show-labels?
                            {:fx/type :stack-pane
-                            :id (str "preview-zone-label-" cell-index)
                             :alignment :top-left
                             :children (filterv some?
                                                [{:fx/type zone-selector-label

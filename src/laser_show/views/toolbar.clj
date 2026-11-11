@@ -16,7 +16,11 @@
    Uses style-class for base styling, inline :style only for dynamic active state."
   [{:keys [icon tooltip on-action active?]}]
   {:fx/type :button
-   :id (if (= icon :stop) "stop-btn" "play-btn")
+   :id (case icon
+         :play "play-btn"
+         :stop "stop-btn"
+         :rotate-right "retrigger-btn"
+         "transport-btn")
    :graphic {:fx/type fa/icon
              :name icon
              :size 12}

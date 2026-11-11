@@ -17,6 +17,15 @@
     (ui/wait-for! #(false? (get-in (state/get-raw-state) [:playback :playing?])))
     (ui/assert-visible! "#play-btn")))
 
+(deftest retrigger-button-has-its-own-id
+  (let [robot (ui/robot)]
+    (ui/assert-count! "#play-btn" 1)
+    (ui/assert-count! "#retrigger-btn" 1)
+    (is (not (identical? (ui/query "#play-btn") (ui/query "#retrigger-btn"))))
+    (ui/click! robot "#retrigger-btn")
+    (ui/sync-fx!)
+    (is (not (get-in (state/get-raw-state) [:playback :playing?])))))
+
 (deftest bpm-input-commits-valid-value
   (let [robot (ui/robot)]
     (ui/fill! robot "#bpm-input" "140")

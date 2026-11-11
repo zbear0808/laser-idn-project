@@ -236,9 +236,10 @@
 (defn- file-menu
   [{:keys [fx/context]}]
   {:fx/type :menu
+   :id "file-menu"
    :text ""
    :graphic {:fx/type :label
-             :id "file-menu"
+             :id "file-menu-label"
              :text "File"
              :style-class "menu-label"}
    :items (file-menu-items context)})
@@ -246,9 +247,10 @@
 (defn- edit-menu
   [{:keys [fx/context]}]
   {:fx/type :menu
+   :id "edit-menu"
    :text ""
    :graphic {:fx/type :label
-             :id "edit-menu"
+             :id "edit-menu-label"
              :text "Edit"
              :style-class "menu-label"}
    :items (edit-menu-items context)})
@@ -256,9 +258,10 @@
 (defn- transport-menu
   [{:keys [fx/context]}]
   {:fx/type :menu
+   :id "transport-menu"
    :text ""
    :graphic {:fx/type :label
-             :id "transport-menu"
+             :id "transport-menu-label"
              :text "Transport"
              :style-class "menu-label"}
    :items (transport-menu-items context)})
@@ -266,9 +269,10 @@
 (defn- view-menu
   [{:keys [fx/context]}]
   {:fx/type :menu
+   :id "view-menu"
    :text ""
    :graphic {:fx/type :label
-             :id "view-menu"
+             :id "view-menu-label"
              :text "View"
              :style-class "menu-label"}
    :items (view-menu-items context)})
@@ -276,9 +280,10 @@
 (defn- help-menu
   [{:keys [fx/context]}]
   {:fx/type :menu
+   :id "help-menu"
    :text ""
    :graphic {:fx/type :label
-             :id "help-menu"
+             :id "help-menu-label"
              :text "Help"
              :style-class "menu-label"}
    :items (help-menu-items context)})

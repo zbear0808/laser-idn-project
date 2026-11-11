@@ -1,6 +1,6 @@
 # TestFX UI Integration Tests: Cross-Platform + Headless
 
-**Status:** In progress (Phases 1–2 done)   **Last verified against:** 36e4dec + working tree
+**Status:** In progress (Phases 1–3 done)   **Last verified against:** 36e4dec + working tree
 **Supersedes / Superseded by:** none   **Related findings:** 01 F19, 01 M3, 06 F7, 06 F8, 06 M3
 
 ## 0. Summary of the revision
@@ -106,7 +106,19 @@ Changes to `testfx.clj`:
   `test-results/<ns>/<test>.png` (`screenshot!` already exists; headless
   snapshots work with `prism.order=sw`). CI already uploads `test-results/`.
 
-### Phase 3: App-side fixes (small, real bugs)
+### Phase 3: App-side fixes (small, real bugs) (DONE)
+Done. The `:id` now sits on the `Menu` itself (JavaFX's MenuBarSkin copies it to the
+menu-bar button), and the graphic labels are renamed `<name>-menu-label`. Added
+`toolbar-test/retrigger-button-has-its-own-id`. Headless: 20/20 pass.
+
+**Finding: visible macOS runs need the Accessibility permission.** After
+Phase 3 the visible run is unchanged (7 failures, 11 errors), and every failure is a
+real robot mouse click. Failure screenshots show the click never reached the
+app, while helpers that act on the FX thread (`fill!`, `select!`) pass. macOS
+drops synthetic input from processes without
+System Settings → Privacy & Security → **Accessibility** permission for
+the terminal/IDE launching `clj`. This is an OS setting, not a code bug.
+Headless runs don't need it.
 - `toolbar.clj` `transport-button`: ids `play-btn` / `stop-btn` /
   `retrigger-btn` (R4).
 - `title_bar.clj`: put `:id "transport-menu"` (and the other menu ids) on the

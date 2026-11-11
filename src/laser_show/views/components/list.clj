@@ -322,7 +322,7 @@
                        (fn [event]
                          (let [button (.getButton event)
                                click-count (.getClickCount event)
-                               ctrl? (.isShortcutDown event)
+                               ctrl? (or (.isShortcutDown event) (.isControlDown event))
                                shift? (.isShiftDown event)
                                dynamic-props (get-handler-props component-id)
                                effective-path (or items-path (:items-path dynamic-props))
@@ -720,7 +720,7 @@
    (on-fx-event
     (fn [event]
       (let [code (.getCode event)
-            ctrl? (.isShortcutDown event)
+            ctrl? (or (.isShortcutDown event) (.isControlDown event))
             shift? (.isShiftDown event)
             alt? (.isAltDown event)
             props @props-atom
