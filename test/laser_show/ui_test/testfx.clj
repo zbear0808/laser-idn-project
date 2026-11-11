@@ -151,6 +151,19 @@
                                     (reverse (vec (Window/getWindows))))
                               .getRoot)))
 
+(defn- focus-owner-desc
+  "Short description of each showing window's focus owner, for diagnostics."
+  []
+  (try
+    (run-on-fx-thread!
+     #(vec (for [^Window window (Window/getWindows)
+                 :when (.isShowing window)
+                 :let [owner (some-> window .getScene .getFocusOwner)]]
+             (when owner
+               (str (.getSimpleName (class owner))
+                    (when-let [id (.getId ^Node owner)] (str "#" id)))))))
+    (catch Throwable _ nil)))
+
 (defn wait-for!
   "Poll pred until it returns truthy, flushing JavaFX events between attempts."
   ([pred] (wait-for! default-timeout-ms pred))
@@ -163,13 +176,17 @@
          (if (< (System/nanoTime) deadline)
            (do (Thread/sleep 50) (recur))
            (throw (ex-info "Timed out waiting for UI condition"
-                           {:timeout-ms timeout-ms}))))))))
+                           {:timeout-ms timeout-ms
+                            :windows (window-titles)
+                            :focus-owner (focus-owner-desc)}))))))))
 
 (defn click!
-  "Click a node found by CSS selector using TestFX's mouse robot."
+  "Click a node found by CSS selector using TestFX's mouse robot.
+   The node is resolved with query (topmost window first) and clicked by
+   reference, so nodes in secondary stages are hit too."
   [^FxRobot robot-instance ^String selector]
   (wait-for! #(some? (query selector)))
-  (.clickOn ^FxRobotInterface robot-instance selector
+  (.clickOn ^FxRobotInterface robot-instance (query selector)
             (into-array MouseButton [MouseButton/PRIMARY]))
   (sync-fx!)
   robot-instance)
@@ -203,7 +220,12 @@
                        (.toFront ^javafx.stage.Stage window))
                      (.requestFocus window)
                      (.requestFocus node))))))
-  (wait-for! #(run-on-fx-thread! (fn [] (.isFocused (query selector)))))
+  ;; Scene focus owner, not Node.isFocused: the latter also needs OS window
+  ;; focus, which a terminal-launched JVM on macOS often doesn't get.
+  (wait-for! #(run-on-fx-thread!
+               (fn []
+                 (let [^Node n (query selector)]
+                   (identical? n (some-> n .getScene .getFocusOwner))))))
   robot-instance)
 
 (defn headless?
@@ -284,7 +306,24 @@
   robot-instance)
 
 (defn fill!
-  "Clear and type text into a TextInputControl found by CSS selector."
+  "Replace the text of a TextInputControl found by CSS selector. Sets the
+   text on the FX thread, so it doesn't depend on OS window focus. Use type!
+   when the test needs real per-character key events."
+  [^FxRobot robot-instance ^String selector ^String text]
+  (wait-for! #(some? (query selector)))
+  (let [^TextInputControl node (query selector)]
+    (.interact robot-instance
+               (reify Runnable
+                 (run [_]
+                   (.requestFocus node)
+                   (.setText node text)
+                   (.positionCaret node (count text)))))
+    (sync-fx!)
+    robot-instance))
+
+(defn type!
+  "Clear a TextInputControl, then type text with real key events. Needs a
+   focused window (always true headless; not always on macOS visible runs)."
   [^FxRobot robot-instance ^String selector ^String text]
   (wait-for! #(some? (query selector)))
   (let [^TextInputControl node (query selector)]
@@ -293,7 +332,7 @@
                  (run [_]
                    (.requestFocus node)
                    (.clear node))))
-    (.clickOn ^FxRobotInterface robot-instance selector
+    (.clickOn ^FxRobotInterface robot-instance node
               (into-array MouseButton [MouseButton/PRIMARY]))
     (.write robot-instance text)
     (sync-fx!)
@@ -348,7 +387,8 @@
 
 (defn hover!
   [^FxRobot robot-instance selector]
-  (.moveTo ^FxRobotInterface robot-instance selector)
+  (wait-for! #(some? (query selector)))
+  (.moveTo ^FxRobotInterface robot-instance (query selector))
   (sync-fx!)
   robot-instance)
 

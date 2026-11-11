@@ -1,6 +1,6 @@
 # TestFX UI Integration Tests: Cross-Platform + Headless
 
-**Status:** In progress (Phase 1 done)   **Last verified against:** 36e4dec + working tree
+**Status:** In progress (Phases 1–2 done)   **Last verified against:** 36e4dec + working tree
 **Supersedes / Superseded by:** none   **Related findings:** 01 F19, 01 M3, 06 F7, 06 F8, 06 M3
 
 ## 0. Summary of the revision
@@ -91,7 +91,7 @@ flags are always `false` on headless mouse events.
     on the node (works around H1). Visible mode still uses the real robot.
 - `cue_chain_list_test.clj`: `KeyCode/CONTROL` → `KeyCode/SHORTCUT`.
 
-### Phase 2: Harden the DSL for both modes
+### Phase 2: Harden the DSL for both modes (DONE)
 Changes to `testfx.clj`:
 - `click!`: resolve with `query` and click the `Node` (like `click-node!`) (R3).
 - `fill!`: set text on the FX thread: `requestFocus`, `setText`,
