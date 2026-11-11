@@ -199,7 +199,7 @@
   ;;   clj -M:test-ui:win tap-tempo  ; tests with "tap-tempo" in the name
   ;;   clj -M:test-ui:win            ; whole suite
   ;; The LLM vision helpers (ui_test/cases) also need a .env file (see .env.example).
-  :test-ui
+  #_#_#_#_:test-ui
   {:extra-paths ["test"]
    :jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"

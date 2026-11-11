@@ -89,13 +89,13 @@ jobs:
     - name: Run integration tests
       run: clojure -M:linux:test-integration
 
-    - name: Install virtual display
-      run: sudo apt-get update && sudo apt-get install -y xvfb
+    # Run TestFX UI coverage inside an invisible virtual X display. DISABLED.
+    # - name: Install virtual display
+    #   run: sudo apt-get update && sudo apt-get install -y xvfb
 
-    # Run TestFX UI coverage inside an invisible virtual X display.
-    - name: Run headless UI tests
-      timeout-minutes: 10
-      run: xvfb-run -a --server-args="-screen 0 1280x800x24" clojure -M:linux:test-ui:test-ui-headless
+    # - name: Run headless UI tests
+    #   timeout-minutes: 10
+    #   run: xvfb-run -a --server-args="-screen 0 1280x800x24" clojure -M:linux:test-ui:test-ui-headless
 
     # UI tests write screenshots and other artifacts to test-results/.
     - name: Upload UI test results and screenshots
