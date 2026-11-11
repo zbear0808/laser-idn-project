@@ -84,32 +84,37 @@ clj -M:win:test -n laser-show.events.grid-handlers-test  # one unit test namespa
 
 clj -M:win:test history  # unit tests whose ns/name contains "history"
 
-# TestFX UI tests (visible JavaFX window, moves the mouse). Run only what you need:
-clj -M:test-ui:win --list                              # list UI tests
-clj -M:test-ui:win tap-tempo                           # tests matching a name
-clj -M:test-ui:win -n laser-show.ui-test.toolbar-test  # one feature namespace
-clj -M:test-ui:win                                     # whole UI suite
+# TestFX UI tests. Headless by default: no windows, no mouse movement, no
+# display needed (any OS, incl. CI). Run only what you need:
+clj -M:test-ui:win:test-ui-headless --list                              # list UI tests
+clj -M:test-ui:win:test-ui-headless tap-tempo                           # tests matching a name
+clj -M:test-ui:win:test-ui-headless -n laser-show.ui-test.toolbar-test  # one feature namespace
+clj -M:test-ui:win:test-ui-headless                                     # whole UI suite
 
-# TestFX UI tests with headless JVM flags (requires Xvfb on Linux)
-clj -M:test-ui:win:test-ui-headless
+# Visible mode (drop :test-ui-headless) shows real windows and moves the mouse.
+# On macOS it needs Accessibility permission for the terminal/IDE.
+clj -M:test-ui:win tap-tempo
 ```
 
 ### UI Regression Requirement
 
 Any change to `src/laser_show/views/`, UI event handlers, subscriptions, state
 used by the UI, CSS, or application lifecycle must preserve the headless
-TestFX suite. GitHub Actions runs it inside Xvfb so JavaFX has no physical
-display to show windows on. The Windows command above still uses the local
-desktop display; use the Linux/Xvfb command documented in `README.md` when
-verifying the exact CI behavior. During development, first run the smallest
+TestFX suite. It uses JavaFX's built-in headless platform
+(`-Dglass.platform=headless`), so it behaves the same locally and in GitHub
+Actions (Linux, macOS, Windows jobs). During development, first run the smallest
 relevant UI test namespace or test var, along with related unit tests. Do not
 rerun the complete TestFX suite after every edit when a focused test can cover
 the change. Before considering UI work complete, after focused checks pass:
 
 1. Run the relevant unit tests.
-2. Run `clj -M:test-ui:win:test-ui-headless` locally when JavaFX is available.
+2. Run `clj -M:test-ui:win:test-ui-headless` (or your platform alias).
 3. Run `clj -M:win:test` (or your platform alias) for the complete unit suite.
-4. Ensure the GitHub Actions `Run headless UI tests` job passes.
+4. Ensure the GitHub Actions headless UI test jobs pass.
+
+Use `KeyCode/SHORTCUT` (not `CONTROL`) for shortcut modifier clicks in UI
+tests, and wrap every state assertion after an interaction in `ui/wait-for!`.
+On failure, a screenshot is saved to `test-results/<ns>/<test>.png`.
 
 New interactive controls should have stable JavaFX `:id` values so they can be
 queried by CSS selectors. Add or update a TestFX regression test for every

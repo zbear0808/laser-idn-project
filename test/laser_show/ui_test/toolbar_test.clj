@@ -42,7 +42,8 @@
 
 (deftest tap-tempo-button-records-taps
   (let [robot (ui/robot)]
-    (dotimes [_ 3]
-      (ui/click! robot "#tap-tempo-btn"))
-    (ui/wait-for! #(= 3 (count (get-in (state/get-raw-state) [:timing :tap-times]))))
+    (dotimes [i 3]
+      (ui/click! robot "#tap-tempo-btn")
+      (ui/wait-for! #(= (inc i)
+                        (count (get-in (state/get-raw-state) [:timing :tap-times])))))
     (is (= 3 (count (get-in (state/get-raw-state) [:timing :tap-times]))))))

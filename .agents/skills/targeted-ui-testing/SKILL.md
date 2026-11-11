@@ -11,16 +11,16 @@ Use this workflow whenever a change affects JavaFX views, UI event handlers, sub
 
 1. Identify the smallest existing UI test namespace that covers the changed behavior.
 2. If the behavior has no regression test, add one before relying on the broader suite.
-3. During implementation, run only the affected feature namespace (`clj -M:test-ui:win --list` shows every UI test grouped by namespace):
+3. During implementation, run only the affected feature namespace (`clj -M:test-ui:win:test-ui-headless --list` shows every UI test grouped by namespace):
 
    ```powershell
-   clj -M:test-ui:win -n laser-show.ui-test.<feature>-test
+   clj -M:test-ui:win:test-ui-headless -n laser-show.ui-test.<feature>-test
    ```
 
 4. While iterating on one test, run it by part of its name (any substring of `namespace/test-name`, ignoring case; several patterns are OR'ed):
 
    ```powershell
-   clj -M:test-ui:win <part-of-test-name>
+   clj -M:test-ui:win:test-ui-headless <part-of-test-name>
    ```
 
    A pattern that matches nothing exits non-zero, so a typo can't pass as "Ran 0 tests".
@@ -38,7 +38,7 @@ Use this workflow whenever a change affects JavaFX views, UI event handlers, sub
    clj -M:win:test
    ```
 
-Always include a platform alias (`:win`, `:mac`, `:mac-arm` or `:linux`); without one the tests run against a different JavaFX version than the app ships. On Linux/CI, run the UI command through the repository's Xvfb wrapper and include the `:linux` alias.
+Always include a platform alias (`:win`, `:mac`, `:mac-arm` or `:linux`); without one the tests run against a different JavaFX version than the app ships. Keep `:test-ui-headless` on for UI runs: it uses JavaFX's built-in headless platform, so tests run in the background with no display, no Xvfb and no mouse movement on Windows, macOS and Linux. Drop it only to watch a test in real windows (on macOS that needs Accessibility permission for the terminal/IDE).
 
 ## Selection guidance
 
@@ -54,6 +54,9 @@ Always include a platform alias (`:win`, `:mac`, `:mac-arm` or `:linux`); withou
 - Give new interactive controls stable JavaFX `:id` values.
 - Use the shared helpers in `laser-show.ui-test.testfx`; do not cache JavaFX nodes across renders.
 - Put new UI tests in the feature namespace they belong to (or a new `laser-show.ui-test.<feature>-test`), with `(use-fixtures :once fixtures/with-toolkit)` and `(use-fixtures :each fixtures/with-app)` from `laser-show.ui-test.fixtures`, so each test mounts a fresh app and can run on its own.
+- Use `KeyCode/SHORTCUT` (Cmd on macOS, Ctrl elsewhere) for shortcut-modifier clicks; never hard-code `KeyCode/CONTROL`.
+- Wrap every state assertion that follows an interaction in `ui/wait-for!`; events are processed asynchronously.
+- Failure screenshots are written to `test-results/<ns>/<test>.png`.
 - Keep hardware, network discovery, MIDI, OSC, Link, and gamepad services disabled or mocked in UI tests.
 
 ## Completion evidence

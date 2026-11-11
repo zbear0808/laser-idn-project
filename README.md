@@ -82,36 +82,27 @@ A pattern that matches nothing fails instead of running 0 tests.
 clj -M:win:test history          # unit tests with "history" in the name
 ```
 
-The TestFX UI tests open real windows and move the mouse, so run only the
-ones you are working on. They live in `test/laser_show/ui_test/`, one
-namespace per feature (toolbar, main window, grid, trigger editor, menu bar,
-preview, cue chain list, timeline editor):
+The TestFX UI tests live in `test/laser_show/ui_test/`, one namespace per
+feature (toolbar, main window, grid, trigger editor, menu bar, preview, cue
+chain list, timeline editor). Add `:test-ui-headless` to run them in the
+background: no windows, no mouse movement, no display needed. It uses the
+headless platform built into JavaFX 26+, so it works the same on Windows,
+macOS and Linux (and in CI):
 
 ```bash
-clj -M:test-ui:win --list                  # list every UI test
-clj -M:test-ui:win tap-tempo               # one test, by part of its name
-clj -M:test-ui:win -n laser-show.ui-test.toolbar-test   # one feature area
-clj -M:test-ui:win                         # whole UI suite
+clj -M:test-ui:win:test-ui-headless --list        # list every UI test
+clj -M:test-ui:win:test-ui-headless tap-tempo     # one test, by part of its name
+clj -M:test-ui:win:test-ui-headless -n laser-show.ui-test.toolbar-test   # one feature area
+clj -M:test-ui:win:test-ui-headless               # whole UI suite
 ```
 
-Run the UI suite locally with the TestFX headless JVM flags. On Windows this
-still uses the native display, so the window may be visible:
+Drop `:test-ui-headless` to watch the tests run in real windows (this moves
+your mouse). On macOS, visible runs need Accessibility permission for your
+terminal/IDE (System Settings → Privacy & Security → Accessibility), or the
+OS silently drops the robot's clicks.
 
-```bash
-clj -M:test-ui:win:test-ui-headless
-```
-
-GitHub Actions runs the UI suite inside Xvfb with the Linux JavaFX
-dependencies using:
-
-```bash
-xvfb-run -a --server-args="-screen 0 1280x800x24" \
-  clojure -M:linux:test-ui:test-ui-headless
-```
-
-The current project uses JavaFX 28, while the available TestFX Monocle
-artifact targets JavaFX 21, so CI uses Xvfb instead of forcing an incompatible
-Monocle backend.
+When a UI test fails, a screenshot is saved to
+`test-results/<namespace>/<test>.png`.
 
 **Test Suite is pretty bad**
 

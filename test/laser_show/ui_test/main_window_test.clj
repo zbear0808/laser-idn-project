@@ -34,6 +34,9 @@
                             ["settings" false]
                             ["grid" true]]]
       (ui/click! robot (str "#" tab "-tab"))
+      (ui/wait-for! #(= (keyword tab)
+                        (get-in (state/get-raw-state) [:ui :active-tab])))
       (is (= (keyword tab)
              (get-in (state/get-raw-state) [:ui :active-tab])))
+      (ui/wait-for! #(= preview? (ui/visible? "#preview-panel")))
       (is (= preview? (ui/visible? "#preview-panel"))))))

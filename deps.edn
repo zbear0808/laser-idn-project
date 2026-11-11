@@ -193,11 +193,12 @@
   {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2026.10.26"}}
    :main-opts ["-m" "clj-kondo.main"]}
 
-  ;; TestFX UI tests. Combine with a platform alias. They open real windows and
-  ;; move the mouse, so run only the tests you are working on:
-  ;;   clj -M:test-ui:win --list     ; list the UI tests
-  ;;   clj -M:test-ui:win tap-tempo  ; tests with "tap-tempo" in the name
-  ;;   clj -M:test-ui:win            ; whole suite
+  ;; TestFX UI tests. Combine with a platform alias, and usually with
+  ;; :test-ui-headless (background, no windows). Without it they open real
+  ;; windows and move the mouse.
+  ;;   clj -M:test-ui:win:test-ui-headless --list     ; list the UI tests
+  ;;   clj -M:test-ui:win:test-ui-headless tap-tempo  ; tests matching "tap-tempo"
+  ;;   clj -M:test-ui:win:test-ui-headless            ; whole suite
   ;; The LLM vision helpers (ui_test/cases) also need a .env file (see .env.example).
   :test-ui
   {:extra-paths ["test"]

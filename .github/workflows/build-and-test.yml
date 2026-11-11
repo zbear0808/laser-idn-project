@@ -49,6 +49,60 @@ jobs:
     - name: Lint (clj-kondo)
       run: clojure -M:kondo --lint src test --parallel --fail-level error
 
+  # Same headless UI suite on macOS and Windows, so platform-specific input
+  # (Cmd vs Ctrl shortcuts) and native JavaFX libraries are covered.
+  ui-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac-arm
+            shell: bash
+          - os: windows-latest
+            platform: win
+            shell: pwsh
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '25'
+
+    - name: Setup Clojure
+      uses: DeLaGuardo/setup-clojure@3fe9b3ae632c6758d0b7757b0838606ef4287b08 # 13.4
+      with:
+        cli: '1.12.4.1582'
+
+    - name: Cache Maven dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.m2/repository
+          ~/.gitlibs
+        key: ${{ runner.os }}-clojure-${{ hashFiles('**/deps.edn') }}
+        restore-keys: |
+          ${{ runner.os }}-clojure-
+
+    - name: Run headless UI tests
+      shell: ${{ matrix.shell }}
+      run: clojure '-M:${{ matrix.platform }}:test-ui:test-ui-headless'
+
+    - name: Upload UI test results and screenshots
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ui-test-results-${{ matrix.platform }}
+        path: test-results/
+        if-no-files-found: ignore
+        retention-days: 14
+
   build-and-test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -89,13 +143,11 @@ jobs:
     - name: Run integration tests
       run: clojure -M:linux:test-integration
 
-    # Run TestFX UI coverage inside an invisible virtual X display. DISABLED.
-    # - name: Install virtual display
-    #   run: sudo apt-get update && sudo apt-get install -y xvfb
-
-    # - name: Run headless UI tests
-    #   timeout-minutes: 10
-    #   run: xvfb-run -a --server-args="-screen 0 1280x800x24" clojure -M:linux:test-ui:test-ui-headless
+    # TestFX UI tests on JavaFX's built-in headless platform: no display or
+    # Xvfb needed.
+    - name: Run headless UI tests
+      timeout-minutes: 10
+      run: clojure -M:linux:test-ui:test-ui-headless
 
     # UI tests write screenshots and other artifacts to test-results/.
     - name: Upload UI test results and screenshots

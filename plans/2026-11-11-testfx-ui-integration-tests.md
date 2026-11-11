@@ -1,6 +1,6 @@
 # TestFX UI Integration Tests: Cross-Platform + Headless
 
-**Status:** In progress (Phases 1–3 done)   **Last verified against:** 36e4dec + working tree
+**Status:** Done (Phases 1–5; CI matrix unverified until pushed)   **Last verified against:** 36e4dec + working tree
 **Supersedes / Superseded by:** none   **Related findings:** 01 F19, 01 M3, 06 F7, 06 F8, 06 M3
 
 ## 0. Summary of the revision
@@ -129,13 +129,13 @@ Headless runs don't need it.
   which matches `cue_chain_editor.clj:643` and the other dialogs (R6, app
   side; Ctrl-click then also works on macOS).
 
-### Phase 4: Test fixes
+### Phase 4: Test fixes (DONE)
 - `main_window_test`: wrap tab assertions in `ui/wait-for!` (R5).
 - `toolbar_test/tap-tempo-button-records-taps`: wait for count `i+1` after
   each click (R9).
 - Add `retrigger-button-dispatches-retrigger` to cover the R4 fix.
 
-### Phase 5: CI and docs
+### Phase 5: CI and docs (DONE: Linux step plus a macOS/Windows `ui-tests` matrix job; README, copilot instructions, skill and deps.edn comments updated)
 - `.github/workflows/build-and-test.yml`: turn the UI step back on, **without
   Xvfb**:
   ```yaml
