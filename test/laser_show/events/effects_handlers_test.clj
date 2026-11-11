@@ -165,13 +165,13 @@
 
 
 (deftest handle-effects-toggle-cell-test
-  (testing "Toggle cell enables empty cell"
+  (testing "Toggle cell on an empty cell is a no-op (nothing to switch on)"
     (let [event {:event/type :effects/toggle-cell
                  :col 0 :row 1
                  :state sample-state}
           result (effects/handle event)]
-      ;; Should create cell with active?: true
-      (is (true? (get-in result [:state :chains :effect-chains [0 1] :active?])))))
+      (is (nil? (get-in result [:state :chains :effect-chains [0 1]])))
+      (is (= [0 1] (get-in result [:state :effects :selected-cell])))))
   
   (testing "Toggle cell disables active cell"
     (let [event {:event/type :effects/toggle-cell

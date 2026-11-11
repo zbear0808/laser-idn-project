@@ -200,6 +200,19 @@
   [{:keys [accumulated-beats]} dispatch]
   (link/sync-to-downbeat! dispatch accumulated-beats))
 
+;; Input Learn Effects
+
+(defn- effect-input-await-learn
+  "Effect that waits (off the event thread) for a learn capture, then dispatches
+   :on-captured with :input-event. A nil delivery means learn was cancelled."
+  [{:keys [promise on-captured]} dispatch]
+  (future
+    (try
+      (when-let [input-event @promise]
+        (dispatch (assoc on-captured :input-event input-event)))
+      (catch Throwable t
+        (log/error "Input learn failed:" (.getMessage t))))))
+
 ;; System Effects
 
 (defn- effect-system-exit
@@ -387,6 +400,7 @@
    - :dispatch-later - dispatch event after delay
    - :timing/calculate-bpm - calculate BPM from taps
    - :link/sync-to-downbeat - align phase to Link's downbeat
+   - :input/await-learn - wait for a learn capture, then dispatch the binding
    - :multi-engine/start - start multi-engine streaming to all projectors
    - :multi-engine/stop - stop multi-engine streaming
    - :multi-engine/refresh - refresh engines when projectors change
@@ -414,6 +428,7 @@
         :dispatch-later effect-dispatch-later
         :timing/calculate-bpm effect-timing-calculate-bpm
         :link/sync-to-downbeat effect-link-sync-to-downbeat
+        :input/await-learn effect-input-await-learn
         ;; Multi-engine streaming (zone-aware system)
         :multi-engine/start effect-multi-engine-start
         :multi-engine/stop effect-multi-engine-stop

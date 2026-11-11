@@ -198,3 +198,37 @@ The dirty flag isn't derived from anything, so it drifts.
 - **Follow-ups:**
   - The unsaved-changes guard on close/open/new (01 L3) can now trust `[:project :dirty?]`.
   - Consider moving live/view fields out of the document entirely (section 9).
+
+## 11. Review fixes (2026-11-09)
+
+An independent review (with probes run through the real pipeline) found 7 confirmed bugs and some slow paths. All are fixed:
+
+| # | Problem | Fix |
+|---|---|---|
+| 1 | A drag ending at the saved value stayed "unsaved" after mouse-up | A closing transaction always triggers a full unsaved-check |
+| 2 | Learned MIDI/OSC bindings were written outside the event pipeline, so they were lost on undo and never marked unsaved | NEW `:input/await-learn` effect plus a pure `:input/learn-captured` handler (undo label "Learn Trigger"); captures after cancel are ignored |
+| 3 | A drag held for more than 60 s flooded the undo stack | Staleness is measured from the last drag activity (`touch-transaction`); any mouse-up commits the open transaction |
+| 4 | Skipped/rebased changes (scan, timeline setup) were lost on undo/redo; converting a cue to a timeline cue wasn't undoable | `:history/skip?` + `:document/rebase?` replaced by `:history/backfill (fn [doc] doc)`, applied to every snapshot and to the saved baseline. Converting to a timeline cue is now an undoable "Convert to Timeline Cue" |
+| 5 | Undoing a cell move could switch an effect off | A restored effect cell takes its on/off state from the current cell, or from the cell its items moved to; otherwise it comes back off |
+| 6 | Toggling an empty effect cell created an undo step | It's a no-op now; an entry holding only `:active?` counts as no entry |
+| 7 | `:selected-keyframe` could end up out of range after undo | The current selection is kept only if the keyframes are unchanged, then clamped |
+| 8 | Duplicate item ids grafted live fields wrongly | Duplicated ids keep the snapshot's values |
+| 9 | A mismatched commit left the transaction stuck open | Any mouse-up commits |
+| perf | `postwalk` rebuilt whole cells for every comparison | A non-allocating comparison that ignores live fields and stops at identical subtrees; the full check against the saved version is limited to events where the answer can change |
+
+**Performance:** measured with the reviewer's probe (64 cue cells × 8 items × 4 effects, 32 effect cells). Overhead per event:
+
+| Event | Before | After |
+|---|---|---|
+| Effect toggle from a trigger | 110–140 µs | ~30 µs |
+| Param edit, no transaction | 1.6–2.6 ms | ~110 µs |
+| Param edit inside a transaction | — | 7–60 µs |
+| BPM change | — | ~6 µs |
+
+**Tests:** 15 new regression tests (unit total 604/0).
+
+**Pre-existing, not from this change:** the UI test `cue-chain-list-test/grouped-list-right-click-keeps-multi-selection` times out on committed HEAD `d8a4693` too.
+
+**Still open (reviewer, suspected, not fixed):**
+- Clicking a slider track may produce a discrete step before the drag begins (JavaFX sets the value before `on-mouse-pressed`).
+- The canvas commit is dispatched before the release result (`canvas_interaction.clj:211-214`).

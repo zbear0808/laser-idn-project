@@ -70,6 +70,10 @@
 
 
 ;; Document Policy: Comparison
+;;
+;; Comparisons ignore live fields without rebuilding anything: they walk both
+;; values in step and stop at the first identical? pair, so an edit to one
+;; item only compares the path down to that item.
 
 
 (defn- differs?
@@ -79,25 +83,45 @@
 (defn- chain-item? [x]
   (and (map? x) (contains? x :id)))
 
-(defn- dissoc-path
-  [m path]
-  (if (= 1 (count path))
-    (dissoc m (first path))
-    (let [parent (pop path)]
-      (if (map? (get-in m parent))
-        (update-in m parent dissoc (peek path))
-        m))))
+(def ^:private live-item-keys #{:collapsed?})
+(def ^:private live-keyframe-keys #{:selected-keyframe})
 
-(defn- strip-live-item [item]
-  (reduce dissoc-path item live-item-paths))
+(declare equiv-ignoring-live?)
 
-(defn- strip-chain-entry
-  "Remove live fields from one chain entry (e.g. [:chains :cue-chains [0 0]])."
-  [domain entry]
-  (let [stripped (walk/postwalk #(if (chain-item? %) (strip-live-item %) %) entry)]
-    (if (and (= domain :effect-chains) (map? stripped))
-      (dissoc stripped :active?)
-      stripped)))
+(defn- map-equiv?
+  "Map equality ignoring the keys in ignore. Chain items also ignore their
+   live fields (including :selected-keyframe inside :keyframe-modulator)."
+  [a b ignore]
+  (let [item? (or (chain-item? a) (chain-item? b))
+        ignore (if item? (into ignore live-item-keys) ignore)
+        child-equiv? (fn [k x y]
+                       (if (and item? (= k :keyframe-modulator) (map? x) (map? y))
+                         (or (identical? x y) (map-equiv? x y live-keyframe-keys))
+                         (equiv-ignoring-live? x y)))]
+    (and (every? (fn [[k v]]
+                   (or (contains? ignore k)
+                       (and (contains? b k) (child-equiv? k v (get b k)))))
+                 a)
+         (every? (fn [k] (or (contains? ignore k) (contains? a k))) (keys b)))))
+
+(defn- equiv-ignoring-live?
+  [a b]
+  (cond
+    (identical? a b) true
+    (and (map? a) (map? b)) (map-equiv? a b #{})
+    (and (sequential? a) (sequential? b)) (and (= (count a) (count b))
+                                               (every? true? (map equiv-ignoring-live? a b)))
+    :else (= a b)))
+
+(defn- entry-equiv?
+  "Compare one chain entry (e.g. [:chains :cue-chains [0 0]]). For effect cells
+   :active? is live, and an entry holding nothing but :active? equals no entry."
+  [domain a b]
+  (if (= domain :effect-chains)
+    (let [a (or a {}) b (or b {})]
+      (or (identical? a b)
+          (and (map? a) (map? b) (map-equiv? a b #{:active?}))))
+    (equiv-ignoring-live? a b)))
 
 (defn- chains-changed?
   [old-chains new-chains]
@@ -111,8 +135,7 @@
                                (let [oe (get o k)
                                      ne (get n k)]
                                  (and (not (identical? oe ne))
-                                      (not= (strip-chain-entry domain oe)
-                                            (strip-chain-entry domain ne)))))
+                                      (not (entry-equiv? domain oe ne)))))
                              (into (set (keys o)) (keys n))))))
               (into (set (keys old-chains)) (keys new-chains))))))
 
@@ -151,53 +174,88 @@
 ;; Document Policy: Restore
 
 
+(defn- chain-items [entry]
+  (filter chain-item? (tree-seq coll? seq entry)))
+
 (defn- live-item-index
-  "Map of item :id -> {path value-or-::absent} for every chain item in entry."
+  "Map of item :id -> current item, for ids that occur exactly once in entry
+   (duplicate ids are ambiguous, so those items keep the snapshot's values)."
   [entry]
-  (into {}
-        (comp (filter chain-item?)
-              (map (fn [item]
-                     [(:id item)
-                      (into {} (map (fn [p] [p (get-in item p ::absent)])) live-item-paths)])))
-        (tree-seq coll? seq entry)))
+  (let [items (chain-items entry)
+        counts (frequencies (map :id items))]
+    (into {} (comp (filter #(= 1 (counts (:id %)))) (map (juxt :id identity))) items)))
+
+(defn- clamp-selected-keyframe [kf-mod]
+  (let [n (count (:keyframes kf-mod))
+        sel (:selected-keyframe kf-mod)]
+    (if (and (integer? sel) (or (neg? sel) (>= sel n)))
+      (assoc kf-mod :selected-keyframe (max 0 (dec n)))
+      kf-mod)))
 
 (defn- graft-live-item
-  [item fields]
-  (reduce-kv (fn [m path v]
-               (cond
-                 (= ::absent v) (dissoc-path m path)
-                 (or (= 1 (count path)) (map? (get-in m (pop path)))) (assoc-in m path v)
-                 :else m))
-             item
-             fields))
+  "Copy live fields from the current version of an item onto the restored one."
+  [restored current]
+  (let [item (reduce (fn [m k]
+                       (if (contains? current k) (assoc m k (get current k)) (dissoc m k)))
+                     restored
+                     live-item-keys)
+        r-kf (:keyframe-modulator item)
+        c-kf (:keyframe-modulator current)]
+    (if (map? r-kf)
+      (assoc item :keyframe-modulator
+             (clamp-selected-keyframe
+              ;; The current selection only means the same keyframe if the
+              ;; keyframes themselves are unchanged
+              (if (and (map? c-kf)
+                       (contains? c-kf :selected-keyframe)
+                       (= (:keyframes c-kf) (:keyframes r-kf)))
+                (assoc r-kf :selected-keyframe (:selected-keyframe c-kf))
+                r-kf)))
+      item)))
 
 (defn- graft-live-entry
   "Copy live fields from the current entry onto the restored entry."
-  [domain current-entry restored-entry]
+  [current-entry restored-entry]
   (if (or (nil? current-entry) (identical? current-entry restored-entry) (not (map? restored-entry)))
     restored-entry
-    (let [index (live-item-index current-entry)
-          grafted (if (seq index)
-                    (walk/postwalk (fn [x]
-                                     (if-let [fields (and (chain-item? x) (get index (:id x)))]
-                                       (graft-live-item x fields)
-                                       x))
-                                   restored-entry)
-                    restored-entry)]
-      (if (and (= domain :effect-chains) (contains? current-entry :active?))
-        (assoc grafted :active? (:active? current-entry))
-        grafted))))
+    (let [index (live-item-index current-entry)]
+      (if (seq index)
+        (walk/postwalk (fn [x]
+                         (if-let [current (and (chain-item? x) (get index (:id x)))]
+                           (graft-live-item x current)
+                           x))
+                       restored-entry)
+        restored-entry))))
+
+(defn- item-id-set [entry]
+  (not-empty (set (keep :id (:items entry)))))
+
+(defn- restored-effect-active
+  "On/off state for a restored effect cell: the current cell's state; for a cell
+   that doesn't exist now, the state of the current cell holding the same items
+   (it was moved), otherwise off."
+  [current-cells k restored-entry]
+  (if-let [current (get current-cells k)]
+    (boolean (:active? current))
+    (let [ids (item-id-set restored-entry)
+          moved (when ids (some (fn [[_ e]] (when (= ids (item-id-set e)) e)) current-cells))]
+      (boolean (:active? moved)))))
 
 (defn- graft-live-chains
   [current-chains restored-chains]
-  (reduce-kv (fn [acc domain entries]
-               (assoc acc domain
-                      (reduce-kv (fn [m k entry]
-                                   (assoc m k (graft-live-entry domain (get-in current-chains [domain k]) entry)))
-                                 entries
-                                 entries)))
-             restored-chains
-             restored-chains))
+  (reduce-kv
+   (fn [acc domain entries]
+     (let [current-cells (get current-chains domain)]
+       (assoc acc domain
+              (reduce-kv (fn [m k entry]
+                           (let [grafted (graft-live-entry (get current-cells k) entry)]
+                             (assoc m k (if (and (= domain :effect-chains) (map? grafted))
+                                          (assoc grafted :active? (restored-effect-active current-cells k entry))
+                                          grafted))))
+                         entries
+                         entries))))
+   restored-chains
+   restored-chains))
 
 (defn restore-document
   "Restore the undoable content of a document snapshot into state.
@@ -218,6 +276,33 @@
         (assoc :chains (graft-live-chains (:chains state) (or chains {}))))))
 
 
+;; Backfill
+;;
+;; Some events add document content that isn't a user edit (network scan
+;; creating projectors, filling in timeline fields). They return a pure
+;; (fn [document] document) as :history/backfill. Applying it to every stored
+;; snapshot and to the saved baseline means undo/redo never remove that content
+;; and it never counts as an unsaved change.
+
+
+(defn- backfill-snapshot [snapshot f]
+  (if snapshot (update snapshot :document-state f) snapshot))
+
+(defn backfill-history
+  "Apply f to the document of every undo/redo snapshot and the open transaction baseline."
+  [history-state f]
+  (cond-> history-state
+    (:undo-stack history-state) (update :undo-stack #(mapv (fn [s] (backfill-snapshot s f)) %))
+    (:redo-stack history-state) (update :redo-stack #(mapv (fn [s] (backfill-snapshot s f)) %))
+    (get-in history-state [:transaction :baseline-snapshot])
+    (update-in [:transaction :baseline-snapshot] backfill-snapshot f)))
+
+(defn backfill-baseline
+  "Apply f to the saved baseline document, if there is one."
+  [state f]
+  (if (get-in state [:project :saved-document])
+    (update-in state [:project :saved-document] f)
+    state))
 
 ;; Unsaved Changes
 
@@ -311,23 +396,19 @@
    If modified, pushes baseline snapshot to the undo stack.
    Clears active transaction.
    
-   With opts {:source-id id}: only commits when id matches the open
-   transaction's :source-id (a nil id commits whatever is open)."
+   Any mouse-up commits whatever transaction is open: if the mouse-up of the
+   control that opened it was missed, the next one closes it."
   ([history-state current-state]
    (commit-transaction history-state current-state default-max-depth))
   ([history-state current-state max-depth]
-   (commit-transaction history-state current-state max-depth nil))
-  ([history-state current-state max-depth {:keys [source-id]}]
    (if-let [tx (:transaction history-state)]
-     (if (and (some? source-id) (some? (:source-id tx)) (not= source-id (:source-id tx)))
-       history-state
-       (let [baseline (:baseline-snapshot tx)
-             changed? (undoable-changed? (:document-state baseline)
-                                         (extract-document-state current-state))
-             history-without-tx (assoc history-state :transaction nil)]
-         (if changed?
-           (push-undo-snapshot history-without-tx baseline max-depth)
-           history-without-tx)))
+     (let [baseline (:baseline-snapshot tx)
+           changed? (undoable-changed? (:document-state baseline)
+                                       (extract-document-state current-state))
+           history-without-tx (assoc history-state :transaction nil)]
+       (if changed?
+         (push-undo-snapshot history-without-tx baseline max-depth)
+         history-without-tx))
      history-state)))
 
 (defn begin-transaction
@@ -335,7 +416,7 @@
    Captures a baseline document snapshot of the current state.
    If a transaction from the same source is already open it is kept; one from
    a different source (e.g. its mouse-up was missed) is committed first."
-  [history-state current-state {:keys [label source-id ui-context]}]
+  [history-state current-state {:keys [label source-id ui-context now]}]
   (let [open-tx (:transaction history-state)]
     (if (and open-tx (= source-id (:source-id open-tx)))
       history-state
@@ -348,13 +429,23 @@
         (assoc history-state
                :transaction (u/->map& label source-id
                                       :baseline-snapshot baseline
-                                      :start-time (System/currentTimeMillis)))))))
+                                      :start-time (or now (System/currentTimeMillis))))))))
 
 (defn stale-transaction?
-  "True when an open transaction started more than stale-transaction-ms before now."
+  "True when an open transaction has had no activity (see touch-transaction)
+   for more than stale-transaction-ms before now."
   [history-state now]
-  (when-let [start (get-in history-state [:transaction :start-time])]
-    (> (- now start) stale-transaction-ms)))
+  (when-let [tx (:transaction history-state)]
+    (when-let [last-active (or (:last-activity tx) (:start-time tx))]
+      (> (- now last-active) stale-transaction-ms))))
+
+(defn touch-transaction
+  "Record activity on the open transaction (a drag tick), so a long drag
+   isn't treated as stale."
+  [history-state now]
+  (if (:transaction history-state)
+    (assoc-in history-state [:transaction :last-activity] now)
+    history-state))
 
 (defn abort-transaction
   "Abort an in-progress transaction without saving to undo stack.

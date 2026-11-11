@@ -7,9 +7,10 @@
    History meta keys (consumed here, never passed on to cljfx effects):
    - :history/skip?         (event or effects) never push an undo snapshot
    - :history/coalesce-key  (event or effects) merge bursts into one undo step
-   - :history/description   (event) undo label
-   - :document/rebase?      (effects) if the project was clean, the change
-                            becomes part of the saved baseline (not 'unsaved')
+   - :history/description   (event or effects) undo label
+   - :history/backfill      (effects) (fn [document] document) for content that
+                            isn't a user edit; applied to all snapshots and the
+                            saved baseline, so it's never undone or 'unsaved'
    Events dispatched by triggers (:source-trigger set) are always skipped."
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
@@ -17,21 +18,20 @@
 
 (defn handle-begin-transaction
   "Begin a continuous interaction transaction on mouse down."
-  [{:keys [label source-id ui-context state]}]
+  [{:keys [label source-id ui-context state time]}]
   (let [current-history (get state :history {})
         updated-history (history/begin-transaction current-history state
                                                    {:label (or label "Edit")
                                                     :source-id source-id
-                                                    :ui-context ui-context})]
+                                                    :ui-context ui-context
+                                                    :now time})]
     {:state (assoc state :history updated-history)}))
 
 (defn handle-commit-transaction
   "Commit a continuous interaction transaction on mouse up."
-  [{:keys [source-id state]}]
+  [{:keys [state]}]
   (let [current-history (get state :history {})
-        updated-history (history/commit-transaction current-history state
-                                                    history/default-max-depth
-                                                    {:source-id source-id})]
+        updated-history (history/commit-transaction current-history state)]
     {:state (assoc state :history updated-history)}))
 
 (defn handle-abort-transaction
@@ -168,7 +168,7 @@
           (str/capitalize))))
 
 (defn- commit-stale-transaction
-  "Commit a transaction left open too long (e.g. a missed mouse-up)."
+  "Commit a transaction left open with no activity for too long (e.g. a missed mouse-up)."
   [{:keys [state time event/type] :as event}]
   (let [h (get state :history {})]
     (if (and (not= "history" (namespace type))
@@ -177,30 +177,57 @@
           (assoc event :state (assoc state :history (history/commit-transaction h state))))
       event)))
 
+(defn- apply-backfill
+  "Fold a non-user change into every stored snapshot (see state.history Backfill)."
+  [new-state backfill]
+  (if backfill
+    (update new-state :history #(history/backfill-history (or % {}) backfill))
+    new-state))
+
 (defn wrap-history
   "Middleware that wraps handle-event to intercept state modifications.
    For discrete events that change undoable content while no transaction is
-   active, captures a pre-action snapshot on the undo stack."
+   active, captures a pre-action snapshot on the undo stack.
+   
+   :history/backfill (effects) is applied to all snapshots here and passed on
+   to wrap-dirty for the saved baseline."
   [handler]
   (fn [event]
     (let [{:keys [state event/type] :as event} (commit-stale-transaction event)
           effects (handler event)
-          skip? (or (:history/skip? event)
+          backfill (:history/backfill effects)
+          skip? (or backfill
+                    (:history/skip? event)
                     (:history/skip? effects)
                     (some? (:source-trigger event)))
           coalesce-key (or (:history/coalesce-key event) (:history/coalesce-key effects))
-          effects (dissoc effects :history/skip? :history/coalesce-key)
-          new-state (:state effects)]
-      (if (or (nil? new-state)
-              skip?
-              (history-excluded-events type)
-              (get-in state [:history :transaction])
-              (history/document-roots-identical? state new-state)
-              (not (history/undoable-changed? (history/extract-document-state state)
-                                              (history/extract-document-state new-state))))
+          description (or (:history/description effects) (:history/description event))
+          effects (dissoc effects :history/skip? :history/coalesce-key :history/description)
+          new-state (:state effects)
+          now (or (:time event) (System/currentTimeMillis))]
+      (cond
+        (nil? new-state)
         effects
-        (let [desc (or (:history/description event)
-                       (format-event-description type))
+
+        backfill
+        (assoc effects :state (apply-backfill new-state backfill))
+
+        (or skip?
+            (history-excluded-events type)
+            (history/document-roots-identical? state new-state))
+        effects
+
+        (get-in state [:history :transaction])
+        (if (get-in new-state [:history :transaction])
+          (assoc effects :state (update new-state :history history/touch-transaction now))
+          effects)
+
+        (not (history/undoable-changed? (history/extract-document-state state)
+                                        (history/extract-document-state new-state)))
+        effects
+
+        :else
+        (let [desc (or description (format-event-description type))
               snapshot (history/make-snapshot {:state state
                                                :description desc
                                                :ui-context (ui-context state)})
@@ -208,33 +235,77 @@
                                                           snapshot
                                                           history/default-max-depth
                                                           {:coalesce-key coalesce-key
-                                                           :now (:time event)})]
+                                                           :now now})]
           (assoc effects :state (assoc new-state :history updated-history)))))))
+
+(defn- transaction-closed? [state new-state]
+  (and (get-in state [:history :transaction])
+       (nil? (get-in new-state [:history :transaction]))))
+
+(defn- full-dirty-recompute?
+  "Events whose result can move the document back to (or re-define) the saved
+   baseline: undo/redo/abort, a drag transaction closing, and anything that
+   changed [:project] (save, load, save-failed, mark-clean)."
+  [type state new-state]
+  (or (= "history" (namespace type))
+      (#{:edit/undo :edit/redo} type)
+      (transaction-closed? state new-state)
+      (not (identical? (:project state) (:project new-state)))))
+
+(defn- next-dirty
+  "The :dirty? flag after this event. Exact (compared with the saved baseline)
+   whenever the answer could change, but cheap on the hot path:
+   - events that don't change persisted data keep the flag (only the entries
+     this event touched are compared, so trigger/live events stay cheap);
+   - during an open drag transaction a dirty project stays dirty until the
+     transaction closes, which recomputes."
+  [type state new-state]
+  (let [was-dirty? (boolean (get-in state [:project :dirty?]))]
+    (cond
+      (full-dirty-recompute? type state new-state)
+      (history/derive-dirty state new-state)
+
+      (history/document-roots-identical? state new-state)
+      was-dirty?
+
+      (and was-dirty? (get-in new-state [:history :transaction]))
+      true
+
+      (not (history/persisted-changed? (history/extract-document-state state)
+                                       (history/extract-document-state new-state)))
+      was-dirty?
+
+      ;; Already dirty: this edit might restore the saved version
+      was-dirty?
+      (history/derive-dirty state new-state)
+
+      :else true)))
 
 (defn wrap-dirty
   "Middleware that derives [:project :dirty?] after every event.
    Must wrap wrap-history (outermost), so undo/redo are covered too."
   [handler]
-  (fn [{:keys [state] :as event}]
+  (fn [{:keys [state event/type] :as event}]
     (let [effects (handler event)
-          rebase? (:document/rebase? effects)
-          effects (dissoc effects :document/rebase?)
+          backfill (:history/backfill effects)
+          effects (dissoc effects :history/backfill)
           new-state (:state effects)]
       (if (or (nil? new-state)
               (and (history/document-roots-identical? state new-state)
-                   (identical? (:project state) (:project new-state))))
+                   (identical? (:project state) (:project new-state))
+                   (not (transaction-closed? state new-state))))
         effects
-        (let [was-dirty? (boolean (get-in state [:project :dirty?]))
-              new-state' (if (and rebase?
-                                  (not was-dirty?)
-                                  (get-in new-state [:project :saved-document]))
-                           (history/mark-clean new-state)
-                           (let [dirty? (history/derive-dirty state new-state)]
-                             (if (= dirty? (boolean (get-in new-state [:project :dirty?])))
-                               new-state
-                               (assoc-in new-state [:project :dirty?] dirty?))))]
-          (assoc effects :state new-state'))))))
-
+        (let [new-state (cond-> new-state backfill (history/backfill-baseline backfill))
+              dirty? (if backfill
+                       ;; Backfilled content is never an unsaved change
+                       (if (get-in new-state [:project :saved-document])
+                         (history/derive-dirty state new-state)
+                         (boolean (get-in state [:project :dirty?])))
+                       (next-dirty type state new-state))]
+          (assoc effects :state
+                 (if (= dirty? (boolean (get-in new-state [:project :dirty?])))
+                   new-state
+                   (assoc-in new-state [:project :dirty?] dirty?))))))))
 (defn handle
   "Dispatch history events."
   [{:keys [event/type] :as event}]

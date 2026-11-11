@@ -394,8 +394,11 @@
       (let [updated-chain (tl/auto-initialize-tracks cue-chain (or zone-groups {}))]
         {:state (-> state
                     (assoc-in chain-path updated-chain))
-         :history/skip? true
-         :document/rebase? true}))))
+         :history/backfill (fn [doc]
+                             (let [chain (get-in doc chain-path)]
+                               (if (and chain (empty? (:tracks chain)))
+                                 (assoc-in doc (conj chain-path :tracks) (:tracks updated-chain))
+                                 doc)))}))))
 
 (defn- handle-set-track-zone
   "Set or clear the zone group assignment on a track or folder.
@@ -569,41 +572,56 @@
     (not (contains? item :timeline/start))    (assoc :timeline/start 0.0)
     (not (contains? item :timeline/duration)) (assoc :timeline/duration 4.0)))
 
+(defn- fill-timeline-fields
+  "Give a timeline cue chain any missing timeline fields: item start/duration,
+   and the given tracks if it has none. Deterministic, so it can be backfilled."
+  [cue-chain tracks]
+  (cond-> cue-chain
+    (not (timeline-ready? (:items cue-chain [])))
+    (update :items #(mapv ensure-item-timeline-fields (or % [])))
+
+    (and (empty? (:tracks cue-chain)) (seq tracks))
+    (assoc :tracks tracks)))
+
+(defn- backfill-timeline-cell
+  "A :history/backfill fn that fills in the same timeline fields in snapshots
+   where the cell is already a timeline cue."
+  [chain-path tracks]
+  (fn [doc]
+    (let [chain (get-in doc chain-path)]
+      (if (= :timeline (:editor-type chain))
+        (assoc-in doc chain-path (fill-timeline-fields chain tracks))
+        doc))))
+
 (defn- handle-open-editor
   "Open the timeline cue editor for a cell.
    Initializes timeline configuration:
    - Sets :editor-type to :timeline
    - Ensures :timeline/start and :timeline/duration on every item
    - Tracks from :destination-zone via auto-initialize-tracks if missing
-   Then chains into :ui/open-dialog to actually show the dialog."
+   Then chains into :ui/open-dialog to actually show the dialog.
+   
+   Converting a cue to a timeline cue changes playback, so it's a normal
+   undoable edit. Filling in missing fields on a cue that already is a
+   timeline cue is setup, so it's backfilled into history instead."
   [{:keys [col row state]}]
   (let [chain-path [:chains :cue-chains [col row]]
-        cue-chain  (get-in state chain-path)
-        items      (:items cue-chain [])
-        zone-groups (get state :zone-groups {})
-        ready?     (timeline-ready? items)
-        has-tracks? (seq (:tracks cue-chain))
-        timeline-type? (= (:editor-type cue-chain) :timeline)
-
-        updated-state
-        (if (and ready? has-tracks? timeline-type?)
-          state
-          (let [updated-items (if ready? items (mapv ensure-item-timeline-fields items))
-                chain-with-items (assoc (or cue-chain {}) :items updated-items)
-                final-chain (cond-> (if has-tracks?
-                                      chain-with-items
-                                      (tl/auto-initialize-tracks chain-with-items zone-groups))
-                              true (assoc :editor-type :timeline))]
-            (-> state
-                (assoc-in chain-path final-chain))))]
-    (cond-> {:state updated-state
-             :dispatch {:event/type :ui/open-dialog
-                        :dialog-id :timeline-cue-editor
-                        :data {:col col :row row}}}
-      ;; Initialising timeline fields is setup, not a user edit
-      (not (identical? updated-state state)) (assoc :history/skip? true
-                                                    :document/rebase? true))))
-
+        cue-chain  (or (get-in state chain-path) {})
+        tracks     (or (not-empty (:tracks cue-chain))
+                       (:tracks (tl/auto-initialize-tracks cue-chain (get state :zone-groups {}))))
+        converting? (not= (:editor-type cue-chain) :timeline)
+        final-chain (-> cue-chain
+                        (fill-timeline-fields tracks)
+                        (assoc :editor-type :timeline))
+        changed? (not= final-chain cue-chain)
+        effects {:state (cond-> state changed? (assoc-in chain-path final-chain))
+                 :dispatch {:event/type :ui/open-dialog
+                            :dialog-id :timeline-cue-editor
+                            :data {:col col :row row}}}]
+    (cond
+      (not changed?) effects
+      converting? (assoc effects :history/description "Convert to Timeline Cue")
+      :else (assoc effects :history/backfill (backfill-timeline-cell chain-path (:tracks final-chain))))))
 
 ;; Public API
 

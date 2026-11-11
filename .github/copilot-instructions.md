@@ -82,14 +82,13 @@ clj -M:win:dev:laser-show
 clj -M:win:test  # unit tests; use :mac/:mac-arm/:linux on other platforms. Coverage is incomplete
 clj -M:win:test -n laser-show.events.grid-handlers-test  # one unit test namespace
 
-# Local TestFX UI tests (visible JavaFX window)
-clj -M:test-ui:win
+clj -M:win:test history  # unit tests whose ns/name contains "history"
 
-# Run one UI namespace while developing
-clj -M:test-ui:win -n laser-show.ui-test.e2e-test
-
-# Run one UI test var while iterating
-clj -M:test-ui:win -v laser-show.ui-test.e2e-test/user-can-type-and-switch-tabs
+# TestFX UI tests (visible JavaFX window, moves the mouse). Run only what you need:
+clj -M:test-ui:win --list                              # list UI tests
+clj -M:test-ui:win tap-tempo                           # tests matching a name
+clj -M:test-ui:win -n laser-show.ui-test.toolbar-test  # one feature namespace
+clj -M:test-ui:win                                     # whole UI suite
 
 # TestFX UI tests with headless JVM flags (requires Xvfb on Linux)
 clj -M:test-ui:win:test-ui-headless

@@ -237,28 +237,37 @@
                                          (deliver learn-promise event)
                                          (router/unregister-handler! ::generalized-input-learn))))
 
-    ;; A real app would track this promise and process it, but since we are in
-    ;; the synchronous event loop, we can just process it asynchronously
-    (future
-      (let [event @learn-promise]
-        (when event
-          ;; Dispatch event to map this input to the action
-          (state/swap-state!
-           (fn [s]
-             (let [lookup-key (cond
-                                (input-events/note-on? event)
-                                {:source (:source event) :channel (:channel event) :note (:note event)}
+    ;; The :input/await-learn effect waits for the captured input off the event
+    ;; thread, then dispatches :input/learn-captured, which writes the binding
+    ;; through the normal pipeline (undoable, marks the project unsaved).
+    {:state (assoc-in state [:backend :input :learning-target] target-action)
+     :input/await-learn {:promise learn-promise
+                         :on-captured {:event/type :input/learn-captured
+                                       :target-action target-action}}}))
 
-                                (input-events/trigger? event)
-                                {:source (:source event) :id (:id event)})]
-               (if lookup-key
-                 (-> s
-                     (assoc-in [:config :input :trigger-map lookup-key] target-action)
-                     (update-in [:backend :input] dissoc :learning-target))
-                 (update-in s [:backend :input] dissoc :learning-target))))))))
+(defn- learn-lookup-key
+  "Trigger-map key for a captured input event, or nil."
+  [input-event]
+  (cond
+    (input-events/note-on? input-event)
+    {:source (:source input-event) :channel (:channel input-event) :note (:note input-event)}
 
-    ;; Update state to indicate learning is active (for UI)
-    {:state (assoc-in state [:backend :input :learning-target] target-action)}))
+    (input-events/trigger? input-event)
+    {:source (:source input-event) :id (:id input-event)}))
+
+(defn- handle-input-learn-captured
+  "Bind the captured input to the target action (ignored if learn was cancelled
+   or restarted for another target in the meantime)."
+  [{:keys [state input-event target-action]}]
+  (let [learning (get-in state [:backend :input :learning-target])
+        lookup-key (learn-lookup-key input-event)]
+    (if (and lookup-key (= learning target-action))
+      {:state (-> state
+                  (assoc-in [:config :input :trigger-map lookup-key] target-action)
+                  (update-in [:backend :input] dissoc :learning-target))
+       :history/description "Learn Trigger"}
+      {:state (cond-> state
+                (= learning target-action) (update-in [:backend :input] dissoc :learning-target))})))
 
 (defn- handle-input-cancel-learn
   "Cancel generic input learn mode."
@@ -344,6 +353,7 @@
 
     ;; Generalized triggers
     :input/start-learn (handle-input-start-learn event)
+    :input/learn-captured (handle-input-learn-captured event)
     :input/cancel-learn (handle-input-cancel-learn event)
     :input/remove-trigger (handle-input-remove-trigger event)
     :input/clear-cell-triggers (handle-input-clear-cell-triggers event)

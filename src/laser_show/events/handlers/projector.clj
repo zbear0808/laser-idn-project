@@ -164,16 +164,26 @@
    - New projectors are disabled by default (enabled? = false)
    - Existing projectors are NOT overwritten (preserves user settings)
    
-   Discovery isn't a user edit: it doesn't create an undo step, and on a clean
-   project the new projectors become part of the saved baseline."
+   Discovery isn't a user edit: the new projectors are backfilled into undo
+   history and the saved baseline, so they are never undone and never count
+   as an unsaved change."
   [{:keys [devices state]}]
   (let [;; Auto-create projectors for all discovered devices
-        state-with-projectors (reduce auto-create-projectors-for-device state devices)]
-    {:state (-> state-with-projectors
-                (assoc-in [:projector-ui :scanning?] false)
-                (assoc-in [:projector-ui :discovered-devices] (vec devices)))
-     :history/skip? true
-     :document/rebase? true}))
+        state-with-projectors (reduce auto-create-projectors-for-device state devices)
+        old-projectors (get state :projectors {})
+        new-projectors (into {} (remove (fn [[id _]] (contains? old-projectors id)))
+                             (get state-with-projectors :projectors))
+        new-effects (select-keys (get-in state-with-projectors [:chains :projector-effects])
+                                 (keys new-projectors))]
+    (cond-> {:state (-> state-with-projectors
+                        (assoc-in [:projector-ui :scanning?] false)
+                        (assoc-in [:projector-ui :discovered-devices] (vec devices)))}
+      (seq new-projectors)
+      (assoc :history/backfill
+             (fn [doc]
+               (-> doc
+                   (update :projectors #(merge new-projectors %))
+                   (update-in [:chains :projector-effects] #(merge new-effects %))))))))
 
 
 (defn- handle-projectors-scan-failed

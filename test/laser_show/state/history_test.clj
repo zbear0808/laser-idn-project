@@ -193,21 +193,78 @@
 (deftest transaction-source-scoping-test
   (let [h1 (history/begin-transaction {} sample-state {:label "A" :source-id [:slider :a]})
         edited (edit-content sample-state)]
-    (testing "commit from another source is ignored"
-      (is (some? (:transaction (history/commit-transaction h1 edited 50 {:source-id [:slider :b]})))))
-    (testing "commit from the same source, or with no source, commits"
-      (is (nil? (:transaction (history/commit-transaction h1 edited 50 {:source-id [:slider :a]}))))
-      (is (nil? (:transaction (history/commit-transaction h1 edited 50 {})))))
+    (testing "any mouse-up commits the open transaction (a missed mouse-up can't leave it stuck)"
+      (is (nil? (:transaction (history/commit-transaction h1 edited))))
+      (is (= "A" (history/undo-label (history/commit-transaction h1 edited)))))
     (testing "begin from the same source keeps the open transaction"
       (is (= (:transaction h1) (:transaction (history/begin-transaction h1 edited {:label "A" :source-id [:slider :a]})))))
-    (testing "begin from a new source commits the open one first (missed mouse-up)"
+    (testing "begin from a new source commits the open one first"
       (let [h2 (history/begin-transaction h1 edited {:label "B" :source-id [:slider :b]})]
         (is (= "A" (history/undo-label h2)))
         (is (= "B" (get-in h2 [:transaction :label])))))))
 
 (deftest stale-transaction-test
-  (let [h (history/begin-transaction {} sample-state {:label "A" :source-id :x})
-        start (get-in h [:transaction :start-time])]
-    (is (not (history/stale-transaction? h (+ start 1000))))
-    (is (history/stale-transaction? h (+ start history/stale-transaction-ms 1)))
-    (is (not (history/stale-transaction? {} (+ start history/stale-transaction-ms 1))))))
+  (let [h (history/begin-transaction {} sample-state {:label "A" :source-id :x :now 0})]
+    (is (not (history/stale-transaction? h 1000)))
+    (is (history/stale-transaction? h (inc history/stale-transaction-ms)))
+    (testing "activity keeps a long drag fresh"
+      (let [touched (history/touch-transaction h 50000)]
+        (is (not (history/stale-transaction? touched 100000)))
+        (is (history/stale-transaction? touched (+ 50001 history/stale-transaction-ms)))))
+    (is (not (history/stale-transaction? {} (inc history/stale-transaction-ms))))))
+
+(deftest restore-effect-active-for-moved-and-new-cells-test
+  (let [effect-item {:id #uuid "55555555-5555-5555-5555-555555555555" :effect-id :scale}
+        base (assoc-in sample-state [:chains :effect-chains [1 0]] {:active? false :items [effect-item]})
+        snapshot-doc (doc base)]
+    (testing "a cell moved and switched on stays on after undoing the move"
+      (let [current (-> base
+                        (update-in [:chains :effect-chains] dissoc [1 0])
+                        (assoc-in [:chains :effect-chains [2 0]] {:active? true :items [effect-item]}))
+            restored (history/restore-document current snapshot-doc)]
+        (is (true? (get-in restored [:chains :effect-chains [1 0] :active?])))))
+    (testing "a cleared cell comes back switched off"
+      (let [on (assoc-in base [:chains :effect-chains [1 0] :active?] true)
+            current (update-in on [:chains :effect-chains] dissoc [1 0])
+            restored (history/restore-document current (doc on))]
+        (is (false? (get-in restored [:chains :effect-chains [1 0] :active?])))))
+    (testing "an entry holding only :active? equals no entry"
+      (is (false? (history/undoable-changed?
+                   (doc sample-state)
+                   (doc (assoc-in sample-state [:chains :effect-chains [7 7]] {:active? true}))))))))
+
+(deftest restore-clamps-selected-keyframe-test
+  (let [kf (fn [n sel] {:enabled? true :selected-keyframe sel
+                        :keyframes (vec (for [i (range n)] {:position (/ i 4.0) :params {}}))})
+        with-kf (fn [s m] (assoc-in s [:chains :cue-chains [0 0] :items 0 :keyframe-modulator] m))
+        snapshot-doc (doc (with-kf sample-state (kf 2 0)))]
+    (testing "when the keyframes changed, the snapshot's own selection is used"
+      (let [restored (history/restore-document (with-kf sample-state (kf 4 3)) snapshot-doc)]
+        (is (= 0 (get-in restored [:chains :cue-chains [0 0] :items 0 :keyframe-modulator :selected-keyframe])))))
+    (testing "an out-of-range selection is clamped"
+      (let [restored (history/restore-document (with-kf sample-state (kf 4 3))
+                                               (doc (with-kf sample-state (kf 2 5))))]
+        (is (= 1 (get-in restored [:chains :cue-chains [0 0] :items 0 :keyframe-modulator :selected-keyframe])))))
+    (testing "current selection is kept when the keyframes are unchanged"
+      (let [restored (history/restore-document (with-kf sample-state (kf 2 1)) snapshot-doc)]
+        (is (= 1 (get-in restored [:chains :cue-chains [0 0] :items 0 :keyframe-modulator :selected-keyframe])))))))
+
+(deftest duplicate-ids-keep-snapshot-live-fields-test
+  (let [dup [{:id group-id :type :group :collapsed? true :items []}
+             {:id group-id :type :group :collapsed? false :items []}]
+        snap (assoc-in sample-state [:chains :effect-chains [1 0] :items] dup)
+        current (assoc-in snap [:chains :effect-chains [1 0] :items]
+                          (mapv #(assoc % :collapsed? true) dup))
+        restored (history/restore-document current (doc snap))]
+    (is (= [true false] (mapv :collapsed? (get-in restored [:chains :effect-chains [1 0] :items]))))))
+
+(deftest backfill-history-test
+  (let [h (-> {:undo-stack [] :redo-stack []}
+              (history/push-undo-snapshot (history/make-snapshot {:state sample-state :description "a"}))
+              (assoc :redo-stack [(history/make-snapshot {:state sample-state :description "r"})]))
+        add-p #(assoc-in % [:projectors :new] {:name "New"})
+        h' (history/backfill-history h add-p)]
+    (is (every? #(= "New" (get-in % [:document-state :projectors :new :name]))
+                (concat (:undo-stack h') (:redo-stack h'))))
+    (is (= "New" (get-in (history/backfill-baseline (history/mark-clean sample-state) add-p)
+                         [:project :saved-document :projectors :new :name])))))

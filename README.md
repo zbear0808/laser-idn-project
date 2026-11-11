@@ -74,22 +74,24 @@ clj -M:win:test-all           # unit + integration
 clj -M:win:test-timing        # timing-precision tests (OS/load sensitive)
 ```
 
-Run the TestFX UI suite locally with a visible window:
+Every test alias takes name patterns: only tests whose `namespace/name`
+contains one of them (ignoring case) run. `--list` shows what would run.
+A pattern that matches nothing fails instead of running 0 tests.
 
 ```bash
-clj -M:test-ui:win
+clj -M:win:test history          # unit tests with "history" in the name
 ```
 
-Run one UI namespace while developing:
+The TestFX UI tests open real windows and move the mouse, so run only the
+ones you are working on. They live in `test/laser_show/ui_test/`, one
+namespace per feature (toolbar, main window, grid, trigger editor, menu bar,
+preview, cue chain list, timeline editor):
 
 ```bash
-clj -M:test-ui:win -n laser-show.ui-test.e2e-test
-```
-
-Run one UI test var while iterating on a specific workflow:
-
-```bash
-clj -M:test-ui:win -v laser-show.ui-test.e2e-test/user-can-type-and-switch-tabs
+clj -M:test-ui:win --list                  # list every UI test
+clj -M:test-ui:win tap-tempo               # one test, by part of its name
+clj -M:test-ui:win -n laser-show.ui-test.toolbar-test   # one feature area
+clj -M:test-ui:win                         # whole UI suite
 ```
 
 Run the UI suite locally with the TestFX headless JVM flags. On Windows this

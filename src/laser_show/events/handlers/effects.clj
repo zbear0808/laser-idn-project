@@ -31,14 +31,18 @@
   [{:keys [col row state] :as event}]
   (let [;; Check if explicit value was provided (from checkbox)
         explicit-value (get event :fx/event)
-        current-active (get-in state [:chains :effect-chains [col row] :active?] false)
+        cell (get-in state [:chains :effect-chains [col row]])
+        current-active (:active? cell false)
         ;; Use explicit value if provided, otherwise toggle
         new-active (if (some? explicit-value)
                      explicit-value
                      (not current-active))]
-    {:state (-> state
-                (assoc-in [:chains :effect-chains [col row] :active?] new-active)
-                (assoc-in [:effects :selected-cell] [col row]))}))
+    (if (nil? cell)
+      ;; Nothing to switch on in an empty cell
+      {:state (assoc-in state [:effects :selected-cell] [col row])}
+      {:state (-> state
+                  (assoc-in [:chains :effect-chains [col row] :active?] new-active)
+                  (assoc-in [:effects :selected-cell] [col row]))})))
 
 (defn- migrate-cell-triggers
   "Migrates target coordinates for triggers mapped to from-pos."

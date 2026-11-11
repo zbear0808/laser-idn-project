@@ -165,7 +165,7 @@
         "undo after saving moves away from the saved version"))
   (is (false? (get-in (persistent/new-project-state (run (clean-state) edit-size)) [:project :dirty?]))))
 
-(deftest scan-complete-rebases-clean-project-test
+(deftest scan-complete-backfills-clean-project-test
   (let [devices [{:address "10.0.0.5" :host-name "dac" :unit-id "u1" :port 7255 :services []}]
         s1 (run (clean-state) {:event/type :projectors/scan-complete :devices devices})]
     (is (seq (:projectors s1)) "projectors were auto-created")
@@ -230,9 +230,18 @@
     (is (= #{[0 0]} (set (keys (get-in s2 [:playback :active-cues])))))))
 
 (deftest meta-keys-do-not-reach-effects-test
-  (let [devices [{:address "10.0.0.5" :host-name "dac" :unit-id "u1" :port 7255 :services []}]
-        effects (pipeline {:event/type :projectors/scan-complete :devices devices :state (clean-state)})]
-    (is (not-any? #{:history/skip? :history/coalesce-key :document/rebase?} (keys effects)))))
+  (doseq [[label effects]
+          [["scan (backfill)" (pipeline {:event/type :projectors/scan-complete
+                                         :devices [{:address "10.0.0.5" :host-name "dac" :unit-id "u1"
+                                                    :port 7255 :services []}]
+                                         :state (clean-state)})]
+           ["timeline convert (description)" (pipeline {:event/type :timeline-cue-editor/open
+                                                        :col 0 :row 0 :state (clean-state)})]
+           ["nudge (coalesce)" (pipeline {:event/type :timeline/nudge-selection :col 0 :row 0
+                                          :delta-beats 1.0 :state (test-state)})]]]
+    (is (not-any? #{:history/skip? :history/coalesce-key :history/backfill :history/description}
+                  (keys effects))
+        label)))
 
 (deftest history-labels-name-real-events-test
   (doseq [event-type (keys history-handlers/event-descriptions)]
@@ -240,3 +249,126 @@
                       (catch Throwable _ ::threw))]
       (is (not= {} result)
           (str event-type " is not routed to a handler (unknown events return {})")))))
+
+;; Regression tests for the 2026-11-08 review
+
+(def devices [{:address "10.0.0.5" :host-name "dac" :unit-id "u1" :port 7255 :services []}])
+(def scan {:event/type :projectors/scan-complete :devices devices})
+
+(deftest drag-back-to-saved-value-is-clean-test
+  (let [begin {:event/type :history/begin-transaction :label "Size" :source-id :size}
+        commit {:event/type :history/commit-transaction :source-id :size}]
+    (testing "clean -> drag away and back -> commit is clean"
+      (let [s (-> (clean-state) (run begin) (run (assoc edit-size :value 2.0))
+                  (run (assoc edit-size :value 1.0)) (run commit))]
+        (is (false? (get-in s [:project :dirty?])))
+        (is (= 0 (undo-count s)))))
+    (testing "dirty -> drag back to the saved value -> commit is clean"
+      (let [s (-> (clean-state) (run (assoc edit-size :value 3.0)) (run begin)
+                  (run (assoc edit-size :value 1.0)) (run commit))]
+        (is (false? (get-in s [:project :dirty?])))))))
+
+(deftest long-drag-stays-one-step-test
+  (let [t0 1000000
+        s (reduce (fn [s n] (run s (assoc edit-size :value (+ 1.0 (* n 0.01)) :time (+ t0 (* n 1000)))))
+                  (run (clean-state) {:event/type :history/begin-transaction :label "Size" :source-id :size :time t0})
+                  (range 1 100))
+        s (run s {:event/type :history/commit-transaction :source-id :size :time (+ t0 100000)})]
+    (is (= 1 (undo-count s)) "a 100 s drag with activity is one step")))
+
+(deftest stale-transaction-auto-commits-after-inactivity-test
+  (let [t0 1000000
+        s (-> (clean-state)
+              (run {:event/type :history/begin-transaction :label "Size" :source-id :size :time t0})
+              (run (assoc edit-size :time (+ t0 10))))
+        s (run s {:event/type :grid/clear-cell :col 0 :row 0 :time (+ t0 history/stale-transaction-ms 100)})]
+    (is (nil? (get-in s [:history :transaction])))
+    (is (= 2 (undo-count s)) "the stale drag, then the clear as its own step")))
+
+(deftest scan-backfill-survives-undo-and-redo-test
+  (testing "edit -> undo -> scan -> redo keeps the projectors"
+    (let [s (-> (clean-state) (run edit-size) (run {:event/type :edit/undo}) (run scan)
+                (run {:event/type :edit/redo}))]
+      (is (seq (:projectors s)))
+      (is (= 2.0 (size-of s)))))
+  (testing "edit -> save -> scan -> undo -> redo keeps projectors, and is clean back at the saved version"
+    (let [saved (persistent/mark-saved (run (clean-state) edit-size) "x.zip" 0)
+          scanned (run saved scan)
+          undone (run scanned {:event/type :edit/undo})
+          redone (run undone {:event/type :edit/redo})]
+      (is (false? (get-in scanned [:project :dirty?])))
+      (is (seq (:projectors undone)))
+      (is (true? (get-in undone [:project :dirty?])))
+      (is (false? (get-in redone [:project :dirty?])) "redo returns to the saved version"))))
+
+(deftest timeline-editor-open-classification-test
+  (testing "converting a cue to a timeline cue is an undoable edit"
+    (let [s (run (clean-state) {:event/type :timeline-cue-editor/open :col 0 :row 0})]
+      (is (= :timeline (get-in s [:chains :cue-chains [0 0] :editor-type])))
+      (is (= 1 (undo-count s)))
+      (is (= "Convert to Timeline Cue" (history/undo-label (:history s))))
+      (is (true? (get-in s [:project :dirty?])))))
+  (testing "filling in missing fields on a timeline cue is backfilled"
+    (let [timeline-cue (-> (clean-state)
+                           (assoc-in [:chains :cue-chains [0 0] :editor-type] :timeline)
+                           history/mark-clean)
+          s0 (run timeline-cue edit-size)
+          s1 (run s0 {:event/type :timeline-cue-editor/open :col 0 :row 0})
+          s2 (run s1 {:event/type :edit/undo})]
+      (is (= (undo-count s0) (undo-count s1)) "opening adds no step")
+      (is (some? (get-in s2 [:chains :cue-chains [0 0] :items 0 :timeline/start]))
+          "undoing an earlier edit keeps the filled-in fields")
+      (is (seq (get-in s2 [:chains :cue-chains [0 0] :tracks])))
+      (is (false? (get-in s2 [:project :dirty?]))))))
+
+(deftest empty-effect-cell-toggle-is-a-no-op-test
+  (let [s (run (clean-state) {:event/type :effects/toggle-cell :col 5 :row 3})]
+    (is (nil? (get-in s [:chains :effect-chains [5 3]])))
+    (is (= 0 (undo-count s)))
+    (is (false? (get-in s [:project :dirty?])))))
+
+(deftest moved-effect-cell-keeps-on-state-after-undo-test
+  (let [s (-> (clean-state)
+              (assoc-in [:chains :effect-chains [1 0] :items] [{:id #uuid "66666666-6666-6666-6666-666666666666" :effect-id :scale}])
+              (run {:event/type :effects/move-cell :from-col 1 :from-row 0 :to-col 2 :to-row 0})
+              (run {:event/type :effects/toggle-cell :col 2 :row 0})
+              (run {:event/type :edit/undo}))]
+    (is (some? (get-in s [:chains :effect-chains [1 0]])))
+    (is (true? (get-in s [:chains :effect-chains [1 0] :active?])))))
+
+(deftest modulator-toggle-pair-is-one-step-test
+  (let [coalesce [:modulator/toggle :cue-chains [0 0] [0] :size]
+        s (-> (test-state)
+              (assoc-in [:chains :cue-chains [0 0] :items 0 :keyframe-modulator] {:enabled? true :keyframes []})
+              (run {:event/type :keyframe/toggle-enabled :domain :cue-chains :entity-key [0 0] :effect-path [0]
+                    :enabled? false :history/coalesce-key coalesce :time 5000})
+              (run (assoc edit-size :history/coalesce-key coalesce :time 5010)))]
+    (is (= 1 (undo-count s)))))
+
+(deftest timeline-nudge-coalesces-test
+  (let [base (-> (test-state)
+                 (assoc-in [:chains :cue-chains [0 0] :items 0 :timeline/start] 0.0)
+                 (assoc-in [:ui :timeline :selection] #{item-id}))
+        nudge {:event/type :timeline/nudge-selection :col 0 :row 0 :delta-beats 1.0}
+        s (-> base (run (assoc nudge :time 1000)) (run (assoc nudge :time 1300)) (run (assoc nudge :time 1600)))]
+    (is (= 3.0 (get-in s [:chains :cue-chains [0 0] :items 0 :timeline/start])))
+    (is (= 1 (undo-count s)))))
+
+(deftest learned-binding-is-undoable-and-unsaved-test
+  (let [target {:type :trigger-cue :target [0 0]}
+        input {:type :note-on :source :midi :channel 0 :note 60 :velocity 100}
+        learning (assoc-in (clean-state) [:backend :input :learning-target] target)
+        s (run learning {:event/type :input/learn-captured :target-action target :input-event input})]
+    (is (= target (get-in s [:config :input :trigger-map {:source :midi :channel 0 :note 60}])))
+    (is (nil? (get-in s [:backend :input :learning-target])))
+    (is (true? (get-in s [:project :dirty?])))
+    (is (= "Learn Trigger" (history/undo-label (:history s))))
+    (testing "a capture after learn was cancelled is ignored"
+      (let [s (run (clean-state) {:event/type :input/learn-captured :target-action target :input-event input})]
+        (is (empty? (get-in s [:config :input :trigger-map])))))))
+
+(deftest live-events-keep-the-dirty-flag-test
+  (let [dirty (run (clean-state) edit-size)]
+    (is (true? (get-in (run dirty {:event/type :timing/set-bpm :bpm 90.0}) [:project :dirty?])))
+    (is (true? (get-in (run dirty {:event/type :effects/toggle-cell :col 1 :row 0}) [:project :dirty?])))
+    (is (false? (get-in (run (clean-state) {:event/type :effects/toggle-cell :col 1 :row 0}) [:project :dirty?])))))
