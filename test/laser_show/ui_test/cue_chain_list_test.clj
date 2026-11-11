@@ -56,7 +56,7 @@
     (open-cue-chain-editor!)
     (add-cue-chain-items! [:square :triangle])
     (ui/click-node! robot (nth (ui/query-all ".chain-item") 0))
-    (ui/modifier-click-node! robot (nth (ui/query-all ".chain-item") 1) javafx.scene.input.KeyCode/CONTROL)
+    (ui/modifier-click-node! robot (nth (ui/query-all ".chain-item") 1) javafx.scene.input.KeyCode/SHORTCUT)
     (ui/wait-for! #(= 2 (count (get-in (state/get-raw-state)
                                         [:list-ui component-id :selected-ids]))))
     (let [selected (get-in (state/get-raw-state) [:list-ui component-id :selected-ids])]
@@ -73,7 +73,7 @@
     (let [item-ids (mapv :id (get-in (state/get-raw-state)
                                      [:chains :cue-chains [0 0] :items]))]
       (ui/click-node! robot (nth (ui/query-all ".chain-item") 0))
-      (ui/modifier-click-node! robot (nth (ui/query-all ".chain-item") 1) javafx.scene.input.KeyCode/CONTROL)
+      (ui/modifier-click-node! robot (nth (ui/query-all ".chain-item") 1) javafx.scene.input.KeyCode/SHORTCUT)
       (ui/modifier-click-node! robot (nth (ui/query-all ".chain-item") 2) javafx.scene.input.KeyCode/SHIFT)
       (ui/wait-for! #(and (= 2 (count (get-in (state/get-raw-state)
                                               [:list-ui [:cue-chain 0 0] :selected-ids])))

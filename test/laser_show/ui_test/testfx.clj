@@ -11,7 +11,7 @@
            [javafx.event ActionEvent Event]
            [javafx.stage Window]
            [javafx.embed.swing SwingFXUtils]
-           [javafx.scene.input KeyCode MouseButton]
+           [javafx.scene.input KeyCode MouseButton MouseEvent]
            [javax.imageio ImageIO]
            [java.io File]
            [org.testfx.api FxRobot FxRobotInterface FxToolkit]
@@ -206,30 +206,72 @@
   (wait-for! #(run-on-fx-thread! (fn [] (.isFocused (query selector)))))
   robot-instance)
 
+(defn headless?
+  "True when running on JavaFX's built-in headless glass platform."
+  []
+  (= "headless" (System/getProperty "glass.platform")))
+
+(defn- mac? []
+  (.contains (.toLowerCase (System/getProperty "os.name" "")) "mac"))
+
+(defn shortcut-key-code
+  "The platform shortcut key: Cmd on macOS, Ctrl elsewhere."
+  ^KeyCode []
+  (if (mac?) KeyCode/COMMAND KeyCode/CONTROL))
+
+(defn- resolve-modifier ^KeyCode [^KeyCode modifier]
+  (if (= modifier KeyCode/SHORTCUT) (shortcut-key-code) modifier))
+
+(defn- fire-modified-click!
+  "Fire a synthetic primary click on node with modifier flags set.
+   JavaFX's HeadlessRobot drops held keys from mouse events, so headless
+   modifier clicks are delivered this way instead."
+  [^Node node ^KeyCode modifier]
+  (let [shift? (= modifier KeyCode/SHIFT)
+        ctrl? (= modifier KeyCode/CONTROL)
+        alt? (= modifier KeyCode/ALT)
+        meta? (contains? #{KeyCode/META KeyCode/COMMAND} modifier)]
+    (run-on-fx-thread!
+     (fn []
+       (let [bounds (.localToScreen node (.getBoundsInLocal node))
+             local-x (/ (.getWidth (.getBoundsInLocal node)) 2)
+             local-y (/ (.getHeight (.getBoundsInLocal node)) 2)
+             screen-x (+ (.getMinX bounds) local-x)
+             screen-y (+ (.getMinY bounds) local-y)]
+         (doseq [[event-type click-count] [[MouseEvent/MOUSE_PRESSED 1]
+                                           [MouseEvent/MOUSE_RELEASED 1]
+                                           [MouseEvent/MOUSE_CLICKED 1]]]
+           (Event/fireEvent
+            node
+            (MouseEvent. event-type local-x local-y screen-x screen-y
+                         MouseButton/PRIMARY click-count
+                         shift? ctrl? alt? meta?
+                         (= event-type MouseEvent/MOUSE_PRESSED) false false
+                         false false true nil))))))))
+
+(defn modifier-click-node!
+  "Click a specific node while holding a keyboard modifier. Pass
+   KeyCode/SHORTCUT for the platform shortcut key (Cmd on macOS, Ctrl
+   elsewhere)."
+  [^FxRobot robot-instance ^Node node ^KeyCode modifier]
+  (let [modifier (resolve-modifier modifier)]
+    (if (headless?)
+      (fire-modified-click! node modifier)
+      (do
+        (.press ^FxRobotInterface robot-instance
+                (into-array KeyCode [modifier]))
+        (.clickOn ^FxRobotInterface robot-instance node
+                  (into-array MouseButton [MouseButton/PRIMARY]))
+        (.release ^FxRobotInterface robot-instance
+                  (into-array KeyCode [modifier])))))
+  (sync-fx!)
+  robot-instance)
+
 (defn modifier-click!
   "Click a selector while holding a keyboard modifier."
   [^FxRobot robot-instance ^String selector ^KeyCode modifier]
   (wait-for! #(some? (query selector)))
-  (.press ^FxRobotInterface robot-instance
-          (into-array KeyCode [modifier]))
-  (.clickOn ^FxRobotInterface robot-instance selector
-            (into-array MouseButton [MouseButton/PRIMARY]))
-  (.release ^FxRobotInterface robot-instance
-            (into-array KeyCode [modifier]))
-  (sync-fx!)
-  robot-instance)
-
-(defn modifier-click-node!
-  "Click a specific node while holding a keyboard modifier."
-  [^FxRobot robot-instance ^Node node ^KeyCode modifier]
-  (.press ^FxRobotInterface robot-instance
-          (into-array KeyCode [modifier]))
-  (.clickOn ^FxRobotInterface robot-instance node
-            (into-array MouseButton [MouseButton/PRIMARY]))
-  (.release ^FxRobotInterface robot-instance
-            (into-array KeyCode [modifier]))
-  (sync-fx!)
-  robot-instance)
+  (modifier-click-node! robot-instance (query selector) modifier))
 
 (defn drag-node!
   "Drag one queried node onto another node using TestFX mouse movement."

@@ -199,7 +199,7 @@
   ;;   clj -M:test-ui:win tap-tempo  ; tests with "tap-tempo" in the name
   ;;   clj -M:test-ui:win            ; whole suite
   ;; The LLM vision helpers (ui_test/cases) also need a .env file (see .env.example).
-  #_#_#_#_:test-ui
+  :test-ui
   {:extra-paths ["test"]
    :jvm-opts ["-Djavafx.enablePreview=true"
               "-Djavafx.suppressPreviewWarning=true"
@@ -214,13 +214,15 @@
    :main-opts ["-m" "laser-show.test-runner"
                "-d" "test/laser_show/ui_test"]}
 
-  ;; Add this alias for CI or any display-less environment. CI wraps this
-  ;; command with Xvfb because Monocle 21.0.2 is incompatible with JavaFX 28.
+  ;; Add this alias to run UI tests fully in the background: no windows, no
+  ;; mouse movement, no display needed (macOS, Windows, Linux, CI). Uses the
+  ;; headless glass platform built into JavaFX 26+ instead of Monocle.
+  ;; Do NOT add -Dtestfx.headless=true: TestFX 4.0.18 then tries to load
+  ;; Monocle, which is incompatible with JavaFX 28.
   :test-ui-headless
-  {:jvm-opts ["-Dtestfx.robot=glass"
-              "-Dtestfx.headless=true"
+  {:jvm-opts ["-Dglass.platform=headless"
               "-Dprism.order=sw"
-              "-Dprism.text=t2k"
+              "-Dtestfx.robot=glass"
               "-Djava.awt.headless=true"]}
 
 

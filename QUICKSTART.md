@@ -5,10 +5,13 @@
 1. **Install Java** (if not already installed)
    - Download from https://adoptium.net/
    - JDK 25+ is required (for JavaFX 28-ea compatibility)
+   - **macOS setup:** See [docs/MACOS_SETUP.md](docs/MACOS_SETUP.md) for full guide (Homebrew, Temurin, Apple Silicon/Intel).
+   - **Linux setup:** See [docs/LINUX_SETUP.md](docs/LINUX_SETUP.md).
 
 2. **Install Clojure CLI tools**
-   - Windows: https://clojure.org/guides/install_clojure#_windows
-   - Or use: `scoop install clojure`
+   - **macOS:** `brew install clojure/tools/clojure` (see [docs/MACOS_SETUP.md](docs/MACOS_SETUP.md))
+   - **Windows:** https://clojure.org/guides/install_clojure#_windows or `scoop install clojure`
+   - **Linux:** See [docs/LINUX_SETUP.md](docs/LINUX_SETUP.md)
 
 
 ## Running the Applications
