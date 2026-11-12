@@ -212,3 +212,21 @@
       (is (not (contains? domains :cues)))
       (is (not (contains? domains :cue-lists)))
       (is (not (contains? domains :effect-registry))))))
+
+(deftest load-normalizes-timeline-cues-and-stays-clean-test
+  (let [track-id #uuid "33333333-3333-3333-3333-333333333333"
+        untimed {:editor-type :timeline
+                 :tracks [{:id track-id :type :track :name "T" :enabled? false}]
+                 :items [{:type :preset :id #uuid "44444444-4444-4444-4444-444444444444"
+                          :preset-id :circle :effects [] :enabled? true}]}
+        saved (assoc-in (domains/build-initial-state) [:chains :cue-chains [0 0]] untimed)]
+    (is (persistent/write-project! test-project-file (persistent/project-files saved)))
+    (let [loaded (persistent/apply-loaded-project (domains/build-initial-state)
+                                                  (persistent/read-project test-project-file)
+                                                  test-project-file)
+          cue (get-in loaded [:chains :cue-chains [0 0]])]
+      (is (= 0.0 (get-in cue [:items 0 :timeline/start])))
+      (is (= 4.0 (get-in cue [:items 0 :timeline/duration])))
+      (is (= track-id (get-in cue [:items 0 :track-id])))
+      (is (true? (get-in cue [:tracks 0 :muted?])) "old disabled track becomes muted")
+      (is (false? (get-in loaded [:project :dirty?])) "loading doesn't make the project unsaved"))))

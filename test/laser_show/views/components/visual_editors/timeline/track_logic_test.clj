@@ -318,3 +318,109 @@
     (is (= {:enabled? true :start 0.0 :duration 5.0} (tl/trim-loop-start lp -3.0 snap-q)))
     (is (= {:enabled? true :start 1.0 :duration 6.0} (tl/trim-loop-end lp 7.0 snap-q)))
     (is (= {:enabled? true :start 3.0 :duration 4.0} (tl/move-loop lp 2.1 snap-q)))))
+
+(def ^:private norm-tracks [{:id :f :type :group :items [{:id :t1 :type :track}]}])
+
+(defn- norm-item [item]
+  (first (:items (tl/normalize-timeline-cue {:editor-type :timeline :tracks norm-tracks :items [item]}))))
+
+(deftest normalize-timeline-cue-examples-test
+  (testing "plan §7.1 table"
+    (is (= {:id :a :type :preset :timeline/start 0.0 :timeline/duration 4.0 :track-id :t1}
+           (norm-item {:id :a :type :preset})))
+    (is (= {:id :a :type :preset :timeline/start 8.0 :timeline/duration 4.0 :track-id :t1}
+           (norm-item {:id :a :type :preset :timeline/start 8.0 :track-id :t1})))
+    (is (= :t1 (:track-id (norm-item {:id :a :track-id :gone :timeline/start 2.0 :timeline/duration 1.0})))
+        "dangling track id goes to the first leaf")
+    (let [g (norm-item {:id :g :type :group
+                        :items [{:id :c1 :timeline/start 4.0 :timeline/duration 2.0}
+                                {:id :c2 :timeline/start 8.0 :timeline/duration 4.0}]})]
+      (is (= [4.0 8.0] [(:timeline/start g) (:timeline/duration g)]) "group spans its timed children")
+      (is (= [{:id :c1 :timeline/start 4.0 :timeline/duration 2.0}
+              {:id :c2 :timeline/start 8.0 :timeline/duration 4.0}]
+             (:items g)) "children unchanged"))
+    (let [g (norm-item {:id :g :type :group :items [{:id :c1}]})]
+      (is (= [0.0 4.0] [(:timeline/start g) (:timeline/duration g)]))))
+  (testing "a complete cue is returned identical"
+    (let [cue {:editor-type :timeline :tracks norm-tracks
+               :items [{:id :a :timeline/start 1.0 :timeline/duration 2.0 :track-id :t1}]}]
+      (is (identical? cue (tl/normalize-timeline-cue cue)))))
+  (testing "no leaf track: one is appended and used"
+    (let [cue (tl/normalize-timeline-cue {:editor-type :timeline :tracks [] :items [{:id :a}]}
+                                         {:new-track-id :new})]
+      (is (= [{:id :new :type :track :name "Track 1" :collapsed? false}] (:tracks cue)))
+      (is (= :new (get-in cue [:items 0 :track-id])))))
+  (testing "non-timeline cues are untouched"
+    (let [cue {:editor-type :cue-chain :items [{:id :a}]}]
+      (is (identical? cue (tl/normalize-timeline-cue cue))))))
+
+(deftest normalize-migrates-disabled-tracks-to-muted-test
+  (let [cue (tl/normalize-timeline-cue
+             {:editor-type :timeline
+              :tracks [{:id :f :type :group :enabled? true
+                        :items [{:id :t1 :type :track :enabled? false}]}]
+              :items []})]
+    (is (= [{:id :f :type :group :items [{:id :t1 :type :track :muted? true}]}]
+           (:tracks cue)))))
+
+(defn- random-cue [^java.util.Random rnd]
+  (let [pick (fn [& xs] (nth xs (.nextInt rnd (count xs))))
+        leaf-ids [:t1 :t2]
+        item (fn [i]
+               (cond-> {:id i :type (pick :preset :group)}
+                 (.nextBoolean rnd) (assoc :timeline/start (pick -1.0 0.0 2.5 7.0))
+                 (.nextBoolean rnd) (assoc :timeline/duration (pick 0.0 0.01 1.0 4.0))
+                 (.nextBoolean rnd) (assoc :track-id (pick :t1 :t2 :f :gone nil))))]
+    {:editor-type :timeline
+     :tracks (pick [] [{:id :t1 :type :track}]
+                   [{:id :f :type :group :enabled? (.nextBoolean rnd)
+                     :items (mapv (fn [id] {:id id :type :track}) leaf-ids)}])
+     :items (mapv item (range (.nextInt rnd 4)))}))
+
+(deftest normalize-timeline-cue-idempotent-test
+  (let [rnd (java.util.Random. 42)]
+    (dotimes [_ 200]
+      (let [cue (random-cue rnd)
+            once (tl/normalize-timeline-cue cue {:new-track-id :new})
+            twice (tl/normalize-timeline-cue once {:new-track-id :other})
+            leaf-ids (tl/leaf-track-ids (:tracks once))]
+        (is (identical? once twice) (pr-str cue))
+        (doseq [item (:items once)]
+          (is (>= (:timeline/start item) 0.0))
+          (is (>= (:timeline/duration item) tl/min-clip-length))
+          (is (contains? leaf-ids (:track-id item))))))))
+
+(deftest convert-to-timeline-examples-test
+  (testing "empty cell"
+    (let [cue (tl/convert-to-timeline nil {})]
+      (is (= :timeline (:editor-type cue)))
+      (is (= [] (:items cue)))
+      (is (seq (:tracks cue)))
+      (is (not (contains? cue :loop)))))
+  (testing "plain cue"
+    (let [cue (tl/convert-to-timeline {:items [{:id :a :type :preset}]
+                                       :destination-zone {:zone-group-id :all}} {})
+          item (first (:items cue))]
+      (is (= [0.0 16.0] [(:timeline/start item) (:timeline/duration item)]))
+      (is (contains? (tl/leaf-track-ids (:tracks cue)) (:track-id item)))
+      (is (= {:enabled? true :start 0.0 :duration 16.0} (:loop cue)))))
+  (testing "keeps an existing loop"
+    (is (= {:enabled? false :start 0.0 :duration 8.0}
+           (:loop (tl/convert-to-timeline {:items [{:id :a}] :loop {:enabled? false :start 0.0 :duration 8.0}} {})))))
+  (testing "timeline cues are returned identical"
+    (let [cue {:editor-type :timeline :items []}]
+      (is (identical? cue (tl/convert-to-timeline cue {}))))))
+
+(deftest muted-track-ids-includes-folder-descendants-test
+  (is (= #{:f :t1 :g :t2 :t3}
+         (tl/muted-track-ids [{:id :f :type :group :muted? true
+                               :items [{:id :t1 :type :track}
+                                       {:id :g :type :group :items [{:id :t2} {:id :t3 :type :track}]}]}
+                              {:id :t4 :type :track}])))
+  (is (= #{:t4} (tl/muted-track-ids [{:id :t4 :type :track :muted? true}]))))
+
+(deftest parent-track-test
+  (let [tracks [{:id :f :type :group :items [{:id :t1 :type :track}]} {:id :t2 :type :track}]]
+    (is (= :f (:id (tl/parent-track tracks :t1))))
+    (is (nil? (tl/parent-track tracks :t2)))
+    (is (nil? (tl/parent-track tracks :missing)))))

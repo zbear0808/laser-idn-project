@@ -5,7 +5,8 @@
             [laser-show.state.persistent :as persistent]
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
-            [laser-show.events.core :as events]))
+            [laser-show.events.core :as events]
+            [laser-show.views.components.visual-editors.timeline.track-logic :as tl]))
 
 (def item-id #uuid "11111111-1111-1111-1111-111111111111")
 
@@ -308,11 +309,17 @@
       (is (= 1 (undo-count s)))
       (is (= "Convert to Timeline Cue" (history/undo-label (:history s))))
       (is (true? (get-in s [:project :dirty?])))))
-  (testing "filling in missing fields on a timeline cue is backfilled"
+  (testing "opening a normalized timeline cue doesn't touch the document"
+    (let [s0 (run (clean-state) {:event/type :timeline-cue-editor/open :col 0 :row 0})
+          s1 (run s0 {:event/type :timeline-cue-editor/open :col 0 :row 0})]
+      (is (identical? (get-in s0 [:chains :cue-chains]) (get-in s1 [:chains :cue-chains])))
+      (is (= (undo-count s0) (undo-count s1)))))
+  (testing "a timeline cue that skipped normalization is normalized on open as a backfill"
     (let [timeline-cue (-> (clean-state)
                            (assoc-in [:chains :cue-chains [0 0] :editor-type] :timeline)
                            history/mark-clean)
-          s0 (run timeline-cue edit-size)
+          other-edit {:event/type :timeline/add-track :col 1 :row 0}
+          s0 (run timeline-cue other-edit)
           s1 (run s0 {:event/type :timeline-cue-editor/open :col 0 :row 0})
           s2 (run s1 {:event/type :edit/undo})]
       (is (= (undo-count s0) (undo-count s1)) "opening adds no step")
@@ -320,6 +327,18 @@
           "undoing an earlier edit keeps the filled-in fields")
       (is (seq (get-in s2 [:chains :cue-chains [0 0] :tracks])))
       (is (false? (get-in s2 [:project :dirty?]))))))
+
+(deftest pipeline-normalizes-items-added-by-cue-chain-editor-test
+  (let [s0 (run (clean-state) {:event/type :timeline-cue-editor/open :col 0 :row 0})
+        steps (undo-count s0)
+        s1 (run s0 {:event/type :cue-chain/add-preset :col 0 :row 0 :preset-id :circle})
+        items (get-in s1 [:chains :cue-chains [0 0] :items])
+        leaf-ids (tl/leaf-track-ids (get-in s1 [:chains :cue-chains [0 0] :tracks]))]
+    (is (= 2 (count items)))
+    (is (every? #(number? (:timeline/start %)) items))
+    (is (every? #(number? (:timeline/duration %)) items))
+    (is (every? #(contains? leaf-ids (:track-id %)) items))
+    (is (= (inc steps) (undo-count s1)) "one undo entry for the add, normalization included")))
 
 (deftest empty-effect-cell-toggle-is-a-no-op-test
   (let [s (run (clean-state) {:event/type :effects/toggle-cell :col 5 :row 3})]

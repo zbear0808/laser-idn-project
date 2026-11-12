@@ -26,9 +26,10 @@
     (ui/click! robot "#timeline-add-content")
     (ui/wait-for! #(true? (get-in (state/get-raw-state)
                                   [:ui :timeline :add-panel-open?])))
-    (ui/click! robot "#timeline-loop-toggle")
-    (ui/wait-for! #(true? (get-in (state/get-raw-state)
-                                  [:chains :cue-chains [0 0] :loop :enabled?])))
+    (let [loop-path [:chains :cue-chains [0 0] :loop :enabled?]
+          before (boolean (get-in (state/get-raw-state) loop-path))]
+      (ui/click! robot "#timeline-loop-toggle")
+      (ui/wait-for! #(= (not before) (boolean (get-in (state/get-raw-state) loop-path)))))
     (ui/click! robot ".timeline-canvas")
     (is (some? (ui/query ".timeline-canvas")))))
 
@@ -76,3 +77,13 @@
     (ui/check! robot "#timeline-snap-toggle")
     (ui/wait-for! #(true? (get-in (state/get-raw-state) snap-path)))
     (is (true? (get-in (state/get-raw-state) snap-path)))))
+
+(deftest timeline-open-does-not-convert-twice
+  (let [cue-path [:chains :cue-chains [0 0]]]
+    (open-timeline!)
+    (let [after-first (get-in (state/get-raw-state) cue-path)]
+      (is (= :timeline (:editor-type after-first)))
+      (events/dispatch! {:event/type :ui/close-dialog :dialog-id :timeline-cue-editor})
+      (ui/wait-for! #(not (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor :open?])))
+      (open-timeline!)
+      (is (= after-first (get-in (state/get-raw-state) cue-path))))))

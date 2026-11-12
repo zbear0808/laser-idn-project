@@ -1,13 +1,15 @@
 (ns laser-show.events.timeline-handlers-test
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.events.handlers.timeline :as timeline]
+            [laser-show.services.frame-service :as frame-service]
+            [laser-show.state.core :as state]
             [laser-show.state.domains :refer [build-initial-state]]))
 
 (def base-state
   (build-initial-state))
 
 (deftest handle-open-editor-test
-  (testing "initializes tracks, timing fields, and sets :editor-type :timeline on empty cell"
+  (testing "initializes tracks and sets :editor-type :timeline on an empty cell"
     (let [empty-state (assoc-in base-state [:chains :cue-chains] {})
           event {:event/type :timeline-cue-editor/open
                  :col 1
@@ -18,25 +20,83 @@
       (is (= :timeline (:editor-type cue)))
       (is (vector? (:tracks cue)))
       (is (seq (:tracks cue)))
+      (is (nil? (:loop cue)) "an empty cell gets no loop")
+      (is (= "Convert to Timeline Cue" (:history/description result)))
       (is (= {:event/type :ui/open-dialog
               :dialog-id :timeline-cue-editor
               :data {:col 1 :row 1}}
              (:dispatch result)))))
 
-  (testing "sets :editor-type :timeline on existing cue chain with presets"
+  (testing "converts a plain cue to 16-beat clips under an enabled 16-beat loop"
     (let [state (assoc-in base-state [:chains :cue-chains [0 0]]
-                          {:items [{:preset-id :circle}]})
-          event {:event/type :timeline-cue-editor/open
-                 :col 0
-                 :row 0
-                 :state state}
-          result (timeline/handle event)
+                          {:items [{:id :a :type :preset :preset-id :circle}]})
+          result (timeline/handle {:event/type :timeline-cue-editor/open
+                                   :col 0 :row 0 :state state})
           cue (get-in result [:state :chains :cue-chains [0 0]])
           first-item (first (:items cue))]
       (is (= :timeline (:editor-type cue)))
       (is (seq (:tracks cue)))
       (is (= 0.0 (:timeline/start first-item)))
-      (is (= 4.0 (:timeline/duration first-item))))))
+      (is (= 16.0 (:timeline/duration first-item)))
+      (is (= {:enabled? true :start 0.0 :duration 16.0} (:loop cue))))))
+
+(deftest open-editor-on-timeline-cue-does-not-change-document-test
+  (let [converted (:state (timeline/handle {:event/type :timeline-cue-editor/open
+                                            :col 0 :row 0 :state base-state}))
+        again (timeline/handle {:event/type :timeline-cue-editor/open
+                                :col 0 :row 0 :state converted})]
+    (is (identical? (get-in converted [:chains :cue-chains])
+                    (get-in again [:state :chains :cue-chains])))
+    (is (not (contains? again :history/backfill)))
+    (is (not (contains? again :history/description)))))
+
+(deftest open-editor-converts-without-changing-output-test
+  (let [plain {:destination-zone {:zone-group-id :all}
+               :items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true :effects []}
+                       {:id (random-uuid) :type :preset :preset-id :square :enabled? true :effects []}]}
+        state (assoc-in base-state [:chains :cue-chains [0 0]] plain)
+        converted (get-in (timeline/handle {:event/type :timeline-cue-editor/open
+                                            :col 0 :row 0 :state state})
+                          [:state :chains :cue-chains [0 0]])
+        render (fn [cue beats]
+                 (let [frames (frame-service/generate-frames-by-zone
+                               cue 0 120.0 0 {:accumulated-beats beats :accumulated-ms 0.0
+                                              :phase-offset 0.0 :effective-beats beats
+                                              :time-ms 0 :bpm 120.0 :trigger-time 0})]
+                   (update-vals frames count)))]
+    (state/init-state! base-state)
+    ;; The loop wraps playback inside [0, 16), so these are the reachable positions.
+    (doseq [beats [0.0 5.0 15.0 15.99]]
+      (is (= (render plain beats) (render converted beats))
+          (str "same zones and point counts at beat " beats)))))
+
+(deftest open-editor-resets-ui-for-other-cell-test
+  (let [s0 (-> base-state
+               (assoc-in [:ui :dialogs :timeline-cue-editor] {:col 0 :row 0 :open? true})
+               (assoc-in [:ui :timeline] {:selection #{:x} :cursor-beat 8.0 :scroll-hvalue 0.5 :zoom-x 80.0})
+               (assoc-in [:list-ui :timeline-tracks] {:selected-ids #{:t}}))
+        other (:state (timeline/handle {:event/type :timeline-cue-editor/open
+                                        :col 2 :row 1 :state s0}))
+        same (:state (timeline/handle {:event/type :timeline-cue-editor/open
+                                       :col 0 :row 0 :state s0}))]
+    (testing "another cell starts with a clean view"
+      (is (= #{} (get-in other [:ui :timeline :selection])))
+      (is (= 0.0 (get-in other [:ui :timeline :cursor-beat])))
+      (is (= 0.0 (get-in other [:ui :timeline :scroll-hvalue])))
+      (is (= {} (get-in other [:list-ui :timeline-tracks])))
+      (is (= 80.0 (get-in other [:ui :timeline :zoom-x])) "zoom is an editor preference"))
+    (testing "reopening the same cell keeps the view"
+      (is (= #{:x} (get-in same [:ui :timeline :selection])))
+      (is (= {:selected-ids #{:t}} (get-in same [:list-ui :timeline-tracks]))))))
+
+(deftest add-track-does-not-stamp-zone-test
+  (let [s0 (assoc-in base-state [:chains :cue-chains [0 0]]
+                     {:destination-zone {:zone-group-id :front} :tracks [] :items []})
+        tracks (fn [ev] (get-in (timeline/handle (assoc ev :col 0 :row 0 :state s0))
+                                [:state :chains :cue-chains [0 0] :tracks]))]
+    (is (not (contains? (last (tracks {:event/type :timeline/add-track})) :zone-group-id)))
+    (is (not (contains? (last (tracks {:event/type :timeline/add-folder})) :zone-group-id)))
+    (is (= :back (:zone-group-id (last (tracks {:event/type :timeline/add-track :zone-group-id :back})))))))
 
 (deftest handle-add-preset-to-track-test
   (testing "adds preset at cursor-beat on resolved leaf track"

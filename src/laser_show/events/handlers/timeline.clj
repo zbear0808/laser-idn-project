@@ -331,24 +331,6 @@
     {:state (-> state
                 (assoc-in items-path updated-items))}))
 
-(defn- handle-init-tracks
-  "Auto-initialize tracks for a cue chain that has none.
-   Uses auto-initialize-tracks from track-logic. This is setup, not a user
-   edit: no undo step, and it doesn't make a clean project unsaved."
-  [{:keys [col row zone-groups state]}]
-  (let [chain-path [:chains :cue-chains [col row]]
-        cue-chain (get-in state chain-path)]
-    (if (seq (:tracks cue-chain))
-      {:state state} ;; Already has tracks, no-op
-      (let [updated-chain (tl/auto-initialize-tracks cue-chain (or zone-groups {}))]
-        {:state (-> state
-                    (assoc-in chain-path updated-chain))
-         :history/backfill (fn [doc]
-                             (let [chain (get-in doc chain-path)]
-                               (if (and chain (empty? (:tracks chain)))
-                                 (assoc-in doc (conj chain-path :tracks) (:tracks updated-chain))
-                                 doc)))}))))
-
 (defn- handle-set-track-zone
   "Set or clear the zone group assignment on a track or folder.
    If :zone-group-id is nil or :inherit, removes the key so the track inherits from its parent folder."
@@ -379,13 +361,12 @@
 
 (defn- handle-add-track
   "Appends a new regular track to the cue chain's tracks.
-   Optional :zone-group-id sets initial zone, falling back to chain default."
+   Optional :zone-group-id sets its zone; without it the track inherits
+   (its folder's zone, or the chain's default zone at the top level)."
   [{:keys [col row zone-group-id state]}]
   (let [tracks-path [:chains :cue-chains [col row] :tracks]
         tracks (get-in state tracks-path [])
-        dest-zone (or zone-group-id
-                      (get-in state [:chains :cue-chains [col row] :destination-zone :zone-group-id] :all))
-        new-track (tl/create-track {:zone-group-id dest-zone
+        new-track (tl/create-track {:zone-group-id zone-group-id
                                     :name (str "Track " (inc (count tracks)))})
         new-track-id (:id new-track)
         updated-tracks (conj tracks new-track)]
@@ -396,13 +377,11 @@
 
 (defn- handle-add-folder
   "Appends a new track folder to the cue chain's tracks.
-   Optional :zone-group-id sets initial zone, falling back to chain default."
+   Optional :zone-group-id sets its zone; without it the folder inherits."
   [{:keys [col row zone-group-id state]}]
   (let [tracks-path [:chains :cue-chains [col row] :tracks]
         tracks (get-in state tracks-path [])
-        dest-zone (or zone-group-id
-                      (get-in state [:chains :cue-chains [col row] :destination-zone :zone-group-id] :all))
-        new-folder (assoc (tl/create-track {:zone-group-id dest-zone
+        new-folder (assoc (tl/create-track {:zone-group-id zone-group-id
                                             :name (str "Folder " (inc (count tracks)))})
                           :type :group
                           :collapsed? false
@@ -453,9 +432,8 @@
   (let [items-path [:chains :cue-chains [col row] :items]
         tracks-path [:chains :cue-chains [col row] :tracks]
         tracks (get-in state tracks-path [])
-        dest-zone (get-in state [:chains :cue-chains [col row] :destination-zone :zone-group-id] :all)
         [tracks state-with-tracks] (if (empty? tracks)
-                                     (let [default-tr (tl/create-track {:zone-group-id dest-zone :name "Track 1"})]
+                                     (let [default-tr (tl/create-track {:name "Track 1"})]
                                        [[default-tr] (assoc-in state tracks-path [default-tr])])
                                      [tracks state])
         resolved-track-id (tl/ensure-leaf-track tracks track-id)
@@ -501,72 +479,82 @@
                 (assoc-in items-path updated-items))}))
 
 
-;; Open Editor (initialize timeline data on first open)
+;; Open Editor
 
 
-(defn- timeline-ready?
-  "Check if any item in the cue chain already has timeline-namespaced keys.
-   A quick check to avoid re-initializing items that already have timing data."
-  [items]
-  (some #(contains? % :timeline/start) items))
-
-(defn- ensure-item-timeline-fields
-  "Add :timeline/start and :timeline/duration to an item if missing."
-  [item]
-  (cond-> item
-    (not (contains? item :timeline/start))    (assoc :timeline/start 0.0)
-    (not (contains? item :timeline/duration)) (assoc :timeline/duration 4.0)))
-
-(defn- fill-timeline-fields
-  "Give a timeline cue chain any missing timeline fields: item start/duration,
-   and the given tracks if it has none. Deterministic, so it can be backfilled."
-  [cue-chain tracks]
-  (cond-> cue-chain
-    (not (timeline-ready? (:items cue-chain [])))
-    (update :items #(mapv ensure-item-timeline-fields (or % [])))
-
-    (and (empty? (:tracks cue-chain)) (seq tracks))
-    (assoc :tracks tracks)))
-
-(defn- backfill-timeline-cell
-  "A :history/backfill fn that fills in the same timeline fields in snapshots
-   where the cell is already a timeline cue."
-  [chain-path tracks]
-  (fn [doc]
-    (let [chain (get-in doc chain-path)]
-      (if (= :timeline (:editor-type chain))
-        (assoc-in doc chain-path (fill-timeline-fields chain tracks))
-        doc))))
+(defn- reset-view-for-cell
+  "Selection, cursor, scroll and track selection belong to one cue.
+   Clear them when the editor opens on a different cell."
+  [state col row]
+  (let [{open-col :col open-row :row} (get-in state [:ui :dialogs :timeline-cue-editor])]
+    (if (= [open-col open-row] [col row])
+      state
+      (-> state
+          (update-in [:ui :timeline] assoc :selection #{} :cursor-beat 0.0 :scroll-hvalue 0.0)
+          (assoc-in [:list-ui :timeline-tracks] {})))))
 
 (defn- handle-open-editor
   "Open the timeline cue editor for a cell.
-   Initializes timeline configuration:
-   - Sets :editor-type to :timeline
-   - Ensures :timeline/start and :timeline/duration on every item
-   - Tracks from :destination-zone via auto-initialize-tracks if missing
-   Then chains into :ui/open-dialog to actually show the dialog.
    
-   Converting a cue to a timeline cue changes playback, so it's a normal
-   undoable edit. Filling in missing fields on a cue that already is a
-   timeline cue is setup, so it's backfilled into history instead."
+   - Timeline cue: the document isn't changed. (A cue that somehow skipped
+     normalization is normalized here as a backfill: no undo step, not unsaved.)
+   - Any other cue (or an empty cell): converted with tl/convert-to-timeline,
+     which keeps what it renders. That's an undoable \"Convert to Timeline Cue\".
+   Then chains into :ui/open-dialog."
   [{:keys [col row state]}]
   (let [chain-path [:chains :cue-chains [col row]]
-        cue-chain  (or (get-in state chain-path) {})
-        tracks     (or (not-empty (:tracks cue-chain))
-                       (:tracks (tl/auto-initialize-tracks cue-chain (get state :zone-groups {}))))
-        converting? (not= (:editor-type cue-chain) :timeline)
-        final-chain (-> cue-chain
-                        (fill-timeline-fields tracks)
-                        (assoc :editor-type :timeline))
-        changed? (not= final-chain cue-chain)
-        effects {:state (cond-> state changed? (assoc-in chain-path final-chain))
+        cue-chain (get-in state chain-path)
+        timeline? (cue-chains/timeline-cue? cue-chain)
+        new-track-id (random-uuid)
+        normalize #(tl/normalize-timeline-cue % {:new-track-id new-track-id})
+        final-chain (if timeline?
+                      (normalize cue-chain)
+                      (tl/convert-to-timeline cue-chain (get state :zone-groups {})))
+        changed? (not (identical? final-chain cue-chain))
+        effects {:state (cond-> (reset-view-for-cell state col row)
+                          changed? (assoc-in chain-path final-chain))
                  :dispatch {:event/type :ui/open-dialog
                             :dialog-id :timeline-cue-editor
                             :data {:col col :row row}}}]
     (cond
       (not changed?) effects
-      converting? (assoc effects :history/description "Convert to Timeline Cue")
-      :else (assoc effects :history/backfill (backfill-timeline-cell chain-path (:tracks final-chain))))))
+      (not timeline?) (assoc effects :history/description "Convert to Timeline Cue")
+      :else (assoc effects :history/backfill
+                   (fn [doc]
+                     (if (get-in doc chain-path)
+                       (update-in doc chain-path normalize)
+                       doc))))))
+
+
+;; Pipeline middleware
+
+
+(defn- restores-history?
+  "Undo/redo restore a snapshot exactly; normalizing it again could differ
+   from the saved baseline (e.g. a fresh track id)."
+  [{:keys [event/type]}]
+  (or (#{:edit/undo :edit/redo} type)
+      (= "history" (some-> type namespace))))
+
+(defn wrap-normalize-timelines
+  "Middleware: after the handler runs, enforce the timeline invariants
+   (tl/normalize-timeline-cue) on every cue chain the event changed. Runs
+   innermost, so undo snapshots and the unsaved flag see normalized state.
+   Events that don't touch cue chains only pay one identical? check."
+  [handler]
+  (fn [event]
+    (let [effects (handler event)
+          old-ccs (get-in event [:state :chains :cue-chains])
+          new-ccs (get-in effects [:state :chains :cue-chains])]
+      (if (or (nil? (:state effects))
+              (identical? old-ccs new-ccs)
+              (restores-history? event))
+        effects
+        (let [normalized (tl/normalize-timeline-cues old-ccs new-ccs)]
+          (if (identical? normalized new-ccs)
+            effects
+            (assoc-in effects [:state :chains :cue-chains] normalized)))))))
+
 
 ;; Public API
 
@@ -608,7 +596,6 @@
     ;; Track CRUD
     :timeline/update-tracks (handle-update-tracks event)
     :timeline/move-item-to-track (handle-move-item-to-track event)
-    :timeline/init-tracks (handle-init-tracks event)
     :timeline/add-track (handle-add-track event)
     :timeline/add-folder (handle-add-folder event)
     :timeline/set-track-zone (handle-set-track-zone event)

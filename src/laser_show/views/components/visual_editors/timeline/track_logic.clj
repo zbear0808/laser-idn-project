@@ -7,14 +7,16 @@
    Track structure:
    {:id         UUID
     :name       String   — user-visible label  (default: zone group name)
-    :zone-group-id  Keyword  — which zone group this track routes to
+    :zone-group-id  Keyword  — zone group override (optional; inherits from
+                               the parent folder, then the chain default)
     :color      String   — hex color (optional, derived from zone if nil)
-    :visible?   Boolean  — whether hidden in UI (default true)
+    :muted?     Boolean  — muted track/folder (optional)
     :collapsed? Boolean  — whether sub-items are collapsed (default false)}
    
    Items reference their track via :track-id.
    Multiple tracks may point to the same :zone-group-id."
   (:require [laser-show.animation.chains :as chains]
+            [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.common.util :as u]))
 
 
@@ -24,12 +26,13 @@
 
 
 (defn create-track
-  "Create a new track with a zone-group assignment.
+  "Create a new track.
    
    Parameters:
    - opts map with:
-     :zone-group-id — required, keyword like :all, :front, :back
-     :name          — optional, defaults to zone-group-id name
+     :zone-group-id — optional keyword like :all, :front, :back. Without it
+                      the track inherits from its folder, or the chain default.
+     :name          — optional, defaults to the zone name or \"Track\"
      :color         — optional hex color string
    
    Returns: Track map with fresh UUID."
@@ -37,10 +40,9 @@
   (u/assoc-some
    {:id (random-uuid)
     :type :track
-    :zone-group-id (or zone-group-id :all)
-    :name (or name (clojure.core/name (or zone-group-id :all)))
-    :visible? true
+    :name (or name (some-> zone-group-id clojure.core/name) "Track")
     :collapsed? false}
+   :zone-group-id zone-group-id
    :color color))
 
 
@@ -393,6 +395,153 @@
   "trim-end for a loop region {:start :duration}."
   [loop-config new-end snap-opts]
   (clip->loop loop-config (trim-end (loop->clip loop-config) new-end snap-opts)))
+
+
+;; ============================================================
+;; Track Tree Queries & Timeline Normalization (pure)
+;; ============================================================
+
+
+(defn leaf-track-ids
+  "Set of ids of every leaf (non-folder) track in the tracks tree."
+  [tracks]
+  (into #{}
+        (comp (filter leaf-track?) (map :id))
+        (tree-seq (fn [t] (and (map? t) (track-group? t))) #(:items % []) {:type :group :items tracks})))
+
+(defn parent-track
+  "The folder directly containing track-id, or nil for top-level/unknown tracks."
+  [tracks track-id]
+  (when-let [path (chains/find-path-by-id tracks track-id)]
+    (when (> (count path) 1)
+      (get-in (vec tracks) (vec (drop-last 2 path))))))
+
+(defn muted-track-ids
+  "Ids of tracks with :muted? true, plus every descendant of a muted folder."
+  [tracks]
+  (letfn [(walk [acc level muted-parent?]
+            (reduce (fn [acc t]
+                      (let [muted? (or muted-parent? (true? (:muted? t)))
+                            acc (cond-> acc muted? (conj (:id t)))]
+                        (if (track-group? t)
+                          (walk acc (:items t []) muted?)
+                          acc)))
+                    acc level))]
+    (walk #{} tracks false)))
+
+(defn- mapv-identical
+  "Like mapv, but returns coll itself when f returns every element unchanged."
+  [f coll]
+  (let [out (mapv f coll)]
+    (if (and (vector? coll) (every? true? (map identical? coll out)))
+      coll
+      out)))
+
+(defn- migrate-track-enabled
+  "D10: the old track checkbox wrote :enabled?; mute is now :muted?."
+  [tracks]
+  (mapv-identical
+   (fn [t]
+     (let [t' (if (contains? t :enabled?)
+                (cond-> (dissoc t :enabled?)
+                  (false? (:enabled? t)) (assoc :muted? true))
+                t)]
+       (if (and (track-group? t') (seq (:items t')))
+         (let [children (migrate-track-enabled (:items t'))]
+           (if (identical? children (:items t')) t' (assoc t' :items children)))
+         t')))
+   tracks))
+
+(defn- timed-children-span
+  "[start length] covering the group's timed children, or nil."
+  [group]
+  (let [timed (filter #(and (number? (clip-start %)) (number? (clip-length %))) (:items group []))]
+    (when (seq timed)
+      (let [s (apply min (map #(double (clip-start %)) timed))
+            e (apply max (map #(double (clip-end %)) timed))]
+        [s (max min-clip-length (- e s))]))))
+
+(defn- normalize-item
+  [item leaf-ids default-track-id]
+  (let [start (clip-start item)
+        length (clip-length item)
+        [span-start span-length] (when (and (nil? start) (nil? length) (chains/group? item))
+                                   (timed-children-span item))
+        valid-start? (and (number? start) (>= (double start) 0.0))
+        valid-length? (and (number? length) (>= (double length) min-clip-length))]
+    (cond-> item
+      (not valid-start?) (assoc :timeline/start (if (number? start)
+                                                  0.0
+                                                  (double (or span-start 0.0))))
+      (not valid-length?) (assoc :timeline/duration (if (number? length)
+                                                      min-clip-length
+                                                      (double (or span-length default-clip-length))))
+      (and default-track-id (not (contains? leaf-ids (:track-id item))))
+      (assoc :track-id default-track-id))))
+
+(defn normalize-timeline-cue
+  "Enforce the timeline invariants on a timeline cue chain. Every top-level
+   item gets a numeric start >= 0, a length >= min-clip-length and a :track-id
+   that is a leaf track; existing valid timing is never changed. Legacy track
+   :enabled? is migrated to :muted?. Non-timeline cues and cues that already
+   satisfy the invariants are returned identical.
+   
+   opts :new-track-id fixes the id of the track created when items exist but
+   there's no leaf track (default: a random uuid)."
+  ([cue-chain] (normalize-timeline-cue cue-chain nil))
+  ([cue-chain {:keys [new-track-id]}]
+   (if-not (cue-chains/timeline-cue? cue-chain)
+     cue-chain
+     (let [items (:items cue-chain [])
+           tracks0 (:tracks cue-chain [])
+           tracks1 (migrate-track-enabled tracks0)
+           tracks2 (if (or (empty? items) (first-leaf-track tracks1))
+                     tracks1
+                     (conj (vec tracks1)
+                           (assoc (create-track {:name "Track 1"})
+                                  :id (or new-track-id (random-uuid)))))
+           leaf-ids (leaf-track-ids tracks2)
+           default-id (:id (first-leaf-track tracks2))
+           items' (mapv-identical #(normalize-item % leaf-ids default-id) items)]
+       (cond-> cue-chain
+         (not (identical? tracks0 tracks2)) (assoc :tracks tracks2)
+         (not (identical? items items')) (assoc :items items'))))))
+
+(defn normalize-timeline-cues
+  "normalize-timeline-cue over a {cell -> cue-chain} map.
+   Only entries not identical? to old-cue-chains are checked (all, when it's nil).
+   Returns new-cue-chains itself when nothing changes."
+  ([new-cue-chains] (normalize-timeline-cues nil new-cue-chains))
+  ([old-cue-chains new-cue-chains]
+   (if-not (map? new-cue-chains)
+     new-cue-chains
+     (reduce-kv (fn [acc k cc]
+                  (if (identical? cc (get old-cue-chains k ::none))
+                    acc
+                    (let [cc' (normalize-timeline-cue cc)]
+                      (if (identical? cc cc') acc (assoc acc k cc')))))
+                new-cue-chains
+                new-cue-chains))))
+
+(defn convert-to-timeline
+  "Turn a plain cue chain (or nil for an empty cell) into a timeline cue
+   without changing what it renders: each untimed item becomes a clip over
+   [0, conversion-length), and unless the cue already has a :loop, a loop over
+   the same span is enabled. Timeline cues are returned identical."
+  [cue-chain zone-groups]
+  (if (cue-chains/timeline-cue? cue-chain)
+    cue-chain
+    (let [cc (or cue-chain {:items []})
+          cc (if (seq (:tracks cc)) cc (auto-initialize-tracks cc (or zone-groups {})))
+          items (mapv (fn [item]
+                        (cond-> item
+                          (nil? (clip-start item)) (assoc :timeline/start 0.0)
+                          (nil? (clip-length item)) (assoc :timeline/duration conversion-length)))
+                      (:items cc []))]
+      (normalize-timeline-cue
+       (cond-> (assoc cc :items items :editor-type :timeline)
+         (and (seq items) (not (contains? cc :loop)))
+         (assoc :loop {:enabled? true :start 0.0 :duration conversion-length}))))))
 
 
 ;; ============================================================

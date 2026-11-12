@@ -36,6 +36,7 @@
             [laser-show.state.persistent :as persistent]
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
+            [laser-show.events.handlers.timeline :as timeline-handlers]
             [laser-show.backend.multi-engine :as multi-engine]
             [laser-show.common.util :as u]
             [laser-show.dev-config :as dev-config]
@@ -379,9 +380,12 @@
 ;; Wrapped Event Handler
 
 (def handle-event-pipeline
-  "Event handler pipeline: undo history for undoable document edits, then the
-   unsaved-changes flag derived for every event (see handlers/history.clj)."
+  "Event handler pipeline: timeline invariants enforced on changed cue chains
+   (innermost, so history sees normalized state), undo history for undoable
+   document edits, then the unsaved-changes flag derived for every event
+   (see handlers/history.clj)."
   (-> handlers/handle-event
+      timeline-handlers/wrap-normalize-timelines
       history-handlers/wrap-history
       history-handlers/wrap-dirty))
 
