@@ -435,3 +435,13 @@
     (is (= (inc (undo-count s0)) (undo-count s1)))
     (is (= "Move Clip" (history/undo-label (:history s1))))
     (is (== 0.0 (get-in (run s1 {:event/type :edit/undo}) [:chains :cue-chains [0 0] :items 0 :timeline/start])))))
+
+(deftest transport-events-create-no-undo-test
+  (let [s0 (timeline-state)
+        s (reduce run s0 [{:event/type :timeline/play :col 0 :row 0}
+                          {:event/type :timeline/seek :col 0 :row 0 :beat 2.0}
+                          {:event/type :timeline/pause :col 0 :row 0}
+                          {:event/type :timeline/stop :col 0 :row 0}
+                          {:event/type :timeline/set-ruler-mode :mode :time}])]
+    (is (= (undo-count s0) (undo-count s)))
+    (is (false? (get-in s [:project :dirty?])))))

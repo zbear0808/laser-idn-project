@@ -92,3 +92,17 @@
                         [:config :input :trigger-map note-key :behavior] :retrigger)]
     (is (= :grid/trigger-cell (:event/type (:dispatch (input state :note-on)))))
     (is (nil? (:dispatch (input state :note-off))))))
+
+(deftest start-timeline-action-emits-play-test
+  (let [state (fn [action] {:config {:input {:trigger-map {{:source :keyboard :id :t} action}}}
+                            :trigger-runtime {}})
+        fire (fn [action] (some-> (triggers/handle {:event/type :trigger/input
+                                                    :state (state action)
+                                                    :input-event {:type :trigger :source :keyboard :id :t :timestamp 1}
+                                                    :time 1})
+                                  :dispatch
+                                  (select-keys [:event/type :col :row])
+                                  not-empty))]
+    (is (= {:event/type :timeline/play :col 2 :row 1} (fire {:type :start-timeline :target [2 1]})))
+    (is (= {:event/type :timeline/stop :col 2 :row 1} (fire {:type :stop-timeline :target [2 1]})))
+    (is (nil? (fire {:type :start-timeline :target :some-id})) "non-cell targets do nothing")))

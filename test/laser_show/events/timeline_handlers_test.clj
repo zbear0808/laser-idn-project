@@ -318,3 +318,64 @@
     (is (true? (get-in s2 [:ui :timeline-prefs :snap :enabled?]))))
   (let [s1 (:state (timeline/handle {:event/type :timeline/toggle-inspector :state base-state}))]
     (is (false? (get-in s1 [:ui :timeline-prefs :inspector-open?])))))
+
+;; Transport
+
+(defn- transport-state []
+  (assoc-in base-state [:chains :cue-chains [0 0]]
+            {:editor-type :timeline
+             :tracks [{:id :t :type :track}]
+             :items [{:id :a :track-id :t :timeline/start 0.0 :timeline/duration 16.0}]}))
+
+(defn- timing-at [s] (get-in s [:playback :active-cues [0 0]]))
+
+(deftest play-from-cursor-test
+  (let [s0 (assoc-in (transport-state) [:ui :timeline-editor [0 0] :cursor-beat] 6.0)
+        s1 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :time 1000 :state s0}))]
+    (is (= 6.0 (:accumulated-beats (timing-at s1))))
+    (is (true? (:timeline? (timing-at s1))))
+    (is (true? (get-in s1 [:playback :playing?]))))
+  (testing "a cursor at the end of a non-looping timeline plays from 0"
+    (let [s0 (assoc-in (transport-state) [:ui :timeline-editor [0 0] :cursor-beat] 16.0)
+          s1 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :state s0}))]
+      (is (= 0.0 (:accumulated-beats (timing-at s1))))))
+  (testing ":from overrides the cursor"
+    (let [s1 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :from 3.0 :state (transport-state)}))]
+      (is (= 3.0 (:accumulated-beats (timing-at s1)))))))
+
+(deftest pause-freezes-position-test
+  (let [s1 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :from 2.0 :state (transport-state)}))
+        s2 (:state (timeline/handle {:event/type :timeline/pause :col 0 :row 0 :state s1}))
+        s3 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :state s2}))]
+    (is (true? (:paused? (timing-at s2))))
+    (is (false? (:paused? (timing-at s3))) "play resumes")
+    (is (= 2.0 (:accumulated-beats (timing-at s3))) "from where it paused")
+    (is (nil? (timing-at (:state (timeline/handle {:event/type :timeline/pause :col 0 :row 0 :state (transport-state)}))))
+        "pausing a stopped timeline does nothing")))
+
+(deftest seek-inactive-sets-cursor-only-test
+  (let [s1 (:state (timeline/handle {:event/type :timeline/seek :col 0 :row 0 :beat 5.0 :state (transport-state)}))]
+    (is (= 5.0 (get-in s1 [:ui :timeline-editor [0 0] :cursor-beat])))
+    (is (nil? (timing-at s1))))
+  (testing "seeking a playing timeline moves it"
+    (let [s1 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :from 0.0 :state (transport-state)}))
+          s2 (:state (timeline/handle {:event/type :timeline/seek :col 0 :row 0 :beat 9.0 :state s1}))]
+      (is (= 9.0 (:accumulated-beats (timing-at s2)))))))
+
+(deftest stop-keeps-cursor-test
+  (let [s0 (assoc-in (transport-state) [:ui :timeline-editor [0 0] :cursor-beat] 4.0)
+        s1 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :state s0}))
+        s2 (:state (timeline/handle {:event/type :timeline/stop :col 0 :row 0 :state s1}))]
+    (is (nil? (timing-at s2)))
+    (is (false? (get-in s2 [:playback :playing?])))
+    (is (= 4.0 (get-in s2 [:ui :timeline-editor [0 0] :cursor-beat])))))
+
+(deftest timeline-settings-ops-test
+  (let [run (fn [op] (get-in (timeline/handle {:event/type :timeline/apply-op :col 0 :row 0 :op op
+                                               :state (transport-state)})
+                             [:state :chains :cue-chains [0 0]]))]
+    (is (= 32.0 (:timeline/length (run {:op :set-length :beats 32.0}))))
+    (is (= 128.0 (:timeline/tempo-bpm (run {:op :set-tempo :bpm 128.0}))))
+    (is (= 3600.0 (:timeline/tc-start (run {:op :set-tc-start :seconds 3600.0}))))
+    (is (= 25 (:timeline/tc-fps (run {:op :set-tc-fps :fps 25}))))
+    (is (nil? (:timeline/tc-fps (run {:op :set-tc-fps :fps 48}))) "unsupported fps is ignored")))

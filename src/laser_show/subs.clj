@@ -193,6 +193,16 @@
   [context col row]
   (get-in (fx/sub-val context ex/active-cues) [[col row] :accumulated-beats]))
 
+(defn timeline-transport
+  "Transport status of the cue at [col row]: :stopped, :playing or :paused.
+   Changes only when that does, not on every timing tick."
+  [context col row]
+  (let [t (get (fx/sub-val context ex/active-cues) [col row])]
+    (cond
+      (nil? t) :stopped
+      (:paused? t) :paused
+      :else :playing)))
+
 (defn zone-groups-by-id
   "Zone groups as {id -> group (with :id)}."
   [context]

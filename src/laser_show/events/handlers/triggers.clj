@@ -3,8 +3,12 @@
 
    Trigger inputs are resolved here and then translated into the existing
    domain events so all input sources share the same playback behavior."
-  (:require [laser-show.input.events :as input-events]
+  (:require [clojure.tools.logging :as log]
+            [laser-show.input.events :as input-events]
             [laser-show.triggers.matcher :as matcher]))
+
+(defn- cell? [target]
+  (and (vector? target) (= 2 (count target)) (every? int? target)))
 
 (defn- lookup-key [event]
   (cond
@@ -72,10 +76,12 @@
         :stop-all {:event/type :transport/stop}
         :blackout {:event/type :transport/stop}
         :tap-tempo {:event/type :timing/tap-tempo}
-        :start-timeline (when target
-                          {:event/type :timeline/start :timeline-id target})
-        :stop-timeline (when target
-                         {:event/type :timeline/stop :timeline-id target})
+        :start-timeline (if (cell? target)
+                          {:event/type :timeline/play :col (first target) :row (second target)}
+                          (log/debug "start-timeline needs a [col row] target, got" (pr-str target)))
+        :stop-timeline (if (cell? target)
+                         {:event/type :timeline/stop :col (first target) :row (second target)}
+                         (log/debug "stop-timeline needs a [col row] target, got" (pr-str target)))
         :apply-preset (when target
                         {:event/type :preset/apply :preset-id target})
         nil)

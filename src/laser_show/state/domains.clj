@@ -168,7 +168,8 @@
                      :doc "timeline editor view state per cue: [col row] -> {:selection #{clip-id} :cursor-beat}"}
    :timeline-prefs {:default {:snap {:enabled? true :value 0.25}
                               :add-panel {:open? false :preset-tab :geometric :effect-tab :shape}
-                              :inspector-open? true}
+                              :inspector-open? true
+                              :ruler-mode :bars}
                     :doc "timeline editor preferences shared by every cue (snap, preset drawer, inspector)"}
    :preview-zone-selector-open {:default nil
                                 :doc "Cell index whose zone selector popup is open, or nil if none"}

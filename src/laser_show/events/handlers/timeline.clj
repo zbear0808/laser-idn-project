@@ -18,6 +18,8 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
             [laser-show.animation.cue-chains :as cue-chains]
+            [laser-show.animation.cue-timing :as cue-timing]
+            [laser-show.state.extractors :as ex]
             [laser-show.events.handlers.list.helpers :as list-helpers]
             [laser-show.timeline.model :as model]))
 
@@ -38,7 +40,8 @@
   "Editor-wide timeline preferences."
   {:snap {:enabled? true :value 0.25}
    :add-panel {:open? false :preset-tab :geometric :effect-tab :shape}
-   :inspector-open? true})
+   :inspector-open? true
+   :ruler-mode :bars})
 
 (defn view-path [col row] [:ui :timeline-editor [col row]])
 
@@ -316,6 +319,85 @@
                                {} (:parameters item []))}))
 
 
+;; Transport: play / pause / stop / seek one timeline cue.
+;; These only touch [:playback ...] and the per-cue cursor, so they're never
+;; undo steps and never mark the project unsaved.
+
+
+(defn- with-cell [event]
+  (let [[col row] (event-cell event)]
+    (assoc event :col col :row row)))
+
+(defn- active-timing [state col row]
+  (get-in state [:playback :active-cues [col row]]))
+
+(defn- start-beat
+  "Where Play starts: :from, else the cursor; a position at or past the end
+   of a timeline that doesn't loop starts from 0."
+  [state col row from]
+  (let [cue (get-in state (chain-path col row))
+        beat (double (or from (view-get state col row :cursor-beat) 0.0))
+        length (model/effective-length cue)]
+    (if (and (not (get-in cue [:loop :enabled?])) (pos? length) (>= beat length))
+      0.0
+      beat)))
+
+(defn- handle-play
+  "Play the timeline at [col row] from :from (default: the cursor).
+   Paused: resume (seeking to :from if given). Playing: seek to :from."
+  [{:keys [col row from state] :as event}]
+  (let [timing (active-timing state col row)]
+    {:state
+     (cond
+       (nil? (get-in state (chain-path col row)))
+       state
+
+       (nil? timing)
+       (update state :playback cue-timing/activate-cue [col row] (h/current-time-ms event)
+               (ex/global-accumulated-beats state)
+               {:timeline? true :start-beat (start-beat state col row from)})
+
+       :else
+       (update-in state [:playback :active-cues [col row]]
+                  (fn [t]
+                    (cond-> (assoc t :paused? false :timeline? true :phase-offset 0.0 :phase-offset-target 0.0)
+                      (some? from) (cue-timing/seek from)))))}))
+
+(defn- handle-pause
+  "Pause or resume the playing timeline at [col row]. No-op when it isn't playing."
+  [{:keys [col row state]}]
+  {:state (if (active-timing state col row)
+            (update-in state [:playback :active-cues [col row] :paused?] not)
+            state)})
+
+(defn- handle-toggle-play
+  "Play/pause button and Space: pause while playing, otherwise play."
+  [{:keys [col row state] :as event}]
+  (let [timing (active-timing state col row)]
+    (if (and timing (not (:paused? timing)))
+      (handle-pause event)
+      (handle-play (dissoc event :from)))))
+
+(defn- handle-stop
+  "Stop the timeline at [col row]. The cursor stays where it is."
+  [{:keys [col row state]}]
+  {:state (update state :playback cue-timing/deactivate-cue [col row])})
+
+(defn- handle-seek
+  "Move the cursor to :beat; a playing (or paused) timeline jumps there too."
+  [{:keys [col row beat state] :as event}]
+  (let [[col row] (if (and col row) [col row] (event-cell event))
+        beat (max 0.0 (double (or beat 0.0)))]
+    {:state (cond-> (view-assoc state col row :cursor-beat beat)
+              (active-timing state col row)
+              (update-in [:playback :active-cues [col row]] cue-timing/seek beat))}))
+
+(defn- handle-set-ruler-mode
+  "Ruler labels: :bars (bar.beat) or :time (show timecode)."
+  [{:keys [mode state]}]
+  {:state (prefs-assoc state [:ruler-mode] (if (= mode :time) :time :bars))})
+
+
 ;; Open Editor
 
 
@@ -410,6 +492,14 @@
 
     ;; Edits as data
     :timeline/apply-op (handle-apply-op event)
+
+    ;; Transport (without :col/:row: the open editor's cell)
+    :timeline/play (handle-play (with-cell event))
+    :timeline/pause (handle-pause (with-cell event))
+    :timeline/toggle-play (handle-toggle-play (with-cell event))
+    :timeline/stop (handle-stop (with-cell event))
+    :timeline/seek (handle-seek event)
+    :timeline/set-ruler-mode (handle-set-ruler-mode event)
 
     ;; Track CRUD
     :timeline/update-tracks (handle-update-tracks event)
