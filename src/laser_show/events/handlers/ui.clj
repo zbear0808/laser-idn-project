@@ -129,17 +129,6 @@
   {:state (assoc-in state [:ui :preview-zone-selector-open] nil)})
 
 
-(defn- handle-canvas-update-drag
-  "Merge drag state updates for a canvas into global state."
-  [{:keys [canvas-id updates state]}]
-  {:state (update-in state [:ui :canvas-drag canvas-id] merge updates)})
-
-(defn- handle-canvas-clear-drag
-  "Remove drag state for a canvas from global state."
-  [{:keys [canvas-id state]}]
-  {:state (update-in state [:ui :canvas-drag] dissoc canvas-id)})
-
-
 ;; Public API
 
 
@@ -158,8 +147,6 @@
     :preview/set-cell-zone (handle-preview-set-cell-zone event)
     :preview/open-zone-selector (handle-preview-open-zone-selector event)
     :preview/close-zone-selector (handle-preview-close-zone-selector event)
-    :canvas/update-drag (handle-canvas-update-drag event)
-    :canvas/clear-drag (handle-canvas-clear-drag event)
 
     ;; Unknown event in this domain
     {}))

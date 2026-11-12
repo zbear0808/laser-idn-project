@@ -99,3 +99,22 @@
       (events/dispatch! {:event/type :timeline/select-track :track-id (:id folder)})
       (ui/wait-for! #(= "FOLDER PROPERTIES" (ui/node-text "#timeline-inspector-title")))
       (is (= "FOLDER PROPERTIES" (ui/node-text "#timeline-inspector-title"))))))
+
+(defn- add-clip-at-zero!
+  "Add a clip at beat 0 on the first track; returns its id."
+  []
+  (let [items-path [:chains :cue-chains [0 0] :items]
+        before (count (get-in (state/get-raw-state) items-path))]
+    (events/dispatch! {:event/type :timeline/set-cursor-beat :beat 0.0})
+    (events/dispatch! {:event/type :timeline/add-preset-to-track :col 0 :row 0 :item-id :square :start 0.0})
+    (ui/wait-for! #(= (inc before) (count (get-in (state/get-raw-state) items-path))))
+    (:id (last (get-in (state/get-raw-state) items-path)))))
+
+(deftest timeline-click-leaves-no-open-undo-transaction
+  (let [robot (ui/robot)]
+    (open-timeline!)
+    (add-clip-at-zero!)
+    ;; Row 2 (the folder's first track) starts at ruler 24 + 32 px; the clip spans x 0..200
+    (ui/drag-by! robot "#timeline-canvas" 100 (+ 24 32 16) 0 0)
+    (ui/wait-for! #(nil? (get-in (state/get-raw-state) [:history :transaction])))
+    (is (nil? (get-in (state/get-raw-state) [:history :transaction])))))

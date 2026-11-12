@@ -14,7 +14,9 @@
            [javafx.scene.input KeyCode MouseButton MouseEvent]
            [javax.imageio ImageIO]
            [java.io File]
+           [javafx.geometry Point2D Pos]
            [org.testfx.api FxRobot FxRobotInterface FxToolkit]
+           [org.testfx.robot Motion]
            [org.testfx.util WaitForAsyncUtils]))
 
 (def ^:private default-timeout-ms 3000)
@@ -302,6 +304,32 @@
   (.drag ^FxRobotInterface robot-instance
          (into-array MouseButton [MouseButton/PRIMARY]))
   (.dropTo ^FxRobotInterface robot-instance target)
+  (sync-fx!)
+  robot-instance)
+
+(defn drag-by!
+  "Press the primary button at (x, y) inside the node found by selector
+   (node-local coordinates from its top-left), move by dx/dy in steps, and
+   release. With :hold? true, returns before releasing (call release!)."
+  ([robot-instance selector x y dx dy] (drag-by! robot-instance selector x y dx dy nil))
+  ([^FxRobot robot-instance ^String selector x y dx dy {:keys [hold? steps] :or {steps 4}}]
+   (wait-for! #(some? (query selector)))
+   (let [^Node node (query selector)]
+     (.moveTo robot-instance node Pos/TOP_LEFT (Point2D. (double x) (double y)) Motion/DIRECT)
+     (.press robot-instance (into-array MouseButton [MouseButton/PRIMARY]))
+     (sync-fx!)
+     (dotimes [_ steps]
+       (.moveBy robot-instance (/ (double dx) steps) (/ (double dy) steps))
+       (sync-fx!))
+     (when-not hold?
+       (.release robot-instance (into-array MouseButton [MouseButton/PRIMARY]))
+       (sync-fx!)))
+   robot-instance))
+
+(defn release!
+  "Release the primary mouse button (ends a drag-by! with :hold? true)."
+  [^FxRobot robot-instance]
+  (.release robot-instance (into-array MouseButton [MouseButton/PRIMARY]))
   (sync-fx!)
   robot-instance)
 
