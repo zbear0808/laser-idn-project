@@ -43,7 +43,7 @@
 (def live-item-paths
   "Paths inside any chain map with an :id that hold view/live state.
    They are neither undoable nor unsaved changes."
-  [[:collapsed?] [:keyframe-modulator :selected-keyframe]])
+  [[:collapsed?] [:muted?] [:keyframe-modulator :selected-keyframe]])
 
 (def ^:private document-roots
   "Top-level state keys that extract-document-state reads from."
@@ -83,7 +83,9 @@
 (defn- chain-item? [x]
   (and (map? x) (contains? x :id)))
 
-(def ^:private live-item-keys #{:collapsed?})
+(def ^:private live-item-keys
+  "Top-level keys of live-item-paths."
+  (into #{} (comp (filter #(= 1 (count %))) (map first)) live-item-paths))
 (def ^:private live-keyframe-keys #{:selected-keyframe})
 
 (declare equiv-ignoring-live?)

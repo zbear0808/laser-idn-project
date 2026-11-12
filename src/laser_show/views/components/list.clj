@@ -399,7 +399,9 @@
                      :desc {:fx/type :h-box
                             :style-class header-classes
                             :alignment :center-left
-                            :children [{:fx/type :button
+                            :children (filterv
+                                       some?
+                                       [{:fx/type :button
                                         :graphic {:fx/type fa/icon
                                                   :name (if collapsed? :circle-chevron-right :circle-chevron-down)
                                                   :size 14
@@ -407,10 +409,11 @@
                                         :style-class "group-collapse-btn"
                                         :on-action (fn [_] (dispatch-toggle-collapse! props group-id))}
 
-                                       {:fx/type :check-box
-                                        :selected enabled?
-                                        :on-selected-changed (fn [new-enabled?]
-                                                               (dispatch-set-enabled! props group-id new-enabled?))}
+                                       (when (:show-enable-toggle? props true)
+                                         {:fx/type :check-box
+                                          :selected enabled?
+                                          :on-selected-changed (fn [new-enabled?]
+                                                                 (dispatch-set-enabled! props group-id new-enabled?))})
 
                                        (if renaming?
                                          {:fx/type rename-text-field
@@ -434,7 +437,7 @@
                                        {:fx/type :button
                                         :text "⊗"
                                         :style-class "group-ungroup-btn"
-                                        :on-action (fn [_] (dispatch-ungroup! props group-id))}]}}
+                                        :on-action (fn [_] (dispatch-ungroup! props group-id))}])}}
         cm-fn (or (:get-group-context-menu props)
                   (:get-context-menu props))
         context-menu (when cm-fn (cm-fn group))]
@@ -480,10 +483,13 @@
                                    (setup-click-handler! node component-id item-id (:items-path props))))
                    :desc {:fx/type :h-box
                           :style-class item-classes
-                          :children [{:fx/type :check-box
-                                      :selected enabled?
-                                      :on-selected-changed (fn [new-enabled?]
-                                                             (dispatch-set-enabled! props item-id new-enabled?))}
+                          :children (filterv
+                                     some?
+                                     [(when (:show-enable-toggle? props true)
+                                        {:fx/type :check-box
+                                         :selected enabled?
+                                         :on-selected-changed (fn [new-enabled?]
+                                                                (dispatch-set-enabled! props item-id new-enabled?))})
 
                                      (if renaming?
                                        {:fx/type rename-text-field
@@ -494,7 +500,7 @@
                                         :style-class "list-item-name-input"}
                                        {:fx/type :label
                                         :text (or item-label "Unknown")
-                                        :style-class name-classes})]}}
+                                        :style-class name-classes})])}}
         context-menu (when-let [cm-fn (:get-context-menu props)]
                        (cm-fn item))]
     (if context-menu
@@ -816,7 +822,8 @@
    - :allow-groups? - Enable grouping (default true)
    - :fallback-label - Label for unknown items (default \"Unknown\")
    - :compact? - If true, hide toolbar/header chrome (default false)
-   - :scrollable? - If true, wrap items in ScrollPane (default true)"
+   - :scrollable? - If true, wrap items in ScrollPane (default true)
+   - :show-enable-toggle? - If false, rows have no enable checkbox (default true)"
   [{:keys [fx/context items component-id
            get-item-label get-group-label
            get-context-menu get-group-context-menu
@@ -824,13 +831,14 @@
            on-change-event on-change-params items-path
            on-copy-fn clipboard-items
            header-label empty-text allow-groups? fallback-label
-           compact? scrollable?]
+           compact? scrollable? show-enable-toggle?]
     :or {header-label "LIST"
          empty-text "No items"
          allow-groups? true
          fallback-label "Unknown"
          compact? false
-         scrollable? true}}]
+         scrollable? true
+         show-enable-toggle? true}}]
   #_(log/debug "list-editor render"
                {:component-id component-id
                 :items-count (count items)
@@ -885,6 +893,7 @@
                         items clipboard-items header-label
                         empty-text allow-groups? component-id on-change-event on-change-params items-path
                         compact? scrollable? get-group-label get-context-menu get-group-context-menu
+                        show-enable-toggle?
                         :fx/type list-sidebar
                         :fx/context context
                         :v-box/vgrow :always

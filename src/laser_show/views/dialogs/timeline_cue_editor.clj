@@ -11,7 +11,6 @@
    - Editable chain name"
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
-            [laser-show.animation.presets :as presets]
             [laser-show.events.core :as events]
             [laser-show.css.core :as css]
             [laser-show.views.components.inline-edit :as inline-edit]
@@ -32,7 +31,7 @@
      :spacing 8
      :alignment :center-left
      :children [{:fx/type :label
-                 :text "Default Zone (Chain Fallback):"
+                 :text "Default zone:"
                  :style-class "zone-picker-label"}
                 {:fx/type :combo-box
                  :value current-group
@@ -109,9 +108,6 @@
         active-cue-timing (get active-cues-map [col row])
         beats-elapsed (:accumulated-beats active-cue-timing)
 
-        ;; Clipboard for list-editor
-        clipboard-items (fx/sub-val context get-in [:ui :clipboard :cue-chain-items])
-
         ;; Chain name
         chain-name (:name cue-chain)
         default-name (str "Cell " (char (+ 65 (or row 0))) (inc (or col 0)))
@@ -119,8 +115,10 @@
     {:fx/type :v-box
      :spacing 0
      :style-class "dialog-content"
-     :pref-width 900
-     :pref-height 500
+     :pref-width 1280
+     :pref-height 760
+     :min-width 960
+     :min-height 560
      :children
      [;; Header with editable name
       {:fx/type :h-box
@@ -152,18 +150,7 @@
        :destination-zone-id destination-zone-id
        :timeline-ui timeline-ui
        :beats-elapsed beats-elapsed
-       :loop-config (:loop cue-chain {:enabled? false :start 0.0 :duration 4.0})
-       :list-props {:component-id [:timeline-cue-chain col row]
-                    :item-id-key :preset-id
-                    :item-registry-fn presets/presets-by-id
-                    :fallback-label "Unknown Preset"
-                    :on-change-event :chain/set-items
-                    :on-change-params {:domain :cue-chains :entity-key [col row]}
-                    :items-path [:chains :cue-chains [col row] :items]
-                    :on-copy-fn (fn [copied-items]
-                                  (events/dispatch! {:event/type :cue-chain/set-clipboard
-                                                     :items copied-items}))
-                    :clipboard-items clipboard-items}}
+       :loop-config (:loop cue-chain {:enabled? false :start 0.0 :duration 4.0})}
 
       ;; Footer
       {:fx/type :h-box

@@ -39,7 +39,7 @@
 
 (def clipboard-types
   #{:cue :zone :projector :effect :effect-chain :cell-assignment
-    :cue-chain :effects-cell :cue-chain-items :item-effects})
+    :cue-chain :effects-cell :cue-chain-items :item-effects :timeline-tracks})
 
 (defn valid-clipboard-type?
   [type]
@@ -280,6 +280,22 @@
   (when (seq items)
     (let [clip-data {:type :cue-chain-items
                      :items items
+                     :copied-at (System/currentTimeMillis)}]
+      (set-internal-clipboard! clip-data)
+      (copy-to-system-clipboard! clip-data)
+      true)))
+
+
+;; Timeline Tracks Copy/Paste (track/folder definitions, never their clips)
+
+
+(defn copy-timeline-tracks!
+  "Copy timeline tracks and folders to clipboard.
+   Also copies to system clipboard as EDN."
+  [tracks]
+  (when (seq tracks)
+    (let [clip-data {:type :timeline-tracks
+                     :items tracks
                      :copied-at (System/currentTimeMillis)}]
       (set-internal-clipboard! clip-data)
       (copy-to-system-clipboard! clip-data)

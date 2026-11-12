@@ -88,26 +88,35 @@
 (defn- build-tracks
   "Build a flat vector of display rows from explicit Track tree definitions and items.
    
-   Folders are flattened into single rows that act as separators or global effects lines.
-   Visible tracks are derived using tl/flatten-visible-tracks."
-  [track-defs items expanded-tracks]
+   Visible tracks come from tl/flatten-visible-tracks. A collapsed folder's row
+   shows the clips of every track hidden under it (:summary? true), so
+   collapsing never moves clips to \"Unassigned\"."
+  [track-defs items]
   (if (seq track-defs)
     (let [grouped (tl/items-by-track items)
-          flat-tracks (tl/flatten-visible-tracks track-defs expanded-tracks)
-          visible-track-ids (set (map :id flat-tracks))
+          flat-tracks (tl/flatten-visible-tracks track-defs)
+          shown-ids (into #{} (mapcat #(cons (:id %) (:hidden-descendants %))) flat-tracks)
           track-rows (mapv (fn [track]
-                             {:id (:id track)
-                              :label (:name track)
-                              :type (:type track :track)
-                              :track track
-                              :items (get grouped (:id track) [])
-                              :zone-group-id (:zone-group-id track)})
+                             (let [hidden (:hidden-descendants track)]
+                               (cond-> {:id (:id track)
+                                        :label (:name track)
+                                        :type (:type track :track)
+                                        :track track
+                                        :items (if (seq hidden)
+                                                 (->> (cons (:id track) hidden)
+                                                      (mapcat #(get grouped % []))
+                                                      (sort-by #(:timeline/start % 0.0))
+                                                      vec)
+                                                 (get grouped (:id track) []))
+                                        :zone-group-id (:zone-group-id track)}
+                                 (seq hidden) (assoc :summary? true))))
                            flat-tracks)
-          ;; Collect unassigned items or items on tracks that are not visible
+          ;; Items with no track or a track that doesn't exist (only possible
+          ;; before normalization)
           unassigned (into (get grouped ::tl/unassigned [])
                            (mapcat (fn [[tid t-items]]
                                      (when (and (not= tid ::tl/unassigned)
-                                                (not (contains? visible-track-ids tid)))
+                                                (not (contains? shown-ids tid)))
                                        t-items))
                                    grouped))]
       (if (seq unassigned)
@@ -158,15 +167,31 @@
 (def ^:private loop-brace-color-active (Color/web "#00FFFF" 0.8))
 (def ^:private loop-brace-color-inactive (Color/web "#00FFFF" 0.3))
 (def ^:private loop-brace-height 8)
+(def ^:private loop-brace-top (- ruler-height loop-brace-height 2))
+(def ^:private loop-brace-bottom (- ruler-height 2))
+(def ^:private ruler-font (Font. "Inter" 10))
+(def ^:private clip-font (Font. "Inter" 10))
+(def ^:private grid-line-beat-color (Color/web "#444444"))
+(def ^:private clip-border-color (Color/web "#000000" 0.45))
+(def ^:private clip-overlap-color (Color/web "#FFFFFF" 0.18))
+(def ^:private selected-clip-outline Color/WHITE)
+(def ^:private cursor-color (Color/web "#FFB300" 0.9))
+(def ^:private insert-marker-color (Color/web "#5BA5F5"))
+(def ^:private muted-alpha 0.35)
+
+(defn- crisp
+  "Pixel-snap a coordinate so 1 px lines don't blur across two pixels."
+  ^double [x]
+  (+ (Math/floor (double x)) 0.5))
 
 (defn- draw-loop-brace!
   "Draw the loop brace in the ruler area."
-  [^GraphicsContext gc zoom-x scroll-x loop-config]
+  [^GraphicsContext gc zoom-x loop-config]
   (when loop-config
     (let [{:keys [enabled? start duration]} loop-config
-          x (- (* start zoom-x) scroll-x)
+          x (* start zoom-x)
           w (* duration zoom-x)
-          y (- ruler-height loop-brace-height 2)
+          y loop-brace-top
           color (if enabled? loop-brace-color-active loop-brace-color-inactive)]
       (.setFill gc color)
       ;; Draw a top bar and small side ticks to look like a brace [...]
@@ -174,27 +199,27 @@
       (.fillRect gc x y 4 loop-brace-height) ;; left tick
       (.fillRect gc (- (+ x w) 4) y 4 loop-brace-height))))
 
+(defn- grid-subdivision [zoom-x]
+  (cond
+    (>= zoom-x 120) 0.0625
+    (>= zoom-x 60)  0.125
+    (>= zoom-x 30)  0.25
+    (>= zoom-x 15)  1.0
+    :else           4.0))
+
 (defn- draw-ruler!
   "Draw the beat ruler at the top."
-  [^GraphicsContext gc width zoom-x scroll-x loop-config]
+  [^GraphicsContext gc width zoom-x loop-config]
   (.setFill gc ruler-bg-color)
   (.fillRect gc 0 0 width ruler-height)
   ;; Grid lines and beat labels
-  (let [start-beat (/ scroll-x zoom-x)
-        end-beat (/ (+ scroll-x width) zoom-x)
-        ;; Determine grid subdivision based on zoom level
-        subdivisions (cond
-                       (>= zoom-x 120) 0.0625
-                       (>= zoom-x 60)  0.125
-                       (>= zoom-x 30)  0.25
-                       (>= zoom-x 15)  1.0
-                       :else           4.0)
-        first-beat (* (Math/floor (/ start-beat subdivisions)) subdivisions)]
-    (.setFont gc (Font. "Inter" 10))
+  (let [end-beat (/ width zoom-x)
+        subdivisions (grid-subdivision zoom-x)]
+    (.setFont gc ruler-font)
     (.setTextAlign gc TextAlignment/CENTER)
-    (loop [beat first-beat]
+    (loop [beat 0.0]
       (when (<= beat end-beat)
-        (let [x (- (* beat zoom-x) scroll-x)
+        (let [x (crisp (* beat zoom-x))
               rounded (Math/round (double beat))
               int-beat? (< (Math/abs (- (double beat) (double rounded))) 1e-4)
               measure? (and int-beat? (zero? (mod rounded 4)))]
@@ -206,39 +231,32 @@
                            measure?  grid-line-major-color
                            int-beat? ruler-text-color
                            :else     grid-line-color))
-          (.setLineWidth gc (if measure? 1.5 0.5))
+          (.setLineWidth gc 1.0)
           (let [tick-h (cond
                          measure?  8
                          int-beat? 6
                          :else     3)]
             (.strokeLine gc x ruler-height x (- ruler-height tick-h))))
         (recur (+ beat subdivisions))))
-    (draw-loop-brace! gc zoom-x scroll-x loop-config)))
+    (draw-loop-brace! gc zoom-x loop-config)))
 
 
 (defn- draw-grid!
   "Draw vertical grid lines across all tracks."
-  [^GraphicsContext gc width height zoom-x scroll-x]
-  (let [start-beat (/ scroll-x zoom-x)
-        end-beat (/ (+ scroll-x width) zoom-x)
-        subdivisions (cond
-                       (>= zoom-x 120) 0.0625  ;; 1/16 beat
-                       (>= zoom-x 60)  0.125   ;; 1/8 beat
-                       (>= zoom-x 30)  0.25    ;; 1/4 beat
-                       (>= zoom-x 15)  1.0     ;; 1 beat
-                       :else           4.0)
-        first-beat (* (Math/floor (/ start-beat subdivisions)) subdivisions)]
-    (loop [beat first-beat]
+  [^GraphicsContext gc width height zoom-x]
+  (let [end-beat (/ width zoom-x)
+        subdivisions (grid-subdivision zoom-x)]
+    (.setLineWidth gc 1.0)
+    (loop [beat 0.0]
       (when (<= beat end-beat)
-        (let [x (- (* beat zoom-x) scroll-x)
+        (let [x (crisp (* beat zoom-x))
               rounded (Math/round (double beat))
               int-beat? (< (Math/abs (- (double beat) (double rounded))) 1e-4)
               measure? (and int-beat? (zero? (mod rounded 4)))]
           (.setStroke gc (cond
                            measure?  grid-line-major-color
-                           int-beat? (Color/web "#444444")
+                           int-beat? grid-line-beat-color
                            :else     grid-line-color))
-          (.setLineWidth gc (if measure? 1.0 0.3))
           (.strokeLine gc x ruler-height x height))
         (recur (+ beat subdivisions))))))
 
@@ -248,99 +266,154 @@
 
 (defn- draw-track-backgrounds!
   "Draw alternating track lane backgrounds.
-   Group tracks get a distinct darker background.
-   The currently selected track lane is subtly highlighted."
-  [^GraphicsContext gc width tracks selected-track-id]
+   Folder rows get a distinct darker background. The lane selected in the
+   sidebar (track or folder) is tinted; the lane new content goes to gets a
+   thin marker on its left edge."
+  [^GraphicsContext gc width tracks selected-track-id insert-track-id]
   (doseq [[idx track] (map-indexed vector tracks)]
     (let [y (track-y idx)
-          selected? (and selected-track-id
-                         (= (:id track) selected-track-id)
-                         (not= :group (:type track)))]
+          selected? (and selected-track-id (= (:id track) selected-track-id))]
       (.setFill gc (cond
-                     (= :group (:type track)) group-bg-color
                      selected?                track-bg-selected
+                     (= :group (:type track)) group-bg-color
                      (even? idx)              track-bg-even
                      :else                    track-bg-odd))
       (.fillRect gc 0 y width track-height)
-      (when selected?
-        (.setStroke gc selection-border-color)
-        (.setLineWidth gc 1.0)
-        (.strokeLine gc 0 y width y)
-        (.strokeLine gc 0 (+ y track-height) width (+ y track-height))))))
+      (when (and insert-track-id (= (:id track) insert-track-id))
+        (.setFill gc insert-marker-color)
+        (.fillRect gc 0 y 3 track-height)))))
 
+
+(defn- clip-label
+  "Clip text: its own name, else the preset's display name."
+  [item]
+  (or (:name item)
+      (:name (presets/presets-by-id (:preset-id item)))
+      (some-> (:preset-id item) name)
+      (some-> (:effect-id item) name)
+      ""))
+
+(defn- clip-rect
+  "[x w] of a clip on the canvas."
+  [item zoom-x]
+  [(* (double (or (tl/clip-start item) 0.0)) zoom-x)
+   (max min-clip-width (* (double (or (tl/clip-length item) 0.0)) zoom-x))])
 
 (defn- draw-clip!
   "Draw a single clip (item rectangle) on the canvas.
-   Uses the track's resolved color as the clip fill."
-  [^GraphicsContext gc track-idx item zoom-x scroll-x selection ^Color color]
-  (let [start (:timeline/start item 0.0)
-        duration (:timeline/duration item 4.0)
-        x (- (* start zoom-x) scroll-x)
-        w (max min-clip-width (* duration zoom-x))
+   Uses the track's resolved color as the clip fill; disabled clips and clips
+   on muted tracks are drawn faded."
+  [^GraphicsContext gc track-idx item zoom-x selection ^Color color dimmed?]
+  (let [[x w] (clip-rect item zoom-x)
         y (+ (track-y track-idx) 2)
         h (- track-height 4)
         selected? (contains? selection (:id item))
-        body-color (if color
-                     (if selected? (.brighter color) color)
-                     (if selected? clip-color-selected clip-color-default))]
+        base (or color clip-color-default)
+        body-color (cond-> (if selected? (.brighter base) base)
+                     dimmed? (.deriveColor 0 1 1 muted-alpha))]
     ;; Clip body
     (.setFill gc body-color)
     (.fillRect gc x y w h)
-    ;; Label
-    (.setFill gc Color/WHITE)
-    (.setFont gc (Font. "Inter" 10))
-    (.setTextAlign gc TextAlignment/LEFT)
-    (let [label (or (:name item)
-                    (some-> (:preset-id item) name)
-                    (some-> (:effect-id item) name)
-                    "")]
-      (when (> w 30)
-        (.fillText gc label (+ x 6) (+ y 14))))
-    ;; Selection border
+    (.setStroke gc clip-border-color)
+    (.setLineWidth gc 1.0)
+    (.strokeRect gc (crisp x) (crisp y) (dec (Math/floor w)) (dec h))
+    ;; Label, clipped to the clip
+    (when (> w 30)
+      (.save gc)
+      (.beginPath gc)
+      (.rect gc x y w h)
+      (.clip gc)
+      (.setFill gc (if dimmed? (Color/web "#FFFFFF" 0.5) Color/WHITE))
+      (.setFont gc clip-font)
+      (.setTextAlign gc TextAlignment/LEFT)
+      (.fillText gc (clip-label item) (+ x 6) (+ y 14))
+      (.restore gc))
+    ;; Selection outline
     (when selected?
-      (.setStroke gc selection-border-color)
+      (.setStroke gc selected-clip-outline)
       (.setLineWidth gc 1.5)
       (.strokeRect gc x y w h))))
+
+(defn- draw-overlaps!
+  "Highlight spans where clips on the same row overlap (they all play)."
+  [^GraphicsContext gc track-idx items zoom-x]
+  (let [spans (->> items
+                   (keep (fn [i] (when-let [e (tl/clip-end i)] [(double (tl/clip-start i)) e])))
+                   (sort-by first)
+                   vec)
+        y (+ (track-y track-idx) 2)
+        h (- track-height 4)]
+    (.setFill gc clip-overlap-color)
+    (doseq [i (range (count spans))
+            j (range (inc i) (count spans))
+            :let [[s1 e1] (spans i) [s2 e2] (spans j)
+                  s (max s1 s2) e (min e1 e2)]
+            :when (< s e)]
+      (.fillRect gc (* s zoom-x) y (* (- e s) zoom-x) h))))
+
+(defn- clip-draw-order
+  "Clips in the order they're drawn: by start, selected clips last (on top).
+   hit-test walks the reverse of this."
+  [items selection]
+  (let [{sel true other false} (group-by #(contains? selection (:id %))
+                                         (sort-by #(or (tl/clip-start %) 0.0) items))]
+    (into (vec other) sel)))
 
 
 (defn- draw-playhead!
   "Draw the playhead vertical line."
-  [^GraphicsContext gc width height zoom-x scroll-x beats-elapsed]
-  (let [x (- (* beats-elapsed zoom-x) scroll-x)]
+  [^GraphicsContext gc width height zoom-x beats-elapsed]
+  (let [x (* beats-elapsed zoom-x)]
     (when (and (>= x 0) (<= x width))
       (.setStroke gc playhead-color)
       (.setLineWidth gc 2.0)
       (.strokeLine gc x 0 x height))))
+
+(defn- draw-cursor!
+  "Draw the edit cursor (where new content is placed) as a dashed amber line."
+  [^GraphicsContext gc width height zoom-x cursor-beat]
+  (let [x (crisp (* cursor-beat zoom-x))]
+    (when (and (>= x 0) (<= x width))
+      (.save gc)
+      (.setStroke gc cursor-color)
+      (.setLineWidth gc 1.0)
+      (.setLineDashes gc (double-array [4.0 3.0]))
+      (.strokeLine gc x 0 x height)
+      (.restore gc))))
 
 
 (defn- render-timeline!
   "Main canvas render function.
    Called by interactive-canvas with current value and drag-info."
   [^Canvas canvas value _]
-  (let [{:keys [tracks zoom-x scroll-x selection
+  (let [{:keys [tracks zoom-x selection muted-track-ids
                 beats-elapsed cursor-beat zone-groups loop-config
-                selected-track-id]} value
+                selected-track-id insert-track-id]} value
         gc (.getGraphicsContext2D canvas)
         width (.getWidth canvas)
-        height (.getHeight canvas)
-        playhead-beat (or beats-elapsed cursor-beat 0.0)]
+        height (.getHeight canvas)]
     ;; Clear
     (.setFill gc bg-color)
     (.fillRect gc 0 0 width height)
     ;; Draw layers
-    (draw-track-backgrounds! gc width tracks selected-track-id)
-    (draw-grid! gc width height zoom-x scroll-x)
-    (draw-ruler! gc width zoom-x scroll-x loop-config)
+    (draw-track-backgrounds! gc width tracks selected-track-id insert-track-id)
+    (draw-grid! gc width height zoom-x)
+    (draw-ruler! gc width zoom-x loop-config)
     ;; Draw clips — each track row can have multiple items
     (doseq [[idx {:keys [items track zone-group-id]}] (map-indexed vector tracks)]
       (let [color (if track
                     (track-color track zone-groups)
                     (when zone-group-id
                       (zone-group-color zone-groups zone-group-id)))]
-        (doseq [item items]
-          (draw-clip! gc idx item zoom-x scroll-x selection color))))
-    ;; Playhead / Cursor
-    (draw-playhead! gc width height zoom-x scroll-x playhead-beat)))
+        (doseq [item (clip-draw-order items selection)]
+          (draw-clip! gc idx item zoom-x selection color
+                      (or (false? (:enabled? item))
+                          (contains? muted-track-ids (:track-id item)))))
+        (draw-overlaps! gc idx items zoom-x)))
+    ;; Cursor, then the playhead (only while the cue plays) on top
+    (draw-cursor! gc width height zoom-x (or cursor-beat 0.0))
+    (when beats-elapsed
+      (draw-playhead! gc width height zoom-x beats-elapsed))))
 
 
 ;; ============================================================
@@ -349,46 +422,37 @@
 
 
 (defn- hit-test
-  "Find which clip is under the mouse.
-   Returns {:track-idx int :item map :edge :left/:right/:center} or nil.
-   Scans all items within the hovered track row."
-  [mx my tracks zoom-x scroll-x loop-config]
-  (let [scroll-x (or scroll-x 0.0)]
-    (if (and loop-config (<= my ruler-height))
-      ;; Check loop brace hit
-      (let [{:keys [start duration]} loop-config
-            x (- (* start zoom-x) scroll-x)
-            w (* duration zoom-x)]
-        (when (and (>= mx x) (<= mx (+ x w)))
-          (let [edge (cond
-                       (< mx (+ x edge-grab-px)) :left
-                       (> mx (- (+ x w) edge-grab-px)) :right
-                       :else :center)]
-            {:type :loop-brace
-             :edge edge})))
-      ;; Otherwise check clips
-      (when-let [{:keys [track-idx track]} (tl/track-at-y {:y my
-                                                           :ruler-height ruler-height
-                                                           :track-height track-height
-                                                           :track-rows tracks})]
-        (let [{:keys [items]} track]
-          ;; Check each item in this track row for a hit
-          (some (fn [item]
-                  (let [start (:timeline/start item 0.0)
-                        duration (:timeline/duration item 4.0)
-                        clip-x (- (* start zoom-x) scroll-x)
-                        clip-w (max min-clip-width (* duration zoom-x))
-                        clip-end (+ clip-x clip-w)]
-                    (when (and (>= mx clip-x) (<= mx clip-end))
-                      (let [edge (cond
-                                   (< mx (+ clip-x edge-grab-px)) :left
-                                   (> mx (- clip-end edge-grab-px)) :right
-                                   :else :center)]
-                        {:type :clip
-                         :track-idx track-idx
-                         :item item
-                         :edge edge}))))
-                items))))))
+  "Find what's under the mouse: the loop brace (only inside its drawn band)
+   or the topmost clip (reverse draw order: selected first, then latest start).
+   Returns {:type :loop-brace :edge e} or {:type :clip :track-idx int :item map :edge e}
+   with e one of :left/:right/:center, or nil."
+  [mx my tracks zoom-x loop-config selection]
+  (if (and loop-config (<= loop-brace-top my loop-brace-bottom))
+    (let [{:keys [start duration]} loop-config
+          x (* start zoom-x)
+          w (* duration zoom-x)]
+      (when (and (>= mx x) (<= mx (+ x w)))
+        {:type :loop-brace
+         :edge (cond
+                 (< mx (+ x edge-grab-px)) :left
+                 (> mx (- (+ x w) edge-grab-px)) :right
+                 :else :center)}))
+    (when-let [{:keys [track-idx track]} (tl/track-at-y {:y my
+                                                         :ruler-height ruler-height
+                                                         :track-height track-height
+                                                         :track-rows tracks})]
+      (some (fn [item]
+              (let [[clip-x clip-w] (clip-rect item zoom-x)
+                    clip-end (+ clip-x clip-w)]
+                (when (and (>= mx clip-x) (<= mx clip-end))
+                  {:type :clip
+                   :track-idx track-idx
+                   :item item
+                   :edge (cond
+                           (< mx (+ clip-x edge-grab-px)) :left
+                           (> mx (- clip-end edge-grab-px)) :right
+                           :else :center)})))
+            (rseq (clip-draw-order (:items track) (or selection #{})))))))
 
 
 ;; ============================================================
@@ -400,8 +464,8 @@
   "Handle mouse press. Select item or begin drag.
    Clicking empty space clears selection, sets cursor beat, and selects clicked track."
   [mx my button value _]
-  (let [{:keys [tracks zoom-x scroll-x col row loop-config]} value
-        hit (hit-test mx my tracks zoom-x scroll-x loop-config)]
+  (let [{:keys [tracks zoom-x col row loop-config selection]} value
+        hit (hit-test mx my tracks zoom-x loop-config selection)]
     (when (= button MouseButton/PRIMARY)
       (if hit
         (if (= (:type hit) :loop-brace)
@@ -435,7 +499,7 @@
                             :col col
                             :row row}}))
         ;; Clicked empty space - clear selection, move cursor, select track if clicked
-        (let [clicked-beat (max 0.0 (/ (+ mx (or scroll-x 0.0)) zoom-x))
+        (let [clicked-beat (max 0.0 (/ mx zoom-x))
               clicked-track (:track (tl/track-at-y {:y my
                                                     :ruler-height ruler-height
                                                     :track-height track-height
@@ -504,8 +568,8 @@
 (defn- on-hover
   "Handle mouse hover. Update cursor based on edge proximity."
   [mx my value _]
-  (let [{:keys [tracks zoom-x scroll-x loop-config]} value
-        hit (hit-test mx my tracks zoom-x scroll-x loop-config)]
+  (let [{:keys [tracks zoom-x loop-config selection]} value
+        hit (hit-test mx my tracks zoom-x loop-config selection)]
     (if hit
       {:hover-id (if (= (:type hit) :loop-brace) :loop-brace (:id (:item hit)))
        :cursor (case (:edge hit)
@@ -730,9 +794,17 @@
                                      :track-id track-id
                                      :zone-group-id nil}}
                         {:fx/type :separator-menu-item}])
-        all-zone-items (into (vec inherit-item) zone-items)]
+        all-zone-items (into (vec inherit-item) zone-items)
+        muted? (true? (:muted? track-or-folder))]
     {:fx/type :context-menu
-     :items [{:fx/type :menu
+     :items [{:fx/type :menu-item
+              :text (if muted? "Unmute" "Mute")
+              :on-action {:event/type :timeline/set-track-muted
+                          :col col
+                          :row row
+                          :track-id track-id
+                          :muted? (not muted?)}}
+             {:fx/type :menu
               :text "Assign Zone"
               :items all-zone-items}]}))
 
@@ -759,7 +831,8 @@
      :get-group-context-menu (partial track-context-menu col row zone-groups)
      :items-path items-path
      :on-change-event :timeline/update-tracks ;; Requires custom handler or alias
-     :on-change-params {:col col :row row}
+     :on-change-params {:col col :row row :clipboard-type :timeline-tracks}
+     :show-enable-toggle? false ;; Mute is in the context menu; :enabled? isn't used for tracks
      :header-label "TRACKS"
      :empty-text "No tracks. Add one to start."
      :allow-groups? true
@@ -769,10 +842,12 @@
 
 (defn- timeline-inspector-panel
   "Inspector panel for the selected clip or selected track in the timeline."
-  [{:keys [col row items track-defs zone-groups selected-item-id selected-track-id]}]
+  [{:keys [col row items track-defs zone-groups selected-item-id selected-track-id
+           destination-zone-id]}]
   (let [;; Check for selected clip
         selected-clip (when selected-item-id
-                        (u/seek #(= (:id %) selected-item-id) (chains/flatten-chain items)))
+                        (when-let [path (chains/find-path-by-id items selected-item-id)]
+                          (get-in (vec items) path)))
         ;; Check for selected track
         selected-track (when (and (not selected-clip) selected-track-id)
                          (tl/find-track-by-id track-defs selected-track-id))]
@@ -870,13 +945,17 @@
       selected-track
       (let [is-folder? (or (= :group (:type selected-track)) (contains? selected-track :items))
             track-zone (:zone-group-id selected-track)
-            parent-path (last (:path selected-track))
-            parent-folder (when parent-path (tl/find-track-by-id track-defs parent-path))
-            parent-zone (when parent-folder (:zone-group-id parent-folder :all))
+            parent-folder (tl/parent-track track-defs (:id selected-track))
+            parent-zone (when parent-folder
+                          (ze/resolve-track-effective-zone track-defs (:id parent-folder) :all))
             parent-zone-name (when parent-zone
                                (or (get-in zone-groups [parent-zone :name]) (name parent-zone)))
-            inherit-opt (when (and (not is-folder?) parent-folder)
-                          [{:id :inherit :name (str "Inherit from Folder (" (or parent-zone-name "All") ")")}])
+            default-zone (or destination-zone-id :all)
+            default-zone-name (or (get-in zone-groups [default-zone :name]) (name default-zone))
+            inherit-opt [{:id :inherit
+                          :name (if parent-folder
+                                  (str "Inherit from Folder (" (or parent-zone-name "All") ")")
+                                  (str "Cue Default Zone (" default-zone-name ")"))}]
             zone-options (into (vec inherit-opt)
                                (mapv (fn [zg] {:id (:id zg) :name (:name zg (name (:id zg)))}) (vals zone-groups)))
             current-zone-val (or (u/seek #(= (:id %) (or track-zone :inherit)) zone-options)
@@ -887,6 +966,7 @@
          :style "-fx-background-color: #1E1E1E; -fx-border-color: #333333; -fx-border-width: 0 0 0 1;"
          :children
          [{:fx/type :label
+           :id "timeline-inspector-title"
            :text (if is-folder? "FOLDER PROPERTIES" "TRACK PROPERTIES")
            :padding {:top 4 :bottom 2 :left 8}
            :style "-fx-text-fill: #777777; -fx-font-size: 10; -fx-font-weight: bold;"}
@@ -938,8 +1018,8 @@
   "Collapsible bottom panel for adding presets and effects to the timeline,
    and inspecting clip and track properties."
   [{:keys [col row add-panel-open? add-panel-preset-tab add-panel-effect-tab
-           selected-item-id selected-track-id cursor-beat beats-elapsed
-           items track-defs zone-groups]}]
+           selected-item-id inspector-track-id insert-track-id cursor-beat beats-elapsed
+           items track-defs zone-groups destination-zone-id]}]
   (when add-panel-open?
     {:fx/type :v-box
      :style "-fx-background-color: #1A1A1A; -fx-border-color: #333333; -fx-border-width: 1 0 0 0;"
@@ -979,7 +1059,7 @@
                      :item-event-template {:event/type :timeline/add-preset-to-track
                                            :col col
                                            :row row
-                                           :track-id selected-track-id
+                                           :track-id insert-track-id
                                            :start (or cursor-beat beats-elapsed 0.0)}}]}
         ;; Effect bank (only when a clip is selected)
         {:fx/type :v-box
@@ -1014,13 +1094,14 @@
          :track-defs track-defs
          :zone-groups zone-groups
          :selected-item-id selected-item-id
-         :selected-track-id selected-track-id}]}]}))
+         :selected-track-id inspector-track-id
+         :destination-zone-id destination-zone-id}]}]}))
 
 
 (defn timeline-canvas
   "The interactive canvas that shows the timeline grid, clips, and playhead."
-  [{:keys [col row tracks items zoom-x scroll-x selection selected-track-id
-           beats-elapsed cursor-beat loop-config zone-groups]}]
+  [{:keys [col row tracks items zoom-x selection selected-track-id insert-track-id
+           muted-track-ids beats-elapsed cursor-beat loop-config zone-groups]}]
   (let [canvas-height (total-canvas-height (count tracks))
         canvas-width (calculate-canvas-width items loop-config (or zoom-x default-zoom))]
     {:fx/type ci/interactive-canvas
@@ -1031,9 +1112,10 @@
      :cursor "crosshair"
      :value {:tracks tracks
              :zoom-x (or zoom-x default-zoom)
-             :scroll-x (or scroll-x 0.0)
              :selection (or selection #{})
              :selected-track-id selected-track-id
+             :insert-track-id insert-track-id
+             :muted-track-ids (or muted-track-ids #{})
              :beats-elapsed beats-elapsed
              :cursor-beat cursor-beat
              :loop-config loop-config
@@ -1060,31 +1142,30 @@
    - :items         — Cue chain items vector
    - :track-defs    — Explicit Track definitions vector (from CueChain :tracks)
    - :zone-groups   — Map of zone-group-id -> group config
+   - :destination-zone-id — The cue's default zone (what top-level tracks inherit)
    - :timeline-ui   — Map from [:ui :timeline] state
    - :beats-elapsed — Current beat position from active cue timing (nil if stopped)
-   - :loop-config   — Map with {:enabled? :start :duration}
-   - :list-props    — Map of props to forward to list-editor sidebar"
-  [{:keys [fx/context col row items track-defs zone-groups
-           timeline-ui beats-elapsed loop-config list-props]}]
-  (let [{:keys [zoom-x scroll-x scroll-hvalue selection snap-enabled?
-                snap-value expanded-tracks sync-scroll-y cursor-beat
+   - :loop-config   — Map with {:enabled? :start :duration}"
+  [{:keys [fx/context col row items track-defs zone-groups destination-zone-id
+           timeline-ui beats-elapsed loop-config]}]
+  (let [{:keys [zoom-x selection snap-enabled? snap-value cursor-beat
                 add-panel-open? add-panel-preset-tab add-panel-effect-tab]
          :or {zoom-x default-zoom
-              scroll-x 0.0
-              scroll-hvalue 0.0
               selection #{}
               snap-enabled? true
-              snap-value 0.25
-              expanded-tracks #{}}} timeline-ui
-        tracks (build-tracks (or track-defs []) (or items []) expanded-tracks)
+              snap-value 0.25}} timeline-ui
+        tracks (build-tracks (or track-defs []) (or items []))
+        muted-track-ids (tl/muted-track-ids track-defs)
         ;; Determine selected item ID for the effect bank
         selected-item-id (when (= 1 (count selection)) (first selection))
-        ;; Determine explicit selected track from canonical list-ui state
+        ;; The track or folder selected in the sidebar (nil when none)...
         tracks-ui-state (fx/sub-ctx context subs/list-ui-state :timeline-tracks)
-        sidebar-selected-track-id (first (:selected-ids tracks-ui-state))
-        selected-track-id (tl/resolve-active-track
-                           {:track-defs track-defs
-                            :selected-track-id sidebar-selected-track-id})]
+        sidebar-selected-track-id (let [id (first (:selected-ids tracks-ui-state))]
+                                    (when (and id (tl/find-track-by-id track-defs id)) id))
+        ;; ...and the leaf track new content goes to
+        insert-track-id (tl/resolve-active-track
+                         {:track-defs track-defs
+                          :selected-track-id sidebar-selected-track-id})]
     (cond->
      {:fx/type :border-pane
       :style "-fx-background-color: #121212;"
@@ -1148,9 +1229,10 @@
            :tracks tracks
            :items items
            :zoom-x zoom-x
-           :scroll-x scroll-x
            :selection selection
-           :selected-track-id selected-track-id
+           :selected-track-id sidebar-selected-track-id
+           :insert-track-id insert-track-id
+           :muted-track-ids muted-track-ids
            :beats-elapsed beats-elapsed
            :cursor-beat cursor-beat
            :loop-config loop-config
@@ -1163,9 +1245,11 @@
                       :add-panel-preset-tab add-panel-preset-tab
                       :add-panel-effect-tab add-panel-effect-tab
                       :selected-item-id selected-item-id
-                      :selected-track-id selected-track-id
+                      :inspector-track-id sidebar-selected-track-id
+                      :insert-track-id insert-track-id
                       :cursor-beat cursor-beat
                       :beats-elapsed beats-elapsed
                       :items items
                       :track-defs track-defs
-                      :zone-groups zone-groups}))))
+                      :zone-groups zone-groups
+                      :destination-zone-id destination-zone-id}))))

@@ -197,14 +197,6 @@
                                 :state base-state})]
       (is (== 0.0 (get-in res [:state :ui :timeline :scroll-hvalue]))))))
 
-(deftest handle-scroll-horizontal-test
-  (testing "preserves scroll-hvalue in state when scroll-pane is not registered (headless)"
-    (let [s0 (assoc-in base-state [:ui :timeline :scroll-hvalue] 0.4)
-          res (timeline/handle {:event/type :timeline/scroll-horizontal
-                                :delta-y 40.0
-                                :state s0})]
-      (is (== 0.4 (get-in res [:state :ui :timeline :scroll-hvalue]))))))
-
 (deftest handle-zoom-at-cursor-test
   (testing "zooms in and out centered at cursor"
     (let [s0 (assoc-in base-state [:ui :timeline :zoom-x] 50.0)
@@ -336,3 +328,35 @@
       (let [c (clip-after {:edge :center :start 3.0})]
         (is (== 3.0 (:timeline/start c)))
         (is (== 4.0 (:timeline/duration c)))))))
+
+(deftest update-tracks-deleting-track-deletes-its-clips-test
+  (let [s0 (-> base-state
+               (assoc-in [:chains :cue-chains [0 0]]
+                         {:editor-type :timeline
+                          :tracks [{:id :f :type :group :items [{:id :t1 :type :track}]}
+                                   {:id :t2 :type :track}]
+                          :items [{:id :a :track-id :t1 :timeline/start 0.0 :timeline/duration 4.0}
+                                  {:id :b :track-id :t2 :timeline/start 0.0 :timeline/duration 4.0}]})
+               (assoc-in [:ui :timeline :selection] #{:a :b}))
+        cue (fn [tracks]
+              (:state (timeline/handle {:event/type :timeline/update-tracks
+                                        :col 0 :row 0 :items tracks :state s0})))]
+    (testing "deleting the folder deletes the clips of the track inside it"
+      (let [s1 (cue [{:id :t2 :type :track}])]
+        (is (= [:b] (mapv :id (get-in s1 [:chains :cue-chains [0 0] :items]))))
+        (is (= #{:b} (get-in s1 [:ui :timeline :selection])))))
+    (testing "reordering or regrouping keeps every clip"
+      (let [s1 (cue [{:id :t2 :type :track} {:id :t1 :type :track}])]
+        (is (= [:a :b] (mapv :id (get-in s1 [:chains :cue-chains [0 0] :items]))))))))
+
+(deftest set-track-muted-test
+  (let [s0 (assoc-in base-state [:chains :cue-chains [0 0] :tracks]
+                     [{:id :f :type :group :items [{:id :t1 :type :track}]}])
+        muted (:state (timeline/handle {:event/type :timeline/set-track-muted
+                                        :col 0 :row 0 :track-id :t1 :muted? true
+                                        :state s0}))
+        unmuted (:state (timeline/handle {:event/type :timeline/set-track-muted
+                                          :col 0 :row 0 :track-id :t1 :muted? false
+                                          :state muted}))]
+    (is (true? (get-in muted [:chains :cue-chains [0 0] :tracks 0 :items 0 :muted?])))
+    (is (not (contains? (get-in unmuted [:chains :cue-chains [0 0] :tracks 0 :items 0]) :muted?)))))

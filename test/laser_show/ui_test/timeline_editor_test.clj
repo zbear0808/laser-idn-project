@@ -87,3 +87,15 @@
       (ui/wait-for! #(not (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor :open?])))
       (open-timeline!)
       (is (= after-first (get-in (state/get-raw-state) cue-path))))))
+
+(deftest timeline-inspector-shows-folder-properties
+  (let [robot (ui/robot)]
+    (open-timeline!)
+    (ui/click! robot "#timeline-add-content")
+    (ui/wait-for! #(true? (get-in (state/get-raw-state) [:ui :timeline :add-panel-open?])))
+    (let [folder (first (filter #(= :group (:type %))
+                                (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :tracks])))]
+      (is (some? folder) "conversion creates a zone folder")
+      (events/dispatch! {:event/type :timeline/select-track :track-id (:id folder)})
+      (ui/wait-for! #(= "FOLDER PROPERTIES" (ui/node-text "#timeline-inspector-title")))
+      (is (= "FOLDER PROPERTIES" (ui/node-text "#timeline-inspector-title"))))))

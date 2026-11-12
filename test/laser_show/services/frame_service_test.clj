@@ -530,3 +530,24 @@
 
 
 
+
+(defn- render-with-tracks [tracks]
+  (frame-service/generate-frames-by-zone
+   {:destination-zone {:zone-group-id :all}
+    :editor-type :timeline
+    :tracks tracks
+    :items [{:id :a :type :preset :preset-id :circle :track-id :t1 :enabled? true :effects []
+             :timeline/start 0.0 :timeline/duration 4.0}
+            {:id :b :type :preset :preset-id :square :track-id :t2 :enabled? true :effects []
+             :timeline/start 0.0 :timeline/duration 4.0}]}
+   0 120.0 0 test-timing-ctx))
+
+(deftest muted-track-clips-do-not-render-test
+  (let [both (render-with-tracks [{:id :t1 :type :track} {:id :t2 :type :track}])
+        one (render-with-tracks [{:id :t1 :type :track :muted? true} {:id :t2 :type :track}])]
+    (is (< (count (:all one)) (count (:all both))))
+    (is (pos? (count (:all one))))))
+
+(deftest muted-folder-mutes-children-test
+  (is (empty? (render-with-tracks [{:id :f :type :group :muted? true
+                                    :items [{:id :t1 :type :track} {:id :t2 :type :track}]}]))))

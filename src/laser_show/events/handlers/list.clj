@@ -242,6 +242,7 @@
             copied-items (chains/deep-copy-items selected-items)]
         (case clipboard-type
           :item-effects (clipboard/copy-item-effects! copied-items)
+          :timeline-tracks (clipboard/copy-timeline-tracks! copied-items)
           (clipboard/copy-cue-chain-items! copied-items))
         {:state state})
       {:state state})))

@@ -5,10 +5,10 @@
    - View controls: zoom, scroll, snap
    - Item selection within the timeline
    - Item timing updates (start/duration)
-   - Track CRUD: add, delete, update, move, init
+   - Track CRUD: add, delete, update, move, mute
    - Item-to-track assignment
-   - Track expand/collapse for sub-effects
-   - Nudge and resize of selected items
+   - Nudge of selected items
+   - Opening the editor, and the wrap-normalize-timelines pipeline middleware
    
    State paths:
    - Timeline UI: [:ui :timeline]
@@ -61,13 +61,6 @@
         clamped (-> (double zoom) (max min-zoom) (min max-zoom))]
     {:state (assoc-in state [:ui :timeline :zoom-x] clamped)}))
 
-(defn- handle-scroll
-  "Update horizontal scroll position."
-  [{:keys [delta-x state]}]
-  (let [current (get-in state [:ui :timeline :scroll-x] 0.0)]
-    {:state (assoc-in state [:ui :timeline :scroll-x]
-                      (max 0.0 (+ current delta-x)))}))
-
 (defonce ^:private scroll-panes (atom {}))
 
 (defn- handle-register-scroll-pane
@@ -106,30 +99,6 @@
   (let [val (or hvalue event 0.0)
         clamped (-> (double val) (max 0.0) (min 1.0))]
     {:state (assoc-in state [:ui :timeline :scroll-hvalue] clamped)}))
-
-(defn- handle-scroll-horizontal
-  "Update horizontal scroll position from mouse wheel scroll delta.
-   Negative delta-y scrolls right (forward in time); positive scrolls left (backward in time)."
-  [{:keys [delta-x delta-y state]}]
-  (let [raw-delta (if (and (number? delta-x) (not (zero? delta-x)))
-                    (double delta-x)
-                    (double (or delta-y 0.0)))
-        delta-px (- raw-delta)]
-    (if-let [^ScrollPane sp (get @scroll-panes :right)]
-      (let [content-node ^Node (.getContent sp)
-            content-width (if content-node (.getWidth (.getLayoutBounds content-node)) 0.0)
-            viewport-bounds (.getViewportBounds sp)
-            viewport-width (if viewport-bounds (.getWidth viewport-bounds) 0.0)
-            cur-h (.getHvalue sp)
-            new-h (tl/calculate-horizontal-scroll
-                   {:current-hvalue cur-h
-                    :delta-px delta-px
-                    :content-width content-width
-                    :viewport-width viewport-width})]
-        (run-on-fx! #(.setHvalue sp new-h))
-        {:state (assoc-in state [:ui :timeline :scroll-hvalue] new-h)})
-      (let [cur-h (get-in state [:ui :timeline :scroll-hvalue] 0.0)]
-        {:state (assoc-in state [:ui :timeline :scroll-hvalue] cur-h)}))))
 
 (defn- handle-zoom-at-cursor
   "Zoom timeline horizontally centered on the mouse cursor beat position.
@@ -294,30 +263,39 @@
      :history/coalesce-key [:timeline/nudge-selection col row]}))
 
 
-;; Track Expand/Collapse
-
-
-(defn- handle-toggle-track-expand
-  "Toggle an item's expanded state (shows/hides effect sub-tracks)."
-  [{:keys [id state]}]
-  (let [expanded (get-in state [:ui :timeline :expanded-tracks] #{})]
-    {:state (assoc-in state [:ui :timeline :expanded-tracks]
-                      (if (contains? expanded id)
-                        (disj expanded id)
-                        (conj expanded id)))}))
-
-
 ;; Track CRUD
 
 
 (defn- handle-update-tracks
   "Replaces the entire tracks vector for a cue chain.
    This is the callback fired by the `list-editor` component when tracks
-   are grouped, reordered, deleted, or pasted."
+   are grouped, reordered, deleted, or pasted. Clips on tracks that no
+   longer exist are deleted in the same edit (decision D4)."
   [{:keys [col row items state]}]
-  (let [tracks-path [:chains :cue-chains [col row] :tracks]]
-    {:state (-> state
-                (assoc-in tracks-path (vec items)))}))
+  (let [chain-path [:chains :cue-chains [col row]]
+        old-tracks (get-in state (conj chain-path :tracks) [])
+        new-tracks (vec items)
+        removed (reduce disj (tl/leaf-track-ids old-tracks) (tl/leaf-track-ids new-tracks))
+        orphan-ids (into #{}
+                         (comp (filter #(contains? removed (:track-id %))) (map :id))
+                         (get-in state (conj chain-path :items) []))]
+    {:state (cond-> (assoc-in state (conj chain-path :tracks) new-tracks)
+              (seq orphan-ids)
+              (-> (update-in (conj chain-path :items) list-helpers/remove-by-ids orphan-ids)
+                  (update-in [:ui :timeline :selection] #(reduce disj (or % #{}) orphan-ids))))}))
+
+(defn- handle-set-track-muted
+  "Mute or unmute a track or folder (a muted folder mutes everything in it).
+   :muted? is a live field (state.history/live-item-paths): not undoable and
+   not an unsaved change, but saved with the project."
+  [{:keys [col row track-id muted? state]}]
+  (let [tracks-path [:chains :cue-chains [col row] :tracks]
+        tracks (get-in state tracks-path [])]
+    (if-let [path (chains/find-path-by-id tracks track-id)]
+      {:state (assoc-in state tracks-path
+                        (update-in (vec tracks) path
+                                   #(if muted? (assoc % :muted? true) (dissoc % :muted?))))}
+      {:state state})))
 
 (defn- handle-move-item-to-track
   "Reassign an item to a different track.
@@ -567,8 +545,6 @@
   (case type
     ;; View controls
     :timeline/set-zoom (handle-set-zoom event)
-    :timeline/scroll (handle-scroll event)
-    :timeline/scroll-horizontal (handle-scroll-horizontal event)
     :timeline/zoom-at-cursor (handle-zoom-at-cursor event)
     :timeline/set-hvalue (handle-set-hvalue event)
     :timeline/set-snap (handle-set-snap event)
@@ -590,11 +566,9 @@
     :timeline/update-loop-timing (handle-update-loop-timing event)
     :timeline/toggle-loop (handle-toggle-loop event)
 
-    ;; Track expand/collapse
-    :timeline/toggle-track-expand (handle-toggle-track-expand event)
-
     ;; Track CRUD
     :timeline/update-tracks (handle-update-tracks event)
+    :timeline/set-track-muted (handle-set-track-muted event)
     :timeline/move-item-to-track (handle-move-item-to-track event)
     :timeline/add-track (handle-add-track event)
     :timeline/add-folder (handle-add-folder event)

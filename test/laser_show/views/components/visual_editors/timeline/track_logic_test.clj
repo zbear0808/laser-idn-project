@@ -9,7 +9,7 @@
     (is (not (tl/track-group? {:type :track})))))
 
 (deftest flatten-visible-tracks-test
-  (testing "flattens and inherits zones"
+  (testing "flattens and inherits zones; collapsed folders hide their children"
     (let [tracks [{:id "t1"
                    :type :track
                    :zone-group-id :z1}
@@ -23,11 +23,11 @@
                             :zone-group-id :z3}]} ;; Should override to :z3
                   {:id "g2"
                    :type :group
+                   :collapsed? true
                    :zone-group-id :z4
                    :items [{:id "t4"
-                            :type :track}]}] ;; Children omitted, but group row remains
-          expanded-tracks #{"g1"}
-          result (tl/flatten-visible-tracks tracks expanded-tracks)]
+                            :type :track}]}] ;; Children hidden, but group row remains
+          result (tl/flatten-visible-tracks tracks)]
 
       (is (= 5 (count result)) "t1, g1, t2, t3, g2")
       (is (= "t1" (:id (nth result 0))))
@@ -39,6 +39,16 @@
       (is (= :z3 (:zone-group-id (nth result 3))))
       (is (= "g2" (:id (nth result 4))))
       (is (= :z4 (:zone-group-id (nth result 4)))))))
+
+(deftest flatten-visible-tracks-hidden-descendants-test
+  (let [tracks [{:id :f :type :group :collapsed? true
+                 :items [{:id :t1 :type :track}
+                         {:id :g :type :group :items [{:id :t2 :type :track}]}]}
+                {:id :open :type :group :items [{:id :t3 :type :track}]}]
+        rows (tl/flatten-visible-tracks tracks)]
+    (is (= [:f :open :t3] (mapv :id rows)))
+    (is (= #{:t1 :g :t2} (:hidden-descendants (first rows))))
+    (is (nil? (:hidden-descendants (second rows))))))
 
 (deftest first-leaf-track-test
   (testing "finds the first non-group track at any depth"

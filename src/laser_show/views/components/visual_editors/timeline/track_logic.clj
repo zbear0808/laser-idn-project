@@ -58,13 +58,6 @@
   (when-let [path (chains/find-path-by-id tracks track-id)]
     (get-in (vec tracks) path)))
 
-(defn track-index
-  "Return the flat index of a track by ID within a sequence of FLATTENED tracks, or nil if not found."
-  [flat-tracks track-id]
-  (first
-   (keep-indexed (fn [i t] (when (= (:id t) track-id) i))
-                 flat-tracks)))
-
 (defn track-group?
   "Returns true if the track is a group/folder."
   [track]
@@ -72,30 +65,36 @@
    (or (= (:type track) :group)
        (contains? track :items))))
 
+(defn- descendant-ids [track]
+  (into #{}
+        (comp (drop 1) (map :id))
+        (tree-seq track-group? #(:items % []) track)))
+
 (defn flatten-visible-tracks
   "Takes a nested vector of tracks and returns a flat view of all tracks
-   that should be visible on the canvas. 
+   that should be visible on the canvas: every top-level track, plus the
+   children of folders that aren't :collapsed?.
    
-   If a track-group is marked as expanded in expanded-tracks, its children are IN the view.
-   Also propagates inherited :zone-group-id down from parents to children if 
-   the children do not have their own explicit zone."
-  [tracks expanded-tracks]
+   Each row carries its effective :zone-group-id (inherited from its parent
+   folder when it has none). A collapsed folder's row also has
+   :hidden-descendants, the ids of every track hidden under it."
+  [tracks]
   (letfn [(flatten-level [level-tracks parent-zone-id]
             (mapcat (fn [track]
                       (let [effective-zone (or (:zone-group-id track) parent-zone-id)
                             track-with-zone (assoc track :zone-group-id effective-zone)]
-                        (if (track-group? track)
-                          ;; It's a folder. We include the folder itself as a row, 
-                          ;; then conditionally include its children
+                        (cond
+                          (not (track-group? track))
+                          [track-with-zone]
+
+                          (:collapsed? track false)
+                          [(assoc track-with-zone :hidden-descendants (descendant-ids track))]
+
+                          :else
                           (into [track-with-zone]
-                                (when (if (seq expanded-tracks)
-                                        (contains? expanded-tracks (:id track))
-                                        (not (:collapsed? track false)))
-                                  (flatten-level (:items track []) effective-zone)))
-                          ;; Regular track
-                          [track-with-zone])))
+                                (flatten-level (:items track []) effective-zone)))))
                     level-tracks))]
-    (flatten-level tracks :all)))
+    (vec (flatten-level tracks :all))))
 
 
 ;; ============================================================
@@ -111,57 +110,6 @@
     (update-vals grouped
                  (fn [track-items]
                    (vec (sort-by #(:timeline/start % 0.0) track-items))))))
-
-(defn track-zone-id
-  "Resolve a zone-group-id for an item by looking up its track.
-   Falls back to default-zone when track is not found."
-  [tracks item default-zone]
-  (if-let [tid (:track-id item)]
-    (if-let [track (find-track-by-id tracks tid)]
-      (:zone-group-id track)
-      default-zone)
-    default-zone))
-
-
-;; ============================================================
-;; Track Mutation Helpers (pure)
-;; ============================================================
-
-
-(defn add-track
-  "Append a new track to the tracks vector.
-   Returns updated tracks."
-  [tracks opts]
-  (conj (vec tracks) (create-track opts)))
-
-(defn remove-track
-  "Remove a track by ID. Returns updated tracks vector.
-   Does NOT handle orphaned items — caller must reassign."
-  [tracks track-id]
-  (into [] (remove #(= (:id %) track-id)) tracks))
-
-(defn update-track
-  "Update a track by ID with the given key-value pairs.
-   Returns updated tracks vector."
-  [tracks track-id updates]
-  (mapv (fn [t]
-          (if (= (:id t) track-id)
-            (merge t updates)
-            t))
-        tracks))
-
-(defn move-track
-  "Move a track from one index to another.
-   Returns reordered tracks vector."
-  [tracks from-idx to-idx]
-  (let [tracks (vec tracks)
-        item (nth tracks from-idx)
-        without (into (subvec tracks 0 from-idx)
-                      (subvec tracks (inc from-idx)))
-        before (subvec without 0 (min to-idx (count without)))
-        after (subvec without (min to-idx (count without)))]
-    (into [] cat [before [item] after])))
-
 
 ;; ============================================================
 ;; Auto-initialization (migration from legacy chains)

@@ -4,7 +4,8 @@
    Tests the hierarchical list UI state management including
    selection, drag-drop, and rename operations."
   (:require [clojure.test :refer [deftest is testing]]
-            [laser-show.events.handlers.list :as list-handlers]))
+            [laser-show.events.handlers.list :as list-handlers]
+            [laser-show.state.clipboard :as clipboard]))
 
 
 ;; Selection Tests
@@ -420,3 +421,19 @@
       (let [new-items (get-in result [:dispatch :items])]
         ;; item-a moved after item-b, so order is b, a
         (is (= [id-b id-a] (mapv :id new-items)))))))
+
+(deftest timeline-track-copy-uses-own-clipboard-type-test
+  (let [calls (atom [])
+        state {:chains {:cue-chains {[0 0] {:tracks [{:id :t1 :type :track :name "T1"}]}}}
+               :list-ui {:timeline-tracks {:selected-ids #{:t1}}}}]
+    (with-redefs [clipboard/copy-timeline-tracks!
+                  (fn [items] (swap! calls conj [:timeline-tracks items]) true)
+                  clipboard/copy-cue-chain-items!
+                  (fn [items] (swap! calls conj [:cue-chain-items items]) true)]
+      (list-handlers/handle {:event/type :list/copy-selected
+                             :component-id :timeline-tracks
+                             :items-path [:chains :cue-chains [0 0] :tracks]
+                             :clipboard-type :timeline-tracks
+                             :state state}))
+    (is (= [:timeline-tracks] (mapv first @calls)))
+    (is (= "T1" (:name (first (second (first @calls))))))))

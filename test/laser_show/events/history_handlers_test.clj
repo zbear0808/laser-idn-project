@@ -391,3 +391,38 @@
     (is (true? (get-in (run dirty {:event/type :timing/set-bpm :bpm 90.0}) [:project :dirty?])))
     (is (true? (get-in (run dirty {:event/type :effects/toggle-cell :col 1 :row 0}) [:project :dirty?])))
     (is (false? (get-in (run (clean-state) {:event/type :effects/toggle-cell :col 1 :row 0}) [:project :dirty?])))))
+(defn- timeline-state []
+  (-> (test-state)
+      (assoc-in [:chains :cue-chains [0 0]]
+                {:editor-type :timeline
+                 :tracks [{:id :f :type :group :collapsed? false
+                           :items [{:id :t1 :type :track :name "T1"}]}]
+                 :items [{:id item-id :type :preset :preset-id :circle :track-id :t1
+                          :timeline/start 0.0 :timeline/duration 4.0}]})
+      history/mark-clean))
+
+(deftest track-mute-is-not-undoable-test
+  (let [s0 (timeline-state)
+        s1 (run s0 {:event/type :timeline/set-track-muted :col 0 :row 0 :track-id :t1 :muted? true})]
+    (is (true? (get-in s1 [:chains :cue-chains [0 0] :tracks 0 :items 0 :muted?])))
+    (is (= (undo-count s0) (undo-count s1)))
+    (is (false? (get-in s1 [:project :dirty?])))))
+
+(deftest folder-collapse-is-not-undoable-test
+  (let [s0 (timeline-state)
+        tracks (get-in s0 [:chains :cue-chains [0 0] :tracks])
+        s1 (run s0 {:event/type :timeline/update-tracks :col 0 :row 0
+                    :items (assoc-in tracks [0 :collapsed?] true)})]
+    (is (true? (get-in s1 [:chains :cue-chains [0 0] :tracks 0 :collapsed?])))
+    (is (= (undo-count s0) (undo-count s1)))
+    (is (false? (get-in s1 [:project :dirty?])))))
+
+(deftest undo-does-not-unmute-test
+  (let [s0 (timeline-state)
+        s1 (run s0 {:event/type :timeline/set-track-muted :col 0 :row 0 :track-id :t1 :muted? true})
+        s2 (run s1 {:event/type :timeline/update-item-timing :col 0 :row 0 :id item-id
+                    :edge :center :start 8.0})
+        s3 (run s2 {:event/type :edit/undo})]
+    (is (== 8.0 (get-in s2 [:chains :cue-chains [0 0] :items 0 :timeline/start])))
+    (is (== 0.0 (get-in s3 [:chains :cue-chains [0 0] :items 0 :timeline/start])) "the move is undone")
+    (is (true? (get-in s3 [:chains :cue-chains [0 0] :tracks 0 :items 0 :muted?])) "the mute stays")))

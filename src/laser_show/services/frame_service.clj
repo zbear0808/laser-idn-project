@@ -41,6 +41,8 @@
             [laser-show.profiling.jfr-profiler :as jfr]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.input.store :as input-store]
+            ;; Phase 2 of the timeline rework moves this out of views
+            [laser-show.views.components.visual-editors.timeline.track-logic :as tl]
             [laser-show.animation.effects.shape]
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
@@ -504,9 +506,11 @@
                        (pr-str (:destination-zone cue-chain))
                        (double (:effective-beats timing-ctx 0.0))
                        (count (:items cue-chain []))))
-  (let [items (:items cue-chain [])
+  (let [tracks (:tracks cue-chain)
+        muted (tl/muted-track-ids tracks)
+        items (cond->> (:items cue-chain [])
+                (seq muted) (filterv #(not (contains? muted (:track-id %)))))
         destination-id (get-in cue-chain [:destination-zone :zone-group-id] :all)
-        tracks (:tracks cue-chain)
         raw-state (state/get-raw-state)
         item-zone-maps (u/keepv
                         #(render-item-tree-by-zone
