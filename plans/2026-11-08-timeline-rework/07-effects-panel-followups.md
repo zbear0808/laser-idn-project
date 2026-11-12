@@ -1,7 +1,7 @@
 # Effects panel follow-ups: drag-and-drop, effect groups, panel size
 
 **Written:** 2026-11-11   **Written for commit:** `6edef3a` (branch `timeline/effects-panel`)
-**Status:** Proposed. Pick an option per limitation.   **Related:** `05-visual-design.md` (layout note, 2026-11-11)
+**Status:** Options chosen: A for each. Detailed plans: `08-drag-from-browser.md` (L1-A), `09-effect-racks.md` (L2-A), `10-detail-panel-size.md` (L3-A).   **Related:** `05-visual-design.md` (layout note, 2026-11-11)
 
 The Ableton-style detail panel and browser shipped with three known limitations. This file explains each one and gives resolution options with rough effort. One related bug found while researching is listed at the end.
 
@@ -77,17 +77,15 @@ A covers B's effect drop. Card reordering by drag (from B) can be added to A lat
 
 ---
 
-## Related bug found: zoom and scroll don't reset when the editor shows another cell
+## Related bug: corrected (see `10-detail-panel-size.md` §2)
 
-- The `timeline-editor` docstring says the viewport resets when the editor switches cell, but nothing keys the local state on the cell: `:cell` is stored in `:initial-state` and never compared.
-- If the open editor is pointed at another cell, it keeps the previous cue's zoom, scroll and panel height.
-- **Fix:** put `:fx/key [col row]` on the `ext-state` (~15 min, plus a UI test).
-- If L3-A/B is done, the panel height lives in prefs, so it correctly survives a cell switch while zoom and scroll reset.
+- The bug first described here doesn't exist. cljfx's `ext-state` resets its local state whenever `:initial-state` changes (cljfx 1.10.6 `lifecycle.clj`, `advance`), and `:initial-state` includes `:cell`, so zoom and scroll already reset when the editor shows another cell. `:fx/key` on the `ext-state` wouldn't have done anything anyway.
+- **The real bug:** that reset puts the lane size back to 0×0, and nothing measures it again unless the pane resizes, so the lanes can go blank after a cell switch. It's hidden today because the panel height snapping back happens to trigger a resize. It must be fixed before L3-A; plan 10 step 1 does it.
 
 ---
 
 ## Suggested order
-1. Cell-switch fix + L3-A (half a day together, low risk).
+1. L3-A with the blank-lanes fix (`10`, ~2 h, low risk).
 2. L1-A (drag from the browser): the biggest workflow gain.
 3. L2: C if groups are rare; B if grouping should be a timeline feature (it also covers card reordering).
 4. L3-B if you want layouts remembered across restarts.
