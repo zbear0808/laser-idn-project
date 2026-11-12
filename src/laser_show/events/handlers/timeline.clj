@@ -19,7 +19,8 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.events.handlers.list.helpers :as list-helpers]
-            [laser-show.views.components.visual-editors.timeline.track-logic :as tl])
+            [laser-show.views.components.visual-editors.timeline.track-logic :as tl]
+            [laser-show.timeline.model :as model])
   (:import [javafx.scene.control ScrollPane]
            [javafx.scene Node]
            [javafx.application Platform]))
@@ -36,7 +37,7 @@
 
 
 (defn- snap-opts
-  "Current snap settings in the shape tl/snap expects."
+  "Current snap settings in the shape model/snap expects."
   [state]
   {:enabled? (get-in state [:ui :timeline :snap-enabled?] true)
    :value (get-in state [:ui :timeline :snap-value] 0.25)})
@@ -207,9 +208,9 @@
         opts (snap-opts state)
         current-loop (get-in state loop-path {:enabled? false :start 0.0 :duration 4.0})
         updated-loop (case edge
-                       :center (tl/move-loop current-loop (- (double start) (double (:start current-loop 0.0))) opts)
-                       :left (tl/trim-loop-start current-loop start opts)
-                       :right (tl/trim-loop-end current-loop end opts)
+                       :center (model/move-loop current-loop (- (double start) (double (:start current-loop 0.0))) opts)
+                       :left (model/trim-loop-start current-loop start opts)
+                       :right (model/trim-loop-end current-loop end opts)
                        current-loop)]
     {:state (assoc-in state loop-path updated-loop)}))
 
@@ -231,7 +232,7 @@
    :edge :center moves the clip to :start (keeping its length),
    :left trims its start to :start (keeping its end),
    :right trims its end to :end (keeping its start).
-   Snaps when enabled; start >= 0 and length >= tl/min-clip-length."
+   Snaps when enabled; start >= 0 and length >= model/min-clip-length."
   [{:keys [col row id edge start end state]}]
   (let [items-path [:chains :cue-chains [col row] :items]
         items (get-in state items-path [])
@@ -240,9 +241,9 @@
                        items id
                        (fn [item]
                          (case edge
-                           :center (tl/move-clip item (- (double start) (double (or (tl/clip-start item) 0.0))) opts)
-                           :left (tl/trim-start item start opts)
-                           :right (tl/trim-end item end opts)
+                           :center (model/move-clip item (- (double start) (double (or (model/clip-start item) 0.0))) opts)
+                           :left (model/trim-start item start opts)
+                           :right (model/trim-end item end opts)
                            item)))]
     {:state (assoc-in state items-path updated-items)}))
 
@@ -255,7 +256,7 @@
         opts (snap-opts state)
         updated-items (reduce
                        (fn [acc id]
-                         (update-item-at-id acc id #(tl/move-clip % delta-beats opts)))
+                         (update-item-at-id acc id #(model/move-clip % delta-beats opts)))
                        items
                        selection)]
     {:state (-> state
@@ -275,7 +276,7 @@
   (let [chain-path [:chains :cue-chains [col row]]
         old-tracks (get-in state (conj chain-path :tracks) [])
         new-tracks (vec items)
-        removed (reduce disj (tl/leaf-track-ids old-tracks) (tl/leaf-track-ids new-tracks))
+        removed (reduce disj (model/leaf-track-ids old-tracks) (model/leaf-track-ids new-tracks))
         orphan-ids (into #{}
                          (comp (filter #(contains? removed (:track-id %))) (map :id))
                          (get-in state (conj chain-path :items) []))]
@@ -344,9 +345,9 @@
   [{:keys [col row zone-group-id state]}]
   (let [tracks-path [:chains :cue-chains [col row] :tracks]
         tracks (get-in state tracks-path [])
-        new-track (tl/create-track {:zone-group-id zone-group-id
+        new-track (model/create-track {:zone-group-id zone-group-id
                                     :name (str "Track " (inc (count tracks)))
-                                    :color (tl/palette-color (count (tl/leaf-track-ids tracks)))})
+                                    :color (model/palette-color (count (model/leaf-track-ids tracks)))})
         new-track-id (:id new-track)
         updated-tracks (conj tracks new-track)]
     {:state (-> state
@@ -360,7 +361,7 @@
   [{:keys [col row zone-group-id state]}]
   (let [tracks-path [:chains :cue-chains [col row] :tracks]
         tracks (get-in state tracks-path [])
-        new-folder (assoc (tl/create-track {:zone-group-id zone-group-id
+        new-folder (assoc (model/create-track {:zone-group-id zone-group-id
                                             :name (str "Folder " (inc (count tracks)))})
                           :type :group
                           :collapsed? false
@@ -379,7 +380,7 @@
 (defn- handle-set-cursor-beat
   "Set the timeline cursor beat position, snapping if enabled."
   [{:keys [beat state]}]
-  (let [snapped (max 0.0 (tl/snap (or beat 0.0) (snap-opts state)))]
+  (let [snapped (max 0.0 (model/snap (or beat 0.0) (snap-opts state)))]
     {:state (assoc-in state [:ui :timeline :cursor-beat] snapped)}))
 
 
@@ -412,14 +413,14 @@
         tracks-path [:chains :cue-chains [col row] :tracks]
         tracks (get-in state tracks-path [])
         [tracks state-with-tracks] (if (empty? tracks)
-                                     (let [default-tr (tl/create-track {:name "Track 1"})]
+                                     (let [default-tr (model/create-track {:name "Track 1"})]
                                        [[default-tr] (assoc-in state tracks-path [default-tr])])
                                      [tracks state])
-        resolved-track-id (tl/ensure-leaf-track tracks track-id)
+        resolved-track-id (model/insert-track tracks track-id)
         cursor-beat (get-in state-with-tracks [:ui :timeline :cursor-beat] 0.0)
         raw-start (or start cursor-beat 0.0)
-        start-beat (max 0.0 (tl/snap raw-start (snap-opts state-with-tracks)))
-        duration-beats tl/default-clip-length
+        start-beat (max 0.0 (model/snap raw-start (snap-opts state-with-tracks)))
+        duration-beats model/default-clip-length
         new-preset (-> (cue-chains/create-preset-instance item-id {})
                        (h/ensure-item-fields)
                        (assoc :track-id resolved-track-id
@@ -477,7 +478,7 @@
    
    - Timeline cue: the document isn't changed. (A cue that somehow skipped
      normalization is normalized here as a backfill: no undo step, not unsaved.)
-   - Any other cue (or an empty cell): converted with tl/convert-to-timeline,
+   - Any other cue (or an empty cell): converted with model/convert-to-timeline,
      which keeps what it renders. That's an undoable \"Convert to Timeline Cue\".
    Then chains into :ui/open-dialog."
   [{:keys [col row state]}]
@@ -485,10 +486,10 @@
         cue-chain (get-in state chain-path)
         timeline? (cue-chains/timeline-cue? cue-chain)
         new-track-id (random-uuid)
-        normalize #(tl/normalize-timeline-cue % {:new-track-id new-track-id})
+        normalize #(model/normalize-timeline-cue % {:new-track-id new-track-id})
         final-chain (if timeline?
                       (normalize cue-chain)
-                      (tl/convert-to-timeline cue-chain (get state :zone-groups {})))
+                      (model/convert-to-timeline cue-chain (get state :zone-groups {})))
         changed? (not (identical? final-chain cue-chain))
         effects {:state (cond-> (reset-view-for-cell state col row)
                           changed? (assoc-in chain-path final-chain))
@@ -517,7 +518,7 @@
 
 (defn wrap-normalize-timelines
   "Middleware: after the handler runs, enforce the timeline invariants
-   (tl/normalize-timeline-cue) on every cue chain the event changed. Runs
+   (model/normalize-timeline-cue) on every cue chain the event changed. Runs
    innermost, so undo snapshots and the unsaved flag see normalized state.
    Events that don't touch cue chains only pay one identical? check."
   [handler]
@@ -529,7 +530,7 @@
               (identical? old-ccs new-ccs)
               (restores-history? event))
         effects
-        (let [normalized (tl/normalize-timeline-cues old-ccs new-ccs)]
+        (let [normalized (model/normalize-timeline-cues old-ccs new-ccs)]
           (if (identical? normalized new-ccs)
             effects
             (assoc-in effects [:state :chains :cue-chains] normalized)))))))

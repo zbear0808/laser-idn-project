@@ -41,8 +41,7 @@
             [laser-show.profiling.jfr-profiler :as jfr]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.input.store :as input-store]
-            ;; Phase 2 of the timeline rework moves this out of views
-            [laser-show.views.components.visual-editors.timeline.track-logic :as tl]
+            [laser-show.timeline.model :as model]
             [laser-show.animation.effects.shape]
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
@@ -282,25 +281,6 @@
       (+ start (mod (- beats start) duration))
       beats)))
 
-(defn- in-timeline-window?
-  "Check if the current beat position falls within an item's timeline window.
-   Returns true if the item should be active at `current-beats`.
-
-   Rules:
-   - If :timeline/start is nil → start defaults to 0.
-   - If :timeline/duration is nil → item is active from start onward (infinite).
-   - Active when: start <= current-beats < start + duration.
-   - Items without any timeline keys are always active (backward compatible)."
-  [item current-beats]
-  (let [start (:timeline/start item)
-        duration (:timeline/duration item)]
-    (if (and (nil? start) (nil? duration))
-      true ;; no timeline keys → always on
-      (let [s (or start 0.0)]
-        (and (>= current-beats s)
-             (or (nil? duration)
-                 (< current-beats (+ s duration))))))))
-
 (defn- apply-item-effects
   "Apply an item's (preset or group) effect chain to a frame.
    Effects with :timeline/start and :timeline/duration are filtered
@@ -308,7 +288,7 @@
   [frame item elapsed-ms bpm trigger-time timing-ctx]
   (let [current-beats (window-beats timing-ctx)
         item-effects (->> (:effects item [])
-                          (filterv #(in-timeline-window? % current-beats)))]
+                          (filterv #(model/active-at? % current-beats)))]
     (if (seq item-effects)
       (try
         (effects/apply-effect-chain frame {:effects item-effects} elapsed-ms bpm trigger-time timing-ctx)
@@ -375,7 +355,7 @@
   [item elapsed-ms bpm trigger-time timing-ctx]
   (let [current-beats (window-beats timing-ctx)]
     (when (and (:enabled? item true)
-               (in-timeline-window? item current-beats))
+               (model/active-at? item current-beats))
       (cond
         ;; Preset: render and apply its effects
         (= :preset (:type item))
@@ -428,7 +408,7 @@
   [item parent-zone-id elapsed-ms bpm trigger-time timing-ctx tracks default-zone-id]
   (let [current-beats (window-beats timing-ctx)]
     (if-not (and (:enabled? item true)
-                 (in-timeline-window? item current-beats))
+                 (model/active-at? item current-beats))
       {}
       (cond
         ;; Preset: render and apply preset effects, assign to resolved zone
@@ -524,7 +504,7 @@
                        (double (:effective-beats timing-ctx 0.0))
                        (count (:items cue-chain []))))
   (let [tracks (:tracks cue-chain)
-        muted (tl/muted-track-ids tracks)
+        muted (model/muted-track-ids tracks)
         items (cond->> (:items cue-chain [])
                 (seq muted) (filterv #(not (contains? muted (:track-id %)))))
         destination-id (get-in cue-chain [:destination-zone :zone-group-id] :all)

@@ -6,7 +6,7 @@
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.events.core :as events]
-            [laser-show.views.components.visual-editors.timeline.track-logic :as tl]))
+            [laser-show.timeline.model :as model]))
 
 (def item-id #uuid "11111111-1111-1111-1111-111111111111")
 
@@ -333,7 +333,7 @@
         steps (undo-count s0)
         s1 (run s0 {:event/type :cue-chain/add-preset :col 0 :row 0 :preset-id :circle})
         items (get-in s1 [:chains :cue-chains [0 0] :items])
-        leaf-ids (tl/leaf-track-ids (get-in s1 [:chains :cue-chains [0 0] :tracks]))]
+        leaf-ids (model/leaf-track-ids (get-in s1 [:chains :cue-chains [0 0] :tracks]))]
     (is (= 2 (count items)))
     (is (every? #(number? (:timeline/start %)) items))
     (is (every? #(number? (:timeline/duration %)) items))

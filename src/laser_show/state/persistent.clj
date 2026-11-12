@@ -14,7 +14,7 @@
             [laser-show.state.history :as history]
             [laser-show.state.serialization :as ser]
             [laser-show.state.templates :as templates]
-            [laser-show.views.components.visual-editors.timeline.track-logic :as tl]))
+            [laser-show.timeline.model :as model]))
 
 
 (def default-projects-dir
@@ -167,7 +167,7 @@
         (replace-document initial (zip-contents->file-data zip-contents))
         (reset-session initial)
         ;; Before mark-clean, so an old project isn't "unsaved" right after loading
-        (update-in [:chains :cue-chains] tl/normalize-timeline-cues)
+        (update-in [:chains :cue-chains] model/normalize-timeline-cues)
         history/mark-clean
         (assoc-in [:project :current-file] zip-path))))
 

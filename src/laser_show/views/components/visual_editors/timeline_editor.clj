@@ -21,7 +21,8 @@
             [laser-show.views.components.list :as list]
             [laser-show.views.components.preset-bank :as preset-bank]
             [laser-show.views.components.visual-editors.canvas-interaction :as ci]
-            [laser-show.views.components.visual-editors.timeline.track-logic :as tl])
+            [laser-show.views.components.visual-editors.timeline.track-logic :as tl]
+            [laser-show.timeline.model :as model])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.paint Color]
            [javafx.scene.control ScrollPane]
@@ -67,7 +68,7 @@
 (defn- track-color
   "Clip colour for a track: its :color, else the palette colour for its row."
   [track row-idx]
-  (web-color (or (:color track) (tl/palette-color row-idx))))
+  (web-color (or (:color track) (model/palette-color row-idx))))
 
 
 ;; ============================================================
@@ -78,13 +79,13 @@
 (defn- build-tracks
   "Build a flat vector of display rows from explicit Track tree definitions and items.
    
-   Visible tracks come from tl/flatten-visible-tracks. A collapsed folder's row
+   Visible tracks come from model/flatten-visible-tracks. A collapsed folder's row
    shows the clips of every track hidden under it (:summary? true), so
    collapsing never moves clips to \"Unassigned\"."
   [track-defs items]
   (if (seq track-defs)
-    (let [grouped (tl/items-by-track items)
-          flat-tracks (tl/flatten-visible-tracks track-defs)
+    (let [grouped (model/items-by-track items)
+          flat-tracks (model/flatten-visible-tracks track-defs)
           shown-ids (into #{} (mapcat #(cons (:id %) (:hidden-descendants %))) flat-tracks)
           track-rows (mapv (fn [track]
                              (let [hidden (:hidden-descendants track)]
@@ -103,9 +104,9 @@
                            flat-tracks)
           ;; Items with no track or a track that doesn't exist (only possible
           ;; before normalization)
-          unassigned (into (get grouped ::tl/unassigned [])
+          unassigned (into (get grouped ::model/unassigned [])
                            (mapcat (fn [[tid t-items]]
-                                     (when (and (not= tid ::tl/unassigned)
+                                     (when (and (not= tid ::model/unassigned)
                                                 (not (contains? shown-ids tid)))
                                        t-items))
                                    grouped))]
@@ -286,8 +287,8 @@
 (defn- clip-rect
   "[x w] of a clip on the canvas."
   [item zoom-x]
-  [(* (double (or (tl/clip-start item) 0.0)) zoom-x)
-   (max min-clip-width (* (double (or (tl/clip-length item) 0.0)) zoom-x))])
+  [(* (double (or (model/clip-start item) 0.0)) zoom-x)
+   (max min-clip-width (* (double (or (model/clip-length item) 0.0)) zoom-x))])
 
 (defn- draw-clip!
   "Draw a single clip (item rectangle) on the canvas.
@@ -328,7 +329,7 @@
   "Highlight spans where clips on the same row overlap (they all play)."
   [^GraphicsContext gc track-idx items zoom-x]
   (let [spans (->> items
-                   (keep (fn [i] (when-let [e (tl/clip-end i)] [(double (tl/clip-start i)) e])))
+                   (keep (fn [i] (when-let [e (model/clip-end i)] [(double (model/clip-start i)) e])))
                    (sort-by first)
                    vec)
         y (+ (track-y track-idx) 2)
@@ -346,7 +347,7 @@
    hit-test walks the reverse of this."
   [items selection]
   (let [{sel true other false} (group-by #(contains? selection (:id %))
-                                         (sort-by #(or (tl/clip-start %) 0.0) items))]
+                                         (sort-by #(or (model/clip-start %) 0.0) items))]
     (into (vec other) sel)))
 
 
@@ -837,11 +838,11 @@
                           (get-in (vec items) path)))
         ;; Check for selected track
         selected-track (when (and (not selected-clip) selected-track-id)
-                         (tl/find-track-by-id track-defs selected-track-id))]
+                         (model/find-track track-defs selected-track-id))]
     (cond
       ;; 1. Clip Inspector
       selected-clip
-      (let [assigned-track (tl/find-track-by-id track-defs (:track-id selected-clip))
+      (let [assigned-track (model/find-track track-defs (:track-id selected-clip))
             track-zone (when assigned-track
                          (ze/resolve-track-effective-zone track-defs (:id assigned-track) :all))
             track-zone-name (or (get-in zone-groups [track-zone :name])
@@ -849,7 +850,7 @@
                                 "All")
             clip-zone (:zone-group-id selected-clip)
             preset-def (presets/presets-by-id (:preset-id selected-clip))
-            leaf-tracks (filterv tl/leaf-track? (chains/flatten-chain track-defs))
+            leaf-tracks (filterv model/leaf-track? (chains/flatten-chain track-defs))
             ;; Zone combo options
             zone-options (into [{:id :inherit :name (str "Inherit from Track (" track-zone-name ")")}]
                                (mapv (fn [zg] {:id (:id zg) :name (:name zg (name (:id zg)))}) (vals zone-groups)))
@@ -932,7 +933,7 @@
       selected-track
       (let [is-folder? (or (= :group (:type selected-track)) (contains? selected-track :items))
             track-zone (:zone-group-id selected-track)
-            parent-folder (tl/parent-track track-defs (:id selected-track))
+            parent-folder (model/parent-track track-defs (:id selected-track))
             parent-zone (when parent-folder
                           (ze/resolve-track-effective-zone track-defs (:id parent-folder) :all))
             parent-zone-name (when parent-zone
@@ -1142,17 +1143,15 @@
               snap-enabled? true
               snap-value 0.25}} timeline-ui
         tracks (build-tracks (or track-defs []) (or items []))
-        muted-track-ids (tl/muted-track-ids track-defs)
+        muted-track-ids (model/muted-track-ids track-defs)
         ;; Determine selected item ID for the effect bank
         selected-item-id (when (= 1 (count selection)) (first selection))
         ;; The track or folder selected in the sidebar (nil when none)...
         tracks-ui-state (fx/sub-ctx context subs/list-ui-state :timeline-tracks)
         sidebar-selected-track-id (let [id (first (:selected-ids tracks-ui-state))]
-                                    (when (and id (tl/find-track-by-id track-defs id)) id))
+                                    (when (and id (model/find-track track-defs id)) id))
         ;; ...and the leaf track new content goes to
-        insert-track-id (tl/resolve-active-track
-                         {:track-defs track-defs
-                          :selected-track-id sidebar-selected-track-id})]
+        insert-track-id (model/insert-track (or track-defs []) sidebar-selected-track-id)]
     (cond->
      {:fx/type :border-pane
       :style "-fx-background-color: #121212;"
