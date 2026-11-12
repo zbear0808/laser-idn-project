@@ -20,6 +20,8 @@
             [laser-show.subs :as subs]
             [laser-show.timeline.layout :as layout]
             [laser-show.timeline.model :as model]
+            [laser-show.timeline.playback :as playback]
+            [laser-show.timeline.timecode :as tc]
             [laser-show.views.components.preset-bank :as preset-bank]
             [laser-show.views.components.visual-editors.canvas-interaction :as ci]
             [laser-show.views.components.visual-editors.timeline.gesture :as gesture]
@@ -228,6 +230,22 @@
     (.setStroke gc cc/tl-grid-beat)
     (.strokeLine gc 0 (- ruler-h 0.5) width (- ruler-h 0.5))))
 
+(defn- draw-past-end!
+  "The timeline stops at its end: shade what's after it and draw the
+   (draggable) end marker."
+  [^GraphicsContext gc {:keys [view cue]} width height]
+  (when-let [end (layout/end-beat cue)]
+    (let [x (layout/beat->x view end)]
+      (when (< x width)
+        (.setFill gc cc/tl-past-end)
+        (.fillRect gc (max 0.0 x) 0 (- width (max 0.0 x)) height)
+        (when (>= x 0)
+          (.setStroke gc cc/tl-end-marker)
+          (.setLineWidth gc 1.0)
+          (.strokeLine gc (crisp x) 0 (crisp x) height)
+          (.setFill gc cc/tl-end-marker)
+          (.fillRect gc (- (crisp x) 3) 4 6 14))))))
+
 (defn- draw-empty-state! [^GraphicsContext gc {:keys [rows view cue cursor-beat]} width height]
   (.setFont gc cc/tl-font-hint)
   (.setFill gc cc/tl-ghost-text)
@@ -251,12 +269,18 @@
         width (.getWidth canvas)
         height (.getHeight canvas)
         value (assoc value :hover-id (:hover-id drag-info))
-        ticks (layout/ruler-ticks (:view value))]
+        ticks (layout/ruler-ticks (:view value) (:ruler-opts value))]
     (draw-lanes! gc value width height)
     (draw-grid! gc ticks width height)
     (draw-clips! gc value width height)
+    (draw-past-end! gc value width height)
     (draw-empty-state! gc value width height)
     (draw-ruler! gc value ticks width)
+    (when-let [b (:scrub-beat value)]
+      (let [x (crisp (layout/beat->x (:view value) b))]
+        (.setStroke gc cc/tl-cursor)
+        (.setLineWidth gc 1.0)
+        (.strokeLine gc x 0 x height)))
     (when-let [[x y w h] (:marquee value)]
       (.setFill gc cc/tl-marquee-fill)
       (.fillRect gc x y w h)
@@ -281,6 +305,7 @@
       marquee (assoc value :marquee marquee
                      :selection (cond-> (set (:marquee-ids g))
                                   (:additive? g) (into (:selection value))))
+      (= :scrub (:kind g)) (assoc value :scrub-beat (:beat g))
       (and (:moved? g) (:op g))
       (let [cue (gesture/preview (:cue value) g {:snap (:snap value)})]
         (assoc value
@@ -309,8 +334,8 @@
                    :clip (cond-> []
                            (:press-select g) (conj (assoc (:press-select g) :event/type :timeline/select-items :col col :row row))
                            select-track (conj select-track))
-                   :loop []
-                   :ruler [{:event/type :timeline/set-cursor-beat :col col :row row :beat beat}]
+                   (:loop :end) []
+                   :ruler [{:event/type :timeline/seek :col col :row row :beat beat}]
                    (cond-> []
                      (not (or (:shift? modifiers) (:shortcut? modifiers)))
                      (conj {:event/type :timeline/clear-selection :col col :row row})
@@ -329,8 +354,9 @@
 
 (defn- on-release [value {:keys [gesture]}]
   (let [{:keys [col row]} value
-        {:keys [op select select-track]} (gesture/finish gesture)]
+        {:keys [op select select-track seek]} (gesture/finish gesture)]
     {:dispatch (cond-> []
+                 seek (conj {:event/type :timeline/seek :col col :row row :beat seek})
                  op (conj {:event/type :timeline/apply-op :col col :row row :op op})
                  select (conj (assoc select :event/type :timeline/select-items :col col :row row))
                  select-track (conj {:event/type :timeline/select-track :col col :row row :track-id select-track}))}))
@@ -340,17 +366,21 @@
     {:hover-id (when (= :clip (:type h)) (get-in h [:clip :id]))
      :cursor (case (:type h)
                (:clip :loop) (case (:edge h) :left "w-resize" :right "e-resize" "move")
+               :end "e-resize"
                :ruler "hand"
                "default")}))
 
 (defn- on-key
-  "Escape cancels a drag (or clears the selection), Delete/Backspace delete
+  "Space plays/pauses. Escape cancels a drag (or clears the selection), Delete/Backspace delete
    the selection, arrows nudge (Shift = 1/4 beat), Ctrl/Cmd+D duplicates,
    Ctrl/Cmd+A selects every clip."
   [^KeyCode key-code shift? value {:keys [dragging? modifiers]}]
   (let [{:keys [col row selection cue]} value
         shortcut? (:shortcut? modifiers)]
     (cond
+      (= key-code KeyCode/SPACE)
+      {:dispatch {:event/type :timeline/toggle-play :col col :row row} :consumed? true}
+
       (= key-code KeyCode/ESCAPE)
       (if dragging?
         {:cancel-drag? true :consumed? true}
@@ -451,11 +481,42 @@
 ;; ============================================================
 
 
-(def ^:private snap-options
+(def ^:private bar-snap-options
   [["1 bar" 4.0] ["1/2" 2.0] ["1/4" 1.0] ["1/8" 0.5] ["1/16" 0.25] ["1/32" 0.125] ["1/64" 0.0625]])
 
-(defn- snap-name [value]
-  (or (some (fn [[label v]] (when (== v (double value)) label)) snap-options) (str value)))
+(defn- snap-options
+  "[label beats] snap choices: musical in bar mode, time in time mode
+   (converted to beats at the cue's tempo)."
+  [{:keys [mode bpm fps]}]
+  (if (= mode :time)
+    (mapv (fn [[label secs]] [label (tc/seconds->beats secs bpm)])
+          [["1 frame" (/ 1.0 (double (or fps 30)))] ["1/4 s" 0.25] ["1 s" 1.0] ["5 s" 5.0]])
+    bar-snap-options))
+
+(defn- snap-name [options value]
+  (or (some (fn [[label v]] (when (< (Math/abs (- (double v) (double value))) 1e-9) label)) options)
+      (format "%.3g" (double value))))
+
+(defn- readout
+  "Position readout: bar.beat.sub and show timecode, from the playhead while
+   playing, else the cursor. Subscribes to the playhead itself, so only this
+   label updates on playback ticks. ≈ marks a timecode estimated at the
+   current global BPM (the tempo isn't locked)."
+  [{:keys [fx/context col row cue cursor-beat global-bpm]}]
+  (let [playhead (fx/sub-ctx context subs/timeline-playhead col row)
+        pos (or playhead cursor-beat 0.0)
+        {:keys [seconds approx?]} (tc/show-seconds cue pos global-bpm)]
+    {:fx/type :h-box
+     :alignment :center-left
+     :spacing 6
+     :children [{:fx/type :label
+                 :id "timeline-readout"
+                 :style-class "tl-readout"
+                 :text (bar-beat-sub pos)}
+                {:fx/type :label
+                 :id "timeline-readout-tc"
+                 :style-class (cond-> ["tl-readout" "tl-readout-tc"] approx? (conj "tl-readout-approx"))
+                 :text (str (when approx? "≈") (tc/format-tc (tc/seconds->tc seconds (tc/cue-fps cue))))}]}))
 
 (defn- icon-button [{:keys [id icon tooltip on-action disable]}]
   (cond-> {:fx/type :button
@@ -481,21 +542,58 @@
 
 (defn- toolbar
   [{:keys [col row title view snap loop-enabled? follow? inspector-open? drawer-open?
-           cursor-beat zoom-view! fit! swap-state]}]
-  (let [log2 #(/ (Math/log (double %)) (Math/log 2.0))]
+           cursor-beat zoom-view! fit! swap-state cue global-bpm transport ruler-opts]}]
+  (let [log2 #(/ (Math/log (double %)) (Math/log 2.0))
+        options (snap-options ruler-opts)
+        locked (:timeline/tempo-bpm cue)
+        playing? (= :playing transport)]
     {:fx/type :h-box
      :style-class "tl-toolbar"
      :children
      (filterv some?
               [title
                (when title (separator))
-               (icon-button {:icon :backward-step :tooltip "Back to start (Phase 4)" :disable true :on-action (fn [_])})
-               (icon-button {:icon :play :tooltip "Play (Phase 4)" :disable true :on-action (fn [_])})
-               (icon-button {:icon :stop :tooltip "Stop (Phase 4)" :disable true :on-action (fn [_])})
+               (icon-button {:id "timeline-to-start" :icon :backward-step :tooltip "Back to start"
+                             :on-action {:event/type :timeline/seek :col col :row row :beat 0.0}})
+               (icon-button {:id "timeline-play" :icon (if playing? :pause :play)
+                             :tooltip (if playing? "Pause (Space)" "Play from the cursor (Space)")
+                             :on-action {:event/type :timeline/toggle-play :col col :row row}})
+               (icon-button {:id "timeline-stop" :icon :stop :tooltip "Stop"
+                             :disable (= :stopped transport)
+                             :on-action {:event/type :timeline/stop :col col :row row}})
+               {:fx/type readout :col col :row row :cue cue :cursor-beat cursor-beat :global-bpm global-bpm}
+               (separator)
                {:fx/type :label
-                :id "timeline-readout"
-                :style-class "tl-readout"
-                :text (bar-beat-sub (or cursor-beat 0.0))}
+                :id "timeline-tempo"
+                :style-class (cond-> ["tl-readout" "tl-tempo"] (not locked) (conj "tl-readout-approx"))
+                :text (format "%.1f BPM" (double (or locked global-bpm 120.0)))}
+               {:fx/type :toggle-button
+                :id "timeline-tempo-lock"
+                :style-class ["toggle-button" "tl-toggle"]
+                :focus-traversable false
+                :selected (some? locked)
+                :graphic {:fx/type fa/icon :name (if locked :lock :lock-open) :size 12}
+                :tooltip {:fx/type :tooltip
+                          :text (if locked
+                                  "Tempo locked: tap tempo and Link don't change this timeline. Click to follow the global BPM."
+                                  "Follows the global BPM. Click to lock this timeline at the current tempo.")}
+                :on-action {:event/type :timeline/apply-op :col col :row row
+                            :op {:op :set-tempo :bpm (when-not locked global-bpm)}}}
+               {:fx/type :h-box
+                :children [{:fx/type :toggle-button
+                            :id "timeline-ruler-bars"
+                            :text "Bars"
+                            :style-class ["toggle-button" "tl-toggle" "tl-segment"]
+                            :focus-traversable false
+                            :selected (not= :time (:mode ruler-opts))
+                            :on-action {:event/type :timeline/set-ruler-mode :mode :bars}}
+                           {:fx/type :toggle-button
+                            :id "timeline-ruler-time"
+                            :text "Time"
+                            :style-class ["toggle-button" "tl-toggle" "tl-segment"]
+                            :focus-traversable false
+                            :selected (= :time (:mode ruler-opts))
+                            :on-action {:event/type :timeline/set-ruler-mode :mode :time}}]}
                (separator)
                {:fx/type :region :h-box/hgrow :always}
                {:fx/type :button
@@ -520,10 +618,10 @@
                 :id "timeline-snap-value"
                 :style-class ["combo-box" "tl-snap-combo"]
                 :focus-traversable false
-                :items (mapv first snap-options)
-                :value (snap-name (:value snap))
+                :items (mapv first options)
+                :value (snap-name options (:value snap))
                 :on-value-changed (fn [label]
-                                    (when-let [v (some (fn [[l v]] (when (= l label) v)) snap-options)]
+                                    (when-let [v (some (fn [[l v]] (when (= l label) v)) options)]
                                       (when (not= v (:value snap))
                                         (events/dispatch! {:event/type :timeline/set-snap :value v}))))}
                (toggle {:id "timeline-loop-toggle" :icon :repeat :tooltip "Loop"
@@ -618,6 +716,12 @@
         {drawer-open? :open? preset-tab :preset-tab effect-tab :effect-tab} (:add-panel timeline-prefs)
         inspector-open? (:inspector-open? timeline-prefs true)
         tracks (:tracks cue [])
+        global-bpm (fx/sub-ctx context subs/bpm)
+        transport (fx/sub-ctx context subs/timeline-transport col row)
+        ruler-opts {:mode (:ruler-mode timeline-prefs :bars)
+                    :bpm (playback/cue-bpm cue global-bpm)
+                    :tc-start (:timeline/tc-start cue 0.0)
+                    :fps (tc/cue-fps cue)}
         rows (layout/rows tracks (:items cue))
         content-beats (layout/content-beats cue)
         content-height (layout/content-height rows)
@@ -646,7 +750,8 @@
            :col col :row row :title title :view view :snap snap
            :loop-enabled? (boolean (get-in cue [:loop :enabled?]))
            :follow? follow? :inspector-open? inspector-open? :drawer-open? drawer-open?
-           :cursor-beat cursor-beat :zoom-view! zoom-view! :fit! fit! :swap-state swap-state}
+           :cursor-beat cursor-beat :zoom-view! zoom-view! :fit! fit! :swap-state swap-state
+           :cue cue :global-bpm global-bpm :transport transport :ruler-opts ruler-opts}
      :center
      {:fx/type :border-pane
       :center
@@ -691,6 +796,7 @@
                     :insert-track-id insert-track-id
                     :muted-track-ids (model/muted-track-ids tracks)
                     :cursor-beat cursor-beat
+                    :ruler-opts ruler-opts
                     :snap snap}
             :render! render-lanes!
             :on-press on-press
@@ -740,7 +846,8 @@
                      :zone-groups zone-groups :destination-zone-id destination-zone-id
                      :selection (or selection #{})
                      :selected-track-id selected-track-id
-                     :add-panel-effect-tab effect-tab})
+                     :add-panel-effect-tab effect-tab
+                     :global-bpm global-bpm})
       drawer-open?
       (assoc :bottom {:fx/type drawer
                       :col col :row row :preset-tab preset-tab :cursor-beat cursor-beat

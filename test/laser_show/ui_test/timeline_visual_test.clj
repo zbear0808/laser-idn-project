@@ -73,5 +73,12 @@
         (shot! "03-playing")
         (state/swap-state! update-in [:playback :active-cues] dissoc [2 2])
         (ui/click! (ui/robot) "#timeline-add-content")
-        (shot! "04-drawer"))
+        (shot! "04-drawer")
+        ;; No loop: the timeline stops at its end, shown by the end marker
+        (events/dispatch! {:event/type :timeline/toggle-loop :col 2 :row 2})
+        (events/dispatch! {:event/type :timeline/apply-op :col 2 :row 2 :op {:op :set-tempo :bpm 120.0}})
+        (ui/wait-for! #(false? (get-in (cue) [:loop :enabled?])))
+        (shot! "05-end-marker")
+        (events/dispatch! {:event/type :timeline/set-ruler-mode :mode :time})
+        (shot! "06-time-ruler"))
       (is true))))

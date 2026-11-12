@@ -10,6 +10,7 @@
             [laser-show.events.core :as events]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.timeline.model :as model]
+            [laser-show.timeline.timecode :as tc]
             [laser-show.views.components.effect-bank :as effect-bank])
   (:import [javafx.scene.control TextField]))
 
@@ -164,34 +165,89 @@
                                  :on-action (fn [_] (apply-op! col row {:op :set-track-color :track-id (:id track) :color hex}))})
                               model/track-palette)}]))))
 
-(defn- timeline-section [{:keys [col row cue]}]
+(defn- text-commit-field
+  "Text field committing (on-commit text) on Enter."
+  [{:keys [id text on-commit pref-width]}]
+  {:fx/type :text-field
+   :id id
+   :text text
+   :pref-width (or pref-width 110)
+   :on-action (fn [e] (on-commit (.getText ^TextField (.getSource e))))})
+
+(defn- timeline-section [{:keys [col row cue global-bpm]}]
   (let [{:keys [enabled? start duration] :or {start 0.0 duration 4.0}} (:loop cue)
         clips (:items cue)
-        end (reduce max 0.0 (keep model/clip-end clips))]
+        explicit (:timeline/length cue)
+        length (model/effective-length cue)
+        locked (:timeline/tempo-bpm cue)
+        fps (tc/cue-fps cue)
+        tc-start (:timeline/tc-start cue 0.0)
+        cell (fn [r c node] (assoc node :grid-pane/row r :grid-pane/column c))]
     [(title "TIMELINE")
-     {:fx/type :label :text (str (count clips) " clips · ends at beat " (format "%.2f" end)) :style-class "tl-field-value"}
+     {:fx/type :label
+      :text (str (count clips) " clips · "
+                 (if enabled? "loops" (str "stops at beat " (format "%.2f" (double length)))))
+      :style-class "tl-field-value"}
+     {:fx/type :grid-pane
+      :hgap 8 :vgap 6
+      :children [(cell 0 0 (field-label "Length"))
+                 (cell 0 1 (beats-field {:id "timeline-length" :value length
+                                         :on-commit #(apply-op! col row {:op :set-length :beats % :snap? false})}))
+                 (cell 0 2 {:fx/type :button
+                            :id "timeline-length-auto"
+                            :text "Auto"
+                            :disable (nil? explicit)
+                            :style-class ["button" "tl-icon-button"]
+                            :tooltip {:fx/type :tooltip :text "End at the last clip"}
+                            :on-action (fn [_] (apply-op! col row {:op :set-length :beats nil}))})
+                 (cell 1 0 (field-label "Tempo"))
+                 (cell 1 1 (if locked
+                             (beats-field {:id "timeline-tempo-bpm" :value locked
+                                           :on-commit #(apply-op! col row {:op :set-tempo :bpm %})})
+                             {:fx/type :label :text (format "follows %.1f" (double (or global-bpm 120.0)))
+                              :style-class "tl-field-value"}))
+                 (cell 1 2 {:fx/type :button
+                            :text (if locked "Follow" "Lock")
+                            :style-class ["button" "tl-icon-button"]
+                            :on-action (fn [_] (apply-op! col row {:op :set-tempo :bpm (when-not locked global-bpm)}))})
+                 (cell 2 0 (field-label "Starts at"))
+                 (cell 2 1 (text-commit-field
+                            {:id "timeline-tc-start"
+                             :text (tc/format-tc (tc/seconds->tc tc-start fps))
+                             :on-commit (fn [text]
+                                          (when-let [t (tc/parse-tc text fps)]
+                                            (apply-op! col row {:op :set-tc-start :seconds (tc/tc->seconds t fps)})))}))
+                 (cell 3 0 (field-label "Frame rate"))
+                 (cell 3 1 {:fx/type :combo-box
+                            :id "timeline-tc-fps"
+                            :items tc/frame-rates
+                            :value fps
+                            :button-cell (fn [f] {:text (if (tc/drop-frame? f) "29.97 DF" (str f))})
+                            :cell-factory {:fx/cell-type :list-cell
+                                           :describe (fn [f] {:text (if (tc/drop-frame? f) "29.97 DF" (str f))})}
+                            :on-value-changed (fn [f] (when (and f (not= f fps))
+                                                        (apply-op! col row {:op :set-tc-fps :fps f})))})]}
      {:fx/type :check-box
       :text "Loop"
       :selected (boolean enabled?)
       :on-selected-changed (fn [on] (apply-op! col row {:op :set-loop :enabled? on}))}
      {:fx/type :grid-pane
       :hgap 8 :vgap 6
-      :children [(assoc (field-label "Loop start") :grid-pane/row 0 :grid-pane/column 0)
-                 (assoc (beats-field {:id "timeline-loop-start" :value start
-                                      :on-commit #(apply-op! col row {:op :set-loop :start (max 0.0 %)})})
-                        :grid-pane/row 0 :grid-pane/column 1)
-                 (assoc (field-label "Loop length") :grid-pane/row 1 :grid-pane/column 0)
-                 (assoc (beats-field {:id "timeline-loop-length" :value duration
-                                      :on-commit #(apply-op! col row {:op :set-loop :duration (max model/min-clip-length %)})})
-                        :grid-pane/row 1 :grid-pane/column 1)]}
+      :children [(cell 0 0 (field-label "Loop start"))
+                 (cell 0 1 (beats-field {:id "timeline-loop-start" :value start
+                                         :on-commit #(apply-op! col row {:op :set-loop :start (max 0.0 %)})}))
+                 (cell 1 0 (field-label "Loop length"))
+                 (cell 1 1 (beats-field {:id "timeline-loop-length" :value duration
+                                         :on-commit #(apply-op! col row {:op :set-loop :duration (max model/min-clip-length %)})}))]}
      {:fx/type :label
-      :text "Click the ruler to move the cursor; presets are added at the cursor on the selected track."
+      :text (str "Without a loop the timeline stops at its end. Lock the tempo for pre-recorded shows "
+                 "so beats map to fixed times. Click or drag the ruler to move the cursor; Space plays from it.")
       :wrap-text true
       :style-class "tl-field-label"}]))
 
 (defn inspector
   "Props: :col :row :cue :tracks :zone-groups :destination-zone-id :selection
-   :selected-track-id :add-panel-effect-tab"
+   :selected-track-id :add-panel-effect-tab :global-bpm"
   [{:keys [cue tracks selection selected-track-id] :as props}]
   (let [items (:items cue)
         clip (when (= 1 (count selection))

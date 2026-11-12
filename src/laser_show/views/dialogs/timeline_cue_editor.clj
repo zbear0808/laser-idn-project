@@ -175,11 +175,17 @@
 
 
 (defn- handle-scene-key-pressed
-  "Handles undo/redo keyboard shortcuts at the scene level."
+  "Handles undo/redo shortcuts and Space (play/pause the timeline) at the
+   scene level. Space only gets here when no control used it (text fields
+   and buttons do)."
   [^KeyEvent e]
   (let [code (.getCode e)
         shortcut? (or (.isShortcutDown e) (.isControlDown e))
         shift? (.isShiftDown e)]
+    (when (and (= code KeyCode/SPACE) (not shortcut?)
+               (not (instance? javafx.scene.control.TextInputControl (.getTarget e))))
+      (.consume e)
+      (events/dispatch! {:event/type :timeline/toggle-play}))
     (when shortcut?
       (cond
         (and (= code KeyCode/Z) shift?)

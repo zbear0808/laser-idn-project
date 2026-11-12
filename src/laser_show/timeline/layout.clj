@@ -9,7 +9,8 @@
    - beats map to canvas x through the viewport:
        view = {:zoom px-per-beat :scroll-beat b :scroll-y px :width px :height px}
      where :width/:height are the lane canvas size (ruler included)."
-  (:require [laser-show.timeline.model :as model]))
+  (:require [laser-show.timeline.model :as model]
+            [laser-show.timeline.timecode :as tc]))
 
 
 (def metrics
@@ -200,10 +201,57 @@
         in-bar (inc (mod b beats-per-bar))]
     (if (= 1 in-bar) (str bar) (str bar "." in-bar))))
 
+(def ^:private time-steps
+  "Candidate label spacings in seconds for the time ruler."
+  [1 2 5 10 15 30 60 120 300 600 1800 3600])
+
+(defn- time-ticks
+  "Time-mode ticks: labelled every `major` seconds (at least ~70 px apart),
+   minor ticks between, frame ticks at >= 400 px per second.
+   opts: {:bpm :tc-start :fps}. Labels are mm:ss (h:mm:ss past an hour)."
+  [view {:keys [bpm tc-start fps]}]
+  (let [bpm (double (or bpm 120.0))
+        tc-start (double (or tc-start 0.0))
+        px-per-s (* (double (:zoom view)) (/ bpm 60.0))
+        major (or (some #(when (>= (* px-per-s %) 70.0) %) time-steps) (peek time-steps))
+        minor (cond
+                (>= px-per-s 400.0) (/ 1.0 (double (or fps 30)))
+                (>= (* px-per-s major) 280.0) (/ major 10.0)
+                :else (/ major 5.0))
+        [b0 b1] (visible-beat-range view)
+        s0 (+ tc-start (* b0 (/ 60.0 bpm)))
+        s1 (+ tc-start (* b1 (/ 60.0 bpm)))
+        first-i (long (Math/floor (/ s0 minor)))
+        last-i (long (Math/ceil (/ s1 minor)))
+        per-major (Math/round (/ (double major) minor))]
+    (into []
+          (keep (fn [i]
+                  (let [secs (* i minor)
+                        beat (* (- secs tc-start) (/ bpm 60.0))
+                        on-major? (and (pos? per-major) (zero? (mod i per-major)))
+                        on-second? (< (Math/abs (- secs (Math/rint secs))) 1e-6)]
+                    (when (>= beat -1e-9)
+                      {:beat beat
+                       :x (beat->x view beat)
+                       :kind (cond on-major? :bar on-second? :beat :else :sub)
+                       :label (when on-major? (tc/format-clock (Math/rint secs)))}))))
+          (range first-i (inc last-i)))))
+
+(declare bar-ticks)
+
 (defn ruler-ticks
   "Ticks in the visible range: [{:beat :x :kind (:bar | :beat | :sub) :label}].
    One table drives both the ruler and the grid. Bars are 1-based (4/4);
-   beat labels read bar.beat (\"5.3\")."
+   beat labels read bar.beat (\"5.3\").
+   With opts {:mode :time :bpm :tc-start :fps} the ticks follow show time
+   instead (see time-ticks); :bar is then a labelled time tick."
+  ([view] (ruler-ticks view nil))
+  ([view {:keys [mode] :as opts}]
+   (if (= mode :time)
+     (time-ticks view opts)
+     (bar-ticks view))))
+
+(defn- bar-ticks
   [view]
   (let [{:keys [label] :as levels} (tick-levels (:zoom view))
         step (double (or (:sub levels) (:beat levels) (:bar levels)))
@@ -266,9 +314,18 @@
       (> x (- (+ left w) grab)) :right
       :else :center)))
 
+(defn end-beat
+  "Where the end marker is drawn, or nil: the timeline's end when it doesn't
+   loop (it stops there) and has one."
+  [cue]
+  (let [end (model/effective-length cue)]
+    (when (and (not (get-in cue [:loop :enabled?])) (pos? (double end)))
+      end)))
+
 (defn hit-test
   "What's at canvas (x, y), topmost first:
    {:type :loop :edge e}           the loop band (only its drawn strip)
+   {:type :end :beat b}            the end marker, within 4 px, in the ruler
    {:type :ruler :beat b}          the rest of the ruler
    {:type :clip :clip c :row-idx i :row r :edge e}
                                    e is :left/:right/:center; summary bars
@@ -283,8 +340,14 @@
       (let [{:keys [start duration] :or {start 0.0 duration 0.0}} (:loop cue)
             lx (beat->x view start)
             lw (* (double duration) (double (:zoom view)))]
-        (if (and (:loop cue) (>= y band-y) (< y (+ band-y band-h)) (>= x lx) (<= x (+ lx lw)))
+        (cond
+          (and (:loop cue) (>= y band-y) (< y (+ band-y band-h)) (>= x lx) (<= x (+ lx lw)))
           {:type :loop :edge (edge-of x lx lw)}
+
+          (when-let [e (end-beat cue)] (<= (Math/abs (- (double x) (beat->x view e))) 4.0))
+          {:type :end :beat (end-beat cue)}
+
+          :else
           {:type :ruler :beat beat}))
       (if-let [[idx row] (row-at rows view y)]
         (or (some (fn [clip]

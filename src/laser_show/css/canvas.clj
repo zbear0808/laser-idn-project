@@ -67,7 +67,9 @@
   (def tl-text-dark (web "#121212"))
   (def tl-text-light (web "#FFFFFF"))
   (def tl-text-muted (web text-muted))
-  (def tl-ghost-text (web "#5A5A5A")))
+  (def tl-ghost-text (web "#5A5A5A"))
+  (def tl-past-end (web-a "#000000" 0.35))
+  (def tl-end-marker (web-a "#FFFFFF" 0.4)))
 
 (def tl-font-ruler (Font/font "System" FontWeight/BOLD 11.0))
 (def tl-font-clip (Font/font "System" FontWeight/BOLD 11.0))

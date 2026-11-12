@@ -35,7 +35,7 @@
 
 (defn start
   "Begin a gesture for a press. hit is the layout/hit-test result.
-   Returns a gesture, or nil when the press doesn't start one (the ruler).
+   Returns a gesture, or nil when the press doesn't start one.
    
    Pressing a clip that's already selected (no modifiers) keeps the selection
    so several clips can be dragged; the click collapses it on release.
@@ -79,6 +79,14 @@
       (:lane :empty)
       (assoc base :kind :marquee :additive? (boolean (or shift? shortcut?)))
 
+      ;; Scrubbing the ruler moves the cursor (and a playing timeline)
+      :ruler
+      (assoc base :kind :scrub :beat (max 0.0 (double (:beat hit))))
+
+      ;; Dragging the end marker sets an explicit length
+      :end
+      (assoc base :kind :end :original (:beat hit))
+
       nil)))
 
 
@@ -106,6 +114,9 @@
    the edit releasing now would commit. Shift held = no snapping."
   [gesture {:keys [x shift?] :as pointer} _cue view]
   (when gesture
+    (if (= :scrub (:kind gesture))
+      (assoc gesture :pointer pointer :moved? true
+             :beat (max 0.0 (layout/x->beat view x)))
     (let [moved (or (:moved? gesture) (moved? gesture pointer))
           delta (/ (- (double x) (double (get-in gesture [:origin :x]))) (double (:zoom view)))
           snap? (not shift?)
@@ -128,16 +139,20 @@
           :loop-move (assoc g :op {:op :move-loop :delta delta :snap? snap?})
           :loop-trim-start (assoc g :op {:op :trim-loop-start :to (+ (:original g) delta) :snap? snap?})
           :loop-trim-end (assoc g :op {:op :trim-loop-end :to (+ (:original g) delta) :snap? snap?})
+          :end (assoc g :op {:op :set-length :beats (max model/min-clip-length (+ (:original g) delta)) :snap? snap?})
           :marquee (assoc g :marquee-ids (marquee-ids g pointer view))
-          g)))))
+          g))))))
 
 
 (defn finish
   "End the gesture on release. Returns {:op op} for an edit, {:select {...}}
-   for a selection change, both, or nil for nothing to do."
+   for a selection change, {:seek beat} for a scrub, or nil for nothing to do."
   [gesture]
   (when gesture
     (cond
+      (= :scrub (:kind gesture))
+      {:seek (:beat gesture)}
+
       (and (:moved? gesture) (= :marquee (:kind gesture)))
       {:select {:ids (vec (:marquee-ids gesture))
                 :mode (if (:additive? gesture) :add :replace)}}

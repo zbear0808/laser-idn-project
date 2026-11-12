@@ -1,8 +1,9 @@
 (ns laser-show.ui-test.timeline-editor-test
   "Timeline editor window for cell [0 0]: track, content and loop controls,
    canvas clicks and the Delete key."
-  (:require [clojure.test :refer [deftest is use-fixtures]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.timeline.layout :as layout]
             [laser-show.ui-test.fixtures :as fixtures]
@@ -229,3 +230,38 @@
         (ui/drag-by! robot "#timeline-canvas" x first-track-y 0 0)
         (ui/wait-for! #(= #{id} (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection])))
         (is (= #{id} (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection])))))))
+
+(deftest timeline-play-button-starts-from-cursor
+  (let [robot (ui/robot)
+        timing-path [:playback :active-cues [0 0]]]
+    (open-timeline!)
+    (events/dispatch! {:event/type :timeline/seek :col 0 :row 0 :beat 6.0})
+    (ui/wait-for! #(= 6.0 (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :cursor-beat])))
+    (ui/click! robot "#timeline-play")
+    (ui/wait-for! #(some? (get-in (state/get-raw-state) timing-path)))
+    ;; app/start-test! doesn't run the preview timer: advance the clock by hand
+    (frame-service/update-timing-accumulators! (System/currentTimeMillis))
+    (Thread/sleep 50)
+    (frame-service/update-timing-accumulators! (System/currentTimeMillis))
+    (is (>= (get-in (state/get-raw-state) (conj timing-path :accumulated-beats)) 6.0))
+    (testing "the play button becomes pause, and pause freezes the cue"
+      (ui/click! robot "#timeline-play")
+      (ui/wait-for! #(true? (get-in (state/get-raw-state) (conj timing-path :paused?)))))
+    (testing "stop deactivates it and keeps the cursor"
+      (ui/click! robot "#timeline-stop")
+      (ui/wait-for! #(nil? (get-in (state/get-raw-state) timing-path)))
+      (is (= 6.0 (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :cursor-beat]))))))
+
+(deftest timeline-ruler-time-mode-shows-timecode
+  (let [robot (ui/robot)]
+    (open-timeline!)
+    (is (re-matches #"≈00:00:00:00" (ui/node-text "#timeline-readout-tc"))
+        "without a locked tempo the timecode is an estimate")
+    (ui/click! robot "#timeline-ruler-time")
+    (ui/wait-for! #(= :time (get-in (state/get-raw-state) [:ui :timeline-prefs :ruler-mode])))
+    (ui/click! robot "#timeline-tempo-lock")
+    (ui/wait-for! #(some? (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :timeline/tempo-bpm])))
+    (events/dispatch! {:event/type :timeline/seek :col 0 :row 0 :beat 4.0})
+    ;; 4 beats at the locked 120 BPM = 2 s
+    (ui/wait-for! #(= "00:00:02:00" (ui/node-text "#timeline-readout-tc")))
+    (is (= "00:00:02:00" (ui/node-text "#timeline-readout-tc")))))

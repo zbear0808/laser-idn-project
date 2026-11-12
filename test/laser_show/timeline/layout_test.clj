@@ -113,3 +113,24 @@
   (let [v (assoc v0 :scroll-y 27.0)]
     (is (= :t1 (:id (second (layout/row-at rows v (+ 36 5))))) "t1 is now at the top of the lanes")
     (is (= 36.0 (layout/row-y v (second rows))))))
+
+(deftest ruler-time-mode-test
+  (let [v {:zoom 50.0 :scroll-beat 0.0 :width 800}
+        ticks (layout/ruler-ticks v {:mode :time :bpm 120.0 :tc-start 0.0 :fps 25})
+        labelled (filter :label ticks)]
+    (testing "120 BPM, 50 px/beat = 100 px/s: a label every second"
+      (is (= ["00:00" "00:01" "00:02"] (take 3 (map :label labelled))))
+      (is (= [0.0 2.0 4.0] (take 3 (map :beat labelled))) "1 s = 2 beats"))
+    (testing "tc-start shifts the labels"
+      (is (= "1:00:00" (:label (first (filter :label (layout/ruler-ticks v {:mode :time :bpm 120.0 :tc-start 3600.0}))))))))
+  (testing "frame ticks at >= 400 px/s"
+    (let [ticks (layout/ruler-ticks {:zoom 250.0 :scroll-beat 0.0 :width 400} {:mode :time :bpm 120.0 :fps 25})]
+      (is (some #(= :sub (:kind %)) ticks))
+      (is (< (Math/abs (- 0.08 (- (:beat (second ticks)) (:beat (first ticks))))) 1e-9) "1/25 s = 0.08 beats"))))
+
+(deftest hit-test-end-marker-test
+  (let [cue {:items [{:timeline/start 0.0 :timeline/duration 8.0}]}]
+    (is (= {:type :end :beat 8.0} (layout/hit-test rows cue v0 401 12 #{})))
+    (is (= :ruler (:type (layout/hit-test rows cue v0 380 12 #{}))))
+    (is (= :ruler (:type (layout/hit-test rows (assoc cue :loop {:enabled? true :start 0.0 :duration 4.0}) v0 401 12 #{})))
+        "a looping timeline has no end marker")))

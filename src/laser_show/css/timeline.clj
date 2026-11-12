@@ -31,6 +31,17 @@
         :-fx-text-fill text-primary
         :-fx-min-width 70
         :-fx-alignment "center"}
+       ".tl-readout-tc"
+       {:-fx-text-fill text-secondary
+        :-fx-min-width 100}
+       ".tl-readout-approx"
+       {:-fx-opacity 0.6}
+       ".tl-tempo"
+       {:-fx-min-width 76
+        :-fx-font-size 12}
+       ".tl-segment"
+       {:-fx-padding [3 8 3 8]
+        :-fx-font-size 11}
        ".tl-icon-button"
        {:-fx-background-color "transparent"
         :-fx-background-radius 4

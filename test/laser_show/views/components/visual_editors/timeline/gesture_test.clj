@@ -104,8 +104,8 @@
     (is (= :toggle (:mode (:press-select (gesture/start (hit view 150 row1-y) {:x 150 :y row1-y :shortcut? true} cue view)))))
     (is (= :add (:mode (:press-select (gesture/start (hit view 150 row1-y) {:x 150 :y row1-y :shift? true} cue view)))))))
 
-(deftest ruler-press-starts-no-gesture-test
-  (is (nil? (gesture/start (hit view 150 10) {:x 150 :y 10} cue view))))
+(deftest ruler-press-starts-a-scrub-test
+  (is (= :scrub (:kind (gesture/start (hit view 150 10) {:x 150 :y 10} cue view)))))
 
 (deftest marquee-selects-intersecting-clips-test
   (let [g (drag [50 40] [160 row2-y])]
@@ -113,3 +113,14 @@
     (is (= [50 40 110 (- row2-y 40)] (mapv long (gesture/marquee-rect g)))))
   (testing "a marquee that misses every clip selects nothing"
     (is (= {:select {:ids [] :mode :replace}} (gesture/finish (drag [10 row2-y] [60 row2-y]))))))
+
+(deftest scrub-and-end-marker-test
+  (testing "a ruler press is a scrub; release seeks to where it ended"
+    (let [g (drag [100 10] [175 12])]
+      (is (= :scrub (:kind g)))
+      (is (= {:seek 3.5} (gesture/finish g)))
+      (is (= {:seek 2.0} (gesture/finish (drag [100 10]))) "a click seeks too")))
+  (testing "dragging the end marker sets the length"
+    (let [v view
+          g (gesture/update (gesture/start {:type :end :beat 6.0} {:x 300 :y 10} cue v) {:x 400 :y 10} cue v)]
+      (is (= {:op :set-length :beats 8.0 :snap? true} (:op (gesture/finish g)))))))
