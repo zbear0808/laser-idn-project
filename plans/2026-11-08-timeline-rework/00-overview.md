@@ -1,7 +1,7 @@
 # Timeline rework — overview
 
 **Written:** 2026-11-08 (user decisions D10–D12 added the same day)   **Written for commit:** `d0a7dc2` (`master`, "docs")
-**Status:** Proposed   **Last verified against:** `d0a7dc2`
+**Status:** In progress (Phase 1 done, see `01-phase1-correctness.md`)   **Last verified against:** `d0a7dc2`
 **Supersedes / Superseded by:** none
 **Related findings:** 01 F8 (done), F9, F10, F11, F12, F14, F15, F17, F18, F22, M1, M3, M5, M6, L1, carry-overs "tracks can't inherit" and "clip overlap"; 02 #8, #15, #16, #19, #20, #21, M4, M5; 03 #1, MR1; 04 #11, LE1; overview T1, T4, T5
 **Depends on / interacts with:** `plans/2026-11-08-undo-history-boundary.md` (In progress), `plans/2026-10-07-keyboard-shortcuts-and-focus-consolidation.md`
@@ -123,7 +123,7 @@ Principles:
 
 | Phase | Goal | Size | Depends on |
 |---|---|---|---|
-| 1 — Correctness (`01`) | Stop data changes on open, make editor = output, fix broken controls, scroll echo, trims, inspector, mute, keyframe strip; cheap visual wins | ~3–4 days | none (coordinate with the undo plan for TL-1 history flags) |
+| 1 — Correctness (`01`) — **Done** 2026-11-11 | Stop data changes on open, make editor = output, fix broken controls, scroll echo, trims, inspector, mute, keyframe strip; cheap visual wins | ~3–4 days | none (coordinate with the undo plan for TL-1 history flags) |
 | 2 — Model and gestures (`02`) | `timeline.model`, `apply-op`, local canvas state (01 M3 for all canvases), per-cue UI state, narrowed subs (01 M1 steps 2, 3, 5) | ~1 week | Phase 1 |
 | 3 — Layout, viewport, visuals (`03` + `05`) | Shared row layout, header column, virtual layered canvas, ScrollBars, new look | ~1–1.5 weeks | Phase 2 |
 | 4 — Transport and time (`04`) | Per-cue transport, seek, stop at end, playhead = output, clip-local time, locked tempo, timecode display, trigger actions | ~1–1.5 weeks | Phase 2; clip-local once-mode needs 03 MR1 |

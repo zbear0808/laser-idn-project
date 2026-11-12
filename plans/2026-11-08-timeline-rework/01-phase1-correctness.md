@@ -1,8 +1,18 @@
 # Phase 1 — Correctness fixes
 
 **Written:** 2026-11-08   **Written for commit:** `d0a7dc2`
-**Status:** Proposed   **Last verified against:** `d0a7dc2`
+**Status:** Done (2026-11-11, branch `timeline/phase1-correctness`, commits `c7a57ff`…`707c82a`)   **Last verified against:** `707c82a`
 **Supersedes / Superseded by:** none   **Related findings:** TL-1…TL-5, TL-7…TL-12, TL-15, TL-17, TL-19 (reset), TL-20…TL-23, TL-26 (cursor), TL-29, TL-30, V-2…V-5, V-9, V-14 (label, size), V-15 (see `00-overview.md` §3, `05-visual-design.md` §2); 01 F9, F10; 02 #20 (partly)
+
+> **How the implementation differs from this plan:**
+> - **Conversion is an undoable edit** ("Convert to Timeline Cue"), not `:history/skip?` + `:document/rebase?`. The undo plan that landed replaced those keys with `:history/backfill` and made conversion undoable (`2026-11-08-undo-history-boundary.md` §decisions row 4). Opening a timeline cue that somehow skipped normalization normalizes it as a backfill.
+> - **Undo/redo results aren't re-normalized** by `wrap-normalize-timelines`. They restore normalized snapshots, and re-normalizing could mint a new track id that differs from the saved baseline.
+> - **`:muted?` is a live field** via `live-item-paths`, and `live-item-keys` in `state/history.clj` is now derived from that list. Before, it was a separate hard-coded `#{:collapsed?}`, so adding a path to `live-item-paths` alone had no effect.
+> - **Loop window wrap (part of TL-25):** `generate-frames-by-zone` wraps the window position into an enabled loop. Without it, a converted cue went dark for up to a beat at each 16-beat wrap because of the phase offset. Removing the phase glide for timeline cues stays in Phase 4.
+> - **Top-level tracks** get a "Cue Default Zone (X)" inherit option in the inspector, so a track with no zone doesn't show the first zone group as its value.
+> - **Mute only filters top-level clips** in `generate-frames-by-zone`, the path both preview and hardware use. `in-timeline-window?` and the older `render-item-with-effects` path are unchanged.
+> - **Visuals:** overlaps get a translucent band, not the 45° hatch. There's no 2 px top band or luminance-based label colour yet. Clips have a 1 px dark border, selected clips are drawn on top with a white outline, and labels are clipped. These visual items move to Phase 3 (`05` §3.4).
+> - **TL-30** has no automated test; the drag callback is inside the component. The real fix is stable keyframe IDs (§9).
 
 Each item below is independent and can ship alone. Every item starts with a failing test (§8) that shows the current behaviour.
 
