@@ -301,6 +301,101 @@
 
 
 ;; ============================================================
+;; Clip Timing (pure)
+;; ============================================================
+
+
+(def default-clip-length 4.0)
+(def conversion-length 16.0)
+(def min-clip-length 0.0625) ;; 1/16 beat
+
+(defn clip-start
+  "Clip start in beats, or nil when the item has no timing."
+  [item]
+  (:timeline/start item))
+
+(defn clip-length
+  "Clip length in beats, or nil when the item has no timing."
+  [item]
+  (:timeline/duration item))
+
+(defn clip-end
+  "Clip end in beats, or nil when start or length is missing."
+  [item]
+  (when-let [s (clip-start item)]
+    (when-let [l (clip-length item)]
+      (+ (double s) (double l)))))
+
+(defn snap
+  "Snap beats to the nearest multiple of :value when :enabled?."
+  [beats {:keys [enabled? value]}]
+  (if (and enabled? value (pos? (double value)))
+    (* (Math/round (/ (double beats) (double value))) (double value))
+    (double beats)))
+
+(defn- shift-nested-starts
+  "Shift :timeline/start of every nested child (under :items) by delta."
+  [item delta]
+  (if (seq (:items item))
+    (update item :items
+            (fn [children]
+              (mapv (fn [child]
+                      (cond-> (shift-nested-starts child delta)
+                        (number? (:timeline/start child))
+                        (update :timeline/start #(+ (double %) delta))))
+                    children)))
+    item))
+
+(defn move-clip
+  "Move a clip by delta beats, keeping its length. The new start is snapped
+   and clamped to >= 0; nested children shift by the delta actually applied."
+  [item delta snap-opts]
+  (let [start (double (or (clip-start item) 0.0))
+        new-start (max 0.0 (snap (+ start (double delta)) snap-opts))
+        applied (- new-start start)]
+    (-> item
+        (assoc :timeline/start new-start)
+        (shift-nested-starts applied))))
+
+(defn trim-start
+  "Move the clip's left edge to new-start, keeping its end fixed.
+   Start is snapped, then clamped to [0, end - min-clip-length]."
+  [item new-start snap-opts]
+  (let [end (or (clip-end item) (+ (double (or (clip-start item) 0.0)) default-clip-length))
+        s (-> (snap new-start snap-opts) (max 0.0) (min (- end min-clip-length)))]
+    (assoc item :timeline/start s :timeline/duration (- end s))))
+
+(defn trim-end
+  "Move the clip's right edge to new-end, keeping its start fixed.
+   Length is at least min-clip-length."
+  [item new-end snap-opts]
+  (let [start (double (or (clip-start item) 0.0))
+        e (max (+ start min-clip-length) (snap new-end snap-opts))]
+    (assoc item :timeline/start start :timeline/duration (- e start))))
+
+(defn- loop->clip [{:keys [start duration]}]
+  {:timeline/start (double (or start 0.0)) :timeline/duration (double (or duration default-clip-length))})
+
+(defn- clip->loop [loop-config clip]
+  (assoc loop-config :start (:timeline/start clip) :duration (:timeline/duration clip)))
+
+(defn move-loop
+  "move-clip for a loop region {:start :duration}."
+  [loop-config delta snap-opts]
+  (clip->loop loop-config (move-clip (loop->clip loop-config) delta snap-opts)))
+
+(defn trim-loop-start
+  "trim-start for a loop region {:start :duration}."
+  [loop-config new-start snap-opts]
+  (clip->loop loop-config (trim-start (loop->clip loop-config) new-start snap-opts)))
+
+(defn trim-loop-end
+  "trim-end for a loop region {:start :duration}."
+  [loop-config new-end snap-opts]
+  (clip->loop loop-config (trim-end (loop->clip loop-config) new-end snap-opts)))
+
+
+;; ============================================================
 ;; Timeline Geometry & Scrolling Math
 ;; ============================================================
 

@@ -30,20 +30,16 @@
 
 (def ^:private min-zoom 10.0)
 (def ^:private max-zoom 200.0)
-(def ^:private min-duration 0.0625) ;; 1/16 beat
 
 
 ;; Helpers
 
 
-(defn- snap-value
-  "Snap a beat value to the nearest grid subdivision.
-   Returns the original value if snap is disabled."
-  [beats snap-size snap-enabled?]
-  (if snap-enabled?
-    (* (Math/round (/ (double beats) (double snap-size)))
-       (double snap-size))
-    beats))
+(defn- snap-opts
+  "Current snap settings in the shape tl/snap expects."
+  [state]
+  {:enabled? (get-in state [:ui :timeline :snap-enabled?] true)
+   :value (get-in state [:ui :timeline :snap-value] 0.25)})
 
 (defn- update-item-at-id
   "Update an item by ID within a nested chain structure.
@@ -234,22 +230,19 @@
 ;; Loop Timing
 
 (defn- handle-update-loop-timing
-  "Update the loop brace timing.
-   Accepts :col :row and :start / :duration."
-  [{:keys [col row start duration state]}]
+  "Update the loop brace from a drag.
+   :edge :center moves the loop to :start, :left trims its start to :start,
+   :right trims its end to :end. A missing loop starts out disabled."
+  [{:keys [col row edge start end state]}]
   (let [loop-path [:chains :cue-chains [col row] :loop]
-        snap-enabled? (get-in state [:ui :timeline :snap-enabled?] true)
-        snap-size (get-in state [:ui :timeline :snap-value] 0.25)
+        opts (snap-opts state)
         current-loop (get-in state loop-path {:enabled? false :start 0.0 :duration 4.0})
-        new-start (if (some? start)
-                    (max 0.0 (snap-value start snap-size snap-enabled?))
-                    (:start current-loop 0.0))
-        new-duration (if (some? duration)
-                       (max min-duration (snap-value duration snap-size snap-enabled?))
-                       (:duration current-loop 4.0))
-        updated-loop (assoc current-loop :start new-start :duration new-duration)]
-    {:state (-> state
-                (assoc-in loop-path updated-loop))}))
+        updated-loop (case edge
+                       :center (tl/move-loop current-loop (- (double start) (double (:start current-loop 0.0))) opts)
+                       :left (tl/trim-loop-start current-loop start opts)
+                       :right (tl/trim-loop-end current-loop end opts)
+                       current-loop)]
+    {:state (assoc-in state loop-path updated-loop)}))
 
 (defn- handle-toggle-loop
   "Toggle the loop enabled state for a cue-chain."
@@ -265,29 +258,24 @@
 
 
 (defn- handle-update-item-timing
-  "Update :timeline/start and :timeline/duration for a single item by ID.
-   Applies snap if enabled. Enforces start >= 0 and duration >= min-duration.
-   
-   Accepts :col :row to identify the cue chain, :id for the item,
-   and :start / :duration for the new values (either or both)."
-  [{:keys [col row id start duration state]}]
+  "Move or trim a single clip by ID from a drag.
+   :edge :center moves the clip to :start (keeping its length),
+   :left trims its start to :start (keeping its end),
+   :right trims its end to :end (keeping its start).
+   Snaps when enabled; start >= 0 and length >= tl/min-clip-length."
+  [{:keys [col row id edge start end state]}]
   (let [items-path [:chains :cue-chains [col row] :items]
         items (get-in state items-path [])
-        snap-enabled? (get-in state [:ui :timeline :snap-enabled?] true)
-        snap-size (get-in state [:ui :timeline :snap-value] 0.25)
+        opts (snap-opts state)
         updated-items (update-item-at-id
                        items id
                        (fn [item]
-                         (cond-> item
-                           (some? start)
-                           (assoc :timeline/start
-                                  (max 0.0 (snap-value start snap-size snap-enabled?)))
-                           (some? duration)
-                           (assoc :timeline/duration
-                                  (max min-duration
-                                       (snap-value duration snap-size snap-enabled?))))))]
-    {:state (-> state
-                (assoc-in items-path updated-items))}))
+                         (case edge
+                           :center (tl/move-clip item (- (double start) (double (or (tl/clip-start item) 0.0))) opts)
+                           :left (tl/trim-start item start opts)
+                           :right (tl/trim-end item end opts)
+                           item)))]
+    {:state (assoc-in state items-path updated-items)}))
 
 (defn- handle-nudge-selection
   "Move all selected items by delta-beats."
@@ -295,56 +283,15 @@
   (let [items-path [:chains :cue-chains [col row] :items]
         items (get-in state items-path [])
         selection (get-in state [:ui :timeline :selection] #{})
-        snap-enabled? (get-in state [:ui :timeline :snap-enabled?] true)
-        snap-size (get-in state [:ui :timeline :snap-value] 0.25)
+        opts (snap-opts state)
         updated-items (reduce
                        (fn [acc id]
-                         (update-item-at-id
-                          acc id
-                          (fn [item]
-                            (let [current-start (:timeline/start item 0.0)
-                                  new-start (max 0.0 (+ current-start delta-beats))]
-                              (assoc item :timeline/start
-                                     (snap-value new-start snap-size snap-enabled?))))))
+                         (update-item-at-id acc id #(tl/move-clip % delta-beats opts)))
                        items
                        selection)]
     {:state (-> state
                 (assoc-in items-path updated-items))
      :history/coalesce-key [:timeline/nudge-selection col row]}))
-
-(defn- handle-resize-selection
-  "Adjust duration (and optionally start) of selected items.
-   :side :right -> only change duration
-   :side :left  -> change both start and duration (trim from left)"
-  [{:keys [col row delta-duration side state]}]
-  (let [items-path [:chains :cue-chains [col row] :items]
-        items (get-in state items-path [])
-        selection (get-in state [:ui :timeline :selection] #{})
-        snap-enabled? (get-in state [:ui :timeline :snap-enabled?] true)
-        snap-size (get-in state [:ui :timeline :snap-value] 0.25)
-        updated-items (reduce
-                       (fn [acc id]
-                         (update-item-at-id
-                          acc id
-                          (fn [item]
-                            (let [current-start (:timeline/start item 0.0)
-                                  current-dur (:timeline/duration item 4.0)]
-                              (if (= side :left)
-                                ;; Left edge: move start, adjust duration inversely
-                                (let [new-start (max 0.0 (+ current-start delta-duration))
-                                      start-delta (- new-start current-start)
-                                      new-dur (max min-duration (- current-dur start-delta))]
-                                  (assoc item
-                                         :timeline/start (snap-value new-start snap-size snap-enabled?)
-                                         :timeline/duration (snap-value new-dur snap-size snap-enabled?)))
-                                ;; Right edge: just adjust duration
-                                (let [new-dur (max min-duration (+ current-dur delta-duration))]
-                                  (assoc item :timeline/duration
-                                         (snap-value new-dur snap-size snap-enabled?))))))))
-                       items
-                       selection)]
-    {:state (-> state
-                (assoc-in items-path updated-items))}))
 
 
 ;; Track Expand/Collapse
@@ -474,9 +421,7 @@
 (defn- handle-set-cursor-beat
   "Set the timeline cursor beat position, snapping if enabled."
   [{:keys [beat state]}]
-  (let [snap-enabled? (get-in state [:ui :timeline :snap-enabled?] true)
-        snap-size (get-in state [:ui :timeline :snap-value] 0.25)
-        snapped (max 0.0 (snap-value (or beat 0.0) snap-size snap-enabled?))]
+  (let [snapped (max 0.0 (tl/snap (or beat 0.0) (snap-opts state)))]
     {:state (assoc-in state [:ui :timeline :cursor-beat] snapped)}))
 
 
@@ -514,12 +459,10 @@
                                        [[default-tr] (assoc-in state tracks-path [default-tr])])
                                      [tracks state])
         resolved-track-id (tl/ensure-leaf-track tracks track-id)
-        snap-enabled? (get-in state-with-tracks [:ui :timeline :snap-enabled?] true)
-        snap-size (get-in state-with-tracks [:ui :timeline :snap-value] 0.25)
         cursor-beat (get-in state-with-tracks [:ui :timeline :cursor-beat] 0.0)
         raw-start (or start cursor-beat 0.0)
-        start-beat (max 0.0 (snap-value raw-start snap-size snap-enabled?))
-        duration-beats 4.0
+        start-beat (max 0.0 (tl/snap raw-start (snap-opts state-with-tracks)))
+        duration-beats tl/default-clip-length
         new-preset (-> (cue-chains/create-preset-instance item-id {})
                        (h/ensure-item-fields)
                        (assoc :track-id resolved-track-id
@@ -654,7 +597,6 @@
     ;; Item timing
     :timeline/update-item-timing (handle-update-item-timing event)
     :timeline/nudge-selection (handle-nudge-selection event)
-    :timeline/resize-selection (handle-resize-selection event)
 
     ;; Loop timing
     :timeline/update-loop-timing (handle-update-loop-timing event)

@@ -250,3 +250,29 @@
                               :col 0 :row 0 :start 2.0
                               :state s0})]
     (is (false? (get-in res [:state :chains :cue-chains [0 0] :loop :enabled?])))))
+
+(defn- cell-with-clip [state clip]
+  (assoc-in state [:chains :cue-chains [0 0] :items] [clip]))
+
+(deftest update-item-timing-left-edge-keeps-end-test
+  (let [s0 (cell-with-clip base-state {:id :c :timeline/start 1.0 :timeline/duration 4.0})
+        clip-after (fn [event]
+                     (-> (timeline/handle (merge {:event/type :timeline/update-item-timing
+                                                  :col 0 :row 0 :id :c :state s0}
+                                                 event))
+                         (get-in [:state :chains :cue-chains [0 0] :items 0])))]
+    (testing "trimming the left edge past 0 doesn't lengthen the clip's end"
+      (let [c (clip-after {:edge :left :start -3.0})]
+        (is (== 0.0 (:timeline/start c)))
+        (is (== 5.0 (:timeline/duration c)))))
+    (testing "trimming the left edge past the end leaves a sliver ending at the old end"
+      (let [c (clip-after {:edge :left :start 9.0})]
+        (is (== 5.0 (+ (:timeline/start c) (:timeline/duration c))))))
+    (testing "right edge keeps the start"
+      (let [c (clip-after {:edge :right :end 7.0})]
+        (is (== 1.0 (:timeline/start c)))
+        (is (== 6.0 (:timeline/duration c)))))
+    (testing "center moves without changing length"
+      (let [c (clip-after {:edge :center :start 3.0})]
+        (is (== 3.0 (:timeline/start c)))
+        (is (== 4.0 (:timeline/duration c)))))))

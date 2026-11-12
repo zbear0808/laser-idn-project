@@ -456,23 +456,13 @@
         delta-px (- mx start-mx)
         delta-beats (/ delta-px zoom-x)]
     (if (= drag-id :loop-brace)
-      (case edge
-        :center
-        {:dispatch [{:event/type :timeline/update-loop-timing
-                     :col col :row row
-                     :start (+ original-start delta-beats)}]}
-        :right
-        {:dispatch [{:event/type :timeline/update-loop-timing
-                     :col col :row row
-                     :duration (+ original-duration delta-beats)}]}
-        :left
-        (let [new-start (+ original-start delta-beats)
-              start-delta (- new-start original-start)
-              new-dur (- original-duration start-delta)]
-          {:dispatch [{:event/type :timeline/update-loop-timing
-                       :col col :row row
-                       :start new-start
-                       :duration new-dur}]}))
+      {:dispatch [(case edge
+                    :right {:event/type :timeline/update-loop-timing
+                            :col col :row row :edge :right
+                            :end (+ original-start original-duration delta-beats)}
+                    {:event/type :timeline/update-loop-timing
+                     :col col :row row :edge edge
+                     :start (+ original-start delta-beats)})]}
       (let [{:keys [track-idx track]} (tl/track-at-y {:y my
                                                       :ruler-height ruler-height
                                                       :track-height track-height
@@ -484,22 +474,14 @@
             destination-track (when track-changed? track)
             valid-destination? (tl/droppable-track? destination-track)
             base-events (case edge
-                          :center
-                          [{:event/type :timeline/update-item-timing
-                            :col col :row row :id drag-id
-                            :start (+ original-start delta-beats)}]
                           :right
                           [{:event/type :timeline/update-item-timing
-                            :col col :row row :id drag-id
-                            :duration (+ original-duration delta-beats)}]
-                          :left
-                          (let [new-start (+ original-start delta-beats)
-                                start-delta (- new-start original-start)
-                                new-dur (- original-duration start-delta)]
-                            [{:event/type :timeline/update-item-timing
-                              :col col :row row :id drag-id
-                              :start new-start
-                              :duration new-dur}])
+                            :col col :row row :id drag-id :edge :right
+                            :end (+ original-start original-duration delta-beats)}]
+                          (:center :left)
+                          [{:event/type :timeline/update-item-timing
+                            :col col :row row :id drag-id :edge edge
+                            :start (+ original-start delta-beats)}]
                           [])
 
             events (if valid-destination?

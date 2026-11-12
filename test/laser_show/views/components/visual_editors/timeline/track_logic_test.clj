@@ -275,3 +275,46 @@
 
 
 
+(def ^:private snap-q {:enabled? true :value 0.25})
+(def ^:private clip-1-4 {:id :c :timeline/start 1.0 :timeline/duration 4.0})
+
+(defn- span [item] [(:timeline/start item) (:timeline/duration item)])
+
+(deftest trim-start-keeps-end-test
+  (testing "plan §7.3 examples"
+    (is (= [0.0 5.0] (span (tl/trim-start clip-1-4 -3.0 snap-q))) "clamped to 0")
+    (is (= [4.9375 0.0625] (span (tl/trim-start clip-1-4 9.0 snap-q))) "min length wins")
+    (is (= [1.5 3.5] (span (tl/trim-start clip-1-4 1.6 snap-q))) "snapped"))
+  (testing "end never moves for in-range targets"
+    (doseq [target (range -2.0 8.0 0.37)]
+      (let [r (tl/trim-start clip-1-4 target snap-q)]
+        (is (== 5.0 (tl/clip-end r)))
+        (is (>= (:timeline/start r) 0.0))
+        (is (>= (:timeline/duration r) tl/min-clip-length))))))
+
+(deftest trim-end-keeps-start-test
+  (is (= [1.0 0.0625] (span (tl/trim-end clip-1-4 0.5 snap-q))))
+  (is (= [1.0 6.0] (span (tl/trim-end clip-1-4 7.1 snap-q))))
+  (doseq [target (range -2.0 10.0 0.41)]
+    (let [r (tl/trim-end clip-1-4 target snap-q)]
+      (is (== 1.0 (:timeline/start r)))
+      (is (>= (:timeline/duration r) tl/min-clip-length)))))
+
+(deftest move-clip-shifts-children-test
+  (let [group (assoc clip-1-4 :items [{:id :child :timeline/start 1.0 :timeline/duration 2.0}
+                                      {:id :untimed}])]
+    (testing "+2.1 snaps to start 3.0, child shifted by the applied +2.0"
+      (let [r (tl/move-clip group 2.1 snap-q)]
+        (is (= [3.0 4.0] (span r)))
+        (is (== 3.0 (get-in r [:items 0 :timeline/start])))
+        (is (not (contains? (get-in r [:items 1]) :timeline/start)) "untimed child stays untimed")))
+    (testing "-5 clamps to 0, child shifted by the applied -1.0"
+      (let [r (tl/move-clip group -5.0 snap-q)]
+        (is (= [0.0 4.0] (span r)))
+        (is (== 0.0 (get-in r [:items 0 :timeline/start])))))))
+
+(deftest loop-trims-test
+  (let [lp {:enabled? true :start 1.0 :duration 4.0}]
+    (is (= {:enabled? true :start 0.0 :duration 5.0} (tl/trim-loop-start lp -3.0 snap-q)))
+    (is (= {:enabled? true :start 1.0 :duration 6.0} (tl/trim-loop-end lp 7.0 snap-q)))
+    (is (= {:enabled? true :start 3.0 :duration 4.0} (tl/move-loop lp 2.1 snap-q)))))
