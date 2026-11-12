@@ -1,7 +1,7 @@
 # Timeline visual design
 
 **Written:** 2026-11-08   **Written for commit:** `d0a7dc2`
-**Status:** Proposed   **Last verified against:** `d0a7dc2` (screenshots taken at that commit)
+**Status:** Mostly done (Phases 1 and 3; the exceptions are listed in `03` status notes)   **Last verified against:** `ad19072` (the `img/before-*` screenshots are from `d0a7dc2`; new ones come from `timeline-screenshot-baseline`)
 **Related findings:** V-1…V-15 (below); 01 F15, F22, Q10, L1; `CSS_COLOR_SYSTEM.md`
 **Implemented by:** Phase 1 quick wins (`01` §4.3) and Phase 3 (`03` §4.2-§4.7)
 

@@ -60,3 +60,4 @@ test-*.log
 /backend/build/
 /frontend/node_modules/
 /legacy/
+/test-output/

@@ -1,7 +1,17 @@
 # Phase 3 — One layout, virtual viewport, header column, new look
 
 **Written:** 2026-11-08   **Written for commit:** `d0a7dc2`
-**Status:** Proposed (after Phase 2)   **Last verified against:** `d0a7dc2`
+**Status:** Done (2026-11-11, branch `timeline/phase3-layout`, commits `26e0f84`, `ad19072`)   **Last verified against:** `ad19072`
+
+> **How the implementation differs from this plan:**
+> - **Viewport layout.** The lanes are a `:pane` holding two unmanaged canvases (lanes + overlay) sized from the view, not a StackPane. A StackPane's minimum size follows its children, so it couldn't shrink. The vertical ScrollBar sits right of the lanes and the horizontal one under them (offset by the header width).
+> - **Per-cue state.** Selected track stays in `[:list-ui [:timeline-tracks col row]]` (Phase 2) and rename-in-progress is view-local (`:renaming-id` in `ext-state`), so neither is new app state. The viewport resets when the editor shows another cell, as §9 allows.
+> - **Follow playhead** is an `fx/ext-effect` whose args change once per page; the swap goes through `Platform/runLater`. Zooming doesn't turn follow off; scrolling by hand does.
+> - **Header rows** are a graphic-only `:label` wrapping an `:h-box`, because only Controls take a `:context-menu`.
+> - **The inspector** lives in NEW `timeline.inspector`; effects can be removed through a NEW `:remove-effect` op. The Phase 4/5 rows (length, tempo, timecode) aren't there yet.
+> - **Not done from `05` §3.4:** the hover trim-zone bands, the dashed original outline, snap guide and tooltip while dragging, and the narrow-clip tooltip. Labels are clipped without an "…".
+> - **Performance is unmeasured.** The overlay-only redraw during playback is *unverified*; no JFR run yet (`docs/PROFILING.md`).
+> - **Tests** live in `laser-show.ui-test.timeline-editor-test`, not `e2e-test`. `timeline-long-show-reachable` uses a clip at beat 300, not 600: Fit can't go below the 2 px/beat minimum zoom in the 780 px headless lane width. The screenshot baseline is `laser-show.ui-test.timeline-visual-test/timeline-screenshot-baseline`, run with `LASER_SHOW_VISUAL=1`; the test runner can't exclude a tag by default and still let you opt in.
 **Supersedes / Superseded by:** none   **Related findings:** TL-15 (rest), TL-16, TL-18, TL-28 (render part), V-1, V-6…V-14 (`05-visual-design.md`); 01 F11, F15, F17, F22, M6, Q10, L1; 02 M4 "timeline scroll panes"
 
 This phase implements the visual spec in `05-visual-design.md` §3. This file covers structure and data flow; `05` covers how it looks.
