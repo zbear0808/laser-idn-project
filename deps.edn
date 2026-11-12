@@ -73,7 +73,9 @@
                 cider/cider-nrepl {:mvn/version "0.57.0"}
                 org.clojure/tools.namespace {:mvn/version "1.5.0"}
                 hawk/hawk {:mvn/version "0.2.11"}
-                io.github.cljfx/dev {:mvn/version "1.10.6.42"}}}
+                io.github.cljfx/dev {:mvn/version "1.10.6.42"}
+                ;; Inspect and drive the running UI from the REPL (see .agents/skills/plorer)
+                io.github.cljfx/plorer {:mvn/version "1.31"}}}
 
   ;; JFR continuous recording add-on - combine with :dev:laser-show
   ;; Use: clj -M:dev:laser-show:jfr
