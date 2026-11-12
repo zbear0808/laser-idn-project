@@ -1017,7 +1017,7 @@
   "Collapsible bottom panel for adding presets and effects to the timeline,
    and inspecting clip and track properties."
   [{:keys [col row add-panel-open? add-panel-preset-tab add-panel-effect-tab
-           selected-item-id inspector-track-id insert-track-id cursor-beat beats-elapsed
+           selected-item-id inspector-track-id insert-track-id cursor-beat
            items track-defs zone-groups destination-zone-id]}]
   (when add-panel-open?
     {:fx/type :v-box
@@ -1059,7 +1059,7 @@
                                            :col col
                                            :row row
                                            :track-id insert-track-id
-                                           :start (or cursor-beat beats-elapsed 0.0)}}]}
+                                           :start (or cursor-beat 0.0)}}]}
         ;; Effect bank (only when a clip is selected)
         {:fx/type :v-box
          :h-box/hgrow :always
@@ -1098,10 +1098,13 @@
 
 
 (defn timeline-canvas
-  "The interactive canvas that shows the timeline grid, clips, and playhead."
-  [{:keys [col row tracks items track-defs zoom-x selection selected-track-id insert-track-id
-           muted-track-ids beats-elapsed cursor-beat loop-config snap]}]
-  (let [canvas-height (total-canvas-height (count tracks))
+  "The interactive canvas that shows the timeline grid, clips, and playhead.
+   It subscribes to the playhead itself, so playback ticks re-render only
+   the canvas, not the dialog."
+  [{:keys [fx/context col row tracks items track-defs zoom-x selection selected-track-id insert-track-id
+           muted-track-ids cursor-beat loop-config snap]}]
+  (let [beats-elapsed (fx/sub-ctx context subs/timeline-playhead col row)
+        canvas-height (total-canvas-height (count tracks))
         canvas-width (calculate-canvas-width items loop-config (or zoom-x default-zoom))]
     {:fx/type ci/interactive-canvas
      :id "timeline-canvas"
@@ -1150,10 +1153,9 @@
    - :destination-zone-id — The cue's default zone (what top-level tracks inherit)
    - :timeline-ui   — This cue's view state (subs/timeline-ui)
    - :timeline-prefs — Editor preferences (subs/timeline-prefs)
-   - :beats-elapsed — Current beat position from active cue timing (nil if stopped)
    - :loop-config   — Map with {:enabled? :start :duration}"
   [{:keys [fx/context col row items track-defs zone-groups destination-zone-id
-           timeline-ui timeline-prefs beats-elapsed loop-config]}]
+           timeline-ui timeline-prefs loop-config]}]
   (let [{:keys [zoom-x selection cursor-beat]
          :or {zoom-x default-zoom
               selection #{}}} timeline-ui
@@ -1238,7 +1240,6 @@
            :selected-track-id sidebar-selected-track-id
            :insert-track-id insert-track-id
            :muted-track-ids muted-track-ids
-           :beats-elapsed beats-elapsed
            :cursor-beat cursor-beat
            :loop-config loop-config}}}]}}
       add-panel-open?
@@ -1252,7 +1253,6 @@
                       :inspector-track-id sidebar-selected-track-id
                       :insert-track-id insert-track-id
                       :cursor-beat cursor-beat
-                      :beats-elapsed beats-elapsed
                       :items items
                       :track-defs track-defs
                       :zone-groups zone-groups

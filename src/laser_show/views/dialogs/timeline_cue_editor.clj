@@ -15,7 +15,6 @@
             [laser-show.css.core :as css]
             [laser-show.views.components.inline-edit :as inline-edit]
             [laser-show.views.components.visual-editors.timeline-editor :as timeline-editor]
-            [laser-show.state.extractors :as ex]
             [laser-show.common.util :as u])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
@@ -92,8 +91,8 @@
         {:keys [col row]} dialog-data
 
         ;; Cue chain data
-        chains-state (fx/sub-val context :chains)
-        cue-chain (or (get-in chains-state [:cue-chains [col row]]) {:items []})
+        ;; Only this cell's chain: edits to other cues don't re-render the dialog
+        cue-chain (fx/sub-ctx context subs/cue-cell-chain col row)
         items (:items cue-chain [])
 
         ;; Zone groups
@@ -104,10 +103,6 @@
         timeline-ui (fx/sub-ctx context subs/timeline-ui col row)
         timeline-prefs (fx/sub-ctx context subs/timeline-prefs)
 
-        ;; Beats elapsed: check if cue is currently active/playing
-        active-cues-map (fx/sub-val context ex/active-cues)
-        active-cue-timing (get active-cues-map [col row])
-        beats-elapsed (:accumulated-beats active-cue-timing)
 
         ;; Chain name
         chain-name (:name cue-chain)
@@ -147,11 +142,10 @@
        :row row
        :items items
        :track-defs (:tracks cue-chain)
-       :zone-groups (into {} (map (juxt :id identity)) zone-groups)
+       :zone-groups (fx/sub-ctx context subs/zone-groups-by-id)
        :destination-zone-id destination-zone-id
        :timeline-ui timeline-ui
        :timeline-prefs timeline-prefs
-       :beats-elapsed beats-elapsed
        :loop-config (:loop cue-chain {:enabled? false :start 0.0 :duration 4.0})}
 
       ;; Footer
@@ -217,9 +211,7 @@
   (let [open? (fx/sub-ctx context subs/dialog-open? :timeline-cue-editor)
         dialog-data (fx/sub-ctx context subs/dialog-data :timeline-cue-editor)
         {:keys [col row]} dialog-data
-        chains-state (fx/sub-val context :chains)
-        cue-chain (get-in chains-state [:cue-chains [col row]])
-        chain-name (:name cue-chain)
+        chain-name (:name (fx/sub-ctx context subs/cue-cell-chain col row))
         stylesheets (css/dialog-stylesheet-urls)
         cell-id (str "Cell " (char (+ 65 (or row 0))) (inc (or col 0)))
         window-title (str "Timeline Editor - "

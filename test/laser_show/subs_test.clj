@@ -87,3 +87,26 @@
                      (fx/swap-context assoc-in [:chains :cue-chains [0 0] :name] "Renamed")
                      (fx/swap-context update-in [:playback :active-cues [0 0] :accumulated-beats] + 1.0))]
         (is (identical? before (fx/sub-ctx ctx' subs/effect-cell-display-data 0 0)))))))
+
+(deftest timeline-playhead-only-depends-on-cell-test
+  (let [ctx (context base-state)]
+    (is (= 0.0 (fx/sub-ctx ctx subs/timeline-playhead 0 0)))
+    (is (nil? (fx/sub-ctx ctx subs/timeline-playhead 1 0)) "not playing")
+    (testing "a tick on this cue changes the playhead"
+      (let [ctx' (fx/swap-context ctx update-in [:playback :active-cues [0 0] :accumulated-beats] + 0.25)]
+        (is (= 0.25 (fx/sub-ctx ctx' subs/timeline-playhead 0 0)))))))
+
+(deftest timeline-dialog-subs-ignore-playback-and-other-cells-test
+  (let [ctx (context base-state)
+        chain (fx/sub-ctx ctx subs/cue-cell-chain 0 0)
+        ui (fx/sub-ctx ctx subs/timeline-ui 0 0)]
+    (testing "playback ticks don't invalidate the dialog's subs"
+      (let [ctx' (fx/swap-context ctx update-in [:playback :active-cues [0 0] :accumulated-beats] + 0.25)]
+        (is (identical? chain (fx/sub-ctx ctx' subs/cue-cell-chain 0 0)))
+        (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui 0 0)))))
+    (testing "another cell's edits and view don't either"
+      (let [ctx' (-> ctx
+                     (fx/swap-context assoc-in [:chains :cue-chains [1 0] :name] "Other")
+                     (fx/swap-context assoc-in [:ui :timeline-editor [1 0] :selection] #{:x}))]
+        (is (identical? chain (fx/sub-ctx ctx' subs/cue-cell-chain 0 0)))
+        (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui 0 0)))))))
