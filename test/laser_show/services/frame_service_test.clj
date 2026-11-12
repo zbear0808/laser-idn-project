@@ -6,6 +6,7 @@
    - IDN streaming bypasses preview zone filtering
    - Per-item zone routing generates separate frames per zone"
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.input.mtc :as mtc]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]))
@@ -606,3 +607,33 @@
     (is (= (render 0.0 1.25) (render 8.0 9.25))
         "the same clip moved to beat 8 looks the same 1.25 beats into it")
     (is (not= (render 0.0 1.25) (render 0.0 2.0)) "the modulator does move")))
+
+;; Phase 5: MTC chase
+
+(deftest chasing-timeline-follows-mtc-test
+  (let [cue (timeline-cue {:timeline/chase :mtc :timeline/tc-start 3600.0 :timeline/tempo-bpm 120.0
+                           :timeline/length 64.0})
+        tick! (fn [pos now] (with-redefs [mtc/current (constantly pos)]
+                              (frame-service/update-timing-accumulators! now)))]
+    (state/swap-state! (fn [s] (-> s
+                                   (assoc-in [:chains :cue-chains [0 0]] cue)
+                                   (assoc-in [:playback :active-cues] {})
+                                   (assoc-in [:playback :playing?] false))))
+    (tick! {:state :running :seconds 3599.0 :fps 25 :tc {:h 0 :m 59 :s 59 :f 0 :drop? false}} 1000)
+    (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))
+    (is (= {:state :running :fps 25 :text "00:59:59:00"}
+           (dissoc (get-in (state/get-raw-state) [:backend :input :mtc]) :at-ms))
+        "the status is mirrored for the UI")
+    (tick! {:state :running :seconds 3605.48 :fps 25} 1033)
+    (is (< (Math/abs (- 10.96 (beats-at-00))) 1e-9))
+    (testing "the cue's own clock doesn't move it between timecode updates"
+      (tick! {:state :running :seconds 3605.48 :fps 25} 1500)
+      (is (< (Math/abs (- 10.96 (beats-at-00))) 1e-9)))
+    (tick! {:state :stopped :seconds 3605.48 :fps 25} 1600)
+    (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))))
+
+(deftest non-chasing-cues-ignore-mtc-test
+  (start-timeline! (timeline-cue {:timeline/length 100.0}) 2.0 1000)
+  (with-redefs [mtc/current (constantly {:state :running :seconds 50.0 :fps 25})]
+    (frame-service/update-timing-accumulators! 1500))
+  (is (< (Math/abs (- 3.0 (beats-at-00))) 1e-9) "advanced by its own clock (+1 beat), not set to 100"))

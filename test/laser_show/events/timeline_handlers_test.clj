@@ -379,3 +379,17 @@
     (is (= 3600.0 (:timeline/tc-start (run {:op :set-tc-start :seconds 3600.0}))))
     (is (= 25 (:timeline/tc-fps (run {:op :set-tc-fps :fps 25}))))
     (is (nil? (:timeline/tc-fps (run {:op :set-tc-fps :fps 48}))) "unsupported fps is ignored")))
+
+(deftest chasing-timeline-ignores-transport-test
+  (let [s0 (assoc-in (transport-state) [:chains :cue-chains [0 0] :timeline/chase] :mtc)]
+    (doseq [t [:timeline/play :timeline/toggle-play :timeline/pause :timeline/stop]]
+      (is (= s0 (:state (timeline/handle {:event/type t :col 0 :row 0 :state s0}))) (str t)))
+    (testing "seek still moves the cursor"
+      (is (= 3.0 (get-in (:state (timeline/handle {:event/type :timeline/seek :col 0 :row 0 :beat 3.0 :state s0}))
+                         [:ui :timeline-editor [0 0] :cursor-beat]))))
+    (testing ":set-chase"
+      (let [run (fn [src] (get-in (timeline/handle {:event/type :timeline/apply-op :col 0 :row 0
+                                                    :op {:op :set-chase :source src} :state (transport-state)})
+                                  [:state :chains :cue-chains [0 0] :timeline/chase]))]
+        (is (= :mtc (run :mtc)))
+        (is (nil? (run nil)))))))

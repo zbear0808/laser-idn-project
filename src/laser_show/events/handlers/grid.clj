@@ -9,6 +9,7 @@
             [laser-show.state.clipboard :as clipboard]
             [laser-show.state.extractors :as ex]
             [laser-show.animation.cue-chains :as cue-chains]
+            [laser-show.timeline.playback :as playback]
             [laser-show.animation.cue-timing :as cue-timing]
             [clojure.tools.logging :as log]))
 
@@ -31,13 +32,16 @@
 
 (defn- trigger-cue
   "Trigger a cue: add it to active-cues with fresh timing. Timeline cues start
-   from the top (live use); the timeline editor's Play starts from its cursor."
+   from the top (live use); the timeline editor's Play starts from its cursor.
+   A timeline following MIDI timecode isn't started: the timecode drives it."
   [state col row]
   (let [now (h/current-time-ms {:time (System/currentTimeMillis)})
         cue (get-in state [:chains :cue-chains [col row]])]
-    (update state :playback cue-timing/activate-cue [col row] now
-            (ex/global-accumulated-beats state)
-            {:timeline? (cue-chains/timeline-cue? cue) :start-beat 0.0})))
+    (if (playback/chases-mtc? cue)
+      state
+      (update state :playback cue-timing/activate-cue [col row] now
+              (ex/global-accumulated-beats state)
+              {:timeline? (cue-chains/timeline-cue? cue) :start-beat 0.0}))))
 
 (defn- untrigger-cue
   "Remove a cue from active-cues. Sets playing? to false if no cues remain."

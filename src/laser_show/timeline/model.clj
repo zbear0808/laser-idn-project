@@ -480,6 +480,7 @@
 ;; :timeline/tempo-bpm  locked tempo; nil = follow the global BPM
 ;; :timeline/tc-start   timecode of beat 0, in seconds (default 0)
 ;; :timeline/tc-fps     24, 25, 29.97 (drop-frame) or 30 (default 30)
+;; :timeline/chase      nil, or :mtc to follow incoming MIDI timecode
 
 
 (defn content-end
@@ -662,6 +663,9 @@
     :set-tc-fps (if (some #(== % (double (:fps o 0))) [24 25 29.97 30])
                   (assoc cue :timeline/tc-fps (:fps o))
                   cue)
+    :set-chase (if (= :mtc (:source o))
+                 (assoc cue :timeline/chase :mtc)
+                 (dissoc cue :timeline/chase))
     cue))
 
 (def op-types
@@ -670,7 +674,8 @@
     :add-effect :remove-effect :set-clip-track :set-clip-zone :set-track-zone :add-track
     :add-folder :delete-tracks :move-tracks :rename-track :set-track-color
     :set-track-muted :set-collapsed :set-loop :move-loop :trim-loop-start
-    :trim-loop-end :set-length :set-tempo :set-tc-start :set-tc-fps})
+    :trim-loop-end :set-length :set-tempo :set-tc-start :set-tc-fps
+    :set-chase})
 
 (defn apply-op
   "Apply one edit op to a timeline cue chain. Returns the cue normalized
@@ -716,5 +721,6 @@
     (:set-loop :move-loop :trim-loop-start :trim-loop-end) "Edit Loop"
     :set-length "Set Timeline Length"
     :set-tempo "Set Timeline Tempo"
+    :set-chase "Set Follow Timecode"
     (:set-tc-start :set-tc-fps) "Set Timecode"
     "Edit Timeline"))

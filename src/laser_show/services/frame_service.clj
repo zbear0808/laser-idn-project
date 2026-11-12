@@ -44,6 +44,7 @@
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.timeline.model :as model]
             [laser-show.timeline.playback :as playback]
+            [laser-show.input.mtc :as mtc]
             [laser-show.animation.effects.shape]
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
@@ -82,20 +83,23 @@
 (defn- advance-active-cues
   "Advance every active cue's timing to current-time-ms. Each cue runs at its
    own tempo (a timeline's locked tempo, else the global BPM). Timeline cues
-   that reached their end are deactivated."
+   that reached their end are deactivated. Timelines chasing MTC are skipped:
+   apply-chase sets their position."
   [playback cue-chains current-time-ms bpm resync-rate]
   (let [advanced (reduce-kv
                   (fn [acc cell-key cue-timing-state]
                     (let [chain (get cue-chains cell-key)
                           loop-config (get chain :loop {:enabled? false :start 0.0 :duration 4.0})]
                       (assoc acc cell-key
+                             (if (playback/chases-mtc? chain)
+                               cue-timing-state
                              (cue-timing/update-cue-timing
                               cue-timing-state
                               current-time-ms
                               (playback/cue-bpm chain bpm)
                               resync-rate
                               loop-config
-                              (when (:timeline? cue-timing-state) (playback/timeline-cfg chain))))))
+                              (when (:timeline? cue-timing-state) (playback/timeline-cfg chain)))))))
                   {}
                   (or (:active-cues playback) {}))
         ended (keep (fn [[k t]] (when (:ended? t) k)) advanced)]
@@ -109,6 +113,8 @@
    1. Updates global clock (for BPM visualization, runs always)
    2. Updates each active cue's timing (with phase offset decay), and stops
       timeline cues at their end
+   3. Sets timelines that chase MIDI timecode from the decoder, and mirrors
+      the decoder's status for the UI ([:backend :input :mtc])
    
    NOTE: Global clock and cue timing run continuously, not just when playing.
    This allows modulators to animate in editor preview mode.
@@ -117,7 +123,8 @@
   (let [raw-state (state/get-raw-state)
         bpm (ex/bpm raw-state)
         resync-rate (ex/resync-rate raw-state)
-        cue-chains (get-in raw-state [:chains :cue-chains])]
+        cue-chains (get-in raw-state [:chains :cue-chains])
+        mtc-pos (mtc/current)]
     (state/swap-state!
      (fn [s]
        (-> s
@@ -132,7 +139,10 @@
                          bpm
                          resync-rate)))
            ;; 2. Update all active cues' timing
-           (update :playback advance-active-cues cue-chains current-time-ms bpm resync-rate))))))
+           (update :playback advance-active-cues cue-chains current-time-ms bpm resync-rate)
+           ;; 3. MIDI timecode chase
+           (update :playback playback/apply-chase cue-chains mtc-pos bpm current-time-ms)
+           (update-in [:backend :input :mtc] mtc/mirror-status mtc-pos current-time-ms))))))
 
 
 ;; Frame Generation

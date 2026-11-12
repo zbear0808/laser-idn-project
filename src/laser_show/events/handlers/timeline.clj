@@ -19,6 +19,7 @@
             [laser-show.events.helpers :as h]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.cue-timing :as cue-timing]
+            [laser-show.timeline.playback :as playback]
             [laser-show.state.extractors :as ex]
             [laser-show.events.handlers.list.helpers :as list-helpers]
             [laser-show.timeline.model :as model]))
@@ -328,6 +329,11 @@
   (let [[col row] (event-cell event)]
     (assoc event :col col :row row)))
 
+(defn- unless-chasing [handler {:keys [col row state] :as event}]
+  (if (playback/chases-mtc? (get-in state (chain-path col row)))
+    {:state state}
+    (handler event)))
+
 (defn- active-timing [state col row]
   (get-in state [:playback :active-cues [col row]]))
 
@@ -493,11 +499,12 @@
     ;; Edits as data
     :timeline/apply-op (handle-apply-op event)
 
-    ;; Transport (without :col/:row: the open editor's cell)
-    :timeline/play (handle-play (with-cell event))
-    :timeline/pause (handle-pause (with-cell event))
-    :timeline/toggle-play (handle-toggle-play (with-cell event))
-    :timeline/stop (handle-stop (with-cell event))
+    ;; Transport (without :col/:row: the open editor's cell). A timeline
+    ;; following MIDI timecode ignores them: the timecode drives it.
+    :timeline/play (unless-chasing handle-play (with-cell event))
+    :timeline/pause (unless-chasing handle-pause (with-cell event))
+    :timeline/toggle-play (unless-chasing handle-toggle-play (with-cell event))
+    :timeline/stop (unless-chasing handle-stop (with-cell event))
     :timeline/seek (handle-seek event)
     :timeline/set-ruler-mode (handle-set-ruler-mode event)
 

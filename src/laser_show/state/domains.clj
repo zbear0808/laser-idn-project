@@ -420,6 +420,7 @@
                            :address-mappings {}        ; Map of OSC address -> event config
                            :handlers {}                ; Map of handler-id -> {:pattern :handler}
                            :learn-mode nil}            ; Promise when learning, nil otherwise
+                     :mtc {:state :stopped :fps nil :text nil} ; mirror of laser-show.input.mtc, see mirror-status
                      :gamepad {:enabled? true}
                      :keyboard {:enabled? true
                                 :attached-components #{}}
