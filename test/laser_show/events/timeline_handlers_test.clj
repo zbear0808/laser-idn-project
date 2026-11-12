@@ -65,8 +65,9 @@
                                               :time-ms 0 :bpm 120.0 :trigger-time 0})]
                    (update-vals frames count)))]
     (state/init-state! base-state)
-    ;; The loop wraps playback inside [0, 16), so these are the reachable positions.
-    (doseq [beats [0.0 5.0 15.0 15.99]]
+    ;; Accumulated beats wrap inside [0, 16); the phase offset can push the
+    ;; effective position up to ~1 beat past the loop end.
+    (doseq [beats [0.0 5.0 15.0 15.99 16.5]]
       (is (= (render plain beats) (render converted beats))
           (str "same zones and point counts at beat " beats)))))
 

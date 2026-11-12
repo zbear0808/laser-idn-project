@@ -265,6 +265,23 @@
       (presets/generate-frame-with-params preset-id params)
       (presets/generate-frame preset-id))))
 
+(defn- window-beats
+  "The beat position clip/effect windows are tested against. Defaults to
+   :effective-beats; generate-frames-by-zone sets :window-beats so a looping
+   cue's windows see the same loop region as its playhead (TL-25)."
+  ^double [timing-ctx]
+  (double (or (:window-beats timing-ctx) (:effective-beats timing-ctx 0.0))))
+
+(defn- wrap-into-loop
+  "Wrap beats into an enabled loop region [start, start + duration)."
+  [beats {:keys [enabled? start duration]}]
+  (let [beats (double beats)
+        start (double (or start 0.0))
+        duration (double (or duration 0.0))]
+    (if (and enabled? (pos? duration) (>= beats (+ start duration)))
+      (+ start (mod (- beats start) duration))
+      beats)))
+
 (defn- in-timeline-window?
   "Check if the current beat position falls within an item's timeline window.
    Returns true if the item should be active at `current-beats`.
@@ -289,7 +306,7 @@
    Effects with :timeline/start and :timeline/duration are filtered
    so only those active at the current beat position are applied."
   [frame item elapsed-ms bpm trigger-time timing-ctx]
-  (let [current-beats (:effective-beats timing-ctx 0.0)
+  (let [current-beats (window-beats timing-ctx)
         item-effects (->> (:effects item [])
                           (filterv #(in-timeline-window? % current-beats)))]
     (if (seq item-effects)
@@ -356,7 +373,7 @@
    
    Returns a frame (vector of points) or nil if disabled/empty/outside timeline."
   [item elapsed-ms bpm trigger-time timing-ctx]
-  (let [current-beats (:effective-beats timing-ctx 0.0)]
+  (let [current-beats (window-beats timing-ctx)]
     (when (and (:enabled? item true)
                (in-timeline-window? item current-beats))
       (cond
@@ -409,7 +426,7 @@
    
    Returns: Map of zone-group-id → LaserFrame (vector of points)"
   [item parent-zone-id elapsed-ms bpm trigger-time timing-ctx tracks default-zone-id]
-  (let [current-beats (:effective-beats timing-ctx 0.0)]
+  (let [current-beats (window-beats timing-ctx)]
     (if-not (and (:enabled? item true)
                  (in-timeline-window? item current-beats))
       {}
@@ -511,6 +528,10 @@
         items (cond->> (:items cue-chain [])
                 (seq muted) (filterv #(not (contains? muted (:track-id %)))))
         destination-id (get-in cue-chain [:destination-zone :zone-group-id] :all)
+        timing-ctx (if-let [loop-config (:loop cue-chain)]
+                     (assoc timing-ctx :window-beats
+                            (wrap-into-loop (:effective-beats timing-ctx 0.0) loop-config))
+                     timing-ctx)
         raw-state (state/get-raw-state)
         item-zone-maps (u/keepv
                         #(render-item-tree-by-zone
