@@ -8,6 +8,7 @@
   (:require [clojure.tools.logging :as log]
             [overtone.midi :as m]
             [laser-show.input.events :as events]
+            [laser-show.input.mtc :as mtc]
             [laser-show.common.util :as u])
   (:import [javax.sound.midi MidiDevice Transmitter]))
 
@@ -92,6 +93,10 @@
 (defn create-midi-handler
   "Creates a handler function for MIDI messages.
    
+   MTC quarter-frames go straight to the timecode decoder (laser-show.input.mtc):
+   they ignore the channel filter (system messages have no channel) and never
+   become trigger events.
+   
    Args:
    - device-name: Name of the device for logging
    - dispatch-fn: Function to call with converted events
@@ -104,13 +109,27 @@
       (when (and (:enabled? midi-state)
                  ;; Guard against a handler that outlives its disconnect
                  (contains? (:connected-devices midi-state) device-name))
-        (let [channel-filter (:channel-filter midi-state)
-              channel (:channel msg)]
-          ;; Check channel filter
-          (when (or (nil? channel-filter)
-                    (contains? channel-filter channel))
-            (when-let [event (midi-msg->event msg)]
-              (dispatch-fn event))))))))
+        (if (= :midi-time-code (:status msg))
+          (mtc/on-quarter-frame! (:data1 msg))
+          (let [channel-filter (:channel-filter midi-state)
+                channel (:channel msg)]
+            ;; Check channel filter
+            (when (or (nil? channel-filter)
+                      (contains? channel-filter channel))
+              (when-let [event (midi-msg->event msg)]
+                (dispatch-fn event)))))))))
+
+(defn create-sysex-handler
+  "Creates a handler for SysEx messages: MTC full-frame (locate) messages go
+   to the timecode decoder; everything else is ignored."
+  [device-name get-state-fn]
+  (fn [{:keys [data]}]
+    (let [midi-state (get-state-fn)]
+      (when (and (:enabled? midi-state)
+                 (contains? (:connected-devices midi-state) device-name)
+                 data
+                 (mtc/full-frame? data))
+        (mtc/on-sysex! data)))))
 
 (defn connect-device
   "Connects to a MIDI input device by name.
@@ -125,7 +144,7 @@
             receiver (m/midi-in device-info)
             handler (create-midi-handler actual-name dispatch-fn get-state-fn)]
         ;; Set up the handler (side effect)
-        (m/midi-handle-events receiver handler)
+        (m/midi-handle-events receiver handler (create-sysex-handler actual-name get-state-fn))
         (log/info "Connected to MIDI device:" actual-name)
         ;; Return updated state
         (-> midi-state

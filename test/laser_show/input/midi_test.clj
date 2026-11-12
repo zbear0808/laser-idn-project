@@ -1,7 +1,8 @@
 (ns laser-show.input.midi-test
   (:require [clojure.test :refer [deftest testing is]]
             [laser-show.input.fixtures :as fx]
-            [laser-show.input.midi :as midi]))
+            [laser-show.input.midi :as midi]
+            [laser-show.input.mtc :as mtc]))
 
 (deftest fixture-shape-test
   (testing "midi-clj leaves :status nil above channel 0, which is why we read :command"
@@ -105,3 +106,38 @@
         handler (midi/create-midi-handler "Test Device" #(swap! sent conj %) #(deref state))]
     (handler (fx/note-on 0 60 100))
     (is (empty? @sent))))
+
+(deftest mtc-fixture-shape-test
+  (testing "midi-clj 0.5.0's map for 0xF1: no :command, a keyword :status, channel 1"
+    (is (= {:channel 1 :command nil :status :midi-time-code :data1 0x25 :data2 0 :note 0x25 :velocity 0}
+           (select-keys (fx/mtc-quarter-frame 0x25) [:channel :command :status :data1 :data2 :note :velocity])))))
+
+(deftest mtc-quarter-frame-bypasses-triggers-and-channel-filter-test
+  (mtc/reset-decoder!)
+  (let [sent (atom [])
+        state (atom {:enabled? true :channel-filter #{5} :connected-devices #{"Test Device"}})
+        handler (midi/create-midi-handler "Test Device" #(swap! sent conj %) #(deref state))]
+    (doseq [b [0x0C 0x10 0x25 0x30 0x40 0x50 0x61 0x72]]
+      (handler (fx/mtc-quarter-frame b)))
+    (is (empty? @sent) "no trigger events")
+    (is (= :running (:state (mtc/current))) "channel 1 isn't in the filter, the decoder still got them")
+    (is (= 25 (:fps (mtc/current))))
+    (testing "disabled MIDI ignores MTC too"
+      (mtc/reset-decoder!)
+      (swap! state assoc :enabled? false)
+      (doseq [b [0x0C 0x10 0x25 0x30 0x40 0x50 0x61 0x72]]
+        (handler (fx/mtc-quarter-frame b)))
+      (is (nil? (:seconds (mtc/current)))))
+    (mtc/reset-decoder!)))
+
+(deftest sysex-handler-forwards-mtc-full-frame-test
+  (mtc/reset-decoder!)
+  (let [handler (midi/create-sysex-handler "Test Device" (constantly {:enabled? true :connected-devices #{"Test Device"}}))
+        msg (fx/sysex-msg [0xF0 0x7F 0x7F 0x01 0x01 0x21 0 20 0 0xF7])]
+    (is (= 0xF0 (:status msg)))
+    (handler (fx/sysex-msg [0xF0 0x7E 0x7F 0x06 0x01 0xF7]))
+    (is (nil? (:seconds (mtc/current))) "other SysEx is ignored")
+    (handler msg)
+    (is (= 3620.0 (:seconds (mtc/current))))
+    (is (= :stopped (:state (mtc/current)))))
+  (mtc/reset-decoder!))
