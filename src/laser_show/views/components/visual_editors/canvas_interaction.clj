@@ -168,10 +168,10 @@
                                                                     :transaction-open? false}
                                                                    initial-drag-state))})
                    (draw-interactive-canvas! canvas props)))
-   :desc {:fx/type :canvas
+   :desc (cond->
+          {:fx/type :canvas
           :id id
           :managed (if (some? managed) managed true)
-          :style-class style-class
           :width width
           :height height
           :style (str "-fx-cursor: " cursor ";")
@@ -300,4 +300,6 @@
                                            (on-scroll delta-x delta-y value drag-state)))))]
                 (dispatch-result! (:dispatch result))
                 (when (:consumed? result)
-                  (.consume e))))))}})
+                  (.consume e))))))}
+          ;; cljfx can't set a nil style-class list
+          style-class (assoc :style-class style-class))})
