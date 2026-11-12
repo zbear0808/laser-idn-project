@@ -472,6 +472,28 @@
 
 
 ;; ============================================================
+;; Timeline settings
+;; ============================================================
+;;
+;; Optional document keys on a timeline cue:
+;; :timeline/length     beats; nil = the last clip end
+;; :timeline/tempo-bpm  locked tempo; nil = follow the global BPM
+;; :timeline/tc-start   timecode of beat 0, in seconds (default 0)
+;; :timeline/tc-fps     24, 25, 29.97 (drop-frame) or 30 (default 30)
+
+
+(defn content-end
+  "End of the last clip in beats (0 for an empty cue)."
+  [cue]
+  (reduce max 0.0 (keep clip-end (:items cue))))
+
+(defn effective-length
+  "Where the timeline ends: :timeline/length when set, else the last clip end."
+  [cue]
+  (or (:timeline/length cue) (content-end cue)))
+
+
+;; ============================================================
 ;; Edits as data: apply-op
 ;; ============================================================
 ;;
@@ -630,6 +652,16 @@
     :move-loop (edit-loop cue #(move-loop % (:delta o) snap-opts))
     :trim-loop-start (edit-loop cue #(trim-loop-start % (:to o) snap-opts))
     :trim-loop-end (edit-loop cue #(trim-loop-end % (:to o) snap-opts))
+    :set-length (if-let [b (:beats o)]
+                  (assoc cue :timeline/length (max min-clip-length (snap (double b) snap-opts)))
+                  (dissoc cue :timeline/length))
+    :set-tempo (if-let [bpm (:bpm o)]
+                 (assoc cue :timeline/tempo-bpm (-> (double bpm) (max 20.0) (min 999.0)))
+                 (dissoc cue :timeline/tempo-bpm))
+    :set-tc-start (assoc cue :timeline/tc-start (max 0.0 (double (or (:seconds o) 0.0))))
+    :set-tc-fps (if (some #(== % (double (:fps o 0))) [24 25 29.97 30])
+                  (assoc cue :timeline/tc-fps (:fps o))
+                  cue)
     cue))
 
 (def op-types
@@ -638,7 +670,7 @@
     :add-effect :remove-effect :set-clip-track :set-clip-zone :set-track-zone :add-track
     :add-folder :delete-tracks :move-tracks :rename-track :set-track-color
     :set-track-muted :set-collapsed :set-loop :move-loop :trim-loop-start
-    :trim-loop-end})
+    :trim-loop-end :set-length :set-tempo :set-tc-start :set-tc-fps})
 
 (defn apply-op
   "Apply one edit op to a timeline cue chain. Returns the cue normalized
@@ -682,4 +714,7 @@
     :set-track-muted "Mute Track"
     :set-collapsed "Collapse Folder"
     (:set-loop :move-loop :trim-loop-start :trim-loop-end) "Edit Loop"
+    :set-length "Set Timeline Length"
+    :set-tempo "Set Timeline Tempo"
+    (:set-tc-start :set-tc-fps) "Set Timecode"
     "Edit Timeline"))

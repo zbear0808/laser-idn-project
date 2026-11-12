@@ -128,8 +128,11 @@
                              (when cues
                                (reduce-kv
                                 (fn [acc k v]
-                                  (let [cur (double (or (:phase-offset v) 0.0))]
-                                    (assoc acc k (assoc v :phase-offset-target (+ cur offset')))))
+                                  ;; Timeline cues keep their position (no phase correction)
+                                  (if (:timeline? v)
+                                    (assoc acc k v)
+                                    (let [cur (double (or (:phase-offset v) 0.0))]
+                                      (assoc acc k (assoc v :phase-offset-target (+ cur offset'))))))
                                 {}
                                 cues)))))}))
 

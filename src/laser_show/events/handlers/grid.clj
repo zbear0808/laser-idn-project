@@ -30,29 +30,19 @@
     resolved-mode))
 
 (defn- trigger-cue
-  "Trigger a cue by adding it to active-cues with fresh timing state."
+  "Trigger a cue: add it to active-cues with fresh timing. Timeline cues start
+   from the top (live use); the timeline editor's Play starts from its cursor."
   [state col row]
   (let [now (h/current-time-ms {:time (System/currentTimeMillis)})
-        global-clock-beats (ex/global-accumulated-beats state)
-        cue-timing-state (cue-timing/create-cue-timing-state now global-clock-beats)]
-    (-> state
-        (assoc-in [:playback :active-cues [col row]] cue-timing-state)
-        (assoc-in [:playback :playing?] true)
-        ;; Keep deprecated state for backward compatibility during transition
-        (assoc-in [:playback :active-cell] [col row])
-        (assoc-in [:playback :trigger-time] now))))
+        cue (get-in state [:chains :cue-chains [col row]])]
+    (update state :playback cue-timing/activate-cue [col row] now
+            (ex/global-accumulated-beats state)
+            {:timeline? (cue-chains/timeline-cue? cue) :start-beat 0.0})))
 
 (defn- untrigger-cue
   "Remove a cue from active-cues. Sets playing? to false if no cues remain."
   [state col row]
-  (let [remaining-cues (dissoc (get-in state [:playback :active-cues]) [col row])
-        any-remaining? (boolean (seq remaining-cues))]
-    (-> state
-        (assoc-in [:playback :active-cues] remaining-cues)
-        (assoc-in [:playback :playing?] any-remaining?)
-        ;; Clear deprecated active-cell if this was it
-        (cond-> (= (get-in state [:playback :active-cell]) [col row])
-          (assoc-in [:playback :active-cell] (first (keys remaining-cues)))))))
+  (update state :playback cue-timing/deactivate-cue [col row]))
 
 (defn- migrate-cell-triggers
   "Migrates target coordinates for triggers mapped to from-pos."

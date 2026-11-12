@@ -45,8 +45,11 @@
 
 (defn align-cue-timing-phase
   "Set target phase offset on a cue timing state so it smoothly glides to align
-   with the nearest integer beat boundary."
+   with the nearest integer beat boundary. Timeline cues are returned
+   unchanged: a sequenced show must not shift when someone taps the tempo."
   [{:keys [accumulated-beats phase-offset effective-beats] :as cue-timing}]
+  (if (:timeline? cue-timing)
+    cue-timing
   (let [eff-beats (double (or effective-beats
                               (+ (double (or accumulated-beats 0.0))
                                  (double (or phase-offset 0.0)))))
@@ -55,7 +58,7 @@
         target-phase (+ current-phase correction)]
     (assoc cue-timing
            :phase-offset current-phase
-           :phase-offset-target target-phase)))
+           :phase-offset-target target-phase))))
 
 (defn align-all-active-cues-phase
   "Align phase target for all active cues."
@@ -125,45 +128,64 @@
    Parameters:
    - cue-timing: Current cue timing state map
    - current-time-ms: Current time in milliseconds
-   - bpm: Current BPM
+   - bpm: The cue's tempo (a timeline's locked tempo, else the global BPM)
    - resync-rate: Beats to reach ~63% of phase correction (decay rate)
    - loop-config: Map with {:enabled? :start :duration} for arrangement looping
+   - timeline-cfg: (timeline cues) {:length beats}
+   
+   Timeline cues (:timeline? true) have no phase glide (phase stays 0, so
+   accumulated = effective beats), don't move while :paused?, and without an
+   enabled loop stop at :length with :ended? true.
    
    Returns: Updated cue timing state"
-  [{:keys [accumulated-beats accumulated-ms phase-offset phase-offset-target
-           last-frame-time trigger-time] :as ct}
-   current-time-ms bpm resync-rate {:keys [enabled? start duration] :as loop-config}]
-  (if last-frame-time
-    (let [delta-ms (- current-time-ms last-frame-time)]
-      ;; Guard against unreasonable deltas
-      (if (> delta-ms 1000)
-        ;; Skip accumulation, just update timestamp
-        (assoc ct :last-frame-time current-time-ms)
-        ;; Normal accumulation with phase decay
-        (let [delta-beats (* delta-ms (/ bpm 60000.0))
-              diff (- phase-offset phase-offset-target)
-              ;; Snap to target when within threshold, else decay
-              new-phase (if (< (Math/abs diff) snap-threshold)
-                          phase-offset-target
-                          (let [decay (Math/exp (- (/ delta-beats (max 0.1 resync-rate))))]
-                            (+ phase-offset-target (* diff decay))))
+  ([ct current-time-ms bpm resync-rate loop-config]
+   (update-cue-timing ct current-time-ms bpm resync-rate loop-config nil))
+  ([{:keys [accumulated-beats accumulated-ms phase-offset phase-offset-target
+            last-frame-time timeline? paused?] :as ct}
+    current-time-ms bpm resync-rate {:keys [enabled? start duration] :as _loop-config} timeline-cfg]
+   (cond
+     (nil? last-frame-time)
+     ;; First frame - just initialize timestamp
+     (assoc ct :last-frame-time current-time-ms)
 
-              new-accumulated-beats (+ accumulated-beats delta-beats)
+     (or paused? (:ended? ct))
+     (assoc ct :last-frame-time current-time-ms)
 
-              ;; Wrap beats if we crossed the loop end
-              wrapped-beats (if (and enabled?
-                                     (pos? duration)
-                                     (>= new-accumulated-beats (+ start duration)))
-                              (let [overshoot (- new-accumulated-beats (+ start duration))]
-                                (+ start (mod overshoot duration)))
-                              new-accumulated-beats)]
-          (assoc ct
-                 :accumulated-beats wrapped-beats
-                 :accumulated-ms (+ accumulated-ms delta-ms)
-                 :phase-offset new-phase
-                 :last-frame-time current-time-ms))))
-    ;; First frame - just initialize timestamp
-    (assoc ct :last-frame-time current-time-ms)))
+     :else
+     (let [delta-ms (- current-time-ms last-frame-time)]
+       ;; Guard against unreasonable deltas
+       (if (> delta-ms 1000)
+         ;; Skip accumulation, just update timestamp
+         (assoc ct :last-frame-time current-time-ms)
+         ;; Normal accumulation with phase decay
+         (let [delta-beats (* delta-ms (/ bpm 60000.0))
+               diff (- phase-offset phase-offset-target)
+               ;; Snap to target when within threshold, else decay
+               new-phase (cond
+                           timeline? 0.0
+                           (< (Math/abs diff) snap-threshold) phase-offset-target
+                           :else (let [decay (Math/exp (- (/ delta-beats (max 0.1 resync-rate))))]
+                                   (+ phase-offset-target (* diff decay))))
+
+               new-accumulated-beats (+ accumulated-beats delta-beats)
+               looping? (and enabled? (pos? duration))
+               length (:length timeline-cfg)
+
+               ;; Wrap beats if we crossed the loop end
+               wrapped-beats (if (and looping?
+                                      (>= new-accumulated-beats (+ start duration)))
+                               (let [overshoot (- new-accumulated-beats (+ start duration))]
+                                 (+ start (mod overshoot duration)))
+                               new-accumulated-beats)
+               ended? (and timeline? (not looping?) length
+                           (>= wrapped-beats (double length)))]
+           (cond-> (assoc ct
+                          :accumulated-beats (if ended? (double length) wrapped-beats)
+                          :accumulated-ms (+ accumulated-ms delta-ms)
+                          :phase-offset new-phase
+                          :last-frame-time current-time-ms)
+             timeline? (assoc :phase-offset-target 0.0)
+             ended? (assoc :ended? true))))))))
 
 
 (defn get-cue-timing-context
@@ -254,11 +276,12 @@
    
    Returns: Reset cue timing state"
   [cue-timing]
-  (assoc cue-timing
-         :accumulated-beats 0.0
-         :accumulated-ms 0.0
-         :phase-offset 0.0
-         :phase-offset-target 0.0))
+  (-> cue-timing
+      (assoc :accumulated-beats 0.0
+             :accumulated-ms 0.0
+             :phase-offset 0.0
+             :phase-offset-target 0.0)
+      (dissoc :ended?)))
 
 
 (defn reset-global-clock
@@ -275,3 +298,44 @@
          :phase-offset 0.0
          :phase-offset-target 0.0
          :effective-beats 0.0))
+
+
+;; Activating cues on the :playback map
+
+
+(defn activate-cue
+  "Start the cue at cell: add fresh timing to (:active-cues playback) and set
+   :playing?. Timeline cues (:timeline? true) start at :start-beat with no
+   phase glide; other cues glide toward the global beat phase."
+  [playback cell now global-beats {:keys [timeline? start-beat]}]
+  (let [base (create-cue-timing-state now global-beats)
+        timing (if timeline?
+                 (assoc base
+                        :timeline? true
+                        :accumulated-beats (double (or start-beat 0.0))
+                        :phase-offset 0.0
+                        :phase-offset-target 0.0
+                        :paused? false)
+                 base)]
+    (-> playback
+        (assoc-in [:active-cues cell] timing)
+        (assoc :playing? true)
+        ;; Deprecated fields kept for older readers
+        (assoc :active-cell cell
+               :trigger-time now))))
+
+(defn deactivate-cue
+  "Stop the cue at cell. :playing? is false once no cue remains."
+  [playback cell]
+  (let [remaining (dissoc (:active-cues playback) cell)]
+    (cond-> (assoc playback
+                   :active-cues remaining
+                   :playing? (boolean (seq remaining)))
+      (= (:active-cell playback) cell) (assoc :active-cell (first (keys remaining))))))
+
+(defn seek
+  "Move a cue's position to beat (clears :ended?)."
+  [cue-timing beat]
+  (-> cue-timing
+      (assoc :accumulated-beats (max 0.0 (double beat)))
+      (dissoc :ended?)))

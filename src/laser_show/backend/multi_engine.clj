@@ -27,6 +27,7 @@
             [laser-show.animation.effects :as effects]
             [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.services.frame-service :as frame-service]
+            [laser-show.timeline.playback :as playback]
             [laser-show.input.store :as input-store]
             [laser-show.idn.output-config :as output-config]))
 
@@ -168,11 +169,12 @@
                         (fn [{:keys [cue-chain cue-timing]}]
                           (let [trigger-time (:trigger-time cue-timing 0)
                                 elapsed (- current-time trigger-time)
-                                timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing bpm)
+                                cue-bpm (playback/cue-bpm cue-chain bpm)
+                                timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing cue-bpm)
                                                   :input-values input-values)
                                 ;; Generate zone frames for this cue
                                 zone-frames-map (frame-service/generate-frames-by-zone-cached
-                                                  cue-chain elapsed bpm trigger-time timing-ctx)
+                                                  cue-chain elapsed cue-bpm trigger-time timing-ctx)
                                 ;; Extract frames for this projector's zones
                                 projector-frames (extract-frames-for-zones zone-frames-map projector-zone-groups)]
                             ;; Combine this cue's zone frames

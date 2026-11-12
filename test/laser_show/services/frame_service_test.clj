@@ -551,3 +551,58 @@
 (deftest muted-folder-mutes-children-test
   (is (empty? (render-with-tracks [{:id :f :type :group :muted? true
                                     :items [{:id :t1 :type :track} {:id :t2 :type :track}]}]))))
+
+;; Phase 4: timeline playback
+
+(defn- timeline-cue [extra]
+  (merge {:editor-type :timeline
+          :destination-zone {:zone-group-id :all}
+          :tracks [{:id :t :type :track}]
+          :items [{:id :a :type :preset :preset-id :circle :track-id :t :enabled? true :effects []
+                   :timeline/start 0.0 :timeline/duration 4.0}]}
+         extra))
+
+(defn- start-timeline! [cue start-beat now]
+  (state/swap-state!
+   (fn [s]
+     (-> s
+         (assoc-in [:chains :cue-chains [0 0]] cue)
+         (assoc-in [:timing :bpm] 120.0)
+         (assoc-in [:playback :playing?] true)
+         (assoc-in [:playback :active-cues [0 0]]
+                   {:timeline? true :trigger-time now :accumulated-beats start-beat :accumulated-ms 0.0
+                    :phase-offset 0.0 :phase-offset-target 0.0 :last-frame-time now})))))
+
+(defn- beats-at-00 [] (get-in (state/get-raw-state) [:playback :active-cues [0 0] :accumulated-beats]))
+
+(deftest timeline-cue-stops-at-end-test
+  (start-timeline! (timeline-cue {}) 3.5 1000)
+  (frame-service/update-timing-accumulators! 1500) ; +1 beat at 120 BPM
+  (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]]))
+      "past the last clip end (4 beats) the cue is deactivated")
+  (is (false? (get-in (state/get-raw-state) [:playback :playing?])))
+  (testing "with the loop on it keeps going"
+    (start-timeline! (timeline-cue {:loop {:enabled? true :start 0.0 :duration 4.0}}) 3.5 1000)
+    (frame-service/update-timing-accumulators! 1500)
+    (is (< (Math/abs (- 0.5 (beats-at-00))) 1e-9))))
+
+(deftest locked-tempo-ignores-global-bpm-test
+  (start-timeline! (timeline-cue {:timeline/tempo-bpm 60.0 :timeline/length 100.0}) 0.0 1000)
+  (state/swap-state! assoc-in [:timing :bpm] 180.0)
+  (frame-service/update-timing-accumulators! 2000) ; 1 s
+  (is (< (Math/abs (- 1.0 (beats-at-00))) 1e-9) "1 s at the locked 60 BPM = 1 beat, not 3"))
+
+(deftest clip-local-loop-modulator-starts-at-clip-test
+  (let [clip (fn [start]
+               {:id :a :type :preset :preset-id :circle :track-id :t :enabled? true
+                :timeline/start start :timeline/duration 8.0
+                :effects [{:id :fx :effect-id :scale :enabled? true
+                           :params {:x-scale {:type :sine :min 0.5 :max 1.5 :period 3.0}}}]})
+        render (fn [start beats]
+                 (frame-service/generate-frames-by-zone
+                  (timeline-cue {:items [(clip start)]})
+                  0 120.0 0 {:accumulated-beats beats :effective-beats beats :phase-offset 0.0
+                             :accumulated-ms (* beats 500.0) :time-ms (* beats 500.0) :bpm 120.0 :trigger-time 0}))]
+    (is (= (render 0.0 1.25) (render 8.0 9.25))
+        "the same clip moved to beat 8 looks the same 1.25 beats into it")
+    (is (not= (render 0.0 1.25) (render 0.0 2.0)) "the modulator does move")))

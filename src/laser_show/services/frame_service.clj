@@ -41,7 +41,9 @@
             [laser-show.profiling.jfr-profiler :as jfr]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.input.store :as input-store]
+            [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.timeline.model :as model]
+            [laser-show.timeline.playback :as playback]
             [laser-show.animation.effects.shape]
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
@@ -77,13 +79,36 @@
 ;; elapsed time (which causes jumps), we accumulate beats incrementally.
 
 
-(defn- update-timing-accumulators!
+(defn- advance-active-cues
+  "Advance every active cue's timing to current-time-ms. Each cue runs at its
+   own tempo (a timeline's locked tempo, else the global BPM). Timeline cues
+   that reached their end are deactivated."
+  [playback cue-chains current-time-ms bpm resync-rate]
+  (let [advanced (reduce-kv
+                  (fn [acc cell-key cue-timing-state]
+                    (let [chain (get cue-chains cell-key)
+                          loop-config (get chain :loop {:enabled? false :start 0.0 :duration 4.0})]
+                      (assoc acc cell-key
+                             (cue-timing/update-cue-timing
+                              cue-timing-state
+                              current-time-ms
+                              (playback/cue-bpm chain bpm)
+                              resync-rate
+                              loop-config
+                              (when (:timeline? cue-timing-state) (playback/timeline-cfg chain))))))
+                  {}
+                  (or (:active-cues playback) {}))
+        ended (keep (fn [[k t]] (when (:ended? t) k)) advanced)]
+    (reduce cue-timing/deactivate-cue (assoc playback :active-cues advanced) ended)))
+
+(defn update-timing-accumulators!
   "Update beat/time accumulators for the current frame.
    Call once per frame before generating animation.
    
    Multi-Cue Architecture:
    1. Updates global clock (for BPM visualization, runs always)
-   2. Updates each active cue's timing (with phase offset decay)
+   2. Updates each active cue's timing (with phase offset decay), and stops
+      timeline cues at their end
    
    NOTE: Global clock and cue timing run continuously, not just when playing.
    This allows modulators to animate in editor preview mode.
@@ -107,20 +132,7 @@
                          bpm
                          resync-rate)))
            ;; 2. Update all active cues' timing
-           (update-in [:playback :active-cues]
-                      (fn [cues]
-                        (reduce-kv
-                         (fn [acc cell-key cue-timing-state]
-                           (let [loop-config (get-in cue-chains [cell-key :loop] {:enabled? false :start 0.0 :duration 4.0})]
-                             (assoc acc cell-key
-                                    (cue-timing/update-cue-timing
-                                     cue-timing-state
-                                     current-time-ms
-                                     bpm
-                                     resync-rate
-                                     loop-config))))
-                         {}
-                         (or cues {})))))))))
+           (update :playback advance-active-cues cue-chains current-time-ms bpm resync-rate))))))
 
 
 ;; Frame Generation
@@ -513,9 +525,16 @@
                             (wrap-into-loop (:effective-beats timing-ctx 0.0) loop-config))
                      timing-ctx)
         raw-state (state/get-raw-state)
+        timeline? (cue-chains/timeline-cue? cue-chain)
         item-zone-maps (u/keepv
-                        #(render-item-tree-by-zone
-                          % nil elapsed-ms bpm trigger-time timing-ctx tracks destination-id)
+                        (fn [item]
+                          (if timeline?
+                            ;; Each clip runs on its own clock, from its start
+                            (let [clip-ctx (playback/clip-timing-ctx timing-ctx item bpm)]
+                              (render-item-tree-by-zone
+                               item nil (playback/clip-elapsed-ms clip-ctx) bpm 0 clip-ctx tracks destination-id))
+                            (render-item-tree-by-zone
+                             item nil elapsed-ms bpm trigger-time timing-ctx tracks destination-id)))
                         items)
         combined-by-zone (reduce
                           (fn [acc item-map]
@@ -626,10 +645,11 @@
                               (let [trigger-time (:trigger-time cue-timing)
                                     elapsed (- current-time trigger-time)
                                     input-values (input-store/get-all-continuous-values)
-                                    timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing bpm)
+                                    cue-bpm (playback/cue-bpm cue-chain bpm)
+                                    timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing cue-bpm)
                                                       :input-values input-values)
                                     ;; Generate frames separated by zone
-                                    zone-frames (generate-frames-by-zone cue-chain elapsed bpm trigger-time timing-ctx)
+                                    zone-frames (generate-frames-by-zone cue-chain elapsed cue-bpm trigger-time timing-ctx)
                                     ;; Track all zones this cue routes to
                                     cue-zone-targets (set (keys zone-frames))
                                     ;; Always combine all zone frames (master view)
