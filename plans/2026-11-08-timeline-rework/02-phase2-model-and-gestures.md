@@ -1,7 +1,16 @@
 # Phase 2 — Timeline model, edits as data, local gestures
 
 **Written:** 2026-11-08   **Written for commit:** `d0a7dc2`
-**Status:** Proposed (after Phase 1)   **Last verified against:** `d0a7dc2`
+**Status:** Done (2026-11-11, branch `timeline/phase2-model-gestures`, commits `7dda99a`…`afd2306`)   **Last verified against:** `afd2306`
+
+> **How the implementation differs from this plan:**
+> - **Anchored multi-clip moves.** `:move-clips` takes an optional `:anchor-id`, the clip under the pointer. Snapping is applied where that clip lands, and every clip then moves by the same delta, clamped so the earliest stays at ≥ 0. Without an anchor (nudge), the earliest clip is the anchor. Ops also accept `:snap? false`, which the gesture sends while Shift is held.
+> - **Cross-track drags are single-clip only:** `:to-track` is set only when one clip is dragged.
+> - **`apply-op` normalizes its result,** and returns the input itself when the result is equal, so `identical?` detects no-ops. The pipeline middleware then finds nothing left to do.
+> - **Pressing a selected clip keeps the selection** so it can be dragged as a group; a click without movement collapses the selection on release. Backspace deletes too.
+> - **`interactive-canvas` changes beyond the plan.** Callbacks get `:modifiers {:shift? :shortcut? :alt?}`. A press on a focusable canvas is consumed, so an enclosing ScrollPane doesn't take the keyboard focus back (Escape during a drag didn't reach the canvas otherwise). `on-key` can return `:cancel-drag?`.
+> - **Zoom is per cue** (`[:ui :timeline-editor [col row] :zoom-x]`), as §5 says. View events that don't carry `:col`/`:row` fall back to the open editor's cell.
+> - **Still open:** `events/handlers/timeline` still requires `track-logic` for the zoom-at-cursor geometry, and that handler still reads live ScrollPanes on the agent thread. `:timeline/update-tracks` stays for the list sidebar. Both go in Phase 3 with the viewport and header column. `subs/timeline-ui` and `timeline-prefs` aren't used outside the dialog yet. The keyboard-shortcut plan still needs to absorb the canvas keys (Escape, Ctrl/Cmd+D, Ctrl/Cmd+A).
 **Supersedes / Superseded by:** none   **Related findings:** TL-13, TL-14, TL-19, TL-28 (subs part); 01 F11, F12, F14, M1 steps 2/3/5, M3 steps 1/2/4; 02 #16, #20, #21, Q13
 
 ## 1. Current behaviour (file:line)
