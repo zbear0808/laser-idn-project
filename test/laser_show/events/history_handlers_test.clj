@@ -367,7 +367,7 @@
 (deftest timeline-nudge-coalesces-test
   (let [base (-> (test-state)
                  (assoc-in [:chains :cue-chains [0 0] :items 0 :timeline/start] 0.0)
-                 (assoc-in [:ui :timeline :selection] #{item-id}))
+                 (assoc-in [:ui :timeline-editor [0 0] :selection] #{item-id}))
         nudge {:event/type :timeline/nudge-selection :col 0 :row 0 :delta-beats 1.0}
         s (-> base (run (assoc nudge :time 1000)) (run (assoc nudge :time 1300)) (run (assoc nudge :time 1600)))]
     (is (= 3.0 (get-in s [:chains :cue-chains [0 0] :items 0 :timeline/start])))

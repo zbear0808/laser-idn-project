@@ -25,7 +25,7 @@
                                        [:chains :cue-chains [0 0] :tracks])))))
     (ui/click! robot "#timeline-add-content")
     (ui/wait-for! #(true? (get-in (state/get-raw-state)
-                                  [:ui :timeline :add-panel-open?])))
+                                  [:ui :timeline-prefs :add-panel :open?])))
     (let [loop-path [:chains :cue-chains [0 0] :loop :enabled?]
           before (boolean (get-in (state/get-raw-state) loop-path))]
       (ui/click! robot "#timeline-loop-toggle")
@@ -46,13 +46,13 @@
                          :col 0 :row 0 :item-id :square})
       (ui/wait-for! #(and (= (inc count-before)
                              (count (get-in (state/get-raw-state) items-path)))
-                          (seq (get-in (state/get-raw-state) [:ui :timeline :selection]))))
-      (let [added-id (first (get-in (state/get-raw-state) [:ui :timeline :selection]))]
+                          (seq (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection]))))
+      (let [added-id (first (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection]))]
         (ui/focus! robot "#timeline-canvas")
         (ui/press! robot javafx.scene.input.KeyCode/DELETE)
         (ui/wait-for! #(= count-before (count (get-in (state/get-raw-state) items-path))))
         (is (not-any? #(= added-id (:id %)) (get-in (state/get-raw-state) items-path)))
-        (is (empty? (get-in (state/get-raw-state) [:ui :timeline :selection])))))))
+        (is (empty? (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection])))))))
 
 (defn- open-timeline! []
   (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
@@ -65,12 +65,12 @@
   (let [robot (ui/robot)]
     (open-timeline!)
     (ui/slide! robot "#timeline-zoom-slider" 120)
-    (ui/wait-for! #(= 120.0 (get-in (state/get-raw-state) [:ui :timeline :zoom-x])))
-    (is (= 120.0 (get-in (state/get-raw-state) [:ui :timeline :zoom-x])))))
+    (ui/wait-for! #(= 120.0 (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :zoom-x])))
+    (is (= 120.0 (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :zoom-x])))))
 
 (deftest timeline-snap-checkbox-toggles-both-ways
   (let [robot (ui/robot)
-        snap-path [:ui :timeline :snap-enabled?]]
+        snap-path [:ui :timeline-prefs :snap :enabled?]]
     (open-timeline!)
     (ui/uncheck! robot "#timeline-snap-toggle")
     (ui/wait-for! #(false? (get-in (state/get-raw-state) snap-path)))
@@ -92,11 +92,11 @@
   (let [robot (ui/robot)]
     (open-timeline!)
     (ui/click! robot "#timeline-add-content")
-    (ui/wait-for! #(true? (get-in (state/get-raw-state) [:ui :timeline :add-panel-open?])))
+    (ui/wait-for! #(true? (get-in (state/get-raw-state) [:ui :timeline-prefs :add-panel :open?])))
     (let [folder (first (filter #(= :group (:type %))
                                 (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :tracks])))]
       (is (some? folder) "conversion creates a zone folder")
-      (events/dispatch! {:event/type :timeline/select-track :track-id (:id folder)})
+      (events/dispatch! {:event/type :timeline/select-track :col 0 :row 0 :track-id (:id folder)})
       (ui/wait-for! #(= "FOLDER PROPERTIES" (ui/node-text "#timeline-inspector-title")))
       (is (= "FOLDER PROPERTIES" (ui/node-text "#timeline-inspector-title"))))))
 
@@ -105,7 +105,7 @@
   []
   (let [items-path [:chains :cue-chains [0 0] :items]
         before (count (get-in (state/get-raw-state) items-path))]
-    (events/dispatch! {:event/type :timeline/set-cursor-beat :beat 0.0})
+    (events/dispatch! {:event/type :timeline/set-cursor-beat :col 0 :row 0 :beat 0.0})
     (events/dispatch! {:event/type :timeline/add-preset-to-track :col 0 :row 0 :item-id :square :start 0.0})
     (ui/wait-for! #(= (inc before) (count (get-in (state/get-raw-state) items-path))))
     (:id (last (get-in (state/get-raw-state) items-path)))))

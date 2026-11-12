@@ -172,6 +172,32 @@
   [context col row]
   (fx/sub-val context get-in [:chains :cue-chains [col row]] {:items []}))
 
+(def ^:private timeline-view-defaults
+  {:selection #{} :cursor-beat 0.0 :zoom-x 50.0 :scroll-hvalue 0.0})
+
+(defn timeline-ui
+  "Timeline editor view state for the cue at [col row]
+   ({:selection :cursor-beat :zoom-x :scroll-hvalue}), with defaults."
+  [context col row]
+  (merge timeline-view-defaults
+         (fx/sub-val context get-in [:ui :timeline-editor [col row]])))
+
+(defn timeline-prefs
+  "Timeline editor preferences: {:snap {:enabled? :value} :add-panel {...}}."
+  [context]
+  (fx/sub-val context get-in [:ui :timeline-prefs]))
+
+(defn timeline-playhead
+  "Beats played by the cue at [col row], or nil when it isn't playing.
+   Re-runs on every timing tick, so only the timeline canvas should use it."
+  [context col row]
+  (get-in (fx/sub-val context ex/active-cues) [[col row] :accumulated-beats]))
+
+(defn zone-groups-by-id
+  "Zone groups as {id -> group (with :id)}."
+  [context]
+  (into {} (map (fn [[id config]] [id (assoc config :id id)])) (fx/sub-val context :zone-groups)))
+
 (defn- active-cue? [state cell]
   (contains? (ex/active-cues state) cell))
 

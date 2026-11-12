@@ -11,12 +11,11 @@
    - Opening the editor, and the wrap-normalize-timelines pipeline middleware
    
    State paths:
-   - Timeline UI: [:ui :timeline]
+   - Timeline UI: [:ui :timeline-editor [col row]] (per cue), [:ui :timeline-prefs]
    - Tracks: [:chains :cue-chains [col row] :tracks]
    - Item timing: [:chains :cue-chains [col row] :items ... :timeline/start :timeline/duration]"
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
-            [laser-show.animation.chains :as chains]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.events.handlers.list.helpers :as list-helpers]
             [laser-show.views.components.visual-editors.timeline.track-logic :as tl]
@@ -36,19 +35,56 @@
 ;; Helpers
 
 
+;; UI state: per cue at [:ui :timeline-editor [col row]] (selection, cursor,
+;; zoom, scroll), editor-wide prefs at [:ui :timeline-prefs] (snap, add
+;; panel), and the track sidebar's list state at [:list-ui [:timeline-tracks col row]].
+
+(def default-view
+  "Per-cue editor view state."
+  {:selection #{} :cursor-beat 0.0 :zoom-x 50.0 :scroll-hvalue 0.0})
+
+(def default-prefs
+  "Editor-wide timeline preferences."
+  {:snap {:enabled? true :value 0.25}
+   :add-panel {:open? false :preset-tab :geometric :effect-tab :shape}})
+
+(defn view-path [col row] [:ui :timeline-editor [col row]])
+
+(defn tracks-list-id
+  "list-editor component id of the track sidebar for [col row]."
+  [col row]
+  [:timeline-tracks col row])
+
+(defn- view-get [state col row k]
+  (get-in state (conj (view-path col row) k) (get default-view k)))
+
+(defn- view-assoc [state col row k v]
+  (assoc-in state (conj (view-path col row) k) v))
+
+(defn- prefs-get [state ks]
+  (get-in state (into [:ui :timeline-prefs] ks) (get-in default-prefs ks)))
+
+(defn- prefs-assoc [state ks v]
+  (assoc-in state (into [:ui :timeline-prefs] ks) v))
+
+(defn- select-track-in-sidebar [state col row track-id]
+  (update-in state [:list-ui (tracks-list-id col row)] assoc
+             :selected-ids (if track-id #{track-id} #{})
+             :last-selected-id track-id))
+
+(defn- event-cell
+  "[col row] of the event, or of the open timeline editor when the event
+   doesn't say (view events from controls that only know the editor)."
+  [{:keys [col row state]}]
+  (if (and (some? col) (some? row))
+    [col row]
+    (let [{dcol :col drow :row} (get-in state [:ui :dialogs :timeline-cue-editor])]
+      [dcol drow])))
+
 (defn- snap-opts
   "Current snap settings in the shape model/snap expects."
   [state]
-  {:enabled? (get-in state [:ui :timeline :snap-enabled?] true)
-   :value (get-in state [:ui :timeline :snap-value] 0.25)})
-
-(defn- update-item-at-id
-  "Update an item by ID within a nested chain structure.
-   Returns updated items vector, or original if ID not found."
-  [items id update-fn]
-  (if-let [path (chains/find-path-by-id items id)]
-    (update-in (vec items) path update-fn)
-    items))
+  (prefs-get state [:snap]))
 
 
 ;; View Controls
@@ -58,9 +94,10 @@
   "Set the horizontal zoom level (pixels per beat). Clamped to bounds.
    Takes :zoom, or the slider's new value from :fx/event."
   [{:keys [zoom state] :as event}]
-  (let [zoom (h/first-some zoom (:fx/event event) (get-in state [:ui :timeline :zoom-x]) 50.0)
+  (let [[col row] (event-cell event)
+        zoom (h/first-some zoom (:fx/event event) (view-get state col row :zoom-x))
         clamped (-> (double zoom) (max min-zoom) (min max-zoom))]
-    {:state (assoc-in state [:ui :timeline :zoom-x] clamped)}))
+    {:state (view-assoc state col row :zoom-x clamped)}))
 
 (defonce ^:private scroll-panes (atom {}))
 
@@ -84,28 +121,29 @@
 
 (defn- handle-sync-scroll
   "Link the vertical scroll between the left list sidebar and the right timeline canvas."
-  [{:keys [pane state]}]
+  [{:keys [pane]}]
   (when-let [source-sp (get @scroll-panes pane)]
     (let [vval (.getVvalue source-sp)
           target-pane (if (= pane :left) :right :left)]
       (when-let [target-sp (get @scroll-panes target-pane)]
         (when (not= (.getVvalue target-sp) vval)
           (run-on-fx! #(.setVvalue target-sp vval))))
-      {:state (assoc-in state [:ui :timeline :sync-scroll-y] vval)})))
+      {})))
 
 (defn- handle-set-hvalue
   "Store the normalized horizontal scroll position (0.0 to 1.0).
    The ScrollPane is the source of truth; this never writes back to it."
-  [{:keys [hvalue fx/event state]}]
-  (let [val (or hvalue event 0.0)
+  [{:keys [hvalue fx/event state] :as e}]
+  (let [[col row] (event-cell e)
+        val (or hvalue event 0.0)
         clamped (-> (double val) (max 0.0) (min 1.0))]
-    {:state (assoc-in state [:ui :timeline :scroll-hvalue] clamped)}))
+    {:state (view-assoc state col row :scroll-hvalue clamped)}))
 
 (defn- handle-zoom-at-cursor
   "Zoom timeline horizontally centered on the mouse cursor beat position.
    Positive delta-y zooms in; negative delta-y zooms out."
   [{:keys [focal-beat viewport-x cursor-x x delta-y col row state]}]
-  (let [current-zoom (get-in state [:ui :timeline :zoom-x] 50.0)
+  (let [current-zoom (view-get state col row :zoom-x)
         zoom-factor (if (pos? (double (or delta-y 0.0))) 1.15 (/ 1.0 1.15))]
     (if-let [^ScrollPane sp (get @scroll-panes :right)]
       (let [content-node ^Node (.getContent sp)
@@ -134,27 +172,21 @@
                                             :max-zoom max-zoom})]
         (run-on-fx! #(.setHvalue sp new-hvalue))
         {:state (-> state
-                    (assoc-in [:ui :timeline :zoom-x] new-zoom)
-                    (assoc-in [:ui :timeline :scroll-hvalue] new-hvalue))})
+                    (view-assoc col row :zoom-x new-zoom)
+                    (view-assoc col row :scroll-hvalue new-hvalue))})
       ;; Fallback if scroll pane not registered (e.g. headless unit tests)
-      (let [new-zoom (-> (* current-zoom zoom-factor) (max min-zoom) (min max-zoom))
-            cur-h (get-in state [:ui :timeline :scroll-hvalue] 0.0)]
-        {:state (-> state
-                    (assoc-in [:ui :timeline :zoom-x] new-zoom)
-                    (assoc-in [:ui :timeline :scroll-hvalue] cur-h))}))))
+      (let [new-zoom (-> (* current-zoom zoom-factor) (max min-zoom) (min max-zoom))]
+        {:state (view-assoc state col row :zoom-x new-zoom)}))))
 
 (defn- handle-set-snap
   "Configure snap-to-grid settings.
    :enabled? comes from the event or, for the checkbox, from a boolean :fx/event."
   [{:keys [enabled? value state] :as event}]
-  (let [current-enabled? (get-in state [:ui :timeline :snap-enabled?] true)
-        current-value (get-in state [:ui :timeline :snap-value] 0.25)
+  (let [{current-enabled? :enabled? current-value :value} (snap-opts state)
         fx-enabled? (let [e (:fx/event event)] (when (boolean? e) e))]
-    {:state (-> state
-                (assoc-in [:ui :timeline :snap-enabled?]
-                          (h/first-some enabled? fx-enabled? current-enabled?))
-                (assoc-in [:ui :timeline :snap-value]
-                          (or value current-value)))}))
+    {:state (prefs-assoc state [:snap]
+                         {:enabled? (h/first-some enabled? fx-enabled? current-enabled?)
+                          :value (or value current-value)})}))
 
 
 ;; Edits: one op per committed edit (model/apply-op)
@@ -164,10 +196,12 @@
 
 (defn- prune-selection
   "Drop selected clip ids that no longer exist in the cue."
-  [state cue]
-  (let [ids (into #{} (map :id) (:items cue []))]
-    (update-in state [:ui :timeline :selection]
-               (fn [sel] (into #{} (filter ids) (or sel #{}))))))
+  [state col row cue]
+  (let [ids (into #{} (map :id) (:items cue []))
+        sel (view-get state col row :selection)]
+    (if (every? ids sel)
+      state
+      (view-assoc state col row :selection (into #{} (filter ids) sel)))))
 
 (defn apply-op-to-state
   "Apply a model op to the cue at [col row]. Returns the new state; identical
@@ -182,7 +216,7 @@
           state
           (-> state
               (assoc-in path cue')
-              (prune-selection cue')))))))
+              (prune-selection col row cue')))))))
 
 (defn- op-effects
   "Effects for an edit: the new state, labelled for undo."
@@ -211,8 +245,9 @@
    - :replace - Set selection to exactly these IDs
    - :add     - Add IDs to existing selection
    - :toggle  - Toggle each ID in/out of selection"
-  [{:keys [ids mode state]}]
-  (let [current (get-in state [:ui :timeline :selection] #{})
+  [{:keys [ids mode state] :as event}]
+  (let [[col row] (event-cell event)
+        current (view-get state col row :selection)
         id-set (set ids)
         new-selection (case (or mode :replace)
                         :replace id-set
@@ -222,33 +257,34 @@
                                             (disj sel id)
                                             (conj sel id)))
                                         current id-set))]
-    {:state (assoc-in state [:ui :timeline :selection] new-selection)}))
+    {:state (view-assoc state col row :selection new-selection)}))
 
 (defn- handle-clear-selection
   "Clear all selected items."
-  [{:keys [state]}]
-  {:state (assoc-in state [:ui :timeline :selection] #{})})
+  [{:keys [state] :as event}]
+  (let [[col row] (event-cell event)]
+    {:state (view-assoc state col row :selection #{})}))
 
 (defn- handle-delete-selection
   "Delete the selected clips. No-op when nothing is selected."
   [{:keys [col row state]}]
-  (let [selection (get-in state [:ui :timeline :selection] #{})]
+  (let [selection (view-get state col row :selection)]
     (if (empty? selection)
       {:state state}
       (op-effects state col row {:op :delete-clips :clip-ids selection}))))
 
 (defn- handle-select-track
   "Set the currently selected track ID."
-  [{:keys [track-id state]}]
-  {:state (-> state
-              (assoc-in [:list-ui :timeline-tracks :selected-ids] (if track-id #{track-id} #{}))
-              (assoc-in [:list-ui :timeline-tracks :last-selected-id] track-id))})
+  [{:keys [track-id state] :as event}]
+  (let [[col row] (event-cell event)]
+    {:state (select-track-in-sidebar state col row track-id)}))
 
 (defn- handle-set-cursor-beat
   "Set the timeline cursor beat position, snapping if enabled."
-  [{:keys [beat state]}]
-  (let [snapped (max 0.0 (model/snap (or beat 0.0) (snap-opts state)))]
-    {:state (assoc-in state [:ui :timeline :cursor-beat] snapped)}))
+  [{:keys [beat state] :as event}]
+  (let [[col row] (event-cell event)
+        snapped (max 0.0 (model/snap (or beat 0.0) (snap-opts state)))]
+    {:state (view-assoc state col row :cursor-beat snapped)}))
 
 
 ;; Loop
@@ -267,7 +303,7 @@
 (defn- handle-nudge-selection
   "Move all selected clips by delta-beats (arrow keys). Bursts coalesce."
   [{:keys [col row delta-beats state]}]
-  (let [selection (get-in state [:ui :timeline :selection] #{})]
+  (let [selection (view-get state col row :selection)]
     (assoc (op-effects state col row {:op :move-clips :clip-ids selection :delta delta-beats})
            :history/coalesce-key [:timeline/nudge-selection col row])))
 
@@ -291,7 +327,8 @@
     {:state (cond-> (assoc-in state (conj chain-path :tracks) new-tracks)
               (seq orphan-ids)
               (-> (update-in (conj chain-path :items) list-helpers/remove-by-ids orphan-ids)
-                  (update-in [:ui :timeline :selection] #(reduce disj (or % #{}) orphan-ids))))}))
+                  (view-assoc col row :selection
+                              (reduce disj (view-get state col row :selection) orphan-ids))))}))
 
 (defn- handle-set-track-muted
   "Mute or unmute a track or folder (a muted folder mutes everything in it).
@@ -316,10 +353,7 @@
   [{:keys [col row zone-group-id state]}]
   (let [track-id (random-uuid)
         effects (op-effects state col row {:op :add-track :track-id track-id :zone-group-id zone-group-id})]
-    (update effects :state
-            #(-> %
-                 (assoc-in [:list-ui :timeline-tracks :selected-ids] #{track-id})
-                 (assoc-in [:list-ui :timeline-tracks :last-selected-id] track-id)))))
+    (update effects :state select-track-in-sidebar col row track-id)))
 
 (defn- handle-add-folder
   "Append a track folder. Optional :zone-group-id sets its zone."
@@ -333,17 +367,13 @@
 (defn- handle-toggle-add-panel
   "Toggle the bottom add-content panel open/closed."
   [{:keys [state]}]
-  (let [current (get-in state [:ui :timeline :add-panel-open?] false)]
-    {:state (assoc-in state [:ui :timeline :add-panel-open?] (not current))}))
+  {:state (prefs-assoc state [:add-panel :open?] (not (prefs-get state [:add-panel :open?])))})
 
 (defn- handle-set-add-panel-tab
   "Set the active tab in the add panel's preset or effect bank.
    :panel is :preset or :effect, :tab-id is the category keyword."
   [{:keys [panel tab-id state]}]
-  (let [k (if (= panel :effect)
-            :add-panel-effect-tab
-            :add-panel-preset-tab)]
-    {:state (assoc-in state [:ui :timeline k] tab-id)}))
+  {:state (prefs-assoc state [:add-panel (if (= panel :effect) :effect-tab :preset-tab)] tab-id)})
 
 (defn- handle-add-preset-to-track
   "Add a preset clip at :start (default: the cursor) on :track-id (resolved
@@ -351,20 +381,17 @@
    and selects the new clip."
   [{:keys [col row item-id track-id start state]}]
   (let [clip-id (random-uuid)
-        cursor (get-in state [:ui :timeline :cursor-beat] 0.0)
+        cursor (view-get state col row :cursor-beat)
         new-state (apply-op-to-state state col row {:op :add-clip :clip-id clip-id :preset-id item-id
                                                     :track-id track-id :start (or start cursor 0.0)})
         clip (list-helpers/find-by-id (get-in new-state (conj (chain-path col row) :items) []) clip-id)]
     (if-not clip
       {:state state}
       {:state (-> new-state
-                  (assoc-in [:ui :timeline :cursor-beat] (model/clip-end clip))
-                  (assoc-in [:list-ui :timeline-tracks :selected-ids] #{(:track-id clip)})
-                  (assoc-in [:list-ui :timeline-tracks :last-selected-id] (:track-id clip)))
-       :history/description "Add Clip"
-       :dispatch {:event/type :timeline/select-items
-                  :ids [clip-id]
-                  :mode :replace}})))
+                  (view-assoc col row :cursor-beat (model/clip-end clip))
+                  (view-assoc col row :selection #{clip-id})
+                  (select-track-in-sidebar col row (:track-id clip)))
+       :history/description "Add Clip"})))
 
 (defn- handle-add-effect-to-timeline-item
   "Add an effect (from the effect bank: :item is its definition) to the clip
@@ -380,17 +407,6 @@
 
 ;; Open Editor
 
-
-(defn- reset-view-for-cell
-  "Selection, cursor, scroll and track selection belong to one cue.
-   Clear them when the editor opens on a different cell."
-  [state col row]
-  (let [{open-col :col open-row :row} (get-in state [:ui :dialogs :timeline-cue-editor])]
-    (if (= [open-col open-row] [col row])
-      state
-      (-> state
-          (update-in [:ui :timeline] assoc :selection #{} :cursor-beat 0.0 :scroll-hvalue 0.0)
-          (assoc-in [:list-ui :timeline-tracks] {})))))
 
 (defn- handle-open-editor
   "Open the timeline cue editor for a cell.
@@ -410,7 +426,7 @@
                       (normalize cue-chain)
                       (model/convert-to-timeline cue-chain (get state :zone-groups {})))
         changed? (not (identical? final-chain cue-chain))
-        effects {:state (cond-> (reset-view-for-cell state col row)
+        effects {:state (cond-> state
                           changed? (assoc-in chain-path final-chain))
                  :dispatch {:event/type :ui/open-dialog
                             :dialog-id :timeline-cue-editor

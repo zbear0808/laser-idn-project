@@ -499,22 +499,22 @@
    that track."
   [mx my button value {:keys [modifiers]}]
   (when (= button MouseButton/PRIMARY)
-    (let [{:keys [tracks zoom-x loop-config selection]} value
+    (let [{:keys [tracks zoom-x loop-config selection col row]} value
           hit (hit-test mx my tracks zoom-x loop-config selection)
           pointer (assoc modifiers :x mx :y my)
           g (gesture/start hit pointer (value-cue value) (gesture-view value))
           clicked-row (:track (tl/track-at-y {:y my :ruler-height ruler-height
                                               :track-height track-height :track-rows tracks}))
           select-track (when (tl/droppable-track? clicked-row)
-                         {:event/type :timeline/select-track :track-id (:id clicked-row)})
+                         {:col col :row row :event/type :timeline/select-track :track-id (:id clicked-row)})
           events (if hit
                    (cond-> []
-                     (:press-select g) (conj (assoc (:press-select g) :event/type :timeline/select-items))
+                     (:press-select g) (conj (assoc (:press-select g) :event/type :timeline/select-items :col col :row row))
                      (= :clip (:type hit)) (cond-> select-track (conj select-track)))
                    (cond-> []
                      (not (or (:shift? modifiers) (:shortcut? modifiers)))
-                     (conj {:event/type :timeline/clear-selection})
-                     true (conj {:event/type :timeline/set-cursor-beat :beat (max 0.0 (/ mx zoom-x))})
+                     (conj {:col col :row row :event/type :timeline/clear-selection})
+                     true (conj {:col col :row row :event/type :timeline/set-cursor-beat :beat (max 0.0 (/ mx zoom-x))})
                      select-track (conj select-track)))]
       (cond-> {:dispatch events}
         g (assoc :drag-start true
@@ -536,8 +536,8 @@
         {:keys [op select select-track]} (gesture/finish gesture)]
     {:dispatch (cond-> []
                  op (conj {:event/type :timeline/apply-op :col col :row row :op op})
-                 select (conj (assoc select :event/type :timeline/select-items))
-                 select-track (conj {:event/type :timeline/select-track :track-id select-track}))}))
+                 select (conj (assoc select :event/type :timeline/select-items :col col :row row))
+                 select-track (conj {:col col :row row :event/type :timeline/select-track :track-id select-track}))}))
 
 (defn- on-hover
   "Handle mouse hover. Update cursor based on edge proximity."
@@ -567,7 +567,7 @@
       (= key-code KeyCode/ESCAPE)
       (if dragging?
         {:cancel-drag? true :consumed? true}
-        {:dispatch {:event/type :timeline/clear-selection} :consumed? true})
+        {:dispatch {:col col :row row :event/type :timeline/clear-selection} :consumed? true})
 
       (and shortcut? (= key-code KeyCode/D))
       (when (seq selection)
@@ -576,7 +576,7 @@
          :consumed? true})
 
       (and shortcut? (= key-code KeyCode/A))
-      {:dispatch {:event/type :timeline/select-items :ids (mapv :id items) :mode :replace}
+      {:dispatch {:col col :row row :event/type :timeline/select-items :ids (mapv :id items) :mode :replace}
        :consumed? true}
 
       (or (= key-code KeyCode/DELETE) (= key-code KeyCode/BACK_SPACE))
@@ -648,8 +648,9 @@
                               :content-width content-width
                               :viewport-width viewport-width})]
                   (.setHvalue sp new-h)
-                  (events/dispatch! {:event/type :timeline/set-hvalue
-                                     :hvalue new-h})
+                  (events/dispatch! (merge {:event/type :timeline/set-hvalue
+                                            :hvalue new-h}
+                                           (select-keys (.getUserData sp) [:col :row])))
                   (.consume e))))))
         (catch Throwable t
           (log/warn t "Timeline scroll filter failed"))))))
@@ -706,7 +707,7 @@
      :id "timeline-snap-toggle"
      :text "Snap"
      :selected (boolean snap-enabled?)
-     :on-selected-changed {:event/type :timeline/set-snap}}
+     :on-selected-changed {:event/type :timeline/set-snap :col col :row row}}
     ;; Snap value selector
     {:fx/type :combo-box
      :id "timeline-snap-value"
@@ -728,7 +729,7 @@
      :min 10 :max 200
      :value (or zoom-x default-zoom)
      :pref-width 140
-     :on-value-changed {:event/type :timeline/set-zoom}}]})
+     :on-value-changed {:event/type :timeline/set-zoom :col col :row row}}]})
 
 
 (defn track-label-renderer
@@ -821,7 +822,7 @@
      :v-box/vgrow :always
      :fx/context context
      :items (or track-defs [])
-     :component-id :timeline-tracks
+     :component-id [:timeline-tracks col row]
      :get-item-label (partial track-label-renderer zone-groups (or track-defs []))
      :get-group-label (partial track-group-label-renderer zone-groups)
      :get-context-menu (partial track-context-menu col row zone-groups)
@@ -1147,23 +1148,23 @@
    - :track-defs    — Explicit Track definitions vector (from CueChain :tracks)
    - :zone-groups   — Map of zone-group-id -> group config
    - :destination-zone-id — The cue's default zone (what top-level tracks inherit)
-   - :timeline-ui   — Map from [:ui :timeline] state
+   - :timeline-ui   — This cue's view state (subs/timeline-ui)
+   - :timeline-prefs — Editor preferences (subs/timeline-prefs)
    - :beats-elapsed — Current beat position from active cue timing (nil if stopped)
    - :loop-config   — Map with {:enabled? :start :duration}"
   [{:keys [fx/context col row items track-defs zone-groups destination-zone-id
-           timeline-ui beats-elapsed loop-config]}]
-  (let [{:keys [zoom-x selection snap-enabled? snap-value cursor-beat
-                add-panel-open? add-panel-preset-tab add-panel-effect-tab]
+           timeline-ui timeline-prefs beats-elapsed loop-config]}]
+  (let [{:keys [zoom-x selection cursor-beat]
          :or {zoom-x default-zoom
-              selection #{}
-              snap-enabled? true
-              snap-value 0.25}} timeline-ui
+              selection #{}}} timeline-ui
+        {snap-enabled? :enabled? snap-value :value :or {snap-enabled? true snap-value 0.25}} (:snap timeline-prefs)
+        {add-panel-open? :open? add-panel-preset-tab :preset-tab add-panel-effect-tab :effect-tab} (:add-panel timeline-prefs)
         tracks (build-tracks (or track-defs []) (or items []))
         muted-track-ids (model/muted-track-ids track-defs)
         ;; Determine selected item ID for the effect bank
         selected-item-id (when (= 1 (count selection)) (first selection))
         ;; The track or folder selected in the sidebar (nil when none)...
-        tracks-ui-state (fx/sub-ctx context subs/list-ui-state :timeline-tracks)
+        tracks-ui-state (fx/sub-ctx context subs/list-ui-state [:timeline-tracks col row])
         sidebar-selected-track-id (let [id (first (:selected-ids tracks-ui-state))]
                                     (when (and id (model/find-track track-defs id)) id))
         ;; ...and the leaf track new content goes to
@@ -1222,7 +1223,7 @@
           :hbar-policy :always
           :vbar-policy :as-needed
           :on-vvalue-changed {:event/type :timeline/sync-scroll :pane :right}
-          :on-hvalue-changed {:event/type :timeline/set-hvalue}
+          :on-hvalue-changed {:event/type :timeline/set-hvalue :col col :row row}
           :style "-fx-background-color: transparent; -fx-background: transparent;"
           :content
           {:fx/type timeline-canvas

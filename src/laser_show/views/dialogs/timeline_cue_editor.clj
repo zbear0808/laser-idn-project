@@ -100,8 +100,9 @@
         zone-groups (fx/sub-ctx context subs/zone-groups-list)
         destination-zone-id (get-in cue-chain [:destination-zone :zone-group-id])
 
-        ;; Timeline UI state
-        timeline-ui (fx/sub-val context get-in [:ui :timeline])
+        ;; Timeline UI state: this cue's view, plus editor-wide prefs
+        timeline-ui (fx/sub-ctx context subs/timeline-ui col row)
+        timeline-prefs (fx/sub-ctx context subs/timeline-prefs)
 
         ;; Beats elapsed: check if cue is currently active/playing
         active-cues-map (fx/sub-val context ex/active-cues)
@@ -149,6 +150,7 @@
        :zone-groups (into {} (map (juxt :id identity)) zone-groups)
        :destination-zone-id destination-zone-id
        :timeline-ui timeline-ui
+       :timeline-prefs timeline-prefs
        :beats-elapsed beats-elapsed
        :loop-config (:loop cue-chain {:enabled? false :start 0.0 :duration 4.0})}
 
