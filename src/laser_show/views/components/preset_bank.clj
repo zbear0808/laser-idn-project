@@ -42,8 +42,9 @@
    - :active-tab - Currently active category tab (default: :geometric)
    - :on-tab-change - Event map or function for tab changes
    - :item-event-template - Optional override for the event dispatched on item click.
-                            Defaults to {:event/type :cue-chain/add-preset :col col :row row}"
-  [{:keys [cell active-tab on-tab-change item-event-template]}]
+                            Defaults to {:event/type :cue-chain/add-preset :col col :row row}
+   - :fill? - Grow with the parent (default: fixed 80 px)"
+  [{:keys [cell active-tab on-tab-change item-event-template fill?]}]
   (let [[col row] cell
         event-template (or item-event-template
                            {:event/type :cue-chain/add-preset
@@ -63,4 +64,5 @@
      :empty-text "No presets in this category"
      :hgap 6
      :vgap 6
-     :padding 10}))
+     :padding 10
+     :fill? fill?}))

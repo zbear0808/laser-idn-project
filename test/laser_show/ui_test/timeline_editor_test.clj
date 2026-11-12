@@ -7,6 +7,7 @@
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.timeline.layout :as layout]
+            [laser-show.timeline.model :as model]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]))
 
@@ -298,3 +299,38 @@
       (ui/wait-for! #(nil? (get-in (state/get-raw-state) timing-path)))
       (ui/wait-for! #(= "MTC —" (ui/node-text "#timeline-mtc-chip"))))
     (mtc/reset-decoder!)))
+
+(defn- click-bank-button! [robot text]
+  (ui/wait-for! #(some (fn [n] (= text (.getText ^javafx.scene.control.Labeled n)))
+                       (ui/query-all ".bank-item-btn")))
+  (ui/click-node! robot (first (filter #(= text (.getText ^javafx.scene.control.Labeled %))
+                                       (ui/query-all ".bank-item-btn")))))
+
+(deftest timeline-effects-from-browser-show-in-detail-panel
+  (let [robot (ui/robot)
+        cue-path [:chains :cue-chains [0 0]]
+        clip-fx (fn [id] (:effects (first (filter #(= id (:id %)) (get-in (state/get-raw-state) (conj cue-path :items))))))]
+    (open-timeline!)
+    (when-not (get-in (state/get-raw-state) [:ui :timeline-prefs :add-panel :open?])
+      (ui/click! robot "#timeline-add-content"))
+    (ui/wait-for! #(ui/visible? "#timeline-browser"))
+    (let [clip-id (add-clip-at-zero!)]
+      (ui/wait-for! #(= "Adds to Square" (ui/node-text "#timeline-browser-effect-hint")))
+      (testing "clicking an effect in the browser adds it to the selected clip"
+        (click-bank-button! robot "Scale")
+        (ui/wait-for! #(= [:scale] (mapv :effect-id (clip-fx clip-id))))
+        (ui/wait-for! #(= "Scale" (ui/node-text "#timeline-device-name-0"))))
+      (testing "the card's switch turns it off"
+        (ui/click! robot "#timeline-device-enabled-0")
+        (ui/wait-for! #(false? (:enabled? (first (clip-fx clip-id))))))
+      (testing "and its x removes it"
+        (ui/click! robot "#timeline-device-remove-0")
+        (ui/wait-for! #(empty? (clip-fx clip-id)))))
+    (testing "with a track selected, effects go to the track"
+      (let [track-id (:id (model/first-leaf-track (get-in (state/get-raw-state) (conj cue-path :tracks))))]
+        (events/dispatch! {:event/type :timeline/clear-selection :col 0 :row 0})
+        (events/dispatch! {:event/type :timeline/select-track :col 0 :row 0 :track-id track-id})
+        (ui/wait-for! #(= "TRACK PROPERTIES" (ui/node-text "#timeline-inspector-title")))
+        (click-bank-button! robot "Rotation")
+        (ui/wait-for! #(= [:rotation] (mapv :effect-id (:effects (model/find-track (get-in (state/get-raw-state) (conj cue-path :tracks)) track-id)))))
+        (is (= "Rotation" (ui/node-text "#timeline-device-name-0")))))))

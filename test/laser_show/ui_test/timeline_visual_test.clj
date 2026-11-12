@@ -8,6 +8,7 @@
    It writes PNGs to test-output/timeline/ for manual (or LLM) review against
    the acceptance checklist; it asserts nothing about pixels."
   (:require [clojure.test :refer [deftest is use-fixtures]]
+            [laser-show.animation.effects :as effects]
             [laser-show.events.core :as events]
             [laser-show.input.mtc :as mtc]
             [laser-show.services.frame-service :as frame-service]
@@ -94,5 +95,21 @@
         (frame-service/update-timing-accumulators! (System/currentTimeMillis))
         (ui/wait-for! #(ui/visible? "#timeline-mtc-rate-warning"))
         (shot! "07-mtc-chase")
-        (mtc/reset-decoder!))
+        (mtc/reset-decoder!)
+        (events/dispatch! {:event/type :timeline/apply-op :col 2 :row 2 :op {:op :set-chase :source nil}})
+        ;; Effects: two on a clip, one on a track, shown in the bottom panel
+        (let [circle (:id (first (:items (cue))))
+              fx-def effects/get-effect]
+          (events/dispatch! {:event/type :timeline/select-items :col 2 :row 2 :ids #{circle}})
+          (doseq [e [:scale :rotation]]
+            (events/dispatch! {:event/type :timeline/add-effect-to-item :col 2 :row 2
+                               :item-id e :item (fx-def e) :target-item-id circle}))
+          (ui/wait-for! #(= 2 (count (:effects (first (:items (cue)))))))
+          (shot! "08-clip-effects")
+          (events/dispatch! {:event/type :timeline/clear-selection :col 2 :row 2})
+          (events/dispatch! {:event/type :timeline/select-track :col 2 :row 2 :track-id t1})
+          (events/dispatch! {:event/type :timeline/add-effect-to-item :col 2 :row 2
+                             :item-id :scale :item (fx-def :scale) :target-track-id t1})
+          (ui/wait-for! #(ui/visible? ".tl-device"))
+          (shot! "09-track-effects")))
       (is true))))

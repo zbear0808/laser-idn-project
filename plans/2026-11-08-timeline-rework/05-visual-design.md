@@ -173,6 +173,11 @@ Label text colour: `#FFFFFF` if the body colour's relative luminance is < 0.5, e
   - Next to it: tempo `128.0 BPM` with a lock icon (`:lock`/`:lock-open`), and a `Bars | Time` segmented toggle for the ruler.
   - When the timeline follows MTC, a status chip `MTC 01:00:05:12` appears: green `#4CAF50` text on 0.15 background when running, `:orange` when freewheeling, `:text-muted` when stopped. The transport buttons grey out with the tooltip "Following MIDI timecode".
 
+> **Layout changed 2026-11-11 (user request, Ableton-style):** §3.8, §3.9 and the §3.11 diagram describe the earlier layout. Now:
+> - **Bottom: detail panel** (toggled by the sliders button; default 300 px, drag the top strip to resize between 160 and 600 px). On the left is a 300 px column with the §3.8 properties. To its right is a **device chain**: the selected clip's, track's or folder's effects as 320 px cards, each with an on/off switch, move left/right, remove, and the shared `effect-parameter-editor`.
+> - **Right: browser** (toggled by the layers button; 280 px). Presets add a clip at the cursor on the insert track, and effects add to the selected clip, track or folder. A hint line under each heading says what a click will do. The Zone effect tab is only offered for clips.
+> - **Tracks and folders can have effects** (`:effects` on the track). They apply to every clip on the track, or in the folder, at timeline time. NEW ops `:set-effect-enabled` and `:move-effect`; `:add-effect` and `:remove-effect` take `:clip-id` or `:track-id`.
+
 ### 3.8 Inspector (right side, 280 px, collapsible)
 It replaces the "properties" third of the bottom panel. Section headers are 11 px bold caps `:text-secondary`, and labels are 11 px (not 10).
 

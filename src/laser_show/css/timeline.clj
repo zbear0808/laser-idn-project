@@ -1,6 +1,6 @@
 (ns laser-show.css.timeline
   "Styles for the timeline editor's node chrome: toolbar, header column,
-   inspector and content drawer. The canvas itself draws with laser-show.css.canvas.
+   detail panel (inspector + device chain) and browser. The canvas itself draws with laser-show.css.canvas.
    See plans/2026-11-08-timeline-rework/05-visual-design.md §3.5-§3.10."
   (:require [cljfx.css :as css]
             [laser-show.css.theme :as theme]))
@@ -165,12 +165,43 @@
                      :-fx-border-color orange
                      :-fx-text-fill "#121212"}}
 
-       ;; Inspector (right, 280 px)
+       ;; Detail panel (bottom): inspector column (300 px) + device chain
+       ".tl-detail"
+       {:-fx-background-color "#161616"
+        :-fx-border-color ["#262626" "transparent" "transparent" "transparent"]}
+       ".tl-detail-resize"
+       {:-fx-min-height 5 :-fx-pref-height 5 :-fx-max-height 5
+        :-fx-background-color "#1C1C1C"}
        ".tl-inspector"
        {:-fx-background-color "#161616"
-        :-fx-min-width 280 :-fx-pref-width 280 :-fx-max-width 280
+        :-fx-min-width 300 :-fx-pref-width 300 :-fx-max-width 300
         :-fx-padding 10
-        :-fx-spacing 8
+        :-fx-spacing 8}
+       ".tl-device-chain"
+       {:-fx-background-color "#121212"
+        :-fx-padding [8 8 8 10]
+        :-fx-spacing 6
+        :-fx-border-color ["transparent" "transparent" "transparent" "#262626"]}
+       ".tl-device"
+       {:-fx-background-color "#1C1C1C"
+        :-fx-border-color "#2E2E2E"
+        :-fx-min-width 320 :-fx-pref-width 320 :-fx-max-width 320
+        :-fx-padding 6
+        :-fx-spacing 6}
+       ".tl-device-off"
+       {:-fx-opacity 0.55}
+       ".tl-device-header"
+       {:-fx-padding [0 0 4 0]
+        :-fx-border-color ["transparent" "transparent" "#2E2E2E" "transparent"]}
+       ".tl-device-name"
+       {:-fx-text-fill text-primary
+        :-fx-font-size 12
+        :-fx-font-weight "bold"}
+
+       ;; Browser (right, 280 px): presets + effects
+       ".tl-browser"
+       {:-fx-background-color "#161616"
+        :-fx-min-width 280 :-fx-pref-width 280 :-fx-max-width 280
         :-fx-border-color ["transparent" "transparent" "transparent" "#262626"]}
        ".tl-inspector-title"
        {:-fx-text-fill text-secondary
@@ -196,11 +227,6 @@
        {:-fx-border-color text-primary
         :-fx-border-width 2}
 
-       ;; Content drawer (bottom, 132 px)
-       ".tl-drawer"
-       {:-fx-background-color "#161616"
-        :-fx-min-height 132 :-fx-pref-height 132 :-fx-max-height 132
-        :-fx-border-color ["#262626" "transparent" "transparent" "transparent"]}
        ".tl-hint"
        {:-fx-text-fill text-muted
         :-fx-font-size 11}

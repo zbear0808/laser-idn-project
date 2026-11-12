@@ -81,11 +81,12 @@
    - :empty-text - Text shown when category is empty (default: \"No items\")
    - :hgap - Horizontal gap between buttons (default: 4)
    - :vgap - Vertical gap between buttons (default: 4)
-   - :padding - Padding around flow pane (default: 8)"
+   - :padding - Padding around flow pane (default: 8)
+   - :fill? - Grow with the parent instead of the fixed 80 px height"
  [{:keys [tab-definitions active-tab on-tab-change
           items items-by-category
           item-event-template item-name-key item-id-key button-style-class
-          empty-text hgap vgap padding]}]
+          empty-text hgap vgap padding fill?]}]
   (let [active (or active-tab (:id (first tab-definitions)))
         ;; Get items either directly or from category map
         display-items (or items
@@ -101,8 +102,8 @@
         ;; Use theme colors
         bg-color (::theme/bg-primary theme/theme)]
     {:fx/type :v-box
-     :pref-height h
-     :max-height h
+     :pref-height (if fill? -1.0 h)
+     :max-height (if fill? Double/MAX_VALUE h)
      :style-class "panel-primary"
      :children [{:fx/type tabs/styled-tab-bar
                  :tabs tab-definitions

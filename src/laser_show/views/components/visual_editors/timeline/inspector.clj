@@ -1,19 +1,17 @@
 (ns laser-show.views.components.visual-editors.timeline.inspector
-  "Timeline inspector (right side, 280 px): properties of the selected clip,
-   clips, track or folder, or of the timeline when nothing is selected.
+  "Timeline inspector: the properties column at the left of the bottom detail
+   panel. Shows the selected clip, clips, track or folder, or the timeline
+   when nothing is selected; their effects sit next to it (device-chain).
    See plans/2026-11-08-timeline-rework/05-visual-design.md §3.8."
   (:require [cljfx.api :as fx]
-            [clj-font-awesome.core :as fa]
             [laser-show.animation.chains :as chains]
-            [laser-show.animation.effects :as effects]
             [laser-show.animation.presets :as presets]
             [laser-show.common.util :as u]
             [laser-show.events.core :as events]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.subs :as subs]
             [laser-show.timeline.model :as model]
-            [laser-show.timeline.timecode :as tc]
-            [laser-show.views.components.effect-bank :as effect-bank])
+            [laser-show.timeline.timecode :as tc])
   (:import [javafx.scene.control TextField]))
 
 
@@ -58,14 +56,45 @@
 (defn- leaf-tracks [tracks]
   (filterv model/leaf-track? (tree-seq model/track-group? #(:items % []) {:type :group :items tracks})))
 
+(defn selection-target
+  "What the detail panel and the effect browser act on:
+   {:kind :clip :entity clip :path p}     one selected clip (p within :items)
+   {:kind :clips :ids ids}                several clips
+   {:kind :track :entity track :path p}   the sidebar's track or folder (p within :tracks)
+   {:kind :timeline}                      nothing selected"
+  [cue selection selected-track-id]
+  (let [items (vec (:items cue))
+        tracks (vec (:tracks cue))
+        found (fn [kind coll id]
+                (if-let [path (chains/find-path-by-id coll id)]
+                  {:kind kind :entity (get-in coll path) :path path}
+                  {:kind :timeline}))]
+    (cond
+      (= 1 (count selection)) (found :clip items (first selection))
+      (> (count selection) 1) {:kind :clips :ids selection}
+      selected-track-id (found :track tracks selected-track-id)
+      :else {:kind :timeline})))
+
+(defn clip-name [clip]
+  (or (:name clip) (:name (presets/presets-by-id (:preset-id clip))) "Clip"))
+
+(defn target-name
+  "Short label for a selection-target."
+  [{:keys [kind entity ids]}]
+  (case kind
+    :clip (clip-name entity)
+    :clips (str (count ids) " clips")
+    :track (:name entity (if (model/track-group? entity) "Folder" "Track"))
+    "Timeline"))
+
 (defn- clip-section
-  [{:keys [col row tracks zone-groups add-panel-effect-tab]} clip]
+  [{:keys [col row tracks zone-groups]} clip]
   (let [track (model/find-track tracks (:track-id clip))
         track-zone (ze/resolve-track-effective-zone tracks (:track-id clip) :all)
         leaves (leaf-tracks tracks)]
     [(title "CLIP")
      {:fx/type :label
-      :text (or (:name clip) (:name (presets/presets-by-id (:preset-id clip))) "Clip")
+      :text (clip-name clip)
       :style-class "tl-inspector-name"}
      {:fx/type :grid-pane
       :hgap 8 :vgap 6
@@ -99,36 +128,7 @@
      (zone-combo {:zone-groups zone-groups
                   :current (:zone-group-id clip)
                   :inherit-label (str "Inherit from Track (" (zone-name zone-groups track-zone) ")")
-                  :on-change #(apply-op! col row {:op :set-clip-zone :id (:id clip) :zone-group-id %})})
-     (title "EFFECTS")
-     {:fx/type :v-box
-      :spacing 2
-      :children (if (seq (:effects clip))
-                  (mapv (fn [fx]
-                          {:fx/type :h-box
-                           :alignment :center-left
-                           :children [{:fx/type :label
-                                       :text (or (:name (effects/get-effect (:effect-id fx)))
-                                                 (some-> (:effect-id fx) name))
-                                       :style-class "tl-field-value"
-                                       :max-width Double/MAX_VALUE
-                                       :h-box/hgrow :always}
-                                      {:fx/type :button
-                                       :style-class ["button" "tl-icon-button"]
-                                       :graphic {:fx/type fa/icon :name :xmark :size 10}
-                                       :on-action (fn [_]
-                                                    (events/dispatch!
-                                                     {:event/type :timeline/apply-op :col col :row row
-                                                      :op {:op :remove-effect :clip-id (:id clip) :effect-instance-id (:id fx)}}))}]})
-                        (:effects clip))
-                  [{:fx/type :label :text "No effects" :style-class "tl-field-label"}])}
-     {:fx/type effect-bank/effect-bank
-      :active-tab (or add-panel-effect-tab :shape)
-      :on-tab-change {:event/type :timeline/set-add-panel-tab :panel :effect}
-      :item-event-template {:event/type :timeline/add-effect-to-item
-                            :col col :row row
-                            :target-item-id (:id clip)}
-      :include-zone? true}]))
+                  :on-change #(apply-op! col row {:op :set-clip-zone :id (:id clip) :zone-group-id %})})]))
 
 (defn- clips-section [{:keys [col row]} clip-ids]
   [(title "CLIPS")
@@ -297,24 +297,19 @@
       :style-class "tl-field-label"}]))
 
 (defn inspector
-  "Props: :col :row :cue :tracks :zone-groups :destination-zone-id :selection
-   :selected-track-id :add-panel-effect-tab :global-bpm"
-  [{:keys [cue tracks selection selected-track-id] :as props}]
-  (let [items (:items cue)
-        clip (when (= 1 (count selection))
-               (when-let [path (chains/find-path-by-id items (first selection))]
-                 (get-in (vec items) path)))
-        track (when (and (empty? selection) selected-track-id)
-                (model/find-track tracks selected-track-id))]
-    {:fx/type :scroll-pane
-     :fit-to-width true
-     :hbar-policy :never
-     :style "-fx-background: #161616; -fx-background-color: #161616;"
-     :min-width 280 :pref-width 280 :max-width 280
-     :content {:fx/type :v-box
-               :style-class "tl-inspector"
-               :children (cond
-                           clip (clip-section props clip)
-                           (> (count selection) 1) (clips-section props selection)
-                           track (track-section props track)
-                           :else (timeline-section props))}}))
+  "Props: :col :row :cue :tracks :zone-groups :destination-zone-id :target
+   (selection-target) :global-bpm"
+  [{:keys [target] :as props}]
+  {:fx/type :scroll-pane
+   :id "timeline-inspector"
+   :fit-to-width true
+   :hbar-policy :never
+   :style "-fx-background: #161616; -fx-background-color: #161616;"
+   :min-width 300 :pref-width 300 :max-width 300
+   :content {:fx/type :v-box
+             :style-class "tl-inspector"
+             :children (case (:kind target)
+                         :clip (clip-section props (:entity target))
+                         :clips (clips-section props (:ids target))
+                         :track (track-section props (:entity target))
+                         (timeline-section props))}})

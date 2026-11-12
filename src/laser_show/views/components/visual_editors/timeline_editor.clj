@@ -22,14 +22,15 @@
             [laser-show.timeline.model :as model]
             [laser-show.timeline.playback :as playback]
             [laser-show.timeline.timecode :as tc]
-            [laser-show.views.components.preset-bank :as preset-bank]
             [laser-show.views.components.visual-editors.canvas-interaction :as ci]
+            [laser-show.views.components.visual-editors.timeline.browser :as browser]
+            [laser-show.views.components.visual-editors.timeline.device-chain :as device-chain]
             [laser-show.views.components.visual-editors.timeline.gesture :as gesture]
             [laser-show.views.components.visual-editors.timeline.header :as header]
             [laser-show.views.components.visual-editors.timeline.inspector :as inspector])
   (:import [javafx.application Platform]
            [javafx.scene.canvas Canvas GraphicsContext]
-           [javafx.scene.input KeyCode MouseButton ScrollEvent]
+           [javafx.scene.input KeyCode MouseButton MouseEvent ScrollEvent]
            [javafx.scene.layout Region]
            [javafx.scene.paint Color]
            [javafx.scene.text TextAlignment]))
@@ -674,42 +675,51 @@
                (icon-button {:id "timeline-zoom-fit" :icon :arrows-left-right :tooltip "Fit the whole timeline"
                              :on-action (fn [_] (fit!))})
                (separator)
-               (toggle {:id "timeline-add-content" :icon :layer-group :tooltip "Preset browser"
+               (toggle {:id "timeline-add-content" :icon :layer-group :tooltip "Browser (presets and effects)"
                         :selected drawer-open?
                         :on-action {:event/type :timeline/toggle-add-panel}})
-               (toggle {:id "timeline-inspector-toggle" :icon :sliders :tooltip "Inspector"
+               (toggle {:id "timeline-inspector-toggle" :icon :sliders :tooltip "Detail panel (properties and effects)"
                         :selected inspector-open?
                         :on-action {:event/type :timeline/toggle-inspector}})])}))
 
 
 ;; ============================================================
-;; Content drawer (presets)
+;; Detail panel (bottom): properties + effects
 ;; ============================================================
 
 
-(defn- drawer [{:keys [col row preset-tab cursor-beat insert-track-name insert-track-id]}]
-  {:fx/type :v-box
-   :style-class "tl-drawer"
-   :children [{:fx/type :h-box
-               :alignment :center-left
-               :padding {:top 4 :left 10 :right 10}
-               :children [{:fx/type :label :text "PRESETS" :style-class "tl-section-label"}
-                          {:fx/type :region :h-box/hgrow :always}
-                          {:fx/type :label
-                           :id "timeline-drawer-hint"
-                           :style-class "tl-hint"
-                           :text (if insert-track-id
-                                   (str "Adds at " (bar-beat-sub (or cursor-beat 0.0)) " on " insert-track-name)
-                                   "Add a track first")}]}
-              {:fx/type preset-bank/preset-bank
-               :v-box/vgrow :always
-               :cell [col row]
-               :active-tab (or preset-tab :geometric)
-               :on-tab-change {:event/type :timeline/set-add-panel-tab :panel :preset}
-               :item-event-template {:event/type :timeline/add-preset-to-track
-                                     :col col :row row
-                                     :track-id insert-track-id
-                                     :start (or cursor-beat 0.0)}}]})
+(def ^:private detail-height-bounds [160.0 600.0])
+
+(defonce ^:private detail-drag
+  ;; [screen-y height] at the press; outside render so re-renders keep it
+  (atom nil))
+
+(defn- detail-panel
+  "Bottom panel, Ableton-style: the selection's properties on the left and
+   its effects as a row of cards. The strip on top drags to resize it."
+  [{:keys [height swap-state inspector-props target col row]}]
+  (let [[lo hi] detail-height-bounds
+        drag detail-drag]
+    {:fx/type :v-box
+     :id "timeline-detail"
+     :style-class "tl-detail"
+     :min-height height :pref-height height :max-height height
+     :children
+     [{:fx/type :region
+       :id "timeline-detail-resize"
+       :style-class "tl-detail-resize"
+       :cursor :n-resize
+       :on-mouse-pressed (fn [^MouseEvent e] (reset! drag [(.getScreenY e) height]))
+       :on-mouse-dragged (fn [^MouseEvent e]
+                           (when-let [[y0 h0] @drag]
+                             (let [h (-> (+ (double h0) (- (double y0) (.getScreenY e))) (max lo) (min hi))]
+                               (swap-state assoc :detail-h h))))
+       :on-mouse-released (fn [_] (reset! drag nil))}
+      {:fx/type :h-box
+       :v-box/vgrow :always
+       :children [(assoc inspector-props :fx/type inspector/inspector :target target)
+                  {:fx/type device-chain/device-chain :h-box/hgrow :always
+                   :col col :row row :target target}]}]}))
 
 
 ;; ============================================================
@@ -767,7 +777,8 @@
                             (when (and id (model/find-track tracks id)) id))
         insert-track-id (model/insert-track tracks selected-track-id)
         lanes-h (layout/lanes-height view)
-        visible (layout/visible-beats view)]
+        visible (layout/visible-beats view)
+        target (inspector/selection-target cue selection selected-track-id)]
     (cond->
      {:fx/type :border-pane
      :style-class "tl-root"
@@ -865,19 +876,21 @@
                                          (scroll-view! assoc :scroll-beat (double v))))}]}}
      }
       ;; cljfx needs these props absent, not nil
-      inspector-open?
-      (assoc :right {:fx/type inspector/inspector
-                     :col col :row row :cue cue :tracks tracks
-                     :zone-groups zone-groups :destination-zone-id destination-zone-id
-                     :selection (or selection #{})
-                     :selected-track-id selected-track-id
-                     :add-panel-effect-tab effect-tab
-                     :global-bpm global-bpm})
       drawer-open?
-      (assoc :bottom {:fx/type drawer
-                      :col col :row row :preset-tab preset-tab :cursor-beat cursor-beat
-                      :insert-track-id insert-track-id
-                      :insert-track-name (:name (model/find-track tracks insert-track-id))}))))
+      (assoc :right {:fx/type browser/browser
+                     :col col :row row :preset-tab preset-tab :effect-tab effect-tab
+                     :cursor-label (bar-beat-sub (or cursor-beat 0.0))
+                     :insert-track-id insert-track-id
+                     :insert-track-name (:name (model/find-track tracks insert-track-id))
+                     :target target})
+      inspector-open?
+      (assoc :bottom {:fx/type detail-panel
+                      :col col :row row :target target
+                      :height (:detail-h state 300.0)
+                      :swap-state swap-state
+                      :inspector-props {:col col :row row :cue cue :tracks tracks
+                                        :zone-groups zone-groups :destination-zone-id destination-zone-id
+                                        :global-bpm global-bpm}}))))
 
 (defn timeline-editor
   "Main timeline editor component.
