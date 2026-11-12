@@ -1,7 +1,17 @@
 # Phase 5 — Chase incoming MIDI timecode (MTC)
 
 **Written:** 2026-11-08   **Written for commit:** `d0a7dc2`
-**Status:** Proposed (after Phase 4)   **Last verified against:** `d0a7dc2`; `overtone/midi-clj` 0.5.0 (`deps.edn`)
+**Status:** Done (2026-11-11, branch `timeline/phase5-mtc-chase`), except the manual DAW check (§8)   **Last verified against:** branch head; `overtone/midi-clj` 0.5.0 (`deps.edn`)
+
+> **How the implementation differs from this plan:**
+> - **Position anchor.** `:tc` is the assembled value + 2 frames (what a display shows, as §7.1 says), but the position used for chasing is anchored at the value + 1.75 frames. Piece 7 arrives 1.75 frames after piece 0's frame started, so this removes a quarter-frame lead.
+> - **Resync after a gap.** A quarter-frame arriving more than 500 ms after the previous one marks the decoder unsynced. It then reports `:stopped`, holding the position where timecode stopped, until a fresh 8-piece sequence arrives. Otherwise a restart would briefly extrapolate from the stale anchor. A full-frame locate also drops partly collected pieces.
+> - **Names.** The test reset is `mtc/reset-decoder!` (not `reset!`, which would shadow `clojure.core`). NEW `mtc/full-frame?`, `mtc/status`, `mtc/mirror-status`, `midi/create-sysex-handler`.
+> - **The chase step is pure and lives in `timeline.playback/apply-chase`**, with `chases-mtc?` and `chase-beat`. `update-timing-accumulators!` calls it after `advance-active-cues`, which skips chasing cues. Freewheeling outside `[0, length)` also deactivates. The loop is ignored while chasing. Chased cues also get `:chasing? true` and `:accumulated-ms` matching the beat.
+> - **Status mirror.** `[:backend :input :mtc]` is `{:state :fps :text :at-ms}`. It's written when `:state` or `:fps` change, and at most every 100 ms when only the text changes. `subs/mtc-status` drops `:at-ms`.
+> - **A chasing timeline ignores** `:timeline/play`, `:pause`, `:toggle-play`, `:stop` and grid triggers, because the timecode drives it. `:timeline/seek` still moves the cursor.
+> - **Inspector.** "Follow timecode: Off | MTC" sits under the frame rate. The rate warning is a component that subscribes to the MTC status by itself. A second warning appears when a chasing timeline's tempo isn't locked.
+> - **Tests.** The UI test is `timeline-follows-midi-timecode` in `laser-show.ui-test.timeline-editor-test`, and the screenshot baseline gained `07-mtc-chase`. The midi-test fixtures are `fixtures/mtc-quarter-frame` and `fixtures/sysex-msg`, built through midi-clj itself. The manual DAW check has **not** been done yet.
 **Supersedes / Superseded by:** none   **Related findings:** TL-31; README "Timecode Integration" (`README.md:147,157`); 05 (input fixtures must match the library); overview T1, T4
 
 This implements user decision D12 (`00-overview.md` §8): pre-recorded shows follow an external timecode source. A typical setup is a DAW or media server playing the audio, sending MTC, and the laser timeline following it. Phase 4 already provides the locked tempo, the timecode maths (`laser-show.timeline.timecode`) and the transport.
