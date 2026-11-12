@@ -202,3 +202,51 @@
                                   :col 0 :row 0 :state s1})]
         (is (identical? s1 (:state res)))))))
 
+
+(deftest set-zoom-uses-fx-event-test
+  (testing "the slider's new value arrives as :fx/event"
+    (let [s0 (assoc-in base-state [:ui :timeline :zoom-x] 50.0)
+          res (timeline/handle {:event/type :timeline/set-zoom
+                                :fx/event 120.0
+                                :state s0})]
+      (is (== 120.0 (get-in res [:state :ui :timeline :zoom-x])))))
+  (testing "an explicit :zoom still works and is clamped"
+    (let [res (timeline/handle {:event/type :timeline/set-zoom
+                                :zoom 500.0
+                                :state base-state})]
+      (is (== 200.0 (get-in res [:state :ui :timeline :zoom-x]))))))
+
+(deftest set-snap-uses-fx-event-false-test
+  (testing "an unchecked checkbox (:fx/event false) disables snap"
+    (let [s0 (assoc-in base-state [:ui :timeline :snap-enabled?] true)
+          res (timeline/handle {:event/type :timeline/set-snap
+                                :fx/event false
+                                :state s0})]
+      (is (false? (get-in res [:state :ui :timeline :snap-enabled?])))))
+  (testing "a checked checkbox enables it"
+    (let [s0 (assoc-in base-state [:ui :timeline :snap-enabled?] false)
+          res (timeline/handle {:event/type :timeline/set-snap
+                                :fx/event true
+                                :state s0})]
+      (is (true? (get-in res [:state :ui :timeline :snap-enabled?])))))
+  (testing "the snap-value combo leaves the enabled flag alone"
+    (let [s0 (assoc-in base-state [:ui :timeline :snap-enabled?] false)
+          res (timeline/handle {:event/type :timeline/set-snap
+                                :value 0.5
+                                :state s0})]
+      (is (false? (get-in res [:state :ui :timeline :snap-enabled?])))
+      (is (== 0.5 (get-in res [:state :ui :timeline :snap-value]))))))
+
+(deftest set-hvalue-has-no-side-effects-test
+  (let [res (timeline/handle {:event/type :timeline/set-hvalue
+                              :fx/event 0.3
+                              :state base-state})]
+    (is (= #{:state} (set (keys res))))
+    (is (== 0.3 (get-in res [:state :ui :timeline :scroll-hvalue])))))
+
+(deftest update-loop-timing-missing-loop-stays-disabled-test
+  (let [s0 (assoc-in base-state [:chains :cue-chains [0 0]] {:items []})
+        res (timeline/handle {:event/type :timeline/update-loop-timing
+                              :col 0 :row 0 :start 2.0
+                              :state s0})]
+    (is (false? (get-in res [:state :chains :cue-chains [0 0] :loop :enabled?])))))

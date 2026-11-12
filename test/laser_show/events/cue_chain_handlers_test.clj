@@ -471,3 +471,20 @@
                 :header-label "TEST"}]
       (is (map? desc))
       (is (= list-comp/list-editor (:fx/type desc))))))
+
+(deftest set-name-clears-given-dialog-flag-test
+  (let [s0 {:ui {:dialogs {:timeline-cue-editor {:editing-name? true}
+                           :cue-chain-editor {:editing-name? true}}}}]
+    (testing "the timeline dialog passes its own :dialog-id"
+      (let [s1 (:state (cue-chain/handle {:event/type :cue-chain/set-name
+                                          :col 0 :row 0 :name "Intro"
+                                          :dialog-id :timeline-cue-editor
+                                          :state s0}))]
+        (is (= "Intro" (get-in s1 [:chains :cue-chains [0 0] :name])))
+        (is (false? (get-in s1 [:ui :dialogs :timeline-cue-editor :editing-name?])))
+        (is (true? (get-in s1 [:ui :dialogs :cue-chain-editor :editing-name?])))))
+    (testing "without :dialog-id it clears the cue chain editor's flag"
+      (let [s1 (:state (cue-chain/handle {:event/type :cue-chain/set-name
+                                          :col 0 :row 0 :name "Intro"
+                                          :state s0}))]
+        (is (false? (get-in s1 [:ui :dialogs :cue-chain-editor :editing-name?])))))))

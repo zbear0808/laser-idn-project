@@ -134,6 +134,7 @@
                                    :dialog-id :timeline-cue-editor
                                    :editing-name? true}
                    :on-commit {:event/type :cue-chain/set-name
+                               :dialog-id :timeline-cue-editor
                                :col col
                                :row row}
                    :on-cancel {:event/type :ui/update-dialog-data

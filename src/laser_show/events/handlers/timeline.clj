@@ -58,9 +58,11 @@
 
 
 (defn- handle-set-zoom
-  "Set the horizontal zoom level (pixels per beat). Clamped to bounds."
-  [{:keys [zoom state]}]
-  (let [clamped (-> zoom (max min-zoom) (min max-zoom))]
+  "Set the horizontal zoom level (pixels per beat). Clamped to bounds.
+   Takes :zoom, or the slider's new value from :fx/event."
+  [{:keys [zoom state] :as event}]
+  (let [zoom (h/first-some zoom (:fx/event event) (get-in state [:ui :timeline :zoom-x]) 50.0)
+        clamped (-> (double zoom) (max min-zoom) (min max-zoom))]
     {:state (assoc-in state [:ui :timeline :zoom-x] clamped)}))
 
 (defn- handle-scroll
@@ -102,13 +104,11 @@
       {:state (assoc-in state [:ui :timeline :sync-scroll-y] vval)})))
 
 (defn- handle-set-hvalue
-  "Set normalized horizontal scroll position (0.0 to 1.0)."
+  "Store the normalized horizontal scroll position (0.0 to 1.0).
+   The ScrollPane is the source of truth; this never writes back to it."
   [{:keys [hvalue fx/event state]}]
   (let [val (or hvalue event 0.0)
         clamped (-> (double val) (max 0.0) (min 1.0))]
-    (when-let [^ScrollPane sp (get @scroll-panes :right)]
-      (when (not= (.getHvalue sp) clamped)
-        (run-on-fx! #(.setHvalue sp clamped))))
     {:state (assoc-in state [:ui :timeline :scroll-hvalue] clamped)}))
 
 (defn- handle-scroll-horizontal
@@ -178,13 +178,15 @@
                     (assoc-in [:ui :timeline :scroll-hvalue] cur-h))}))))
 
 (defn- handle-set-snap
-  "Configure snap-to-grid settings."
-  [{:keys [enabled? value state]}]
+  "Configure snap-to-grid settings.
+   :enabled? comes from the event or, for the checkbox, from a boolean :fx/event."
+  [{:keys [enabled? value state] :as event}]
   (let [current-enabled? (get-in state [:ui :timeline :snap-enabled?] true)
-        current-value (get-in state [:ui :timeline :snap-value] 0.25)]
+        current-value (get-in state [:ui :timeline :snap-value] 0.25)
+        fx-enabled? (let [e (:fx/event event)] (when (boolean? e) e))]
     {:state (-> state
                 (assoc-in [:ui :timeline :snap-enabled?]
-                          (if (some? enabled?) enabled? current-enabled?))
+                          (h/first-some enabled? fx-enabled? current-enabled?))
                 (assoc-in [:ui :timeline :snap-value]
                           (or value current-value)))}))
 
@@ -238,7 +240,7 @@
   (let [loop-path [:chains :cue-chains [col row] :loop]
         snap-enabled? (get-in state [:ui :timeline :snap-enabled?] true)
         snap-size (get-in state [:ui :timeline :snap-value] 0.25)
-        current-loop (get-in state loop-path {:enabled? true :start 0.0 :duration 4.0})
+        current-loop (get-in state loop-path {:enabled? false :start 0.0 :duration 4.0})
         new-start (if (some? start)
                     (max 0.0 (snap-value start snap-size snap-enabled?))
                     (:start current-loop 0.0))

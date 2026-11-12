@@ -214,12 +214,12 @@
 
 (defn- handle-cue-chain-set-name
   "Set the name for a cue chain.
-   Also clears the editing state."
-  [{:keys [col row name state]}]
+   Also clears the editing state of :dialog-id (default :cue-chain-editor)."
+  [{:keys [col row name dialog-id state]}]
   (let [name-path [:chains :cue-chains [col row] :name]]
     {:state (-> state
                 (assoc-in name-path (when (seq name) name))
-                (assoc-in [:ui :dialogs :cue-chain-editor :editing-name?] false))}))
+                (assoc-in [:ui :dialogs (or dialog-id :cue-chain-editor) :editing-name?] false))}))
 
 
 ;; Trigger Mode Operations

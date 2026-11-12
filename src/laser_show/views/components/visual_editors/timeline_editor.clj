@@ -10,6 +10,7 @@
    - timeline-toolbar     : Zoom, snap, grid controls
    - timeline-headers     : Track names / zone indicators (left sidebar)"
   (:require [cljfx.api :as fx]
+            [clojure.tools.logging :as log]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.presets :as presets]
             [laser-show.common.util :as u]
@@ -607,7 +608,8 @@
                   (events/dispatch! {:event/type :timeline/set-hvalue
                                      :hvalue new-h})
                   (.consume e))))))
-        (catch Throwable _ nil)))))
+        (catch Throwable t
+          (log/warn t "Timeline scroll filter failed"))))))
 
 
 ;; ============================================================
@@ -652,7 +654,7 @@
     {:fx/type :toggle-button
      :id "timeline-loop-toggle"
      :text "Loop"
-     :selected (boolean (:enabled? loop-config true))
+     :selected (boolean (:enabled? loop-config false))
      :on-action {:event/type :timeline/toggle-loop
                  :col col :row row}}
 
@@ -661,8 +663,7 @@
      :id "timeline-snap-toggle"
      :text "Snap"
      :selected (boolean snap-enabled?)
-     :on-selected-changed {:event/type :timeline/set-snap
-                           :enabled? (not snap-enabled?)}}
+     :on-selected-changed {:event/type :timeline/set-snap}}
     ;; Snap value selector
     {:fx/type :combo-box
      :id "timeline-snap-value"
@@ -684,8 +685,7 @@
      :min 10 :max 200
      :value (or zoom-x default-zoom)
      :pref-width 140
-     :on-value-changed {:event/type :timeline/set-zoom
-                        :zoom (or zoom-x default-zoom)}}]})
+     :on-value-changed {:event/type :timeline/set-zoom}}]})
 
 
 (defn track-label-renderer
@@ -1131,7 +1131,6 @@
           :fit-to-height true
           :hbar-policy :never
           :vbar-policy :never
-          :vvalue (or sync-scroll-y 0.0)
           :on-vvalue-changed {:event/type :timeline/sync-scroll :pane :left}
           :content {:fx/type timeline-sidebar
                     :context context
@@ -1157,9 +1156,7 @@
           :fit-to-height true
           :hbar-policy :always
           :vbar-policy :as-needed
-          :vvalue (or sync-scroll-y 0.0)
           :on-vvalue-changed {:event/type :timeline/sync-scroll :pane :right}
-          :hvalue (or scroll-hvalue 0.0)
           :on-hvalue-changed {:event/type :timeline/set-hvalue}
           :style "-fx-background-color: transparent; -fx-background: transparent;"
           :content

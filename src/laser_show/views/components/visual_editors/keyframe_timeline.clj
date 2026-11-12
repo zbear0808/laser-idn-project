@@ -274,7 +274,7 @@
     :render!
     (fn [^Canvas canvas keyframes drag-info]
       (let [gc (.getGraphicsContext2D canvas)
-            hover-idx (:hover-idx drag-info)]
+            hover-idx (:hover-id drag-info)]
         (draw-background gc width height)
         (draw-timeline-bar gc width height)
         (when (= param-type :zone-group-id)
@@ -317,11 +317,21 @@
     (fn [mx my keyframes drag-info]
       (let [keyframe-idx (:drag-id drag-info)
             position (x-to-position mx width)
-            clamped-pos (max 0.0 (min 1.0 position))]
+            clamped-pos (max 0.0 (min 1.0 position))
+            ;; The move handler re-sorts by :position, so follow the dragged
+            ;; keyframe to its index after the same sort.
+            new-idx (when (and (int? keyframe-idx) (< -1 keyframe-idx (count keyframes)))
+                      (->> (map-indexed vector keyframes)
+                           (map (fn [[i kf]] [i (if (= i keyframe-idx) clamped-pos (:position kf))]))
+                           (sort-by second)
+                           (map first)
+                           (keep-indexed (fn [sorted-i i] (when (= i keyframe-idx) sorted-i)))
+                           first))]
         (when on-move
-          {:dispatch (assoc on-move
-                            :keyframe-idx keyframe-idx
-                            :new-position clamped-pos)})))
+          (cond-> {:dispatch (assoc on-move
+                                    :keyframe-idx keyframe-idx
+                                    :new-position clamped-pos)}
+            new-idx (assoc :drag-id new-idx)))))
 
     :on-hover
     (fn [mx my keyframes drag-info]

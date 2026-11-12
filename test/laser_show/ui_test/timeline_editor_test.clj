@@ -52,3 +52,27 @@
         (ui/wait-for! #(= count-before (count (get-in (state/get-raw-state) items-path))))
         (is (not-any? #(= added-id (:id %)) (get-in (state/get-raw-state) items-path)))
         (is (empty? (get-in (state/get-raw-state) [:ui :timeline :selection])))))))
+
+(defn- open-timeline! []
+  (events/dispatch! {:event/type :timeline-cue-editor/open :col 0 :row 0})
+  (ui/wait-for! #(some (fn [title]
+                         (and title (.startsWith ^String title "Timeline Editor")))
+                       (ui/window-titles)))
+  (ui/assert-visible! "#timeline-canvas"))
+
+(deftest timeline-zoom-slider-changes-zoom
+  (let [robot (ui/robot)]
+    (open-timeline!)
+    (ui/slide! robot "#timeline-zoom-slider" 120)
+    (ui/wait-for! #(= 120.0 (get-in (state/get-raw-state) [:ui :timeline :zoom-x])))
+    (is (= 120.0 (get-in (state/get-raw-state) [:ui :timeline :zoom-x])))))
+
+(deftest timeline-snap-checkbox-toggles-both-ways
+  (let [robot (ui/robot)
+        snap-path [:ui :timeline :snap-enabled?]]
+    (open-timeline!)
+    (ui/uncheck! robot "#timeline-snap-toggle")
+    (ui/wait-for! #(false? (get-in (state/get-raw-state) snap-path)))
+    (ui/check! robot "#timeline-snap-toggle")
+    (ui/wait-for! #(true? (get-in (state/get-raw-state) snap-path)))
+    (is (true? (get-in (state/get-raw-state) snap-path)))))

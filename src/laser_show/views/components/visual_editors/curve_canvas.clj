@@ -216,7 +216,7 @@
       :render!
       (fn [^Canvas canvas points drag-info]
         (let [gc (.getGraphicsContext2D canvas)
-              hover-idx (:hover-idx drag-info)]
+              hover-idx (:hover-id drag-info)]
           (draw-background gc width height)
           (draw-grid gc width height padding)
           (draw-diagonal gc width height padding)
