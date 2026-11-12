@@ -611,6 +611,8 @@
                                   :effect-id (:effect-id o)
                                   :params (or (:params o) {})
                                   :enabled? true}))
+    :remove-effect (update cue :items update-items-by-id #{(:clip-id o)}
+                           (fn [clip] (update clip :effects #(remove-ids (or % []) #{(:effect-instance-id o)}))))
     :set-clip-track (if (contains? (leaf-track-ids (:tracks cue [])) (:track-id o))
                       (update cue :items update-items-by-id #{(:clip-id o)} #(assoc % :track-id (:track-id o)))
                       cue)
@@ -633,7 +635,7 @@
 (def op-types
   "Every op apply-op knows."
   #{:move-clips :trim-start :trim-end :delete-clips :duplicate-clips :add-clip
-    :add-effect :set-clip-track :set-clip-zone :set-track-zone :add-track
+    :add-effect :remove-effect :set-clip-track :set-clip-zone :set-track-zone :add-track
     :add-folder :delete-tracks :move-tracks :rename-track :set-track-color
     :set-track-muted :set-collapsed :set-loop :move-loop :trim-loop-start
     :trim-loop-end})
@@ -667,6 +669,7 @@
     :duplicate-clips (str "Duplicate " (n-clips (count clip-ids)))
     :add-clip "Add Clip"
     :add-effect "Add Effect"
+    :remove-effect "Remove Effect"
     :set-clip-track "Move Clip to Track"
     :set-clip-zone "Change Clip Zone"
     :set-track-zone "Change Track Zone"

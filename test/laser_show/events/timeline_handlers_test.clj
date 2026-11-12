@@ -186,60 +186,6 @@
       (is (= (:timeline/duration item) (:timeline/duration updated-item)))
       (is (= (:track-id item) (:track-id (move (random-uuid)))) "unknown track: unchanged"))))
 
-(deftest handle-set-hvalue-test
-  (testing "sets and clamps scroll-hvalue in state"
-    (let [res (timeline/handle {:event/type :timeline/set-hvalue :col 0 :row 0
-                                :hvalue 0.65
-                                :state base-state})]
-      (is (== 0.65 (get-in res [:state :ui :timeline-editor [0 0] :scroll-hvalue]))))
-
-    (let [res (timeline/handle {:event/type :timeline/set-hvalue :col 0 :row 0
-                                :hvalue 1.5
-                                :state base-state})]
-      (is (== 1.0 (get-in res [:state :ui :timeline-editor [0 0] :scroll-hvalue]))))
-
-    (let [res (timeline/handle {:event/type :timeline/set-hvalue :col 0 :row 0
-                                :hvalue -0.2
-                                :state base-state})]
-      (is (== 0.0 (get-in res [:state :ui :timeline-editor [0 0] :scroll-hvalue]))))))
-
-(deftest handle-zoom-at-cursor-test
-  (testing "zooms in and out centered at cursor"
-    (let [s0 (assoc-in base-state [:ui :timeline-editor [0 0] :zoom-x] 50.0)
-          ;; Zoom in
-          res-in (timeline/handle {:event/type :timeline/zoom-at-cursor
-                                  :x 200.0
-                                  :delta-y 40.0
-                                  :col 0 :row 0
-                                  :state s0})
-          zoom-in (get-in res-in [:state :ui :timeline-editor [0 0] :zoom-x])]
-      (is (> zoom-in 50.0))
-      ;; Zoom out
-      (let [res-out (timeline/handle {:event/type :timeline/zoom-at-cursor
-                                     :x 200.0
-                                     :delta-y -40.0
-                                     :col 0 :row 0
-                                     :state (:state res-in)})
-            zoom-out (get-in res-out [:state :ui :timeline-editor [0 0] :zoom-x])]
-        (is (< zoom-out zoom-in)))))
-
-  (testing "enforces zoom bounds"
-    (let [s-max (assoc-in base-state [:ui :timeline-editor [0 0] :zoom-x] 190.0)
-          res (timeline/handle {:event/type :timeline/zoom-at-cursor
-                               :x 100.0
-                               :delta-y 40.0
-                               :col 0 :row 0
-                               :state s-max})]
-      (is (== 200.0 (get-in res [:state :ui :timeline-editor [0 0] :zoom-x]))))
-
-    (let [s-min (assoc-in base-state [:ui :timeline-editor [0 0] :zoom-x] 11.0)
-          res (timeline/handle {:event/type :timeline/zoom-at-cursor
-                               :x 100.0
-                               :delta-y -40.0
-                               :col 0 :row 0
-                               :state s-min})]
-      (is (== 10.0 (get-in res [:state :ui :timeline-editor [0 0] :zoom-x]))))))
-
 (deftest handle-delete-selection-test
   (let [a (random-uuid) b (random-uuid) c (random-uuid)
         s0 (-> base-state
@@ -261,19 +207,6 @@
         (is (identical? s1 (:state res)))))))
 
 
-(deftest set-zoom-uses-fx-event-test
-  (testing "the slider's new value arrives as :fx/event"
-    (let [s0 (assoc-in base-state [:ui :timeline-editor [0 0] :zoom-x] 50.0)
-          res (timeline/handle {:event/type :timeline/set-zoom :col 0 :row 0
-                                :fx/event 120.0
-                                :state s0})]
-      (is (== 120.0 (get-in res [:state :ui :timeline-editor [0 0] :zoom-x])))))
-  (testing "an explicit :zoom still works and is clamped"
-    (let [res (timeline/handle {:event/type :timeline/set-zoom :col 0 :row 0
-                                :zoom 500.0
-                                :state base-state})]
-      (is (== 200.0 (get-in res [:state :ui :timeline-editor [0 0] :zoom-x]))))))
-
 (deftest set-snap-uses-fx-event-false-test
   (testing "an unchecked checkbox (:fx/event false) disables snap"
     (let [s0 (assoc-in base-state [:ui :timeline-prefs :snap :enabled?] true)
@@ -294,13 +227,6 @@
                                 :state s0})]
       (is (false? (get-in res [:state :ui :timeline-prefs :snap :enabled?])))
       (is (== 0.5 (get-in res [:state :ui :timeline-prefs :snap :value]))))))
-
-(deftest set-hvalue-has-no-side-effects-test
-  (let [res (timeline/handle {:event/type :timeline/set-hvalue :col 0 :row 0
-                              :fx/event 0.3
-                              :state base-state})]
-    (is (= #{:state} (set (keys res))))
-    (is (== 0.3 (get-in res [:state :ui :timeline-editor [0 0] :scroll-hvalue])))))
 
 (deftest loop-op-on-missing-loop-stays-disabled-test
   (let [s0 (assoc-in base-state [:chains :cue-chains [0 0]] {:editor-type :timeline :items []})
@@ -384,3 +310,11 @@
     (let [res (timeline/handle {:event/type :timeline/apply-op :col 0 :row 0
                                 :op {:op :nope} :state base-state})]
       (is (identical? base-state (:state res))))))
+
+(deftest set-snap-toggle-and-inspector-test
+  (let [s1 (:state (timeline/handle {:event/type :timeline/set-snap :toggle? true :state base-state}))
+        s2 (:state (timeline/handle {:event/type :timeline/set-snap :toggle? true :state s1}))]
+    (is (false? (get-in s1 [:ui :timeline-prefs :snap :enabled?])))
+    (is (true? (get-in s2 [:ui :timeline-prefs :snap :enabled?]))))
+  (let [s1 (:state (timeline/handle {:event/type :timeline/toggle-inspector :state base-state}))]
+    (is (false? (get-in s1 [:ui :timeline-prefs :inspector-open?])))))

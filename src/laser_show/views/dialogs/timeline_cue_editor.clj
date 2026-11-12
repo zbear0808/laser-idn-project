@@ -62,7 +62,7 @@
      :spacing 8
      :alignment :center-left
      :children [{:fx/type :label
-                 :text "Trigger Mode:"
+                 :text "Trigger:"
                  :style-class "zone-picker-label"}
                 {:fx/type :combo-box
                  :value current-option
@@ -83,8 +83,7 @@
 
 (defn- timeline-cue-editor-content
   "Main content of the timeline-based cue chain editor.
-   Header: editable name
-   Center: timeline-editor component with list sidebar
+   Center: timeline-editor (its toolbar starts with the editable name)
    Footer: destination zone, trigger mode, close button"
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :timeline-cue-editor)
@@ -93,7 +92,6 @@
         ;; Cue chain data
         ;; Only this cell's chain: edits to other cues don't re-render the dialog
         cue-chain (fx/sub-ctx context subs/cue-cell-chain col row)
-        items (:items cue-chain [])
 
         ;; Zone groups
         zone-groups (fx/sub-ctx context subs/zone-groups-list)
@@ -116,37 +114,30 @@
      :min-width 960
      :min-height 560
      :children
-     [;; Header with editable name
-      {:fx/type :h-box
-       :alignment :center-left
-       :style-class "dialog-header"
-       :children [{:fx/type inline-edit/inline-edit-text
-                   :value chain-name
-                   :placeholder default-name
-                   :editing? editing-name?
-                   :on-start-edit {:event/type :ui/update-dialog-data
-                                   :dialog-id :timeline-cue-editor
-                                   :editing-name? true}
-                   :on-commit {:event/type :cue-chain/set-name
-                               :dialog-id :timeline-cue-editor
-                               :col col
-                               :row row}
-                   :on-cancel {:event/type :ui/update-dialog-data
-                               :dialog-id :timeline-cue-editor
-                               :editing-name? false}}]}
-      ;; Timeline editor (center) with list sidebar
-      {:fx/type timeline-editor/timeline-editor
-       :fx/context context
+     [{:fx/type timeline-editor/timeline-editor
        :v-box/vgrow :always
        :col col
        :row row
-       :items items
-       :track-defs (:tracks cue-chain)
+       :cue cue-chain
        :zone-groups (fx/sub-ctx context subs/zone-groups-by-id)
        :destination-zone-id destination-zone-id
        :timeline-ui timeline-ui
        :timeline-prefs timeline-prefs
-       :loop-config (:loop cue-chain {:enabled? false :start 0.0 :duration 4.0})}
+       ;; The cue's editable name sits at the left of the toolbar
+       :title {:fx/type inline-edit/inline-edit-text
+               :value chain-name
+               :placeholder default-name
+               :editing? editing-name?
+               :on-start-edit {:event/type :ui/update-dialog-data
+                               :dialog-id :timeline-cue-editor
+                               :editing-name? true}
+               :on-commit {:event/type :cue-chain/set-name
+                           :dialog-id :timeline-cue-editor
+                           :col col
+                           :row row}
+               :on-cancel {:event/type :ui/update-dialog-data
+                           :dialog-id :timeline-cue-editor
+                           :editing-name? false}}}
 
       ;; Footer
       {:fx/type :h-box

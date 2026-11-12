@@ -173,17 +173,17 @@
   (fx/sub-val context get-in [:chains :cue-chains [col row]] {:items []}))
 
 (def ^:private timeline-view-defaults
-  {:selection #{} :cursor-beat 0.0 :zoom-x 50.0 :scroll-hvalue 0.0})
+  {:selection #{} :cursor-beat 0.0})
 
 (defn timeline-ui
   "Timeline editor view state for the cue at [col row]
-   ({:selection :cursor-beat :zoom-x :scroll-hvalue}), with defaults."
+   ({:selection :cursor-beat}), with defaults."
   [context col row]
   (merge timeline-view-defaults
          (fx/sub-val context get-in [:ui :timeline-editor [col row]])))
 
 (defn timeline-prefs
-  "Timeline editor preferences: {:snap {:enabled? :value} :add-panel {...}}."
+  "Timeline editor preferences: {:snap {:enabled? :value} :add-panel {...} :inspector-open?}."
   [context]
   (fx/sub-val context get-in [:ui :timeline-prefs]))
 

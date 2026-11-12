@@ -165,10 +165,11 @@
                        :last-render-time 0}
              :doc "preview panel state"}
    :timeline-editor {:default {}
-                     :doc "timeline editor view state per cue: [col row] -> {:selection #{clip-id} :cursor-beat :zoom-x :scroll-hvalue}"}
+                     :doc "timeline editor view state per cue: [col row] -> {:selection #{clip-id} :cursor-beat}"}
    :timeline-prefs {:default {:snap {:enabled? true :value 0.25}
-                              :add-panel {:open? false :preset-tab :geometric :effect-tab :shape}}
-                    :doc "timeline editor preferences shared by every cue (snap, add-content panel)"}
+                              :add-panel {:open? false :preset-tab :geometric :effect-tab :shape}
+                              :inspector-open? true}
+                    :doc "timeline editor preferences shared by every cue (snap, preset drawer, inspector)"}
    :preview-zone-selector-open {:default nil
                                 :doc "Cell index whose zone selector popup is open, or nil if none"}
    :window {:default {:width default-window-width

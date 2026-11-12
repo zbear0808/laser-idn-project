@@ -143,14 +143,15 @@
      :initial-drag-state     - extra keys for initial drag state map
      :cursor                 - default cursor CSS value (default \"crosshair\")
      :focus-traversable?     - enable focus traversal
-     :history-transaction?   - wrap each drag in an undo transaction
+     :managed                - JavaFX managed flag (default true); false keeps
+                               the canvas out of its parent's layout     :history-transaction?   - wrap each drag in an undo transaction
                                (:history/begin-transaction on press, commit
                                on release). Default true. Pass false when the
                                canvas commits one edit on release itself."
   [{:keys [width height value render!
            on-press on-drag on-release on-hover on-key on-exit on-scroll
            initial-drag-state history-transaction?
-           cursor focus-traversable? id style-class]
+           cursor focus-traversable? id style-class managed]
     :or {cursor "crosshair"
          value nil
          history-transaction? true}
@@ -169,6 +170,7 @@
                    (draw-interactive-canvas! canvas props)))
    :desc {:fx/type :canvas
           :id id
+          :managed (if (some? managed) managed true)
           :style-class style-class
           :width width
           :height height
