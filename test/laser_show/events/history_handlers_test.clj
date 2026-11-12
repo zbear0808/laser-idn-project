@@ -426,3 +426,12 @@
     (is (== 8.0 (get-in s2 [:chains :cue-chains [0 0] :items 0 :timeline/start])))
     (is (== 0.0 (get-in s3 [:chains :cue-chains [0 0] :items 0 :timeline/start])) "the move is undone")
     (is (true? (get-in s3 [:chains :cue-chains [0 0] :tracks 0 :items 0 :muted?])) "the mute stays")))
+
+(deftest apply-op-single-undo-entry-test
+  (let [s0 (timeline-state)
+        s1 (run s0 {:event/type :timeline/apply-op :col 0 :row 0
+                    :op {:op :move-clips :clip-ids #{item-id} :delta 2.0}})]
+    (is (== 2.0 (get-in s1 [:chains :cue-chains [0 0] :items 0 :timeline/start])))
+    (is (= (inc (undo-count s0)) (undo-count s1)))
+    (is (= "Move Clip" (history/undo-label (:history s1))))
+    (is (== 0.0 (get-in (run s1 {:event/type :edit/undo}) [:chains :cue-chains [0 0] :items 0 :timeline/start])))))

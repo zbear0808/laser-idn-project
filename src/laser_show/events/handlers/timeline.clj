@@ -157,6 +157,51 @@
                           (or value current-value)))}))
 
 
+;; Edits: one op per committed edit (model/apply-op)
+
+
+(defn- chain-path [col row] [:chains :cue-chains [col row]])
+
+(defn- prune-selection
+  "Drop selected clip ids that no longer exist in the cue."
+  [state cue]
+  (let [ids (into #{} (map :id) (:items cue []))]
+    (update-in state [:ui :timeline :selection]
+               (fn [sel] (into #{} (filter ids) (or sel #{}))))))
+
+(defn apply-op-to-state
+  "Apply a model op to the cue at [col row]. Returns the new state; identical
+   when the op changes nothing. Shared by :timeline/apply-op and the adapters."
+  [state col row op]
+  (let [path (chain-path col row)
+        cue (get-in state path)]
+    (if (nil? cue)
+      state
+      (let [cue' (model/apply-op cue op {:snap (snap-opts state)})]
+        (if (identical? cue cue')
+          state
+          (-> state
+              (assoc-in path cue')
+              (prune-selection cue')))))))
+
+(defn- op-effects
+  "Effects for an edit: the new state, labelled for undo."
+  [state col row op]
+  (let [new-state (apply-op-to-state state col row op)]
+    (cond-> {:state new-state}
+      (not (identical? state new-state)) (assoc :history/description (model/op-label op)))))
+
+(defn- handle-apply-op
+  "Apply one edit op ({:op ...}, see model/apply-op) to the cue at [col row].
+   One undo entry, labelled by model/op-label unless the event has its own
+   :history/description."
+  [{:keys [col row op state]}]
+  (if (contains? model/op-types (:op op))
+    (op-effects state col row op)
+    (do (log/warn "Unknown timeline op:" (:op op))
+        {:state state})))
+
+
 ;; Selection
 
 
@@ -185,86 +230,74 @@
   {:state (assoc-in state [:ui :timeline :selection] #{})})
 
 (defn- handle-delete-selection
-  "Delete the selected clips from the cue chain and clear the selection.
-   No-op when nothing is selected."
+  "Delete the selected clips. No-op when nothing is selected."
   [{:keys [col row state]}]
-  (let [items-path [:chains :cue-chains [col row] :items]
-        selection (get-in state [:ui :timeline :selection] #{})]
+  (let [selection (get-in state [:ui :timeline :selection] #{})]
     (if (empty? selection)
       {:state state}
-      {:state (-> state
-                  (update-in items-path #(list-helpers/remove-by-ids (or % []) selection))
-                  (assoc-in [:ui :timeline :selection] #{}))})))
+      (op-effects state col row {:op :delete-clips :clip-ids selection}))))
+
+(defn- handle-select-track
+  "Set the currently selected track ID."
+  [{:keys [track-id state]}]
+  {:state (-> state
+              (assoc-in [:list-ui :timeline-tracks :selected-ids] (if track-id #{track-id} #{}))
+              (assoc-in [:list-ui :timeline-tracks :last-selected-id] track-id))})
+
+(defn- handle-set-cursor-beat
+  "Set the timeline cursor beat position, snapping if enabled."
+  [{:keys [beat state]}]
+  (let [snapped (max 0.0 (model/snap (or beat 0.0) (snap-opts state)))]
+    {:state (assoc-in state [:ui :timeline :cursor-beat] snapped)}))
 
 
-;; Loop Timing
+;; Loop
+
 
 (defn- handle-update-loop-timing
-  "Update the loop brace from a drag.
-   :edge :center moves the loop to :start, :left trims its start to :start,
-   :right trims its end to :end. A missing loop starts out disabled."
+  "Loop brace drag: :edge :center moves the loop to :start, :left trims its
+   start to :start, :right trims its end to :end."
   [{:keys [col row edge start end state]}]
-  (let [loop-path [:chains :cue-chains [col row] :loop]
-        opts (snap-opts state)
-        current-loop (get-in state loop-path {:enabled? false :start 0.0 :duration 4.0})
-        updated-loop (case edge
-                       :center (model/move-loop current-loop (- (double start) (double (:start current-loop 0.0))) opts)
-                       :left (model/trim-loop-start current-loop start opts)
-                       :right (model/trim-loop-end current-loop end opts)
-                       current-loop)]
-    {:state (assoc-in state loop-path updated-loop)}))
+  (let [loop-start (get-in state (conj (chain-path col row) :loop :start) 0.0)]
+    (op-effects state col row
+                (case edge
+                  :center {:op :move-loop :delta (- (double start) (double loop-start))}
+                  :left {:op :trim-loop-start :to start}
+                  :right {:op :trim-loop-end :to end}
+                  {:op :noop}))))
 
 (defn- handle-toggle-loop
   "Toggle the loop enabled state for a cue-chain."
   [{:keys [col row state]}]
-  (let [loop-path [:chains :cue-chains [col row] :loop]
-        current-loop (get-in state loop-path {:enabled? false :start 0.0 :duration 4.0})
-        updated-loop (update current-loop :enabled? not)]
-    {:state (-> state
-                (assoc-in loop-path updated-loop))}))
+  (let [enabled? (boolean (get-in state (conj (chain-path col row) :loop :enabled?)))]
+    (op-effects state col row {:op :set-loop :enabled? (not enabled?)})))
 
 
-;; Item Timing
+;; Clip timing
 
 
 (defn- handle-update-item-timing
-  "Move or trim a single clip by ID from a drag.
-   :edge :center moves the clip to :start (keeping its length),
-   :left trims its start to :start (keeping its end),
-   :right trims its end to :end (keeping its start).
-   Snaps when enabled; start >= 0 and length >= model/min-clip-length."
+  "Clip drag: :edge :center moves the clip to :start, :left trims its start
+   to :start, :right trims its end to :end."
   [{:keys [col row id edge start end state]}]
-  (let [items-path [:chains :cue-chains [col row] :items]
-        items (get-in state items-path [])
-        opts (snap-opts state)
-        updated-items (update-item-at-id
-                       items id
-                       (fn [item]
-                         (case edge
-                           :center (model/move-clip item (- (double start) (double (or (model/clip-start item) 0.0))) opts)
-                           :left (model/trim-start item start opts)
-                           :right (model/trim-end item end opts)
-                           item)))]
-    {:state (assoc-in state items-path updated-items)}))
+  (let [clip (list-helpers/find-by-id (get-in state (conj (chain-path col row) :items) []) id)]
+    (op-effects state col row
+                (case edge
+                  :center {:op :move-clips :clip-ids #{id}
+                           :delta (- (double start) (double (or (model/clip-start clip) 0.0)))}
+                  :left {:op :trim-start :clip-id id :to start}
+                  :right {:op :trim-end :clip-id id :to end}
+                  {:op :noop}))))
 
 (defn- handle-nudge-selection
-  "Move all selected items by delta-beats."
+  "Move all selected clips by delta-beats (arrow keys). Bursts coalesce."
   [{:keys [col row delta-beats state]}]
-  (let [items-path [:chains :cue-chains [col row] :items]
-        items (get-in state items-path [])
-        selection (get-in state [:ui :timeline :selection] #{})
-        opts (snap-opts state)
-        updated-items (reduce
-                       (fn [acc id]
-                         (update-item-at-id acc id #(model/move-clip % delta-beats opts)))
-                       items
-                       selection)]
-    {:state (-> state
-                (assoc-in items-path updated-items))
-     :history/coalesce-key [:timeline/nudge-selection col row]}))
+  (let [selection (get-in state [:ui :timeline :selection] #{})]
+    (assoc (op-effects state col row {:op :move-clips :clip-ids selection :delta delta-beats})
+           :history/coalesce-key [:timeline/nudge-selection col row])))
 
 
-;; Track CRUD
+;; Tracks
 
 
 (defn- handle-update-tracks
@@ -290,98 +323,38 @@
    :muted? is a live field (state.history/live-item-paths): not undoable and
    not an unsaved change, but saved with the project."
   [{:keys [col row track-id muted? state]}]
-  (let [tracks-path [:chains :cue-chains [col row] :tracks]
-        tracks (get-in state tracks-path [])]
-    (if-let [path (chains/find-path-by-id tracks track-id)]
-      {:state (assoc-in state tracks-path
-                        (update-in (vec tracks) path
-                                   #(if muted? (assoc % :muted? true) (dissoc % :muted?))))}
-      {:state state})))
+  (op-effects state col row {:op :set-track-muted :track-id track-id :muted? muted?}))
 
 (defn- handle-move-item-to-track
-  "Reassign an item to a different track.
-   This effectively changes the item's zone routing."
+  "Reassign a clip to another (leaf) track."
   [{:keys [col row item-id track-id state]}]
-  (let [items-path [:chains :cue-chains [col row] :items]
-        items (get-in state items-path [])
-        updated-items (update-item-at-id
-                       items item-id
-                       #(assoc % :track-id track-id))]
-    {:state (-> state
-                (assoc-in items-path updated-items))}))
+  (op-effects state col row {:op :set-clip-track :clip-id item-id :track-id track-id}))
 
 (defn- handle-set-track-zone
-  "Set or clear the zone group assignment on a track or folder.
-   If :zone-group-id is nil or :inherit, removes the key so the track inherits from its parent folder."
+  "Set or clear (nil / :inherit) the zone on a track or folder."
   [{:keys [col row track-id zone-group-id state]}]
-  (let [tracks-path [:chains :cue-chains [col row] :tracks]
-        tracks (get-in state tracks-path [])]
-    (if-let [path (chains/find-path-by-id tracks track-id)]
-      (let [updated-tracks (if (and zone-group-id (not= zone-group-id :inherit))
-                             (assoc-in (vec tracks) (conj path :zone-group-id) zone-group-id)
-                             (update-in (vec tracks) path dissoc :zone-group-id))]
-        {:state (-> state
-                    (assoc-in tracks-path updated-tracks))})
-      {:state state})))
+  (op-effects state col row {:op :set-track-zone :id track-id :zone-group-id zone-group-id}))
 
 (defn- handle-set-clip-zone
-  "Set or clear an explicit zone override on a clip/item.
-   If :zone-group-id is nil or :inherit, removes the key so the clip inherits from its assigned track."
+  "Set or clear (nil / :inherit) the zone override on a clip."
   [{:keys [col row item-id zone-group-id state]}]
-  (let [items-path [:chains :cue-chains [col row] :items]
-        items (get-in state items-path [])]
-    (if-let [path (chains/find-path-by-id items item-id)]
-      (let [updated-items (if (and zone-group-id (not= zone-group-id :inherit))
-                            (assoc-in (vec items) (conj path :zone-group-id) zone-group-id)
-                            (update-in (vec items) path dissoc :zone-group-id))]
-        {:state (-> state
-                    (assoc-in items-path updated-items))})
-      {:state state})))
+  (op-effects state col row {:op :set-clip-zone :id item-id :zone-group-id zone-group-id}))
 
 (defn- handle-add-track
-  "Appends a new regular track to the cue chain's tracks.
-   Optional :zone-group-id sets its zone; without it the track inherits
-   (its folder's zone, or the chain's default zone at the top level)."
+  "Append a track and select it. Optional :zone-group-id sets its zone;
+   without it the track inherits (its folder's zone, or the cue default)."
   [{:keys [col row zone-group-id state]}]
-  (let [tracks-path [:chains :cue-chains [col row] :tracks]
-        tracks (get-in state tracks-path [])
-        new-track (model/create-track {:zone-group-id zone-group-id
-                                    :name (str "Track " (inc (count tracks)))
-                                    :color (model/palette-color (count (model/leaf-track-ids tracks)))})
-        new-track-id (:id new-track)
-        updated-tracks (conj tracks new-track)]
-    {:state (-> state
-                (assoc-in tracks-path updated-tracks)
-                (assoc-in [:list-ui :timeline-tracks :selected-ids] #{new-track-id})
-                (assoc-in [:list-ui :timeline-tracks :last-selected-id] new-track-id))}))
+  (let [track-id (random-uuid)
+        effects (op-effects state col row {:op :add-track :track-id track-id :zone-group-id zone-group-id})]
+    (update effects :state
+            #(-> %
+                 (assoc-in [:list-ui :timeline-tracks :selected-ids] #{track-id})
+                 (assoc-in [:list-ui :timeline-tracks :last-selected-id] track-id)))))
 
 (defn- handle-add-folder
-  "Appends a new track folder to the cue chain's tracks.
-   Optional :zone-group-id sets its zone; without it the folder inherits."
+  "Append a track folder. Optional :zone-group-id sets its zone."
   [{:keys [col row zone-group-id state]}]
-  (let [tracks-path [:chains :cue-chains [col row] :tracks]
-        tracks (get-in state tracks-path [])
-        new-folder (assoc (model/create-track {:zone-group-id zone-group-id
-                                            :name (str "Folder " (inc (count tracks)))})
-                          :type :group
-                          :collapsed? false
-                          :items [])
-        updated-tracks (conj tracks new-folder)]
-    {:state (-> state
-                (assoc-in tracks-path updated-tracks))}))
-
-(defn- handle-select-track
-  "Set the currently selected track ID."
-  [{:keys [track-id state]}]
-  {:state (-> state
-              (assoc-in [:list-ui :timeline-tracks :selected-ids] (if track-id #{track-id} #{}))
-              (assoc-in [:list-ui :timeline-tracks :last-selected-id] track-id))})
-
-(defn- handle-set-cursor-beat
-  "Set the timeline cursor beat position, snapping if enabled."
-  [{:keys [beat state]}]
-  (let [snapped (max 0.0 (model/snap (or beat 0.0) (snap-opts state)))]
-    {:state (assoc-in state [:ui :timeline :cursor-beat] snapped)}))
+  (op-effects state col row {:op :add-folder :zone-group-id zone-group-id}))
 
 
 ;; Add Panel (preset/effect addition from timeline)
@@ -403,60 +376,36 @@
     {:state (assoc-in state [:ui :timeline k] tab-id)}))
 
 (defn- handle-add-preset-to-track
-  "Add a preset item to a specific track in the timeline.
-   Creates the preset, assigns it to the given track, and sets
-   default timeline position and duration.
-   
-   If no :track-id is provided or points to a folder, uses a valid leaf track."
+  "Add a preset clip at :start (default: the cursor) on :track-id (resolved
+   to a leaf; default: the first leaf). Moves the cursor to the clip's end
+   and selects the new clip."
   [{:keys [col row item-id track-id start state]}]
-  (let [items-path [:chains :cue-chains [col row] :items]
-        tracks-path [:chains :cue-chains [col row] :tracks]
-        tracks (get-in state tracks-path [])
-        [tracks state-with-tracks] (if (empty? tracks)
-                                     (let [default-tr (model/create-track {:name "Track 1"})]
-                                       [[default-tr] (assoc-in state tracks-path [default-tr])])
-                                     [tracks state])
-        resolved-track-id (model/insert-track tracks track-id)
-        cursor-beat (get-in state-with-tracks [:ui :timeline :cursor-beat] 0.0)
-        raw-start (or start cursor-beat 0.0)
-        start-beat (max 0.0 (model/snap raw-start (snap-opts state-with-tracks)))
-        duration-beats model/default-clip-length
-        new-preset (-> (cue-chains/create-preset-instance item-id {})
-                       (h/ensure-item-fields)
-                       (assoc :track-id resolved-track-id
-                              :timeline/start start-beat
-                              :timeline/duration duration-beats))
-        new-id (:id new-preset)
-        next-cursor (+ start-beat duration-beats)]
-    {:state (-> state-with-tracks
-                (update-in items-path (fnil conj []) new-preset)
-                (assoc-in [:ui :timeline :cursor-beat] next-cursor)
-                (assoc-in [:list-ui :timeline-tracks :selected-ids] #{resolved-track-id})
-                (assoc-in [:list-ui :timeline-tracks :last-selected-id] resolved-track-id))
-     ;; Select the newly added item on the timeline
-     :dispatch {:event/type :timeline/select-items
-                :ids [new-id]
-                :mode :replace}}))
+  (let [clip-id (random-uuid)
+        cursor (get-in state [:ui :timeline :cursor-beat] 0.0)
+        new-state (apply-op-to-state state col row {:op :add-clip :clip-id clip-id :preset-id item-id
+                                                    :track-id track-id :start (or start cursor 0.0)})
+        clip (list-helpers/find-by-id (get-in new-state (conj (chain-path col row) :items) []) clip-id)]
+    (if-not clip
+      {:state state}
+      {:state (-> new-state
+                  (assoc-in [:ui :timeline :cursor-beat] (model/clip-end clip))
+                  (assoc-in [:list-ui :timeline-tracks :selected-ids] #{(:track-id clip)})
+                  (assoc-in [:list-ui :timeline-tracks :last-selected-id] (:track-id clip)))
+       :history/description "Add Clip"
+       :dispatch {:event/type :timeline/select-items
+                  :ids [clip-id]
+                  :mode :replace}})))
 
 (defn- handle-add-effect-to-timeline-item
-  "Add an effect to a timeline item identified by :target-item-id.
-   Builds default params from the effect definition."
+  "Add an effect (from the effect bank: :item is its definition) to the clip
+   :target-item-id, with the definition's default params."
   [{:keys [col row item item-id target-item-id state]}]
-  (let [items-path [:chains :cue-chains [col row] :items]
-        items (get-in state items-path [])
-        effect-id (or item-id (:id item))
-        params-map (reduce (fn [acc {:keys [key default]}]
-                             (assoc acc key default))
-                           {}
-                           (:parameters item []))
-        new-effect (h/ensure-item-fields {:effect-id effect-id
-                                          :params params-map})
-        updated-items (if-let [path (chains/find-path-by-id items target-item-id)]
-                        (update-in (vec items) (conj path :effects)
-                                   (fnil conj []) new-effect)
-                        items)]
-    {:state (-> state
-                (assoc-in items-path updated-items))}))
+  (op-effects state col row
+              {:op :add-effect
+               :clip-id target-item-id
+               :effect-id (or item-id (:id item))
+               :params (reduce (fn [acc {:keys [key default]}] (assoc acc key default))
+                               {} (:parameters item []))}))
 
 
 ;; Open Editor
@@ -567,6 +516,9 @@
     ;; Loop timing
     :timeline/update-loop-timing (handle-update-loop-timing event)
     :timeline/toggle-loop (handle-toggle-loop event)
+
+    ;; Edits as data
+    :timeline/apply-op (handle-apply-op event)
 
     ;; Track CRUD
     :timeline/update-tracks (handle-update-tracks event)

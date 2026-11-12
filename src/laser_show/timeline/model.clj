@@ -20,10 +20,12 @@
     :collapsed? Boolean  — folder collapsed in the editor (live field)}
    
    Pure: used by event handlers, views, frame-service and persistence.
-   Must not require views, events or state."
+   Must not require views, events or state (the pure list tree helpers in
+   events.handlers.list.helpers are the one exception)."
   (:require [laser-show.animation.chains :as chains]
             [laser-show.animation.cue-chains :as cue-chains]
-            [laser-show.common.util :as u]))
+            [laser-show.common.util :as u]
+            [laser-show.events.handlers.list.helpers :as list-helpers]))
 
 ;; ============================================================
 ;; Track Creation
@@ -467,3 +469,210 @@
        (cond-> (assoc cc :items items :editor-type :timeline)
          (and (seq items) (not (contains? cc :loop)))
          (assoc :loop {:enabled? true :start 0.0 :duration conversion-length}))))))
+
+
+;; ============================================================
+;; Edits as data: apply-op
+;; ============================================================
+;;
+;; Every committed timeline edit is one {:op ...} map applied by apply-op, so
+;; there's one undo entry per edit with a meaningful label (op-label), and the
+;; edit rules live in one place. Ops on unknown ids leave the cue unchanged.
+
+
+(defn- update-items-by-id
+  "Apply f to each item (at any depth) whose :id is in ids."
+  [items ids f]
+  (mapv (fn [item]
+          (let [item (if (contains? ids (:id item)) (f item) item)]
+            (if (seq (:items item))
+              (update item :items update-items-by-id ids f)
+              item)))
+        items))
+
+(defn- remove-ids
+  "Remove items (at any depth) whose :id is in ids."
+  [items ids]
+  (into []
+        (comp (remove #(contains? ids (:id %)))
+              (map #(if (seq (:items %)) (update % :items remove-ids ids) %)))
+        items))
+
+(defn- top-level-clips [cue ids]
+  (filter #(contains? ids (:id %)) (:items cue [])))
+
+(defn- update-track [cue track-id f]
+  (if (find-track (:tracks cue []) track-id)
+    (update cue :tracks update-items-by-id #{track-id} f)
+    cue))
+
+(defn- clips-span
+  "[start end] covering the given clips (missing start = 0, missing length =
+   0), or nil for no clips."
+  [clips]
+  (when (seq clips)
+    (let [start #(double (or (clip-start %) 0.0))]
+      [(apply min (map start clips))
+       (apply max (map #(or (clip-end %) (start %)) clips))])))
+
+(defn- move-clips [cue {:keys [clip-ids delta to-track]} snap-opts]
+  (let [ids (set clip-ids)
+        clips (top-level-clips cue ids)]
+    (if (empty? clips)
+      cue
+      (let [earliest (first (clips-span clips))
+            ;; Snap where the earliest clip lands, then move every clip by
+            ;; the same applied delta so their offsets are kept
+            target (max 0.0 (snap (+ earliest (double delta)) snap-opts))
+            applied (- target earliest)
+            leaf? (and to-track (contains? (leaf-track-ids (:tracks cue [])) to-track))]
+        (update cue :items
+                (fn [items]
+                  (mapv (fn [item]
+                          (if (contains? ids (:id item))
+                            (cond-> (move-clip item applied nil)
+                              leaf? (assoc :track-id to-track))
+                            item))
+                        items)))))))
+
+(defn- duplicate-clips [cue {:keys [clip-ids]}]
+  (let [clips (vec (top-level-clips cue (set clip-ids)))]
+    (if-let [[s e] (clips-span clips)]
+      (let [offset (- e s)
+            copies (mapv #(move-clip % offset nil) (chains/deep-copy-items clips))]
+        (update cue :items (fnil into []) copies))
+      cue)))
+
+(defn- delete-tracks [cue {:keys [track-ids]}]
+  (let [tracks (:tracks cue [])
+        roots (keep #(find-track tracks %) track-ids)
+        removed (into #{} (mapcat #(cons (:id %) (descendant-ids %))) roots)
+        removed-leaves (into #{} (filter #(contains? removed %)) (leaf-track-ids tracks))
+        clip-ids (into #{} (comp (filter #(contains? removed-leaves (:track-id %))) (map :id))
+                       (:items cue []))]
+    (if (empty? removed)
+      cue
+      (-> cue
+          (assoc :tracks (remove-ids tracks removed))
+          (update :items #(remove-ids (or % []) clip-ids))))))
+
+(defn- add-track [cue {:keys [track-id parent-id name folder? zone-group-id]}]
+  (let [tracks (:tracks cue [])
+        leaf-count (count (leaf-track-ids tracks))
+        base (create-track {:zone-group-id zone-group-id
+                            :name (or name (if folder?
+                                             (str "Folder " (inc (count tracks)))
+                                             (str "Track " (inc (count tracks)))))
+                            :color (when-not folder? (palette-color leaf-count))})
+        track (cond-> (assoc base :id (or track-id (:id base)))
+                folder? (assoc :type :group :items []))
+        parent (when parent-id (find-track tracks parent-id))]
+    (assoc cue :tracks
+           (if (and parent (track-group? parent))
+             (update-items-by-id tracks #{parent-id} #(update % :items (fnil conj []) track))
+             (conj (vec tracks) track)))))
+
+(defn- move-tracks [cue {:keys [track-ids target-id position]}]
+  (let [tracks (:tracks cue [])]
+    (if (every? #(find-track tracks %) track-ids)
+      (assoc cue :tracks (list-helpers/move-items tracks (set track-ids) target-id position))
+      cue)))
+
+(defn- set-zone [items id zone-group-id]
+  (update-items-by-id items #{id}
+                      #(if (and zone-group-id (not= zone-group-id :inherit))
+                         (assoc % :zone-group-id zone-group-id)
+                         (dissoc % :zone-group-id))))
+
+(defn- edit-loop [cue f]
+  (update cue :loop #(f (or % {:enabled? false :start 0.0 :duration default-clip-length}))))
+
+(defn- apply-op*
+  [cue {:keys [op] :as o} {snap-opts :snap}]
+  (case op
+    :move-clips (move-clips cue o snap-opts)
+    :trim-start (update cue :items update-items-by-id #{(:clip-id o)} #(trim-start % (:to o) snap-opts))
+    :trim-end (update cue :items update-items-by-id #{(:clip-id o)} #(trim-end % (:to o) snap-opts))
+    :delete-clips (update cue :items #(remove-ids (or % []) (set (:clip-ids o))))
+    :duplicate-clips (duplicate-clips cue o)
+    :add-clip (let [track-id (insert-track (:tracks cue []) (:track-id o))
+                    clip (-> (cue-chains/create-preset-instance (:preset-id o) {})
+                             (assoc :id (or (:clip-id o) (random-uuid))
+                                    :track-id track-id
+                                    :timeline/start (max 0.0 (snap (or (:start o) 0.0) snap-opts))
+                                    :timeline/duration (or (:length o) default-clip-length)))]
+                (update cue :items (fnil conj []) clip))
+    :add-effect (update cue :items update-items-by-id #{(:clip-id o)}
+                        #(update % :effects (fnil conj [])
+                                 {:id (or (:effect-instance-id o) (random-uuid))
+                                  :effect-id (:effect-id o)
+                                  :params (or (:params o) {})
+                                  :enabled? true}))
+    :set-clip-track (if (contains? (leaf-track-ids (:tracks cue [])) (:track-id o))
+                      (update cue :items update-items-by-id #{(:clip-id o)} #(assoc % :track-id (:track-id o)))
+                      cue)
+    :set-clip-zone (update cue :items set-zone (:id o) (:zone-group-id o))
+    :set-track-zone (update cue :tracks set-zone (:id o) (:zone-group-id o))
+    :add-track (add-track cue o)
+    :add-folder (add-track cue (assoc o :folder? true))
+    :delete-tracks (delete-tracks cue o)
+    :move-tracks (move-tracks cue o)
+    :rename-track (update-track cue (:track-id o) #(assoc % :name (:name o)))
+    :set-track-color (update-track cue (:track-id o) #(assoc % :color (:color o)))
+    :set-track-muted (update-track cue (:track-id o) #(if (:muted? o) (assoc % :muted? true) (dissoc % :muted?)))
+    :set-collapsed (update-track cue (:track-id o) #(assoc % :collapsed? (boolean (:collapsed? o))))
+    :set-loop (edit-loop cue #(merge % (select-keys o [:enabled? :start :duration])))
+    :move-loop (edit-loop cue #(move-loop % (:delta o) snap-opts))
+    :trim-loop-start (edit-loop cue #(trim-loop-start % (:to o) snap-opts))
+    :trim-loop-end (edit-loop cue #(trim-loop-end % (:to o) snap-opts))
+    cue))
+
+(def op-types
+  "Every op apply-op knows."
+  #{:move-clips :trim-start :trim-end :delete-clips :duplicate-clips :add-clip
+    :add-effect :set-clip-track :set-clip-zone :set-track-zone :add-track
+    :add-folder :delete-tracks :move-tracks :rename-track :set-track-color
+    :set-track-muted :set-collapsed :set-loop :move-loop :trim-loop-start
+    :trim-loop-end})
+
+(defn apply-op
+  "Apply one edit op to a timeline cue chain. Returns the cue normalized
+   (normalize-timeline-cue). Unknown ops and unknown ids leave it unchanged.
+   opts: {:snap {:enabled? bool :value beats}}."
+  ([cue op] (apply-op cue op nil))
+  ([cue op opts]
+   (let [cue' (apply-op* cue op opts)]
+     ;; Ops that find nothing to change may still rebuild maps; return the
+     ;; original so callers can use identical? to detect no-ops
+     (if (or (identical? cue' cue) (= cue' cue))
+       cue
+       (normalize-timeline-cue cue')))))
+
+(defn- n-clips [n] (if (= 1 n) "Clip" (str n " Clips")))
+(defn- n-tracks [n] (if (= 1 n) "Track" (str n " Tracks")))
+
+(defn op-label
+  "Undo label for an op, e.g. \"Move Clip\", \"Move 3 Clips\", \"Delete Track\"."
+  [{:keys [op clip-ids track-ids to-track delta] :as _op}]
+  (case op
+    :move-clips (if (and to-track (zero? (double (or delta 0.0))))
+                  (str "Move " (n-clips (count clip-ids)) " to Track")
+                  (str "Move " (n-clips (count clip-ids))))
+    (:trim-start :trim-end) "Trim Clip"
+    :delete-clips (str "Delete " (n-clips (count clip-ids)))
+    :duplicate-clips (str "Duplicate " (n-clips (count clip-ids)))
+    :add-clip "Add Clip"
+    :add-effect "Add Effect"
+    :set-clip-track "Move Clip to Track"
+    :set-clip-zone "Change Clip Zone"
+    :set-track-zone "Change Track Zone"
+    :add-track "Add Track"
+    :add-folder "Add Folder"
+    :delete-tracks (str "Delete " (n-tracks (count track-ids)))
+    :move-tracks (str "Move " (n-tracks (count track-ids)))
+    :rename-track "Rename Track"
+    :set-track-color "Change Track Colour"
+    :set-track-muted "Mute Track"
+    :set-collapsed "Collapse Folder"
+    (:set-loop :move-loop :trim-loop-start :trim-loop-end) "Edit Loop"
+    "Edit Timeline"))

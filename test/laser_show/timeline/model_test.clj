@@ -304,3 +304,117 @@
           beats [0.0 1.9 2.0 3.0 4.999 5.0 100.0]]
     (is (= (legacy-in-timeline-window? item beats) (model/active-at? item beats))
         (pr-str item beats))))
+
+;; apply-op
+
+(def ^:private q {:snap {:enabled? true :value 0.25}})
+
+(defn- op-cue [& clips]
+  {:editor-type :timeline
+   :tracks [{:id :f :type :group :items [{:id :t1 :type :track}]}
+            {:id :t2 :type :track}]
+   :items (vec clips)})
+
+(defn- clip [id start len track]
+  {:id id :type :preset :preset-id :circle :timeline/start start :timeline/duration len :track-id track})
+
+(defn- by-id [cue] (into {} (map (juxt :id identity)) (:items cue)))
+
+(deftest apply-op-examples-test
+  (testing "move: delta is clamped so the earliest clip stays at >= 0, same delta for all"
+    (let [r (by-id (model/apply-op (op-cue (clip :a 1.0 4.0 :t1) (clip :b 6.0 2.0 :t1))
+                                   {:op :move-clips :clip-ids #{:a :b} :delta -3.0} q))]
+      (is (= 0.0 (get-in r [:a :timeline/start])))
+      (is (= 5.0 (get-in r [:b :timeline/start])))))
+  (testing "move to a folder is ignored"
+    (let [c (op-cue (clip :a 1.0 4.0 :t1))]
+      (is (identical? c (model/apply-op c {:op :move-clips :clip-ids #{:a} :delta 0.0 :to-track :f} q)))))
+  (testing "move to a leaf changes the track"
+    (is (= :t2 (get-in (by-id (model/apply-op (op-cue (clip :a 1.0 4.0 :t1))
+                                               {:op :move-clips :clip-ids #{:a} :delta 0.0 :to-track :t2} q))
+                       [:a :track-id]))))
+  (testing "deleting a track deletes its clips"
+    (let [r (model/apply-op (op-cue (clip :a 0.0 4.0 :t1) (clip :b 0.0 4.0 :t2))
+                            {:op :delete-tracks :track-ids #{:t2}} q)]
+      (is (= [:a] (mapv :id (:items r))))
+      (is (nil? (model/find-track (:tracks r) :t2)))))
+  (testing "duplicate places copies right after the span of the originals"
+    (let [r (model/apply-op (op-cue (clip :a 0.0 4.0 :t1) (clip :b 4.0 2.0 :t1))
+                            {:op :duplicate-clips :clip-ids #{:a :b}} q)
+          copies (drop 2 (:items r))]
+      (is (= 4 (count (:items r))))
+      (is (= [6.0 10.0] (mapv :timeline/start copies)))
+      (is (= [4.0 2.0] (mapv :timeline/duration copies)))
+      (is (every? #(= :t1 (:track-id %)) copies))
+      (is (not-any? #{:a :b} (map :id copies)) "fresh ids")))
+  (testing "add-clip snaps the start and uses the first leaf"
+    (let [r (model/apply-op (op-cue) {:op :add-clip :clip-id :new :preset-id :circle :start 3.1} q)
+          c (first (:items r))]
+      (is (= [:new 3.0 4.0 :t1] [(:id c) (:timeline/start c) (:timeline/duration c) (:track-id c)]))))
+  (testing "unknown ids leave the cue unchanged"
+    (let [c (op-cue (clip :a 1.0 4.0 :t1))]
+      (doseq [op [{:op :move-clips :clip-ids #{:zz} :delta 1.0}
+                  {:op :trim-start :clip-id :zz :to 0.0}
+                  {:op :delete-tracks :track-ids #{:zz}}
+                  {:op :rename-track :track-id :zz :name "x"}
+                  {:op :no-such-op}]]
+        (is (identical? c (model/apply-op c op q)) (pr-str op))))))
+
+(deftest move-clips-keeps-relative-offsets-test
+  (let [rnd (java.util.Random. 7)]
+    (dotimes [_ 100]
+      (let [starts (repeatedly 3 #(* 0.25 (.nextInt rnd 40)))
+            c (apply op-cue (map-indexed (fn [i s] (clip i s 1.0 :t1)) starts))
+            delta (- (* 0.5 (.nextInt rnd 40)) 10.0)
+            r (model/apply-op c {:op :move-clips :clip-ids #{0 1 2} :delta delta} q)
+            before (mapv :timeline/start (:items c))
+            after (mapv :timeline/start (:items r))]
+        (is (apply = (map - after before)) (pr-str before delta after))
+        (is (every? #(>= % 0.0) after))))))
+
+(deftest delete-tracks-deletes-clips-test
+  (let [r (model/apply-op (op-cue (clip :a 0.0 4.0 :t1) (clip :b 0.0 4.0 :t2))
+                          {:op :delete-tracks :track-ids #{:f}} q)]
+    (is (= [:b] (mapv :id (:items r))) "deleting a folder deletes the clips of its tracks")
+    (is (= [:t2] (mapv :id (:tracks r))))))
+
+(defn- random-op [^java.util.Random rnd cue]
+  (let [pick (fn [xs] (when (seq xs) (nth (vec xs) (.nextInt rnd (count xs)))))
+        clip-ids (map :id (:items cue))
+        track-ids (map :id (tree-seq #(= :group (:type %)) :items {:type :group :items (:tracks cue)}))
+        beats #(- (* 0.25 (.nextInt rnd 80)) 4.0)]
+    (case (.nextInt rnd 12)
+      0 {:op :move-clips :clip-ids (set (take 2 (shuffle clip-ids))) :delta (beats) :to-track (pick track-ids)}
+      1 {:op :trim-start :clip-id (pick clip-ids) :to (beats)}
+      2 {:op :trim-end :clip-id (pick clip-ids) :to (beats)}
+      3 {:op :delete-clips :clip-ids #{(pick clip-ids)}}
+      4 {:op :duplicate-clips :clip-ids (set (take 2 clip-ids))}
+      5 {:op :add-clip :preset-id :circle :track-id (pick track-ids) :start (beats)}
+      6 {:op :add-track :parent-id (pick track-ids)}
+      7 {:op :add-folder}
+      8 {:op :delete-tracks :track-ids #{(pick (rest track-ids))}}
+      9 {:op :set-clip-track :clip-id (pick clip-ids) :track-id (pick track-ids)}
+      10 {:op :move-tracks :track-ids #{(pick (rest track-ids))} :target-id (pick (rest track-ids)) :position :into}
+      11 {:op :trim-loop-end :to (beats)})))
+
+(deftest apply-op-output-is-normalized-test
+  (let [rnd (java.util.Random. 1234)]
+    (loop [cue (op-cue (clip :a 0.0 4.0 :t1)) step 0]
+      (when (< step 500)
+        (let [op (random-op rnd cue)
+              cue' (model/apply-op cue op q)
+              leaves (model/leaf-track-ids (:tracks cue'))]
+          (is (identical? cue' (model/normalize-timeline-cue cue')) (pr-str op))
+          (doseq [c (:items cue')]
+            (is (contains? leaves (:track-id c)) (pr-str op c)))
+          (recur cue' (inc step)))))))
+
+(deftest op-label-test
+  (is (= "Move Clip" (model/op-label {:op :move-clips :clip-ids #{:a} :delta 1.0})))
+  (is (= "Move 3 Clips" (model/op-label {:op :move-clips :clip-ids #{:a :b :c} :delta 1.0})))
+  (is (= "Move Clip to Track" (model/op-label {:op :move-clips :clip-ids #{:a} :delta 0.0 :to-track :t})))
+  (is (= "Trim Clip" (model/op-label {:op :trim-start})))
+  (is (= "Delete Track" (model/op-label {:op :delete-tracks :track-ids #{:t}})))
+  (is (= "Edit Loop" (model/op-label {:op :move-loop})))
+  (doseq [op model/op-types]
+    (is (string? (model/op-label {:op op})))))

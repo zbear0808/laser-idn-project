@@ -170,16 +170,21 @@
                                     :state (:state open-res)})
           item (first (get-in add-res [:state :chains :cue-chains [0 0] :items]))
           item-id (:id item)
-          target-track-id (random-uuid)
-          move-res (timeline/handle {:event/type :timeline/move-item-to-track
-                                     :col 0 :row 0
-                                     :item-id item-id
-                                     :track-id target-track-id
-                                     :state (:state add-res)})
-          updated-item (first (get-in move-res [:state :chains :cue-chains [0 0] :items]))]
+          with-track (:state (timeline/handle {:event/type :timeline/add-track
+                                               :col 0 :row 0 :state (:state add-res)}))
+          target-track-id (:id (last (get-in with-track [:chains :cue-chains [0 0] :tracks])))
+          move (fn [track-id]
+                 (-> (timeline/handle {:event/type :timeline/move-item-to-track
+                                       :col 0 :row 0
+                                       :item-id item-id
+                                       :track-id track-id
+                                       :state with-track})
+                     (get-in [:state :chains :cue-chains [0 0] :items 0])))
+          updated-item (move target-track-id)]
       (is (= target-track-id (:track-id updated-item)))
       (is (= (:timeline/start item) (:timeline/start updated-item)))
-      (is (= (:timeline/duration item) (:timeline/duration updated-item))))))
+      (is (= (:timeline/duration item) (:timeline/duration updated-item)))
+      (is (= (:track-id item) (:track-id (move (random-uuid)))) "unknown track: unchanged"))))
 
 (deftest handle-set-hvalue-test
   (testing "sets and clamps scroll-hvalue in state"
@@ -300,7 +305,7 @@
 (deftest update-loop-timing-missing-loop-stays-disabled-test
   (let [s0 (assoc-in base-state [:chains :cue-chains [0 0]] {:items []})
         res (timeline/handle {:event/type :timeline/update-loop-timing
-                              :col 0 :row 0 :start 2.0
+                              :col 0 :row 0 :edge :center :start 2.0
                               :state s0})]
     (is (false? (get-in res [:state :chains :cue-chains [0 0] :loop :enabled?])))))
 
@@ -361,3 +366,21 @@
                                           :state muted}))]
     (is (true? (get-in muted [:chains :cue-chains [0 0] :tracks 0 :items 0 :muted?])))
     (is (not (contains? (get-in unmuted [:chains :cue-chains [0 0] :tracks 0 :items 0]) :muted?)))))
+
+(deftest apply-op-prunes-selection-test
+  (let [s0 (-> base-state
+               (assoc-in [:chains :cue-chains [0 0]]
+                         {:editor-type :timeline
+                          :tracks [{:id :t1 :type :track}]
+                          :items [{:id :a :track-id :t1 :timeline/start 0.0 :timeline/duration 4.0}
+                                  {:id :b :track-id :t1 :timeline/start 4.0 :timeline/duration 4.0}]})
+               (assoc-in [:ui :timeline :selection] #{:a :b}))
+        res (timeline/handle {:event/type :timeline/apply-op :col 0 :row 0
+                              :op {:op :delete-clips :clip-ids #{:a}} :state s0})]
+    (is (= [:b] (mapv :id (get-in res [:state :chains :cue-chains [0 0] :items]))))
+    (is (= #{:b} (get-in res [:state :ui :timeline :selection])))
+    (is (= "Delete Clip" (:history/description res))))
+  (testing "unknown ops change nothing"
+    (let [res (timeline/handle {:event/type :timeline/apply-op :col 0 :row 0
+                                :op {:op :nope} :state base-state})]
+      (is (identical? base-state (:state res))))))
