@@ -254,18 +254,6 @@
 ;; Loop
 
 
-(defn- handle-update-loop-timing
-  "Loop brace drag: :edge :center moves the loop to :start, :left trims its
-   start to :start, :right trims its end to :end."
-  [{:keys [col row edge start end state]}]
-  (let [loop-start (get-in state (conj (chain-path col row) :loop :start) 0.0)]
-    (op-effects state col row
-                (case edge
-                  :center {:op :move-loop :delta (- (double start) (double loop-start))}
-                  :left {:op :trim-loop-start :to start}
-                  :right {:op :trim-loop-end :to end}
-                  {:op :noop}))))
-
 (defn- handle-toggle-loop
   "Toggle the loop enabled state for a cue-chain."
   [{:keys [col row state]}]
@@ -275,19 +263,6 @@
 
 ;; Clip timing
 
-
-(defn- handle-update-item-timing
-  "Clip drag: :edge :center moves the clip to :start, :left trims its start
-   to :start, :right trims its end to :end."
-  [{:keys [col row id edge start end state]}]
-  (let [clip (list-helpers/find-by-id (get-in state (conj (chain-path col row) :items) []) id)]
-    (op-effects state col row
-                (case edge
-                  :center {:op :move-clips :clip-ids #{id}
-                           :delta (- (double start) (double (or (model/clip-start clip) 0.0)))}
-                  :left {:op :trim-start :clip-id id :to start}
-                  :right {:op :trim-end :clip-id id :to end}
-                  {:op :noop}))))
 
 (defn- handle-nudge-selection
   "Move all selected clips by delta-beats (arrow keys). Bursts coalesce."
@@ -324,11 +299,6 @@
    not an unsaved change, but saved with the project."
   [{:keys [col row track-id muted? state]}]
   (op-effects state col row {:op :set-track-muted :track-id track-id :muted? muted?}))
-
-(defn- handle-move-item-to-track
-  "Reassign a clip to another (leaf) track."
-  [{:keys [col row item-id track-id state]}]
-  (op-effects state col row {:op :set-clip-track :clip-id item-id :track-id track-id}))
 
 (defn- handle-set-track-zone
   "Set or clear (nil / :inherit) the zone on a track or folder."
@@ -510,11 +480,9 @@
     :timeline/set-cursor-beat (handle-set-cursor-beat event)
 
     ;; Item timing
-    :timeline/update-item-timing (handle-update-item-timing event)
     :timeline/nudge-selection (handle-nudge-selection event)
 
     ;; Loop timing
-    :timeline/update-loop-timing (handle-update-loop-timing event)
     :timeline/toggle-loop (handle-toggle-loop event)
 
     ;; Edits as data
@@ -523,7 +491,6 @@
     ;; Track CRUD
     :timeline/update-tracks (handle-update-tracks event)
     :timeline/set-track-muted (handle-set-track-muted event)
-    :timeline/move-item-to-track (handle-move-item-to-track event)
     :timeline/add-track (handle-add-track event)
     :timeline/add-folder (handle-add-folder event)
     :timeline/set-track-zone (handle-set-track-zone event)

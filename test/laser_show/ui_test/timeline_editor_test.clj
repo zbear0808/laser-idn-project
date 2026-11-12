@@ -118,3 +118,39 @@
     (ui/drag-by! robot "#timeline-canvas" 100 (+ 24 32 16) 0 0)
     (ui/wait-for! #(nil? (get-in (state/get-raw-state) [:history :transaction])))
     (is (nil? (get-in (state/get-raw-state) [:history :transaction])))))
+
+(defn- undo-count []
+  (count (get-in (state/get-raw-state) [:history :undo-stack])))
+
+(defn- clip-start [id]
+  (some #(when (= id (:id %)) (:timeline/start %))
+        (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :items])))
+
+(def ^:private first-track-y
+  "Middle of the first track lane (row 1, under the zone folder row)."
+  (+ 24 32 16))
+
+(deftest timeline-drag-clip-commits-once
+  (let [robot (ui/robot)]
+    (open-timeline!)
+    (let [id (add-clip-at-zero!)
+          before (undo-count)]
+      ;; 50 px per beat: drag the clip 100 px right
+      (ui/drag-by! robot "#timeline-canvas" 100 first-track-y 100 0 {:steps 6})
+      (ui/wait-for! #(= 2.0 (clip-start id)))
+      (is (= 2.0 (clip-start id)))
+      (is (= (inc before) (undo-count)) "one undo entry for the whole drag"))))
+
+(deftest timeline-escape-cancels-drag
+  (let [robot (ui/robot)]
+    (open-timeline!)
+    (let [id (add-clip-at-zero!)
+          before (undo-count)]
+      ;; Key events go to the focused window (headless has no OS focus)
+      (ui/focus! robot "#timeline-canvas")
+      (ui/drag-by! robot "#timeline-canvas" 100 first-track-y 100 0 {:hold? true})
+      (ui/press! robot javafx.scene.input.KeyCode/ESCAPE)
+      (ui/release! robot)
+      (ui/sync-fx!)
+      (is (= 0.0 (clip-start id)) "the clip didn't move")
+      (is (= before (undo-count)) "nothing was committed"))))

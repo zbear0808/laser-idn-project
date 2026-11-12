@@ -21,6 +21,7 @@
             [laser-show.views.components.list :as list]
             [laser-show.views.components.preset-bank :as preset-bank]
             [laser-show.views.components.visual-editors.canvas-interaction :as ci]
+            [laser-show.views.components.visual-editors.timeline.gesture :as gesture]
             [laser-show.views.components.visual-editors.timeline.track-logic :as tl]
             [laser-show.timeline.model :as model])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
@@ -169,6 +170,8 @@
 (def ^:private cursor-color (Color/web "#FFB300" 0.9))
 (def ^:private insert-marker-color (Color/web "#5BA5F5"))
 (def ^:private muted-alpha 0.35)
+(def ^:private marquee-fill (Color/web "#5BA5F5" 0.12))
+(def ^:private marquee-stroke (Color/web "#5BA5F5" 0.8))
 
 (defn- crisp
   "Pixel-snap a coordinate so 1 px lines don't blur across two pixels."
@@ -401,7 +404,13 @@
     ;; Cursor, then the playhead (only while the cue plays) on top
     (draw-cursor! gc width height zoom-x (or cursor-beat 0.0))
     (when beats-elapsed
-      (draw-playhead! gc width height zoom-x beats-elapsed))))
+      (draw-playhead! gc width height zoom-x beats-elapsed))
+    (when-let [[x y w h] (:marquee value)]
+      (.setFill gc marquee-fill)
+      (.fillRect gc x y w h)
+      (.setStroke gc marquee-stroke)
+      (.setLineWidth gc 1.0)
+      (.strokeRect gc (crisp x) (crisp y) w h))))
 
 
 ;; ============================================================
@@ -448,110 +457,87 @@
 ;; ============================================================
 
 
-(defn- on-press
-  "Handle mouse press. Select item or begin drag.
-   Clicking empty space clears selection, sets cursor beat, and selects clicked track."
-  [mx my button value _]
-  (let [{:keys [tracks zoom-x col row loop-config selection]} value
-        hit (hit-test mx my tracks zoom-x loop-config selection)]
-    (when (= button MouseButton/PRIMARY)
-      (if hit
-        (if (= (:type hit) :loop-brace)
-          (let [{:keys [edge]} hit
-                {:keys [start duration]} loop-config]
-            {:drag-start true
-             :drag-id :loop-brace
-             :drag-updates {:edge edge
-                            :start-mx mx
-                            :original-start start
-                            :original-duration duration
-                            :col col
-                            :row row}})
-          (let [{:keys [item edge track-idx]} hit
-                item-id (:id item)
-                clicked-track (when (and (>= track-idx 0) (< track-idx (count tracks)))
-                                (nth tracks track-idx nil))]
-            {:drag-start true
-             :drag-id item-id
-             :dispatch (cond-> [{:event/type :timeline/select-items
-                                 :ids [item-id]
-                                 :mode :replace}]
-                         (tl/droppable-track? clicked-track)
-                         (conj {:event/type :timeline/select-track
-                                :track-id (:id clicked-track)}))
-             :drag-updates {:edge edge
-                            :start-mx mx
-                            :original-start (:timeline/start item 0.0)
-                            :original-duration (:timeline/duration item 4.0)
-                            :original-track-idx track-idx
-                            :col col
-                            :row row}}))
-        ;; Clicked empty space - clear selection, move cursor, select track if clicked
-        (let [clicked-beat (max 0.0 (/ mx zoom-x))
-              clicked-track (:track (tl/track-at-y {:y my
-                                                    :ruler-height ruler-height
-                                                    :track-height track-height
-                                                    :track-rows tracks}))
-              events (cond-> [{:event/type :timeline/clear-selection}
-                              {:event/type :timeline/set-cursor-beat :beat clicked-beat}]
-                       (tl/droppable-track? clicked-track)
-                       (conj {:event/type :timeline/select-track :track-id (:id clicked-track)}))]
-          {:dispatch events})))))
+;; Gestures: pressing a clip, an edge, the loop brace or an empty lane starts
+;; a gesture (timeline.gesture). Dragging only re-renders a local preview;
+;; release commits at most one :timeline/apply-op.
 
+
+(defn- gesture-view [value]
+  {:zoom-x (:zoom-x value)
+   :rows (:tracks value)
+   :selection (:selection value)
+   :ruler-height ruler-height
+   :track-height track-height})
+
+(defn- value-cue [value]
+  {:editor-type :timeline
+   :items (:items value)
+   :tracks (:track-defs value)
+   :loop (:loop-config value)})
+
+(defn- preview-value
+  "The canvas value with the gesture's edit applied, for rendering mid-drag."
+  [value g]
+  (let [marquee (gesture/marquee-rect g)]
+    (cond
+      marquee (assoc value :marquee marquee
+                     :selection (cond-> (set (:marquee-ids g))
+                                  (:additive? g) (into (:selection value))))
+      (and (:moved? g) (:op g))
+      (let [cue (gesture/preview (value-cue value) g {:snap (:snap value)})]
+        (assoc value
+               :items (:items cue)
+               :tracks (build-tracks (:track-defs value) (:items cue))
+               :loop-config (:loop cue)
+               :selection (into (:selection value) (:clip-ids g))))
+      :else value)))
+
+(defn- on-press
+  "Start a gesture, or (ruler / empty space) move the cursor.
+   Clicking a clip selects it (Shift adds, Ctrl/Cmd toggles); pressing an
+   empty lane clears the selection (unless a modifier is held) and selects
+   that track."
+  [mx my button value {:keys [modifiers]}]
+  (when (= button MouseButton/PRIMARY)
+    (let [{:keys [tracks zoom-x loop-config selection]} value
+          hit (hit-test mx my tracks zoom-x loop-config selection)
+          pointer (assoc modifiers :x mx :y my)
+          g (gesture/start hit pointer (value-cue value) (gesture-view value))
+          clicked-row (:track (tl/track-at-y {:y my :ruler-height ruler-height
+                                              :track-height track-height :track-rows tracks}))
+          select-track (when (tl/droppable-track? clicked-row)
+                         {:event/type :timeline/select-track :track-id (:id clicked-row)})
+          events (if hit
+                   (cond-> []
+                     (:press-select g) (conj (assoc (:press-select g) :event/type :timeline/select-items))
+                     (= :clip (:type hit)) (cond-> select-track (conj select-track)))
+                   (cond-> []
+                     (not (or (:shift? modifiers) (:shortcut? modifiers)))
+                     (conj {:event/type :timeline/clear-selection})
+                     true (conj {:event/type :timeline/set-cursor-beat :beat (max 0.0 (/ mx zoom-x))})
+                     select-track (conj select-track)))]
+      (cond-> {:dispatch events}
+        g (assoc :drag-start true
+                 :drag-id (or (:clip-id g) (:kind g))
+                 :drag-updates {:gesture g})))))
 
 (defn- on-drag
-  "Handle mouse drag. Move or resize the currently-dragged clip or loop brace.
-   Dispatches cross-track transfers when dragged vertically to new rows."
-  [mx my value drag-info]
-  (let [{:keys [zoom-x tracks col row]} value
-        {:keys [edge start-mx original-start original-duration original-track-idx drag-id]} drag-info
-        delta-px (- mx start-mx)
-        delta-beats (/ delta-px zoom-x)]
-    (if (= drag-id :loop-brace)
-      {:dispatch [(case edge
-                    :right {:event/type :timeline/update-loop-timing
-                            :col col :row row :edge :right
-                            :end (+ original-start original-duration delta-beats)}
-                    {:event/type :timeline/update-loop-timing
-                     :col col :row row :edge edge
-                     :start (+ original-start delta-beats)})]}
-      (let [{:keys [track-idx track]} (tl/track-at-y {:y my
-                                                      :ruler-height ruler-height
-                                                      :track-height track-height
-                                                      :track-rows tracks})
-            track-changed? (and (not= edge :left)
-                                (not= edge :right)
-                                (some? track-idx)
-                                (not= track-idx original-track-idx))
-            destination-track (when track-changed? track)
-            valid-destination? (tl/droppable-track? destination-track)
-            base-events (case edge
-                          :right
-                          [{:event/type :timeline/update-item-timing
-                            :col col :row row :id drag-id :edge :right
-                            :end (+ original-start original-duration delta-beats)}]
-                          (:center :left)
-                          [{:event/type :timeline/update-item-timing
-                            :col col :row row :id drag-id :edge edge
-                            :start (+ original-start delta-beats)}]
-                          [])
+  "Follow the pointer: update the gesture and render its preview. Never dispatches."
+  [mx my value {:keys [gesture modifiers]}]
+  (when gesture
+    (let [g (gesture/update gesture (assoc modifiers :x mx :y my) (value-cue value) (gesture-view value))]
+      {:drag-updates {:gesture g}
+       :preview-value (preview-value value g)})))
 
-            events (if valid-destination?
-                     (into base-events
-                           [{:event/type :timeline/move-item-to-track
-                             :col col :row row
-                             :item-id drag-id
-                             :track-id (:id destination-track)}
-                            {:event/type :timeline/select-track
-                             :track-id (:id destination-track)}])
-                     base-events)]
-
-        (when (seq events)
-          {:dispatch events
-           ;; Update drag state if track changed so we don't dispatch continuously
-           :drag-updates (when valid-destination?
-                           {:original-track-idx track-idx})})))))
-
+(defn- on-release
+  "Commit the gesture: one :timeline/apply-op and/or a selection change."
+  [value {:keys [gesture]}]
+  (let [{:keys [col row]} value
+        {:keys [op select select-track]} (gesture/finish gesture)]
+    {:dispatch (cond-> []
+                 op (conj {:event/type :timeline/apply-op :col col :row row :op op})
+                 select (conj (assoc select :event/type :timeline/select-items))
+                 select-track (conj {:event/type :timeline/select-track :track-id select-track}))}))
 
 (defn- on-hover
   "Handle mouse hover. Update cursor based on edge proximity."
@@ -568,23 +554,46 @@
        :cursor "crosshair"})))
 
 
+
 (defn- on-key
-  "Handle keyboard shortcuts."
-  [^KeyCode key-code shift? value _]
-  (let [{:keys [col row]} value]
-    (case (.getName key-code)
-      "Delete" {:dispatch {:event/type :timeline/delete-selection
-                           :col col :row row}
-                :consumed? true}
-      "Left"   {:dispatch {:event/type :timeline/nudge-selection
-                           :col col :row row
-                           :delta-beats (if shift? -0.25 -1.0)}
-                :consumed? true}
-      "Right"  {:dispatch {:event/type :timeline/nudge-selection
-                           :col col :row row
-                           :delta-beats (if shift? 0.25 1.0)}
-                :consumed? true}
-      nil)))
+  "Keyboard shortcuts:
+   Escape cancels a drag (or clears the selection), Delete deletes the
+   selection, arrows nudge (Shift = 1/4 beat), Ctrl/Cmd+D duplicates,
+   Ctrl/Cmd+A selects every clip."
+  [^KeyCode key-code shift? value {:keys [dragging? modifiers]}]
+  (let [{:keys [col row selection items]} value
+        shortcut? (:shortcut? modifiers)]
+    (cond
+      (= key-code KeyCode/ESCAPE)
+      (if dragging?
+        {:cancel-drag? true :consumed? true}
+        {:dispatch {:event/type :timeline/clear-selection} :consumed? true})
+
+      (and shortcut? (= key-code KeyCode/D))
+      (when (seq selection)
+        {:dispatch {:event/type :timeline/apply-op :col col :row row
+                    :op {:op :duplicate-clips :clip-ids selection}}
+         :consumed? true})
+
+      (and shortcut? (= key-code KeyCode/A))
+      {:dispatch {:event/type :timeline/select-items :ids (mapv :id items) :mode :replace}
+       :consumed? true}
+
+      (or (= key-code KeyCode/DELETE) (= key-code KeyCode/BACK_SPACE))
+      {:dispatch {:event/type :timeline/delete-selection :col col :row row}
+       :consumed? true}
+
+      (= key-code KeyCode/LEFT)
+      {:dispatch {:event/type :timeline/nudge-selection :col col :row row
+                  :delta-beats (if shift? -0.25 -1.0)}
+       :consumed? true}
+
+      (= key-code KeyCode/RIGHT)
+      {:dispatch {:event/type :timeline/nudge-selection :col col :row row
+                  :delta-beats (if shift? 0.25 1.0)}
+       :consumed? true}
+
+      :else nil)))
 
 
 (def ^:private scroll-filter
@@ -892,11 +901,12 @@
                :on-value-changed (fn [t]
                                    (when (and t (not= (:id t) (:track-id selected-clip)))
                                      (events/dispatch!
-                                      {:event/type :timeline/move-item-to-track
+                                      {:event/type :timeline/apply-op
                                        :col col
                                        :row row
-                                       :item-id selected-item-id
-                                       :track-id (:id t)})))}]}
+                                       :op {:op :set-clip-track
+                                            :clip-id selected-item-id
+                                            :track-id (:id t)}})))}]}
 
             ;; Zone Override
             {:fx/type :v-box
@@ -1088,8 +1098,8 @@
 
 (defn timeline-canvas
   "The interactive canvas that shows the timeline grid, clips, and playhead."
-  [{:keys [col row tracks items zoom-x selection selected-track-id insert-track-id
-           muted-track-ids beats-elapsed cursor-beat loop-config zone-groups]}]
+  [{:keys [col row tracks items track-defs zoom-x selection selected-track-id insert-track-id
+           muted-track-ids beats-elapsed cursor-beat loop-config snap]}]
   (let [canvas-height (total-canvas-height (count tracks))
         canvas-width (calculate-canvas-width items loop-config (or zoom-x default-zoom))]
     {:fx/type ci/interactive-canvas
@@ -1098,7 +1108,13 @@
      :width canvas-width
      :height canvas-height
      :cursor "crosshair"
+     ;; The editor commits one :timeline/apply-op per gesture, so the
+     ;; canvas doesn't open undo transactions
+     :history-transaction? false
      :value {:tracks tracks
+             :items items
+             :track-defs (or track-defs [])
+             :snap snap
              :zoom-x (or zoom-x default-zoom)
              :selection (or selection #{})
              :selected-track-id selected-track-id
@@ -1108,11 +1124,11 @@
              :cursor-beat cursor-beat
              :loop-config loop-config
              :col col
-             :row row
-             :zone-groups zone-groups}
+             :row row}
      :render! render-timeline!
      :on-press on-press
      :on-drag on-drag
+     :on-release on-release
      :on-hover on-hover
      :on-key on-key}))
 
@@ -1214,6 +1230,8 @@
            :row row
            :tracks tracks
            :items items
+           :track-defs track-defs
+           :snap {:enabled? snap-enabled? :value snap-value}
            :zoom-x zoom-x
            :selection selection
            :selected-track-id sidebar-selected-track-id
@@ -1221,8 +1239,7 @@
            :muted-track-ids muted-track-ids
            :beats-elapsed beats-elapsed
            :cursor-beat cursor-beat
-           :loop-config loop-config
-           :zone-groups zone-groups}}}]}}
+           :loop-config loop-config}}}]}}
       add-panel-open?
       (assoc :bottom {:fx/type timeline-add-panel
                       :col col

@@ -515,16 +515,19 @@
       [(apply min (map start clips))
        (apply max (map #(or (clip-end %) (start %)) clips))])))
 
-(defn- move-clips [cue {:keys [clip-ids delta to-track]} snap-opts]
+(defn- move-clips [cue {:keys [clip-ids delta to-track anchor-id]} snap-opts]
   (let [ids (set clip-ids)
         clips (top-level-clips cue ids)]
     (if (empty? clips)
       cue
       (let [earliest (first (clips-span clips))
-            ;; Snap where the earliest clip lands, then move every clip by
-            ;; the same applied delta so their offsets are kept
-            target (max 0.0 (snap (+ earliest (double delta)) snap-opts))
-            applied (- target earliest)
+            ;; Snap where the anchor (the dragged clip; default the earliest)
+            ;; lands, then move every clip by the same delta so their offsets
+            ;; are kept. The earliest clip stays at >= 0.
+            anchor-start (or (some #(when (= anchor-id (:id %)) (double (or (clip-start %) 0.0))) clips)
+                             earliest)
+            target (snap (+ anchor-start (double delta)) snap-opts)
+            applied (max (- earliest) (- target anchor-start))
             leaf? (and to-track (contains? (leaf-track-ids (:tracks cue [])) to-track))]
         (update cue :items
                 (fn [items]
@@ -638,10 +641,11 @@
 (defn apply-op
   "Apply one edit op to a timeline cue chain. Returns the cue normalized
    (normalize-timeline-cue). Unknown ops and unknown ids leave it unchanged.
-   opts: {:snap {:enabled? bool :value beats}}."
+   opts: {:snap {:enabled? bool :value beats}}; an op with :snap? false
+   ignores snapping (e.g. Shift held during a drag)."
   ([cue op] (apply-op cue op nil))
   ([cue op opts]
-   (let [cue' (apply-op* cue op opts)]
+   (let [cue' (apply-op* cue op (cond-> opts (false? (:snap? op)) (dissoc :snap)))]
      ;; Ops that find nothing to change may still rebuild maps; return the
      ;; original so callers can use identical? to detect no-ops
      (if (or (identical? cue' cue) (= cue' cue))

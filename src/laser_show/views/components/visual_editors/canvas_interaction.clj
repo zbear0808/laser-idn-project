@@ -55,11 +55,17 @@
       (instance? MouseEvent e)
       (assoc :x (.getX ^MouseEvent e)
              :y (.getY ^MouseEvent e)
-             :button (.getButton ^MouseEvent e))
+             :button (.getButton ^MouseEvent e)
+             :modifiers {:shift? (.isShiftDown ^MouseEvent e)
+                         :shortcut? (.isShortcutDown ^MouseEvent e)
+                         :alt? (.isAltDown ^MouseEvent e)})
 
       (instance? KeyEvent e)
       (assoc :key-code (.getCode ^KeyEvent e)
-             :shift? (.isShiftDown ^KeyEvent e))
+             :shift? (.isShiftDown ^KeyEvent e)
+             :modifiers {:shift? (.isShiftDown ^KeyEvent e)
+                         :shortcut? (.isShortcutDown ^KeyEvent e)
+                         :alt? (.isAltDown ^KeyEvent e)})
 
       (instance? ScrollEvent e)
       (assoc :x (.getX ^ScrollEvent e)
@@ -96,7 +102,9 @@
      :value            - CURRENT value to render (passed from props)
      :render!          - (fn [^Canvas canvas value drag-info]) draws the canvas
 
-   Mouse interaction opts (all receive 'value' from props):
+   Mouse interaction opts (all receive 'value' from props). The drag-info
+   passed to on-press, on-drag, on-release and on-key also carries
+   :modifiers {:shift? :shortcut? :alt?} for the current event.
      :on-press         - (fn [mx my button value drag-info])
                          Returns map with keys:
                            :drag-start  - truthy to begin drag behavior
@@ -174,10 +182,13 @@
 
           :on-mouse-pressed
           (fn [e]
-            (let [{:keys [canvas canvas-id drag-state x y button]} (extract-event-info e)]
+            (let [{:keys [canvas canvas-id drag-state x y button modifiers]} (extract-event-info e)]
               (when (.isFocusTraversable canvas)
-                (.requestFocus canvas))
-              (when-let [result (and on-press (on-press x y button value drag-state))]
+                (.requestFocus canvas)
+                ;; Don't let the press bubble to an enclosing ScrollPane,
+                ;; which would take the keyboard focus back from the canvas
+                (.consume ^MouseEvent e))
+              (when-let [result (and on-press (on-press x y button value (assoc drag-state :modifiers modifiers)))]
                 (let [open-transaction? (and (:drag-start result)
                                              history-transaction?
                                              (not (:transaction-open? drag-state)))
@@ -196,10 +207,10 @@
 
           :on-mouse-dragged
           (fn [e]
-            (let [{:keys [canvas drag-state x y]} (extract-event-info e)]
+            (let [{:keys [canvas drag-state x y modifiers]} (extract-event-info e)]
               (when-let [result (and on-drag
                                      (:dragging? drag-state)
-                                     (on-drag x y value drag-state))]
+                                     (on-drag x y value (assoc drag-state :modifiers modifiers)))]
                 (let [new-drag (cond-> drag-state
                                  (contains? result :drag-id) (assoc :drag-id (:drag-id result))
                                  (:preview-value result) (assoc :preview-value (:preview-value result))
@@ -210,9 +221,9 @@
 
           :on-mouse-released
           (fn [e]
-            (let [{:keys [canvas canvas-id drag-state]} (extract-event-info e)
+            (let [{:keys [canvas canvas-id drag-state modifiers]} (extract-event-info e)
                   result (when (and on-release (:dragging? drag-state))
-                           (on-release value drag-state))
+                           (on-release value (assoc drag-state :modifiers modifiers)))
                   new-drag (assoc drag-state
                                   :dragging? false
                                   :drag-id nil
@@ -258,8 +269,8 @@
 
           :on-key-pressed
           (fn [e]
-            (let [{:keys [canvas canvas-id drag-state key-code shift?]} (extract-event-info e)]
-              (when-let [result (and on-key (on-key key-code shift? value drag-state))]
+            (let [{:keys [canvas canvas-id drag-state key-code shift? modifiers]} (extract-event-info e)]
+              (when-let [result (and on-key (on-key key-code shift? value (assoc drag-state :modifiers modifiers)))]
                 (let [cancel? (:cancel-drag? result)
                       new-drag (cond-> drag-state
                                  (:drag-updates result) (merge (:drag-updates result))

@@ -160,7 +160,7 @@
       (is (= #{(:id new-track)} (:selected-ids ui-state)))
       (is (= (:id new-track) (:last-selected-id ui-state))))))
 
-(deftest handle-move-item-to-track-test
+(deftest set-clip-track-op-test
   (testing "moves item to target track without affecting other fields"
     (let [open-res (timeline/handle {:event/type :timeline-cue-editor/open
                                      :col 0 :row 0 :state base-state})
@@ -174,10 +174,9 @@
                                                :col 0 :row 0 :state (:state add-res)}))
           target-track-id (:id (last (get-in with-track [:chains :cue-chains [0 0] :tracks])))
           move (fn [track-id]
-                 (-> (timeline/handle {:event/type :timeline/move-item-to-track
+                 (-> (timeline/handle {:event/type :timeline/apply-op
                                        :col 0 :row 0
-                                       :item-id item-id
-                                       :track-id track-id
+                                       :op {:op :set-clip-track :clip-id item-id :track-id track-id}
                                        :state with-track})
                      (get-in [:state :chains :cue-chains [0 0] :items 0])))
           updated-item (move target-track-id)]
@@ -302,36 +301,36 @@
     (is (= #{:state} (set (keys res))))
     (is (== 0.3 (get-in res [:state :ui :timeline :scroll-hvalue])))))
 
-(deftest update-loop-timing-missing-loop-stays-disabled-test
-  (let [s0 (assoc-in base-state [:chains :cue-chains [0 0]] {:items []})
-        res (timeline/handle {:event/type :timeline/update-loop-timing
-                              :col 0 :row 0 :edge :center :start 2.0
+(deftest loop-op-on-missing-loop-stays-disabled-test
+  (let [s0 (assoc-in base-state [:chains :cue-chains [0 0]] {:editor-type :timeline :items []})
+        res (timeline/handle {:event/type :timeline/apply-op
+                              :col 0 :row 0 :op {:op :move-loop :delta 2.0}
                               :state s0})]
-    (is (false? (get-in res [:state :chains :cue-chains [0 0] :loop :enabled?])))))
+    (is (false? (get-in res [:state :chains :cue-chains [0 0] :loop :enabled?])))
+    (is (== 2.0 (get-in res [:state :chains :cue-chains [0 0] :loop :start])))))
 
 (defn- cell-with-clip [state clip]
   (assoc-in state [:chains :cue-chains [0 0] :items] [clip]))
 
-(deftest update-item-timing-left-edge-keeps-end-test
-  (let [s0 (cell-with-clip base-state {:id :c :timeline/start 1.0 :timeline/duration 4.0})
-        clip-after (fn [event]
-                     (-> (timeline/handle (merge {:event/type :timeline/update-item-timing
-                                                  :col 0 :row 0 :id :c :state s0}
-                                                 event))
+(deftest trim-ops-keep-the-other-edge-test
+  (let [s0 (cell-with-clip base-state {:id :c :track-id :t :timeline/start 1.0 :timeline/duration 4.0})
+        s0 (assoc-in s0 [:chains :cue-chains [0 0] :tracks] [{:id :t :type :track}])
+        clip-after (fn [op]
+                     (-> (timeline/handle {:event/type :timeline/apply-op :col 0 :row 0 :op op :state s0})
                          (get-in [:state :chains :cue-chains [0 0] :items 0])))]
     (testing "trimming the left edge past 0 doesn't lengthen the clip's end"
-      (let [c (clip-after {:edge :left :start -3.0})]
+      (let [c (clip-after {:op :trim-start :clip-id :c :to -3.0})]
         (is (== 0.0 (:timeline/start c)))
         (is (== 5.0 (:timeline/duration c)))))
     (testing "trimming the left edge past the end leaves a sliver ending at the old end"
-      (let [c (clip-after {:edge :left :start 9.0})]
+      (let [c (clip-after {:op :trim-start :clip-id :c :to 9.0})]
         (is (== 5.0 (+ (:timeline/start c) (:timeline/duration c))))))
     (testing "right edge keeps the start"
-      (let [c (clip-after {:edge :right :end 7.0})]
+      (let [c (clip-after {:op :trim-end :clip-id :c :to 7.0})]
         (is (== 1.0 (:timeline/start c)))
         (is (== 6.0 (:timeline/duration c)))))
-    (testing "center moves without changing length"
-      (let [c (clip-after {:edge :center :start 3.0})]
+    (testing "moving keeps the length"
+      (let [c (clip-after {:op :move-clips :clip-ids #{:c} :delta 2.0})]
         (is (== 3.0 (:timeline/start c)))
         (is (== 4.0 (:timeline/duration c)))))))
 

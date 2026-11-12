@@ -420,8 +420,8 @@
 (deftest undo-does-not-unmute-test
   (let [s0 (timeline-state)
         s1 (run s0 {:event/type :timeline/set-track-muted :col 0 :row 0 :track-id :t1 :muted? true})
-        s2 (run s1 {:event/type :timeline/update-item-timing :col 0 :row 0 :id item-id
-                    :edge :center :start 8.0})
+        s2 (run s1 {:event/type :timeline/apply-op :col 0 :row 0
+                    :op {:op :move-clips :clip-ids #{item-id} :delta 8.0}})
         s3 (run s2 {:event/type :edit/undo})]
     (is (== 8.0 (get-in s2 [:chains :cue-chains [0 0] :items 0 :timeline/start])))
     (is (== 0.0 (get-in s3 [:chains :cue-chains [0 0] :items 0 :timeline/start])) "the move is undone")
