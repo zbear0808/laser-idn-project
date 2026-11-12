@@ -25,6 +25,15 @@
 ;; ============================================================
 
 
+(def track-palette
+  "Track colours, assigned round-robin to new tracks (clip colour = track colour)."
+  ["#4A90D9" "#E67E22" "#9B59B6" "#2EAD8F" "#D9B84A" "#D9577A" "#6C8CD5" "#7CB342"])
+
+(defn palette-color
+  "The palette colour for the n-th track."
+  [n]
+  (nth track-palette (mod (long n) (count track-palette))))
+
 (defn create-track
   "Create a new track.
    
@@ -225,15 +234,22 @@
                                      (let [zg (get zone-groups zone-id)
                                            name-str (or (:name zg) (clojure.core/name zone-id))
                                            child-track (create-track {:zone-group-id zone-id
-                                                                      :name (str name-str " 1")
-                                                                      :color (:color zg)})
+                                                                      :name (str name-str " 1")})
                                            folder (assoc (create-track {:zone-group-id zone-id
-                                                                        :name name-str
-                                                                        :color (:color zg)})
+                                                                        :name name-str})
                                                          :type :group
                                                          :collapsed? false
                                                          :items [child-track])]
                                        [zone-id {:folder folder :child-track child-track}])))
+                              unique-zones)
+
+        ;; Each folder's track gets the next palette colour
+        zone-structures (into {}
+                              (map-indexed (fn [i zone-id]
+                                             (let [color (palette-color i)]
+                                               [zone-id (-> (get zone-structures zone-id)
+                                                            (assoc-in [:child-track :color] color)
+                                                            (assoc-in [:folder :items 0 :color] color))])))
                               unique-zones)
 
         ;; The new tracks tree is just the folders

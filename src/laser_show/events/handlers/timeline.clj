@@ -345,7 +345,8 @@
   (let [tracks-path [:chains :cue-chains [col row] :tracks]
         tracks (get-in state tracks-path [])
         new-track (tl/create-track {:zone-group-id zone-group-id
-                                    :name (str "Track " (inc (count tracks)))})
+                                    :name (str "Track " (inc (count tracks)))
+                                    :color (tl/palette-color (count (tl/leaf-track-ids tracks)))})
         new-track-id (:id new-track)
         updated-tracks (conj tracks new-track)]
     {:state (-> state

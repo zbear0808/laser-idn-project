@@ -48,10 +48,12 @@
 ;; ============================================================
 
 
-(def ^:private zone-color-fallback "#808080")
+(def ^:private unassigned-clip-color (Color/web "#808080" 0.75))
+(def ^:private web-color
+  "Parsed track colours (hex -> Color @ 0.75), so draws don't parse per frame."
+  (memoize (fn [hex] (Color/web hex 0.75))))
 
 (def ^:private clip-color-default (Color/web "#3A7BD5" 0.85))
-(def ^:private clip-color-selected (Color/web "#5BA5F5" 0.95))
 (def ^:private grid-line-color (Color/web "#333333"))
 (def ^:private grid-line-major-color (Color/web "#555555"))
 (def ^:private ruler-bg-color (Color/web "#1A1A1A"))
@@ -59,25 +61,13 @@
 (def ^:private track-bg-even (Color/web "#1E1E1E"))
 (def ^:private track-bg-odd (Color/web "#232323"))
 (def ^:private playhead-color (Color/web "#FF4444"))
-(def ^:private selection-border-color (Color/web "#FFD700"))
 (def ^:private bg-color (Color/web "#121212"))
 
 
-(defn- zone-group-color
-  "Resolve a Color for a zone-group-id, looking it up in zone-groups config."
-  [zone-groups zone-group-id]
-  (let [hex (or (get-in zone-groups [zone-group-id :color])
-                zone-color-fallback)]
-    (Color/web hex 0.6)))
-
 (defn- track-color
-  "Resolve a Color for a track definition.
-   Uses the track's :color if set, otherwise derives from its zone group."
-  [track zone-groups]
-  (let [hex (or (:color track)
-                (get-in zone-groups [(:zone-group-id track) :color])
-                zone-color-fallback)]
-    (Color/web hex 0.6)))
+  "Clip colour for a track: its :color, else the palette colour for its row."
+  [track row-idx]
+  (web-color (or (:color track) (tl/palette-color row-idx))))
 
 
 ;; ============================================================
@@ -387,7 +377,7 @@
    Called by interactive-canvas with current value and drag-info."
   [^Canvas canvas value _]
   (let [{:keys [tracks zoom-x selection muted-track-ids
-                beats-elapsed cursor-beat zone-groups loop-config
+                beats-elapsed cursor-beat loop-config
                 selected-track-id insert-track-id]} value
         gc (.getGraphicsContext2D canvas)
         width (.getWidth canvas)
@@ -400,11 +390,8 @@
     (draw-grid! gc width height zoom-x)
     (draw-ruler! gc width zoom-x loop-config)
     ;; Draw clips — each track row can have multiple items
-    (doseq [[idx {:keys [items track zone-group-id]}] (map-indexed vector tracks)]
-      (let [color (if track
-                    (track-color track zone-groups)
-                    (when zone-group-id
-                      (zone-group-color zone-groups zone-group-id)))]
+    (doseq [[idx {:keys [items track]}] (map-indexed vector tracks)]
+      (let [color (if track (track-color track idx) unassigned-clip-color)]
         (doseq [item (clip-draw-order items selection)]
           (draw-clip! gc idx item zoom-x selection color
                       (or (false? (:enabled? item))
