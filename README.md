@@ -155,8 +155,11 @@ A timeline system for fully pre-recorded shows:
 
 
 
-**Status**: very rough demo in progress
-can open it through the repl 
+**Status**: the timeline editor works: tracks and clips, play/pause/seek/stop from the
+editor (Space plays from the cursor), timelines stop at their end unless they loop, a
+lockable per-timeline tempo, and a timecode readout and ruler (`Bars | Time`). Following
+incoming MIDI timecode is next (`plans/2026-11-08-timeline-rework/06-phase5-timecode-chase.md`).
+Open it from a grid cell's menu ("Create Timeline Cue" / "Open in Timeline Editor"), or through the REPL:
 
 ```clojure
 (laser-show.events.core/dispatch!

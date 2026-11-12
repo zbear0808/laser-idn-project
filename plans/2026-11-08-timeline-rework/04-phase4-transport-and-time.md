@@ -1,7 +1,16 @@
 # Phase 4 — Transport, time and timecode display
 
 **Written:** 2026-11-08 (updated the same day with the user's decisions D11, D12)   **Written for commit:** `d0a7dc2`
-**Status:** Proposed (after Phase 2; independent of Phase 3)   **Last verified against:** `d0a7dc2`
+**Status:** Done (2026-11-11, branch `timeline/phase4-transport`)   **Last verified against:** branch head
+
+> **How the implementation differs from this plan:**
+> - **Clip-local time also fixes once-mode inside timeline clips.** `playback/clip-timing-ctx` sets `:trigger-time 0` and `:time-ms` to the clip-local ms, so once-mode modulators measure progress from the clip start. 03 #1 stays open for plain cues. The context keeps the absolute position as `:window-beats`, because nested windows stay absolute (D5).
+> - **Converted cues change behaviour.** Grid triggers start every timeline cue with `:timeline? true`, so cues converted in Phase 1 lose the phase glide toward the global beat. They still loop and still follow the global BPM.
+> - **Extra events and subs.** NEW `:timeline/toggle-play` (play/pause button and Space) and NEW `subs/timeline-transport` (`:stopped`/`:playing`/`:paused`, which doesn't change on every tick). Transport events without `:col`/`:row` use the open editor's cell, so the dialog's scene-level Space works.
+> - **`update-timing-accumulators!` is now public.** It already took the time as an argument, so no new arg was needed. The per-cue step is the pure `advance-active-cues`.
+> - **Scrubbing.** A ruler press seeks immediately, a drag draws a local scrub line on the lane canvas (not the overlay), and release seeks again. The end marker (non-looping timelines only) drags to set `:timeline/length`.
+> - **Snap.** The snap value is stored in beats and shared. In time mode the options are time values converted at the cue's tempo, so their beat values change with the tempo.
+> - **Tests.** The Phase 4 UI tests live in `laser-show.ui-test.timeline-editor-test`. The screenshot baseline gained `05-end-marker` and `06-time-ruler`.
 **Supersedes / Superseded by:** none   **Related findings:** TL-6, TL-24, TL-25, TL-26, TL-27, TL-28 (clock), TL-31 (tempo + display); 02 #8 / Q4; 03 #1 / MR1; 04 #11 / LE1; overview T1, T4; README "Timeline System" (`README.md:153-165`)
 **Followed by:** `06-phase5-timecode-chase.md` (follow incoming MTC)
 
