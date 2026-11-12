@@ -3,6 +3,7 @@
    canvas clicks and the Delete key."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.input.mtc :as mtc]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.timeline.layout :as layout]
@@ -265,3 +266,35 @@
     ;; 4 beats at the locked 120 BPM = 2 s
     (ui/wait-for! #(= "00:00:02:00" (ui/node-text "#timeline-readout-tc")))
     (is (= "00:00:02:00" (ui/node-text "#timeline-readout-tc")))))
+
+(deftest timeline-follows-midi-timecode
+  (let [robot (ui/robot)
+        timing-path [:playback :active-cues [0 0]]
+        tick! #(frame-service/update-timing-accumulators! (System/currentTimeMillis))]
+    (mtc/reset-decoder!)
+    (open-timeline!)
+    (events/dispatch! {:event/type :timeline/apply-op :col 0 :row 0 :op {:op :set-length :beats 64.0}})
+    (ui/click! robot "#timeline-chase-mtc")
+    (ui/wait-for! #(= :mtc (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :timeline/chase])))
+    (ui/wait-for! #(ui/visible? "#timeline-mtc-chip"))
+    (tick!)
+    (ui/wait-for! #(= "MTC —" (ui/node-text "#timeline-mtc-chip")))
+    (is (not (ui/enabled? "#timeline-play")) "the timecode drives the transport")
+    (testing "running timecode starts the timeline at its position"
+      ;; 00:00:01:00 at 25 fps, as 8 quarter-frames
+      (doseq [b [0x00 0x10 0x21 0x30 0x40 0x50 0x60 0x72]]
+        (mtc/on-quarter-frame! b))
+      (tick!)
+      (ui/wait-for! #(some? (get-in (state/get-raw-state) timing-path)))
+      (is (< 2.0 (get-in (state/get-raw-state) (conj timing-path :accumulated-beats)) 2.3)
+          "1.07 s at 120 BPM")
+      (ui/wait-for! #(re-matches #"MTC 00:00:01:\d\d" (ui/node-text "#timeline-mtc-chip")))
+      (is (ui/has-style-class? "#timeline-mtc-chip" "tl-mtc-running"))
+      (ui/wait-for! #(ui/visible? "#timeline-mtc-rate-warning"))
+      (is (= "Incoming 25 fps, timeline set to 30 fps" (ui/node-text "#timeline-mtc-rate-warning"))))
+    (testing "no more timecode: the timeline stops"
+      (mtc/reset-decoder!)
+      (tick!)
+      (ui/wait-for! #(nil? (get-in (state/get-raw-state) timing-path)))
+      (ui/wait-for! #(= "MTC —" (ui/node-text "#timeline-mtc-chip"))))
+    (mtc/reset-decoder!)))

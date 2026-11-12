@@ -203,6 +203,12 @@
       (:paused? t) :paused
       :else :playing)))
 
+(defn mtc-status
+  "Incoming MIDI timecode for the UI: {:state (:running | :freewheel | :stopped)
+   :fps :text}. Mirrored by the preview timer, at most 10 times a second."
+  [context]
+  (select-keys (fx/sub-val context get-in [:backend :input :mtc]) [:state :fps :text]))
+
 (defn zone-groups-by-id
   "Zone groups as {id -> group (with :id)}."
   [context]

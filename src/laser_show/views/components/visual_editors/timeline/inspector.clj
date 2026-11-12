@@ -2,13 +2,15 @@
   "Timeline inspector (right side, 280 px): properties of the selected clip,
    clips, track or folder, or of the timeline when nothing is selected.
    See plans/2026-11-08-timeline-rework/05-visual-design.md §3.8."
-  (:require [clj-font-awesome.core :as fa]
+  (:require [cljfx.api :as fx]
+            [clj-font-awesome.core :as fa]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.presets :as presets]
             [laser-show.common.util :as u]
             [laser-show.events.core :as events]
             [laser-show.routing.zone-effects :as ze]
+            [laser-show.subs :as subs]
             [laser-show.timeline.model :as model]
             [laser-show.timeline.timecode :as tc]
             [laser-show.views.components.effect-bank :as effect-bank])
@@ -174,6 +176,45 @@
    :pref-width (or pref-width 110)
    :on-action (fn [e] (on-commit (.getText ^TextField (.getSource e))))})
 
+(defn- fps-name [f] (if (tc/drop-frame? f) "29.97 DF" (str f)))
+
+(defn- mtc-rate-warning
+  "Warns when incoming MTC runs at a different rate than the timeline is set
+   to. Subscribes to the MTC status itself, so the rest of the inspector
+   doesn't re-render as timecode runs."
+  [{:keys [fx/context fps]}]
+  (let [incoming (:fps (fx/sub-ctx context subs/mtc-status))
+        mismatch? (and incoming (not (== (double incoming) (double fps))))]
+    {:fx/type :label
+     :id "timeline-mtc-rate-warning"
+     :style-class "tl-warning"
+     :wrap-text true
+     :visible (boolean mismatch?)
+     :managed (boolean mismatch?)
+     :text (if mismatch?
+             (str "Incoming " (fps-name incoming) " fps, timeline set to " (fps-name fps) " fps")
+             "")}))
+
+(defn- chase-toggle [col row chase]
+  {:fx/type :h-box
+   :children [{:fx/type :toggle-button
+               :id "timeline-chase-off"
+               :text "Off"
+               :style-class ["toggle-button" "tl-toggle" "tl-segment"]
+               :focus-traversable false
+               :selected (nil? chase)
+               :on-action (fn [_] (apply-op! col row {:op :set-chase :source nil}))}
+              {:fx/type :toggle-button
+               :id "timeline-chase-mtc"
+               :text "MTC"
+               :style-class ["toggle-button" "tl-toggle" "tl-segment"]
+               :focus-traversable false
+               :selected (= :mtc chase)
+               :tooltip {:fx/type :tooltip
+                         :text (str "Follow MIDI timecode from the connected MIDI inputs. Beat 0 sits at "
+                                    "'Starts at'; the timeline plays while timecode runs inside it.")}
+               :on-action (fn [_] (apply-op! col row {:op :set-chase :source :mtc}))}]})
+
 (defn- timeline-section [{:keys [col row cue global-bpm]}]
   (let [{:keys [enabled? start duration] :or {start 0.0 duration 4.0}} (:loop cue)
         clips (:items cue)
@@ -182,6 +223,7 @@
         locked (:timeline/tempo-bpm cue)
         fps (tc/cue-fps cue)
         tc-start (:timeline/tc-start cue 0.0)
+        chase (:timeline/chase cue)
         cell (fn [r c node] (assoc node :grid-pane/row r :grid-pane/column c))]
     [(title "TIMELINE")
      {:fx/type :label
@@ -222,11 +264,20 @@
                             :id "timeline-tc-fps"
                             :items tc/frame-rates
                             :value fps
-                            :button-cell (fn [f] {:text (if (tc/drop-frame? f) "29.97 DF" (str f))})
+                            :button-cell (fn [f] {:text (fps-name f)})
                             :cell-factory {:fx/cell-type :list-cell
-                                           :describe (fn [f] {:text (if (tc/drop-frame? f) "29.97 DF" (str f))})}
+                                           :describe (fn [f] {:text (fps-name f)})}
                             :on-value-changed (fn [f] (when (and f (not= f fps))
-                                                        (apply-op! col row {:op :set-tc-fps :fps f})))})]}
+                                                        (apply-op! col row {:op :set-tc-fps :fps f})))})
+                 (cell 4 0 (field-label "Follow timecode"))
+                 (cell 4 1 (assoc (chase-toggle col row chase) :grid-pane/column-span 2))]}
+     {:fx/type mtc-rate-warning :fps fps}
+     {:fx/type :label
+      :text "Tempo isn't locked: the timecode maps to beats at the global BPM."
+      :style-class "tl-warning"
+      :wrap-text true
+      :visible (boolean (and chase (not locked)))
+      :managed (boolean (and chase (not locked)))}
      {:fx/type :check-box
       :text "Loop"
       :selected (boolean enabled?)

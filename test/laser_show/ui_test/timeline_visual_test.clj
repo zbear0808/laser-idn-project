@@ -9,6 +9,8 @@
    the acceptance checklist; it asserts nothing about pixels."
   (:require [clojure.test :refer [deftest is use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.input.mtc :as mtc]
+            [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -80,5 +82,17 @@
         (ui/wait-for! #(false? (get-in (cue) [:loop :enabled?])))
         (shot! "05-end-marker")
         (events/dispatch! {:event/type :timeline/set-ruler-mode :mode :time})
-        (shot! "06-time-ruler"))
+        (shot! "06-time-ruler")
+        ;; Following MIDI timecode: 00:00:01:00 at 25 fps
+        (events/dispatch! {:event/type :timeline/clear-selection :col 2 :row 2})
+        (events/dispatch! {:event/type :timeline/select-track :col 2 :row 2 :track-id nil})
+        (events/dispatch! {:event/type :timeline/apply-op :col 2 :row 2 :op {:op :set-chase :source :mtc}})
+        (ui/wait-for! #(= :mtc (:timeline/chase (cue))))
+        (mtc/reset-decoder!)
+        (doseq [b [0x00 0x10 0x21 0x30 0x40 0x50 0x60 0x72]]
+          (mtc/on-quarter-frame! b))
+        (frame-service/update-timing-accumulators! (System/currentTimeMillis))
+        (ui/wait-for! #(ui/visible? "#timeline-mtc-rate-warning"))
+        (shot! "07-mtc-chase")
+        (mtc/reset-decoder!))
       (is true))))

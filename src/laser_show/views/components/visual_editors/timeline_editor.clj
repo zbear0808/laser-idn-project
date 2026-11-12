@@ -540,28 +540,53 @@
 
 (defn- separator [] {:fx/type :region :style-class "tl-toolbar-sep"})
 
+(defn- mtc-chip
+  "Incoming MIDI timecode, for a timeline that follows it: green while
+   running, amber while freewheeling, grey when stopped. Subscribes to the
+   status itself so only this label updates as timecode runs."
+  [{:keys [fx/context]}]
+  (let [{:keys [state text]} (fx/sub-ctx context subs/mtc-status)
+        state (or state :stopped)]
+    {:fx/type :label
+     :id "timeline-mtc-chip"
+     :style-class ["label" "tl-mtc-chip" (str "tl-mtc-" (name state))]
+     :text (str "MTC " (if (= :stopped state) "—" text))
+     :tooltip {:fx/type :tooltip
+               :text (case state
+                       :running "Following MIDI timecode"
+                       :freewheel "MIDI timecode dropped out: carrying on at the last speed"
+                       "No MIDI timecode coming in")}}))
+
 (defn- toolbar
   [{:keys [col row title view snap loop-enabled? follow? inspector-open? drawer-open?
            cursor-beat zoom-view! fit! swap-state cue global-bpm transport ruler-opts]}]
   (let [log2 #(/ (Math/log (double %)) (Math/log 2.0))
         options (snap-options ruler-opts)
         locked (:timeline/tempo-bpm cue)
-        playing? (= :playing transport)]
+        playing? (= :playing transport)
+        chasing? (playback/chases-mtc? cue)
+        chase-tip "Following MIDI timecode"]
     {:fx/type :h-box
      :style-class "tl-toolbar"
      :children
      (filterv some?
               [title
                (when title (separator))
-               (icon-button {:id "timeline-to-start" :icon :backward-step :tooltip "Back to start"
+               (icon-button {:id "timeline-to-start" :icon :backward-step
+                             :tooltip (if chasing? chase-tip "Back to start")
+                             :disable chasing?
                              :on-action {:event/type :timeline/seek :col col :row row :beat 0.0}})
                (icon-button {:id "timeline-play" :icon (if playing? :pause :play)
-                             :tooltip (if playing? "Pause (Space)" "Play from the cursor (Space)")
+                             :tooltip (cond chasing? chase-tip
+                                            playing? "Pause (Space)"
+                                            :else "Play from the cursor (Space)")
+                             :disable chasing?
                              :on-action {:event/type :timeline/toggle-play :col col :row row}})
-               (icon-button {:id "timeline-stop" :icon :stop :tooltip "Stop"
-                             :disable (= :stopped transport)
+               (icon-button {:id "timeline-stop" :icon :stop :tooltip (if chasing? chase-tip "Stop")
+                             :disable (or chasing? (= :stopped transport))
                              :on-action {:event/type :timeline/stop :col col :row row}})
                {:fx/type readout :col col :row row :cue cue :cursor-beat cursor-beat :global-bpm global-bpm}
+               (when chasing? {:fx/type mtc-chip})
                (separator)
                {:fx/type :label
                 :id "timeline-tempo"

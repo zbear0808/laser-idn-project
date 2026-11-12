@@ -31,6 +31,23 @@
         :-fx-text-fill text-primary
         :-fx-min-width 70
         :-fx-alignment "center"}
+       ".tl-mtc-chip"
+       {:-fx-font-family "monospace"
+        :-fx-font-size 11
+        :-fx-padding [2 6 2 6]
+        :-fx-background-radius 3
+        :-fx-text-fill "#101010"
+        :-fx-background-color "#5A5A5A"}
+       ".tl-mtc-chip.tl-mtc-running"
+       {:-fx-background-color (:accent-success theme/semantic-colors)}
+       ".tl-mtc-chip.tl-mtc-freewheel"
+       {:-fx-background-color (:accent-warning theme/semantic-colors)}
+       ".tl-mtc-chip.tl-mtc-stopped"
+       {:-fx-text-fill text-secondary
+        :-fx-background-color "#2A2A2A"}
+       ".tl-warning"
+       {:-fx-text-fill (:accent-warning theme/semantic-colors)
+        :-fx-font-size 11}
        ".tl-readout-tc"
        {:-fx-text-fill text-secondary
         :-fx-min-width 100}
