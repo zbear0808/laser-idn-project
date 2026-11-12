@@ -418,3 +418,29 @@
   (is (= "Edit Loop" (model/op-label {:op :move-loop})))
   (doseq [op model/op-types]
     (is (string? (model/op-label {:op op})))))
+
+(deftest effect-ops-target-clips-tracks-and-folders-test
+  (let [c (op-cue (clip :a 0.0 4.0 :t1))
+        add (fn [cue target id] (model/apply-op cue (merge target {:op :add-effect :effect-id :scale
+                                                                  :effect-instance-id id}) q))
+        fx-ids (fn [effects] (mapv :id effects))]
+    (testing "add to a clip, a track and a folder"
+      (let [r (-> c (add {:clip-id :a} :e1) (add {:track-id :t1} :e2) (add {:track-id :f} :e3))]
+        (is (= [:e1] (fx-ids (get-in (by-id r) [:a :effects]))))
+        (is (= [:e2] (fx-ids (:effects (model/find-track (:tracks r) :t1)))))
+        (is (= [:e3] (fx-ids (:effects (model/find-track (:tracks r) :f)))))
+        (is (model/track-group? (model/find-track (:tracks r) :f)) "still a folder")
+        (is (model/track-effects? (:tracks r)))
+        (is (not (model/track-effects? (:tracks c))))))
+    (let [r (-> c (add {:track-id :t2} :x) (add {:track-id :t2} :y) (add {:track-id :t2} :z))
+          t2 #(:effects (model/find-track (:tracks %) :t2))
+          op #(model/apply-op r (merge {:track-id :t2} %) q)]
+      (testing "move"
+        (is (= [:y :z :x] (fx-ids (t2 (op {:op :move-effect :effect-instance-id :x :to 2})))))
+        (is (= [:z :x :y] (fx-ids (t2 (op {:op :move-effect :effect-instance-id :z :to 0})))))
+        (is (= [:y :z :x] (fx-ids (t2 (op {:op :move-effect :effect-instance-id :x :to 99})))) "clamped"))
+      (testing "enable and remove"
+        (is (= [true false true] (mapv :enabled? (t2 (op {:op :set-effect-enabled :effect-instance-id :y :enabled? false})))))
+        (is (= [:x :z] (fx-ids (t2 (op {:op :remove-effect :effect-instance-id :y}))))))
+      (testing "an unknown target changes nothing"
+        (is (= r (model/apply-op r {:op :add-effect :track-id :nope :effect-id :scale} q)))))))

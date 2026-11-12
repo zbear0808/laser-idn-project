@@ -310,14 +310,18 @@
 
 (defn- handle-add-effect-to-timeline-item
   "Add an effect (from the effect bank: :item is its definition) to the clip
-   :target-item-id, with the definition's default params."
-  [{:keys [col row item item-id target-item-id state]}]
-  (op-effects state col row
-              {:op :add-effect
-               :clip-id target-item-id
-               :effect-id (or item-id (:id item))
-               :params (reduce (fn [acc {:keys [key default]}] (assoc acc key default))
-                               {} (:parameters item []))}))
+   :target-item-id, or the track or folder :target-track-id, with the
+   definition's default params. No target: nothing happens."
+  [{:keys [col row item item-id target-item-id target-track-id state]}]
+  (if-not (or target-item-id target-track-id)
+    {:state state}
+    (op-effects state col row
+                (cond-> {:op :add-effect
+                         :effect-id (or item-id (:id item))
+                         :params (reduce (fn [acc {:keys [key default]}] (assoc acc key default))
+                                         {} (:parameters item []))}
+                  target-item-id (assoc :clip-id target-item-id)
+                  (not target-item-id) (assoc :track-id target-track-id)))))
 
 
 ;; Transport: play / pause / stop / seek one timeline cue.

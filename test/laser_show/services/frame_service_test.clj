@@ -637,3 +637,40 @@
   (with-redefs [mtc/current (constantly {:state :running :seconds 50.0 :fps 25})]
     (frame-service/update-timing-accumulators! 1500))
   (is (< (Math/abs (- 3.0 (beats-at-00))) 1e-9) "advanced by its own clock (+1 beat), not set to 100"))
+
+;; Track and folder effects
+
+(defn- render-at [cue beats]
+  (frame-service/generate-frames-by-zone
+   cue 0 120.0 0 {:accumulated-beats beats :effective-beats beats :phase-offset 0.0
+                  :accumulated-ms (* beats 500.0) :time-ms (* beats 500.0) :bpm 120.0 :trigger-time 0}))
+
+(def ^:private scale-fx {:id :fx :effect-id :scale :enabled? true :params {:x-scale 0.5}})
+
+(defn- clip-at [start & [effects]]
+  {:id :a :type :preset :preset-id :circle :track-id :t :enabled? true
+   :timeline/start start :timeline/duration 16.0 :effects (or effects [])})
+
+(deftest track-effect-applies-to-its-clips-test
+  (let [on-clip (timeline-cue {:items [(clip-at 0.0 [scale-fx])]})
+        on-track (timeline-cue {:tracks [{:id :t :type :track :effects [scale-fx]}]
+                                :items [(clip-at 0.0)]})
+        in-folder (timeline-cue {:tracks [{:id :f :type :group :effects [scale-fx]
+                                           :items [{:id :t :type :track}]}]
+                                 :items [(clip-at 0.0)]})
+        plain (timeline-cue {:items [(clip-at 0.0)]})]
+    (is (not= (render-at plain 1.0) (render-at on-clip 1.0)) "the effect does something")
+    (is (= (render-at on-clip 1.0) (render-at on-track 1.0)))
+    (is (= (render-at on-clip 1.0) (render-at in-folder 1.0)) "folder effects apply to their tracks")
+    (is (= (render-at plain 1.0)
+           (render-at (assoc-in on-track [:tracks 0 :effects 0 :enabled?] false) 1.0))
+        "a disabled track effect does nothing")))
+
+(deftest track-effect-uses-timeline-time-test
+  (let [sine {:id :fx :effect-id :scale :enabled? true
+              :params {:x-scale {:type :sine :min 0.5 :max 1.5 :period 3.0}}}
+        on-track (timeline-cue {:tracks [{:id :t :type :track :effects [sine]}]
+                                :items [(clip-at 8.0)]})
+        clip-from-0 (timeline-cue {:items [(clip-at 0.0 [sine])]})]
+    (is (= (render-at clip-from-0 9.25) (render-at on-track 9.25))
+        "a track modulator is at timeline beat 9.25, not 1.25 into the clip")))

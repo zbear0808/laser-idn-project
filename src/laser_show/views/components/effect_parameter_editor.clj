@@ -43,9 +43,10 @@
   "Compute the full effect path based on domain.
    
    For :effect-chains: returns effect-path as-is
-   For :cue-chains: returns (concat item-path [:effects] effect-path)"
+   For :cue-chains (and the timeline's :timeline-items / :timeline-tracks):
+   returns (concat item-path [:effects] effect-path)"
   [domain item-path effect-path]
-  (if (= domain :cue-chains)
+  (if (#{:cue-chains :timeline-items :timeline-tracks} domain)
     (vec (concat item-path [:effects] effect-path))
     (vec effect-path)))
 

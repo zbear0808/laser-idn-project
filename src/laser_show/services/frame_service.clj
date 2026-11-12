@@ -501,6 +501,44 @@
             frame)))
       frame)))
 
+(defn- merge-zone-maps
+  "Merge {zone-id frame} maps, concatenating frames that share a zone."
+  [zone-maps elapsed-ms]
+  (reduce
+   (fn [acc item-map]
+     (reduce-kv
+      (fn [m zone-id frame]
+        (update m zone-id
+                (fn [existing]
+                  (if existing
+                    (concatenate-frames [existing frame] elapsed-ms)
+                    frame))))
+      acc
+      item-map))
+   {}
+   zone-maps))
+
+(defn- render-track-tree
+  "Timeline cues whose tracks or folders have effects: merge the clips'
+   zone maps per track, apply each track's effects, then each folder's to the
+   merged result of its tracks. Track effects run at timeline time (the
+   cue's timing-ctx), not clip-local time."
+  [tracks clip-maps-by-track elapsed-ms bpm trigger-time timing-ctx]
+  (merge-zone-maps
+   (mapv (fn [track]
+           (let [inner (if (model/track-group? track)
+                         (render-track-tree (:items track []) clip-maps-by-track
+                                            elapsed-ms bpm trigger-time timing-ctx)
+                         (merge-zone-maps (get clip-maps-by-track (:id track)) elapsed-ms))]
+             (if (seq (:effects track))
+               (reduce-kv (fn [acc zone-id frame]
+                            (let [f (apply-item-effects frame track elapsed-ms bpm trigger-time timing-ctx)]
+                              (if (seq f) (assoc acc zone-id f) acc)))
+                          {} inner)
+               inner)))
+         tracks)
+   elapsed-ms))
+
 (defn generate-frames-by-zone
   "Generate frames organized by destination zone group.
    
@@ -546,19 +584,17 @@
                             (render-item-tree-by-zone
                              item nil elapsed-ms bpm trigger-time timing-ctx tracks destination-id)))
                         items)
-        combined-by-zone (reduce
-                          (fn [acc item-map]
-                            (reduce-kv
-                             (fn [m zone-id frame]
-                               (update m zone-id
-                                       (fn [existing]
-                                         (if existing
-                                           (concatenate-frames [existing frame] elapsed-ms)
-                                           frame))))
-                             acc
-                             item-map))
-                          {}
-                          item-zone-maps)]
+        combined-by-zone (if (and timeline? (model/track-effects? tracks))
+                           (let [by-track (group-by :track-id (map (fn [item m] {:track-id (:track-id item) :m m})
+                                                                    items item-zone-maps))
+                                 by-track (update-vals by-track #(mapv :m %))
+                                 leaf-ids (model/leaf-track-ids tracks)]
+                             (merge-zone-maps
+                              (into [(render-track-tree tracks by-track elapsed-ms bpm trigger-time timing-ctx)]
+                                    ;; Clips without a known track: no track effects
+                                    (mapcat val (remove #(contains? leaf-ids (key %)) by-track)))
+                              elapsed-ms))
+                           (merge-zone-maps item-zone-maps elapsed-ms))]
     (reduce-kv
      (fn [acc zone-id zone-frame]
        (if (seq zone-frame)

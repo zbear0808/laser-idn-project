@@ -17,7 +17,9 @@
                                the parent folder, then the chain default)
     :color      String   — hex colour (clip colour = track colour)
     :muted?     Boolean  — muted track/folder (live field, not undoable)
-    :collapsed? Boolean  — folder collapsed in the editor (live field)}
+    :collapsed? Boolean  — folder collapsed in the editor (live field)
+    :effects    [effect] — optional chain applied to everything on the track
+                           (a folder's: to all its tracks), at timeline time}
    
    Pure: used by event handlers, views, frame-service and persistence.
    Must not require views, events or state (the pure list tree helpers in
@@ -70,6 +72,12 @@
   [tracks track-id]
   (when-let [path (chains/find-path-by-id tracks track-id)]
     (get-in (vec tracks) path)))
+
+(defn track-effects?
+  "Does any track or folder carry effects?"
+  [tracks]
+  (some? (some #(seq (:effects %))
+               (tree-seq #(seq (:items %)) :items {:items tracks}))))
 
 (defn track-group?
   "Returns true if the track is a group/folder."
@@ -610,6 +618,26 @@
                          (assoc % :zone-group-id zone-group-id)
                          (dissoc % :zone-group-id))))
 
+(defn- update-effects
+  "Apply f to the :effects vector of the op's target: the clip :clip-id
+   (any depth) or, without one, the track or folder :track-id."
+  [cue {:keys [clip-id track-id]} f]
+  (let [g #(update % :effects (fn [fx] (f (vec (or fx [])))))]
+    (cond
+      clip-id (update cue :items update-items-by-id #{clip-id} g)
+      track-id (update-track cue track-id g)
+      :else cue)))
+
+(defn- move-effect
+  "Move the top-level effect id to index `to` (clamped)."
+  [effects id to]
+  (if-let [i (first (keep-indexed #(when (= id (:id %2)) %1) effects))]
+    (let [fx (effects i)
+          rest (into (subvec effects 0 i) (subvec effects (inc i)))
+          to (-> (long to) (max 0) (min (count rest)))]
+      (into (conj (subvec rest 0 to) fx) (subvec rest to)))
+    effects))
+
 (defn- edit-loop [cue f]
   (update cue :loop #(f (or % {:enabled? false :start 0.0 :duration default-clip-length}))))
 
@@ -628,14 +656,15 @@
                                     :timeline/start (max 0.0 (snap (or (:start o) 0.0) snap-opts))
                                     :timeline/duration (or (:length o) default-clip-length)))]
                 (update cue :items (fnil conj []) clip))
-    :add-effect (update cue :items update-items-by-id #{(:clip-id o)}
-                        #(update % :effects (fnil conj [])
-                                 {:id (or (:effect-instance-id o) (random-uuid))
-                                  :effect-id (:effect-id o)
-                                  :params (or (:params o) {})
-                                  :enabled? true}))
-    :remove-effect (update cue :items update-items-by-id #{(:clip-id o)}
-                           (fn [clip] (update clip :effects #(remove-ids (or % []) #{(:effect-instance-id o)}))))
+    ;; Effect ops target a clip (:clip-id) or a track or folder (:track-id)
+    :add-effect (update-effects cue o #(conj % {:id (or (:effect-instance-id o) (random-uuid))
+                                                :effect-id (:effect-id o)
+                                                :params (or (:params o) {})
+                                                :enabled? true}))
+    :remove-effect (update-effects cue o #(remove-ids % #{(:effect-instance-id o)}))
+    :set-effect-enabled (update-effects cue o #(update-items-by-id % #{(:effect-instance-id o)}
+                                                                 (fn [fx] (assoc fx :enabled? (boolean (:enabled? o))))))
+    :move-effect (update-effects cue o #(move-effect % (:effect-instance-id o) (:to o)))
     :set-clip-track (if (contains? (leaf-track-ids (:tracks cue [])) (:track-id o))
                       (update cue :items update-items-by-id #{(:clip-id o)} #(assoc % :track-id (:track-id o)))
                       cue)
@@ -675,7 +704,7 @@
     :add-folder :delete-tracks :move-tracks :rename-track :set-track-color
     :set-track-muted :set-collapsed :set-loop :move-loop :trim-loop-start
     :trim-loop-end :set-length :set-tempo :set-tc-start :set-tc-fps
-    :set-chase})
+    :set-chase :set-effect-enabled :move-effect})
 
 (defn apply-op
   "Apply one edit op to a timeline cue chain. Returns the cue normalized
@@ -707,6 +736,8 @@
     :add-clip "Add Clip"
     :add-effect "Add Effect"
     :remove-effect "Remove Effect"
+    :set-effect-enabled "Toggle Effect"
+    :move-effect "Move Effect"
     :set-clip-track "Move Clip to Track"
     :set-clip-zone "Change Clip Zone"
     :set-track-zone "Change Track Zone"

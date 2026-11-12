@@ -1,5 +1,6 @@
 (ns laser-show.events.timeline-handlers-test
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.timeline :as timeline]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
@@ -393,3 +394,22 @@
                                   [:state :chains :cue-chains [0 0] :timeline/chase]))]
         (is (= :mtc (run :mtc)))
         (is (nil? (run nil)))))))
+
+(deftest add-effect-to-track-test
+  (let [run (fn [extra] (get-in (timeline/handle (merge {:event/type :timeline/add-effect-to-item :col 0 :row 0
+                                                          :item-id :scale
+                                                          :item {:id :scale :parameters [{:key :x-scale :default 1.0}]}
+                                                          :state (transport-state)}
+                                                         extra))
+                                [:state :chains :cue-chains [0 0]]))]
+    (is (= [{:effect-id :scale :params {:x-scale 1.0} :enabled? true}]
+           (mapv #(dissoc % :id) (get-in (run {:target-track-id :t}) [:tracks 0 :effects]))))
+    (is (= :scale (get-in (run {:target-item-id :a}) [:items 0 :effects 0 :effect-id])))
+    (is (= (get-in (transport-state) [:chains :cue-chains [0 0]]) (run {})) "no target")))
+
+(deftest track-effect-param-edit-via-chain-events-test
+  (let [s0 (assoc-in (transport-state) [:chains :cue-chains [0 0] :tracks 0 :effects]
+                     [{:id :e :effect-id :scale :params {:x-scale 1.0} :enabled? true}])
+        r (handlers/handle-event {:event/type :chain/update-param :domain :timeline-tracks :entity-key [0 0]
+                                  :effect-path [0 :effects 0] :param-key :x-scale :fx/event 0.5 :state s0})]
+    (is (= 0.5 (get-in r [:state :chains :cue-chains [0 0] :tracks 0 :effects 0 :params :x-scale])))))
