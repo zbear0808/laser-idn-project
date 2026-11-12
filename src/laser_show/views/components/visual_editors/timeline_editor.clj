@@ -132,9 +132,9 @@
                selected? (.brighter))
         top (if dimmed? (cc/with-alpha base 0.45) base)]
     (.setFill gc body)
-    (.fillRoundRect gc x y w h 8 8)
+    (.fillRect gc x y w h)
     (.setFill gc top)
-    (.fillRect gc (+ x 2) y (max 0.0 (- w 4)) 2)
+    (.fillRect gc x y w 2)
     (when (> w 24)
       (.save gc)
       (.beginPath gc)
@@ -155,10 +155,10 @@
     (cond
       selected? (do (.setStroke gc cc/tl-selection)
                     (.setLineWidth gc 2.0)
-                    (.strokeRoundRect gc (+ x 1) (+ y 1) (- w 2) (- h 2) 8 8))
+                    (.strokeRect gc (+ x 1) (+ y 1) (- w 2) (- h 2)))
       hover? (do (.setStroke gc cc/tl-hover)
                  (.setLineWidth gc 1.0)
-                 (.strokeRoundRect gc (crisp x) (crisp y) (dec w) (dec h) 8 8)))))
+                 (.strokeRect gc (crisp x) (crisp y) (dec w) (dec h))))))
 
 (defn- draw-overlaps!
   "Hatch spans where clips on the same track row overlap (they all play)."
@@ -192,7 +192,7 @@
         (doseq [c (:summary-clips r) :when (visible? c)
                 :let [[x cy w h] (layout/clip-rect view r c)]]
           (.setFill gc (cc/color (get colors (:track-id c) "#808080") 0.45))
-          (.fillRoundRect gc x cy w h 4 4))
+          (.fillRect gc x cy w h))
         (let [clips (layout/clip-draw-order r selection)]
           (doseq [c clips :when (visible? c)]
             (draw-clip! gc view r c {:selected? (contains? selection (:id c))

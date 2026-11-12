@@ -115,7 +115,7 @@ Metrics (also `layout/metrics`, `03` §4.1): track lane 36 px, folder lane 26 px
  ┌─────────────────────────────┐   inset 3 px top/bottom, 1 px left/right → touching clips show a gap
  │▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│   2 px top band: track colour, full alpha
  │ Beam Fan                fx 2│   body: track colour @ 0.75; name bold 11, clipped with "…"
- └─────────────────────────────┘   radius 4; badge "fx N" when the clip has effects (small 10)
+ └─────────────────────────────┘   square corners (no radius); badge "fx N" when the clip has effects (small 10)
 ```
 
 | State | Look |
