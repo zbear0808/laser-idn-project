@@ -65,6 +65,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
 
+    # `shell` can't take an expression on a step (GitHub rejects the whole
+    # workflow file), but `matrix` is allowed in `defaults.run`.
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -91,7 +97,6 @@ jobs:
           ${{ runner.os }}-clojure-
 
     - name: Run headless UI tests
-      shell: ${{ matrix.shell }}
       run: clojure '-M:${{ matrix.platform }}:test-ui:test-ui-headless'
 
     - name: Upload UI test results and screenshots
