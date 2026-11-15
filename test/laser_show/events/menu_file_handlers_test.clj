@@ -209,7 +209,7 @@
                     with-runtime
                     (assoc-in [:project :current-file] test-file)
                     (assoc-in [:playback :active-cues [0 0]] {:trigger-time 1}))
-        result (menu/handle {:event/type :file/new-project :state current})
+        result (menu/handle {:event/type :file/new-project :force? true :state current})
         new-state (:state result)]
     (testing "document is fresh, with starter cues"
       (is (= 120.0 (get-in new-state [:timing :bpm])))
@@ -225,3 +225,162 @@
     (testing "runtime/backend state is kept"
       (assert-runtime-kept new-state))
     (is (true? (:multi-engine/refresh result)))))
+
+
+;; Unsaved-changes guard (New / Open / Exit ask first when the project is dirty)
+
+
+(defn- confirm-dialog [state]
+  (get-in state [:ui :dialogs :unsaved-confirm]))
+
+(def clean-document-state
+  (assoc-in document-state [:project :dirty?] false))
+
+(def asking-to-start-over
+  "A dirty project with the confirm dialog open for File > New."
+  (-> document-state
+      (assoc-in [:ui :dialogs :unsaved-confirm] {:open? true
+                                                 :pending {:event/type :file/new-project}})))
+
+(deftest dirty-new-project-asks-first-test
+  (let [result (menu/handle {:event/type :file/new-project :state document-state})
+        new-state (:state result)]
+    (is (true? (:open? (confirm-dialog new-state))))
+    (is (= {:event/type :file/new-project} (:pending (confirm-dialog new-state))))
+    (testing "the document is untouched and nothing else is requested"
+      (is (= (:chains document-state) (:chains new-state)))
+      (is (= 140.0 (get-in new-state [:timing :bpm])))
+      (is (true? (get-in new-state [:project :dirty?])))
+      (is (= #{:state} (set (keys result)))))))
+
+(deftest dirty-open-asks-before-the-chooser-test
+  (let [result (menu/handle {:event/type :file/open :state document-state})]
+    (is (true? (:open? (confirm-dialog (:state result)))))
+    (is (= {:event/type :file/open} (:pending (confirm-dialog (:state result)))))
+    (is (not (contains? result :fx/show-file-chooser)))))
+
+(deftest dirty-exit-asks-first-test
+  (let [result (menu/handle {:event/type :file/exit :state document-state})]
+    (is (true? (:open? (confirm-dialog (:state result)))))
+    (is (= {:event/type :file/exit} (:pending (confirm-dialog (:state result)))))
+    (is (not (contains? result :system/exit)))))
+
+(deftest clean-project-skips-the-guard-test
+  (testing "same effect maps as before the guard existed"
+    (let [new-result (menu/handle {:event/type :file/new-project :state clean-document-state})]
+      (is (= 120.0 (get-in new-result [:state :timing :bpm])))
+      (is (true? (:multi-engine/refresh new-result))))
+    (is (contains? (menu/handle {:event/type :file/open :state clean-document-state})
+                   :fx/show-file-chooser))
+    (is (= {:system/exit true}
+           (menu/handle {:event/type :file/exit :state clean-document-state})))))
+
+(deftest forced-events-skip-the-guard-test
+  (is (= 120.0 (get-in (menu/handle {:event/type :file/new-project :force? true
+                                     :state document-state})
+                       [:state :timing :bpm])))
+  (is (contains? (menu/handle {:event/type :file/open :force? true :state document-state})
+                 :fx/show-file-chooser))
+  (is (= {:system/exit true}
+         (menu/handle {:event/type :file/exit :force? true :state document-state}))))
+
+(deftest second-guarded-event-while-open-is-ignored-test
+  (let [result (menu/handle {:event/type :file/exit :state asking-to-start-over})]
+    (is (= asking-to-start-over (:state result)))
+    (is (= {:event/type :file/new-project}
+           (:pending (confirm-dialog (:state result)))))))
+
+(deftest confirm-cancel-keeps-the-document-and-closes-the-dialog-test
+  (let [result (menu/handle {:event/type :file/confirm-cancel :state asking-to-start-over})
+        new-state (:state result)]
+    (is (false? (:open? (confirm-dialog new-state))))
+    (is (nil? (:pending (confirm-dialog new-state))))
+    (is (= (:chains document-state) (:chains new-state)))
+    (is (= #{:state} (set (keys result))))))
+
+(deftest confirm-discard-continues-the-pending-action-test
+  (let [result (menu/handle {:event/type :file/confirm-discard :state asking-to-start-over})]
+    (is (false? (:open? (confirm-dialog (:state result)))))
+    (is (= {:event/type :file/new-project :force? true} (:dispatch result)))
+    (testing "the document is still untouched: the forced event replaces it"
+      (is (= (:chains document-state) (get-in result [:state :chains]))))))
+
+(deftest confirm-save-with-a-file-waits-for-the-write-test
+  (let [state (assoc-in asking-to-start-over [:project :current-file] test-file)
+        result (menu/handle {:event/type :file/confirm-save :time 77 :state state})
+        new-state (:state result)]
+    (is (false? (:open? (confirm-dialog new-state))))
+    (testing "the zip is requested, and the pending action runs only after it succeeded"
+      (is (= test-file (get-in result [:project/save :file-path])))
+      (is (= {:event/type :file/new-project :force? true}
+             (get-in result [:project/save :on-saved])))
+      (is (not (contains? result :dispatch))))
+    (testing "the document is not replaced yet"
+      (is (= 140.0 (get-in new-state [:timing :bpm])))
+      (is (= (:chains document-state) (:chains new-state))))))
+
+(deftest confirm-save-without-a-file-routes-through-save-as-test
+  (let [result (menu/handle {:event/type :file/confirm-save :state asking-to-start-over})]
+    (is (false? (:open? (confirm-dialog (:state result)))))
+    (is (not (contains? result :project/save)))
+    (is (= :file/save-as-result (get-in result [:fx/show-file-chooser :on-result :event/type])))
+    (is (= {:event/type :file/new-project :force? true}
+           (get-in result [:fx/show-file-chooser :on-result :then])))))
+
+(deftest save-as-result-carries-then-to-the-write-test
+  (is (= {:event/type :file/exit :force? true}
+         (get-in (menu/handle {:event/type :file/save-as-result
+                               :file-path test-file
+                               :then {:event/type :file/exit :force? true}
+                               :state document-state})
+                 [:project/save :on-saved])))
+  (testing "a cancelled chooser ends the chain"
+    (let [result (menu/handle {:event/type :file/save-as-result
+                               :file-path nil
+                               :then {:event/type :file/exit :force? true}
+                               :state document-state})]
+      (is (not (contains? result :project/save)))
+      (is (not (contains? result :dispatch))))))
+
+(deftest plain-save-has-no-continuation-test
+  (let [state (assoc-in document-state [:project :current-file] test-file)]
+    (is (not (contains? (:project/save (menu/handle {:event/type :file/save :state state}))
+                        :on-saved)))))
+
+(deftest save-then-continue-pipeline-test
+  (testing "Save in the dialog writes the zip, and only then replaces the document"
+    (state/reset-state! (assoc-in document-state [:project :current-file] test-file))
+    (events/event-handler {:event/type :file/new-project})
+    (let [asking (state/get-raw-state)]
+      (is (true? (:open? (confirm-dialog asking))))
+      (is (= 140.0 (get-in asking [:timing :bpm])) "still the old document while asking")
+      (is (not (.exists (io/file test-file)))))
+    (events/event-handler {:event/type :file/confirm-save})
+    (let [s (state/get-raw-state)]
+      (is (.exists (io/file test-file)))
+      (is (= 140.0 (get-in (ser/load-from-zip test-file) ["project-metadata.edn" :timing :bpm])))
+      (is (= 120.0 (get-in s [:timing :bpm])) "then the fresh project replaced it")
+      (is (nil? (get-in s [:project :current-file])))
+      (is (false? (:open? (confirm-dialog s)))))))
+
+(deftest failed-write-does-not-continue-test
+  (testing "when the zip can't be written the pending action never runs"
+    ;; a path below an existing *file* can't be created
+    (spit test-file "not a zip")
+    (let [unwritable (str test-file "/inside.zip")]
+      (state/reset-state! (assoc-in document-state [:project :current-file] unwritable))
+      (events/event-handler {:event/type :file/new-project})
+      (events/event-handler {:event/type :file/confirm-save})
+      (let [s (state/get-raw-state)]
+        (is (= 140.0 (get-in s [:timing :bpm])) "the document is still there")
+        (is (true? (get-in s [:project :dirty?])) "and still unsaved")
+        (is (false? (:open? (confirm-dialog s))))))))
+
+(deftest discard-pipeline-test
+  (state/reset-state! document-state)
+  (events/event-handler {:event/type :file/new-project})
+  (events/event-handler {:event/type :file/confirm-discard})
+  (let [s (state/get-raw-state)]
+    (is (= 120.0 (get-in s [:timing :bpm])))
+    (is (false? (:open? (confirm-dialog s))))
+    (is (false? (get-in s [:project :dirty?])))))

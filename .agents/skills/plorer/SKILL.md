@@ -98,7 +98,7 @@ Open the returned PNG with the `read` tool to see it. Screenshots go to the giti
 
 ## Gotchas
 
-- Never close the app window or call `System/exit`. The main window's close handler exits the JVM even in dev mode (`src/laser_show/views/root.clj:169`), which also ends the REPL. Use `(laser-show.app/stop!)` to close the UI.
+- Closing the app window no longer ends the JVM. With unsaved changes it asks first. A confirmed exit stops the app in a `start!` session, and in a `start-test!` session it only logs a warning and the window stays open. Never call `System/exit`; use `(laser-show.app/stop!)` to close the UI.
 - Clicks change the real app. Connecting hardware, changing MIDI or OSC settings, and saving or deleting project files all take effect. Ask the user before clicking those controls.
 - Escape closes an open menu. Check the window count with `(count (p/all javafx.stage.Window))`.
 - `p/one` throws on zero or several matches. Use `p/all` to see what matched.

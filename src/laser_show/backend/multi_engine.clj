@@ -297,7 +297,7 @@
 (defn stop-engines!
   "Stop all streaming engines."
   []
-  (let [multi-state (state/get-in-state [:backend :streaming :multi-engine-state])
+  (let [multi-state (get-in (state/get-raw-state) [:backend :streaming :multi-engine-state])
         engines (:engines multi-state {})]
     
     ;; Stop each engine
@@ -326,7 +326,7 @@
    
    Returns: Map of new engines (projector-id -> engine)"
   []
-  (let [multi-state (state/get-in-state [:backend :streaming :multi-engine-state])
+  (let [multi-state (get-in (state/get-raw-state) [:backend :streaming :multi-engine-state])
         current-engines (:engines multi-state {})
         running? (:running? multi-state false)]
     

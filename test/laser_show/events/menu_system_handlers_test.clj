@@ -9,7 +9,8 @@
 
 (use-fixtures :each (fn [f]
                       (state/init-state! (domains/build-initial-state))
-                      (f)))
+                      (events/set-exit-fn! nil)
+                      (try (f) (finally (events/set-exit-fn! nil)))))
 
 (defn- with-dev-mode [f]
   (let [old (System/getProperty "laser-show.dev")]
@@ -24,9 +25,24 @@
          (menu/handle {:event/type :file/exit :state (state/get-raw-state)}))))
 
 (deftest exit-effect-is-registered-test
-  (testing "the wired pipeline knows :system/exit (dev mode keeps the JVM alive)"
+  (testing "the wired pipeline knows :system/exit; with no application running it is ignored"
+    (is (nil? (events/event-handler {:event/type :file/exit})))
     (with-dev-mode
       #(is (nil? (events/event-handler {:event/type :file/exit}))))))
+
+(deftest exit-effect-calls-the-registered-exit-fn-test
+  (let [exits (atom 0)]
+    (events/set-exit-fn! #(swap! exits inc))
+    (events/event-handler {:event/type :file/exit})
+    (is (= 1 @exits))
+    (testing "a dirty project asks first and does not exit"
+      (state/swap-state! assoc-in [:project :dirty?] true)
+      (events/event-handler {:event/type :file/exit})
+      (is (= 1 @exits))
+      (is (true? (get-in (state/get-raw-state) [:ui :dialogs :unsaved-confirm :open?]))))
+    (testing "Don't Save then exits"
+      (events/event-handler {:event/type :file/confirm-discard})
+      (is (= 2 @exits)))))
 
 (deftest documentation-handler-test
   (let [result (menu/handle {:event/type :help/documentation :state (state/get-raw-state)})]

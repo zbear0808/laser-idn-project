@@ -22,6 +22,7 @@
             [laser-show.events.core :as events]
             [laser-show.views.root :as root]
             [laser-show.services.frame-service :as frame-service]
+            [laser-show.backend.multi-engine :as multi-engine]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.link :as link]
             [laser-show.input.gamepad :as gamepad]
@@ -112,6 +113,8 @@
 ;; Application Lifecycle
 
 
+(declare stop! exit!)
+
 (defn start!
   "Start the laser show application.
    
@@ -144,6 +147,7 @@
     (reset! *app app)
     ;; Wire dispatch! to use app's handler (wrapped with async agent)
     (events/set-dispatch-fn! (:handler app))
+    (events/set-exit-fn! #(exit!))
     (input-mapper/set-dispatch-fn! events/dispatch!))
 
   ;; Start Carabiner service (auto-connect for Link support)
@@ -183,20 +187,54 @@
     (catch Exception e
       (log/warn "Error releasing input devices:" (.getMessage e)))))
 
+(defn- stop-streaming!
+  "Stop the streaming engines, if any are running, so each DAC gets its IDN close
+   packets instead of waiting for its link timeout."
+  []
+  (when (seq (get-in (state/get-raw-state) [:backend :streaming :multi-engine-state :engines]))
+    (try
+      (multi-engine/stop-engines!)
+      (catch Exception e
+        (log/warn "Error stopping streaming engines:" (.getMessage e))))))
+
+(defn- disconnect-link!
+  "Disconnect from the Carabiner daemon if we connected to it."
+  []
+  (when (get-in (state/get-raw-state) [:backend :link :carabiner-connected?])
+    (try
+      (state/swap-state! update-in [:backend :link] link/disconnect-carabiner!)
+      (catch Exception e
+        (log/warn "Error disconnecting from Carabiner:" (.getMessage e))))))
+
 (defn stop!
-  "Stop the mounted cljfx application and release application-owned services.
+  "Stop the mounted cljfx application and release application-owned services:
+   the UI, the preview timer, the input mapper, the streaming engines, input
+   devices and the Carabiner link.
 
    This is intentionally idempotent so UI fixtures can safely call it from
    `finally` blocks after a failed startup or test."
   []
   (when-let [{:keys [renderer]} @*app]
     (fx/unmount-renderer (state/get-context-atom) renderer))
+  (frame-service/stop-preview-updates!)
   (input-mapper/stop-mapper!)
+  (stop-streaming!)
   (stop-input-devices!)
+  (disconnect-link!)
+  (events/set-exit-fn! nil)
   (reset! *app nil)
   (when (dev-config/dev-mode?)
     (Platform/setImplicitExit false))
   nil)
+
+(defn- exit!
+  "End the application (the :system/exit effect calls this). In dev mode the JVM
+   and its REPL stay alive; otherwise the process exits."
+  []
+  (stop!)
+  (when-not (dev-config/dev-mode?)
+    (Platform/exit)
+    (System/exit 0)))
 
 (defn start-test!
   "Mount the application UI without starting hardware or background services.

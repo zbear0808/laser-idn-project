@@ -18,6 +18,7 @@
    └── dialogs (via refs)"
   (:require
    [cljfx.api :as fx]
+   [laser-show.events.core :as events]
    [laser-show.subs :as subs]
    [laser-show.css.core :as css]
    [laser-show.views.components.title-bar :as title-bar]
@@ -29,13 +30,15 @@
    [laser-show.views.dialogs.add-projector-manual :as add-projector-dialog]
    [laser-show.views.dialogs.zone-group-editor :as zone-group-editor]
    [laser-show.views.dialogs.cell-trigger-editor :as cell-trigger-editor]
+   [laser-show.views.dialogs.unsaved-confirm :as unsaved-confirm]
    [laser-show.views.status-bar :as status-bar]
    [laser-show.views.tabs.effects :as effects-tab]
    [laser-show.views.tabs.grid :as grid-tab]
    [laser-show.views.tabs.projectors :as projectors-tab]
    [laser-show.views.tabs.zones :as zones-tab]
    [laser-show.views.tabs.settings :as settings-tab]
-   [laser-show.views.toolbar :as toolbar]))
+   [laser-show.views.toolbar :as toolbar])
+  (:import [javafx.stage WindowEvent]))
 
 
 ;; Layout Constants (non-color theme values)
@@ -148,7 +151,8 @@
         timeline-editor-open? (fx/sub-ctx context subs/dialog-open? :timeline-cue-editor)
         add-projector-open? (fx/sub-ctx context subs/dialog-open? :add-projector-manual)
         zone-group-editor-open? (fx/sub-ctx context subs/dialog-open? :zone-group-editor)
-        trigger-editor-open? (fx/sub-ctx context subs/dialog-open? :trigger-editor)]
+        trigger-editor-open? (fx/sub-ctx context subs/dialog-open? :trigger-editor)
+        unsaved-confirm-open? (fx/sub-ctx context subs/dialog-open? :unsaved-confirm)]
     {:fx/type fx/ext-set-env
      :env {::layout-config layout-config}  ; For any components that need spacing/fonts
      :desc {:fx/type fx/ext-many
@@ -164,9 +168,13 @@
                      :width (:width window-config 1200)
                      :height (:height window-config 800)
                      :showing true
-                     :on-close-request (fn [_]
-                                         ;; TODO: Check for unsaved changes
-                                         (System/exit 0))
+                     :on-close-request (fn [^WindowEvent e]
+                                         ;; Consume it: the window only closes through
+                                         ;; the exit effect, after the unsaved-changes
+                                         ;; check. A cljfx event map would be dispatched
+                                         ;; asynchronously, too late to cancel the close.
+                                         (.consume e)
+                                         (events/dispatch! {:event/type :file/exit}))
                      :scene {:fx/type :scene
                              :stylesheets stylesheets
                              :root {:fx/type main-layout}}}
@@ -193,4 +201,8 @@
                     ;; Cell trigger editor dialog
                     (when trigger-editor-open?
                       {:fx/type cell-trigger-editor/cell-trigger-editor-dialog
-                       :fx/key :cell-trigger-editor-dialog})])}}))
+                       :fx/key :cell-trigger-editor-dialog})
+                    ;; Unsaved-changes question (New / Open / Exit)
+                    (when unsaved-confirm-open?
+                      {:fx/type unsaved-confirm/unsaved-confirm-dialog
+                       :fx/key :unsaved-confirm-dialog})])}}))

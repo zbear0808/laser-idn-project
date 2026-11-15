@@ -20,26 +20,60 @@
 ;; File Menu Events
 
 
+;; Unsaved-changes guard. New, Open and Exit throw the current document away, so
+;; when [:project :dirty?] is true they ask first: the event is parked in
+;; [:ui :dialogs :unsaved-confirm :pending] and the dialog is opened. The dialog's
+;; buttons then drop it (:file/confirm-cancel), re-dispatch it with :force? true
+;; (:file/confirm-discard), or save first and re-dispatch it once the write
+;; succeeded (:file/confirm-save).
+
+(def ^:private confirm-path [:ui :dialogs :unsaved-confirm])
+
+(defn- guard-needed?
+  "True when the event would discard unsaved work and wasn't already confirmed."
+  [state {:keys [force?]}]
+  (and (not force?)
+       (boolean (get-in state [:project :dirty?]))))
+
+(defn- ask-first
+  "Open the unsaved-changes dialog for event (ignored if it is already open)."
+  [state event]
+  (if (get-in state (conj confirm-path :open?))
+    {:state state}
+    {:state (update-in state confirm-path assoc
+                       :open? true
+                       :pending (select-keys event [:event/type]))}))
+
+(defn- close-confirm [state]
+  (update-in state confirm-path assoc :open? false :pending nil))
+
 (defn- handle-file-new-project
   "Replace the document with a fresh starter project.
-   Backend/runtime state (streaming, Link, MIDI/OSC) is left untouched."
-  [{:keys [state]}]
-  (log/info "File > New Project")
-  ;; TODO: Show confirmation dialog if project is dirty
-  {:state (persistent/new-project-state state)
-   :multi-engine/refresh true})
+   Backend/runtime state (streaming, Link, MIDI/OSC) is left untouched.
+   Asks first when the project has unsaved changes."
+  [{:keys [state] :as event}]
+  (if (guard-needed? state event)
+    (ask-first state event)
+    (do
+      (log/info "File > New Project")
+      {:state (persistent/new-project-state state)
+       :multi-engine/refresh true})))
 
 (defn- handle-file-open
-  "Open a project from disk using file chooser dialog."
-  [{:keys [state]}]
-  (log/info "File > Open")
-  {:state state
-   :fx/show-file-chooser {:title "Open Project"
-                          :initial-directory (or persistent/default-projects-dir
-                                                (System/getProperty "user.home"))
-                          :extension-filters [{:description "Laser Show Projects"
-                                              :extensions ["*.zip"]}]
-                          :on-result {:event/type :file/open-result}}})
+  "Open a project from disk using file chooser dialog.
+   Asks first (before the chooser) when the project has unsaved changes."
+  [{:keys [state] :as event}]
+  (if (guard-needed? state event)
+    (ask-first state event)
+    (do
+      (log/info "File > Open")
+      {:state state
+       :fx/show-file-chooser {:title "Open Project"
+                              :initial-directory (or persistent/default-projects-dir
+                                                    (System/getProperty "user.home"))
+                              :extension-filters [{:description "Laser Show Projects"
+                                                  :extensions ["*.zip"]}]
+                              :on-result {:event/type :file/open-result}}})))
 
 (defn- handle-file-open-result
   "Handle result from open file dialog by requesting a project read."
@@ -66,14 +100,17 @@
 
 (defn- save-to
   "Mark the project saved to file-path and request the zip write.
-   If the write fails, :file/save-failed restores the previous project status."
-  [{:keys [state] :as event} file-path]
+   If the write fails, :file/save-failed restores the previous project status.
+   An optional :then event on the event is dispatched only after the write
+   succeeded (the unsaved-changes dialog uses it to continue New/Open/Exit)."
+  [{:keys [state then] :as event} file-path]
   (log/info "Saving project to:" file-path)
   {:state (persistent/mark-saved state file-path (h/current-time-ms event))
-   :project/save {:file-path file-path
-                  :files (persistent/project-files state)
-                  :on-failed {:event/type :file/save-failed
-                              :previous-project (:project state)}}})
+   :project/save (cond-> {:file-path file-path
+                          :files (persistent/project-files state)
+                          :on-failed {:event/type :file/save-failed
+                                      :previous-project (:project state)}}
+                   then (assoc :on-saved then))})
 
 (defn- handle-file-save-failed
   "Restore the project status from before the failed save, including the
@@ -85,8 +122,9 @@
                         [:current-file :last-saved :saved-document :dirty?]))})
 
 (defn- handle-file-save-as
-  "Save the project to a new location using file chooser dialog."
-  [{:keys [state]}]
+  "Save the project to a new location using file chooser dialog.
+   An optional :then event is carried through the chooser to the write."
+  [{:keys [state then]}]
   (log/info "File > Save As")
   (let [current-file (get-in state [:project :current-file])
         initial-dir (if current-file
@@ -102,7 +140,8 @@
                             :extension-filters [{:description "Laser Show Projects"
                                                 :extensions ["*.zip"]}]
                             :mode :save
-                            :on-result {:event/type :file/save-as-result}}}))
+                            :on-result (cond-> {:event/type :file/save-as-result}
+                                         then (assoc :then then))}}))
 
 (defn- handle-file-save
   "Save the current project."
@@ -127,11 +166,45 @@
   {:state state})
 
 (defn- handle-file-exit
-  "Exit the application."
-  [_event]
+  "Exit the application. Asks first when the project has unsaved changes.
+   Also the handler for closing the main window."
+  [{:keys [state] :as event}]
   (log/debug "File > Exit")
-  ;; TODO: Show confirmation dialog if project is dirty
-  {:system/exit true})
+  (if (guard-needed? state event)
+    (ask-first state event)
+    {:system/exit true}))
+
+
+;; Unsaved-changes dialog buttons
+
+
+(defn- pending-action [state]
+  (get-in state (conj confirm-path :pending)))
+
+(defn- handle-file-confirm-cancel
+  "Cancel: drop the parked action; the document stays as it is."
+  [{:keys [state]}]
+  {:state (close-confirm state)})
+
+(defn- handle-file-confirm-discard
+  "Don't Save: carry on with the parked action, unsaved changes and all."
+  [{:keys [state]}]
+  (let [pending (pending-action state)]
+    (cond-> {:state (close-confirm state)}
+      pending (assoc :dispatch (assoc pending :force? true)))))
+
+(defn- handle-file-confirm-save
+  "Save: write the project (asking for a file name first if it has none), then
+   carry on with the parked action once the write has succeeded. Cancelling the
+   file chooser or a failed write ends the chain with nothing lost."
+  [{:keys [state] :as event}]
+  (let [pending (pending-action state)
+        closed (close-confirm state)]
+    (if pending
+      (handle-file-save (assoc event
+                               :state closed
+                               :then (assoc pending :force? true)))
+      {:state closed})))
 
 
 ;; Edit Menu Events
@@ -323,6 +396,9 @@
     :file/save-failed (handle-file-save-failed event)
     :file/export (handle-file-export event)
     :file/exit (handle-file-exit event)
+    :file/confirm-save (handle-file-confirm-save event)
+    :file/confirm-discard (handle-file-confirm-discard event)
+    :file/confirm-cancel (handle-file-confirm-cancel event)
     
     ;; Edit menu
     :edit/undo (handle-edit-undo event)

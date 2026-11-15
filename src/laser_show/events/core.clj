@@ -39,7 +39,6 @@
             [laser-show.events.handlers.timeline :as timeline-handlers]
             [laser-show.backend.multi-engine :as multi-engine]
             [laser-show.common.util :as u]
-            [laser-show.dev-config :as dev-config]
             [laser-show.idn.hello :as idn-hello]
             [laser-show.input.link :as link])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
@@ -106,11 +105,14 @@
 
 (defn- effect-save-project
   "Effect that writes a project zip.
-   Args: {:file-path path :files {filename data} :on-failed event}
-   The handler has already marked the project saved; on failure, dispatches
-   :on-failed with :file-path so the handler can revert that."
-  [{:keys [file-path files on-failed]} dispatch]
-  (when-not (persistent/write-project! file-path files)
+   Args: {:file-path path :files {filename data} :on-saved event :on-failed event}
+   The handler has already marked the project saved. After a successful write,
+   dispatches :on-saved (if given). On failure, dispatches :on-failed with
+   :file-path so the handler can revert the saved status."
+  [{:keys [file-path files on-saved on-failed]} dispatch]
+  (if (persistent/write-project! file-path files)
+    (when on-saved
+      (dispatch on-saved))
     (when on-failed
       (dispatch (assoc on-failed :file-path file-path)))))
 
@@ -216,15 +218,19 @@
 
 ;; System Effects
 
+(defonce ^{:private true
+           :doc "The function that ends the application (see set-exit-fn!)."}
+  !exit-fn
+  (atom nil))
+
 (defn- effect-system-exit
-  "Effect that exits the application.
-   In dev mode the JVM is kept alive (it hosts the REPL), so this only logs."
+  "Effect that exits the application through the function app/start! registered
+   with set-exit-fn!. With none registered (unit tests, or before the app is
+   started) it only logs, so a stray exit event can't kill the JVM."
   [_ _dispatch]
-  (if (dev-config/dev-mode?)
-    (log/info "File > Exit ignored in dev mode (would kill the REPL JVM). Use (laser-show.app/stop!).")
-    (do
-      (Platform/exit)
-      (System/exit 0))))
+  (if-let [exit-fn @!exit-fn]
+    (exit-fn)
+    (log/warn "Exit requested, but no application is running; ignoring")))
 
 (defn- effect-system-open-url
   "Effect that opens a URL in the system browser (off the agent thread)."
@@ -408,10 +414,10 @@
    - :multi-engine/start - start multi-engine streaming to all projectors
    - :multi-engine/stop - stop multi-engine streaming
    - :multi-engine/refresh - refresh engines when projectors change
-   - :project/save - write project zip to disk
+   - :project/save - write project zip to disk, then dispatch :on-saved
    - :project/load - read project zip from disk
    - :fx/show-file-chooser - show file open/save dialog
-   - :system/exit - exit the application (no-op in dev mode)
+   - :system/exit - end the application through the fn registered with set-exit-fn!
    - :system/open-url - open a URL in the system browser
    - :dev/reload - reload :styles or :app code (dev only)
    - :clipboard/copy-effects - copy effects to clipboard
@@ -464,6 +470,13 @@
    to route through the app's async event handler."
   [dispatch-fn]
   (reset! *dispatch-fn dispatch-fn))
+
+(defn set-exit-fn!
+  "Set the function the :system/exit effect calls (nil to clear it).
+   app/start! registers the real one; tests register a recording fn so they
+   can see an exit request without ending the JVM."
+  [exit-fn]
+  (reset! !exit-fn exit-fn))
 
 (defn dispatch!
   "Dispatch an event through the app's async event handler (agent thread).

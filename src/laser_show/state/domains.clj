@@ -158,6 +158,8 @@
                                            :name ""
                                            :description ""
                                            :color "#808080"}
+                       :unsaved-confirm {:open? false
+                                         :pending nil}
                        :about {:open? false}
                        :settings {:open? false}}
              :doc "dialog visibility and data states (fields alongside :open?, no nested :data key)"}
