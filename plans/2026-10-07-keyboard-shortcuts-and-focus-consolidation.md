@@ -1,7 +1,7 @@
 # Keyboard Shortcut & Focus Architecture Plan
 
 **Date:** 2026-10-07  
-**Status:** Proposed. Not started. Kept after the 2026-11-08 audit; slotted into Phase 2, after 01 M5 (shared dialog scaffolding)  
+**Status:** Superseded by `plans/2026-11-13-keyboard-focus-window-lifecycle/` (approved 2026-11-14). Don't execute this plan: probes showed several of its root causes don't exist (that folder's `00-overview.md` §3). Kept for reference.  
 **Last verified against:** master `dd95ee5` (see `plans/2026-11-07-improvement-review/07-old-plans-audit.md`)  
 
 > **Amendments required before execution (2026-11-08 audit):**
