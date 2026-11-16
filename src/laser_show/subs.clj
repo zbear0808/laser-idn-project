@@ -183,7 +183,8 @@
          (fx/sub-val context get-in [:ui :timeline-editor [col row]])))
 
 (defn timeline-prefs
-  "Timeline editor preferences: {:snap {:enabled? :value} :add-panel {...} :inspector-open?}."
+  "Timeline editor preferences: {:snap {:enabled? :value} :add-panel {...} :inspector-open?
+   :ruler-mode :detail-height}."
   [context]
   (fx/sub-val context get-in [:ui :timeline-prefs]))
 

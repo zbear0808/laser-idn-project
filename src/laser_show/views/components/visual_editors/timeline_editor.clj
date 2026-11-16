@@ -688,18 +688,21 @@
 ;; ============================================================
 
 
-(def ^:private detail-height-bounds [160.0 600.0])
-
 (defonce ^:private detail-drag
-  ;; [screen-y height] at the press; outside render so re-renders keep it
+  ;; [screen-y height lanes-height] at the press; outside render so
+  ;; re-renders keep it
   (atom nil))
 
 (defn- detail-panel
   "Bottom panel, Ableton-style: the selection's properties on the left and
-   its effects as a row of cards. The strip on top drags to resize it."
-  [{:keys [height swap-state inspector-props target col row]}]
-  (let [[lo hi] detail-height-bounds
-        drag detail-drag]
+   its effects as a row of cards. The strip on top drags to resize it: the
+   drag previews in local state, and the release commits the height as an
+   editor preference (one :timeline/set-detail-height per drag)."
+  [{:keys [height lanes-height swap-state inspector-props target col row]}]
+  (let [drag detail-drag
+        drag-height (fn [^MouseEvent e]
+                      (when-let [[y0 h0 lanes-h] @drag]
+                        (layout/detail-drag-height h0 y0 (.getScreenY e) lanes-h)))]
     {:fx/type :v-box
      :id "timeline-detail"
      :style-class "tl-detail"
@@ -709,12 +712,20 @@
        :id "timeline-detail-resize"
        :style-class "tl-detail-resize"
        :cursor :n-resize
-       :on-mouse-pressed (fn [^MouseEvent e] (reset! drag [(.getScreenY e) height]))
-       :on-mouse-dragged (fn [^MouseEvent e]
-                           (when-let [[y0 h0] @drag]
-                             (let [h (-> (+ (double h0) (- (double y0) (.getScreenY e))) (max lo) (min hi))]
-                               (swap-state assoc :detail-h h))))
-       :on-mouse-released (fn [_] (reset! drag nil))}
+       :on-mouse-pressed (fn [^MouseEvent e]
+                           (reset! drag [(.getScreenY e) (double height) (double (or lanes-height 0.0))]))
+       :on-mouse-dragged (fn [e]
+                           (when-let [h (drag-height e)]
+                             (swap-state assoc :detail-h h)))
+       ;; The preview stays after the release: clearing it would show the old
+       ;; height until the event lands. It's dropped on reopen or cell switch.
+       :on-mouse-released (fn [e]
+                            (when-let [h (drag-height e)]
+                              (swap-state assoc :detail-h h)
+                              (when (not= h (second @drag))
+                                (events/dispatch! {:event/type :timeline/set-detail-height
+                                                   :height h})))
+                            (reset! drag nil))}
       {:fx/type :h-box
        :v-box/vgrow :always
        :children [(assoc inspector-props :fx/type inspector/inspector :target target)
@@ -886,7 +897,11 @@
       inspector-open?
       (assoc :bottom {:fx/type detail-panel
                       :col col :row row :target target
-                      :height (:detail-h state 300.0)
+                      ;; A drag in progress (or just released) wins over the pref
+                      :height (or (:detail-h state)
+                                  (:detail-height timeline-prefs)
+                                  layout/default-detail-height)
+                      :lanes-height (:height view)
                       :swap-state swap-state
                       :inspector-props {:col col :row row :cue cue :tracks tracks
                                         :zone-groups zone-groups :destination-zone-id destination-zone-id
@@ -904,9 +919,14 @@
    - :timeline-prefs        — editor preferences (subs/timeline-prefs)
    - :title                 — optional node shown at the left of the toolbar
    
-   The viewport and hover state are local to this component and reset when
-   it shows another cell."
+   Local state (viewport, follow, renaming) resets when :cell changes, since
+   it's part of :initial-state; the measured lane size carries over."
   [{:keys [col row] :as props}]
   {:fx/type fx/ext-state
+   ;; :cell is never read: it's here so a new cell resets the local state
    :initial-state {:cell [col row] :view initial-view :follow? true :renaming-id nil}
+   ;; The lanes pane keeps its size across the reset, so its size listeners
+   ;; won't fire again: keep the measured size, or the canvas stays 0x0
+   :reset (fn [old new]
+            (update new :view merge (select-keys (:view old) [:width :height])))
    :desc (assoc props :fx/type editor-body)})

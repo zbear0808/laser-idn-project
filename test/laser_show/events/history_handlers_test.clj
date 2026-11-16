@@ -445,3 +445,21 @@
                           {:event/type :timeline/set-ruler-mode :mode :time}])]
     (is (= (undo-count s0) (undo-count s)))
     (is (false? (get-in s [:project :dirty?])))))
+
+(deftest timeline-pref-events-create-no-undo-test
+  (let [pref-events [{:event/type :timeline/set-detail-height :height 420.0}
+                     {:event/type :timeline/toggle-inspector}
+                     {:event/type :timeline/toggle-add-panel}]]
+    (testing "a clean project stays clean, with no undo entry"
+      (let [s0 (timeline-state)
+            s (reduce run s0 pref-events)]
+        (is (= 420.0 (get-in s [:ui :timeline-prefs :detail-height])))
+        (is (= (undo-count s0) (undo-count s)))
+        (is (false? (get-in s [:project :dirty?])))))
+    (testing "a dirty project stays dirty"
+      (let [s0 (run (timeline-state) {:event/type :timeline/apply-op :col 0 :row 0
+                                      :op {:op :move-clips :clip-ids #{item-id} :delta 2.0}})
+            s (reduce run s0 pref-events)]
+        (is (true? (get-in s0 [:project :dirty?])))
+        (is (= (undo-count s0) (undo-count s)))
+        (is (true? (get-in s [:project :dirty?])))))))

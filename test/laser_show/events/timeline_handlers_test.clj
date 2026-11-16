@@ -413,3 +413,19 @@
         r (handlers/handle-event {:event/type :chain/update-param :domain :timeline-tracks :entity-key [0 0]
                                   :effect-path [0 :effects 0] :param-key :x-scale :fx/event 0.5 :state s0})]
     (is (= 0.5 (get-in r [:state :chains :cue-chains [0 0] :tracks 0 :effects 0 :params :x-scale])))))
+
+(deftest set-detail-height-clamps-test
+  (let [height-after (fn [h]
+                       (get-in (timeline/handle {:event/type :timeline/set-detail-height
+                                                 :height h :state base-state})
+                               [:state :ui :timeline-prefs :detail-height]))]
+    (is (= 300.0 (get-in base-state [:ui :timeline-prefs :detail-height])) "the default")
+    (is (= 420.5 (height-after 420.5)))
+    (is (= 160.0 (height-after 50)))
+    (is (= 600.0 (height-after 9999)))
+    (is (= 300.0 (height-after nil))))
+  (testing "the other prefs are untouched"
+    (let [s (:state (timeline/handle {:event/type :timeline/set-detail-height
+                                      :height 420.5 :state base-state}))]
+      (is (= (dissoc (get-in base-state [:ui :timeline-prefs]) :detail-height)
+             (dissoc (get-in s [:ui :timeline-prefs]) :detail-height))))))

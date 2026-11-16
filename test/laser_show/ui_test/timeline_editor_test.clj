@@ -334,3 +334,75 @@
         (click-bank-button! robot "Rotation")
         (ui/wait-for! #(= [:rotation] (mapv :effect-id (:effects (model/find-track (get-in (state/get-raw-state) (conj cue-path :tracks)) track-id)))))
         (is (= "Rotation" (ui/node-text "#timeline-device-name-0")))))))
+
+
+;; Detail panel height and cell switches (plans/2026-11-08-timeline-rework/10-detail-panel-size.md)
+
+(defn- canvas-width []
+  (.getWidth ^javafx.scene.canvas.Canvas (ui/query "#timeline-canvas")))
+
+(defn- detail-height []
+  (.getHeight ^javafx.scene.layout.Region (ui/query "#timeline-detail")))
+
+(defn- near? [a b] (< (Math/abs (- (double a) (double b))) 1.0))
+
+(defn- switch-cell!
+  "Show another cell in the open editor, the way a grid click does."
+  [col row]
+  (events/dispatch! {:event/type :timeline-cue-editor/open :col col :row row})
+  (ui/wait-for! #(= [col row] ((juxt :col :row)
+                               (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor])))))
+
+(deftest timeline-cell-switch-resets-zoom-keeps-lanes
+  (let [robot (ui/robot)]
+    (open-timeline!)
+    (ui/wait-for! #(pos? (canvas-width)))
+    (let [initial (slider-value)]
+      (ui/click! robot "#timeline-zoom-in")
+      (ui/wait-for! #(> (slider-value) initial))
+      (switch-cell! 1 0)
+      (ui/wait-for! #(< (Math/abs (- (slider-value) initial)) 1e-6))
+      (dotimes [_ 3] (ui/sync-fx!))
+      (is (pos? (canvas-width)) "the lanes are still drawn after the switch"))))
+
+(def ^:private detail-pref-path [:ui :timeline-prefs :detail-height])
+
+(defn- drag-detail-up!
+  "Drag the detail panel's top edge up by px. 1 px steps: in headless mode a
+   bigger step jumps off the 5 px strip and the rest of the drag is lost."
+  ([robot px] (drag-detail-up! robot px nil))
+  ([robot px opts]
+   (ui/drag-by! robot "#timeline-detail-resize" 300 2 0 (- px) (merge {:steps px} opts))))
+
+(deftest timeline-detail-height-survives-reopen
+  (let [robot (ui/robot)]
+    (open-timeline!)
+    (ui/wait-for! #(near? 300.0 (detail-height)))
+    (drag-detail-up! robot 80 {:hold? true})
+    (testing "the drag previews locally and commits nothing yet"
+      (ui/wait-for! #(near? 380.0 (detail-height)))
+      (is (= 300.0 (get-in (state/get-raw-state) detail-pref-path))))
+    (ui/release! robot)
+    (testing "the release commits the height"
+      (ui/wait-for! #(near? 380.0 (get-in (state/get-raw-state) detail-pref-path)))
+      (is (near? 380.0 (detail-height))))
+    (events/dispatch! {:event/type :ui/close-dialog :dialog-id :timeline-cue-editor})
+    (ui/wait-for! #(not (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor :open?])))
+    (open-timeline!)
+    (ui/wait-for! #(near? 380.0 (detail-height)))
+    (is (near? 380.0 (detail-height)) "reopening keeps the height")))
+
+(deftest timeline-cell-switch-keeps-detail-height
+  (let [robot (ui/robot)]
+    (open-timeline!)
+    (ui/wait-for! #(pos? (canvas-width)))
+    (let [initial (slider-value)]
+      (drag-detail-up! robot 80)
+      (ui/wait-for! #(near? 380.0 (get-in (state/get-raw-state) detail-pref-path)))
+      (ui/click! robot "#timeline-zoom-in")
+      (ui/wait-for! #(> (slider-value) initial))
+      (switch-cell! 1 0)
+      (ui/wait-for! #(< (Math/abs (- (slider-value) initial)) 1e-6))
+      (dotimes [_ 3] (ui/sync-fx!))
+      (is (near? 380.0 (detail-height)) "the panel keeps its height")
+      (is (pos? (canvas-width)) "and the lanes are still drawn"))))

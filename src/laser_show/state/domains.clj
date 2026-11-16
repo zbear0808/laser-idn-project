@@ -171,8 +171,9 @@
    :timeline-prefs {:default {:snap {:enabled? true :value 0.25}
                               :add-panel {:open? false :preset-tab :geometric :effect-tab :shape}
                               :inspector-open? true
-                              :ruler-mode :bars}
-                    :doc "timeline editor preferences shared by every cue (snap, preset drawer, inspector)"}
+                              :ruler-mode :bars
+                              :detail-height 300.0}
+                    :doc "timeline editor preferences shared by every cue (snap, preset drawer, inspector, ruler mode, detail panel height); kept for the session, not saved"}
    :preview-zone-selector-open {:default nil
                                 :doc "Cell index whose zone selector popup is open, or nil if none"}
    :window {:default {:width default-window-width

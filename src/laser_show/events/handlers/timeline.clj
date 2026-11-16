@@ -19,6 +19,7 @@
             [laser-show.events.helpers :as h]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.cue-timing :as cue-timing]
+            [laser-show.timeline.layout :as layout]
             [laser-show.timeline.playback :as playback]
             [laser-show.state.extractors :as ex]
             [laser-show.events.handlers.list.helpers :as list-helpers]
@@ -42,7 +43,8 @@
   {:snap {:enabled? true :value 0.25}
    :add-panel {:open? false :preset-tab :geometric :effect-tab :shape}
    :inspector-open? true
-   :ruler-mode :bars})
+   :ruler-mode :bars
+   :detail-height layout/default-detail-height})
 
 (defn view-path [col row] [:ui :timeline-editor [col row]])
 
@@ -102,6 +104,12 @@
   "Show or hide the inspector (an editor preference)."
   [{:keys [state]}]
   {:state (prefs-assoc state [:inspector-open?] (not (prefs-get state [:inspector-open?])))})
+
+(defn- handle-set-detail-height
+  "Height of the editor's bottom detail panel (an editor preference). The
+   view dispatches it once per resize drag, on release."
+  [{:keys [height state]}]
+  {:state (prefs-assoc state [:detail-height] (layout/clamp-detail-height height))})
 
 
 ;; Edits: one op per committed edit (model/apply-op)
@@ -486,6 +494,7 @@
     ;; View controls
     :timeline/set-snap (handle-set-snap event)
     :timeline/toggle-inspector (handle-toggle-inspector event)
+    :timeline/set-detail-height (handle-set-detail-height event)
 
     ;; Selection
     :timeline/select-items (handle-select-items event)

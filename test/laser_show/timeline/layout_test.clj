@@ -134,3 +134,28 @@
     (is (= :ruler (:type (layout/hit-test rows cue v0 380 12 #{}))))
     (is (= :ruler (:type (layout/hit-test rows (assoc cue :loop {:enabled? true :start 0.0 :duration 4.0}) v0 401 12 #{})))
         "a looping timeline has no end marker")))
+
+(deftest clamp-detail-height-test
+  (is (= 420.5 (layout/clamp-detail-height 420.5)))
+  (is (= 160.0 (layout/clamp-detail-height 50)))
+  (is (= 600.0 (layout/clamp-detail-height 9999)))
+  (testing "anything that isn't a number gives the default"
+    (is (= 300.0 (layout/clamp-detail-height nil)))
+    (is (= 300.0 (layout/clamp-detail-height "400")))
+    (is (= 300.0 (layout/clamp-detail-height ##NaN)))))
+
+(deftest detail-drag-height-test
+  ;; args: height at the press, pointer y at the press, pointer y now, lanes height at the press
+  (testing "follows the pointer: up grows the panel, down shrinks it"
+    (is (= 380.0 (layout/detail-drag-height 300.0 500.0 420.0 500.0)))
+    (is (= 250.0 (layout/detail-drag-height 300.0 500.0 550.0 500.0))))
+  (testing "a press and release without moving keeps the height"
+    (is (= 300.0 (layout/detail-drag-height 300.0 500.0 500.0 500.0))))
+  (testing "stays inside the bounds"
+    (is (= 160.0 (layout/detail-drag-height 300.0 500.0 900.0 500.0)))
+    (is (= 600.0 (layout/detail-drag-height 300.0 500.0 -400.0 2000.0))))
+  (testing "the lanes keep 120 px: lanes 200 px tall at the press let the panel grow by 80"
+    (is (= 380.0 (layout/detail-drag-height 300.0 500.0 0.0 200.0))))
+  (testing "lanes already shorter than that: the panel can shrink but not grow"
+    (is (= 300.0 (layout/detail-drag-height 300.0 500.0 400.0 100.0)))
+    (is (= 250.0 (layout/detail-drag-height 300.0 500.0 550.0 100.0)))))

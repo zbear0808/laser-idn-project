@@ -179,6 +179,44 @@
 
 
 ;; ============================================================
+;; Detail panel
+;; ============================================================
+
+
+(def detail-height-bounds
+  "[min max] height of the editor's bottom detail panel, px."
+  [160.0 600.0])
+
+(def default-detail-height 300.0)
+
+(def min-lanes-height
+  "Lane canvas height (ruler included) a detail-panel drag always leaves:
+   the ruler and about two tracks."
+  120.0)
+
+(defn clamp-detail-height
+  "h kept inside detail-height-bounds. Anything that isn't a number (or is
+   NaN) gives default-detail-height."
+  ^double [h]
+  (let [[lo hi] detail-height-bounds]
+    (if (and (number? h) (not (Double/isNaN (double h))))
+      (clamp h lo hi)
+      default-detail-height)))
+
+(defn detail-drag-height
+  "Detail panel height while its top edge is dragged: the height at the press
+   (h0) plus how far the pointer has moved up since (screen y0 - y). Kept
+   inside detail-height-bounds, and low enough that the lane canvas (lanes-h
+   at the press) keeps min-lanes-height. A panel that already leaves less
+   than that can shrink but not grow."
+  ^double [h0 y0 y lanes-h]
+  (let [[lo hi] detail-height-bounds
+        h0 (double h0)
+        cap (max h0 (min (double hi) (+ h0 (- (double lanes-h) min-lanes-height))))]
+    (clamp (+ h0 (- (double y0) (double y))) lo cap)))
+
+
+;; ============================================================
 ;; Ruler and grid
 ;; ============================================================
 

@@ -1,7 +1,7 @@
 # Detail panel height kept for the session (L3-A) + cell-switch viewport fix
 
 **Written:** 2026-11-11   **Written for commit:** `716688d` (branch `timeline/effects-panel`)
-**Status:** Proposed   **Related:** `07-effects-panel-followups.md` L3 (option A) and "Related bug"; corrects that section's diagnosis (see §2)
+**Status:** Done (2026-11-14, on `master` after `e2c17ac`; differences in §10)   **Related:** `07-effects-panel-followups.md` L3 (option A) and "Related bug"; corrects that section's diagnosis (see §2)
 
 The bottom detail panel's height should survive closing/reopening the editor and switching cell. Zoom, scroll and "follow" should still reset per cell. Total ~2 h.
 
@@ -107,3 +107,19 @@ No new effects. Not in `history-excluded-events` (`handlers/history.clj:119-133`
 - **Per-cell remembered zoom/scroll** (state keyed by cell): not requested; the docstring says reset.
 - **L3-B, app settings file across restarts (~1 day):** new infrastructure. It needs a load at startup in `app.clj` (before or around `state/init-state!`, `:135`), a debounced save on pref changes, and a choice of which prefs go in it. `serialization/save-to-file!`/`load-from-file` (`serialization.clj:141,168`) exist but are unused. Worth doing for all prefs at once, not just this one.
 - **L3-C, per-project `:config`:** a window size isn't project data, and changing it would mark the project unsaved (`[:config k]` is persisted; `state/history.clj:39-41`). Rejected.
+
+## 10. As built (2026-11-14)
+
+All four steps are done, step 4 included.
+
+| Plan | As built | Why |
+|---|---|---|
+| Pure helper `drag-height [[y0 h0] screen-y]`, private to the view (§4.4) | `layout/detail-drag-height [h0 y0 y lanes-h]`, public in `laser-show.timeline.layout` next to `clamp-detail-height`, together with `min-lanes-height 120.0` | It also carries the step 4 cap, so it gets a unit test (`detail-drag-height-test`) |
+| Step 4 cap `hi = min(600, height + (:height view) − 120)` (§4.5) | `max(h0, min(600, h0 + lanes-h − 120))`, with `h0` and `lanes-h` taken at the press | With the plan's formula, a window whose lanes are already under 120 px would make the panel jump smaller on the first drag event. Now such a panel can shrink but not grow |
+| `clamp-detail-height`: non-numbers give the default (§4.2) | NaN gives the default too | `max`/`min` pass NaN through |
+| `:detail-height 300.0` in `domains.clj` (`layout/default-detail-height`) (§4.3) | The literal `300.0` in `domains.clj`; `default-prefs` uses `layout/default-detail-height` | `domains.clj` spells every default as a literal and requires no timeline namespace |
+
+The drag records `[screen-y height lanes-height]` at the press in `detail-drag`. Every drag event previews the height locally. The release computes the height from its own event, keeps it as the local preview, and dispatches `:timeline/set-detail-height` only if it differs from the height at the press, so a click without a drag commits nothing.
+
+Tests (all new): `laser-show.timeline.layout-test/clamp-detail-height-test` and `/detail-drag-height-test`; `laser-show.events.timeline-handlers-test/set-detail-height-clamps-test`; `laser-show.events.history-handlers-test/timeline-pref-events-create-no-undo-test`; in `laser-show.ui-test.timeline-editor-test`: `timeline-cell-switch-resets-zoom-keeps-lanes` (written first; it failed with a 0 px canvas before the fix), `timeline-detail-height-survives-reopen` (also checks that nothing is committed during the drag) and `timeline-cell-switch-keeps-detail-height`. The UI tests drag through `drag-detail-up!` in 1 px steps, as §8 advises.
+
