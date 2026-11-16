@@ -141,12 +141,14 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-clojure-
     
-    # Run tests (need :linux for JavaFX deps on ubuntu)
+    # Run tests (need :linux for JavaFX deps on ubuntu). cljfx starts JavaFX as
+    # soon as it loads and the runner has no display, so every test step uses
+    # JavaFX's headless platform (the :test-ui-headless alias).
     - name: Run unit tests
-      run: clojure -M:linux:test
+      run: clojure -M:linux:test:test-ui-headless
     
     - name: Run integration tests
-      run: clojure -M:linux:test-integration
+      run: clojure -M:linux:test-integration:test-ui-headless
 
     # TestFX UI tests on JavaFX's built-in headless platform: no display or
     # Xvfb needed.
