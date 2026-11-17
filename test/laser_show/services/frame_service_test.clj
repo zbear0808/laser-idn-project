@@ -6,6 +6,7 @@
    - IDN streaming bypasses preview zone filtering
    - Per-item zone routing generates separate frames per zone"
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.animation.cue-timing :as ct]
             [laser-show.input.mtc :as mtc]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
@@ -674,6 +675,27 @@
         clip-from-0 (timeline-cue {:items [(clip-at 0.0 [sine])]})]
     (is (= (render-at clip-from-0 9.25) (render-at on-track 9.25))
         "a track modulator is at timeline beat 9.25, not 1.25 into the clip")))
+
+(deftest once-mode-on-a-track-effect-follows-the-playhead-test
+  (let [saw {:id :fx :effect-id :scale :enabled? true
+             :params {:x-scale {:type :sawtooth :min 0.0 :max 1.0 :period 4.0 :loop-mode :once}}}
+        cue (timeline-cue {:tracks [{:id :t :type :track :effects [saw]}]
+                           :items [(clip-at 0.0)]})
+        t0 (System/currentTimeMillis)
+        ;; Started and advanced the way the app does it, so the context is the app's
+        width-at (fn [ms]
+                   (let [pb (ct/activate-cue {} [0 0] t0 0.0 {:timeline? true :start-beat 0.0})
+                         t (reduce (fn [t now] (ct/update-cue-timing t now 120.0 1.0 {:enabled? false} {:length 64.0}))
+                                   (get-in pb [:active-cues [0 0]])
+                                   (concat (range t0 (+ t0 ms) 33) [(+ t0 ms)]))
+                         frame (get (frame-service/generate-frames-by-zone
+                                     cue ms 120.0 t0 (ct/get-cue-timing-context t 120.0))
+                                    :all)
+                         xs (map first (remove #(every? zero? (subvec % 2 5)) frame))]
+                     (- (apply max xs) (apply min xs))))]
+    (is (< (Math/abs (- 1.0 (width-at 0))) 0.01) "at the start the sawtooth is at 1")
+    (is (< (Math/abs (- 0.5 (width-at 1000))) 0.01) "2 beats into 4: half")
+    (is (< (width-at 3000) 0.01) "done: held at 0")))
 
 
 ;; Preview timer (output runtime Phase 2)

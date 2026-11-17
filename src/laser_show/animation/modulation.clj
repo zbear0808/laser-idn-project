@@ -45,8 +45,8 @@
    Parameters:
    - time-ms: Current time in milliseconds
    - bpm: Current BPM
-   - trigger-time: Time when the cue/effect was triggered (optional, for once-mode modulators)
-   - trigger-time: Time when the cue/effect was triggered (optional, for once-mode modulators)
+   - trigger-time: (hand-built contexts only) what time-ms counts from when
+     there are no accumulators; timing contexts from cue-timing don't have it
    - input-values: Map of input values from generic router (optional)
    
    Per-Point Parameters (for position-based modulators):

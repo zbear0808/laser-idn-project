@@ -45,20 +45,18 @@
    
    Parameters:
    - config: Map with :period, :time-unit, :loop-mode keys
-   - time-ms: Current time in milliseconds
-   - context: Modulation context with :bpm and :trigger-time
+   - time-ms: Current time in milliseconds (used when context has no accumulators)
+   - context: Modulation context with the cue's accumulators and :bpm
    
    Returns: Position in [0, 1]"
   ^double [{:keys [period time-unit loop-mode]
             :or {period 1.0 time-unit :beats loop-mode :loop}}
            time-ms
-           {:keys [bpm trigger-time] :as context}]
+           context]
   (let [period' (double period)]
     (if (= loop-mode :once)
-      (let [progress (double (time/calculate-once-progress (or time-ms 0) trigger-time
-                                                          period' (or time-unit :beats)
-                                                          (or bpm 120.0)))]
-        (clojure.core/min progress 1.0))
+      (time/calculate-once-progress (cond-> (or context {}) (some? time-ms) (assoc :time-ms time-ms))
+                                    period' (or time-unit :beats))
       (u/fmod (/ (time/get-loop-time-from-context context time-unit) period') 1.0))))
 
 (defn calculate-spatial-position

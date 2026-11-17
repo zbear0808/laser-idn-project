@@ -1,7 +1,9 @@
 (ns laser-show.animation.modulation-test
   "Tests for the parameter modulation system."
   (:require [clojure.test :refer [deftest testing is]]
+            [laser-show.animation.cue-timing :as ct]
             [laser-show.animation.effects :as effects]
+            [laser-show.animation.effects.shape]
             [laser-show.animation.interpolation :as interp]
             [laser-show.animation.keyframes :as kf]
             [laser-show.animation.modulation :as mod]
@@ -584,6 +586,88 @@
         ;; At phase 0.25 of cycle (within duty cycle), should be at max
         (is (= 1.0 final-val))
         (is (= final-val held-val) "Should hold at exact final position")))))
+
+
+;; Once mode through the app's own path: a grid cue started at the wall-clock
+;; time, its timing advanced like the preview tick, the context from
+;; get-cue-timing-context, the effect through apply-effect-chain
+;; (plans/2026-11-17-modulator-time-base.md §7)
+
+(defn- cue-timing
+  "The timing of a grid cue started at the wall-clock time t0 and played for ms
+   at bpm, ticked every 33 ms like the preview timer."
+  ([t0 ms bpm] (cue-timing (get-in (ct/activate-cue {} [0 0] t0 0.0 {}) [:active-cues [0 0]]) t0 ms bpm))
+  ([timing from ms bpm]
+   (reduce (fn [t now] (ct/update-cue-timing t now bpm 1.0 nil))
+           timing
+           (concat (range from (+ from ms) 33) [(+ from ms)]))))
+
+(defn- scaled-x
+  "x of the point [0.5 0 1 1 1] after a :scale effect with x-scale (a value or
+   a modulator), in the cue whose timing is t, as the frame service calls it."
+  ([x-scale t bpm] (scaled-x {:x-scale x-scale :y-scale 1.0} nil t bpm))
+  ([params keyframe-mod t bpm]
+   (let [ctx (ct/get-cue-timing-context t bpm)
+         effect (cond-> {:id :fx :effect-id :scale :enabled? true :params params}
+                  keyframe-mod (assoc :keyframe-modulator keyframe-mod))]
+     (get-in (effects/apply-effect-chain [[0.5 0.0 1.0 1.0 1.0]] {:effects [effect]}
+                                         (long (:accumulated-ms t)) bpm (:trigger-time t) ctx)
+             [0 0]))))
+
+(def ^:private once-saw {:type :sawtooth :min 0.0 :max 1.0 :period 4.0 :loop-mode :once})
+
+(deftest once-mode-progresses-in-a-grid-cue-test
+  (let [t0 (System/currentTimeMillis)
+        x (fn [x-scale ms] (scaled-x x-scale (cue-timing t0 ms 120.0) 120.0))]
+    (testing "sawtooth over 4 beats (2 s at 120 BPM): 1 -> 0, then held"
+      (is (approx= 0.5 (x once-saw 0)))
+      (is (approx= 0.25 (x once-saw 1000)))
+      (is (approx= 0.0 (x once-saw 2000)))
+      (is (approx= 0.0 (x once-saw 3000))))
+    (testing "sine: down to min half way, back to max, then held"
+      (let [sine (assoc once-saw :type :sine)]
+        (is (approx= 0.5 (x sine 0)))
+        (is (approx= 0.0 (x sine 1000)))
+        (is (approx= 0.5 (x sine 3000)))))
+    (testing "square: max for the first half, then min, then held"
+      (let [square (assoc once-saw :type :square :duty-cycle 0.5)]
+        (is (approx= 0.5 (x square 500)))
+        (is (approx= 0.0 (x square 1500)))
+        (is (approx= 0.0 (x square 3000)))))
+    (testing "random: steps through new values, then holds the last"
+      (let [random {:type :random :min 0.0 :max 1.0 :period 4.0 :changes-per-beat 4.0 :loop-mode :once}]
+        (is (not= (x random 250) (x random 1250)))
+        (is (= (x random 3000) (x random 5000)))))
+    (testing "a time-driven keyframe modulator in once mode"
+      (let [kf-mod {:enabled? true :period 4.0 :loop-mode :once
+                    :keyframes [{:position 0.0 :params {:x-scale 0.0}}
+                                {:position 1.0 :params {:x-scale 1.0}}]}
+            kx (fn [ms] (scaled-x {:x-scale 1.0 :y-scale 1.0} kf-mod (cue-timing t0 ms 120.0) 120.0))]
+        (is (approx= 0.125 (kx 500)) "a quarter of the way: x-scale 0.25")
+        (is (approx= 0.375 (kx 1500)) "three quarters: x-scale 0.75")))))
+
+(deftest once-mode-restarts-on-retrigger-test
+  (let [t0 (System/currentTimeMillis)
+        played (cue-timing t0 1000 120.0)
+        retriggered (ct/reset-cue-timing played)]
+    (is (approx= 0.25 (scaled-x once-saw played 120.0)))
+    (is (approx= 0.5 (scaled-x once-saw retriggered 120.0)) "back at the start")
+    (is (approx= 0.375 (scaled-x once-saw (cue-timing retriggered (+ t0 1000) 500 120.0) 120.0))
+        "and running again")))
+
+(deftest beats-once-mode-ignores-tempo-changes-test
+  (let [t0 (System/currentTimeMillis)
+        two-beats (cue-timing t0 1000 120.0)]
+    (is (approx= (scaled-x once-saw two-beats 120.0) (scaled-x once-saw two-beats 60.0))
+        "a tempo change doesn't move it: 2 beats played are 2 beats")
+    (is (approx= 0.125 (scaled-x once-saw (cue-timing two-beats (+ t0 1000) 1000 60.0) 60.0))
+        "1 s more at 60 BPM is 1 beat more: 3 of 4")))
+
+(deftest seconds-once-mode-uses-elapsed-ms-test
+  (let [t0 (System/currentTimeMillis)
+        saw (assoc once-saw :time-unit :seconds :period 2.0)]
+    (is (approx= 0.375 (scaled-x saw (cue-timing t0 500 120.0) 120.0)) "500 ms of 2 s")
+    (is (approx= 0.375 (scaled-x saw (cue-timing t0 500 60.0) 60.0)) "whatever the tempo")))
 
 
 

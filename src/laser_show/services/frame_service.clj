@@ -248,8 +248,7 @@
        :phase-offset 0.0
        :effective-beats 0.0
        :time-ms 0
-       :bpm (or (ex/bpm s) 120.0)
-       :trigger-time 0})))
+       :bpm (or (ex/bpm s) 120.0)})))
 
 (defn get-active-global-effects
   "Get all active effect instances from the effects grid.

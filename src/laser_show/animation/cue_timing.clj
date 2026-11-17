@@ -190,6 +190,8 @@
 
 (defn get-cue-timing-context
   "Build timing context map for modulator evaluation from cue timing state.
+   A timing context holds relative time only: the cue's wall-clock
+   :trigger-time stays in the timing state. Missing keys count as 0.
    
    Parameters:
    - cue-timing: Cue timing state map
@@ -201,16 +203,17 @@
    - :phase-offset - Current phase offset for beat sync
    - :effective-beats - accumulated-beats + phase-offset
    - :time-ms - Same as accumulated-ms
-   - :bpm - Current BPM
-   - :trigger-time - When this cue was triggered"
-  [{:keys [accumulated-beats accumulated-ms phase-offset trigger-time]} bpm]
-  {:accumulated-beats accumulated-beats
-   :accumulated-ms accumulated-ms
-   :phase-offset phase-offset
-   :effective-beats (+ accumulated-beats phase-offset)
-   :time-ms accumulated-ms
-   :bpm bpm
-   :trigger-time trigger-time})
+   - :bpm - Current BPM"
+  [{:keys [accumulated-beats accumulated-ms phase-offset]} bpm]
+  (let [beats (or accumulated-beats 0.0)
+        ms (or accumulated-ms 0.0)
+        phase (or phase-offset 0.0)]
+    {:accumulated-beats beats
+     :accumulated-ms ms
+     :phase-offset phase
+     :effective-beats (+ beats phase)
+     :time-ms ms
+     :bpm bpm}))
 
 
 (defn get-global-timing-context
@@ -231,8 +234,7 @@
    - :phase-offset - Current smooth phase offset
    - :effective-beats - accumulated-beats + phase-offset
    - :time-ms - Same as accumulated-ms
-   - :bpm - Current BPM
-   - :trigger-time - Always 0 (global effects don't have a trigger time)"
+   - :bpm - Current BPM"
   [{:keys [accumulated-beats accumulated-ms phase-offset effective-beats]} bpm]
   (let [phase (double (or phase-offset 0.0))
         acc-beats (double (or accumulated-beats 0.0))
@@ -242,8 +244,7 @@
      :phase-offset phase
      :effective-beats eff-beats
      :time-ms (double (or accumulated-ms 0.0))
-     :bpm bpm
-     :trigger-time 0}))
+     :bpm bpm}))
 
 
 (defn create-cue-timing-state

@@ -27,23 +27,24 @@
 
 (defn clip-timing-ctx
   "The cue's timing context made local to a clip: beats and ms count from the
-   clip's start. trigger-time is 0 and time-ms is the local ms, so once-mode
-   modulators measure their progress from the clip start too.
+   clip's start, and time-ms is the local ms, so once-mode modulators measure
+   their progress from the clip start too. A :trigger-time from an older
+   context is dropped: timing contexts hold relative time only.
    :window-beats keeps the absolute position, because nested clips and
    effects keep absolute windows (decision D5)."
   [timing-ctx clip bpm]
   (let [absolute (double (or (:window-beats timing-ctx) (:effective-beats timing-ctx 0.0)))
         local (max 0.0 (- absolute (double (or (model/clip-start clip) 0.0))))
         ms (* local (/ 60000.0 (double bpm)))]
-    (assoc timing-ctx
-           :window-beats absolute
-           :accumulated-beats local
-           :effective-beats local
-           :phase-offset 0.0
-           :accumulated-ms ms
-           :time-ms ms
-           :trigger-time 0
-           :bpm bpm)))
+    (-> timing-ctx
+        (dissoc :trigger-time)
+        (assoc :window-beats absolute
+               :accumulated-beats local
+               :effective-beats local
+               :phase-offset 0.0
+               :accumulated-ms ms
+               :time-ms ms
+               :bpm bpm))))
 
 (defn clip-elapsed-ms
   "elapsed-ms for a clip's effects (ms since the clip started)."

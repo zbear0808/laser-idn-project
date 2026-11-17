@@ -40,6 +40,20 @@
                                        {:accumulated-beats 3.3 :phase-offset 0.0 :phase-offset-target 0.0})))
       "other cues still align"))
 
+(deftest timing-context-is-relative-test
+  (let [t0 (System/currentTimeMillis)
+        t (-> (get-in (ct/activate-cue {} [0 0] t0 0.0 {}) [:active-cues [0 0]])
+              (ct/update-cue-timing t0 120.0 4.0 no-loop)
+              (ct/update-cue-timing (+ t0 1000) 120.0 4.0 no-loop))
+        ctx (ct/get-cue-timing-context t 120.0)]
+    (is (not (contains? ctx :trigger-time)) "no wall-clock time in a timing context")
+    (is (= 1000.0 (:accumulated-ms ctx)))
+    (is (< (Math/abs (- 2.0 (:accumulated-beats ctx))) 1e-9))
+    (is (not (contains? (ct/get-global-timing-context {:accumulated-beats 1.0 :accumulated-ms 500.0} 120.0)
+                        :trigger-time))))
+  (testing "missing keys count as 0 instead of throwing"
+    (is (= 0.0 (:effective-beats (ct/get-cue-timing-context {} 120.0))))))
+
 (deftest non-timeline-cue-unchanged-test
   (let [t (ct/create-cue-timing-state 0 2.25)
         r (-> t

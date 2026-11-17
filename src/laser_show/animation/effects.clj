@@ -241,8 +241,7 @@
                             keyframe-enabled?
                             (let [timing-ctx (:timing-ctx frame-ctx)
                                   context (mod/make-context (merge {:time-ms time-ms
-                                                                    :bpm bpm
-                                                                    :trigger-time trigger-time}
+                                                                    :bpm bpm}
                                                                    timing-ctx))]
                               (kf/eval-keyframe keyframe-mod context))
                             

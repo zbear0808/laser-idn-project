@@ -25,7 +25,7 @@
   "Calculate phase for loop-mode modulators using effective-beats.
    Returns phase as a double."
   ^double [period phase time-unit context]
-  (time/calculate-modulator-phase context period phase :loop period time-unit))
+  (time/calculate-loop-phase context period phase time-unit))
 
 (defn- calculate-wave-phase
   "Calculate phase for standard wave modulators (sine, triangle).
@@ -73,22 +73,16 @@
 (defn- calculate-random-phase
   "Calculate phase for random modulator.
    Note: Random doesn't use phase offset in once-mode calculations."
-  ^double [{:keys [period once-periods time-unit loop-mode]}
-           {:keys [time-ms bpm trigger-time] :as context}]
+  ^double [{:keys [period once-periods time-unit loop-mode]} context]
   (if (= loop-mode :once)
     (let [num-cycles (double once-periods)
           total-duration (* (double period) num-cycles)
-          progress (double (time/calculate-once-progress
-                            time-ms
-                            trigger-time
-                            total-duration
-                            time-unit
-                            bpm))
+          progress (time/calculate-once-progress context total-duration time-unit)
           total-phase (* progress num-cycles)]
       ;; Hold at final position when done
       (if (>= progress 1.0) num-cycles total-phase))
     ;; Loop mode: pass 0.0 for phase (random uses seed-based approach)
-    (time/calculate-modulator-phase context period 0.0 :loop period time-unit)))
+    (time/calculate-loop-phase context period 0.0 time-unit)))
 
 
 ;; Wave Modulators
@@ -133,17 +127,6 @@
 
 (def ^:private ^:const decay-curve-k 5.0)
 
-(defn- decay-elapsed
-  "Time elapsed since the cue was triggered, in time-unit.
-   Uses the raw accumulators (no phase correction); falls back to
-   time-ms - trigger-time for contexts without accumulators."
-  ^double [time-unit {:keys [accumulated-beats accumulated-ms time-ms trigger-time bpm]}]
-  (let [fallback-ms (- (double (or time-ms 0.0)) (double (or trigger-time 0.0)))]
-    (if (= time-unit :seconds)
-      (/ (double (or accumulated-ms fallback-ms)) 1000.0)
-      (double (or accumulated-beats
-                  (time/ms->beats fallback-ms (double (or bpm 120.0))))))))
-
 (defn decay-curve-factor
   "Remaining fraction (1.0 -> 0.0) of a decay at progress p in [0, 1].
    - :linear - constant rate
@@ -163,7 +146,7 @@
    :decay-curve, then holds at :min until retriggered."
   [{:keys [min max duration time-unit decay-curve]} context]
   (let [duration (double (or duration 1.0))
-        elapsed (decay-elapsed time-unit context)
+        elapsed (time/elapsed context time-unit)
         p (if (pos? duration)
             (clojure.core/min 1.0 (clojure.core/max 0.0 (/ elapsed duration)))
             1.0)

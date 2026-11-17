@@ -140,43 +140,32 @@
     (get-seconds-from-context context)
     (get-beats-from-context context)))
 
-
-
-(defn resolve-trigger-time
-  "Resolve trigger time from either a fixed value or an atom reference.
-   Returns the trigger time as a number, or nil if not available."
-  [trigger-source]
-  (cond
-    (instance? clojure.lang.IDeref trigger-source) @trigger-source
-    (number? trigger-source) trigger-source
-    :else nil))
+(defn elapsed
+  "Time since the cue started (since the clip started, in a clip's context),
+   in time-unit: seconds from :accumulated-ms, otherwise beats from
+   :accumulated-beats, the raw count without the phase glide. A context
+   without accumulators (built by hand) falls back to time-ms - trigger-time,
+   as beats at its BPM."
+  ^double [{:keys [accumulated-beats accumulated-ms time-ms trigger-time bpm]} time-unit]
+  (let [fallback-ms (- (double (or time-ms 0.0)) (double (or trigger-time 0.0)))]
+    (if (= time-unit :seconds)
+      (/ (double (or accumulated-ms fallback-ms)) 1000.0)
+      (double (or accumulated-beats
+                  (ms->beats fallback-ms (double (or bpm 120.0))))))))
 
 
 ;; Once-Mode Progress Calculation
 
 
 (defn calculate-once-progress
-  "Calculate progress (0.0 to 1.0) for once-mode modulators.
-   
-   Parameters:
-   - time-ms: Current time in milliseconds
-   - trigger-time: Time when modulator was triggered (falls back to 0 if nil)
-   - duration: Duration value
-   - time-unit: :beats or :seconds
-   - bpm: Current BPM (required for :beats time-unit)
-   
-   Returns: Progress value clamped to 0.0-1.0"
-  [time-ms trigger-time duration time-unit bpm]
-  (let [start-time (double (or trigger-time 0.0))
-        time-ms' (double (or time-ms 0))
-        elapsed (- time-ms' start-time)
-        duration' (double (or duration 1.0))
-        bpm' (double (or bpm 120.0))
-        duration-ms (double (if (= time-unit :seconds)
-                              (* duration' 1000.0)
-                              (beats->ms duration' bpm')))]
-    (if (pos? duration-ms)
-      (min 1.0 (max 0.0 (/ elapsed duration-ms)))
+  "Progress (0.0 to 1.0) of a once-mode modulator that lasts duration
+   (time-unit :beats or :seconds): its elapsed time in context over duration.
+   Beats are counted as beats, so a tempo change doesn't move a beats-unit
+   modulator. A duration of 0 or less is done (1.0)."
+  ^double [context duration time-unit]
+  (let [duration' (double (or duration 1.0))]
+    (if (pos? duration')
+      (min 1.0 (max 0.0 (/ (elapsed context time-unit) duration')))
       1.0)))
 
 (defn calculate-once-mode-phase-data
@@ -184,7 +173,7 @@
    
    Parameters:
    - config: Map with :period, :phase, :once-periods, :time-unit
-   - context: Map with :time-ms, :bpm, :trigger-time
+   - context: Modulation context with the cue's accumulators (see elapsed)
    
    Returns map with:
    - :final-phase - the phase value to use for oscillation (0.0-1.0)
@@ -194,15 +183,10 @@
    - :phase - the phase offset parameter"
   [{:keys [period phase once-periods time-unit]
     :or {period 1.0 phase 0.0 once-periods 1.0 time-unit :beats}}
-   {:keys [time-ms bpm trigger-time]}]
+   context]
   (let [num-cycles (double (or once-periods 1.0))
         total-duration (* (double period) num-cycles)
-        progress (double (calculate-once-progress
-                          (or time-ms 0)
-                          trigger-time
-                          total-duration
-                          time-unit
-                          (or bpm 120.0)))
+        progress (calculate-once-progress context total-duration time-unit)
         phase (double phase)
         total-phase (+ (* progress num-cycles) phase)
         cycle-phase (u/fmod total-phase 1.0)
@@ -216,42 +200,14 @@
 ;; Modulator Phase Calculation
 
 
-(defn calculate-modulator-phase
-  "Calculate the phase for a modulator based on loop-mode and timing settings.
-   
-   For looping modulators, uses effective-beats (accumulated-beats + phase-offset)
-   which enables smooth animation during BPM changes and phase resync on tap tempo.
-   
-   For once-mode modulators, uses raw accumulated-beats without phase correction
-   since these should play through exactly once from trigger without resync effects.
-   
-   Parameters:
-   - context: Modulation context with timing fields
-   - period: Cycle length in time-unit (converted to frequency internally)
-   - phase-param: Phase offset parameter (0.0-1.0)
-   - loop-mode: :loop or :once
-   - duration: Duration for once-mode
-   - time-unit: :beats or :seconds
-   - trigger-override: Optional trigger time to use instead of context's trigger-time
-   
-   Returns: Phase value for oscillation"
-  ([context period phase-param loop-mode duration time-unit]
-   (calculate-modulator-phase context period phase-param loop-mode duration time-unit nil))
-  ([{:keys [time-ms bpm trigger-time] :as context}
-    period phase-param loop-mode duration time-unit trigger-override]
-   (let [bpm (double (or bpm 120.0))
-         frequency (period->frequency (double period))
-         phase-param (double (or phase-param 0.0))]
-     (if (= loop-mode :once)
-       ;; Once mode: use raw accumulated-beats (no phase correction)
-       ;; for predictable one-shot behavior from trigger
-       (let [effective-trigger-time (or (resolve-trigger-time trigger-override) trigger-time)
-             progress (double (calculate-once-progress (or time-ms 0) effective-trigger-time duration time-unit bpm))]
-         (+ (* progress frequency) phase-param))
-       ;; Loop mode: :beats uses effective-beats (with phase correction for tap
-       ;; resync, falling back to time-ms/bpm); :seconds uses real elapsed time
-       (let [t (get-loop-time-from-context context time-unit)]
-         (+ (* t frequency) phase-param))))))
+(defn calculate-loop-phase
+  "Phase of a looping modulator: the loop time base in time-unit (effective
+   beats, which follow tap-tempo resyncs, or real seconds) times the
+   frequency (1 / period), plus the phase parameter."
+  ^double [context period phase-param time-unit]
+  (+ (* (get-loop-time-from-context context time-unit)
+        (period->frequency (double period)))
+     (double (or phase-param 0.0))))
 
 (set! *warn-on-reflection* false)
 (set! *unchecked-math* false)

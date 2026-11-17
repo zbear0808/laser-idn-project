@@ -9,9 +9,11 @@
                                          :accumulated-ms 9000.0 :time-ms 9000.0 :trigger-time 12345}
                                         {:timeline/start 16.0} 120.0)]
       (is (= {:accumulated-beats 2.0 :effective-beats 2.0 :phase-offset 0.0
-              :accumulated-ms 1000.0 :time-ms 1000.0 :trigger-time 0 :bpm 120.0
+              :accumulated-ms 1000.0 :time-ms 1000.0 :bpm 120.0
               :window-beats 18.0}
-             ctx))
+             (dissoc ctx :trigger-time))
+          "local time; the cue's wall-clock trigger time isn't kept")
+      (is (not (contains? ctx :trigger-time)))
       (is (= 1000 (playback/clip-elapsed-ms ctx)))))
   (testing "the window position stays absolute (looping cues pass :window-beats)"
     (is (= 2.0 (:window-beats (playback/clip-timing-ctx {:effective-beats 18.5 :window-beats 2.0}
