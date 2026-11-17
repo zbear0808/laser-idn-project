@@ -1,7 +1,7 @@
 # Output runtime — overview
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** In progress. Phase 1 done (`2c23e63`) and Phase 2 done (`645da70`), 2026-11-16; O1–O4 answered (O1: A; O2: skip only the failing effect; O3: filter bad points; O4: C, no switch); O5–O10 open   **Last verified against:** `70e049e` (13 probes on loopback, JDK 25.0.5, macOS 27.2; see §1). Phases 1–2 changed `streaming_engine.clj`, `multi_engine.clj`, `frame_service.clj`, `effects.clj`, `calibration.clj`, `types.clj` and `generators.clj`, so citations into those files in docs 03–05 are against `70e049e` and get re-checked before each phase starts. After Phase 2, p2, p3, p9 and p11 show the new behaviour (02 §10)
+**Status:** In progress. Phase 1 done (`2c23e63`) and Phase 2 done (`645da70`), 2026-11-16; O1–O8 answered (O1: A; O2: skip only the failing effect; O3: filter bad points; O4: C, no switch; O5–O8: A, with one streaming thread per projector kept); O9–O10 open   **Last verified against:** `70e049e` (13 probes on loopback, JDK 25.0.5, macOS 27.2; see §1). Phases 1–2 changed `streaming_engine.clj`, `multi_engine.clj`, `frame_service.clj`, `effects.clj`, `calibration.clj`, `types.clj` and `generators.clj`, so citations into those files in docs 03–05 are against `70e049e` and get re-checked before each phase starts. After Phase 2, p2, p3, p9 and p11 show the new behaviour (02 §10)
 **Supersedes / Superseded by:** none. Takes over the output items of `plans/2026-11-07-improvement-review/` listed in §6
 **Related findings:** review 04 findings 5, 7, 8, 11–16, 26 and LE3/LE4; 03 findings 6, 7, 9, 10 (MR4, the output half of MR5); 02 #23, M1 (output writers), M7, M8
 
@@ -84,7 +84,7 @@ UI / MIDI / OSC / Link ─▶ event agent ────────────�
            :multi-engine/*    │  │ :output/status (pure data, ≤ 4 Hz)
                               ▼  │
                      output executor (one thread) ──owns──▶ engine registry (runtime atom)    [Phase 4]
-                                                              {projector-id {:engine :fingerprint}}
+                     runs start, stop, sync only              {projector-id {:engine :fingerprint}}
 
 engine thread, per projector, deadline-paced at 60 fps                                         [Phase 5]
   frame provider (reads app state) ─ a failing effect is skipped; any other error ─▶ empty frame
@@ -120,10 +120,10 @@ Each decision is written out with options and a recommendation in the doc that n
 | O2 | What an effect error does to the output | 02 | Phase 2 | **Answered 2026-11-16**: skip only the effect that throws; log once |
 | O3 | What the last-line sanitiser changes | 02 | Phase 2 | **Answered 2026-11-16**: drop bad points; dark first sample; at least 2 samples; clamp as today |
 | O4 | Master output switch | 02 | Phase 2 | **C, answered 2026-11-16**: no switch; blackout unchanged |
-| O5 | How background results re-enter | 03 | Phase 3 | A: callbacks from other threads go through the agent; follow-ups within a turn stay inline; tests keep the synchronous interpreter |
-| O6 | Who owns the engines | 04 | Phase 4 | A: runtime registry plus one output executor |
-| O7 | What a refresh restarts | 04 | Phase 4 | A: diff by config fingerprint; requests coalesced |
-| O8 | How link health is shown | 04 | Phase 4 | A: engine stats at ≤ 4 Hz → toolbar and the projector dot; no ping yet |
+| O5 | How background results re-enter | 03 | Phase 3 | **A, answered 2026-11-16**: callbacks from other threads go through the agent; follow-ups within a turn stay inline; tests keep the synchronous interpreter |
+| O6 | Who owns the engines | 04 | Phase 4 | **A, answered 2026-11-16**: runtime registry plus one output executor for start, stop and sync; each projector keeps its own streaming thread |
+| O7 | What a refresh restarts | 04 | Phase 4 | **A, answered 2026-11-16**: diff by config fingerprint; requests coalesced |
+| O8 | How link health is shown | 04 | Phase 4 | **A, answered 2026-11-16**: engine stats at ≤ 4 Hz → toolbar and the projector dot; no ping yet |
 | O9 | Frame duration | 05 | Phase 5 | A: from the point count and the projector's scan rate, editable; verify on hardware |
 | O10 | Where show time advances | 05 | after Phase 5 | A: one show clock, as its own plan after Phases 1–5 |
 

@@ -1,13 +1,14 @@
 # Phase 4 — One owner for the engines; status the UI can trust
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** Proposed. Needs O6–O8 and Phase 3   **Last verified against:** `70e049e`
+**Status:** Proposed. O6–O8 answered 2026-11-16 (A each; each projector keeps its own streaming thread). Needs Phase 3   **Last verified against:** `70e049e`
 **Supersedes / Superseded by:** none   **Related findings:** O-1, O-10 to O-13 (`00-overview.md` §2); review 04 findings 12, 13, 15, 16, MR4, MR5; 02 #23, M8
 
 Probes p4–p7 show the operator pressing Stop while a laser keeps drawing. Today the streaming engines (threads, sockets, atoms) are stored in app state. Three futures write them there, with no ordering between them. Anything that overwrites app state, or any two lifecycle commands that overlap, can leave an engine running that nothing holds a reference to.
 
 This phase moves the engines into one runtime registry owned by one output thread:
-- lifecycle commands run there, one at a time;
+- lifecycle commands (start, stop, sync) run there, one at a time;
+- each projector keeps its own streaming thread, as today. The output thread never computes or sends a frame, so one projector's slow frames or unreachable host can't delay another's;
 - the UI gets pure-data status;
 - exit drains the registry.
 
@@ -36,7 +37,7 @@ Live objects are kept in app state. Several threads with no common order write t
 | Existing thing (file:line) | How it's reused |
 |---|---|
 | `create-engine-for-projector` (`multi_engine.clj:218-248`), the provider (`:139-212`) | Unchanged; the registry calls them |
-| `engine/start!`, `stop!`, `get-stats` (`streaming_engine.clj:270-343`) | Called only from the output thread (and from `drain!`) |
+| `engine/start!`, `stop!`, `get-stats` (`streaming_engine.clj:270-343`) | Called only from the output thread (and from `drain!`). `start!` still gives each engine its own thread. `stop!` becomes `(stop-all! [engine])` (§4) |
 | `hardware-changed?` (`handlers/history.clj:64-71`) | The idea moves into a middleware: compare per-projector fingerprints before and after every event |
 | Phase 3: callbacks re-enter through the agent | `:output/status` is dispatched with `events/dispatch!` from the output thread |
 | Phase 2: `output-errors/snapshot` | Per-projector error text in the status |
@@ -48,9 +49,12 @@ Live objects are kept in app state. Several threads with no common order write t
   - `!registry` (runtime atom): `{projector-id {:engine e :fingerprint f :started-ms t}}`. An engine goes in before its thread starts and comes out only after its close pair was sent.
   - One single-thread executor, `output-lifecycle`. `submit-sync! [projectors]` and `submit-stop! []` queue commands. A queued sync is replaced by a newer one, so only the latest projector snapshot is applied. A stop drops any queued sync.
   - `sync!` (on the output thread): computes the desired fingerprints from the snapshot. For each projector, the engine is stopped if it's no longer wanted or its fingerprint changed, and started if it's new or changed. An engine that fails to start is closed and reported, never kept.
+  - Engines keep one streaming thread each (`engine/start!`, unchanged). The output thread only starts, stops and replaces them; frames are computed and sent on the engines' own threads.
+  - Stopping several engines (a stop, `drain!`, or a sync that removes or replaces several) goes through `engine/stop-all!`, so every projector goes dark within about one frame of the others instead of one after another.
   - `fingerprint [projector]` = `(select-keys p [:host :port :service-id :output-config :scan-rate])`, only for enabled projectors with a non-blank host. Zone groups and names are read live by the provider, so changing them doesn't restart anything.
   - `drain! [timeout-ms]`, synchronous: stops the executor, waits for the running command up to the timeout, then stops every engine in the registry on the calling thread. It is idempotent.
   - The status publisher (O8-A): while the registry isn't empty, 4 times a second it builds the status (§5) from `get-stats` and `output-errors/snapshot`. It dispatches `:output/status` only when the status changed.
+- `laser-show.backend.streaming-engine`: NEW `stop-all! [engines]`. It clears every engine's `running?` flag first, then joins each thread (up to 1 s each, as `stop!` does today, `streaming_engine.clj:310-311`) and sends its close pair. `stop!` becomes `(stop-all! [engine])`. Today `stop-engines!` stops one engine after another (`multi_engine.clj:297-317`), so with N projectors the last one goes dark up to N frames after the first.
 - `laser-show.events.core` (`:339-383`): the three `:multi-engine/*` effects become `submit-sync!` with the projector snapshot carried in the effect value (`{:projectors …}`), or `submit-stop!`. No futures. The data is read by the handler, not by a worker (`docs/CLJFX_STATE_MANAGEMENT.md` §Best Practices 1).
 - `laser-show.events.handlers.connection` (`:30-76`):
   - `:idn/start-multi-streaming` sets `[:backend :streaming :running?]` (the operator's intent) and returns a sync with `(:projectors state)`. Pressing it twice gives two identical syncs, and the second changes nothing.
@@ -96,6 +100,8 @@ The races from the probes, replayed against the new design:
 | A's host edited while streaming | old engine keeps the old host | on commit, A's fingerprint changes: close pair to the old host, new engine to the new one |
 | File > New while streaming | all closed, "Streaming to 0 projector(s)" | all closed, "Streaming to 0 of 0 (no enabled projectors)"; still on, so enabling a projector starts it |
 | Exit while a sync runs | the running engines are missed (dev: orphaned) | `drain!` waits up to 2 s, then closes every registry engine; the shutdown hook covers a kill |
+| Stop with 3 projectors streaming | each engine is stopped and joined in turn: dark one after another | all three are signalled first: dark within about one frame of each other |
+| A's frames take 250 ms each (heavy content, or a slow host lookup) | B streams at full rate on its own thread | unchanged: B streams at full rate on its own thread |
 
 **Invariants:**
 1. At most one engine per projector id exists, ever.
@@ -103,6 +109,8 @@ The races from the probes, replayed against the new design:
 3. After a stop completes, the fake DAC receives nothing.
 4. App state never holds a `Thread`, socket or engine.
 5. Status written to app state is at most 250 ms old while streaming and is never written more than 4 times a second.
+6. Each engine computes and sends its frames on its own thread. The output thread never does either.
+7. Stopping several engines signals all of them before waiting on any one.
 
 ## 8. Tests
 
@@ -118,6 +126,8 @@ Fake DAC, in `laser-show.backend.output-lifecycle-test` (Phase 1's namespace):
 - `drain-closes-every-engine-test`
 - `shutdown-hook-drains-test` (calls the hook's function directly)
 - `status-reports-engines-and-errors-test`
+- `slow-projector-does-not-delay-others-test` (invariant 6): two projectors; one provider sleeps 250 ms per frame. Over 1 s the other projector delivers at least 15 frames and the slow one at most 5. The bounds are loose on purpose: with one sending thread for both, each would get at most 5.
+- `stop-all-signals-every-engine-first-test` (invariant 7): three engines whose providers each take 200 ms. `stop-all!` returns in under 450 ms (one after another takes about 600 ms), and every close pair arrives.
 
 Middleware, `laser-show.events.output-sync-test`:
 - `fingerprint-change-requests-a-sync-test`
@@ -134,6 +144,7 @@ Run: `clj -M:mac-arm:test output-lifecycle output-sync`, `clj -M:test-ui:mac-arm
 ## 9. Out of scope / alternatives considered
 
 - **One IDN link per DAC** (04 LE2): one socket and sequence per DAC, with projectors as channels. The registry makes it possible later, but it needs a multi-head DAC to verify.
+- **One sending thread for all projectors:** not chosen (O6 answer). Every projector would wait for the others' frames to be computed and sent.
 - **Restarting an engine whose thread died**: after Phase 2 that doesn't happen. A dead thread would show as `:error` in the status.
 - **Keeping the toolbar button on "Stop" while the output thread is busy:** the button follows the operator's intent, and the status line says what is actually running.
 
@@ -141,32 +152,32 @@ Run: `clj -M:mac-arm:test output-lifecycle output-sync`, `clj -M:test-ui:mac-arm
 
 ## Decisions
 
-> **DECISION O6 — Who owns the engines and orders their lifecycle?** *(open · needed before Phase 4 · recommended: A)*
+> **DECISION O6 — Who owns the engines and orders their lifecycle?** *(answered 2026-11-16: A)*
 >
 > | | What | For | Against |
 > |---|---|---|---|
-> | **A (recommended)** | A runtime registry plus one output thread that runs every start, stop and sync in order. Newer syncs replace queued ones. App state gets pure-data status only. | Every race in §7 is gone by construction; Stop can't miss an engine; the agent never blocks on a socket or thread join | A new namespace and thread; status arrives a moment after the click |
+> | **A (chosen)** | A runtime registry plus one output thread that runs every start, stop and sync in order. Each engine keeps its own streaming thread. Newer syncs replace queued ones. App state gets pure-data status only. | Every race in §7 is gone by construction; Stop can't miss an engine; the agent never blocks on a socket or thread join | A new namespace and thread; status arrives a moment after the click |
 > | B | The same registry, but the commands run under a `locking` monitor on the thread that asks (the agent) | No new thread | Stopping N engines blocks the agent for up to N × 1 s (`streaming_engine.clj:310-311`), freezing input and the UI's events meanwhile |
 > | C | Keep the handles in app state, guarded by a lock | Smallest diff | Doesn't fix p7-style losses from whole-state writes; keeps live objects in the context, against `docs/CLJFX_STATE_MANAGEMENT.md` §Best Practices 5 |
 >
-> **Your answer:** _pending_
+> **Your answer:** "I still want separate streaming engines on different threads. I'm not sure how else we could ensure low latency frames being sent to different devices." A keeps that: each projector computes and sends its frames on its own thread, as today. The one output thread only runs start, stop and sync commands. §4, invariants 6–7 and two new tests (§8) make this explicit, and stopping now signals every engine at once.
 
-> **DECISION O7 — What does a refresh restart?** *(open · needed before Phase 4 · recommended: A)*
+> **DECISION O7 — What does a refresh restart?** *(answered 2026-11-16: A)*
 >
 > | | What | For | Against |
 > |---|---|---|---|
-> | **A (recommended)** | A middleware compares per-projector fingerprints (host, port, service, output config, scan rate) after every event, and restarts exactly the projectors whose fingerprint changed. Host and Port commit on Enter or focus loss. | Every edit path is covered (settings, Add Manual, undo, Open), with nothing to remember; zone and name edits restart nothing | Typing a host no longer applies live; it applies on Enter |
+> | **A (chosen)** | A middleware compares per-projector fingerprints (host, port, service, output config, scan rate) after every event, and restarts exactly the projectors whose fingerprint changed. Host and Port commit on Enter or focus loss. | Every edit path is covered (settings, Add Manual, undo, Open), with nothing to remember; zone and name edits restart nothing | Typing a host no longer applies live; it applies on Enter |
 > | B | Keep the id-only diff, plus a "Restart output" button | Small | Edits are silently ignored until someone remembers the button |
 > | C | Restart every engine on any projector change | Simple | A blink on every projector for every name or zone edit while streaming |
 >
-> **Your answer:** _pending_
+> **Your answer:** A ("most of the O5–O8 stuff is good").
 
-> **DECISION O8 — How is link health shown?** *(open · needed before Phase 4 · recommended: A)*
+> **DECISION O8 — How is link health shown?** *(answered 2026-11-16: A)*
 >
 > | | What | For | Against |
 > |---|---|---|---|
-> | **A (recommended)** | Per projector, from engine stats and the error registry, published at most 4 times a second: streaming, starting or error, the actual fps, the last error. Shown as the projector dot and the toolbar line. No network probing. | No hardware needed; catches dead threads, send errors and start failures | A DAC that is switched off but still routable looks fine, because UDP sends succeed |
+> | **A (chosen)** | Per projector, from engine stats and the error registry, published at most 4 times a second: streaming, starting or error, the actual fps, the last error. Shown as the projector dot and the toolbar line. No network probing. | No hardware needed; catches dead threads, send errors and start failures | A DAC that is switched off but still routable looks fine, because UDP sends succeed |
 > | B | A, plus an IDN-Hello ping every second per DAC on the engine's socket (`hello.clj:109` `send-ping` exists, unused), shown as reachable and round-trip time | Detects a DAC that is off or unplugged | Needs a receive path on the engine socket and hardware to confirm DAC behaviour (no IDN DAC available as of 2026-11-16); the fake DAC must answer pings in tests |
 > | C | No health; only fix the toolbar count | Smallest | The operator still can't tell which projector is dark and why |
 >
-> **Your answer:** _pending_
+> **Your answer:** A ("most of the O5–O8 stuff is good").

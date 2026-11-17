@@ -1,7 +1,7 @@
 # Phase 3 — Background results come back through the event agent
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** Proposed. Needs O5   **Last verified against:** `70e049e`
+**Status:** Proposed. O5 answered 2026-11-16 (A)   **Last verified against:** `ab5ad2b` (citations re-checked 2026-11-16; only the two `frame_service.clj` ones had moved, by Phase 2)
 **Supersedes / Superseded by:** none   **Related findings:** O-9 (`00-overview.md` §2), and through it O-1; review 02 M1 (output writers), M7
 
 `events/core.clj` says that co-effects, handlers and effects all run on the agent thread (`:20-24`). That is not true for anything an effect does later from another thread:
@@ -31,7 +31,7 @@ So an effect's `dispatch` runs the full pipeline on the calling thread: co-effec
 | file chooser result, plus its chain (`:project/save` → `:on-saved` → for example `:file/exit`) | FX thread | `events/core.clj:292-335` (`:329`, `:335`); `:106-117` |
 | `:idn/multi-streaming-started`, `:idn/connection-failed`, `-stopped`, `-refreshed` | lifecycle futures | `events/core.clj:343-354,359-364,373-381` |
 
-Writers that don't go through the pipeline at all: the 30 Hz preview timer (`swap-state!` with a function, `frame_service.clj:128-145,827-831`), the multi-engine handle writes (`multi_engine.clj:289,312,371`, Phase 4), and the link setup in `app/start!` (`app.clj:153-160`, review 02 M1).
+Writers that don't go through the pipeline at all: the 30 Hz preview timer (`swap-state!` with a function, `frame_service.clj:129-146,832-836`), the multi-engine handle writes (`multi_engine.clj:289,312,371`, Phase 4), and the link setup in `app/start!` (`app.clj:153-160`, review 02 M1).
 
 **Tests depend on synchronous behaviour.** `menu_file_handlers_test.clj:4-6` says the wired `events/event-handler` "applies effects synchronously when called directly". The save-then-continue and pipeline tests rely on that.
 
@@ -121,12 +121,12 @@ Run: `clj -M:test-ui:mac-arm:test-ui-headless reentry`, `clj -M:mac-arm:test eve
 
 ## Decisions
 
-> **DECISION O5 — How do background results re-enter the event flow?** *(open · needed before Phase 3 · recommended: A)*
+> **DECISION O5 — How do background results re-enter the event flow?** *(answered 2026-11-16: A)*
 >
 > | | What | For | Against |
 > |---|---|---|---|
-> | **A (recommended)** | Give `fx/create-app` the bare pipeline plus our co-effect and effect maps, so cljfx hands every effect the agent's queue. Effects that continue an event within the turn run the follow-up inline, as today. `events/event-handler` stays the synchronous interpreter for tests and the no-app fallback. | One wiring change covers every callback, present and future; it's how cljfx intends effects to work; nothing that happens within a turn moves; tests keep their semantics | Effect authors must know the difference between continuing now (`run-inline`) and calling back later (`dispatch`); the namespace doc and the effect docstrings say which |
+> | **A (chosen)** | Give `fx/create-app` the bare pipeline plus our co-effect and effect maps, so cljfx hands every effect the agent's queue. Effects that continue an event within the turn run the follow-up inline, as today. `events/event-handler` stays the synchronous interpreter for tests and the no-app fallback. | One wiring change covers every callback, present and future; it's how cljfx intends effects to work; nothing that happens within a turn moves; tests keep their semantics | Effect authors must know the difference between continuing now (`run-inline`) and calling back later (`dispatch`); the namespace doc and the effect docstrings say which |
 > | B | Keep the wiring and make each async effect call `events/dispatch!` (about 8 call sites) | Explicit at each site | Every new async effect must remember to; tests then need an app or the fallback for these paths |
 > | C | Keep the wiring and make `effect-state` merge only what the handler changed | Callbacks stay where they are | Diffing whole states on every event; conflicting writes still race; doesn't fix the off-agent handlers themselves |
 >
-> **Your answer:** _pending_
+> **Your answer:** A ("most of the O5–O8 stuff is good"; the one exception concerned O6, see `04-phase4-engine-ownership.md`).
