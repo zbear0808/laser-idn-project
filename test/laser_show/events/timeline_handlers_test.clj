@@ -2,11 +2,16 @@
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.effects.shape]
+            [laser-show.events.core :as events]
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.timeline :as timeline]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
-            [laser-show.state.domains :refer [build-initial-state]]))
+            [laser-show.state.domains :refer [build-initial-state]]
+            [laser-show.state.history :as history]
+            [laser-show.timeline.layout :as layout]
+            [laser-show.timeline.model :as model]
+            [laser-show.views.components.visual-editors.timeline.drop :as drop]))
 
 (def base-state
   (build-initial-state))
@@ -486,3 +491,50 @@
     (is (= def-params (params (add-effect (drop-state) {:target-item-id :a}))))
     (is (= def-params (params (add-effect (drop-state) {:target-item-id :a :item (effects/get-effect :rotation)})))
         "same as a click, which carries the definition")))
+
+;; Drops resolved the way the editor does (drop/drop-target on a lane hit)
+
+(def ^:private drop-view {:zoom 50.0 :scroll-beat 0.0 :scroll-y 0.0 :width 1000 :height 400})
+
+(defn- canvas-drop
+  "The event a drop of payload at canvas (x, y) dispatches, and its preview."
+  [s payload x y]
+  (let [cue (get-in s [:chains :cue-chains [0 0]])
+        rows (layout/rows (:tracks cue) (:items cue))
+        h (assoc (layout/hit-test rows cue drop-view x y #{}) :beat (layout/x->beat drop-view x))]
+    (drop/drop-target payload h {:col 0 :row 0 :tracks (:tracks cue)
+                                 :snap (get-in s [:ui :timeline-prefs :snap] {:enabled? true :value 0.25})})))
+
+(def ^:private square-payload {:laser-show/drag :bank-item :kind :preset :id :square :category :geometric})
+(def ^:private scale-payload {:laser-show/drag :bank-item :kind :effect :id :scale :category :shape})
+
+(deftest drop-is-one-undo-step-test
+  (let [s0 (assoc (drop-state) :history {:undo-stack [] :redo-stack [] :transaction nil})
+        run (fn [s event] (:state (events/handle-event-pipeline (assoc event :state s))))
+        cue-of #(get-in % [:chains :cue-chains [0 0]])
+        undo-count #(count (get-in % [:history :undo-stack]))]
+    (doseq [[label payload [x y] changed?]
+            [["Add Clip" square-payload [413 118] #(= 2 (count (:items (cue-of %))))]
+             ["Add Effect" scale-payload [150 81] #(= 3 (count (get-in (cue-of %) [:items 0 :effects])))]
+             ["Add Effect" scale-payload [400 81] #(seq (:effects (model/find-track (:tracks (cue-of %)) :t1)))]]]
+      (testing (str label " at " x "," y)
+        (let [{:keys [event]} (canvas-drop s0 payload x y)
+              s1 (run s0 event)]
+          (is (changed? s1))
+          (is (= 1 (undo-count s1)) "exactly one undo entry")
+          (is (= label (history/undo-label (:history s1))))
+          (let [s2 (run s1 {:event/type :edit/undo})]
+            (is (= (:items (cue-of s0)) (:items (cue-of s2))))
+            (is (= (:tracks (cue-of s0)) (:tracks (cue-of s2))))))))))
+
+(deftest ghost-matches-committed-clip-test
+  (doseq [snap [{:enabled? true :value 0.25} {:enabled? true :value 1.0} {:enabled? false :value 0.25}]
+          [x y] [[413 118] [150 81] [150 49] [3 118]]]
+    (let [s0 (assoc-in (drop-state) [:ui :timeline-prefs :snap] snap)
+          {:keys [event preview]} (canvas-drop s0 square-payload x y)
+          s1 (:state (timeline/handle (assoc event :state s0)))
+          id (first (selection-of s1))
+          clip (some #(when (= id (:id %)) %) (get-in s1 [:chains :cue-chains [0 0] :items]))]
+      (is (= [(:row-id (:ghost preview)) (:start (:ghost preview)) (:length (:ghost preview))]
+             [(:track-id clip) (:timeline/start clip) (:timeline/duration clip)])
+          (pr-str snap x y)))))
