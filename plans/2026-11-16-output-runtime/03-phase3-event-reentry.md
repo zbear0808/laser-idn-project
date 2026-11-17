@@ -1,7 +1,7 @@
 # Phase 3 — Background results come back through the event agent
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** Proposed. O5 answered 2026-11-16 (A)   **Last verified against:** `ab5ad2b` (citations re-checked 2026-11-16; only the two `frame_service.clj` ones had moved, by Phase 2)
+**Status:** Done 2026-11-16 (`47e7f8d`, `a37f690`; as built in §10). O5 answered 2026-11-16 (A)   **Last verified against:** `a37f690`
 **Supersedes / Superseded by:** none   **Related findings:** O-9 (`00-overview.md` §2), and through it O-1; review 02 M1 (output writers), M7
 
 `events/core.clj` says that co-effects, handlers and effects all run on the agent thread (`:20-24`). That is not true for anything an effect does later from another thread:
@@ -130,3 +130,78 @@ Run: `clj -M:test-ui:mac-arm:test-ui-headless reentry`, `clj -M:mac-arm:test eve
 > | C | Keep the wiring and make `effect-state` merge only what the handler changed | Callbacks stay where they are | Diffing whole states on every event; conflicting writes still race; doesn't fix the off-agent handlers themselves |
 >
 > **Your answer:** A ("most of the O5–O8 stuff is good"; the one exception concerned O6, see `04-phase4-engine-ownership.md`).
+
+---
+
+## 10. As built (2026-11-16)
+
+Committed as `47e7f8d` (the co-effect and effect maps become public defs, no behaviour change) and `a37f690` (the wiring, `run-inline`, the fallback, the detector and the tests), on top of `5052cbe`. §1–9 describe the code before this phase; their citations are against `ab5ad2b`. Nothing in Phase 4 territory changed: `multi_engine.clj`, `streaming_engine.clj`, `events/handlers/connection.clj` and the streaming part of `app/stop!` are untouched; only the `dispatch` their callbacks get is now the agent's.
+
+**Where it is now:** `app/create-app` (`app.clj:90-104`); in `events/core.clj`: `run-inline` (`:97`), the detector (`changed-paths` `:103`, `check-lost-update!` `:118`, `wrap-lost-update-check` `:131`, `effect-state` `:146`), `handle-event-pipeline` (`:469`), `co-effects` (`:484`), `effects` (`:491`), `event-handler` (`:540`), `dispatch!` (`:566`); NEW `state/reset-state-vals!` (`state/core.clj:128`); NEW `frame-service/preview-timer-paths` (`frame_service.clj:109`).
+
+**Differences from the plan above**
+
+| Plan | As built | Why |
+|---|---|---|
+| Six effects continue inline (§4) | Also `:link/sync-to-downbeat` (`events/core.clj:282`): `link/sync-to-downbeat!` gets `#(run-inline % dispatch)` | It dispatches synchronously inside the effect, like `:timing/calculate-bpm`. The correction is computed from the beat phase *now*, so applying it a turn later would apply a stale correction. The full audit is below |
+| "A middleware keeps the co-effect snapshot on the effects map" (§4) | `wrap-lost-update-check`, outermost in `handle-event-pipeline`, puts the snapshot (the event's `:state` co-effect) and the event type into the **metadata of the `:state` value**. `effect-state` strips both before the write, so they never reach app state | An effect consumer only sees its own value, and the order of the effects map isn't guaranteed, so a separate effect key can't be relied on to run before `:state`. Being inside `handle-event-pipeline`, it works in both wirings, and `create-app` still gets `handle-event-pipeline` as is. Outside dev mode the middleware returns the result unchanged |
+| "WARN when the context's current value isn't that snapshot" (§4) | `effect-state` writes with NEW `state/reset-state-vals!` and compares the value it actually replaced (an atomic swap, no separate read). If that isn't `identical?` to the snapshot, both are compared with every path in NEW `frame-service/preview-timer-paths` set to `nil`. If they still differ: WARN "Possible lost update: <event type> … another writer changed [<paths>]" with the differing paths up to two keys deep, e.g. `[[:backend :streaming]]`. If only timer paths differ: TRACE | Clarification 1: the 30 Hz timer's writes must not warn. Comparing paths needs no counters in the timer and names the culprit. The paths sit next to the code that writes them (`update-timing-accumulators!`, `update-preview-frame!`): `[:timing :global-clock]`, `[:playback :active-cues]`, `[:playback :playing?]`, `[:playback :active-cell]`, `[:backend :input :mtc]`, `[:backend :streaming :current-frame]`, `[:backend :streaming :frame-stats]`. TRACE rather than DEBUG because `laser-show` logs at DEBUG (`resources/logback.xml`) and a dev app hits this many times a second while dragging. The cost: a non-timer write *only* to those paths (e.g. `:playing?`) between snapshot and write-back isn't reported. After this phase only the timer writes them outside the pipeline |
+| `dispatch!`'s fallback = `(event-handler event)` (§4) | As planned. It now returns `nil` (it returned the effects map; no caller used it). Callbacks that come later get the synchronous dispatcher on their own thread, as in tests; before, only the scan got `dispatch!` | The same interpreter as `event-handler`, as planned |
+| Probes: "re-run" | The probes' `dispatch!` helper now goes through the production wiring (`fx/wrap-co-effects` + `fx/wrap-effects` with our maps, then `cljfx.event-handler/wrap-async`, waiting with `:fx/sync`). It called `events/event-handler` on the calling thread before | With the old helper the probes would still run callbacks on future threads, i.e. not test what this phase changed |
+| Tests (§8) | As named, plus `events.core-test/effects-and-co-effects-are-shared-maps-test`, `/dispatch-continues-inline-test`, `/tap-tempo-bpm-continues-inline-test`, `/dispatch-later-calls-back-through-the-dispatcher-test`, `/lost-update-detector-is-off-outside-dev-mode-test` | They pin the inline / later split directly: `event-handler` is called with a recording dispatcher, and an inline follow-up must not reach it |
+
+**Effect classification** (clarification 2; every entry of `events/effects`)
+
+| Effect | Class | Thread of its callback in production |
+|---|---|---|
+| `:dispatch` | continue now (`run-inline`) | agent, same turn |
+| `:timing/calculate-bpm` | continue now | agent, same turn |
+| `:link/sync-to-downbeat` | continue now | agent, same turn |
+| `:project/save` (`:on-saved`, `:on-failed`) | continue now | agent, same turn |
+| `:project/load` (`:on-loaded`, `:on-failed`) | continue now | agent, same turn |
+| `:clipboard/paste-effects`, `:clipboard/paste-projector-effects` | continue now | agent, same turn |
+| `:dispatch-later` | call back later (`dispatch`) | future → queued on the agent |
+| `:projectors/scan` | call back later | future → agent |
+| `:input/await-learn` | call back later | future → agent |
+| `:multi-engine/start`, `/stop`, `/refresh` | call back later | future → agent |
+| `:fx/show-file-chooser` | call back later | FX thread → agent |
+| `:state`, `:system/exit`, `:system/open-url`, `:dev/reload`, `:clipboard/copy-effects` | no follow-up event | – |
+| `:context` (added by cljfx's `fill-effects`, production only) | no follow-up event; unused | – |
+
+**Deadlock audit** (clarification 3). An event that an effect dispatches now runs after the current one, so nothing on the agent may wait for it:
+- **Save, then quit** (`:file/confirm-save` → `:project/save` → `:on-saved` `:file/exit` → `:system/exit` → `app/exit!` → `app/stop!`): the whole chain after the file chooser runs inline in one agent turn (Save As: the chooser's result is one queued event). `stop!` waits on nothing the agent would have to run: `fx/unmount-renderer` removes the watch and queues the last render with `Platform/runLater`; the joins in `streaming_engine.clj:328` and `gamepad.clj:142` are bounded at 1 s and wait on their own threads. The menu's Quit already ran `exit!` on the agent before this phase.
+- **Dialogs**: all dialogs except the file chooser are cljfx stages driven by state, so nothing blocks. The file chooser's `showOpenDialog`/`showSaveDialog` runs a nested loop on the FX thread inside `Platform/runLater` and only queues its result.
+- **Promises, derefs, latches**: the learn promise is dereffed in its future, not on the agent (`events/core.clj`, `effect-input-await-learn`). The clipboard reads and writes deref `fx/on-fx-thread` (`clipboard.clj:64,82,116`) on the agent, i.e. the agent waits for the FX thread; the FX thread never waits for the agent, because nothing in `src` dispatches with `:fx/sync` and `dispatch!` doesn't block. The FX thread inside a file chooser still runs `runLater` work. No `CountDownLatch` or `showAndWait` in `src`.
+
+**Observed, not changed** (pre-existing, outside this phase)
+- `app/create-app` passes `:opts` and `:error-handler` to `fx/create-app`, which accepts neither (`cljfx/api.clj` `create-app` destructures `:renderer-error-handler`, no `:opts`). So the dev-mode `type->lifecycle` and `default-error-handler` (`app.clj:40-80`) are never used.
+- `app/stop!` clears the exit fn but not the dispatch fn, so after `stop!` `dispatch!` still sends to the stopped app's agent rather than to the fallback.
+
+**Tests** (all new)
+- `laser-show.events.core-test` (NEW ns; state from `domains/build-initial-state`, no app): `fallback-runs-every-effect-test`, `lost-update-detector-test` (a write to `[:projectors …]` in between → one WARN naming `:timing/set-bpm` and `:projectors`; a timer-only write in between → no WARN; nothing in between → no log; no metadata in app state), `lost-update-detector-is-off-outside-dev-mode-test` and the four inline / later tests named above. Red first: with only `47e7f8d`, 7 failures and 2 errors (the inline tests saw the follow-up at the recording dispatcher, the fallback dropped `:system/exit`, no detector).
+- `laser-show.ui-test.reentry-test` (NEW; `with-toolkit` once, `with-app` each): `lifecycle-results-run-on-the-agent-test`, `dispatch-later-runs-on-the-agent-test` (also checks the inline `:keyframe/toggle-enabled` ran first, on the agent, and the delayed update reached state). Red first with `app.clj` from `47e7f8d`: 3 failures, `:idn/multi-streaming-started` and `:chain/update-param` on `clojure-agent-send-off-pool-0`.
+- Unchanged and passing: `menu-file-handlers-test`, `menu-system-handlers-test`, `timing-handlers-link-test`, `output-lifecycle-test` (invariant 2). No UI test needed a new `wait-for!`.
+
+**Probes** (`probes/output_probes_test.clj`; before = `5052cbe` with the old `dispatch!` helper, after = `a37f690` with the agent helper, see above)
+
+| Probe | Before | After |
+|---|---|---|
+| p7 | after both: 1 sender, `{:running? true, :toolbar-connected? true, :engines-in-state 0}`; after Stop: **1 sender still streaming** | **The same.** The lifecycle callback no longer races (it queues behind `:timing/set-bpm`), but the handles are written by `multi-engine/start-engines!` itself (`multi_engine.clj:297`), outside the pipeline, inside the slowed handler's window, so the write-back still drops them. Phase 4 takes the handles out of app state. With `-J-Dlaser-show.dev=true` the detector reports it: `WARN … Possible lost update: :timing/set-bpm wrote back a state snapshot, but another writer changed [[:backend :streaming]] in the meantime` |
+| p6 | 5 engines for 3 projectors, senders per channel `{1 1, 2 2, 3 2}`; after Stop 2 still streaming | **4 engines, `{1 1, 2 2, 3 1}`; after Stop 1 still streaming** (the same in 4 runs). The `:idn/multi-streaming-refreshed` write-backs no longer run on the refresh futures; the two refreshes themselves still overlap (Phase 4) |
+| p4, p5 | 2 engines, 1 sender left after Stop; 1 sender after Stop with the button offering "Stream" | the same (Phase 4) |
+| p1–p3, p8–p13 | as in 02 §10 | the same findings (the output path is untouched). p12 43.0 fps and p13 43.2 vs 59.8 fps under a load average of ~19 (before: 53.5, and 52.6 vs 59.9); p2 and p3 frame counts vary with load in the same way |
+
+**Live check** (headless dev REPL, `start-test!` plus the 30 Hz preview timer): 300 `:timing/set-bpm` via `dispatch!` (handler slowed 5 ms, like dragging the BPM) ran on `clojure-agent-send-pool-*` threads only; 66 of them had a timer tick between snapshot and write-back; 0 lost-update WARNs.
+
+**Verification, 2026-11-16, macOS arm64, JDK 25.0.5, headless**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test events.core menu-file menu-system timing-handlers-link input-test output-lifecycle` | 65 tests, 233 assertions, 0 failures |
+| `clj -M:test-ui:mac-arm:test-ui-headless reentry` | 2 tests, 5 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 775 tests, 31,160 assertions, 0 failures (768 / 31,139 before) |
+| `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | 49 tests, 184 assertions, 0 failures (47 / 179 before) |
+| The same UI suite with `-J-Dlaser-show.dev=true` (invariant 3) | 49 tests, 184 assertions, 0 failures, 0 lost-update WARNs |
+| `clj -M:kondo --lint src test --parallel --fail-level error` | 0 errors, 21 warnings (22 before), none in a touched file |
+
+Not run locally: the Linux and Windows suites (CI). Not testable headless: the native file chooser; see the manual checks in the hand-off.
