@@ -25,8 +25,11 @@
     :item-name-key :name
     :empty-text \"No items\"}
    ```"
-  (:require [laser-show.views.components.tabs :as tabs]
-            [laser-show.css.theme :as theme]))
+  (:require [laser-show.views.components.drag-drop-cell :as dd]
+            [laser-show.views.components.tabs :as tabs]
+            [laser-show.css.theme :as theme])
+  (:import [javafx.scene.control ButtonBase]
+           [javafx.scene.input DragEvent MouseEvent TransferMode]))
 
 
 ;; Item Button (data-driven, no function props)
@@ -40,16 +43,30 @@
    - :item-name-key - Key to get display name (default :name)
    - :item-id-key - Key to get item ID (default :id)
    - :event-template - Base event map to merge item-id into
-   - :style-class - CSS class for button (default: \"bank-item-btn\")"
-  [{:keys [item item-name-key item-id-key event-template style-class]}]
+   - :style-class - CSS class for button (default: \"bank-item-btn\")
+   - :drag-kind - :preset or :effect makes the button a drag source too
+                  (a :bank-item drag, see drag-drop-cell); nil: click only"
+  [{:keys [item item-name-key item-id-key event-template style-class drag-kind]}]
   (let [name-key (or item-name-key :name)
         id-key (or item-id-key :id)
         item-id (get item id-key)
         item-name (get item name-key "Unknown")]
-    {:fx/type :button
-     :text item-name
-     :style-class (or style-class "bank-item-btn")
-     :on-action (merge event-template {:item-id item-id :item item})}))
+    (cond-> {:fx/type :button
+             :text item-name
+             :style-class (or style-class "bank-item-btn")
+             :on-action (merge event-template {:item-id item-id :item item})}
+      drag-kind
+      (assoc :on-drag-detected (fn [^MouseEvent e]
+                                 (dd/start-drag! (.getSource e) :bank-item
+                                                 {:kind drag-kind :id item-id :category (:category item)}
+                                                 [TransferMode/COPY])
+                                 (.consume e))
+             ;; startDragAndDrop can leave the button armed (pressed look,
+             ;; and the next release would fire it)
+             :on-drag-done (fn [^DragEvent e]
+                             (dd/end-drag! :bank-item)
+                             (.disarm ^ButtonBase (.getSource e))
+                             (.consume e))))))
 
 
 ;; Tabbed Bank Component
@@ -76,6 +93,7 @@
    - :item-name-key - Key to get display name from item (default: :name)
    - :item-id-key - Key to get item ID (default: :id)
    - :button-style-class - CSS class for buttons (default: \"bank-item-btn\")
+   - :drag-kind - :preset or :effect: buttons can also be dragged (see item-button)
    
    Layout:
    - :empty-text - Text shown when category is empty (default: \"No items\")
@@ -86,7 +104,7 @@
  [{:keys [tab-definitions active-tab on-tab-change
           items items-by-category
           item-event-template item-name-key item-id-key button-style-class
-          empty-text hgap vgap padding fill?]}]
+          drag-kind empty-text hgap vgap padding fill?]}]
   (let [active (or active-tab (:id (first tab-definitions)))
         ;; Get items either directly or from category map
         display-items (or items
@@ -127,7 +145,8 @@
                                                :item-name-key name-key
                                                :item-id-key id-key
                                                :event-template item-event-template
-                                               :style-class button-style-class}))
+                                               :style-class button-style-class
+                                               :drag-kind drag-kind}))
                                        [{:fx/type :label
                                          :text empty-msg
                                          :style-class "text-muted"}])}}]}))

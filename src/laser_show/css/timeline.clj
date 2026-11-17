@@ -203,6 +203,8 @@
        {:-fx-background-color "#161616"
         :-fx-min-width 280 :-fx-pref-width 280 :-fx-max-width 280
         :-fx-border-color ["transparent" "transparent" "transparent" "#262626"]}
+       ".tl-browser-bank-idle"
+       {:-fx-opacity 0.55}
        ".tl-inspector-title"
        {:-fx-text-fill text-secondary
         :-fx-font-size 11

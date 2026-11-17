@@ -43,8 +43,9 @@
    - :on-tab-change - Event map or function for tab changes
    - :item-event-template - Optional override for the event dispatched on item click.
                             Defaults to {:event/type :cue-chain/add-preset :col col :row row}
-   - :fill? - Grow with the parent (default: fixed 80 px)"
-  [{:keys [cell active-tab on-tab-change item-event-template fill?]}]
+   - :fill? - Grow with the parent (default: fixed 80 px)
+   - :drag-kind - :preset to make the buttons drag sources (timeline browser)"
+  [{:keys [cell active-tab on-tab-change item-event-template fill? drag-kind]}]
   (let [[col row] cell
         event-template (or item-event-template
                            {:event/type :cue-chain/add-preset
@@ -65,4 +66,5 @@
      :hgap 6
      :vgap 6
      :padding 10
-     :fill? fill?}))
+     :fill? fill?
+     :drag-kind drag-kind}))

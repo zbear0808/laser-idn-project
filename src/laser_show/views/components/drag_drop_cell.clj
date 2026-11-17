@@ -81,13 +81,23 @@
   (doto (ClipboardContent.)
     (.put (data-format drag-type) (encode-drag-payload drag-type payload))))
 
+(defonce ^:private !dragging
+  ;; drag-type -> payload of the drag this app started, until end-drag!
+  (atom {}))
+
 (defn start-drag!
   "Start a drag-and-drop from `source` (call it from a drag-detected handler)
    offering the transfer `modes`, with `payload` as its content. Returns the
-   Dragboard."
+   Dragboard. Call end-drag! from the source's drag-done handler."
   ^Dragboard [^Node source drag-type payload modes]
+  (swap! !dragging assoc drag-type (assoc payload payload-marker drag-type))
   (doto (.startDragAndDrop source (into-array TransferMode modes))
     (.setContent (drag-content drag-type payload))))
+
+(defn end-drag!
+  "The drag of this type that start-drag! began is over."
+  [drag-type]
+  (swap! !dragging dissoc drag-type))
 
 (defn has-payload?
   "Does the dragboard carry a drag of this type? (Content not parsed.)"
@@ -95,10 +105,17 @@
   (boolean (and db (.hasContent db (data-format drag-type)))))
 
 (defn read-payload
-  "The dragboard's payload of `drag-type` when it passes `valid?`, else nil."
+  "The dragboard's payload of `drag-type` when it passes `valid?`, else nil.
+   A platform that announces the format but hides the content before the
+   drop gets the payload of the drag this app started (risk R6 in
+   plans/2026-11-08-timeline-rework/08-drag-from-browser.md)."
   [^Clipboard db drag-type valid?]
   (when (has-payload? db drag-type)
-    (parse-drag-payload (.getContent db (data-format drag-type)) drag-type valid?)))
+    (let [content (.getContent db (data-format drag-type))]
+      (if (string? content)
+        (parse-drag-payload content drag-type valid?)
+        (when-let [p (get @!dragging drag-type)]
+          (when (try (valid? p) (catch Exception _ false)) p))))))
 
 
 ;; Drag Source Handlers

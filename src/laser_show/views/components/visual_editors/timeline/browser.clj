@@ -1,7 +1,13 @@
 (ns laser-show.views.components.visual-editors.timeline.browser
-  "The timeline editor's browser (right side): presets, which add a clip at
-   the cursor on the insert track, and effects, which add to the selected
-   clip, track or folder."
+  "The timeline editor's browser (right side): presets and effects.
+   
+   Click a preset: a clip at the cursor on the insert track. Click an effect:
+   it goes on the selected clip, track or folder.
+   Drag a preset into a lane: a clip at the drop beat on that row (a folder
+   row: its first track), or onto a track header: at the cursor there. Drag
+   an effect onto a clip, a lane, a track or folder header, or a position in
+   the device chain. Zone effects only go on clips. The drop targets and
+   their rules are in timeline.drop."
   (:require [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.views.components.preset-bank :as preset-bank]
             [laser-show.views.components.visual-editors.timeline.inspector :as inspector]))
@@ -25,12 +31,13 @@
      :children
      [(section-header "PRESETS" "timeline-drawer-hint"
                       (if insert-track-id
-                        (str "Adds at " cursor-label " on " insert-track-name)
+                        (str "Click: adds at " cursor-label " on " insert-track-name " · or drag into a lane")
                         "Add a track first"))
       {:fx/type preset-bank/preset-bank
        :v-box/vgrow :always
        :fill? true
        :cell [col row]
+       :drag-kind :preset
        :active-tab (or preset-tab :geometric)
        :on-tab-change {:event/type :timeline/set-add-panel-tab :panel :preset}
        :item-event-template {:event/type :timeline/add-preset-to-track
@@ -38,15 +45,19 @@
                              :track-id insert-track-id}}
       (section-header "EFFECTS" "timeline-browser-effect-hint"
                       (if effect-target?
-                        (str "Adds to " (inspector/target-name target))
-                        "Select a clip, track or folder to add effects"))
+                        (str "Adds to " (inspector/target-name target) " · or drag onto a clip or track")
+                        "Drag onto a clip, track or folder, or select one first"))
+      ;; Without a target a click does nothing, but the effects can still be
+      ;; dragged: dimmed, not disabled
       {:fx/type :v-box
+       :id "timeline-browser-effects"
        :v-box/vgrow :always
-       :disable (not effect-target?)
+       :style-class (if effect-target? [] ["tl-browser-bank-idle"])
        :children
        [{:fx/type effect-bank/effect-bank
          :v-box/vgrow :always
          :fill? true
+         :drag-kind :effect
          ;; Zone effects reroute a clip's content; tracks have a zone setting instead
          :include-zone? (= :clip kind)
          :active-tab (if (and (= :zone effect-tab) (not= :clip kind)) :shape (or effect-tab :shape))

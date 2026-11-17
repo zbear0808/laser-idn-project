@@ -315,7 +315,7 @@
       (ui/click! robot "#timeline-add-content"))
     (ui/wait-for! #(ui/visible? "#timeline-browser"))
     (let [clip-id (add-clip-at-zero!)]
-      (ui/wait-for! #(= "Adds to Square" (ui/node-text "#timeline-browser-effect-hint")))
+      (ui/wait-for! #(= "Adds to Square · or drag onto a clip or track" (ui/node-text "#timeline-browser-effect-hint")))
       (testing "clicking an effect in the browser adds it to the selected clip"
         (click-bank-button! robot "Scale")
         (ui/wait-for! #(= [:scale] (mapv :effect-id (clip-fx clip-id))))

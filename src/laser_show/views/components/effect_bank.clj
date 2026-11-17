@@ -98,8 +98,9 @@
    - :item-event-template - Event map template for adding effects
                           Will receive :item-id (effect-id) and :item (effect-def)
    - :include-zone? - Include Zone category (default: false)
-   - :fill? - Grow with the parent (default: fixed 80 px)"
-  [{:keys [active-tab on-tab-change item-event-template include-zone? fill?]}]
+   - :fill? - Grow with the parent (default: fixed 80 px)
+   - :drag-kind - :effect to make the buttons drag sources (timeline browser)"
+  [{:keys [active-tab on-tab-change item-event-template include-zone? fill? drag-kind]}]
   (let [effects-map (get-effects-by-category)
         tabs (if include-zone?
                effect-bank-tab-definitions-with-zone
@@ -116,4 +117,5 @@
      :item-id-key :id
      :button-style-class "bank-item-btn"
      :empty-text "No effects"
-     :fill? fill?}))
+     :fill? fill?
+     :drag-kind drag-kind}))
