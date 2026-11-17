@@ -7,6 +7,8 @@
    - Test pattern mode for calibration
    - Enable/disable individual projectors"
   (:require [cljfx.api :as fx]
+            [clojure.string :as str]
+            [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
@@ -25,7 +27,7 @@
 
 (defn- status-indicator
   "Colored circle indicating device/connection status."
-  [{:keys [status size]
+  [{:keys [id status size]
     :or {size 8}}]
   (let [color (case status
                 :online (css/green)
@@ -34,9 +36,49 @@
                 :connected (css/green)
                 :connecting (css/blue)
                 (css/text-muted))]
-    {:fx/type :circle
-     :radius (/ size 2)
-     :fill color}))
+    (cond-> {:fx/type :circle
+             :radius (/ size 2)
+             :fill color}
+      id (assoc :id id))))
+
+
+;; Text fields that commit on Enter or focus loss
+
+
+(defn- commit-field
+  "A text field that applies its text on Enter or when it loses focus, not on
+   every keystroke. (on-commit text) returns the event to dispatch, or nil to
+   reject the text, which puts the stored value back."
+  [{:keys [id text on-commit pref-width]}]
+  (let [commit! (fn [^javafx.scene.control.TextField field]
+                  (let [typed (.getText field)]
+                    (when (not= typed text)
+                      (if-let [event (on-commit typed)]
+                        (events/dispatch! event)
+                        (.setText field text)))))]
+    {:fx/type fx/ext-on-instance-lifecycle
+     :on-created (fn [^javafx.scene.control.TextField field]
+                   (.addListener (.focusedProperty field)
+                                 (reify javafx.beans.value.ChangeListener
+                                   (changed [_ _ _ focused?]
+                                     (when-not focused?
+                                       (when-let [f (.getUserData field)]
+                                         (f field)))))))
+     :desc {:fx/type :text-field
+            :id id
+            :text text
+            :pref-width pref-width
+            :style-class ["text-field-dark"]
+            :user-data commit!
+            :on-action (fn [^javafx.event.ActionEvent e]
+                         (commit! (.getSource e)))}}))
+
+(defn- parse-port
+  "The port typed into the Port field, or nil unless it is 1-65535."
+  [text]
+  (let [port (parse-long (str/trim text))]
+    (when (and port (<= 1 port 65535))
+      port)))
 
 
 ;; Device Discovery Panel
@@ -216,14 +258,25 @@
 ;; Configured Projectors List
 
 
+(defn- output-status-text
+  "One line for a projector's output status, or nil when it isn't streaming."
+  [{:keys [state fps error]}]
+  (case state
+    :streaming (if fps (format "Streaming · %.1f fps" (double fps)) "Streaming")
+    :starting "Starting…"
+    :error (str "Error: " error)
+    nil))
+
 (defn- projector-list-item
   "Single configured projector in the list.
-   Shows service ID when configured for a specific output."
-  [{:keys [projector selected?]}]
-  (let [{:keys [id name host service-id service-name enabled? status]} projector
-        connected? (:connected? status)
+   Shows service ID when configured for a specific output, and its output
+   status (the dot, and a line while it streams or fails)."
+  [{:keys [fx/context projector selected?]}]
+  (let [{:keys [id name host service-id]} projector
+        {:keys [state] :as output-status} (fx/sub-ctx context subs/projector-output-status id)
+        status-text (output-status-text output-status)
         ;; Coerce enabled? to boolean to prevent ClassCastException if corrupted data
-        enabled-bool? (boolean enabled?)
+        enabled-bool? (boolean (:enabled? projector))
         ;; Display host:service or just host
         host-display (if (and service-id (pos? service-id))
                        (str host " #" service-id)
@@ -240,14 +293,27 @@
                  :on-selected-changed {:event/type :projectors/toggle-enabled
                                        :projector-id id}}
                 {:fx/type status-indicator
-                 :status (if connected? :connected :offline)}
+                 :id (str "projector-dot-" (clojure.core/name id))
+                 :status (case state
+                           :streaming :connected
+                           :starting :connecting
+                           :error :offline
+                           nil)}
                 {:fx/type :v-box
-                 :children [{:fx/type :label
-                             :text (or (when (string? name) name) "")
-                             :style-class ["label-bold"]}
-                            {:fx/type :label
-                             :text (str host-display)
-                             :style-class ["text-small" "label-secondary"]}]}
+                 :children (cond-> [{:fx/type :label
+                                     :text (or (when (string? name) name) "")
+                                     :style-class ["label-bold"]}
+                                    {:fx/type :label
+                                     :text (str host-display)
+                                     :style-class ["text-small" "label-secondary"]}]
+                             status-text
+                             (conj (cond-> {:fx/type :label
+                                            :id (str "projector-status-" (clojure.core/name id))
+                                            :text status-text
+                                            :wrap-text true
+                                            :max-width 200
+                                            :style-class ["text-small" "label-secondary"]}
+                                     (= :error state) (assoc :style (str "-fx-text-fill: " (css/red) ";")))))}
                 {:fx/type :region :h-box/hgrow :always}]}))
 
 (defn- configured-projectors-list
@@ -315,20 +381,28 @@
                                  :text "Host:"
                                  :pref-width 50
                                  :style-class ["label-secondary"]}
-                                {:fx/type :text-field
+                                {:fx/type commit-field
+                                 :id "projector-host-field"
                                  :text (or host "")
                                  :pref-width 150
-                                 :style-class ["text-field-dark"]
-                                 :on-text-changed {:event/type :projectors/update-settings
+                                 :on-commit (fn [typed]
+                                              (let [new-host (str/trim typed)]
+                                                (when-not (str/blank? new-host)
+                                                  {:event/type :projectors/update-settings
                                                    :projector-id id
-                                                   :updates {:host :fx/event}}}
+                                                   :updates {:host new-host}})))}
                                 {:fx/type :label
                                  :text "Port:"
                                  :style-class ["label-secondary"]}
-                                {:fx/type :text-field
+                                {:fx/type commit-field
+                                 :id "projector-port-field"
                                  :text (str (or port 7255))
                                  :pref-width 60
-                                 :style-class ["text-field-dark"]}]}]
+                                 :on-commit (fn [typed]
+                                              (when-let [new-port (parse-port typed)]
+                                                {:event/type :projectors/update-settings
+                                                 :projector-id id
+                                                 :updates {:port new-port}}))}]}]
                    ;; Service info (if multi-output device)
                    (when (and service-id (pos? service-id))
                      [{:fx/type :h-box
