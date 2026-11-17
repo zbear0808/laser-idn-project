@@ -35,6 +35,7 @@
             [laser-show.animation.chains :as chains]
             [laser-show.animation.types :as t]
             [laser-show.animation.cue-timing :as cue-timing]
+            [laser-show.backend.output-errors :as output-errors]
             [laser-show.common.timing :as timing]
             [laser-show.common.util :as u]
             [laser-show.profiling.frame-profiler :as profiler]
@@ -313,9 +314,11 @@
                           (filterv #(model/active-at? % current-beats)))]
     (if (seq item-effects)
       (try
-        (effects/apply-effect-chain frame {:effects item-effects} elapsed-ms bpm trigger-time timing-ctx)
-        (catch Exception e
-          (log/error "apply-item-effects: Effect chain failed for" (:type item) ":" (.getMessage e))
+        (let [out (effects/apply-effect-chain frame {:effects item-effects} elapsed-ms bpm trigger-time timing-ctx)]
+          (output-errors/ok! [:item-effects (:id item)])
+          out)
+        (catch Throwable e
+          (output-errors/report! [:item-effects (:id item)] e)
           frame))
       frame)))
 
@@ -495,9 +498,11 @@
                                      :input-values input-values)
             global-elapsed (long (or (:accumulated-ms global-clock) 0))]
         (try
-          (effects/apply-effect-chain frame effect-chain global-elapsed bpm 0 global-timing-ctx)
-          (catch Exception e
-            (log/error "apply-global-effects-to-frame: Effect chain failed:" (.getMessage e))
+          (let [out (effects/apply-effect-chain frame effect-chain global-elapsed bpm 0 global-timing-ctx)]
+            (output-errors/ok! [:global-effects])
+            out)
+          (catch Throwable e
+            (output-errors/report! [:global-effects] e)
             frame)))
       frame)))
 
@@ -858,8 +863,9 @@
                              (run []
                                (try
                                  (update-preview-frame!)
-                                 (catch Exception e
-                                   (log/error "Preview update error:" (.getMessage e))))))
+                                 (output-errors/ok! [:preview])
+                                 (catch Throwable e
+                                   (output-errors/report! [:preview] e)))))
                            0
                            interval-ms)
      (reset! preview-timer timer)

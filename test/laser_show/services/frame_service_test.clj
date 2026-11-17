@@ -674,3 +674,21 @@
         clip-from-0 (timeline-cue {:items [(clip-at 0.0 [sine])]})]
     (is (= (render-at clip-from-0 9.25) (render-at on-track 9.25))
         "a track modulator is at timeline beat 9.25, not 1.25 into the clip")))
+
+
+;; Preview timer (output runtime Phase 2)
+
+(deftest preview-timer-survives-an-error-test
+  (let [calls (atom 0)
+        deadline (+ (System/currentTimeMillis) 3000)]
+    (with-redefs [frame-service/update-preview-frame!
+                  (fn []
+                    (when (= 3 (swap! calls inc))
+                      (throw (AssertionError. "test: Assert failed"))))]
+      (try
+        (frame-service/start-preview-updates! 60)
+        (while (and (< @calls 10) (< (System/currentTimeMillis) deadline))
+          (Thread/sleep 10))
+        (is (<= 10 @calls) "ticks keep coming after the one that threw")
+        (finally
+          (frame-service/stop-preview-updates!))))))

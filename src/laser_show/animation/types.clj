@@ -93,12 +93,13 @@
 
 (defn blanked?
   "Check if a point is blanked (invisible).
-   A point is blanked when all color channels are zero (or very close to zero)."
+   A point is blanked when all color channels are zero (or very close to zero).
+   A NaN channel counts as dark."
   [point]
   (let [epsilon 1e-6]
-    (and (< (point R) epsilon)
-         (< (point G) epsilon)
-         (< (point B) epsilon))))
+    (not (or (>= (point R) epsilon)
+             (>= (point G) epsilon)
+             (>= (point B) epsilon)))))
 
 
 ;; Point Update Helpers (for effects operating on 5-element vectors)

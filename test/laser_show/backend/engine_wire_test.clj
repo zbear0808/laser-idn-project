@@ -2,6 +2,7 @@
   "One streaming engine with a fixed frame provider, observed on the fake DAC."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.backend.multi-engine :as me]
+            [laser-show.backend.output-errors :as oe]
             [laser-show.backend.streaming-engine :as se]
             [laser-show.idn.fake-dac :as dac]
             [laser-show.idn.hello :as hello]
@@ -137,3 +138,78 @@
       (is (= 2 (:channel-id close))))
     (is (dac/quiet? *dac* 300) "nothing arrives after the close pair")
     (is (not (se/running? engine)))))
+
+
+;; Phase 2: nothing unsafe reaches the wire
+
+(def ^:private dark-then-lit
+  "[d(-0.5,0) [0.5 0 1 1 1]] on the wire (16/8)"
+  [[-16383 0 0 0 0] [16383 0 255 255 255]])
+
+(defn- frames-after
+  "Frame messages after the first n."
+  [n]
+  (vec (drop n (dac/frames *dac*))))
+
+(deftest nan-point-is-filtered-test
+  (start-engine! (constantly [[-0.5 0.0 0.0 0.0 0.0] [##NaN ##NaN 1.0 1.0 1.0] [0.5 0.0 1.0 1.0 1.0]])
+                 :output-config oc/standard-config)
+  (is (wait-for-frames! 5))
+  (is (every? #(= dark-then-lit (:samples %)) (dac/frames *dac*))
+      "the NaN point is gone, the rest arrives"))
+
+(deftest nil-point-is-filtered-test
+  (let [calls (atom 0)
+        good [[-0.5 0.0 0.0 0.0 0.0] [0.5 0.0 1.0 1.0 1.0]]
+        bad [[-0.5 0.0 0.0 0.0 0.0] [nil 0.0 1.0 1.0 1.0] [0.5 0.0 1.0 1.0 1.0]]
+        engine (start-engine! (fn [] (if (<= (swap! calls inc) 5) good bad))
+                              :output-config oc/standard-config)]
+    (is (wait-for-frames! 15) "frames keep arriving after the bad ones start")
+    (is (every? #(= dark-then-lit (:samples %)) (frames-after 5)))
+    (is (se/running? engine))))
+
+(deftest error-in-provider-keeps-the-engine-alive-test
+  (let [calls (atom 0)
+        failing? (atom true)
+        engine (start-engine! (fn []
+                                (if (and (> (swap! calls inc) 3) @failing?)
+                                  (throw (AssertionError. "test: Assert failed"))
+                                  [[-0.5 0.0 0.0 0.0 0.0] [0.5 0.0 1.0 1.0 1.0]]))
+                              :id :wire-test :output-config oc/standard-config)]
+    (is (wait-for-frames! 10))
+    (is (.isAlive ^Thread @(:thread engine)) "the thread survives the Error")
+    (is (every? #(= [] (:samples %)) (frames-after 3)) "each failed frame goes out empty")
+    (is (< 3 (get-in (oe/snapshot) [[:engine :wire-test] :count] 0))
+        "reported under the engine's key")
+    (let [n (count (dac/frames *dac*))]
+      (reset! failing? false)
+      (is (dac/wait-for! #(= dark-then-lit (:samples (last (dac/frames *dac*)))) 2000)
+          "frames come back when the provider recovers")
+      (is (< n (count (dac/frames *dac*)))))
+    (is (dac/wait-for! #(not (contains? (oe/snapshot) [:engine :wire-test])) 1000)
+        "recovery clears the key")))
+
+(deftest first-sample-is-dark-test
+  (testing "a frame that starts lit gets a dark copy of its first point"
+    (start-engine! (constantly [[0.5 0.5 1.0 1.0 1.0] [-0.5 0.5 1.0 1.0 1.0]])
+                   :output-config oc/standard-config)
+    (is (wait-for-frames! 3))
+    (is (every? #(= [[16383 16383 0 0 0] [16383 16383 255 255 255] [-16383 16383 255 255 255]]
+                    (:samples %))
+                (dac/frames *dac*)))))
+
+(deftest send-error-keeps-the-engine-alive-test
+  (let [sends (atom 0)
+        send-packet-to hello/send-packet-to]
+    (with-redefs [hello/send-packet-to (fn [& args]
+                                         (when (= 4 (swap! sends inc))
+                                           (throw (AssertionError. "test: send failed")))
+                                         (apply send-packet-to args))]
+      (let [engine (start-engine! (constantly [[-0.5 0.0 0.0 0.0 0.0] [0.5 0.0 1.0 1.0 1.0]])
+                                  :output-config oc/standard-config)]
+        (is (wait-for-frames! 10))
+        (is (.isAlive ^Thread @(:thread engine)) "the thread survives the failed send")
+        (let [fs (dac/frames *dac*)]
+          (is (= [] (:samples (nth fs 3))) "an empty frame replaces the one that failed")
+          (is (every? #(= dark-then-lit (:samples %)) (concat (take 3 fs) (drop 4 fs)))))
+        (se/stop! engine)))))

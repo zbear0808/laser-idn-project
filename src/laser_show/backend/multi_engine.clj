@@ -20,6 +20,7 @@
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
             [clojure.set :as set]
+            [laser-show.backend.output-errors :as output-errors]
             [laser-show.backend.streaming-engine :as engine]
             [laser-show.dev-config :as dev-config]
             [laser-show.state.core :as state]
@@ -109,10 +110,12 @@
         projector-effects (get-in raw-state [:chains :projector-effects projector-id :items] [])]
     (if (seq projector-effects)
       (try
-        (effects/apply-effect-chain frame {:effects projector-effects}
-                                    elapsed-ms bpm trigger-time timing-ctx)
-        (catch Exception e
-          (log/error "Error applying projector effects:" (.getMessage e))
+        (let [out (effects/apply-effect-chain frame {:effects projector-effects}
+                                              elapsed-ms bpm trigger-time timing-ctx)]
+          (output-errors/ok! [:projector-effects projector-id])
+          out)
+        (catch Throwable e
+          (output-errors/report! [:projector-effects projector-id] e)
           frame))
       frame)))
 
@@ -136,6 +139,62 @@
                        :cue-timing cue-timing}))))
           active-cues)))
 
+(defn- projector-frame
+  "The projector's frame for now: every active cue routed to its zones, then
+   its projector effects. Nil while nothing is playing."
+  [projector-id]
+  (let [raw-state (state/get-raw-state)
+        playing? (get-in raw-state [:playback :playing?])
+        ;; Get ALL active cues (multi-cue support); idle frames return nil
+        all-cues (when playing? (get-active-cues-data raw-state))]
+    (when (seq all-cues)
+      (let [projector-zone-groups (get-projector-zone-groups raw-state projector-id)
+            bpm (get-in raw-state [:timing :bpm] 120.0)
+            current-time (System/currentTimeMillis)
+            input-values (input-store/get-all-continuous-values)
+            
+            ;; Generate frames for each active cue and extract this projector's zones
+            all-projector-frames
+            (into []
+                  (keep
+                    (fn [{:keys [cue-chain cue-timing]}]
+                      (let [trigger-time (:trigger-time cue-timing 0)
+                            elapsed (- current-time trigger-time)
+                            cue-bpm (playback/cue-bpm cue-chain bpm)
+                            timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing cue-bpm)
+                                              :input-values input-values)
+                            ;; Generate zone frames for this cue
+                            zone-frames-map (frame-service/generate-frames-by-zone-cached
+                                              cue-chain elapsed cue-bpm trigger-time timing-ctx)
+                            ;; Extract frames for this projector's zones
+                            projector-frames (extract-frames-for-zones zone-frames-map projector-zone-groups)]
+                        ;; Combine this cue's zone frames
+                        (combine-zone-frames projector-frames))))
+                  all-cues)
+            
+            ;; Combine frames from all cues
+            combined-frame (combine-zone-frames all-projector-frames)
+            
+            ;; Get timing info for projector effects (use first cue's timing)
+            first-cue-timing (:cue-timing (first all-cues))
+            trigger-time (:trigger-time first-cue-timing 0)
+            elapsed (- current-time trigger-time)
+            timing-ctx (assoc (cue-timing/get-cue-timing-context first-cue-timing bpm)
+                              :input-values input-values)
+            
+            log-count (swap! routing-log-counter inc)]
+        
+        (when (and (dev-config/idn-stream-logging?)
+                   (zero? (mod log-count ROUTING_LOG_INTERVAL)))
+          (log/debug (format "Zone routing [%s]: zone-groups=%s, active-cues=%d, combined-points=%s"
+                             projector-id
+                             (pr-str projector-zone-groups)
+                             (count all-cues)
+                             (if combined-frame (count combined-frame) "nil"))))
+        
+        (when combined-frame
+          (apply-projector-effects combined-frame projector-id elapsed bpm trigger-time timing-ctx))))))
+
 (defn- create-projector-frame-provider
   "Create a frame provider function for a specific projector or virtual projector.
    
@@ -152,63 +211,11 @@
   [projector-id]
   (fn []
     (try
-      (let [raw-state (state/get-raw-state)
-            playing? (get-in raw-state [:playback :playing?])
-            ;; Get ALL active cues (multi-cue support); idle frames return nil
-            all-cues (when playing? (get-active-cues-data raw-state))]
-        (when (seq all-cues)
-          (let [projector-zone-groups (get-projector-zone-groups raw-state projector-id)
-                bpm (get-in raw-state [:timing :bpm] 120.0)
-                current-time (System/currentTimeMillis)
-                input-values (input-store/get-all-continuous-values)
-                
-                ;; Generate frames for each active cue and extract this projector's zones
-                all-projector-frames
-                (into []
-                      (keep
-                        (fn [{:keys [cue-chain cue-timing]}]
-                          (let [trigger-time (:trigger-time cue-timing 0)
-                                elapsed (- current-time trigger-time)
-                                cue-bpm (playback/cue-bpm cue-chain bpm)
-                                timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing cue-bpm)
-                                                  :input-values input-values)
-                                ;; Generate zone frames for this cue
-                                zone-frames-map (frame-service/generate-frames-by-zone-cached
-                                                  cue-chain elapsed cue-bpm trigger-time timing-ctx)
-                                ;; Extract frames for this projector's zones
-                                projector-frames (extract-frames-for-zones zone-frames-map projector-zone-groups)]
-                            ;; Combine this cue's zone frames
-                            (combine-zone-frames projector-frames))))
-                      all-cues)
-                
-                ;; Combine frames from all cues
-                combined-frame (combine-zone-frames all-projector-frames)
-                
-                ;; Get timing info for projector effects (use first cue's timing)
-                first-cue-timing (:cue-timing (first all-cues))
-                trigger-time (:trigger-time first-cue-timing 0)
-                elapsed (- current-time trigger-time)
-                timing-ctx (assoc (cue-timing/get-cue-timing-context first-cue-timing bpm)
-                                  :input-values input-values)
-                
-                log-count (swap! routing-log-counter inc)]
-            
-            (when (and (dev-config/idn-stream-logging?)
-                       (zero? (mod log-count ROUTING_LOG_INTERVAL)))
-              (log/debug (format "Zone routing [%s]: zone-groups=%s, active-cues=%d, combined-points=%s"
-                                 projector-id
-                                 (pr-str projector-zone-groups)
-                                 (count all-cues)
-                                 (if combined-frame (count combined-frame) "nil"))))
-            
-            (when combined-frame
-              (apply-projector-effects combined-frame projector-id elapsed bpm trigger-time timing-ctx)))))
-      
-      (catch clojure.lang.ExceptionInfo e
-        (log/error "Frame provider error:" (.getMessage e))
-        nil)
-      (catch Exception e
-        (log/error "Unexpected frame provider error:" (.getMessage e))
+      (let [frame (projector-frame projector-id)]
+        (output-errors/ok! [:provider projector-id])
+        frame)
+      (catch Throwable e
+        (output-errors/report! [:provider projector-id] e)
         nil))))
 
 
@@ -242,6 +249,7 @@
             (log/info (format "Creating engine for %s -> %s:%d service %d (channel %d)"
                               projector-id host port service-id service-id))
             (engine/create-engine host frame-provider
+                                  :id projector-id
                                   :port port
                                   :channel-id service-id
                                   :service-id service-id

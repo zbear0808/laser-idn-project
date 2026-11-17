@@ -15,6 +15,14 @@
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
 
+(defn- curve-value
+  "The LUT value for a normalized channel value. NaN stays NaN, so the frame
+   sanitiser drops the point instead of the curve lighting it."
+  [lut ^double v]
+  (if (Double/isNaN v)
+    v
+    (nth lut (long (Math/min 255.0 (Math/max 0.0 (* v 255.0)))))))
+
 (defn- rgb-curves-xf [time-ms bpm params ctx]
   (let [resolved (effects/resolve-params-global params time-ms bpm ctx)
         ;; Get control points with defaults (normalized 0.0-1.0)
@@ -26,15 +34,15 @@
         g-lut (curves/generate-curve-lut g-points)
         b-lut (curves/generate-curve-lut b-points)]
     (map (fn [pt]
-           ;; r, g, b are normalized 0.0-1.0, convert to LUT index
-           (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))
-                 r-idx (long (Math/min 255.0 (Math/max 0.0 (* r 255.0))))
-                 g-idx (long (Math/min 255.0 (Math/max 0.0 (* g 255.0))))
-                 b-idx (long (Math/min 255.0 (Math/max 0.0 (* b 255.0))))]
-             (t/update-point-rgb pt
-               (nth r-lut r-idx)
-               (nth g-lut g-idx)
-               (nth b-lut b-idx)))))))
+           ;; Blanked points stay dark, even when a curve's low end is raised
+           (if (t/blanked? pt)
+             pt
+             ;; r, g, b are normalized 0.0-1.0, convert to LUT index
+             (let [r (double (pt t/R)) g (double (pt t/G)) b (double (pt t/B))]
+               (t/update-point-rgb pt
+                 (curve-value r-lut r)
+                 (curve-value g-lut g)
+                 (curve-value b-lut b))))))))
 
 (effects/register-effect!
  {:id :rgb-curves

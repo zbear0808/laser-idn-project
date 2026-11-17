@@ -1,11 +1,13 @@
 (ns laser-show.animation.effects-test
   "Tests for effect chain groups functionality."
   (:require [clojure.test :refer [deftest testing is]]
+            [clojure.tools.logging.test :as log-test]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.effects.color]      ;; Load color effects
             [laser-show.animation.effects.intensity]  ;; Load intensity effects
             [laser-show.animation.modulation :as mod]
-            [laser-show.animation.types :as t]))
+            [laser-show.animation.types :as t]
+            [laser-show.backend.output-errors :as oe]))
 
 (def sample-effect-1
   {:effect-id :scale :params {:x-scale 1.5} :enabled? true})
@@ -340,3 +342,90 @@
                     frame {:effects [{:effect-id :blackout :enabled? true :params {}}]}
                     0 120.0)]
         (is (= frame result))))))
+
+
+;; Effect errors (output runtime Phase 2, O2): a failing effect skips only itself
+
+(def ^:private test-effects
+  [{:id :test-shift-x :name "Test: shift x" :category :shape :timing :static :parameters []
+    :apply-transducer (fn [_ _ _ _] (map (fn [pt] (t/update-point-xy pt (+ (pt t/X) 0.25) (pt t/Y)))))}
+   {:id :test-halve-red :name "Test: halve red" :category :color :timing :static :parameters []
+    :apply-transducer (fn [_ _ _ _] (map (fn [pt] (assoc pt t/R (* 0.5 (pt t/R))))))}
+   {:id :test-fails-per-point :name "Test: fails per point" :category :shape :timing :static :parameters []
+    :apply-transducer (fn [_ _ _ _] (map (fn [_] (throw (AssertionError. "test: per point")))))}
+   {:id :test-fails-to-build :name "Test: fails to build" :category :shape :timing :static :parameters []
+    :apply-transducer (fn [_ _ _ _] (throw (ex-info "test: bad params" {})))}])
+
+(defn- call-with-test-effects
+  "Call f with test-effects registered, then leave the registry as it was, so
+   tests that walk every registered effect never see them."
+  [f]
+  (run! effects/register-effect! test-effects)
+  (oe/clear!)
+  (try
+    (f)
+    (finally
+      (oe/clear!)
+      (swap! effects/!effect-registry #(apply dissoc % (map :id test-effects))))))
+
+(defmacro ^:private with-test-effects [& body]
+  `(call-with-test-effects (fn [] ~@body)))
+
+(defn- instance [effect-id]
+  {:id (keyword (str (name effect-id) "-1")) :effect-id effect-id :enabled? true :params {}})
+
+(def ^:private error-frame
+  [[-0.5 0.0 0.0 0.0 0.0] [0.0 0.0 1.0 1.0 1.0] [0.5 0.5 0.8 0.2 0.4]])
+
+(def ^:private a-then-c
+  "error-frame with :test-shift-x then :test-halve-red applied"
+  [[-0.25 0.0 0.0 0.0 0.0] [0.25 0.0 0.5 1.0 1.0] [0.75 0.5 0.4 0.2 0.4]])
+
+(defn- error-log-entries []
+  (filterv #(#{:warn :error} (:level %)) (log-test/the-log)))
+
+(deftest failing-effect-skips-only-itself-test
+  (with-test-effects
+    (log-test/with-log
+      (let [chain {:effects [(instance :test-shift-x) (instance :test-fails-per-point) (instance :test-halve-red)]}]
+        (dotimes [_ 5]
+          (is (= a-then-c (effects/apply-effect-chain error-frame chain 0 120.0))
+              "a and c are applied, b is skipped"))
+        (testing "inside a group"
+          (is (= a-then-c (effects/apply-effect-chain
+                           error-frame
+                           {:effects [(instance :test-shift-x)
+                                      {:type :group :id "g" :enabled? true
+                                       :items [(instance :test-fails-per-point) (instance :test-halve-red)]}]}
+                           0 120.0))))
+        (is (= 6 (get-in (oe/snapshot) [[:effect :test-fails-per-point-1] :count])))
+        (is (= 1 (count (error-log-entries))) "logged once")))))
+
+(deftest effect-that-fails-to-build-is-skipped-test
+  (with-test-effects
+    (log-test/with-log
+      (let [chain {:effects [(instance :test-shift-x) (instance :test-fails-to-build) (instance :test-halve-red)]}]
+        (dotimes [_ 5]
+          (is (= a-then-c (effects/apply-effect-chain error-frame chain 0 120.0))))
+        (is (= 5 (get-in (oe/snapshot) [[:effect :test-fails-to-build-1] :count])))
+        (is (= 1 (count (error-log-entries))) "logged once, not every frame")))))
+
+(deftest chain-without-errors-is-unchanged-test
+  (with-test-effects
+    (let [frame (make-test-frame [-0.8 -0.3 0.0 0.4 0.9])
+          chain {:effects [{:id :e1 :effect-id :set-hue :enabled? true
+                            :params {:hue {:type :pos-x :min 0.0 :max 360.0}}}
+                           {:type :group :id "g" :enabled? true
+                            :items [{:id :e2 :effect-id :hue-shift :enabled? true :params {:degrees 90.0}}
+                                    {:id :e3 :effect-id :test-fails-per-point :enabled? false :params {}}]}
+                           {:id :e4 :effect-id :test-shift-x :enabled? true :params {}}
+                           {:id :e5 :effect-id :test-halve-red :enabled? true :params {}}]}
+          frame-ctx {:point-count (count frame) :timing-ctx nil}
+          composed (into [] (effects/compose-effect-transducers chain 250 120.0 nil frame-ctx) frame)
+          one-by-one (resolve 'laser-show.animation.effects/apply-effects-one-by-one)]
+      (is (= composed (effects/apply-effect-chain frame chain 250 120.0 nil nil))
+          "the fast path is today's composed single pass")
+      (is (some? one-by-one) "the per-effect fallback exists")
+      (when one-by-one
+        (is (= composed (one-by-one frame chain 250 120.0 nil frame-ctx))
+            "applying the effects one at a time gives the same frame")))))

@@ -10,12 +10,13 @@
    Supports optional application-layer frame fragmentation per IDN-Stream spec Section 6.2
    (disabled by default; see create-engine)."
   (:require [clojure.tools.logging :as log]
+            [laser-show.backend.output-errors :as output-errors]
+            [laser-show.idn.frame-rules :as frame-rules]
             [laser-show.idn.stream :as idn-stream]
             [laser-show.idn.output-config :as output-config]
             [laser-show.idn.fragmentation :as fragmentation]
             [laser-show.animation.types :as t]
             [laser-show.idn.hello :as hello]
-            [laser-show.common.util :as u]
             [laser-show.dev-config :as dev-config]
             [laser-show.profiling.frame-profiler :as profiler])
   (:import [java.net DatagramSocket InetAddress]))
@@ -53,6 +54,7 @@
    - target-host: IP address of the laser DAC
    - frame-provider: Function that returns the current LaserFrame to send
    - opts: Optional map with:
+     - :id - Names the engine in output-errors (default \"host:port/channel\")
      - :fps - Target frames per second (default 60)
      - :port - Target UDP port (default 7255)
      - :channel-id - IDN channel ID for message header (default 0)
@@ -68,7 +70,7 @@
    For multi-head DACs, each output has a different service-id.
    
    Returns an engine map that can be started with start!"
-  [target-host frame-provider & {:keys [fps port channel-id service-id output-config
+  [target-host frame-provider & {:keys [id fps port channel-id service-id output-config
                                         target-mtu fragmentation-enabled?]
                                   :or {fps DEFAULT_FPS
                                        port DEFAULT_PORT
@@ -77,7 +79,8 @@
                                        output-config output-config/default-config
                                        target-mtu DEFAULT_TARGET_MTU
                                        fragmentation-enabled? false}}]
-  {:target-host target-host
+  {:id (or id (str target-host ":" port "/" channel-id))
+   :target-host target-host
    :target-port port
    :frame-provider frame-provider
    :fps fps
@@ -187,6 +190,31 @@
 (def ^:private stream-log-counter (atom 0))
 (def ^:const STREAM_LOG_INTERVAL 300) ;; Log every N frames (~5 seconds at 60fps)
 
+(defn- send-frame!
+  "Encode frame and send its packet(s). Returns the packet count."
+  [engine frame frame-point-count]
+  (let [{:keys [target-host target-port socket service-id channel-id]} engine
+        ;; Get vector of packets (1 if no fragmentation, multiple if fragmented)
+        idn-packets (create-idn-stream-packets engine frame)
+        packet-count (count idn-packets)
+        log-count (swap! stream-log-counter inc)]
+    
+    ;; Send all packets (fragments) for this frame
+    (doseq [idn-packet idn-packets]
+      (let [seq-num (get-next-sequence! engine)
+            hello-packet (hello/wrap-channel-message idn-packet {:sequence seq-num})]
+        
+        ;; Throttled debug logging - only when enabled via dev-config
+        (when (and (dev-config/idn-stream-logging?)
+                   (zero? (mod log-count STREAM_LOG_INTERVAL))
+                   (= service-id (or service-id 0)))
+          (log/debug (format "Streaming [%s:%d svc=%d ch=%d]: frame-points=%d, packets=%d, packet-size=%d, seq=%d"
+                             target-host target-port (or service-id 0) (or channel-id 0)
+                             frame-point-count packet-count (alength hello-packet) seq-num)))
+        
+        (hello/send-packet-to @socket hello-packet (target-address! engine) target-port)))
+    packet-count))
+
 (defn- streaming-loop
   "Main streaming loop - runs in a separate thread.
    Continuously gets frames from the provider and sends them as IDN packets.
@@ -197,9 +225,10 @@
    when multiple engines stream to the same device on different services."
   [engine]
   (let [{:keys [target-host target-port frame-provider fps
-                running? socket stats output-config service-id channel-id
+                running? stats output-config service-id channel-id
                 fragmentation-enabled?]} engine
-        frame-interval-ms (/ 1000.0 fps)]
+        frame-interval-ms (/ 1000.0 fps)
+        error-key [:engine (:id engine)]]
     
     (log/info (format "Streaming loop started: %s:%d service %d channel %d @ %d FPS (%s, fragmentation=%s)"
                       target-host target-port (or service-id 0) (or channel-id 0) fps
@@ -216,26 +245,8 @@
           (let [idn-start-ns (System/nanoTime)
                 frame (frame-provider)
                 frame-point-count (count (or frame []))
-                frame (or frame (t/empty-frame))
-                ;; Get vector of packets (1 if no fragmentation, multiple if fragmented)
-                idn-packets (create-idn-stream-packets engine frame)
-                packet-count (count idn-packets)
-                log-count (swap! stream-log-counter inc)]
-            
-            ;; Send all packets (fragments) for this frame
-            (doseq [idn-packet idn-packets]
-              (let [seq-num (get-next-sequence! engine)
-                    hello-packet (hello/wrap-channel-message idn-packet {:sequence seq-num})]
-                
-                ;; Throttled debug logging - only when enabled via dev-config
-                (when (and (dev-config/idn-stream-logging?)
-                           (zero? (mod log-count STREAM_LOG_INTERVAL))
-                           (= service-id (or service-id 0)))
-                  (log/debug (format "Streaming [%s:%d svc=%d ch=%d]: frame-points=%d, packets=%d, packet-size=%d, seq=%d"
-                                     target-host target-port (or service-id 0) (or channel-id 0)
-                                     frame-point-count packet-count (alength hello-packet) seq-num)))
-                
-                (hello/send-packet-to @socket hello-packet (target-address! engine) target-port)))
+                frame (frame-rules/sanitize-frame (or frame (t/empty-frame)))
+                packet-count (send-frame! engine frame frame-point-count)]
             
             ;; Record IDN streaming time (convert ns to us)
             (let [idn-time-us (/ (- (System/nanoTime) idn-start-ns) 1000.0)]
@@ -251,12 +262,18 @@
                                        (+ (:fragments-sent @stats) packet-count)
                                        (:fragments-sent @stats))
                      :last-frame-time now
-                     :actual-fps actual-fps)))
+                     :actual-fps actual-fps))
+            (output-errors/ok! error-key))
           
-          (catch Exception e
+          (catch Throwable e
             ;; Re-resolve the host on the next frame in case its address changed
             (reset! (:target-address engine) nil)
-            (log/error "Streaming error:" (u/exception->map e))))
+            (output-errors/report! error-key e)
+            ;; Void the DAC's frame buffer instead of leaving the last frame drawn
+            (try
+              (send-frame! engine (t/empty-frame) 0)
+              (catch Throwable e2
+                (output-errors/report! error-key e2)))))
         
         (let [elapsed (- (System/currentTimeMillis) loop-start)
               sleep-time (- frame-interval-ms elapsed)]

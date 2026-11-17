@@ -1,6 +1,8 @@
 (ns laser-show.backend.multi-engine-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [laser-show.backend.multi-engine :as me] 
+            [laser-show.animation.effects :as effects]
+            [laser-show.animation.effects.calibration]
+            [laser-show.backend.multi-engine :as me]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]))
 
@@ -301,3 +303,34 @@
         (state/assoc-in-state! [:playback :active-cues] {})
         (is (nil? (provider)))))
     (is (zero? @ex-count) "Idle frames should not build exceptions")))
+
+
+;; Projector effects (output runtime Phase 2, O2)
+
+(def ^:private failing-calibration-effects
+  [{:id :test-calibration-fails-per-point :name "Test: corner pin fails" :category :calibration
+    :timing :static :parameters []
+    :apply-transducer (fn [_ _ _ _] (map (fn [_] (throw (ex-info "test: corner pin failed" {})))))}
+   {:id :test-calibration-fails-to-build :name "Test: bad calibration" :category :calibration
+    :timing :static :parameters []
+    :apply-transducer (fn [_ _ _ _] (throw (ex-info "test: bad calibration params" {})))}])
+
+(deftest failing-calibration-effect-skips-only-itself-test
+  (run! effects/register-effect! failing-calibration-effects)
+  (try
+    (let [frame [[0.9 0.9 0.0 1.0 1.0] [-0.9 -0.9 0.0 1.0 1.0]]
+          curves {:id (random-uuid) :effect-id :rgb-curves :enabled? true
+                  :params {:r-curve-points [[0.0 0.5] [1.0 1.0]]
+                           :g-curve-points [[0.0 0.0] [1.0 1.0]]
+                           :b-curve-points [[0.0 0.0] [1.0 1.0]]}}
+          apply-projector-effects #'me/apply-projector-effects]
+      (doseq [failing (map :id failing-calibration-effects)]
+        (testing (name failing)
+          (state/assoc-in-state! [:chains :projector-effects :proj-a :items]
+                                 [{:id (random-uuid) :effect-id failing :enabled? true :params {}}
+                                  curves])
+          (let [out (apply-projector-effects frame :proj-a 0 120.0 0 nil)]
+            (is (= [[0.9 0.9] [-0.9 -0.9]] (mapv #(subvec % 0 2) out)) "positions unchanged")
+            (is (every? #(< 0.49 (% 2) 0.51) out) "rgb-curves still raises red to 0.5")))))
+    (finally
+      (swap! effects/!effect-registry #(apply dissoc % (map :id failing-calibration-effects))))))

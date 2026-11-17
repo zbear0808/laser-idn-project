@@ -277,8 +277,8 @@
          t/make-frame)))
 
 (defn wave-frame
-  "Generate a sine wave frame.
-   Params: :amplitude (default 0.3), :frequency (default 2), :num-points (default 64),
+  "Generate a sine wave frame, starting with a blanked point where the wave starts.
+   Params: :amplitude (default 0.3), :frequency (default 2), :num-points (default 64, at least 2),
            :red (1.0), :green (1.0), :blue (1.0)"
   [{:keys [amplitude frequency num-points red green blue]
     :or {amplitude 0.3 frequency 2 num-points 64 red 1.0 green 1.0 blue 1.0}}]
@@ -287,14 +287,15 @@
         b (double blue)
         amplitude' (double amplitude)
         frequency' (double frequency)
-        num-pts (long num-points)
+        num-pts (max 2 (long num-points))
         divisor (double (dec num-pts))]
     (->> (range num-pts)
-         (into [] (map (fn [i]
-                         (let [t (/ (double i) divisor)
-                               x (- t 0.5)
-                               y (* amplitude' (Math/sin (* TWO-PI frequency' t)))]
-                           (t/make-point x y r g b)))))
+         (into [(t/blanked-point -0.5 0.0)]
+               (map (fn [i]
+                      (let [t (/ (double i) divisor)
+                            x (- t 0.5)
+                            y (* amplitude' (Math/sin (* TWO-PI frequency' t)))]
+                        (t/make-point x y r g b)))))
          t/make-frame)))
 
 (defn beam-fan-frame

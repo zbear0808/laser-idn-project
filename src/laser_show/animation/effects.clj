@@ -28,11 +28,11 @@
    Point index is obtained via map-indexed in per-point effect paths,
    and point-count is available in ctx parameter."
   (:require
-   [clojure.tools.logging :as log]
    [laser-show.animation.chains :as chains]
    [laser-show.animation.modulation :as mod]
    [laser-show.common.util :as u]
    [laser-show.animation.keyframes :as kf]
+   [laser-show.backend.output-errors :as oe]
    [laser-show.state.core :as state]
    [laser-show.state.extractors :as ex]))
 
@@ -192,6 +192,13 @@
                      :active? true}])
                param-keys))))
 
+(def ^:private failed-to-build
+  "Stands in for an effect whose transducer failed to build: it passes points through."
+  (map identity))
+
+(defn- effect-error-key [effect-instance]
+  [:effect (or (:id effect-instance) (:effect-id effect-instance))])
+
 (defn make-effect-transducer
   "Create a transducer for a single effect instance.
    
@@ -251,11 +258,24 @@
           ;; When in spatial keyframe mode, params contain synthetic modulator configs
           (try
             (xf-fn time-ms bpm merged-params frame-ctx)
-            (catch Exception e
-              (log/error "make-effect-transducer:" effect-id "failed:" (.getMessage e))
-              (log/debug "  params:" merged-params)
-              ;; Return identity transducer on error
-              (map identity))))))))
+            (catch Throwable e
+              (oe/report! (effect-error-key effect-instance) e)
+              failed-to-build)))))))
+
+(defn- effect-transducers
+  "[effect transducer] for each enabled, known effect of the chain, after
+   flattening nested groups."
+  [chain time-ms bpm trigger-time frame-ctx]
+  (into []
+        (keep (fn [effect]
+                (when-let [xf (make-effect-transducer effect time-ms bpm trigger-time frame-ctx)]
+                  [effect xf])))
+        (chains/flatten-chain (:effects chain))))
+
+(defn- compose-pairs [pairs]
+  (if (empty? pairs)
+    (map identity)
+    (apply comp (map second pairs))))
 
 (defn compose-effect-transducers
   "Compose transducers from a chain of effects.
@@ -272,13 +292,32 @@
    
    Returns: A single composed transducer, or (map identity) for empty chains."
   [chain time-ms bpm trigger-time frame-ctx]
-  (let [effects (:effects chain)
-        ;; Flatten the chain to handle nested groups
-        flat-effects (chains/flatten-chain effects)
-        transducers (keep #(make-effect-transducer % time-ms bpm trigger-time frame-ctx) flat-effects)]
-    (if (empty? transducers)
-      (map identity)
-      (apply comp transducers))))
+  (compose-pairs (effect-transducers chain time-ms bpm trigger-time frame-ctx)))
+
+(defn- apply-pairs-one-by-one
+  "Apply each [effect transducer] on its own, skipping (and reporting) each
+   effect that throws."
+  [frame pairs]
+  (reduce (fn [frame [effect xf]]
+            (if (identical? xf failed-to-build)
+              frame
+              (let [k (effect-error-key effect)]
+                (try
+                  (let [out (into [] xf frame)]
+                    (oe/ok! k)
+                    out)
+                  (catch Throwable e
+                    (oe/report! k e)
+                    frame)))))
+          (into [] frame)
+          pairs))
+
+(defn- apply-effects-one-by-one
+  "The fallback of apply-effect-chain: the chain's effects applied one at a
+   time, each one that throws skipped. Without errors, equal to the composed
+   single pass."
+  [frame chain time-ms bpm trigger-time frame-ctx]
+  (apply-pairs-one-by-one frame (effect-transducers chain time-ms bpm trigger-time frame-ctx)))
 
 
 ;; Effect Chain Application
@@ -288,7 +327,9 @@
   "Apply an effect chain to a frame using transducer composition.
    
    All effect transducers are composed together and applied in a single pass,
-   avoiding intermediate sequence allocations.
+   avoiding intermediate sequence allocations. If that pass throws, the effects
+   are applied one at a time instead, and each effect that throws is skipped
+   and reported to output-errors; the others still apply.
    
    Parameters:
    - frame: LaserFrame (vector of points) to transform
@@ -314,8 +355,16 @@
            frame-ctx {:point-count point-count
                       :timing-ctx timing-ctx}
            ;; Points stay as 5-element vectors throughout - no conversion needed!
-           effect-xf (compose-effect-transducers chain time-ms bpm trigger-time frame-ctx)]
-       (into [] effect-xf frame)))))
+           pairs (effect-transducers chain time-ms bpm trigger-time frame-ctx)]
+       (try
+         (let [out (into [] (compose-pairs pairs) frame)]
+           (when (oe/failing?)
+             (doseq [[effect xf] pairs
+                     :when (not (identical? xf failed-to-build))]
+               (oe/ok! (effect-error-key effect))))
+           out)
+         (catch Throwable _
+           (apply-pairs-one-by-one frame pairs)))))))
 
 
 
