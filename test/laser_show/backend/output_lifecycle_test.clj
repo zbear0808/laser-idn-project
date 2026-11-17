@@ -361,6 +361,19 @@
       (finally
         (remove-watch (state/get-context-atom) watch-key)))))
 
+(deftest status-shows-the-fps-the-projector-draws-test
+  (init-with-projectors! {:a (assoc (projector 1 true) :scan-rate 25000)})
+  (let [status #(get-in (state/get-raw-state) [:backend :streaming :status :projectors :a])
+        lit (vec (for [i (range 1000)] [(- (/ (double i) 1000) 0.5) 0.0 1.0 1.0 1.0]))]
+    (with-redefs-fn {#'me/projector-frame (constantly lit)}
+      (fn []
+        (dispatch! {:event/type :idn/start-multi-streaming})
+        (is (dac/wait-for! #(:scan-limited? (status)) 3000) (pr-str (status)))
+        (let [{:keys [state fps]} (status)]
+          (is (= :streaming state))
+          (is (< 24.0 fps 26.0) "1 001 samples at 25 000 pts/s: 25 fps"))
+        (is (stop-streaming!))))))
+
 
 ;; Each engine on its own thread (invariant 6); stop signals all first (invariant 7)
 

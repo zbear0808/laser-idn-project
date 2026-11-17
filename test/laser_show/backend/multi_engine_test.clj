@@ -132,6 +132,12 @@
       (is (= 0 (:service-id engine)) "Engine should default to service-id 0")
       (is (= 0 (:channel-id engine)) "Engine should default to channel-id 0"))))
 
+(deftest engine-uses-the-projector-scan-rate-test
+  (let [scan-rate #(:scan-rate (me/create-engine-for-projector :test-proj (merge {:host "192.168.1.100"} %)))]
+    (is (= 40000 (scan-rate {:scan-rate 40000})))
+    (is (= 25000 (scan-rate {})) "a projector without one gets the default")
+    (is (= 1000 (scan-rate {:scan-rate 10})) "clamped to the range")))
+
 (deftest multiple-engines-get-unique-channel-ids-test
   (testing "Multiple engines for same host get unique channel IDs based on service-id"
     ;; This tests the fix for the bug where all engines shared channel 0,

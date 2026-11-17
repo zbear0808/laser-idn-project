@@ -429,3 +429,31 @@
       (is (= 12 (stream/packet-size-without-config 0 config)) "Empty frame: 8 + 4 = 12")
       (is (= 18 (stream/packet-size-without-config 1 config)) "1 point: 8 + 4 + 6 = 18")
       (is (= 24 (stream/packet-size-without-config 2 config)) "2 points: 8 + 4 + 12 = 24"))))
+
+
+;; Frame duration from the scan rate (plans/2026-11-16-output-runtime/05 §7)
+
+
+(deftest scan-duration-examples-test
+  (testing "round(10^6 × (samples − 1) / scan rate): the first sample isn't timed (Stream §6.2)"
+    (doseq [[samples rate expected] [[2 25000 40]
+                                     [11 25000 400]
+                                     [418 25000 16680]
+                                     [501 25000 20000]
+                                     [1001 25000 40000]
+                                     [3001 25000 120000]
+                                     [3001 50000 60000]
+                                     [3 30000 67]]]
+      (is (= expected (stream/scan-duration-us samples rate))
+          (str samples " samples at " rate " pts/s"))))
+  (testing "at least 1 µs, at most what the 24-bit field holds"
+    (is (= 1 (stream/scan-duration-us 1 25000)))
+    (is (= 0xFFFFFF (stream/scan-duration-us 20000 1000)))))
+
+(deftest clamp-scan-rate-test
+  (is (= 25000 stream/DEFAULT_SCAN_RATE))
+  (doseq [[rate expected] [[25000 25000] [1000 1000] [100000 100000]
+                           [500 1000] [0 1000] [-5 1000] [200000 100000]
+                           [27500.4 27500]
+                           [nil nil] ["25000" nil] [##NaN nil] [##Inf nil]]]
+    (is (= expected (stream/clamp-scan-rate rate)) (pr-str rate))))

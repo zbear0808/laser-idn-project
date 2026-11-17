@@ -54,8 +54,12 @@
    :packets-sent 0
    :fragments-sent 0
    :last-send-ns nil
+   :frame-duration-us 0
    :interval-us 0.0
-   :send-fps 0.0})
+   :frame-time-us 0.0
+   :send-fps 0.0
+   :draw-fps 0.0
+   :scan-limited? false})
 
 (defn create-engine
   "Create a new streaming engine configuration.
@@ -70,6 +74,9 @@
      - :channel-id - IDN channel ID for message header (default 0)
      - :service-id - IDN service ID for config header (default 0) - targets specific laser output
      - :output-config - OutputConfig for bit depth (default 8-bit color, 16-bit XY)
+     - :scan-rate - Points per second the projector draws (default
+       idn-stream/DEFAULT_SCAN_RATE, clamped by idn-stream/clamp-scan-rate). It
+       sets each frame's duration, so the galvos never run faster than it
      - :target-mtu - Target MTU for fragmentation (default 1400)
      - :fragmentation-enabled? - Enable application-layer fragmentation (default false).
        Off by default: frames up to the 0xFF00 message limit are sent in one message
@@ -81,7 +88,7 @@
    
    Returns an engine map that can be started with start!"
   [target-host frame-provider & {:keys [id fps port channel-id service-id output-config
-                                        target-mtu fragmentation-enabled?]
+                                        scan-rate target-mtu fragmentation-enabled?]
                                   :or {fps DEFAULT_FPS
                                        port DEFAULT_PORT
                                        channel-id DEFAULT_CHANNEL_ID
@@ -97,6 +104,11 @@
    :channel-id channel-id
    :service-id service-id
    :output-config output-config
+   :scan-rate (or (idn-stream/clamp-scan-rate scan-rate) idn-stream/DEFAULT_SCAN_RATE)
+   ;; Samples that fit one message, with and without config. A frame is cut to
+   ;; this (stream/frame->packet), so its duration counts only what is sent
+   :max-samples {true (idn-stream/max-points-per-message output-config true)
+                 false (idn-stream/max-points-per-message output-config false)}
    :target-mtu target-mtu
    :fragmentation-enabled? fragmentation-enabled?
    :packet-buffer (idn-stream/create-packet-buffer)
@@ -139,25 +151,35 @@
 ;; Streaming Loop
 
 
+(defn- wire-duration-us
+  "How long the DAC takes to draw frame, in µs. An empty frame lasts one frame
+   interval. Otherwise it's the samples that go on the wire at the engine's
+   scan rate: all of them when fragmentation splits the frame, else at most
+   one message's worth (stream/frame->packet cuts the rest)."
+  ^long [engine frame include-config?]
+  (let [n (count frame)]
+    (if (zero? n)
+      (idn-stream/frame-duration-us (:fps engine))
+      (idn-stream/scan-duration-us
+       (if (:fragmentation-enabled? engine)
+         n
+         (min n (long (get (:max-samples engine) (boolean include-config?)))))
+       (:scan-rate engine)))))
+
 (defn- create-idn-stream-packets
-  "Create IDN-Stream packet(s) for the given frame.
+  "Create IDN-Stream packet(s) for the given frame, with the channel
+   configuration when include-config?, each saying it takes duration-us to draw.
    Returns a vector of packets (usually 1, more if fragmented).
-   Includes configuration periodically per spec requirements.
    Uses the engine's output-config for bit depth settings.
    Passes service-id to target the correct physical output on multi-head DACs."
-  [engine frame]
+  [engine frame include-config? duration-us]
   (let [buf (:packet-buffer engine)
         channel-id (:channel-id engine)
         service-id (:service-id engine)
         timestamp-us (current-timestamp-us engine)
-        duration-us (idn-stream/frame-duration-us (:fps engine))
         output-cfg (:output-config engine)
         target-mtu (:target-mtu engine)
-        fragmentation-enabled? (:fragmentation-enabled? engine)
-        include-config? (should-resend-config? engine)]
-    
-    (when include-config?
-      (reset! (:last-config-ns engine) (System/nanoTime)))
+        fragmentation-enabled? (:fragmentation-enabled? engine)]
     
     ;; Check if fragmentation is enabled and needed
     (if (and fragmentation-enabled?
@@ -196,13 +218,19 @@
 (def ^:const STREAM_LOG_INTERVAL 300) ;; Log every N frames (~5 seconds at 60fps)
 
 (defn- send-frame!
-  "Encode frame and send its packet(s). Returns the packet count."
+  "Encode frame and send its packet(s), with the channel configuration when it
+   is due (should-resend-config?). Returns [packet-count duration-us]."
   [engine frame frame-point-count]
   (let [{:keys [target-host target-port socket service-id channel-id]} engine
+        include-config? (should-resend-config? engine)
+        duration-us (wire-duration-us engine frame include-config?)
         ;; Get vector of packets (1 if no fragmentation, multiple if fragmented)
-        idn-packets (create-idn-stream-packets engine frame)
+        idn-packets (create-idn-stream-packets engine frame include-config? duration-us)
         packet-count (count idn-packets)
         log-count (swap! stream-log-counter inc)]
+    
+    (when include-config?
+      (reset! (:last-config-ns engine) (System/nanoTime)))
     
     ;; Send all packets (fragments) for this frame
     (doseq [idn-packet idn-packets]
@@ -218,7 +246,7 @@
                              frame-point-count packet-count (alength hello-packet) seq-num)))
         
         (hello/send-packet-to @socket hello-packet (target-address! engine) target-port)))
-    packet-count))
+    [packet-count duration-us]))
 
 (defn- next-deadline
   "When the frame after the one due at deadline should start: one interval
@@ -231,18 +259,27 @@
       next)))
 
 (defn- update-stats
-  "Stats after a frame went out at now-ns in packet-count packets.
-   :send-fps is frames sent per second on the monotonic clock, smoothed over
-   about 10 frames (an EMA); target-us is the send interval assumed before
-   the first one is measured."
-  [{:keys [frames-sent packets-sent fragments-sent last-send-ns interval-us] :as stats}
-   now-ns packet-count target-us]
+  "Stats after a frame of duration-us went out at now-ns in packet-count
+   packets. The rates are smoothed over about 10 frames (an EMA); target-us is
+   the send interval assumed before the first one is measured.
+   - :send-fps: frames sent per second, on the monotonic clock;
+   - :draw-fps: new frames the projector draws per second. It draws each frame
+     for its duration, then the newest one it has (Stream §3.3), so this is
+     10^6 / max(send interval, duration);
+   - :scan-limited?: frames take more than 2 % longer to draw than the send
+     interval, so the scan rate, not the send rate, sets :draw-fps."
+  [{:keys [frames-sent packets-sent fragments-sent last-send-ns interval-us frame-time-us] :as stats}
+   now-ns duration-us packet-count target-us]
   (let [interval (if last-send-ns
                    (/ (- now-ns last-send-ns) 1000.0)
                    (double target-us))
-        interval' (if (pos? frames-sent)
-                    (+ (* 0.9 interval-us) (* 0.1 interval))
-                    interval)]
+        frame-time (max interval (double duration-us))
+        smooth (fn [old x]
+                 (if (pos? frames-sent)
+                   (+ (* 0.9 old) (* 0.1 x))
+                   x))
+        interval' (smooth interval-us interval)
+        frame-time' (smooth frame-time-us frame-time)]
     (assoc stats
            :frames-sent (inc frames-sent)
            :packets-sent (+ packets-sent packet-count)
@@ -250,8 +287,12 @@
                              (+ fragments-sent packet-count)
                              fragments-sent)
            :last-send-ns now-ns
+           :frame-duration-us duration-us
            :interval-us interval'
-           :send-fps (/ 1e6 interval'))))
+           :frame-time-us frame-time'
+           :send-fps (/ 1e6 interval')
+           :draw-fps (/ 1e6 frame-time')
+           :scan-limited? (> frame-time' (* 1.02 interval')))))
 
 (defn- streaming-loop
   "Main streaming loop - runs in a separate thread.
@@ -300,12 +341,12 @@
                 produced (System/nanoTime)
                 _ (await-gap!)
                 send-start (System/nanoTime)
-                packet-count (send-frame! engine frame frame-point-count)
+                [packet-count duration-us] (send-frame! engine frame frame-point-count)
                 sent (System/nanoTime)]
             (vreset! last-sent sent)
             ;; IDN streaming time (µs): producing plus sending, without the wait between
             (profiler/record-idn-streaming! (/ (+ (- produced produce-start) (- sent send-start)) 1000.0))
-            (swap! stats update-stats sent packet-count target-us)
+            (swap! stats update-stats sent duration-us packet-count target-us)
             (output-errors/ok! error-key))
           
           (catch Throwable e
@@ -428,6 +469,7 @@
   @(:running? engine))
 
 (defn get-stats
-  "Current streaming statistics: the counts and :send-fps (see update-stats)."
+  "Current streaming statistics: the counts, :send-fps, :draw-fps,
+   :scan-limited? and :frame-duration-us (see update-stats)."
   [engine]
   @(:stats engine))

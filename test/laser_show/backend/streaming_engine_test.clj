@@ -131,7 +131,7 @@
         frames (fn [intervals-us]
                  (reduce (fn [[stats t] dt]
                            (let [t (+ t (* 1000 dt))]
-                             [(update-stats stats t 1 target-us) t]))
+                             [(update-stats stats t 400 1 target-us) t]))
                          [(se/get-stats (se/create-engine "127.0.0.1" (constantly []))) 0]
                          intervals-us))
         [first-frame] (frames [0])
@@ -144,3 +144,31 @@
     (is (< (Math/abs (- 60.0 (:send-fps at-60))) 0.1))
     (is (< (Math/abs (- 48.0 (:send-fps at-48))) 0.2) "follows a slower rate within about 10 frames")
     (is (= 90 (:packets-sent at-48)))))
+
+(deftest stats-report-the-fps-the-projector-draws-test
+  (let [run (fn [interval-us duration-us]
+              (first (reduce (fn [[stats t] _]
+                               (let [t (+ t (* 1000 interval-us))]
+                                 [(update-stats stats t duration-us 1 16666) t]))
+                             [(se/get-stats (se/create-engine "127.0.0.1" (constantly []))) 0]
+                             (range 60))))
+        near? (fn [expected actual] (< (Math/abs (- expected (double actual))) 0.2))]
+    (testing "frames that take 40 ms to draw: 25 fps, set by the scan rate"
+      (let [s (run 16667 40000)]
+        (is (near? 25.0 (:draw-fps s)))
+        (is (near? 60.0 (:send-fps s)))
+        (is (true? (:scan-limited? s)))
+        (is (= 40000 (:frame-duration-us s)))))
+    (testing "frames drawn in 0.4 ms are repeated: the projector gets a new one at the send rate"
+      (let [s (run 16667 400)]
+        (is (near? 60.0 (:draw-fps s)))
+        (is (false? (:scan-limited? s)))))
+    (testing "an engine that only manages 48 fps"
+      (let [s (run 20833 400)]
+        (is (near? 48.0 (:draw-fps s)))
+        (is (near? 48.0 (:send-fps s)))
+        (is (false? (:scan-limited? s)))))
+    (testing "a frame that just fits the interval isn't scan-limited"
+      (let [s (run 16667 16680)]
+        (is (near? 60.0 (:draw-fps s)))
+        (is (false? (:scan-limited? s)))))))

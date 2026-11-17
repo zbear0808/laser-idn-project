@@ -257,3 +257,58 @@
       (Thread/sleep 2000)
       (let [n (count (dac/frames *dac* :since-ns since))]
         (is (<= 118 n 122) (str n " frames in 2 s"))))))
+
+
+;; Phase 5: the frame duration follows the projector's scan rate
+
+(defn- lit-points
+  "n lit points along a line; on the wire they gain a dark first sample."
+  [n]
+  (vec (for [i (range n)] [(- (/ (double i) n) 0.5) 0.0 1.0 1.0 1.0])))
+
+(defn- frames-from [port]
+  (filterv (comp #{port} :port) (dac/frames *dac*)))
+
+(deftest duration-follows-scan-rate-test
+  (testing "at the default 25 000 pts/s (p10)"
+    (let [points (atom (lit-points 10))
+          engine (start-engine! #(deref points) :output-config oc/standard-config)
+          port (port-of engine)]
+      (is (dac/wait-for! #(<= 3 (count (frames-from port))) 3000))
+      (is (every? #(= [11 400] [(count (:samples %)) (:duration-us %)]) (frames-from port))
+          "10 lit points go out as 11 samples, drawn in 400 µs")
+      (reset! points (lit-points 1000))
+      (is (dac/wait-for! #(<= 3 (count (filter (comp #{1001} count :samples) (frames-from port)))) 3000))
+      (is (every? #(= 40000 (:duration-us %)) (filter (comp #{1001} count :samples) (frames-from port)))
+          "1 001 samples take 40 ms")
+      (se/stop! engine)))
+  (testing "the projector's own scan rate"
+    (let [engine (start-engine! (constantly (lit-points 10)) :scan-rate 50000
+                                :output-config oc/standard-config)
+          port (port-of engine)]
+      (is (dac/wait-for! #(seq (frames-from port)) 3000))
+      (is (= 200 (:duration-us (first (frames-from port)))))
+      (se/stop! engine)))
+  (testing "an empty frame keeps the frame interval"
+    (let [engine (start-engine! (constantly []))
+          port (port-of engine)]
+      (is (dac/wait-for! #(seq (frames-from port)) 3000))
+      (is (= 16666 (:duration-us (first (frames-from port)))))
+      (se/stop! engine))))
+
+(deftest draw-fps-follows-the-scan-rate-test
+  (testing "1 001 samples at 25 000 pts/s take 40 ms to draw: 25 fps, set by the scan rate"
+    (let [engine (start-engine! (constantly (lit-points 1000)) :output-config oc/standard-config)]
+      (is (dac/wait-for! #(< 40 (:frames-sent (se/get-stats engine))) 3000))
+      (let [{:keys [draw-fps send-fps scan-limited?]} (se/get-stats engine)]
+        (is (< 24.0 draw-fps 26.0) (str "draw-fps " draw-fps))
+        (is (< 40.0 send-fps) "the engine still sends at its own rate")
+        (is (true? scan-limited?)))
+      (se/stop! engine)))
+  (testing "11 samples are drawn faster than they're sent: the projector gets the send rate"
+    (let [engine (start-engine! (constantly (lit-points 10)) :output-config oc/standard-config)]
+      (is (dac/wait-for! #(< 40 (:frames-sent (se/get-stats engine))) 3000))
+      (let [{:keys [draw-fps send-fps scan-limited?]} (se/get-stats engine)]
+        (is (= draw-fps send-fps))
+        (is (false? scan-limited?)))
+      (se/stop! engine))))

@@ -245,7 +245,8 @@
                                   :port port
                                   :channel-id service-id
                                   :service-id service-id
-                                  :output-config output-cfg)))))
+                                  :output-config output-cfg
+                                  :scan-rate (:scan-rate projector))))))
 
 (defn create-engines
   "Create streaming engines for all enabled projectors.

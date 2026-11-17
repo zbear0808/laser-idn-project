@@ -172,17 +172,22 @@
 (defn- engine-status [e errors id]
   (let [error (some #(:message (get errors [% id])) [:engine :provider :projector-effects])
         ^Thread thread @(:thread e)
-        {:keys [frames-sent send-fps]} (engine/get-stats e)]
+        {:keys [frames-sent draw-fps scan-limited?]} (engine/get-stats e)]
     (cond
       error {:state :error :error error}
       (and thread (not (.isAlive thread))) {:state :error :error "The streaming thread ended"}
       (zero? frames-sent) {:state :starting}
-      :else {:state :streaming :fps (/ (Math/round (* 10.0 (double send-fps))) 10.0)})))
+      :else (cond-> {:state :streaming :fps (/ (Math/round (* 10.0 (double draw-fps))) 10.0)}
+              scan-limited? (assoc :scan-limited? true)))))
 
 (defn status
   "Pure-data status for app state, or nil when stopped with nothing running:
    {:engines n :wanted m :pending? bool
-    :projectors {id {:state :streaming|:starting|:error :fps 59.8 :error \"…\"}}}"
+    :projectors {id {:state :streaming|:starting|:error :fps 59.8 :scan-limited? true
+                     :error \"…\"}}}
+   :fps is how many new frames the projector draws per second
+   (streaming-engine/update-stats :draw-fps); :scan-limited? is there when its
+   scan rate, not the send rate, sets that."
   []
   (let [registry @!registry
         {:keys [wanted failed busy?]} @!intent

@@ -263,6 +263,23 @@
       (is (= "Updated Name" updated-name) "Should update name")
       (is (= 7256 updated-port) "Should update port"))))
 
+(deftest scan-rate-is-clamped-test
+  (doseq [[rate expected] [[25000 25000] [40000 40000] [500 1000] [200000 100000]
+                           [27500.4 27500]
+                           [nil 30000] ["25000" 30000] [##NaN 30000]]]
+    (testing (pr-str rate)
+      (let [event {:event/type :projectors/update-settings
+                   :projector-id test-projector-id
+                   :updates {:scan-rate rate :name "Renamed"}
+                   :state (assoc-in state-with-projector [:projectors test-projector-id :scan-rate] 30000)}
+            projector (get-in (projectors/handle event) [:state :projectors test-projector-id])]
+        (is (= expected (:scan-rate projector)) "clamped to 1 000-100 000; a non-number is dropped")
+        (is (= "Renamed" (:name projector)) "the other updates still apply")))))
+
+(deftest new-projectors-default-to-25k-test
+  (let [event {:event/type :projectors/add-manual :name "Manual" :host "10.0.0.5" :state sample-state}]
+    (is (= [25000] (map :scan-rate (vals (get-in (projectors/handle event) [:state :projectors])))))))
+
 
 ;; Engine Refresh on Projector Enable/Disable Tests
 ;;

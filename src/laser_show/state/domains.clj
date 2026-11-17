@@ -264,7 +264,8 @@
    - :unit-id - Hardware unit ID from discovery
    - :enabled? - Whether to send output to this projector
    - :output-config - Bit depth settings
-   - :scan-rate - Points per second (pps) for this projector
+   - :scan-rate - Points per second (pps) this projector draws: 25 000 for new
+     projectors, 1 000-100 000. It sets each frame's duration on the wire
    - :zone-groups - Vector of zone group IDs this projector belongs to (e.g., [:all :left])
    - :tags - Set of optional tags (:graphics, :crowd-scanning) for categorization
    - :status - Runtime connection status (not persisted)"

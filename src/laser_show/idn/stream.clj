@@ -539,3 +539,40 @@
   "Calculate frame duration in microseconds for given FPS"
   [fps]
   (long (/ 1000000 fps)))
+
+
+;; Scan rate
+
+
+(def ^:const DEFAULT_SCAN_RATE
+  "Points per second a projector draws unless it is set otherwise."
+  25000)
+
+(def ^:const MIN_SCAN_RATE
+  "Slowest scan rate a projector can be set to. At this rate the largest
+   message (about 9 300 samples at 16/8) still takes less time than the 24-bit
+   duration field holds (16.7 s)."
+  1000)
+
+(def ^:const MAX_SCAN_RATE
+  "Fastest scan rate a projector can be set to."
+  100000)
+
+(defn clamp-scan-rate
+  "rate (pts/s) rounded and clamped to MIN_SCAN_RATE-MAX_SCAN_RATE, or nil
+   unless rate is a finite number."
+  [rate]
+  (when (and (number? rate) (Double/isFinite (double rate)))
+    (-> (Math/round (double rate))
+        (max MIN_SCAN_RATE)
+        (min MAX_SCAN_RATE))))
+
+(defn scan-duration-us
+  "How long a frame of samples takes to draw at scan-rate (pts/s), in µs.
+   The first sample isn't timed (Stream §6.2), so this is
+   round(10^6 × (samples − 1) / scan-rate), at least 1 and at most what the
+   24-bit duration field holds."
+  ^long [^long samples ^long scan-rate]
+  (-> (Math/round (/ (* 1e6 (dec samples)) scan-rate))
+      (max 1)
+      (min 0xFFFFFF)))

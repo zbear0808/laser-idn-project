@@ -22,7 +22,8 @@
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
             [laser-show.events.helpers :as h]
-            [laser-show.common.util :as u]))
+            [laser-show.common.util :as u]
+            [laser-show.idn.stream :as stream]))
 
 
 (def DEFAULT_PROJECTOR_EFFECTS
@@ -86,7 +87,7 @@
    
    Throws: IllegalArgumentException if host is nil or blank"
   [{:keys [name host port service-id service-name unit-id zone-groups tags scan-rate enabled?]
-    :or {port 7255 zone-groups [:all] tags #{} scan-rate 30000 enabled? false}}]
+    :or {port 7255 zone-groups [:all] tags #{} scan-rate stream/DEFAULT_SCAN_RATE enabled? false}}]
   {:pre [(and host (not (str/blank? host)))]}
   {:name name
    :host host
@@ -258,11 +259,20 @@
   [port]
   (and (int? port) (<= 1 port 65535)))
 
+(defn- clamp-scan-rate-update
+  "updates with its :scan-rate clamped (stream/clamp-scan-rate), or without
+   it when it isn't a number."
+  [updates]
+  (if-let [rate (stream/clamp-scan-rate (:scan-rate updates))]
+    (assoc updates :scan-rate rate)
+    (dissoc updates :scan-rate)))
+
 (defn- handle-projectors-update-settings
-  "Update projector settings (name, host, port, enabled, output-config).
+  "Update projector settings (name, host, port, scan rate, enabled, output-config).
    
    A nil or blank host and a port outside 1-65535 are ignored (the other
-   updates still apply), so a half-cleared field can't reach an engine."
+   updates still apply), so a half-cleared field can't reach an engine. A scan
+   rate is clamped to 1 000-100 000 pts/s; one that isn't a number is ignored."
   [{:keys [projector-id updates state]}]
   (let [updates (cond-> updates
                   (and (contains? updates :host)
@@ -271,7 +281,10 @@
                   (dissoc :host)
 
                   (and (contains? updates :port) (not (valid-port? (:port updates))))
-                  (dissoc :port))]
+                  (dissoc :port)
+
+                  (contains? updates :scan-rate)
+                  clamp-scan-rate-update)]
     {:state (update-in state [:projectors projector-id] merge updates)}))
 
 
