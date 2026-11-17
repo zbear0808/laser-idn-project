@@ -1,7 +1,7 @@
 # Phase 2 — Nothing unsafe reaches the wire
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** Proposed; decisions answered 2026-11-16 (O2: skip only the failing effect, O3: filter bad points, O4: no switch). Needs Phase 1   **Last verified against:** `70e049e`
+**Status:** Done (2026-11-16, `645da70` on `master`). O2: skip only the failing effect, O3: filter bad points, O4: no switch; differences from the plan in §10   **Last verified against:** `645da70`
 **Supersedes / Superseded by:** none   **Related findings:** O-2 to O-7 (`00-overview.md` §2); review 04 findings 8, 16, QW6; 03 findings 6, 7, 9, 10, MR4
 
 When something goes wrong while a frame is produced, today's code makes it worse than it needs to be:
@@ -46,7 +46,7 @@ There's no single last stage before the encoder that owns "this frame is valid".
 | `create-idn-stream-packets` (`streaming_engine.clj:136-172`) | The sanitiser runs right before it, in the engine, so it covers every provider |
 | Fake DAC (Phase 1) | The wire tests below |
 
-## 4. Changes per namespace
+## 4. Changes per namespace (as planned; the differences are in §10)
 
 - `laser-show.idn.frame-rules` (NEW, pure): `sanitize-frame [frame] → frame`.
   1. It drops every point with a `nil` or non-finite value in x, y, r, g or b (O3).
@@ -128,7 +128,7 @@ Logging for one key:
 5. The engine thread and the preview timer survive any `Throwable` from producing a frame.
 6. Each error key logs at most once per 10 s.
 
-## 8. Tests
+## 8. Tests (as planned; the list as built is in §10)
 
 Each probe first becomes a failing test.
 
@@ -181,3 +181,67 @@ Run: `clj -M:mac-arm:test frame-rules engine-wire effects multi-engine calibrati
 > **DECISION O4 — A master output switch?** *(answered 2026-11-16: C)*
 >
 > **Your answer:** "Let's not add a separate laser output button. I'm fine with how it currently works." No switch. The blackout trigger keeps stopping the transport.
+
+---
+
+## 10. As built (2026-11-16)
+
+Committed as `645da70` on top of `2c23e63` (Phase 1). No UI, event or lifecycle changes. This doc stays until the whole folder is done (`.agents/rules/planning-guide.md` rule 11).
+
+**Differences from the plan above**
+
+| Plan | As built | Why |
+|---|---|---|
+| `report!` logs "WARN with the stack for a new key or message, then at most every 10 s with a count" (§4) | A new key logs its stack at once. A new message for a key that is already failing waits for that key's next 10 s slot, then logs with the stack; an unchanged message logs "still failing: N times in the last 10 s (message)" | The two rules conflict with invariant 6 (at most once per 10 s per key) when two messages alternate. The invariant wins |
+| `output-errors`: `report!`, `ok!`, `snapshot` (§4) | Also `failing?` (any key failing) and `clear!` (for tests); a private `now-ms` is the clock seam the throttle test redefines | `apply-effect-chain` checks `failing?` before it clears effect keys, so a run with no errors does no per-effect work |
+| Key `[:engine pid]` | `[:engine id]`, where `id` is a NEW `:id` option of `se/create-engine`. `create-engine-for-projector` passes the projector id; other engines default to `"host:port/channel"` | The engine knew no projector id |
+| Key `[:effect (:id effect)]` | Falls back to the `:effect-id` when an instance has no `:id` | Some chains built in code and tests have no ids |
+| When an effect key recovers (not specified) | `ok!` for an effect only after its transducer was applied without error: after a composed pass that succeeded, or after it succeeded on its own in the fallback. A transducer that failed to build is a `failed-to-build` sentinel (still `(map identity)`) and never counts as recovered | Clearing on a successful build would flap a per-point failure between "recovered" and "failing" every frame |
+| `ok!` on success "for the engine" (§4) | Also for `[:provider pid]`, `[:projector-effects pid]`, `[:item-effects id]`, `[:global-effects]` and `[:preview]` | So every key logs its recovery once |
+| The provider's catches catch `Throwable` (§4) | The two catches (`ExceptionInfo`, `Exception`) became one `catch Throwable`. The provider body moved, unchanged, into a private `projector-frame` (`multi_engine.clj:142`) so the provider can call `ok!` after it | Most of the `multi_engine.clj` diff is that re-indent (`git diff -w` shows the real change) |
+| `rgb-curves`: blanked points stay blanked (§4) | That, and a NaN channel of a lit point stays NaN instead of becoming LUT entry 0 (`calibration.clj:18`) | §4 relies on "a NaN colour stays NaN through calibration"; with a NaN red and a lit green the point isn't blanked, so the old lookup would have turned the NaN into a finite, lit value the sanitiser keeps |
+| "When nothing fails the output is exactly what it is today" (invariant 4) | Holds for effect chains (`chain-without-errors-is-unchanged-test`) and for valid frames, which the sanitiser leaves alone: a dark first point and at least 2 finite points encode byte for byte as before (the Phase 1 `samples-match-quantized-input-test` is unchanged). A frame that starts lit gains one dark sample, and a single point is sent twice: that is the O3 rule, not an error path | – |
+| `wave-frame` starts dark (§4) | A blanked point at the wave's start, then the wave: 65 points by default instead of 64 | The same pattern as the other generators (`generators.clj:60,87,118`) |
+| A failed send (§7) | The empty-frame retry is sent with the next sequence number, so the DAC sees a gap of one where the failed packet was | The sequence number is taken before the send. Phase 1 invariant 1 (no gaps) still holds while nothing fails |
+| Probes p1 and p8 "show the new behaviour" | p1's four encode lines call `stream/frame->packet` directly, and the encoder is unchanged by design (the sanitiser runs in the engine), so they print the same; its `blanked?` line now prints `true`. p8's chain holds only the failing effect, so skipping just that effect still yields the input frame and it prints `true` before and after | The new behaviour is pinned by `nan-point-is-filtered-test` (the engine path) and `failing-calibration-effect-skips-only-itself-test` (a failing effect followed by `rgb-curves`, which still applies) |
+| Test effects in `effects-test` and `multi-engine-test` | Registered for the test and removed from `!effect-registry` afterwards | `effects-coverage-test/every-effect-runs-with-defaults-test` runs every registered effect and would run the failing ones |
+
+**Behaviour worth knowing**
+- Logging per error key: one WARN with the stack, then at most one WARN per 10 s, then one INFO "recovered after N failures". Nothing on the real-time threads logs at ERROR any more for these paths.
+- `apply-effect-chain` (`effects.clj:326`) still composes the chain into one pass. Only when that pass throws does it apply the same transducers one at a time (`apply-pairs-one-by-one`, `:297`), skipping each one that throws. The transducers are reused, not rebuilt, so a build failure is reported once per frame, not twice.
+- When the effect chain itself survives but something around it throws (the flattening, the state lookup), the chain-level fallbacks are unchanged: the item's input frame, the frame without global effects, the frame without projector effects, or an empty frame from the provider.
+- The engine loop (`streaming_engine.clj:241-281`) runs provider → `sanitize-frame` → encode → send inside `catch Throwable`; on an error it reports and sends an empty frame, so a DAC no longer keeps drawing a stale frame. Pacing still runs after the `try`, unchanged (Phase 5).
+
+**Tests** (all new; the red run is noted for each)
+- `laser-show.idn.frame-rules-test`: `sanitize-examples-test` (the §7 table), `sanitize-invariants-test` (2,000 generated frames with NaN, ±Inf and `nil`: finite, dark first, ≥ 2 samples, idempotent, never moves, lights or darkens a point, keeps every good point in order). Written before the namespace existed; checked red afterwards with `sanitize-frame` as identity (today's behaviour): 7,592 failures.
+- `laser-show.backend.engine-wire-test`: `nan-point-is-filtered-test` (p1), `nil-point-is-filtered-test` (p2), `error-in-provider-keeps-the-engine-alive-test` (p3; also checks the empty frames, the `[:engine id]` key and its recovery), `first-sample-is-dark-test`, `send-error-keeps-the-engine-alive-test` (an `AssertionError` from one send). All five failed on assertions first.
+- `laser-show.animation.effects-test`: `failing-effect-skips-only-itself-test` (also inside a group), `effect-that-fails-to-build-is-skipped-test`, `chain-without-errors-is-unchanged-test`. Failed first (the throw escaped; 5 ERROR lines; no fallback).
+- `laser-show.backend.multi-engine-test/failing-calibration-effect-skips-only-itself-test` (p8, both failure kinds). Failed first.
+- `laser-show.animation.effects.calibration-test/rgb-curves-keep-blanked-points-dark-test` (p9, NEW ns). Failed first.
+- `laser-show.animation.types-test/nan-colour-is-not-lit-test` (NEW ns). Failed first.
+- `laser-show.animation.generators-test/wave-frame-starts-dark-test`, `/one-point-wave-is-finite-test` (NEW ns). Failed first.
+- `laser-show.services.frame-service-test/preview-timer-survives-an-error-test` (p11). Failed first.
+- `laser-show.backend.output-errors-test/logs-once-then-throttled-test`, `/ok-logs-recovery-once-test` (NEW ns). Written before the namespace existed.
+
+**Probes** (`probes/output_probes_test.clj`, unchanged; before = `5a85452`, after = `645da70`)
+
+| Probe | Before | After |
+|---|---|---|
+| p1 | NaN → `[0 0 255 255 255]`; ±Inf → `[32767 -32767 255 255 255]`; NaN red → `[16383 16383 0 255 255]`; `nil` throws NPE; `blanked?` of all-NaN `false` | The four encoder lines are the same (encoder unchanged, see above); `blanked?` of all-NaN `true` |
+| p2 | 28 frames asked for, 5 received | 28 asked for, **27 received** (the bad point is dropped, the rest is sent) |
+| p3 | thread alive? `false`, 3 frames | thread alive? **`true`**, 21 frames (empty while the provider fails) |
+| p8 | `true`, `true` | `true`, `true` (see above) |
+| p9 | `[0.5 0.5 0.1 0.0 0.0]`, blanked? `false` | **`[0.5 0.5 0.0 0.0 0.0]`, blanked? `true`** |
+| p11 | 3 ticks in 500 ms | **16 ticks** in 500 ms |
+| p4–p7, p10, p12, p13 | as in `00-overview.md` §1 | the same results (p12 50.0 fps, p13 49.2 vs 59.8 fps: run-to-run noise) |
+
+**Verification, 2026-11-16, macOS arm64, JDK 25.0.5, headless**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test frame-rules engine-wire effects multi-engine calibration types-test generators frame-service output-errors fake-dac output-lifecycle streaming-engine` | 114 tests, 17,803 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 750 tests, 31,012 assertions, 0 failures (732 after Phase 1, 720 before Phase 1) |
+| `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | 43 tests, 142 assertions, 0 failures |
+| `clj -M:kondo --lint src test --parallel --fail-level error` | 0 errors, 22 warnings, none new and none in a touched file |
+
+Not run locally: the Linux and Windows suites. They run in CI.

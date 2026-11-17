@@ -1,7 +1,7 @@
 # Phase 1 — A fake DAC, and tests of the wire behaviour we keep
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** Proposed. O1 answered A (2026-11-16); handed off for implementation   **Last verified against:** `70e049e`
+**Status:** Done (2026-11-16, `2c23e63` on `master`). O1 answered A; differences from the plan in §10   **Last verified against:** `2c23e63`
 **Supersedes / Superseded by:** none   **Related findings:** review 04 LE4 and finding 28; this folder's `00-overview.md` §1 (probes)
 
 Every later phase changes code that drives lasers. Today nothing checks what actually reaches the wire end to end: which engines send, what they send, and what arrives after Stop. This phase adds a loopback "fake DAC" for tests, and pins the wire behaviour that must survive every later phase. It changes no app code. About 1 day.
@@ -35,7 +35,7 @@ Tests were written per layer: bytes in `idn_stream_test`, one engine in `streami
 | `^:timing` tag, excluded from `:test` (`deps.edn:142-143`) | Rate assertions |
 | Probes p1–p13 (this folder) | The decoder and the senders/frames queries are lifted from there |
 
-## 4. Changes per namespace
+## 4. Changes per namespace (as planned; the differences are in §10)
 
 - `laser-show.idn.fake-dac` (NEW, `test/laser_show/idn/fake_dac.clj`):
   - `start! []`: binds 127.0.0.1 on port 0 with a 4 MB receive buffer. A daemon thread named `fake-dac` keeps receiving, with a 50 ms socket timeout, and records `{:port source-port :ns arrival :bytes data}`. Returns `{:port … :received atom …}`.
@@ -86,7 +86,7 @@ Quantization the decoder test pins (16/8). These are today's values, colour trun
 6. Two projectors with services 1 and 2 stream on channels 1 and 2 from two source ports.
 7. `app/stop!` sends the close pair for every engine it knows about (`app.clj:190-198`).
 
-## 8. Tests
+## 8. Tests (as planned; the list as built is in §10)
 
 - `laser-show.idn.fake-dac-test/decodes-what-stream-encodes-test`: all three configs, with and without config, and the close message.
 - `laser-show.backend.engine-wire-test`:
@@ -125,3 +125,43 @@ Run: `clj -M:mac-arm:test fake-dac engine-wire output-lifecycle`, then the full 
 > | C | A new `:test-output` alias and CI step | Clear separation | One more alias to remember; nothing else needs it |
 >
 > **Your answer:** A (the recommendation, not changed when O2–O4 were answered on 2026-11-16)
+
+---
+
+## 10. As built (2026-11-16)
+
+Committed as `2c23e63` on top of `5a85452`. No app code changed. Like the keyboard plan's phase docs, this one stays until the whole folder is done (`.agents/rules/planning-guide.md` rule 11).
+
+**Differences from the plan above**
+
+| Plan | As built | Why |
+|---|---|---|
+| Samples "decoded with the last config seen on that channel" (§4) | Decoded with the last config that **sender** sent on that channel (keyed by source port and channel id) | Two engines can use the same channel id (p4, p6); a DAC keeps the config per client. A frame before any config decodes with `:samples nil` |
+| Message shape (§7) | As shown, plus `:tags` and `:close?` whenever the message carries config; `:payload` only on non-channel messages (the RT close: `{:cmd 0x44 :payload nil}`) | `first-message-carries-config-test` compares the tags; the channel close is recognised by `:close?` |
+| `start!`, `stop!`, `messages`, `frames`, `senders`, `wait-for!`, `quiet?` (§4) | All of them, plus `decode-all` (pure: datagrams in, decoded messages out) and `ms-ago` (a `:since-ns` value) | `decodes-what-stream-encodes-test` checks the decoder without a socket; the lifecycle tests ask "who sent in the last 150 ms" |
+| `quiet? [dac ms]` | True if nothing arrives within the next `ms`; returns false as soon as something does | A bounded wait, never a fixed sleep used as an assertion |
+| `config-repeats-within-250ms-test` | Asserts on the engine's own timestamps: no frame without config goes out 250 ms or more after the last one with config, and config is seen at least 4 times | Arrival gaps depend on the scheduler (a busy CI runner could stall the thread); the timestamps say what the engine decided. So it needs no `^:timing` tag |
+| Lifecycle `after` fixture that stops every engine (§4) | `:each` fixture `stopping-every-engine` that wraps the test in `with-redefs` on `se/start!` and stops every recorded engine in `finally`; `engine-wire-test` records the engines its `start-engine!` helper creates and stops them in its `with-fake-dac` fixture | `with-redefs` has to be around the test, not after it |
+| Test names (§8) | As planned, plus `fake-dac-test/records-every-sender-on-loopback-test` | Covers the receiver itself: source ports, `:since-ns`, `quiet?`, and that `stop!` ends the thread |
+
+**Behaviour worth knowing**
+- `app-stop-closes-engines-test` requires `laser-show.app` in the unit suite. Loading it pulls in cljfx and the views but starts no JavaFX toolkit; `app/stop!` runs fine without a mounted app.
+- After `:idn/stop-multi-streaming` the tests wait until every sender's last two messages are the close pair (`stop-streaming!` helper), so the stop future never races the fixture.
+- On this Mac two engines show up on the fake DAC within ~10 ms of the start event; every wait has a 1–3 s deadline.
+
+**Tests** (all new)
+- `laser-show.idn.fake-dac-test`: `decodes-what-stream-encodes-test`, `records-every-sender-on-loopback-test`.
+- `laser-show.backend.engine-wire-test` (fixture `with-fake-dac`): `sequence-counts-up-including-close-test`, `first-message-carries-config-test` (16/8, 16/16, 8/8), `config-repeats-within-250ms-test`, `samples-match-quantized-input-test` (the §7 table for all three configs), `idle-provider-sends-empty-frames-test` (the multi-engine provider while not playing), `stop-sends-close-pair-then-silence-test`.
+- `laser-show.backend.output-lifecycle-test` (fixtures `with-fake-dac`, `stopping-every-engine`): `start-streams-every-enabled-projector-test`, `stop-closes-every-engine-test`, `two-services-two-channels-test`, `app-stop-closes-engines-test`.
+
+Invariants of §7: 1 `sequence-counts-up-including-close-test`; 2 `first-message-carries-config-test`, `config-repeats-within-250ms-test`; 3 `samples-match-quantized-input-test`, `decodes-what-stream-encodes-test`; 4 `idle-provider-sends-empty-frames-test`; 5 `stop-sends-close-pair-then-silence-test`, `stop-closes-every-engine-test`; 6 `two-services-two-channels-test`; 7 `app-stop-closes-engines-test`.
+
+**Verification, 2026-11-16, macOS arm64, JDK 25.0.5**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test fake-dac engine-wire output-lifecycle` | 12 tests, 106 assertions, 0 failures (about 4 s of socket time) |
+| `clj -M:mac-arm:test` (full unit suite) | 732 tests, 13,763 assertions, 0 failures (720 tests before this phase) |
+| `clj -M:kondo --lint src test --parallel --fail-level error` | 0 errors, 22 warnings, none in the new files |
+
+The UI suite wasn't run for this commit (no app code changed); it ran after Phase 2 (see `02-phase2-output-safety.md` §10).

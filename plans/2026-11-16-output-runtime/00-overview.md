@@ -1,7 +1,7 @@
 # Output runtime — overview
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** Proposed. O1–O4 answered 2026-11-16 (O1: A; O2: skip only the failing effect; O3: filter bad points; O4: C, no switch); O5–O10 open. Phases 1–2 handed off for implementation on 2026-11-16   **Last verified against:** `70e049e` (13 probes on loopback, JDK 25.0.5, macOS 27.2; see §1)
+**Status:** In progress. Phase 1 done (`2c23e63`) and Phase 2 done (`645da70`), 2026-11-16; O1–O4 answered (O1: A; O2: skip only the failing effect; O3: filter bad points; O4: C, no switch); O5–O10 open   **Last verified against:** `70e049e` (13 probes on loopback, JDK 25.0.5, macOS 27.2; see §1). Phases 1–2 changed `streaming_engine.clj`, `multi_engine.clj`, `frame_service.clj`, `effects.clj`, `calibration.clj`, `types.clj` and `generators.clj`, so citations into those files in docs 03–05 are against `70e049e` and get re-checked before each phase starts. After Phase 2, p2, p3, p9 and p11 show the new behaviour (02 §10)
 **Supersedes / Superseded by:** none. Takes over the output items of `plans/2026-11-07-improvement-review/` listed in §6
 **Related findings:** review 04 findings 5, 7, 8, 11–16, 26 and LE3/LE4; 03 findings 6, 7, 9, 10 (MR4, the output half of MR5); 02 #23, M1 (output writers), M7, M8
 
