@@ -13,6 +13,11 @@
 ;; Since Phase 4 the engines live in the output runtime's registry, not in app
 ;; state, so streaming-flags reads the registry and the published status.
 ;;
+;; Since Phase 5 the frame duration follows the projector's scan rate (25 000
+;; pts/s unless set), so p10 prints the point rate the duration implies, without
+;; the first sample (Stream §6.2 doesn't time it); and the engine paces by
+;; deadline, which p12 measures.
+;;
 ;; Everything runs on loopback (127.0.0.1): no DAC, no network, no UI. A small
 ;; receiver here stands in for the DAC and decodes 16/8 samples.
 ;;
@@ -351,10 +356,11 @@
     (let [fs (frames dac)
           by-size (group-by #(count (:samples %)) fs)]
       ;; Sizes as sent: since Phase 2 a lit first sample gets a dark copy in
-      ;; front, so the 10- and 3000-point frames arrive with 11 and 3001 samples
+      ;; front, so the 10- and 3000-point frames arrive with 11 and 3001 samples.
+      ;; The first sample isn't timed (Stream §6.2): the rate counts k - 1
       (doseq [k (sort (filter pos? (keys by-size)))
               :let [d (:duration-us (first (get by-size k)))]]
-        (say "p10" k "samples: duration" d "µs =" (long (/ (* k 1e6) d)) "points/s"))
+        (say "p10" k "samples: duration" d "µs =" (long (/ (* (dec k) 1e6) d)) "points/s"))
       (say "p10 timestamps mod 1000 µs:" (set (map #(mod (get-in % [:info :timestamp]) 1000) fs))))
     (close-dac! dac)))
 
@@ -399,7 +405,7 @@
                               (when (pos? wait)
                                 (java.util.concurrent.locks.LockSupport/parkNanos wait)
                                 (recur))))))]
-    (say "p13 sleep-the-remainder (today):" (format "%.1f fps" (fps 120 sleep-remainder)))
+    (say "p13 sleep-the-remainder (the engine before Phase 5):" (format "%.1f fps" (fps 120 sleep-remainder)))
     (reset! next-deadline (System/nanoTime))
     (say "p13 deadline + parkNanos:" (format "%.1f fps" (fps 120 deadline-step)))))
 

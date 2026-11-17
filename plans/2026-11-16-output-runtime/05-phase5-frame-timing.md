@@ -1,10 +1,10 @@
 # Phase 5 — Frame timing: scan rate, pacing, timestamps (and the show clock, later)
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** In progress. O9 answered 2026-11-17: A, with a default of 25 000 pts/s and a projector status that shows the fps the projector actually draws (§4, §7). Needs Phase 1 (done)   **Last verified against:** `f39a998` (citations in §1–9 re-checked 2026-11-17 after Phases 2–4)
+**Status:** Done 2026-11-17 (`eba8b2f`, `2a7e406`, `bfe12a5`; as built in §10), except the hardware check (§8). O9 answered 2026-11-17: A, with a default of 25 000 pts/s and a projector status that shows the fps the projector actually draws (§4, §7). O10 open   **Last verified against:** `bfe12a5` (§10; §1–9 cite `f39a998`, re-checked 2026-11-17 after Phases 2–4)
 **Supersedes / Superseded by:** none   **Related findings:** O-14 to O-17 (`00-overview.md` §2); review 04 findings 5, 7, 11, 14, QW3, MR2 step 1, MR3, LE1; 03 MR1; 02 M1 step 3
 
-Every frame is told to the DAC to take 16.7 ms to draw, whatever its size. A 10-point frame is drawn at 660 points/s and a 3000-point frame at 180 000 points/s, on a projector whose stored scan rate is 30 000 (p10). The first is a slow, bright beam; the second drives the galvos at six times their rate.
+Every frame is told to the DAC to take 16.7 ms to draw, whatever its size. A 10-point frame is drawn at 600 points/s and a 3000-point frame at 180 000 points/s, on a projector whose stored scan rate is 30 000 (p10). The first is a slow, bright beam; the second drives the galvos at six times their rate.
 
 Frames are also paced by sleeping the rest of each frame, which gives 44–48.5 fps here instead of 60 (p12, p13). And timestamps are whole milliseconds from a clock that can step backwards.
 
@@ -111,7 +111,7 @@ Frame durations at the default 25 000 pts/s, counting samples on the wire (a lit
 | 1 | any | – | 1 (the clamp; `sanitize-frame` never sends 1) | – | – |
 | 20 000 | 1 000 | – | 16 777 215 (the 24-bit clamp) | – | – |
 
-So small frames are repeated many times per frame period: brighter, steadier and faster-moving beams. Frames too big for the scan rate refresh more slowly: they flicker rather than distort, and the status line says so. The shipped presets have 8–128 points (`presets.clj:48-116`), so a single cue stays below 418 samples.
+So small frames are repeated many times per frame period: brighter, steadier and faster-moving beams. Frames too big for the scan rate refresh more slowly: they flicker rather than distort, and the status line says so. The shipped presets default to 8–128 points (at most 256, `presets.clj:48-116`), so one preset stays below 418 samples; several presets or cues in one frame can go over.
 
 `clamp-scan-rate`: `25000` → 25000; `500` → 1000; `200000` → 100000; `27500.4` → 27500; `nil`, `"25000"`, `##NaN` → nil (dropped).
 
@@ -187,3 +187,61 @@ Run: `clj -M:mac-arm:test idn-stream common.timing engine-wire streaming-engine 
 > | C | Leave it (Phase 2 already keeps the tick alive after an error) | Nothing to do | O-17 stays |
 >
 > **Your answer:** _pending_
+
+---
+
+## 10. As built (2026-11-17)
+
+Committed as `eba8b2f` (pacing, timestamps, config repeat and send rate: `common/timing.clj`, `streaming_engine.clj`, `output_runtime.clj`, `stream.clj`), `2a7e406` (the scan rate: `stream.clj`, `streaming_engine.clj`, `multi_engine.clj`, `output_runtime.clj`, `handlers/projector.clj`, `domains.clj`) and `bfe12a5` (the projectors tab), on top of `39c5461` (this doc's re-check and the O9 answer). §1–9 describe the code before this phase; their citations are against `f39a998`.
+
+**Where it is now** (at `bfe12a5`)
+- `common/timing.clj`: NEW `max-park-nanos` `:87`, `park-until` `:92`.
+- `idn/stream.clj`: NEW `DEFAULT_SCAN_RATE` `:547`, `MIN_SCAN_RATE` `:551`, `MAX_SCAN_RATE` `:557`, `clamp-scan-rate` `:561`, `scan-duration-us` `:570`; `microseconds-now` removed.
+- `backend/streaming_engine.clj`: `initial-stats` `:51`; `create-engine` `:64` (`:scan-rate`, `:max-samples`, `:start-ns`, `:last-config-ns`); `current-timestamp-us` `:135`; `should-resend-config?` `:141`; NEW `wire-duration-us` `:154`; `create-idn-stream-packets` `:169` (now given the config flag and the duration); `send-frame!` `:220` (decides the config, returns `[packet-count duration-us]`); NEW `next-deadline` `:251`; NEW `update-stats` `:261`; `streaming-loop` `:297`; `start!` `:375`; `get-stats` `:471`. `calculate-actual-fps`, `:last-frame-time` and `:actual-fps` are gone.
+- `backend/multi_engine.clj`: `create-engine-for-projector` `:217` passes `:scan-rate` (`:249`).
+- `backend/output_runtime.clj`: `engine-status` `:172`, `status` `:183`.
+- `events/handlers/projector.clj`: `make-projector-config` `:79` (25 000), NEW `clamp-scan-rate-update` `:262`, `update-settings` `:270`.
+- `views/tabs/projectors.clj`: NEW `parse-scan-rate` `:84`, `output-status-text` `:273`, `projector-basic-settings` `:369` (the Scan rate row, `#projector-scan-rate-field` `:431`).
+
+**Differences from the plan above**
+
+| Plan | As built | Why |
+|---|---|---|
+| `park-until` parks until the deadline (§4) | It parks at most 5 ms at a time (`max-park-nanos`) and checks `keep-waiting?` between parks | A stop is noticed within 5 ms, without `stop-all!` having to `unpark` each thread |
+| The loop's IDN time (not in §4) | `profiler/record-idn-streaming!` gets producing plus sending, not the half-interval wait between them | The wait isn't work, and only happens after a frame overran |
+| When the config counts as sent (not in §4) | As before, when its packets are built; now decided in `send-frame!` rather than `create-idn-stream-packets` | The duration needs the decision first: one message holds a few samples fewer with config |
+| `:scan-limited?` in the status (§5) | Present only when true; always a boolean in the engine's stats | Keeps the status map small |
+
+**Tests**
+- Pure: `idn-stream-test/scan-duration-examples-test` (the §7 durations and both clamps), `clamp-scan-rate-test`; `common.timing-test/park-until-never-returns-early-test`, `park-until-returns-when-told-to-stop-test`; `streaming-engine-test/next-deadline-examples-test`, `stats-report-the-fps-the-projector-draws-test`, and NEW beyond §8 `stats-measure-the-send-rate-test`; `projector-handlers-test/scan-rate-is-clamped-test` (the other updates still apply), `new-projectors-default-to-25k-test`; `multi-engine-test/engine-uses-the-projector-scan-rate-test`; NEW `views.tabs.projectors-test/output-status-text-test`, `parse-scan-rate-test`.
+- Fake DAC: `engine-wire-test/timestamps-are-monotonic-microseconds-test`, `late-frame-skips-instead-of-bursting-test` (it checks gaps between timestamps on the engine clock, so receiver jitter can't fail it), `duration-follows-scan-rate-test`, `draw-fps-follows-the-scan-rate-test`, `^:timing engine-holds-60-fps-test`; `output-lifecycle-test/status-shows-the-fps-the-projector-draws-test` (`projector-frame` redefined to 1 000 lit points).
+- UI: `streaming-status-test/scan-rate-field-commits-on-enter-test` (typing applies nothing; "30k" and Enter give 30 000; "fast" is put back; "500" becomes 1 000; "25,000" applies on focus loss), `projector-status-says-when-the-scan-rate-limits-the-fps-test` ("Streaming · 25.0 fps (limited by scan rate)").
+- Red first: at `39c5461` the two new wire tests failed 3 assertions (every timestamp a whole millisecond; 1 ms after the slow frame; gaps of 17–24 ms). At `eba8b2f` the scan-rate tests had 18 failures and 3 errors in 9 tests. At `2a7e406` both UI tests timed out (no field, no label).
+- Looked at: a screenshot of the projectors tab while streaming, with one projector sending 1 000-point frames and one idle: "Streaming · 25.0 fps (limited by scan rate)" and "Streaming · 59.2 fps", and the Scan rate row under Host and Port.
+
+**Probes** (`probes/output_probes_test.clj`; p10 now leaves the first sample out of the rate, as Stream §6.2 does. Before = `39c5461`, after = `bfe12a5`)
+
+| Probe | Before | After |
+|---|---|---|
+| p10 | 11 and 3 001 samples both 16 666 µs: 600 and 180 007 points/s; every timestamp a whole millisecond | 400 and 120 000 µs: **25 000 points/s for both**, the default; timestamps in µs (25 different values `mod 1000`) |
+| p12 | 92 frames in 2 s = **46.0 fps**; gaps 2 / 22 / 25 / 56 ms (min / median / p95 / max) | 121 frames = **60.5 fps**; gaps 15 / 17 / 18 / 19 ms |
+| p13 | sleep-the-remainder 44.8 fps, deadline 59.8 fps | 45.7 and 60.0 fps. p13 compares the two loops on their own; the engine now uses the second |
+| p1–p9, p11 | as in 04 §10 | the same findings |
+
+**Verification, 2026-11-17, macOS arm64, JDK 25.0.5, headless, load average 4–9**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test common.timing engine-wire streaming-engine` (with `eba8b2f`'s changes) | 36 tests, 156 assertions, 0 failures |
+| `clj -M:mac-arm:test output-lifecycle multi-engine output-sync` (same) | 38 tests, 209 assertions, 0 failures |
+| `clj -M:mac-arm:test idn-stream common.timing engine-wire streaming-engine multi-engine output-lifecycle output-sync projector-handlers` (with `2a7e406`'s changes) | 110 tests, 594 assertions, 0 failures |
+| `clj -M:mac-arm:test-timing engine-holds output-lifecycle` (with each of the two) | 3 tests, 8 assertions, 0 failures |
+| `clj -M:mac-arm:test views.tabs.projectors` | 2 tests, 20 assertions, 0 failures |
+| `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.streaming-status-test` | 6 tests, 24 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 813 tests, 29,257 assertions, 0 failures (796 / 31,328 at Phase 4) |
+| `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | 55 tests, 209 assertions, 0 failures (53 / 202 at Phase 4) |
+| `clj -M:kondo --lint` on every touched file | 0 errors; 1 warning, the unused `laser-show.common.util` in `handlers/projector.clj`, which predates this phase |
+
+The full suite's assertion count is lower than at Phase 4, but not because of this phase. Counted per namespace at `f39a998` and at `bfe12a5`, the eight namespaces this phase touched gained 128 assertions, and the only other change is `timeline.model-test` (6,178 → 3,967). Its `apply-op-output-is-normalized-test` makes one assertion per clip after each of 500 random edits, and its `shuffle` isn't seeded, so the count changes from run to run (6,146, 6,146 and 6,188 in three runs of that namespace). Observed, not changed.
+
+Not testable here: a real DAC (none available). The hardware check in §8 is still to do before release.
