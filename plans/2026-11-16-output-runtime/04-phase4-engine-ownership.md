@@ -247,5 +247,5 @@ Committed as `a8b2fd2` (`streaming_engine.clj` only), `5dce132` (the runtime, th
 | The probes, and again with `-J-Dlaser-show.dev=true` | p4–p7 0 senders after Stop; 0 lost-update WARNs |
 | `clj -M:kondo --lint src test --parallel --fail-level error` | 0 errors, 21 warnings (21 before), none new in a touched file (`handlers/projector.clj`'s unused `laser-show.common.util` predates this phase) |
 
-Observed, not changed: the full unit suite run with `-J-Dlaser-show.dev=true` fails `events.core-test/lost-update-detector-is-off-outside-dev-mode-test` by design, and logs one lost-update WARN from `concurrent-event-cannot-lose-engines-test`, which runs two events at once on two threads without an agent on purpose. Not testable headless: a real DAC (none available); see the manual checks in the hand-off.
+Observed, not changed: with `-J-Dlaser-show.dev=true` the full unit suite logs one lost-update WARN from `concurrent-event-cannot-lose-engines-test`, which runs two events at once on two threads without an agent on purpose. (`events.core-test/lost-update-detector-is-off-outside-dev-mode-test` also failed in that run; since the 2026-11-16 review it clears the `laser-show.dev` property itself, so it passes either way.) Not testable headless: a real DAC (none available); see the manual checks in the hand-off.
 

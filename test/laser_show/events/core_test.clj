@@ -17,9 +17,14 @@
                       (events/set-exit-fn! nil)
                       (try (f) (finally (events/set-exit-fn! nil)))))
 
-(defn- with-dev-mode [f]
+(defn- with-dev-property
+  "Run f with the laser-show.dev system property set to value (nil clears it),
+   then restore it, so these tests don't depend on how the JVM was started."
+  [value f]
   (let [old (System/getProperty "laser-show.dev")]
-    (System/setProperty "laser-show.dev" "true")
+    (if value
+      (System/setProperty "laser-show.dev" value)
+      (System/clearProperty "laser-show.dev"))
     (try (f)
          (finally (if old
                     (System/setProperty "laser-show.dev" old)
@@ -95,7 +100,7 @@
       (events/event-handler {:event/type :timing/set-bpm :bpm 128.0}))))
 
 (deftest lost-update-detector-test
-  (with-dev-mode
+  (with-dev-property "true"
     (fn []
       (testing "a write by another writer between snapshot and reset logs a WARN"
         (log-test/with-log
@@ -123,7 +128,9 @@
         (is (empty? (meta (state/get-raw-state))))))))
 
 (deftest lost-update-detector-is-off-outside-dev-mode-test
-  (log-test/with-log
-    (set-bpm-with-a-write-in-between!
-     #(state/assoc-in-state! [:projectors :elsewhere] {:name "written meanwhile"}))
-    (is (empty? (detector-entries)))))
+  (with-dev-property nil
+    (fn []
+      (log-test/with-log
+        (set-bpm-with-a-write-in-between!
+         #(state/assoc-in-state! [:projectors :elsewhere] {:name "written meanwhile"}))
+        (is (empty? (detector-entries)))))))
