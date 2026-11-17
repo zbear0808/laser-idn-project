@@ -8,7 +8,7 @@ Every frame is told to the DAC to take 16.7 ms to draw, whatever its size. A 10-
 
 Frames are also paced by sleeping the rest of each frame, which gives 44–48.5 fps here instead of 60 (p12, p13). And timestamps are whole milliseconds from a clock that can step backwards.
 
-This phase fixes all three: about 1–1.5 days, plus a check on real hardware before release. The show clock (O10) is decided here and built later.
+This phase fixes all three: about 1–1.5 days, plus a check on real hardware before release. As of 2026-11-16 no IDN DAC is available, so the code and its fake-DAC tests can be done, but the hardware check has to wait. The show clock (O10) is decided here and built later.
 
 ## 1. Current behaviour (file:line)
 

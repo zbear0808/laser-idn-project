@@ -1,7 +1,7 @@
 # Output runtime — overview
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** Proposed. Decisions O1–O10 open   **Last verified against:** `70e049e` (13 probes on loopback, JDK 25.0.5, macOS 27.2; see §1)
+**Status:** Proposed. O1–O4 answered 2026-11-16 (O1: A; O2: skip only the failing effect; O3: filter bad points; O4: C, no switch); O5–O10 open. Phases 1–2 handed off for implementation on 2026-11-16   **Last verified against:** `70e049e` (13 probes on loopback, JDK 25.0.5, macOS 27.2; see §1)
 **Supersedes / Superseded by:** none. Takes over the output items of `plans/2026-11-07-improvement-review/` listed in §6
 **Related findings:** review 04 findings 5, 7, 8, 11–16, 26 and LE3/LE4; 03 findings 6, 7, 9, 10 (MR4, the output half of MR5); 02 #23, M1 (output writers), M7, M8
 
@@ -11,20 +11,20 @@ This is the plan the keyboard plan deferred (`plans/2026-11-13-keyboard-focus-wi
 
 **Start with `01-phase1-fake-dac.md`.** It adds a loopback fake DAC and tests of the wire behaviour that must survive every later change. There are no app changes, it takes about a day, and it needs one answer (O1). Every later phase writes its failing test against the fake DAC first.
 
-**The most urgent fixes are in Phase 2** (`02-phase2-output-safety.md`, ~1.5–2 days):
+**The most urgent fixes are in Phase 2** (`02-phase2-output-safety.md`, ~1.5 days):
 - a NaN coordinate goes out as a full-brightness point at the centre;
-- a calibration effect that throws is skipped, so the beam leaves the calibrated scan area;
+- one failing effect takes its whole chain down, for example all of a projector's calibration;
 - an engine thread or the preview timer can die without anyone being told.
 
 None of that needs hardware to fix or to test.
 
 | Doc | Phase | Size | Needs |
 |---|---|---|---|
-| `01-phase1-fake-dac.md` | A fake DAC and tests of today's correct behaviour | ~1 day | O1 |
-| `02-phase2-output-safety.md` | Nothing unsafe reaches the wire | ~1.5–2 days | O2, O3, O4 |
+| `01-phase1-fake-dac.md` | A fake DAC and tests of today's correct behaviour | ~1 day | O1 (answered) |
+| `02-phase2-output-safety.md` | Nothing unsafe reaches the wire | ~1.5 days | O2, O3, O4 (answered) |
 | `03-phase3-event-reentry.md` | Background results come back through the event agent | ~1 day | O5 |
 | `04-phase4-engine-ownership.md` | One owner for the engines; status the UI can trust | ~2–3 days | O6, O7, O8 (and Phase 3) |
-| `05-phase5-frame-timing.md` | Scan rate, pacing, timestamps; the show clock for later | ~1–1.5 days (+ hardware check) | O9, O10 |
+| `05-phase5-frame-timing.md` | Scan rate, pacing, timestamps; the show clock for later | ~1–1.5 days (+ a hardware check; no IDN DAC available as of 2026-11-16) | O9, O10 |
 
 About 7–9 days in total. The show clock (O10) would be its own plan after these.
 
@@ -55,13 +55,13 @@ p5, p6 and p7 slow one function down with `with-redefs` (a 50–300 ms sleep) so
 | ID | Finding | Sev | Evidence | Phase |
 |---|---|---|---|---|
 | O-1 | **Stop can leave lasers running.** Orphan engines come from a double start (p4), Stop during start (p5), overlapping refreshes (p6), or a concurrent event dropping the handles (p7) | H | futures with no ordering `events/core.clj:343,359,373`; handles written into app state `multi_engine.clj:289,312,371`; whole-state reset `events/core.clj:70-74`, `state/core.clj:115-126` | 3, 4 |
-| O-2 | **Safety effects fail open.** A throwing corner-pin (the scan-area limit), intensity or blackout effect is dropped and the frame goes out without it | H | p8; `animation/effects.clj:252-258`, `frame_service.clj:315-319,497-501`, `multi_engine.clj:111-116` | 2 |
+| O-2 | **Effects fail open, a whole chain at a time.** One effect that throws takes its whole chain with it, so the frame goes out without, for example, any of a projector's calibration | H | p8; `animation/effects.clj:252-258`, `frame_service.clj:315-319,497-501`, `multi_engine.clj:111-116` | 2 (O2: only the failing effect is skipped) |
 | O-3 | A NaN coordinate goes out as a lit point at the centre. Nothing enforces the dark first sample or the 2-sample minimum (Stream §6.2) | H | p1; `util.clj:13-27`, `output_config.clj:99-111`, `types.clj:94-101` | 2 |
 | O-4 | RGB-curve calibration lights blanked points | M-H | p9; `calibration.clj:18-37` (no `blanked?` check, unlike `color.clj:20,51,126`) | 2 |
 | O-5 | An `Error` ends an engine thread or the preview timer silently. The UI keeps saying "Streaming", and beat timing stops | M-H | p3, p11; only `Exception` is caught at `streaming_engine.clj:256` and `frame_service.clj:861` | 2 |
 | O-6 | A frame that fails to encode sends nothing (the DAC holds the last frame), while a provider error sends a blank frame | M | p2; `streaming_engine.clj:256-259` vs `multi_engine.clj:207-212` + `streaming_engine.clj:219` | 2 |
 | O-7 | Output errors log at ERROR on every frame from the real-time threads (60 lines/s per engine) | M | `streaming_engine.clj:259`, `multi_engine.clj:115,208,211`, `animation/effects.clj:255`, `frame_service.clj:318,500` | 2 |
-| O-8 | There's no master output switch. The blackout trigger action stops the transport, which also rewinds every cue and the global clock; output is live as soon as Stream is pressed and something plays | M | `triggers.clj:76-77`, `handlers/timing.clj:68-77`; no output-enable flag in `src/` | 2 (O4) |
+| O-8 | There's no master output switch. The blackout trigger action stops the transport, which also rewinds every cue and the global clock; output is live as soon as Stream is pressed and something plays | M | `triggers.clj:76-77`, `handlers/timing.clj:68-77`; no output-enable flag in `src/` | won't fix (O4: C) |
 | O-9 | Callbacks from futures and the FX thread run the whole event pipeline off the agent and write the whole state back | H (enables O-1) | `app.clj:95` + `cljfx/event_handler.clj:22-25`; callbacks at `events/core.clj:88,191,196,215,329,335,349,353,364,380`; the namespace doc says otherwise (`events/core.clj:20-24`) | 3 |
 | O-10 | Engine handles live in app state; there are two "running" flags, and "Streaming to N" counts enabled projectors, not engines | M | `multi_engine.clj:289-292`; `connection.clj:40,54` vs `multi_engine.clj:291,314`; `toolbar.clj:221-233` | 4 |
 | O-11 | Refresh compares projector ids only, so host, port, service and bit-depth edits never reach a running engine. Add Manual and host edits don't refresh at all | M | `multi_engine.clj:338-343,367-368`; `projector.clj:238-253,268-281` | 4 |
@@ -74,7 +74,7 @@ p5, p6 and p7 slow one function down with `with-redefs` (a 50–300 ms sleep) so
 
 **Why this order.**
 - O-1 is the worst failure: the operator presses Stop and the lasers stay on. But fixing it properly needs the event re-entry change (Phase 3) and an engine owner (Phase 4).
-- Phase 2 needs neither. It also adds a master output switch (O4). That switch gates every engine, orphans included, because they all use the same frame provider, so it is the quickest safety net for O-1 too.
+- Phase 2 needs neither, and it fixes the other high-severity findings (O-3, O-5, O-6). Until Phase 4, quitting the app is the only sure way to stop an orphaned engine: production exits the process, and the DAC goes dark after its 1 s link timeout.
 
 ## 3. Target architecture (recommended defaults)
 
@@ -87,15 +87,14 @@ UI / MIDI / OSC / Link ─▶ event agent ────────────�
                                                               {projector-id {:engine :fingerprint}}
 
 engine thread, per projector, deadline-paced at 60 fps                                         [Phase 5]
-  armed? (runtime atom, O4) ──no──▶ empty frame                                                [Phase 2]
-     │ yes
-  frame provider (reads app state) ─ any error ─▶ blank frame + output-errors (logged once)    [Phase 2]
+  frame provider (reads app state) ─ a failing effect is skipped; any other error ─▶ empty frame
+     │                                       (every error logged once, in output-errors)       [Phase 2]
      ▼
-  sanitize-frame (finite, dark first sample, ≥ 2 samples) ─▶ encode (duration from scan rate) ─▶ UDP
+  sanitize-frame (bad points dropped, dark first sample, ≥ 2 samples) ─▶ encode (duration from scan rate) ─▶ UDP
 ```
 
 - No `Thread`, socket or engine object in app state. The registry is the only place an engine can live, and stopping drains it.
-- Any failure while producing a frame gives a **blank** frame, never a stale or uncalibrated one.
+- A failing effect is skipped on its own; any other failure while producing a frame gives an empty frame, never a stale one.
 - Every background result re-enters through the agent, so a whole-state reset can't undo another thread's write.
 
 ## 4. Phases and dependencies
@@ -103,7 +102,7 @@ engine thread, per projector, deadline-paced at 60 fps                          
 | Phase | Goal | Depends on |
 |---|---|---|
 | 1 | Fake DAC; today's correct wire behaviour pinned in tests | none |
-| 2 | Nothing unsafe reaches the wire; master output switch | 1 |
+| 2 | Nothing unsafe reaches the wire | 1 |
 | 3 | Background results re-enter through the agent | 1 (for tests only) |
 | 4 | One owner for the engines; truthful status | 3 |
 | 5 | Frame timing (scan rate, pacing, timestamps) | 1; a hardware check before release |
@@ -117,10 +116,10 @@ Each decision is written out with options and a recommendation in the doc that n
 
 | ID | Question | Doc | Needed before | Recommended |
 |---|---|---|---|---|
-| O1 | Where the fake-DAC tests run | 01 | Phase 1 | A: in the unit suite; rate assertions tagged `^:timing` |
-| O2 | What an effect error does to the output | 02 | Phase 2 | A: blank the failing chain's output (fail closed), log once, show it later |
-| O3 | What the last-line sanitiser changes | 02 | Phase 2 | A: non-finite or nil → blanked; dark first sample; at least 2 samples; clamp as today |
-| O4 | Master output switch | 02 | Phase 2 | A: runtime "Laser output" switch, off at start; the blackout trigger turns it off |
+| O1 | Where the fake-DAC tests run | 01 | Phase 1 | **A, kept 2026-11-16**: in the unit suite; rate assertions tagged `^:timing` |
+| O2 | What an effect error does to the output | 02 | Phase 2 | **Answered 2026-11-16**: skip only the effect that throws; log once |
+| O3 | What the last-line sanitiser changes | 02 | Phase 2 | **Answered 2026-11-16**: drop bad points; dark first sample; at least 2 samples; clamp as today |
+| O4 | Master output switch | 02 | Phase 2 | **C, answered 2026-11-16**: no switch; blackout unchanged |
 | O5 | How background results re-enter | 03 | Phase 3 | A: callbacks from other threads go through the agent; follow-ups within a turn stay inline; tests keep the synchronous interpreter |
 | O6 | Who owns the engines | 04 | Phase 4 | A: runtime registry plus one output executor |
 | O7 | What a refresh restarts | 04 | Phase 4 | A: diff by config fingerprint; requests coalesced |
@@ -141,10 +140,10 @@ Each decision is written out with options and a recommendation in the doc that n
 | 04 findings 12, 13, 15, MR4 | Still true (p4–p7) | 4 |
 | 04 finding 14, MR3 | Still true (p12, p13) | 5 |
 | 04 finding 16, MR5, QW6 | Still true | 2 (logging), 4 (health) |
-| 04 finding 26, LE3 (calibration mode) | The calibrating id is read only by the UI (`subs.clj:524-529`, `projectors.clj:549`) | 2 (fail closed only); the test-pattern mode is out of scope |
+| 04 finding 26, LE3 (calibration mode) | The calibrating id is read only by the UI (`subs.clj:524-529`, `projectors.clj:549`) | out of scope (failing calibration effects: O2 skips only the failing one) |
 | 04 LE2 (one IDN link per DAC) | Needs multi-head hardware | out of scope |
 | 04 LE4 (fake DAC) | Partly: loopback tests only (`test/laser_show/backend/streaming_engine_test.clj:10-71`) | 1 |
-| 03 findings 9, 10, MR4 (effect error policy) | Still true (p8) | 2 |
+| 03 findings 9, 10, MR4 (effect error policy) | Still true (p8) | 2 (skip the failing effect, log once) |
 | 03 findings 6, 7, MR5 (clamp and blank at the end of the chain) | Still true | 2 owns the output-side failsafe; effect-side clamping stays with 03 |
 | 03 MR1 (one time base) | Still true | later (O10) |
 | 02 #23, M8 (symmetric lifecycle) | Mostly done by `93c638a`: `stop!` stops the engines, the preview timer and Carabiner | 4 finishes it (registry drain, shutdown hook) |

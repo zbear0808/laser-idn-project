@@ -1,7 +1,7 @@
 # Phase 1 — A fake DAC, and tests of the wire behaviour we keep
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** Proposed. Needs O1   **Last verified against:** `70e049e`
+**Status:** Proposed. O1 answered A (2026-11-16); handed off for implementation   **Last verified against:** `70e049e`
 **Supersedes / Superseded by:** none   **Related findings:** review 04 LE4 and finding 28; this folder's `00-overview.md` §1 (probes)
 
 Every later phase changes code that drives lasers. Today nothing checks what actually reaches the wire end to end: which engines send, what they send, and what arrives after Stop. This phase adds a loopback "fake DAC" for tests, and pins the wire behaviour that must survive every later phase. It changes no app code. About 1 day.
@@ -116,7 +116,7 @@ Run: `clj -M:mac-arm:test fake-dac engine-wire output-lifecycle`, then the full 
 
 ## Decisions
 
-> **DECISION O1 — Where do the fake-DAC tests run?** *(open · needed before Phase 1 · recommended: A)*
+> **DECISION O1 — Where do the fake-DAC tests run?** *(A, kept 2026-11-16)*
 >
 > | | What | For | Against |
 > |---|---|---|---|
@@ -124,4 +124,4 @@ Run: `clj -M:mac-arm:test fake-dac engine-wire output-lifecycle`, then the full 
 > | B | In `:test-integration` (`test/integration`, CI step `build-and-test.yml:150-151`) | Keeps the unit suite socket-free | Easy to skip locally; the existing integration tests assert nothing on receipt, so the folder carries no habit of being run |
 > | C | A new `:test-output` alias and CI step | Clear separation | One more alias to remember; nothing else needs it |
 >
-> **Your answer:** _pending_
+> **Your answer:** A (the recommendation, not changed when O2–O4 were answered on 2026-11-16)

@@ -166,7 +166,7 @@ Run: `clj -M:mac-arm:test output-lifecycle output-sync`, `clj -M:test-ui:mac-arm
 > | | What | For | Against |
 > |---|---|---|---|
 > | **A (recommended)** | Per projector, from engine stats and the error registry, published at most 4 times a second: streaming, starting or error, the actual fps, the last error. Shown as the projector dot and the toolbar line. No network probing. | No hardware needed; catches dead threads, send errors and start failures | A DAC that is switched off but still routable looks fine, because UDP sends succeed |
-> | B | A, plus an IDN-Hello ping every second per DAC on the engine's socket (`hello.clj:109` `send-ping` exists, unused), shown as reachable and round-trip time | Detects a DAC that is off or unplugged | Needs a receive path on the engine socket and hardware to confirm DAC behaviour; the fake DAC must answer pings in tests |
+> | B | A, plus an IDN-Hello ping every second per DAC on the engine's socket (`hello.clj:109` `send-ping` exists, unused), shown as reachable and round-trip time | Detects a DAC that is off or unplugged | Needs a receive path on the engine socket and hardware to confirm DAC behaviour (no IDN DAC available as of 2026-11-16); the fake DAC must answer pings in tests |
 > | C | No health; only fix the toolbar count | Smallest | The operator still can't tell which projector is dark and why |
 >
 > **Your answer:** _pending_
