@@ -16,7 +16,7 @@
   (:require [cljfx.api :as fx]
             [laser-show.events.core :as events])
   (:import [javafx.scene.canvas Canvas]
-           [javafx.scene.input KeyEvent KeyCode MouseEvent ScrollEvent]))
+           [javafx.scene.input DragEvent KeyEvent KeyCode MouseEvent ScrollEvent TransferMode]))
 
 (defn- dispatch-result!
   "Dispatch event maps from a callback result.
@@ -75,13 +75,25 @@
              :alt? (.isAltDown ^ScrollEvent e)
              :control? (or (.isControlDown ^ScrollEvent e)
                            (.isShortcutDown ^ScrollEvent e))
-             :shift? (.isShiftDown ^ScrollEvent e)))))
+             :shift? (.isShiftDown ^ScrollEvent e))
+
+      (instance? DragEvent e)
+      (assoc :x (.getX ^DragEvent e)
+             :y (.getY ^DragEvent e)))))
 
 (defn- update-drag-state!
   "Merge updates into the canvas's interaction state (FX thread, synchronous)."
   [^Canvas canvas updates]
   (when-let [a (interaction-atom canvas)]
     (swap! a merge updates)))
+
+(defn- merge-and-render!
+  "Merge updates into the interaction state; redraw only when that changed it."
+  [^Canvas canvas render! value drag-state updates]
+  (let [new-drag (merge drag-state updates)]
+    (when (not= new-drag drag-state)
+      (update-drag-state! canvas new-drag)
+      (render! canvas (or (:preview-value new-drag) value) new-drag))))
 
 (defn- draw-interactive-canvas!
   "Called on every render cycle via cljfx Canvas :draw prop. Triggers render! callback."
@@ -137,6 +149,17 @@
                                            clears the preview and aborts the
                                            undo transaction, if one is open
 
+   Drag-and-drop target opts (drops from other nodes, not mouse drags on the
+   canvas; attached only when given). Each receives the Dragboard; the
+   canvas accepts COPY only, and redraws only when :drag-updates change the
+   interaction state:
+     :on-drag-over     - (fn [mx my ^Dragboard db value drag-info])
+                         Returns {:accept? bool :drag-updates map}
+     :on-drag-exited   - (fn [value drag-info]) Returns {:drag-updates map}
+     :on-drag-dropped  - (fn [mx my ^Dragboard db value drag-info])
+                         Returns {:dispatch event(s) :drag-updates map}; the
+                         drop completes when :dispatch is non-nil
+
    Optional:
      :on-scroll              - (fn [{:keys [delta-x delta-y x y alt? control? shift? value drag-state]}])
                                Returns map with :dispatch, optional :consumed? boolean
@@ -150,6 +173,7 @@
                                canvas commits one edit on release itself."
   [{:keys [width height value render!
            on-press on-drag on-release on-hover on-key on-exit on-scroll
+           on-drag-over on-drag-exited on-drag-dropped
            initial-drag-state history-transaction?
            cursor focus-traversable? id style-class managed]
     :or {cursor "crosshair"
@@ -302,4 +326,32 @@
                 (when (:consumed? result)
                   (.consume e))))))}
           ;; cljfx can't set a nil style-class list
-          style-class (assoc :style-class style-class))})
+          style-class (assoc :style-class style-class)
+
+          on-drag-over
+          (assoc :on-drag-over
+                 (fn [^DragEvent e]
+                   (let [{:keys [canvas drag-state x y]} (extract-event-info e)
+                         {:keys [accept? drag-updates]} (on-drag-over x y (.getDragboard e) value drag-state)]
+                     (when accept?
+                       (.acceptTransferModes e (into-array TransferMode [TransferMode/COPY])))
+                     (merge-and-render! canvas render! value drag-state drag-updates)
+                     (.consume e))))
+
+          on-drag-exited
+          (assoc :on-drag-exited
+                 (fn [^DragEvent e]
+                   (let [{:keys [canvas drag-state]} (extract-event-info e)
+                         {:keys [drag-updates]} (on-drag-exited value drag-state)]
+                     (merge-and-render! canvas render! value drag-state drag-updates)
+                     (.consume e))))
+
+          on-drag-dropped
+          (assoc :on-drag-dropped
+                 (fn [^DragEvent e]
+                   (let [{:keys [canvas drag-state x y]} (extract-event-info e)
+                         {:keys [dispatch drag-updates]} (on-drag-dropped x y (.getDragboard e) value drag-state)]
+                     (dispatch-result! dispatch)
+                     (.setDropCompleted e (some? dispatch))
+                     (merge-and-render! canvas render! value drag-state drag-updates)
+                     (.consume e)))))})

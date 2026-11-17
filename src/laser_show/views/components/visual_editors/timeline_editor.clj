@@ -22,15 +22,17 @@
             [laser-show.timeline.model :as model]
             [laser-show.timeline.playback :as playback]
             [laser-show.timeline.timecode :as tc]
+            [laser-show.views.components.drag-drop-cell :as dd]
             [laser-show.views.components.visual-editors.canvas-interaction :as ci]
             [laser-show.views.components.visual-editors.timeline.browser :as browser]
             [laser-show.views.components.visual-editors.timeline.device-chain :as device-chain]
+            [laser-show.views.components.visual-editors.timeline.drop :as drop]
             [laser-show.views.components.visual-editors.timeline.gesture :as gesture]
             [laser-show.views.components.visual-editors.timeline.header :as header]
             [laser-show.views.components.visual-editors.timeline.inspector :as inspector])
   (:import [javafx.application Platform]
            [javafx.scene.canvas Canvas GraphicsContext]
-           [javafx.scene.input KeyCode MouseButton MouseEvent ScrollEvent]
+           [javafx.scene.input Dragboard KeyCode MouseButton MouseEvent ScrollEvent]
            [javafx.scene.layout Region]
            [javafx.scene.paint Color]
            [javafx.scene.text TextAlignment]))
@@ -258,13 +260,51 @@
     (empty? (:items cue))
     (let [r (or (first (filter #(= :track (:kind %)) rows)) (first rows))]
       (.setTextAlign gc TextAlignment/LEFT)
-      (.fillText gc (str "Pick a preset below to add it at the cursor (bar "
+      (.fillText gc (str "Click or drag a preset from the browser to add it (cursor at bar "
                          (bar-beat-sub (or cursor-beat 0.0)) ")")
                  12 (+ (layout/row-y view r) (/ (:h r) 2.0) 4)))))
 
+(defn- draw-drop-preview!
+  "What a drag from the browser would do here: a ghost clip with a snap
+   guide (preset), or the clip or lane it would land on (effect)."
+  [^GraphicsContext gc {:keys [rows view]} preview width height]
+  (when preview
+    (let [ruler-h (:ruler-h m)
+          row-by-id (fn [id] (some #(when (= id (:id %)) %) rows))]
+      (.save gc)
+      (.beginPath gc)
+      (.rect gc 0 ruler-h width (- height ruler-h))
+      (.clip gc)
+      (when-let [r (row-by-id (:highlight-row preview))]
+        (.setFill gc cc/tl-drop-lane)
+        (.fillRect gc 0 (layout/row-y view r) width (:h r)))
+      (when-let [id (:highlight-clip preview)]
+        (doseq [r rows
+                c (:clips r)
+                :when (= id (:id c))
+                :let [[x y w h] (layout/clip-rect view r c)]]
+          (.setStroke gc cc/tl-drop-target)
+          (.setLineWidth gc 2.0)
+          (.strokeRect gc (+ x 1) (+ y 1) (- w 2) (- h 2))))
+      (when-let [{:keys [row-id start length]} (:ghost preview)]
+        (let [x (crisp (layout/beat->x view start))]
+          (.setStroke gc cc/tl-snap-guide)
+          (.setLineWidth gc 1.0)
+          (.strokeLine gc x ruler-h x height)
+          (when-let [r (row-by-id row-id)]
+            (let [[cx cy cw ch] (layout/clip-rect view r {:timeline/start start :timeline/duration length})
+                  hex (or (:color r) "#808080")]
+              (.setFill gc (cc/color hex 0.35))
+              (.fillRect gc cx cy cw ch)
+              (.setStroke gc (cc/color hex))
+              (.setLineDashes gc (double-array [4.0 3.0]))
+              (.strokeRect gc (crisp cx) (crisp cy) (dec cw) (dec ch))))))
+      (.restore gc))))
+
 (defn- render-lanes!
-  "Lane canvas: lanes, loop tint, grid, clips (or the drag preview), ruler,
-   loop band, marquee. The playhead and cursor are on the overlay canvas."
+  "Lane canvas: lanes, loop tint, grid, clips (or the drag preview), drop
+   preview, ruler, loop band, marquee. The playhead and cursor are on the
+   overlay canvas."
   [^Canvas canvas value drag-info]
   (let [gc (.getGraphicsContext2D canvas)
         width (.getWidth canvas)
@@ -274,6 +314,7 @@
     (draw-lanes! gc value width height)
     (draw-grid! gc ticks width height)
     (draw-clips! gc value width height)
+    (draw-drop-preview! gc value (:drop-preview drag-info) width height)
     (draw-past-end! gc value width height)
     (draw-empty-state! gc value width height)
     (draw-ruler! gc value ticks width)
@@ -412,6 +453,35 @@
        :consumed? true}
 
       :else nil)))
+
+
+;; ============================================================
+;; Drops from the browser
+;; ============================================================
+
+
+(defn- drop-at
+  "The browser drop at canvas (x, y): {:event :preview} or nil."
+  [^Dragboard db value x y]
+  (when-let [payload (dd/read-payload db :bank-item drop/valid-payload?)]
+    (drop/drop-target payload
+                      (assoc (hit value x y) :beat (layout/x->beat (:view value) x))
+                      {:col (:col value) :row (:row value)
+                       :tracks (get-in value [:cue :tracks] [])
+                       :snap (:snap value)})))
+
+;; DnD takes over the mouse, so the hover state is cleared too (R1)
+(defn- on-drop-over [x y db value _]
+  (let [t (drop-at db value x y)]
+    {:accept? (some? t)
+     :drag-updates {:drop-preview (:preview t) :hover-id nil}}))
+
+(defn- on-drop-exit [_ _]
+  {:drag-updates {:drop-preview nil :hover-id nil}})
+
+(defn- on-drop [x y db value _]
+  {:dispatch (:event (drop-at db value x y))
+   :drag-updates {:drop-preview nil :hover-id nil}})
 
 
 ;; ============================================================
@@ -850,7 +920,10 @@
             :on-drag on-drag
             :on-release on-release
             :on-hover on-hover
-            :on-key on-key}
+            :on-key on-key
+            :on-drag-over on-drop-over
+            :on-drag-exited on-drop-exit
+            :on-drag-dropped on-drop}
            {:fx/type overlay-canvas
             :col col :row row :view view :cursor-beat cursor-beat
             :follow? follow? :swap-state swap-state}]}}
