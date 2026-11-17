@@ -172,12 +172,12 @@
 (defn- engine-status [e errors id]
   (let [error (some #(:message (get errors [% id])) [:engine :provider :projector-effects])
         ^Thread thread @(:thread e)
-        {:keys [frames-sent actual-fps]} (engine/get-stats e)]
+        {:keys [frames-sent send-fps]} (engine/get-stats e)]
     (cond
       error {:state :error :error error}
       (and thread (not (.isAlive thread))) {:state :error :error "The streaming thread ended"}
       (zero? frames-sent) {:state :starting}
-      :else {:state :streaming :fps (/ (Math/round (* 10.0 (double actual-fps))) 10.0)})))
+      :else {:state :streaming :fps (/ (Math/round (* 10.0 (double send-fps))) 10.0)})))
 
 (defn status
   "Pure-data status for app state, or nil when stopped with nothing running:

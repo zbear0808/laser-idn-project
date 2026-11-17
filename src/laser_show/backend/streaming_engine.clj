@@ -11,6 +11,7 @@
    (disabled by default; see create-engine)."
   (:require [clojure.tools.logging :as log]
             [laser-show.backend.output-errors :as output-errors]
+            [laser-show.common.timing :as timing]
             [laser-show.idn.frame-rules :as frame-rules]
             [laser-show.idn.stream :as idn-stream]
             [laser-show.idn.output-config :as output-config]
@@ -46,6 +47,15 @@
 
 ;; Engine State
 
+
+(def ^:private initial-stats
+  "Stats of an engine that hasn't sent a frame yet (see update-stats)."
+  {:frames-sent 0
+   :packets-sent 0
+   :fragments-sent 0
+   :last-send-ns nil
+   :interval-us 0.0
+   :send-fps 0.0})
 
 (defn create-engine
   "Create a new streaming engine configuration.
@@ -98,46 +108,36 @@
    ;; the close pair goes there. Nil if the host was never resolved (nothing was sent)
    :last-address (atom nil)
    :thread (atom nil)
-   :start-time-us (atom 0)
-   :last-config-time-ms (atom 0)
+   ;; System/nanoTime at start!; timestamps are microseconds since then
+   :start-ns (atom 0)
+   ;; System/nanoTime of the last frame sent with its config, nil if none yet
+   :last-config-ns (atom nil)
    ;; Each engine needs its own sequence counter for proper packet ordering
    :sequence-counter (atom 0)
-   :stats (atom {:frames-sent 0
-                 :packets-sent 0
-                 :fragments-sent 0
-                 :last-frame-time 0
-                 :actual-fps 0.0})})
+   :stats (atom initial-stats)})
 
 
 ;; Timestamp Management
 
 
 (defn- current-timestamp-us
-  "Get current timestamp in microseconds relative to engine start."
-  [engine]
-  (let [now-us (* (System/currentTimeMillis) 1000)
-        start-us @(:start-time-us engine)]
-    (- now-us start-us)))
+  "Microseconds since the engine started, on the monotonic clock: Stream §2.1
+   requires timestamps that increase monotonically. Written mod 2^32."
+  ^long [engine]
+  (quot (- (System/nanoTime) (long @(:start-ns engine))) 1000))
 
 (defn- should-resend-config?
-  "Check if channel configuration should be resent.
-   Per spec Section 2.2: config should be present every 200ms for recovery."
+  "True when no config has gone out yet, or the last one is
+   CONFIG_RESEND_INTERVAL_MS old (Stream §2.2), on the monotonic clock."
   [engine]
-  (let [now-ms (System/currentTimeMillis)
-        last-config-ms @(:last-config-time-ms engine)]
-    (>= (- now-ms last-config-ms) CONFIG_RESEND_INTERVAL_MS)))
+  (let [last-ns @(:last-config-ns engine)]
+    (or (nil? last-ns)
+        (>= (- (System/nanoTime) (long last-ns))
+            (* CONFIG_RESEND_INTERVAL_MS 1000000)))))
 
 
 ;; Streaming Loop
 
-
-(defn- calculate-actual-fps
-  "Calculate actual FPS based on frame timing."
-  [last-time current-time]
-  (let [elapsed-ms (- current-time last-time)]
-    (if (pos? elapsed-ms)
-      (/ 1000.0 elapsed-ms)
-      0.0)))
 
 (defn- create-idn-stream-packets
   "Create IDN-Stream packet(s) for the given frame.
@@ -157,7 +157,7 @@
         include-config? (should-resend-config? engine)]
     
     (when include-config?
-      (reset! (:last-config-time-ms engine) (System/currentTimeMillis)))
+      (reset! (:last-config-ns engine) (System/nanoTime)))
     
     ;; Check if fragmentation is enabled and needed
     (if (and fragmentation-enabled?
@@ -220,11 +220,49 @@
         (hello/send-packet-to @socket hello-packet (target-address! engine) target-port)))
     packet-count))
 
+(defn- next-deadline
+  "When the frame after the one due at deadline should start: one interval
+   later. If now is already more than one interval past that, the missed
+   frames are skipped and the next one starts an interval from now."
+  ^long [^long deadline ^long now ^long interval]
+  (let [next (+ deadline interval)]
+    (if (> (- now next) interval)
+      (+ now interval)
+      next)))
+
+(defn- update-stats
+  "Stats after a frame went out at now-ns in packet-count packets.
+   :send-fps is frames sent per second on the monotonic clock, smoothed over
+   about 10 frames (an EMA); target-us is the send interval assumed before
+   the first one is measured."
+  [{:keys [frames-sent packets-sent fragments-sent last-send-ns interval-us] :as stats}
+   now-ns packet-count target-us]
+  (let [interval (if last-send-ns
+                   (/ (- now-ns last-send-ns) 1000.0)
+                   (double target-us))
+        interval' (if (pos? frames-sent)
+                    (+ (* 0.9 interval-us) (* 0.1 interval))
+                    interval)]
+    (assoc stats
+           :frames-sent (inc frames-sent)
+           :packets-sent (+ packets-sent packet-count)
+           :fragments-sent (if (> packet-count 1)
+                             (+ fragments-sent packet-count)
+                             fragments-sent)
+           :last-send-ns now-ns
+           :interval-us interval'
+           :send-fps (/ 1e6 interval'))))
+
 (defn- streaming-loop
   "Main streaming loop - runs in a separate thread.
    Continuously gets frames from the provider and sends them as IDN packets.
    Supports application-layer fragmentation for large frames.
    Records timing metrics for IDN streaming profiling.
+   
+   Paced by deadline on System/nanoTime: each frame is due one interval after
+   the last (next-deadline), and the thread parks until then. No frame goes
+   out less than half an interval after the one before, so a frame that
+   overran can't be followed by a burst.
    
    Each engine uses its own sequence counter to avoid interleaving issues
    when multiple engines stream to the same device on different services."
@@ -232,46 +270,42 @@
   (let [{:keys [target-host target-port frame-provider fps
                 running? stats output-config service-id channel-id
                 fragmentation-enabled?]} engine
-        frame-interval-ms (/ 1000.0 fps)
-        error-key [:engine (:id engine)]]
+        interval-ns (timing/fps->interval-nanos fps)
+        min-gap-ns (quot interval-ns 2)
+        target-us (quot interval-ns 1000)
+        error-key [:engine (:id engine)]
+        keep-running? (fn [] @running?)
+        deadline (volatile! (System/nanoTime))
+        last-sent (volatile! nil)
+        await-gap! (fn []
+                     (when-let [prev @last-sent]
+                       (timing/park-until (+ (long prev) min-gap-ns) keep-running?)))]
     
     (log/info (format "Streaming loop started: %s:%d service %d channel %d @ %d FPS (%s, fragmentation=%s)"
                       target-host target-port (or service-id 0) (or channel-id 0) fps
                       (output-config/config-name output-config)
                       (if fragmentation-enabled? "enabled" "disabled")))
     
-    (reset! (:last-config-time-ms engine) 0)
+    (reset! (:last-config-ns engine) nil)
     (reset! (:sequence-counter engine) 0)  ;; Reset sequence on stream start
     
     (while @running?
-      (let [loop-start (System/currentTimeMillis)]
+      (timing/park-until @deadline keep-running?)
+      (when @running?
         (try
-          ;; Start timing for IDN profiling
-          (let [idn-start-ns (System/nanoTime)
+          (let [produce-start (System/nanoTime)
                 frame (frame-provider)
                 frame-point-count (count (or frame []))
                 frame (frame-rules/sanitize-frame (or frame (t/empty-frame)))
-                packet-count (send-frame! engine frame frame-point-count)]
-            
-            ;; Record IDN streaming time (convert ns to us)
-            (let [idn-time-us (/ (- (System/nanoTime) idn-start-ns) 1000.0)]
-              (profiler/record-idn-streaming! idn-time-us))
-            
-            (let [now (System/currentTimeMillis)
-                  {:keys [last-frame-time frames-sent]} @stats
-                  frame-fps (calculate-actual-fps last-frame-time now)
-                  ;; Smoothed over about 10 frames: one frame's interval has ms resolution
-                  actual-fps (if (pos? frames-sent)
-                               (+ (* 0.9 (:actual-fps @stats)) (* 0.1 frame-fps))
-                               frame-fps)]
-              (swap! stats assoc
-                     :frames-sent (inc (:frames-sent @stats))
-                     :packets-sent (+ (:packets-sent @stats) packet-count)
-                     :fragments-sent (if (> packet-count 1)
-                                       (+ (:fragments-sent @stats) packet-count)
-                                       (:fragments-sent @stats))
-                     :last-frame-time now
-                     :actual-fps actual-fps))
+                produced (System/nanoTime)
+                _ (await-gap!)
+                send-start (System/nanoTime)
+                packet-count (send-frame! engine frame frame-point-count)
+                sent (System/nanoTime)]
+            (vreset! last-sent sent)
+            ;; IDN streaming time (µs): producing plus sending, without the wait between
+            (profiler/record-idn-streaming! (/ (+ (- produced produce-start) (- sent send-start)) 1000.0))
+            (swap! stats update-stats sent packet-count target-us)
             (output-errors/ok! error-key))
           
           (catch Throwable e
@@ -280,14 +314,12 @@
             (output-errors/report! error-key e)
             ;; Void the DAC's frame buffer instead of leaving the last frame drawn
             (try
+              (await-gap!)
               (send-frame! engine (t/empty-frame) 0)
+              (vreset! last-sent (System/nanoTime))
               (catch Throwable e2
                 (output-errors/report! error-key e2)))))
-        
-        (let [elapsed (- (System/currentTimeMillis) loop-start)
-              sleep-time (- frame-interval-ms elapsed)]
-          (when (pos? sleep-time)
-            (Thread/sleep (long sleep-time))))))))
+        (vswap! deadline next-deadline (System/nanoTime) interval-ns)))))
 
 
 ;; Engine Control
@@ -312,13 +344,9 @@
     (reset! (:target-address engine) nil)
     (reset! (:last-address engine) nil)
     (reset! (:running? engine) true)
-    (reset! (:start-time-us engine) (* (System/currentTimeMillis) 1000))
-    (reset! (:last-config-time-ms engine) 0)
-    (reset! (:stats engine) {:frames-sent 0
-                             :packets-sent 0
-                             :fragments-sent 0
-                             :last-frame-time (System/currentTimeMillis)
-                             :actual-fps 0.0})
+    (reset! (:start-ns engine) (System/nanoTime))
+    (reset! (:last-config-ns engine) nil)
+    (reset! (:stats engine) initial-stats)
     
     (try
       (let [thread (Thread. #(streaming-loop engine) (thread-name engine))]
@@ -400,6 +428,6 @@
   @(:running? engine))
 
 (defn get-stats
-  "Get current streaming statistics."
+  "Current streaming statistics: the counts and :send-fps (see update-stats)."
   [engine]
   @(:stats engine))

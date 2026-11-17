@@ -84,6 +84,26 @@
       (is (>= elapsed-ms duration-ms)
           "Should sleep at least 5ms"))))
 
+(deftest park-until-never-returns-early-test
+  (testing "park-until returns at or after the target time"
+    (dotimes [_ 5]
+      (let [target (+ (timing/nanotime) 2000000)]
+        (timing/park-until target (constantly true))
+        (is (>= (timing/nanotime) target))))))
+
+(deftest park-until-returns-when-told-to-stop-test
+  (testing "park-until returns soon after keep-waiting? turns false, not at the target"
+    (let [keep-waiting? (atom true)
+          start (timing/nanotime)
+          parked (future
+                   (timing/park-until (+ start 5000000000) #(deref keep-waiting?))
+                   (timing/nanotime))]
+      (Thread/sleep 20)
+      (reset! keep-waiting? false)
+      (let [returned (deref parked 2000 nil)]
+        (is (some? returned) "returned within 2 s of a 5 s target")
+        (is (< (- (long returned) start) 1000000000))))))
+
 
 ;; Measurement Tests
 

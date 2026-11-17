@@ -1,6 +1,7 @@
 (ns laser-show.common.timing
   "Timing utilities for precise time measurement and delays.
-   Provides high-resolution timing functions for real-time applications.")
+   Provides high-resolution timing functions for real-time applications."
+  (:import [java.util.concurrent.locks LockSupport]))
 
 (set! *unchecked-math* :warn-on-boxed)
 
@@ -81,6 +82,26 @@
   "Sleep for the specified duration in milliseconds with sub-millisecond precision."
   [^long duration-ms]
   (precise-sleep-nanos (unchecked-multiply duration-ms 1000000)))
+
+
+(def ^:const ^long max-park-nanos
+  "Longest single park in park-until (5 ms), so it notices keep-waiting?
+   turning false within that time."
+  5000000)
+
+(defn park-until
+  "Park the calling thread until System/nanoTime reaches target-time-nanos.
+   Returns early once (keep-waiting?) is false.
+
+   Unlike precise-sleep-until it never busy-waits: it parks with
+   LockSupport/parkNanos, at most max-park-nanos at a time. It can return a
+   little after the target (the OS's wake-up latency), never before it."
+  [^long target-time-nanos keep-waiting?]
+  (loop []
+    (let [wait (unchecked-subtract target-time-nanos (System/nanoTime))]
+      (when (and (pos? wait) (keep-waiting?))
+        (LockSupport/parkNanos (min wait max-park-nanos))
+        (recur)))))
 
 
 ;; Timing Utilities

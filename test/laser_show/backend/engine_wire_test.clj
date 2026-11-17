@@ -213,3 +213,47 @@
           (is (= [] (:samples (nth fs 3))) "an empty frame replaces the one that failed")
           (is (every? #(= dark-then-lit (:samples %)) (concat (take 3 fs) (drop 4 fs)))))
         (se/stop! engine)))))
+
+
+;; Phase 5: timing on the monotonic clock
+
+(defn- timestamps-of
+  "Engine-clock timestamps (µs) of the messages from port, in arrival order."
+  [port msgs]
+  (into [] (comp (filter (comp #{port} :port)) (keep :timestamp)) msgs))
+
+(deftest timestamps-are-monotonic-microseconds-test
+  (let [engine (start-engine! (constantly frame))
+        port (port-of engine)]
+    (is (wait-for-frames! 20))
+    (se/stop! engine)
+    (is (dac/wait-for! #(close-pair? (take-last 2 (dac/messages *dac*))) 1000))
+    (let [ts (timestamps-of port (dac/messages *dac*))]
+      (is (< 20 (count ts)))
+      (is (apply < ts) "strictly increasing, the close message included")
+      (is (not-every? #(zero? (mod % 1000)) ts) "not whole milliseconds"))))
+
+(deftest late-frame-skips-instead-of-bursting-test
+  (let [calls (atom 0)
+        engine (start-engine! (fn []
+                                (when (= 10 (swap! calls inc))
+                                  (Thread/sleep 50))
+                                frame))
+        port (port-of engine)]
+    (is (wait-for-frames! 25))
+    (se/stop! engine)
+    (let [ts (timestamps-of port (dac/frames *dac*))
+          gaps (mapv - (rest ts) ts)]
+      (is (every? #(>= % 8000) gaps)
+          (str "no two frames less than 8 ms apart (engine clock), µs gaps: " gaps))
+      (is (<= 16000 (nth gaps 9))
+          "the frame after the slow one comes an interval later: the missed ones are skipped"))))
+
+(deftest ^:timing engine-holds-60-fps-test
+  (testing "Deadline pacing holds 60 fps over 2 s, after a 1 s warm-up (p12, p13)"
+    (start-engine! (constantly frame))
+    (Thread/sleep 1000)
+    (let [since (System/nanoTime)]
+      (Thread/sleep 2000)
+      (let [n (count (dac/frames *dac* :since-ns since))]
+        (is (<= 118 n 122) (str n " frames in 2 s"))))))

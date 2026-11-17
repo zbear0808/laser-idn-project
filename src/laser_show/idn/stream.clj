@@ -535,11 +535,6 @@
 ;; Utilities
 
 
-(defn microseconds-now
-  "Get current time in microseconds (for timestamps)"
-  []
-  (/ (System/nanoTime) 1000))
-
 (defn frame-duration-us
   "Calculate frame duration in microseconds for given FPS"
   [fps]

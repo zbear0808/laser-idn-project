@@ -105,3 +105,42 @@
       (is (map? stats) "Stats should be a map")
       (is (contains? stats :frames-sent) "Stats should include frames-sent")
       (is (zero? (:frames-sent stats)) "Initial frames-sent should be zero"))))
+
+
+;; Pacing and stats (plans/2026-11-16-output-runtime/05 §7)
+
+(def ^:private next-deadline #'se/next-deadline)
+(def ^:private update-stats #'se/update-stats)
+
+(defn- ms->ns [ms] (long (* ms 1000000)))
+
+(deftest next-deadline-examples-test
+  (let [interval 16666666]
+    (testing "on time: one interval after the deadline the frame was due at"
+      (is (= interval (next-deadline 0 (ms->ns 2) interval))))
+    (testing "less than one interval late: the deadline stays, so the next frame starts at once"
+      (is (= interval (next-deadline 0 (ms->ns 25) interval)))
+      (is (= interval (next-deadline 0 (* 2 interval) interval)) "exactly one interval late"))
+    (testing "more than one interval late: the missed frames are skipped"
+      (is (= (+ (ms->ns 50) interval) (next-deadline 0 (ms->ns 50) interval))))
+    (testing "deadlines keep their own grid, whatever the clock's origin"
+      (is (= (+ -5000 interval) (next-deadline -5000 (ms->ns 2) interval))))))
+
+(deftest stats-measure-the-send-rate-test
+  (let [target-us 16666
+        frames (fn [intervals-us]
+                 (reduce (fn [[stats t] dt]
+                           (let [t (+ t (* 1000 dt))]
+                             [(update-stats stats t 1 target-us) t]))
+                         [(se/get-stats (se/create-engine "127.0.0.1" (constantly []))) 0]
+                         intervals-us))
+        [first-frame] (frames [0])
+        [at-60] (frames (repeat 30 16667))
+        [at-48] (frames (concat (repeat 30 16667) (repeat 60 20833)))]
+    (is (= 1 (:frames-sent first-frame)))
+    (is (< (Math/abs (- 60.0 (:send-fps first-frame))) 0.1)
+        "before any interval is measured, the target rate")
+    (is (= 30 (:frames-sent at-60)))
+    (is (< (Math/abs (- 60.0 (:send-fps at-60))) 0.1))
+    (is (< (Math/abs (- 48.0 (:send-fps at-48))) 0.2) "follows a slower rate within about 10 frames")
+    (is (= 90 (:packets-sent at-48)))))
