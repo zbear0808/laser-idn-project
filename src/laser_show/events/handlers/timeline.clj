@@ -19,6 +19,7 @@
             [laser-show.events.helpers :as h]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.cue-timing :as cue-timing]
+            [laser-show.animation.effects :as effects]
             [laser-show.timeline.layout :as layout]
             [laser-show.timeline.playback :as playback]
             [laser-show.state.extractors :as ex]
@@ -317,19 +318,33 @@
        :history/description "Add Clip"})))
 
 (defn- handle-add-effect-to-timeline-item
-  "Add an effect (from the effect bank: :item is its definition) to the clip
-   :target-item-id, or the track or folder :target-track-id, with the
-   definition's default params. No target: nothing happens."
-  [{:keys [col row item item-id target-item-id target-track-id state]}]
+  "Add an effect to the clip :target-item-id, or the track or folder
+   :target-track-id, with the definition's default params (:item, else
+   looked up by :item-id). Optional :index inserts at that position instead
+   of appending. :select-target? (drops from the browser) also selects the
+   target, as pressing it on the canvas would. No target: nothing happens."
+  [{:keys [col row item item-id target-item-id target-track-id index select-target? state]}]
   (if-not (or target-item-id target-track-id)
     {:state state}
-    (op-effects state col row
-                (cond-> {:op :add-effect
-                         :effect-id (or item-id (:id item))
-                         :params (reduce (fn [acc {:keys [key default]}] (assoc acc key default))
-                                         {} (:parameters item []))}
-                  target-item-id (assoc :clip-id target-item-id)
-                  (not target-item-id) (assoc :track-id target-track-id)))))
+    (let [item (or item (effects/get-effect item-id))
+          result (op-effects state col row
+                             (cond-> {:op :add-effect
+                                      :effect-id (or item-id (:id item))
+                                      :params (reduce (fn [acc {:keys [key default]}] (assoc acc key default))
+                                                      {} (:parameters item []))}
+                               target-item-id (assoc :clip-id target-item-id)
+                               (not target-item-id) (assoc :track-id target-track-id)
+                               (some? index) (assoc :index index)))]
+      (if (and select-target? (not (identical? state (:state result))))
+        (update result :state
+                (fn [s]
+                  (if target-item-id
+                    (let [clip (list-helpers/find-by-id (get-in s (conj (chain-path col row) :items) []) target-item-id)]
+                      (-> (view-assoc s col row :selection #{target-item-id})
+                          (select-track-in-sidebar col row (:track-id clip))))
+                    (-> (view-assoc s col row :selection #{})
+                        (select-track-in-sidebar col row target-track-id)))))
+        result))))
 
 
 ;; Transport: play / pause / stop / seek one timeline cue.

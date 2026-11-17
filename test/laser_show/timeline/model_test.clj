@@ -444,3 +444,25 @@
         (is (= [:x :z] (fx-ids (t2 (op {:op :remove-effect :effect-instance-id :y}))))))
       (testing "an unknown target changes nothing"
         (is (= r (model/apply-op r {:op :add-effect :track-id :nope :effect-id :scale} q)))))))
+
+(deftest add-effect-at-index-test
+  (let [c (-> (op-cue (clip :a 0.0 4.0 :t1))
+              (model/apply-op {:op :add-effect :clip-id :a :effect-id :scale :effect-instance-id :x} q)
+              (model/apply-op {:op :add-effect :clip-id :a :effect-id :scale :effect-instance-id :y} q))
+        add (fn [target index]
+              (model/apply-op c (cond-> (merge target {:op :add-effect :effect-id :rotation :effect-instance-id :n})
+                                  (some? index) (assoc :index index))
+                              q))
+        clip-fx #(mapv :id (get-in (by-id %) [:a :effects]))]
+    (is (= [:n :x :y] (clip-fx (add {:clip-id :a} 0))))
+    (is (= [:x :n :y] (clip-fx (add {:clip-id :a} 1))) "middle")
+    (is (= [:x :y :n] (clip-fx (add {:clip-id :a} 99))) "past the end clamps")
+    (is (= [:n :x :y] (clip-fx (add {:clip-id :a} -3))) "negative clamps")
+    (is (= [:x :y :n] (clip-fx (add {:clip-id :a} nil))) "no index appends")
+    (testing "on a folder"
+      (let [f (-> c
+                  (model/apply-op {:op :add-effect :track-id :f :effect-id :scale :effect-instance-id :fx1} q)
+                  (model/apply-op {:op :add-effect :track-id :f :effect-id :scale :effect-instance-id :fx0 :index 0} q))]
+        (is (= [:fx0 :fx1] (mapv :id (:effects (model/find-track (:tracks f) :f)))))
+        (is (model/track-group? (model/find-track (:tracks f) :f)))))
+    (is (= "Add Effect" (model/op-label {:op :add-effect :index 1})))))

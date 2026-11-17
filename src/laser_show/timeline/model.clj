@@ -638,6 +638,14 @@
       (into (conj (subvec rest 0 to) fx) (subvec rest to)))
     effects))
 
+(defn- insert-effect
+  "Insert fx at `index` (clamped); without an index, append."
+  [effects index fx]
+  (if (some? index)
+    (let [i (-> (long index) (max 0) (min (count effects)))]
+      (into (conj (subvec effects 0 i) fx) (subvec effects i)))
+    (conj effects fx)))
+
 (defn- edit-loop [cue f]
   (update cue :loop #(f (or % {:enabled? false :start 0.0 :duration default-clip-length}))))
 
@@ -657,10 +665,11 @@
                                     :timeline/duration (or (:length o) default-clip-length)))]
                 (update cue :items (fnil conj []) clip))
     ;; Effect ops target a clip (:clip-id) or a track or folder (:track-id)
-    :add-effect (update-effects cue o #(conj % {:id (or (:effect-instance-id o) (random-uuid))
-                                                :effect-id (:effect-id o)
-                                                :params (or (:params o) {})
-                                                :enabled? true}))
+    :add-effect (update-effects cue o #(insert-effect % (:index o)
+                                                      {:id (or (:effect-instance-id o) (random-uuid))
+                                                       :effect-id (:effect-id o)
+                                                       :params (or (:params o) {})
+                                                       :enabled? true}))
     :remove-effect (update-effects cue o #(remove-ids % #{(:effect-instance-id o)}))
     :set-effect-enabled (update-effects cue o #(update-items-by-id % #{(:effect-instance-id o)}
                                                                  (fn [fx] (assoc fx :enabled? (boolean (:enabled? o))))))

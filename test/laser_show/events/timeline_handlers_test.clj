@@ -1,5 +1,7 @@
 (ns laser-show.events.timeline-handlers-test
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.animation.effects :as effects]
+            [laser-show.animation.effects.shape]
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.timeline :as timeline]
             [laser-show.services.frame-service :as frame-service]
@@ -429,3 +431,58 @@
                                       :height 420.5 :state base-state}))]
       (is (= (dissoc (get-in base-state [:ui :timeline-prefs]) :detail-height)
              (dissoc (get-in s [:ui :timeline-prefs]) :detail-height))))))
+
+;; Drag from the browser (plans/2026-11-08-timeline-rework/08-drag-from-browser.md)
+
+(defn- drop-state []
+  (-> base-state
+      (assoc-in [:chains :cue-chains [0 0]]
+                {:editor-type :timeline
+                 :tracks [{:id :f :type :group :items [{:id :t1 :type :track}]}
+                          {:id :t2 :type :track}]
+                 :items [{:id :a :type :preset :preset-id :circle :track-id :t1
+                          :timeline/start 2.0 :timeline/duration 4.0
+                          :effects [{:id :e0 :effect-id :scale :params {} :enabled? true}
+                                    {:id :e1 :effect-id :scale :params {} :enabled? true}]}]})
+      (assoc-in [:ui :timeline-editor [0 0] :selection] #{})
+      (assoc-in [:list-ui [:timeline-tracks 0 0]] {:selected-ids #{:t2} :last-selected-id :t2})))
+
+(defn- add-effect [s extra]
+  (:state (timeline/handle (merge {:event/type :timeline/add-effect-to-item :col 0 :row 0
+                                   :item-id :rotation :state s}
+                                  extra))))
+
+(defn- selection-of [s] (get-in s [:ui :timeline-editor [0 0] :selection]))
+(defn- sidebar-of [s] (get-in s [:list-ui [:timeline-tracks 0 0] :selected-ids]))
+
+(deftest add-effect-with-index-and-select-target-test
+  (testing "a clip: inserted at :index, the clip and its track get selected"
+    (let [s (add-effect (drop-state) {:target-item-id :a :index 1 :select-target? true})
+          fx (get-in s [:chains :cue-chains [0 0] :items 0 :effects])]
+      (is (= [:scale :rotation :scale] (mapv :effect-id fx)))
+      (is (= [:e0 :e1] [(:id (fx 0)) (:id (fx 2))]))
+      (is (= #{:a} (selection-of s)))
+      (is (= #{:t1} (sidebar-of s)))))
+  (testing "a folder: appended, the selection clears and the folder is the sidebar track"
+    (let [s (add-effect (assoc-in (drop-state) [:ui :timeline-editor [0 0] :selection] #{:a})
+                        {:target-track-id :f :select-target? true})]
+      (is (= [:rotation] (mapv :effect-id (get-in s [:chains :cue-chains [0 0] :tracks 0 :effects]))))
+      (is (= #{} (selection-of s)))
+      (is (= #{:f} (sidebar-of s)))))
+  (testing "a click (no :select-target?) leaves the selection alone"
+    (let [s (add-effect (drop-state) {:target-item-id :a})]
+      (is (= 3 (count (get-in s [:chains :cue-chains [0 0] :items 0 :effects]))))
+      (is (= #{} (selection-of s)))
+      (is (= #{:t2} (sidebar-of s)))))
+  (testing "an unknown target changes nothing, not even the selection"
+    (let [s0 (drop-state)]
+      (is (identical? s0 (add-effect s0 {:target-item-id :nope :select-target? true}))))))
+
+(deftest add-effect-looks-up-definition-test
+  (let [def-params (reduce (fn [acc {:keys [key default]}] (assoc acc key default))
+                           {} (:parameters (effects/get-effect :rotation)))
+        params #(get-in % [:chains :cue-chains [0 0] :items 0 :effects 2 :params])]
+    (is (seq def-params))
+    (is (= def-params (params (add-effect (drop-state) {:target-item-id :a}))))
+    (is (= def-params (params (add-effect (drop-state) {:target-item-id :a :item (effects/get-effect :rotation)})))
+        "same as a click, which carries the definition")))
