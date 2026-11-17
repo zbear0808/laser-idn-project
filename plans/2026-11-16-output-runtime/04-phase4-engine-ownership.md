@@ -1,7 +1,7 @@
 # Phase 4 — One owner for the engines; status the UI can trust
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** Proposed. O6–O8 answered 2026-11-16 (A each; each projector keeps its own streaming thread). Needs Phase 3   **Last verified against:** `70e049e`
+**Status:** Proposed. O6–O8 answered 2026-11-16 (A each; each projector keeps its own streaming thread). Needs Phase 3 (done, `a37f690`)   **Last verified against:** `354b798` (citations re-checked 2026-11-16 after Phases 2 and 3)
 **Supersedes / Superseded by:** none   **Related findings:** O-1, O-10 to O-13 (`00-overview.md` §2); review 04 findings 12, 13, 15, 16, MR4, MR5; 02 #23, M8
 
 Probes p4–p7 show the operator pressing Stop while a laser keeps drawing. Today the streaming engines (threads, sockets, atoms) are stored in app state. Three futures write them there, with no ordering between them. Anything that overwrites app state, or any two lifecycle commands that overlap, can leave an engine running that nothing holds a reference to.
@@ -19,13 +19,13 @@ About 2–3 days.
 | What | Where | Today |
 |---|---|---|
 | Who asks | the toolbar button picks start or stop from the render-time `connected?` (`toolbar.clj:220,235-243`) | No guard against a second click before the re-render (p4) |
-| Start, stop, refresh | `events/core.clj:339-354`, `:356-366`, `:368-383` | Each runs in its own `future`, with no queue and no lock; only `Exception` is caught |
-| Engine handles | `multi_engine.clj:271-295` (blind write at `:289`), `:297-317` (read at `:300`, write at `:312`, after stopping each engine in turn), `:319-378` (read at `:329`, write at `:371`) | Stored at `[:backend :streaming :multi-engine-state]`. `connection.clj:64-70` sets it to nil after a stop. |
-| Running flags | `[:backend :streaming :running?]` (`connection.clj:40,54`); `[… :multi-engine-state :running?]` (`multi_engine.clj:291,314,373`); `[:backend :idn :connected?]` set optimistically (`connection.clj:42`) | Three flags that drift apart (p5: the toolbar says stopped while an engine streams) |
+| Start, stop, refresh | `events/core.clj:420-436`, `:437-448`, `:449-468` | Each runs in its own `future`, with no queue and no lock; only `Exception` is caught |
+| Engine handles | `multi_engine.clj:279-304` (blind write at `:297`), `:305-326` (read at `:308`, write at `:320`, after stopping each engine in turn), `:327-387` (read at `:337`, write at `:379`) | Stored at `[:backend :streaming :multi-engine-state]`. `connection.clj:64-70` sets it to nil after a stop. |
+| Running flags | `[:backend :streaming :running?]` (`connection.clj:40,54`); `[… :multi-engine-state :running?]` (`multi_engine.clj:299,322,381`); `[:backend :idn :connected?]` set optimistically (`connection.clj:42`) | Three flags that drift apart (p5: the toolbar says stopped while an engine streams) |
 | Refresh triggers | returned by `projector.clj:213,231,294`, `menu.clj:60,94`, `handlers/history.clj:92` (via `hardware-changed?`, `:64-71`) | `update-settings` (host, name, `projector.clj:268-281`) and `add-manual` (`:238-253`) don't refresh. The Host field fires on every keystroke (`projectors.clj:318-324`). The Port field has no handler (`:325-331`). A blank host throws inside the handler (`projector.clj:274-279`). |
-| Refresh diff | `multi_engine.clj:338-343,367-368` | Compares projector ids only, so an engine keeps the host, port, service and bit depth it was created with |
-| Status in the UI | `toolbar.clj:221-233` ("Streaming to N" counts *enabled projectors*); `subs.clj:368-386`; the projector dot reads `[:projectors id :status :connected?]` (`projectors.clj:224`), set once to false at creation (`projector.clj:103`) | Nothing reports what is actually streaming. Engine stats (`streaming_engine.clj:244-254`) and `get-stats` (`:340-343`) have no reader. |
-| Exit | `app.clj:190-198` (`stop-streaming!`), `:209-228`, `:230-237` | Stops only the engines found in state. No shutdown hook. In dev mode the JVM stays up after an exit (`93c638a`), so orphans keep streaming in the REPL. |
+| Refresh diff | `multi_engine.clj:345-351,375-376` | Compares projector ids only, so an engine keeps the host, port, service and bit depth it was created with |
+| Status in the UI | `toolbar.clj:221-233` ("Streaming to N" counts *enabled projectors*); `subs.clj:368-386`; the projector dot reads `[:projectors id :status :connected?]` (`projectors.clj:224`), set once to false at creation (`projector.clj:103`) | Nothing reports what is actually streaming. Engine stats (`streaming_engine.clj:255-265`) and `get-stats` (`:357-360`) have no reader. |
+| Exit | `app.clj:195-203` (`stop-streaming!`), `:214-233`, `:235-242` | Stops only the engines found in state. No shutdown hook. In dev mode the JVM stays up after an exit (`93c638a`), so orphans keep streaming in the REPL. |
 | New / Open while streaming | `menu.clj:57-60,89-94`; the new document has no projectors | A refresh closes every engine; the toolbar still says "Streaming to 0 projector(s)" |
 
 ## 2. Root cause
@@ -36,12 +36,12 @@ Live objects are kept in app state. Several threads with no common order write t
 
 | Existing thing (file:line) | How it's reused |
 |---|---|
-| `create-engine-for-projector` (`multi_engine.clj:218-248`), the provider (`:139-212`) | Unchanged; the registry calls them |
-| `engine/start!`, `stop!`, `get-stats` (`streaming_engine.clj:270-343`) | Called only from the output thread (and from `drain!`). `start!` still gives each engine its own thread. `stop!` becomes `(stop-all! [engine])` (§4) |
+| `create-engine-for-projector` (`multi_engine.clj:225-257`), the provider (`projector-frame` and `create-projector-frame-provider`, `:142-224`) | Unchanged; the registry calls them |
+| `engine/start!`, `stop!`, `get-stats` (`streaming_engine.clj:287-360`) | Called only from the output thread (and from `drain!`). `start!` still gives each engine its own thread. `stop!` becomes `(stop-all! [engine])` (§4) |
 | `hardware-changed?` (`handlers/history.clj:64-71`) | The idea moves into a middleware: compare per-projector fingerprints before and after every event |
 | Phase 3: callbacks re-enter through the agent | `:output/status` is dispatched with `events/dispatch!` from the output thread |
 | Phase 2: `output-errors/snapshot` | Per-projector error text in the status |
-| `app/stop!`, `exit!` (`app.clj:209-237`) | Call `drain!` instead of `stop-streaming!` |
+| `app/stop!`, `exit!` (`app.clj:214-242`) | Call `drain!` instead of `stop-streaming!` |
 
 ## 4. Changes per namespace
 
@@ -54,18 +54,18 @@ Live objects are kept in app state. Several threads with no common order write t
   - `fingerprint [projector]` = `(select-keys p [:host :port :service-id :output-config :scan-rate])`, only for enabled projectors with a non-blank host. Zone groups and names are read live by the provider, so changing them doesn't restart anything.
   - `drain! [timeout-ms]`, synchronous: stops the executor, waits for the running command up to the timeout, then stops every engine in the registry on the calling thread. It is idempotent.
   - The status publisher (O8-A): while the registry isn't empty, 4 times a second it builds the status (§5) from `get-stats` and `output-errors/snapshot`. It dispatches `:output/status` only when the status changed.
-- `laser-show.backend.streaming-engine`: NEW `stop-all! [engines]`. It clears every engine's `running?` flag first, then joins each thread (up to 1 s each, as `stop!` does today, `streaming_engine.clj:310-311`) and sends its close pair. `stop!` becomes `(stop-all! [engine])`. Today `stop-engines!` stops one engine after another (`multi_engine.clj:297-317`), so with N projectors the last one goes dark up to N frames after the first.
-- `laser-show.events.core` (`:339-383`): the three `:multi-engine/*` effects become `submit-sync!` with the projector snapshot carried in the effect value (`{:projectors …}`), or `submit-stop!`. No futures. The data is read by the handler, not by a worker (`docs/CLJFX_STATE_MANAGEMENT.md` §Best Practices 1).
+- `laser-show.backend.streaming-engine`: NEW `stop-all! [engines]`. It clears every engine's `running?` flag first, then joins each thread (up to 1 s each, as `stop!` does today, `streaming_engine.clj:327-328`) and sends its close pair. `stop!` becomes `(stop-all! [engine])`. Today `stop-engines!` stops one engine after another (`multi_engine.clj:305-326`), so with N projectors the last one goes dark up to N frames after the first.
+- `laser-show.events.core` (`:420-468`): the three `:multi-engine/*` effects become `submit-sync!` with the projector snapshot carried in the effect value (`{:projectors …}`), or `submit-stop!`. No futures. The data is read by the handler, not by a worker (`docs/CLJFX_STATE_MANAGEMENT.md` §Best Practices 1).
 - `laser-show.events.handlers.connection` (`:30-76`):
   - `:idn/start-multi-streaming` sets `[:backend :streaming :running?]` (the operator's intent) and returns a sync with `(:projectors state)`. Pressing it twice gives two identical syncs, and the second changes nothing.
   - `:idn/stop-multi-streaming` clears the flag and returns the stop.
   - NEW `:output/status` writes `[:backend :streaming :status]`.
   - `:idn/multi-streaming-started`, `-stopped`, `-refreshed` and `:idn/connection-failed` are removed, along with `[:backend :idn :connected? :connecting? :error]`.
-- `laser-show.events.handlers.output-sync` (NEW middleware, added to `handle-event-pipeline`, `events/core.clj:388-396`): after any event, when streaming is on and the fingerprints of `(:projectors old)` and `(:projectors new)` differ, it adds `:multi-engine/refresh {:projectors …}`. The six hand-placed refreshes (`projector.clj:213,231,294`, `menu.clj:60,94`, `handlers/history.clj:92`) go away, and host, port, add-manual and undo are covered too.
+- `laser-show.events.handlers.output-sync` (NEW middleware, added to `handle-event-pipeline`, `events/core.clj:469-483`, inside Phase 3's `wrap-lost-update-check`, which stays outermost): after any event, when streaming is on and the fingerprints of `(:projectors old)` and `(:projectors new)` differ, it adds `:multi-engine/refresh {:projectors …}`. The six hand-placed refreshes (`projector.clj:213,231,294`, `menu.clj:60,94`, `handlers/history.clj:92`) go away, and host, port, add-manual and undo are covered too.
 - `laser-show.events.handlers.projector`: `update-settings` (`:268-281`) ignores a blank host instead of throwing. `make-projector-config` (`:78-104`) stops writing `:status`; old project files that still have it are harmless.
 - `laser-show.views.tabs.projectors`: the Host and Port fields (`:318-331`) commit on Enter or focus loss (O7-A). A half-typed address never reaches an engine: Java resolves `192.168.1` (on its way to `192.168.1.50`) to 192.168.0.1, often the router (checked with `InetAddress/getByName` on JDK 25). The dot (`:220-226`) reads the new per-projector status.
 - `laser-show.views.toolbar` (`:219-243`) and `subs.clj` (`connection-status`, `:368-386`): the toolbar shows "Streaming to 2 of 3" from the status, plus "Starting…" while a sync is queued and an error count. The button is chosen from the operator's intent (`running?`), not from what has finished starting.
-- `laser-show.app`: `stop!` calls `output-runtime/drain! 2000` (replacing `stop-streaming!`, `:190-198`). `start!` registers a JVM shutdown hook that drains, which covers a kill or `System/exit` from anywhere.
+- `laser-show.app`: `stop!` calls `output-runtime/drain! 2000` (replacing `stop-streaming!`, `:195-203`). `start!` registers a JVM shutdown hook that drains, which covers a kill or `System/exit` from anywhere.
 - `laser-show.state.domains` (`:399-410`): `:multi-engine-state`, `:engines`, `:connected-targets` and the `:idn` subtree go; `:status` is added.
 
 ## 5. State placement
@@ -157,7 +157,7 @@ Run: `clj -M:mac-arm:test output-lifecycle output-sync`, `clj -M:test-ui:mac-arm
 > | | What | For | Against |
 > |---|---|---|---|
 > | **A (chosen)** | A runtime registry plus one output thread that runs every start, stop and sync in order. Each engine keeps its own streaming thread. Newer syncs replace queued ones. App state gets pure-data status only. | Every race in §7 is gone by construction; Stop can't miss an engine; the agent never blocks on a socket or thread join | A new namespace and thread; status arrives a moment after the click |
-> | B | The same registry, but the commands run under a `locking` monitor on the thread that asks (the agent) | No new thread | Stopping N engines blocks the agent for up to N × 1 s (`streaming_engine.clj:310-311`), freezing input and the UI's events meanwhile |
+> | B | The same registry, but the commands run under a `locking` monitor on the thread that asks (the agent) | No new thread | Stopping N engines blocks the agent for up to N × 1 s (`streaming_engine.clj:327-328`), freezing input and the UI's events meanwhile |
 > | C | Keep the handles in app state, guarded by a lock | Smallest diff | Doesn't fix p7-style losses from whole-state writes; keeps live objects in the context, against `docs/CLJFX_STATE_MANAGEMENT.md` §Best Practices 5 |
 >
 > **Your answer:** "I still want separate streaming engines on different threads. I'm not sure how else we could ensure low latency frames being sent to different devices." A keeps that: each projector computes and sends its frames on its own thread, as today. The one output thread only runs start, stop and sync commands. §4, invariants 6–7 and two new tests (§8) make this explicit, and stopping now signals every engine at once.
