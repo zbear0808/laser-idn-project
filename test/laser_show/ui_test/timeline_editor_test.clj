@@ -1,15 +1,18 @@
 (ns laser-show.ui-test.timeline-editor-test
   "Timeline editor window for cell [0 0]: track, content and loop controls,
-   canvas clicks and the Delete key."
+   canvas clicks and the Delete key, and drags from the browser."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [clojure.tools.logging :as log]
             [laser-show.events.core :as events]
             [laser-show.input.mtc :as mtc]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
+            [laser-show.state.history :as history]
             [laser-show.timeline.layout :as layout]
             [laser-show.timeline.model :as model]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui]))
+            [laser-show.ui-test.testfx :as ui]
+            [laser-show.views.components.drag-drop-cell :as dd]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -406,3 +409,145 @@
       (dotimes [_ 3] (ui/sync-fx!))
       (is (near? 380.0 (detail-height)) "the panel keeps its height")
       (is (pos? (canvas-width)) "and the lanes are still drawn"))))
+
+
+;; Drag from the browser (plans/2026-11-08-timeline-rework/08-drag-from-browser.md).
+;; Headless, drops are synthetic DragEvents (ui/fire-drop!): the headless glass
+;; platform can't run a real drag-and-drop. timeline-real-drag-from-browser
+;; drags with the mouse and only runs in windowed mode.
+
+(defn- bank-content [kind id category]
+  (dd/drag-content :bank-item {:kind kind :id id :category category}))
+
+(defn- items [] (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :items]))
+
+(defn- tracks [] (get-in (state/get-raw-state) [:chains :cue-chains [0 0] :tracks]))
+
+(defn- first-leaf-id [] (:id (model/first-leaf-track (tracks))))
+
+(defn- canvas-drop-preview []
+  (:drop-preview @(:interaction (.getUserData ^javafx.scene.Node (ui/query "#timeline-canvas")))))
+
+(defn- pseudo-class? [^javafx.scene.Node node pc]
+  (.contains (.getPseudoClassStates node) (javafx.css.PseudoClass/getPseudoClass pc)))
+
+(defn- undo-label [] (history/undo-label (:history (state/get-raw-state))))
+
+(defn- open-browser! [robot]
+  (when-not (get-in (state/get-raw-state) [:ui :timeline-prefs :add-panel :open?])
+    (ui/click! robot "#timeline-add-content"))
+  (ui/wait-for! #(ui/visible? "#timeline-browser")))
+
+(deftest timeline-drag-preset-into-lane
+  (let [robot (ui/robot)]
+    (open-timeline!)
+    (open-browser! robot)
+    (ui/wait-for! #(pos? (canvas-width)))
+    (let [canvas (ui/query "#timeline-canvas")
+          square (bank-content :preset :square :geometric)
+          track (first-leaf-id)
+          before (count (items))
+          undo-before (undo-count)]
+      (testing "hovering shows a ghost where the clip will go"
+        (is (:accepted? (ui/fire-drop! canvas square 413 first-track-y :drop? false :exit? false)))
+        (is (= {:ghost {:row-id track :start 8.25 :length 4.0}} (canvas-drop-preview))))
+      (testing "the drop adds one clip at the snapped beat, as one undo step"
+        (is (:completed? (ui/fire-drop! canvas square 413 first-track-y)))
+        (ui/wait-for! #(= (inc before) (count (items))))
+        (let [clip (last (items))]
+          (is (= [:square track 8.25] [(:preset-id clip) (:track-id clip) (:timeline/start clip)]))
+          (is (= #{(:id clip)} (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection]))))
+        (is (= (inc undo-before) (undo-count)))
+        (is (= "Add Clip" (undo-label)))
+        (is (nil? (canvas-drop-preview)) "the ghost is gone"))
+      (testing "the ruler, foreign text and other drag types are refused"
+        (is (not (:accepted? (ui/fire-drop! canvas square 150 20))))
+        (is (not (:accepted? (ui/fire-drop! canvas (doto (javafx.scene.input.ClipboardContent.) (.putString "square"))
+                                            413 first-track-y))))
+        (is (not (:accepted? (ui/fire-drop! canvas (dd/drag-content :grid-cell {:col 0 :row 0}) 413 first-track-y))))
+        (ui/sync-fx!)
+        (is (= (inc before) (count (items)))))
+      (testing "a bank click after a drop still adds exactly one clip"
+        (click-bank-button! robot "Square")
+        (ui/wait-for! #(= (+ 2 before) (count (items))))
+        (Thread/sleep 100)
+        (ui/sync-fx!)
+        (is (= (+ 2 before) (count (items))))))))
+
+(defn- effect-ids [entity] (mapv :effect-id (:effects entity)))
+
+(defn- clip-by-id [id] (some #(when (= id (:id %)) %) (items)))
+
+(deftest timeline-drag-effect-onto-header-and-chain
+  (let [robot (ui/robot)
+        scale (bank-content :effect :scale :shape)
+        rotation (bank-content :effect :rotation :shape)]
+    (open-timeline!)
+    (open-browser! robot)
+    (ui/wait-for! #(pos? (canvas-width)))
+    (let [clip-id (add-clip-at-zero!)]
+      (ui/wait-for! #(ui/visible? "#timeline-device-hint"))
+      (testing "an empty chain takes a drop, and highlights its hint while hovering"
+        (is (:accepted? (ui/fire-drop! (ui/query "#timeline-device-chain") scale 100 60 :drop? false :exit? false)))
+        (is (pseudo-class? (ui/query "#timeline-device-hint") "drop-target"))
+        (is (:completed? (ui/fire-drop! (ui/query "#timeline-device-chain") scale 100 60)))
+        (ui/wait-for! #(= [:scale] (effect-ids (clip-by-id clip-id))))
+        (ui/wait-for! #(= "Scale" (ui/node-text "#timeline-device-name-0"))))
+      (testing "a drop on the left half of a card inserts before it"
+        (let [card (first (ui/query-all ".tl-device"))]
+          (is (:accepted? (ui/fire-drop! card rotation 20 20 :drop? false :exit? false)))
+          (is (pseudo-class? card "drop-before"))
+          (ui/fire-drop! (ui/query "#timeline-device-chain") rotation 5 5 :drop? false)
+          (is (not (pseudo-class? card "drop-before")) "leaving the chain clears the line")
+          (is (:completed? (ui/fire-drop! card rotation 20 20)))
+          (ui/wait-for! #(= [:rotation :scale] (effect-ids (clip-by-id clip-id))))
+          (is (= "Add Effect" (undo-label)))))
+      (testing "the right half of the last card: after it"
+        (ui/wait-for! #(= 2 (count (ui/query-all ".tl-device"))))
+        (let [card (last (ui/query-all ".tl-device"))]
+          (ui/fire-drop! card scale 300 20 :drop? false :exit? false)
+          (is (pseudo-class? card "drop-after"))
+          (ui/fire-drop! card scale 300 20 :drop? false))))
+    (testing "a header drop puts it on the track and selects the track"
+      (let [track (first-leaf-id)
+            header (ui/query "#timeline-track-header-1")]
+        (is (:accepted? (ui/fire-drop! header scale 100 10 :drop? false :exit? false)))
+        (is (pseudo-class? header "drop-target"))
+        (is (:completed? (ui/fire-drop! header scale 100 10)))
+        (ui/wait-for! #(= [:scale] (effect-ids (model/find-track (tracks) track))))
+        (is (not (pseudo-class? header "drop-target")))
+        (ui/wait-for! #(= #{track} (get-in (state/get-raw-state) [:list-ui [:timeline-tracks 0 0] :selected-ids])))
+        (is (empty? (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection])))
+        (ui/wait-for! #(= "TRACK PROPERTIES" (ui/node-text "#timeline-inspector-title")))))
+    (testing "zone effects don't go on tracks"
+      (is (not (:accepted? (ui/fire-drop! (ui/query "#timeline-track-header-1")
+                                          (bank-content :effect :zone-selector :zone) 100 10)))))
+    (testing "an effect dropped on a clip in the lanes goes on the clip and selects it"
+      (let [fx-count (fn [] (into {} (map (juxt :id #(count (:effects %)))) (items)))
+            before (fx-count)]
+        (is (:completed? (ui/fire-drop! (ui/query "#timeline-canvas") scale 100 first-track-y)))
+        (ui/wait-for! #(= 1 (count (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection]))))
+        (let [id (first (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :selection]))]
+          (ui/wait-for! #(= (assoc before id (inc (before id))) (fx-count))))))))
+
+(deftest timeline-real-drag-from-browser
+  (if (ui/headless?)
+    (log/info "Skipping timeline-real-drag-from-browser: the headless glass platform can't run a real drag-and-drop (windowed only)")
+    (let [robot (ui/robot)]
+      (open-timeline!)
+      (open-browser! robot)
+      (ui/wait-for! #(pos? (canvas-width)))
+      (let [before (count (items))
+            button (fn [] (first (filter #(= "Square" (.getText ^javafx.scene.control.Labeled %))
+                                         (ui/query-all ".bank-item-btn"))))]
+        (ui/wait-for! #(some? (button)))
+        (ui/drag-node-to! robot (button) (ui/query "#timeline-canvas") 413 first-track-y)
+        (ui/wait-for! 5000 #(= (inc before) (count (items))))
+        (is (= 8.25 (:timeline/start (last (items)))))
+        (is (not (.isArmed ^javafx.scene.control.ButtonBase (button))) "the button isn't left armed")
+        (testing "a click right after the drag adds exactly one clip"
+          (click-bank-button! robot "Square")
+          (ui/wait-for! #(= (+ 2 before) (count (items))))
+          (Thread/sleep 200)
+          (ui/sync-fx!)
+          (is (= (+ 2 before) (count (items)))))))))

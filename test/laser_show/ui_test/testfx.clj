@@ -11,7 +11,10 @@
            [javafx.event ActionEvent Event]
            [javafx.stage Window]
            [javafx.embed.swing SwingFXUtils]
-           [javafx.scene.input KeyCode MouseButton MouseEvent]
+           [javafx.scene.input DragEvent KeyCode MouseButton MouseEvent TransferMode]
+           [javafx.util Pair]
+           [com.sun.javafx.scene.input DragboardHelper]
+           [com.sun.javafx.tk TKClipboard]
            [javax.imageio ImageIO]
            [java.io File]
            [javafx.geometry Point2D Pos]
@@ -306,6 +309,75 @@
   (.dropTo ^FxRobotInterface robot-instance target)
   (sync-fx!)
   robot-instance)
+
+(defn drag-node-to!
+  "Real drag-and-drop with the mouse robot: press on the centre of source,
+   move to node-local (x, y) of target (from its top-left) and release.
+   Doesn't work headless: the headless glass platform can't run a native
+   drag-and-drop (see fire-drop!)."
+  [^FxRobot robot-instance ^Node source ^Node target x y]
+  (.moveTo robot-instance source)
+  (.press robot-instance (into-array MouseButton [MouseButton/PRIMARY]))
+  (.moveBy robot-instance 12.0 0.0)
+  (.moveTo robot-instance target Pos/TOP_LEFT (Point2D. (double x) (double y)) Motion/DIRECT)
+  (sync-fx!)
+  (.release robot-instance (into-array MouseButton [MouseButton/PRIMARY]))
+  (sync-fx!)
+  robot-instance)
+
+(defn- test-dragboard
+  "A Dragboard holding `content` (a ClipboardContent) that offers COPY, for
+   synthetic drag events. FX thread only."
+  [content]
+  (let [store (atom (into {} content))]
+    (DragboardHelper/createDragboard
+     (reify TKClipboard
+       (getContentTypes [_] (set (keys @store)))
+       (putContent [_ pairs]
+         (doseq [^Pair p pairs] (swap! store assoc (.getKey p) (.getValue p)))
+         true)
+       (getContent [_ fmt] (get @store fmt))
+       (hasContent [_ fmt] (contains? @store fmt))
+       (getTransferModes [_] #{TransferMode/COPY})
+       (setDragView [_ _])
+       (setDragViewOffsetX [_ _])
+       (setDragViewOffsetY [_ _])
+       (getDragView [_] nil)
+       (getDragViewOffsetX [_] 0.0)
+       (getDragViewOffsetY [_] 0.0)))))
+
+(defn fire-drop!
+  "Drag `content` (a ClipboardContent) over node-local (x, y) of `node` and,
+   when the node accepts and :drop? isn't false, drop it there. Fires
+   synthetic DragEvents (DRAG_ENTERED, DRAG_OVER, DRAG_DROPPED, and
+   DRAG_EXITED unless :exit? is false), because the headless glass platform
+   can't run a real drag-and-drop: its DnD clipboard throws
+   UnsupportedOperationException. The drag source isn't involved.
+   Returns {:accepted? :completed?}."
+  [^Node node content x y & {:keys [drop? exit?] :or {drop? true exit? true}}]
+  (let [result (run-on-fx-thread!
+                (fn []
+                  (let [db (test-dragboard content)
+                        scene-p (.localToScene node (double x) (double y))
+                        screen-p (.localToScreen node (double x) (double y))
+                        event (fn [type mode]
+                                (DragEvent. type db (.getX scene-p) (.getY scene-p)
+                                            (.getX screen-p) (.getY screen-p)
+                                            mode nil node nil))
+                        _ (Event/fireEvent node (event DragEvent/DRAG_ENTERED TransferMode/COPY))
+                        over (event DragEvent/DRAG_OVER TransferMode/COPY)
+                        _ (Event/fireEvent node over)
+                        accepted? (.isAccepted over)
+                        dropped (when (and accepted? drop?)
+                                  (let [d (event DragEvent/DRAG_DROPPED (.getAcceptedTransferMode over))]
+                                    (Event/fireEvent node d)
+                                    d))]
+                    (when exit?
+                      (Event/fireEvent node (event DragEvent/DRAG_EXITED TransferMode/COPY)))
+                    {:accepted? accepted?
+                     :completed? (boolean (some-> ^DragEvent dropped .isDropCompleted))})))]
+    (sync-fx!)
+    result))
 
 (defn drag-by!
   "Press the primary button at (x, y) inside the node found by selector
