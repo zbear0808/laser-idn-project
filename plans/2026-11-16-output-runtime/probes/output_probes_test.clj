@@ -10,6 +10,9 @@
 ;; uses (the pipeline on a cljfx agent). Before, it called events/event-handler
 ;; on the calling thread, which was what an effect's callback did then.
 ;;
+;; Since Phase 4 the engines live in the output runtime's registry, not in app
+;; state, so streaming-flags reads the registry and the published status.
+;;
 ;; Everything runs on loopback (127.0.0.1): no DAC, no network, no UI. A small
 ;; receiver here stands in for the DAC and decodes 16/8 samples.
 ;;
@@ -35,6 +38,7 @@
             [laser-show.animation.effects.calibration]
             [laser-show.animation.types :as t]
             [laser-show.backend.multi-engine :as me]
+            [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.backend.streaming-engine :as se]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.timing :as timing]
@@ -140,11 +144,14 @@
 (defn- init-with-projectors! [projectors]
   (state/init-state! (assoc (domains/build-initial-state) :projectors projectors)))
 
-(defn- streaming-flags []
+(defn- streaming-flags
+  "Since Phase 4: the operator's intent, the engine count the published status
+   reports, and the engines the output runtime's registry actually holds."
+  []
   (let [s (state/get-raw-state)]
     {:running? (get-in s [:backend :streaming :running?])
-     :toolbar-connected? (get-in s [:backend :idn :connected?])
-     :engines-in-state (count (get-in s [:backend :streaming :multi-engine-state :engines]))}))
+     :status-engines (get-in s [:backend :streaming :status :engines])
+     :engines-in-registry (count (output-runtime/registry))}))
 
 (def ^:private agent-handler
   (-> events/handle-event-pipeline
