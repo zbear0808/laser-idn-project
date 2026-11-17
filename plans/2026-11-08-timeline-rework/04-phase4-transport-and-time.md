@@ -106,7 +106,7 @@ Pure. Justification: the ruler, the readout, the inspector and Phase 5 chase all
   That's the same writer as today, so T1 doesn't get worse.
 - `generate-current-frame` (`:619-637`) and `create-projector-frame-provider` (`multi_engine.clj:165-191`): build the timing context and call `generate-frames-by-zone` with `(playback/cue-bpm chain bpm)` (`frame_service.clj:624,627`; `multi_engine.clj:171,174,189`).
 - `render-item-tree-by-zone` (`frame_service.clj:394-464`): for timeline cues, each **top-level** item renders with `(playback/clip-timing-ctx timing-ctx item bpm)` and `clip-elapsed-ms`. Nested children and effects inherit it. Window gating still uses the absolute position (D5).
-- **Dependency.** Once-mode modulators only progress correctly after 03 MR1 (relative `:elapsed-*` context). Loop-mode modulators and keyframes phase-align to the clip start immediately.
+- **Dependency.** Once-mode modulators only progress correctly after 03 MR1 (relative `:elapsed-*` context). Loop-mode modulators and keyframes phase-align to the clip start immediately. *(2026-11-17: clip-local once-mode already worked, because `clip-timing-ctx` set `:trigger-time 0`; MR1 then fixed grid cues and track effects, `plans/2026-11-17-modulator-time-base.md`.)*
 
 ### 4.8 `laser-show.events.handlers.timeline` (existing)
 NEW events. All of them only touch `[:playback …]` and `[:ui :timeline-editor [col row] :cursor]`, so they create no undo entry and don't mark the project unsaved.

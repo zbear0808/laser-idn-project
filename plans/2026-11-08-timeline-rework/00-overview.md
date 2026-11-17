@@ -126,7 +126,7 @@ Principles:
 | 1 — Correctness (`01`) — **Done** 2026-11-11 | Stop data changes on open, make editor = output, fix broken controls, scroll echo, trims, inspector, mute, keyframe strip; cheap visual wins | ~3–4 days | none (coordinate with the undo plan for TL-1 history flags) |
 | 2 — Model and gestures (`02`) — **Done** 2026-11-11 | `timeline.model`, `apply-op`, local canvas state (01 M3 for all canvases), per-cue UI state, narrowed subs (01 M1 steps 2, 3, 5) | ~1 week | Phase 1 |
 | 3 — Layout, viewport, visuals (`03` + `05`) — **Done** 2026-11-11 | Shared row layout, header column, virtual layered canvas, ScrollBars, new look | ~1–1.5 weeks | Phase 2 |
-| 4 — Transport and time (`04`) — **Done** 2026-11-11 | Per-cue transport, seek, stop at end, playhead = output, clip-local time, locked tempo, timecode display, trigger actions | ~1–1.5 weeks | Phase 2; clip-local once-mode needs 03 MR1 |
+| 4 — Transport and time (`04`) — **Done** 2026-11-11 | Per-cue transport, seek, stop at end, playhead = output, clip-local time, locked tempo, timecode display, trigger actions | ~1–1.5 weeks | Phase 2; clip-local once-mode needs 03 MR1 (done 2026-11-17, `plans/2026-11-17-modulator-time-base.md`) |
 | 5 — Timecode chase (`06`) — **Done** 2026-11-11 | Follow incoming MTC: position, start/stop, jumps, freewheel | ~1 week | Phase 4 |
 
 Each phase leaves the app shippable. Phases 3 and 4 are independent of each other.

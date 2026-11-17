@@ -182,7 +182,7 @@ Run: `clj -M:mac-arm:test idn-stream common.timing engine-wire streaming-engine 
 >
 > | | What | For | Against |
 > |---|---|---|---|
-> | **A (recommended)** | A separate plan for one show clock at the output rate. It owns timing in a runtime atom, renders each cue's zone frames once per tick, and publishes a snapshot that engines send and the preview samples; app state gets a 30 Hz mirror (review 02 M1 step 3, 03 MR1, 04 LE1) | Smooth motion, one time base, rendering once instead of once per projector; app state stops changing 30 times a second | 3–5 days, touches timing semantics; needs 03 MR1 first |
+> | **A (recommended)** | A separate plan for one show clock at the output rate. It owns timing in a runtime atom, renders each cue's zone frames once per tick, and publishes a snapshot that engines send and the preview samples; app state gets a 30 Hz mirror (review 02 M1 step 3, 03 MR1, 04 LE1) | Smooth motion, one time base, rendering once instead of once per projector; app state stops changing 30 times a second | 3–5 days, touches timing semantics; needs 03 MR1 first (done 2026-11-17 except its step 3, which this plan would take on: `plans/2026-11-17-modulator-time-base.md` §9) |
 > | B | In this phase, advance timing from a dedicated 60 Hz deadline-paced thread instead of the preview tick, still in app state | Fixes the 30 Hz step now | Twice as many app-state writes; every UI subscription on timing reruns 60 times a second |
 > | C | Leave it (Phase 2 already keeps the tick alive after an error) | Nothing to do | O-17 stays |
 >

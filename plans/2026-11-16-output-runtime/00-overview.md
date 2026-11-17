@@ -108,7 +108,7 @@ engine thread, per projector, deadline-paced at 60 fps                          
 | 3 | Background results re-enter through the agent | 1 (for tests only) |
 | 4 | One owner for the engines; truthful status | 3 |
 | 5 | Frame timing (scan rate, pacing, timestamps) | 1; a hardware check before release |
-| later | One show clock (O10 option A) | 4, 5 and review 03 MR1 |
+| later | One show clock (O10 option A) | 4, 5 and review 03 MR1 (done 2026-11-17 except its step 3, `plans/2026-11-17-modulator-time-base.md`) |
 
 Phases 2, 3 and 5 are independent once Phase 1 is in. Phase 4 follows 3.
 
@@ -147,7 +147,7 @@ Each decision is written out with options and a recommendation in the doc that n
 | 04 LE4 (fake DAC) | Partly: loopback tests only (`test/laser_show/backend/streaming_engine_test.clj:10-71`) | 1 |
 | 03 findings 9, 10, MR4 (effect error policy) | Still true (p8) | 2 (skip the failing effect, log once) |
 | 03 findings 6, 7, MR5 (clamp and blank at the end of the chain) | Still true | 2 owns the output-side failsafe; effect-side clamping stays with 03 |
-| 03 MR1 (one time base) | Still true | later (O10) |
+| 03 MR1 (one time base) | Fixed 2026-11-17 by `803140d` and `8edfe59` (`plans/2026-11-17-modulator-time-base.md`): once-mode modulators run in grid cues and on track effects. Its step 3 (one modulation context per chain) is open | later (O10) for step 3 |
 | 02 #23, M8 (symmetric lifecycle) | Mostly done by `93c638a`: `stop!` stops the engines, the preview timer and Carabiner | 4 finishes it (registry drain, shutdown hook) |
 | 02 M1 (lost updates) | Still true for the output writers | 3 and 4; the other writers (link init, clipboard) stay with 02 |
 | 02 M7 (one effect interpreter) | Still true | 3 |

@@ -1,7 +1,7 @@
 # One time base for modulators (review 03 MR1)
 
 **Written:** 2026-11-17   **Written for commit:** `a4a1405` (`master`)
-**Status:** Proposed   **Last verified against:** `a4a1405` (probe in §1, macOS arm64, JDK 25.0.5)
+**Status:** Done 2026-11-17 (`803140d`, `8edfe59`; as built in §10). MR1 step 3 is left to the show clock (§9)   **Last verified against:** `8edfe59` (§10; §1–9 cite `a4a1405`)
 **Supersedes / Superseded by:** none. Takes over review 03 MR1 steps 1 (without the key rename), 2, 4 and 5; step 3 stays open (§9)   **Related findings:** review 03 #1 (once-mode never progresses, High) and #16 (timing helpers duplicated, not nil-safe); 03 MR1; the output runtime's show clock (O10), which needs this first (`plans/2026-11-16-output-runtime/00-overview.md` §4); timeline Phase 4's note that clip-local once-mode needs MR1 (`plans/2026-11-08-timeline-rework/04-phase4-transport-and-time.md:109`)
 
 Pick "Mode: once" on a wave modulator (`modulators.clj:27,37,48`) or a keyframe modulator (`keyframe_modulator_panel.clj:248,324`) in a grid cue and nothing moves: the modulator stays at its start value forever. The same happens on a timeline's track and folder effects. Only clip effects work, because the timeline rework gave clips their own clock. About half a day.
@@ -109,3 +109,55 @@ Run: `clj -M:mac-arm:test time-test cue-timing modulation frame-service playback
 - **Seconds on timeline track effects.** Clips derive their ms from the playhead (`playback.clj:36-37`), but the cue-level context counts real ms since the cue started, so a seconds-unit modulator on a track effect doesn't follow a seek. Today's loop-mode behaviour; the show clock should define one timeline time for both.
 - **Renaming the accumulators to `:elapsed-ms` / `:elapsed-beats`** (MR1 step 1 as written): about twenty readers would change and nothing would behave differently.
 - **Defaulting a missing timing context to the wall clock**: contexts without accumulators exist only in tests, and today's fallback already serves them.
+
+---
+
+## 10. As built (2026-11-17)
+
+Committed as `803140d` (the fix: `time.clj`, `modulator_evaluators.clj`, `keyframes.clj`, `cue_timing.clj`, `playback.clj`, `effects.clj`, `modulation.clj` docstring, `frame_service.clj`) and `8edfe59` (the 03 #16 cleanup in `cue_timing.clj`), on top of `597ce1e` (this plan). §1–9 cite `a4a1405`.
+
+**Where it is now** (at `8edfe59`)
+- `animation/time.clj`: NEW `elapsed` `:143`; `calculate-once-progress` `:160` (now `[context duration time-unit]`); `calculate-once-mode-phase-data` `:171`; NEW `calculate-loop-phase` `:203`. `calculate-modulator-phase` and `resolve-trigger-time` are gone.
+- `animation/modulator_evaluators.clj`: `calculate-loop-mode-phase` `:24`, `calculate-random-phase` `:73`, `eval-decay` `:143` (uses `time/elapsed`); `decay-elapsed` is gone.
+- `animation/keyframes.clj`: `calculate-time-position` `:43`.
+- `animation/cue_timing.clj`: NEW `with-aligned-target` `:32`, NEW `glide-phase` `:45`; `align-global-clock-phase` `:55`, `align-cue-timing-phase` `:61`, `update-global-clock` `:79`, `update-cue-timing` `:125`, `get-cue-timing-context` `:193`, `get-global-timing-context` `:221`.
+- `timeline/playback.clj`: `clip-timing-ctx` `:28` (drops `:trigger-time`, `:40`).
+- `animation/effects.clj`: the keyframe context (`:243-246`) no longer takes the trigger time.
+- `services/frame_service.clj`: `get-timing-context` `:233`.
+
+**Differences from the plan above**
+
+| Plan | As built | Why |
+|---|---|---|
+| `calculate-time-position` merges `{:time-ms time-ms}` under the context (§4) | It puts the explicit `time-ms` argument over the context's | The 3-arity `eval-keyframe` passes its own time, and that's what the old code used for once-mode; in the 2-arity the two are the same value |
+| `clip-timing-ctx` stops adding `:trigger-time` (§4) | It also removes one it is given | An older context (or a test) passing a wall-clock time through would break invariant 1 |
+| `get-cue-timing-context` defaults missing keys to 0 (§4) | `nil` values count as 0 too, and present values keep their type | A long `:accumulated-ms` (some test fixtures) still compares `=` to a long |
+| `update-cue-timing` defaults missing keys (§4) | Also a missing resync rate, as 4 beats (what `update-global-clock` already did) | Same class of crash |
+
+**Tests**
+- NEW `laser-show.animation.time-test`: `elapsed-examples-test`, `once-progress-examples-test`.
+- `laser-show.animation.modulation-test` (the app's path: `activate-cue` at the wall-clock time, `update-cue-timing` every 33 ms, `get-cue-timing-context`, `apply-effect-chain` with the cue's trigger time): `once-mode-progresses-in-a-grid-cue-test` (sawtooth, sine, square, random, a time-driven keyframe), `once-mode-restarts-on-retrigger-test`, `beats-once-mode-ignores-tempo-changes-test`, `seconds-once-mode-uses-elapsed-ms-test`. The hand-built once-mode tests (`:402-590`) are unchanged and pass (invariant 4).
+- `laser-show.animation.cue-timing-test`: `timing-context-is-relative-test`, `update-cue-timing-is-nil-safe-test`; NEW beyond §8 `phase-glide-is-the-same-for-both-clocks-test` and `align-phase-targets-test` (which replaces the planned `align-phase-unchanged-test`): both pin today's numbers, so they passed before the refactor and after it.
+- `laser-show.services.frame-service-test/once-mode-on-a-track-effect-follows-the-playhead-test`; `laser-show.timeline.playback-test/clip-timing-ctx-test` (no `:trigger-time`, also when given one).
+- Red first: at `597ce1e` the new tests had 19 failures and 1 error in 13 tests (`time-test` itself couldn't load: no `elapsed`); before `8edfe59` the nil-safety test threw a `NullPointerException`.
+
+**Probe** (the same scratch script; before = `a4a1405`, after = `8edfe59`)
+
+| Case | Before (0 / 500 / 1 000 / 1 500 / 3 000 ms) | After |
+|---|---|---|
+| Grid cue, once sawtooth (x) | 0.500 at every time | 0.500 / 0.375 / 0.250 / 0.125 / 0.000 |
+| Grid cue, once keyframe (x) | 0.500 at every time | 0.500 / 0.125 / 0.250 / 0.375 / 0.500 (at 0 and at the end the position sits on the wrapping 0/1 keyframe, as before) |
+| Timeline, sawtooth on the track (circle width at 0 / 1 000 / 3 000 ms) | 0.999 / 0.999 / 0.999 | 0.999 / 0.500 / 0.000, the same as on the clip |
+| Global clock, 2 beats into the 4-beat sawtooth, at 120 and at 60 BPM | 0.500 and 0.750 | 0.500 and 0.500 |
+
+**Verification, 2026-11-17, macOS arm64, JDK 25.0.5, load average 4–13**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test animation.time-test once-mode timing-context-is-relative clip-timing-ctx` | 15 tests, 68 assertions, 0 failures |
+| `clj -M:mac-arm:test animation services timeline routing events.timeline` (with `803140d`'s changes) | 304 tests, 12,084 assertions, 0 failures |
+| `clj -M:mac-arm:test cue-timing timing-handlers frame-service playback modulation animation.time-test grid-handlers timeline` (with `8edfe59`'s) | 237 tests, 10,914 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 824 tests, 31,504 assertions, 0 failures (813 before; the assertion total varies by a few hundred from run to run, 05 §10) |
+| `clj -M:mac-arm:test-integration` | 17 tests, 57 assertions, 0 failures |
+| `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | 55 tests, 209 assertions, 0 failures |
+| `clj -M:kondo --lint` on every touched file; loading them with reflection and boxed-math warnings on | 0 errors, 0 warnings; none |
