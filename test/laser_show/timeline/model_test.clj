@@ -380,11 +380,14 @@
 
 (defn- random-op [^java.util.Random rnd cue]
   (let [pick (fn [xs] (when (seq xs) (nth (vec xs) (.nextInt rnd (count xs)))))
+        seeded-shuffle (fn [xs] (let [l (java.util.ArrayList. ^java.util.Collection (vec xs))]
+                                  (java.util.Collections/shuffle l rnd)
+                                  (vec l)))
         clip-ids (map :id (:items cue))
         track-ids (map :id (tree-seq #(= :group (:type %)) :items {:type :group :items (:tracks cue)}))
         beats #(- (* 0.25 (.nextInt rnd 80)) 4.0)]
     (case (.nextInt rnd 12)
-      0 {:op :move-clips :clip-ids (set (take 2 (shuffle clip-ids))) :delta (beats) :to-track (pick track-ids)}
+      0 {:op :move-clips :clip-ids (set (take 2 (seeded-shuffle clip-ids))) :delta (beats) :to-track (pick track-ids)}
       1 {:op :trim-start :clip-id (pick clip-ids) :to (beats)}
       2 {:op :trim-end :clip-id (pick clip-ids) :to (beats)}
       3 {:op :delete-clips :clip-ids #{(pick clip-ids)}}
