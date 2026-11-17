@@ -6,6 +6,10 @@
 ;; turn the matching probe into a real test on the Phase 1 fake DAC, with an
 ;; assertion on the NEW behaviour.
 ;;
+;; Since Phase 3 the probes' dispatch! goes through the wiring app/create-app
+;; uses (the pipeline on a cljfx agent). Before, it called events/event-handler
+;; on the calling thread, which was what an effect's callback did then.
+;;
 ;; Everything runs on loopback (127.0.0.1): no DAC, no network, no UI. A small
 ;; receiver here stands in for the DAC and decodes 16/8 samples.
 ;;
@@ -24,7 +28,9 @@
 ;;       -n probes.output-probes-test 2>&1 | grep PROBE
 
 (ns probes.output-probes-test
-  (:require [clojure.test :refer [deftest]]
+  (:require [cljfx.api :as fx]
+            [cljfx.event-handler :as event-handler]
+            [clojure.test :refer [deftest]]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.effects.calibration]
             [laser-show.animation.types :as t]
@@ -140,10 +146,18 @@
      :toolbar-connected? (get-in s [:backend :idn :connected?])
      :engines-in-state (count (get-in s [:backend :streaming :multi-engine-state :engines]))}))
 
+(def ^:private agent-handler
+  (-> events/handle-event-pipeline
+      (fx/wrap-co-effects (assoc events/co-effects :fx/context (constantly nil)))
+      (fx/wrap-effects events/effects)
+      (event-handler/wrap-async {:error-handler (fn [_ e] (say "agent error" e))})))
+
 (defn- dispatch!
-  "Run an event through the wired pipeline, the way the cljfx agent does."
+  "Run an event through the wiring app/create-app uses (since Phase 3: the
+   pipeline on a cljfx agent, so effects call back through its queue) and wait
+   until the agent has handled it."
   [event]
-  (events/event-handler event))
+  (agent-handler (assoc event :fx/sync true)))
 
 
 ;; p1 — what non-finite and nil coordinates become on the wire
