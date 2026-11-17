@@ -1,7 +1,7 @@
 # Phase 5 — Frame timing: scan rate, pacing, timestamps (and the show clock, later)
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** Done 2026-11-17 (`eba8b2f`, `2a7e406`, `bfe12a5`; as built in §10), except the hardware check (§8). O9 answered 2026-11-17: A, with a default of 25 000 pts/s and a projector status that shows the fps the projector actually draws (§4, §7). O10 open   **Last verified against:** `bfe12a5` (§10; §1–9 cite `f39a998`, re-checked 2026-11-17 after Phases 2–4)
+**Status:** Done 2026-11-17 (`eba8b2f`, `2a7e406`, `bfe12a5`; as built in §10), except the hardware check (§8). O9 answered 2026-11-17: A, with a default of 25 000 pts/s and a projector status that shows the fps the projector actually draws (§4, §7). O10 answered 2026-11-17: A, planned in `plans/2026-11-17-show-clock/`   **Last verified against:** `bfe12a5` (§10; §1–9 cite `f39a998`, re-checked 2026-11-17 after Phases 2–4)
 **Supersedes / Superseded by:** none   **Related findings:** O-14 to O-17 (`00-overview.md` §2); review 04 findings 5, 7, 11, 14, QW3, MR2 step 1, MR3, LE1; 03 MR1; 02 M1 step 3
 
 Every frame is told to the DAC to take 16.7 ms to draw, whatever its size. A 10-point frame is drawn at 600 points/s and a 3000-point frame at 180 000 points/s, on a projector whose stored scan rate is 30 000 (p10). The first is a slow, bright beam; the second drives the galvos at six times their rate.
@@ -160,7 +160,7 @@ Run: `clj -M:mac-arm:test idn-stream common.timing engine-wire streaming-engine 
 - **Moving existing projectors to 25 000:** a project has no format version, so after this phase a stored 30 000 can't be told apart from one the user typed. The field shows the stored rate instead.
 - **A points-per-frame budget next to the field** ("416 points per frame at 60 fps"): the status line already says when a frame is too big for the scan rate.
 - **Continuous graphic mode or once-flag frames** (Stream §3.3) for tighter timing control: not needed for this app's frame-based content.
-- **The show clock** (O10 option A): its own plan.
+- **The show clock** (O10 option A): its own plan, `plans/2026-11-17-show-clock/`.
 
 ---
 
@@ -176,17 +176,17 @@ Run: `clj -M:mac-arm:test idn-stream common.timing engine-wire streaming-engine 
 >
 > **Your answer:** A: "we should show the fps we are actually getting and base it on the scan rate we have set. (By default we should do 25 kpps)". So the default is 25 000 pts/s (not 30 000), and the projector's status line shows the fps it draws, with "limited by scan rate" when its frames are too big (§4, §7).
 
-> **DECISION O10 — Where does show time advance?** *(open · needed after Phase 5 · recommended: A)*
+> **DECISION O10 — Where does show time advance?** *(answered 2026-11-17: A)*
 >
 > Today beats advance only in the 30 Hz preview tick (`frame_service.clj:822-848`). Engines at 60 fps therefore see each beat position twice, and the timeline end and MTC chase also run there (`frame_service.clj:84-107,121`).
 >
 > | | What | For | Against |
 > |---|---|---|---|
-> | **A (recommended)** | A separate plan for one show clock at the output rate. It owns timing in a runtime atom, renders each cue's zone frames once per tick, and publishes a snapshot that engines send and the preview samples; app state gets a 30 Hz mirror (review 02 M1 step 3, 03 MR1, 04 LE1) | Smooth motion, one time base, rendering once instead of once per projector; app state stops changing 30 times a second | 3–5 days, touches timing semantics; needs 03 MR1 first (done 2026-11-17 except its step 3, which this plan would take on: `plans/2026-11-17-modulator-time-base.md` §9) |
+> | **A (chosen)** | A separate plan for one show clock at the output rate. It owns timing in a runtime atom, renders each cue's zone frames once per tick, and publishes a snapshot that engines send and the preview samples; app state gets a 30 Hz mirror (review 02 M1 step 3, 03 MR1, 04 LE1) | Smooth motion, one time base, rendering once instead of once per projector; app state stops changing 30 times a second | 3–5 days, touches timing semantics; needs 03 MR1 first (done 2026-11-17 except its step 3, which this plan would take on: `plans/2026-11-17-modulator-time-base.md` §9) |
 > | B | In this phase, advance timing from a dedicated 60 Hz deadline-paced thread instead of the preview tick, still in app state | Fixes the 30 Hz step now | Twice as many app-state writes; every UI subscription on timing reruns 60 times a second |
 > | C | Leave it (Phase 2 already keeps the tick alive after an error) | Nothing to do | O-17 stays |
 >
-> **Your answer:** _pending_
+> **Your answer:** A: "Go write the plan" (2026-11-17), after the recommendation to do the show clock next. The plan is `plans/2026-11-17-show-clock/`: four phases, about 4–5.5 days. Its own choices are decisions S1–S3 there: who renders and when each engine sends, how the screen gets the moving parts, and what the lasers show if the clock stops. Each projector keeps its own streaming thread (O6).
 
 ---
 
