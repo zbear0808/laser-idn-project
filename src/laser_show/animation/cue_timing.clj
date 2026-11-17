@@ -29,36 +29,43 @@
       (- 1.0 beat-phase)
       (- beat-phase))))
 
-(defn align-global-clock-phase
-  "Set target phase offset on global clock so it smoothly glides to align
-   with the nearest integer beat boundary without visual snapping."
-  [{:keys [accumulated-beats phase-offset effective-beats] :as global-clock}]
+(defn- with-aligned-target
+  "timing with a :phase-offset-target that glides its effective beats onto
+   the nearest whole beat, the shorter way."
+  [{:keys [accumulated-beats phase-offset effective-beats] :as timing}]
   (let [eff-beats (double (or effective-beats
                               (+ (double (or accumulated-beats 0.0))
                                  (double (or phase-offset 0.0)))))
         correction (calculate-beat-phase-correction eff-beats)
-        current-phase (double (or phase-offset 0.0))
-        target-phase (+ current-phase correction)]
-    (assoc (or global-clock {:accumulated-beats 0.0 :accumulated-ms 0.0 :last-frame-time 0})
+        current-phase (double (or phase-offset 0.0))]
+    (assoc timing
            :phase-offset current-phase
-           :phase-offset-target target-phase)))
+           :phase-offset-target (+ current-phase correction))))
+
+(defn- glide-phase
+  "The phase offset after delta-beats: within snap-threshold of the target it
+   snaps there, otherwise it decays toward it, reaching about 63 % of the way
+   every resync-rate beats."
+  ^double [^double phase ^double target ^double delta-beats ^double resync-rate]
+  (let [diff (- phase target)]
+    (if (< (Math/abs diff) snap-threshold)
+      target
+      (+ target (* diff (Math/exp (- (/ delta-beats (max 0.1 resync-rate)))))))))
+
+(defn align-global-clock-phase
+  "Set target phase offset on global clock so it smoothly glides to align
+   with the nearest integer beat boundary without visual snapping."
+  [global-clock]
+  (with-aligned-target (or global-clock {:accumulated-beats 0.0 :accumulated-ms 0.0 :last-frame-time 0})))
 
 (defn align-cue-timing-phase
   "Set target phase offset on a cue timing state so it smoothly glides to align
    with the nearest integer beat boundary. Timeline cues are returned
    unchanged: a sequenced show must not shift when someone taps the tempo."
-  [{:keys [accumulated-beats phase-offset effective-beats] :as cue-timing}]
+  [cue-timing]
   (if (:timeline? cue-timing)
     cue-timing
-  (let [eff-beats (double (or effective-beats
-                              (+ (double (or accumulated-beats 0.0))
-                                 (double (or phase-offset 0.0)))))
-        correction (calculate-beat-phase-correction eff-beats)
-        current-phase (double (or phase-offset 0.0))
-        target-phase (+ current-phase correction)]
-    (assoc cue-timing
-           :phase-offset current-phase
-           :phase-offset-target target-phase))))
+    (with-aligned-target cue-timing)))
 
 (defn align-all-active-cues-phase
   "Align phase target for all active cues."
@@ -98,12 +105,7 @@
            (assoc gc :last-frame-time current-time-ms)
            ;; Normal accumulation with smooth phase decay
            (let [delta-beats (* delta-ms (/ (double bpm) 60000.0))
-                 diff (- phase-offset' target')
-                 snap? (< (Math/abs diff) snap-threshold)
-                 new-phase (if snap?
-                             target'
-                             (let [decay (Math/exp (- (/ delta-beats (max 0.1 resync-rate'))))]
-                               (+ target' (* diff decay))))
+                 new-phase (glide-phase phase-offset' target' delta-beats resync-rate')
                  new-acc-beats (+ (double (or accumulated-beats 0.0)) delta-beats)
                  new-acc-ms (+ (double (or accumulated-ms 0.0)) delta-ms)]
              (u/->map&
@@ -135,7 +137,8 @@
    
    Timeline cues (:timeline? true) have no phase glide (phase stays 0, so
    accumulated = effective beats), don't move while :paused?, and without an
-   enabled loop stop at :length with :ended? true.
+   enabled loop stop at :length with :ended? true. Missing accumulators and
+   phase keys count as 0, and a missing resync-rate as 4 beats.
    
    Returns: Updated cue timing state"
   ([ct current-time-ms bpm resync-rate loop-config]
@@ -159,15 +162,14 @@
          (assoc ct :last-frame-time current-time-ms)
          ;; Normal accumulation with phase decay
          (let [delta-beats (* delta-ms (/ bpm 60000.0))
-               diff (- phase-offset phase-offset-target)
-               ;; Snap to target when within threshold, else decay
-               new-phase (cond
-                           timeline? 0.0
-                           (< (Math/abs diff) snap-threshold) phase-offset-target
-                           :else (let [decay (Math/exp (- (/ delta-beats (max 0.1 resync-rate))))]
-                                   (+ phase-offset-target (* diff decay))))
+               new-phase (if timeline?
+                           0.0
+                           (glide-phase (double (or phase-offset 0.0))
+                                        (double (or phase-offset-target 0.0))
+                                        delta-beats
+                                        (double (or resync-rate 4.0))))
 
-               new-accumulated-beats (+ accumulated-beats delta-beats)
+               new-accumulated-beats (+ (or accumulated-beats 0.0) delta-beats)
                looping? (and enabled? (pos? duration))
                length (:length timeline-cfg)
 
@@ -181,7 +183,7 @@
                            (>= wrapped-beats (double length)))]
            (cond-> (assoc ct
                           :accumulated-beats (if ended? (double length) wrapped-beats)
-                          :accumulated-ms (+ accumulated-ms delta-ms)
+                          :accumulated-ms (+ (or accumulated-ms 0.0) delta-ms)
                           :phase-offset new-phase
                           :last-frame-time current-time-ms)
              timeline? (assoc :phase-offset-target 0.0)

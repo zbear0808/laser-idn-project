@@ -54,6 +54,40 @@
   (testing "missing keys count as 0 instead of throwing"
     (is (= 0.0 (:effective-beats (ct/get-cue-timing-context {} 120.0))))))
 
+(deftest update-cue-timing-is-nil-safe-test
+  (testing "a timing map with only :last-frame-time advances instead of throwing"
+    (let [r (ct/update-cue-timing {:last-frame-time 0} 500 120.0 4.0 no-loop)]
+      (is (< (Math/abs (- 1.0 (:accumulated-beats r))) 1e-9))
+      (is (= 500.0 (double (:accumulated-ms r))))))
+  (testing "a missing resync rate uses the default"
+    (is (some? (ct/update-cue-timing {:accumulated-beats 0.0 :accumulated-ms 0.0 :phase-offset 0.0
+                                      :phase-offset-target 0.3 :last-frame-time 0}
+                                     500 120.0 nil no-loop)))))
+
+(deftest phase-glide-is-the-same-for-both-clocks-test
+  (let [start {:accumulated-beats 0.0 :accumulated-ms 0.0 :phase-offset 0.0
+               :phase-offset-target 0.25 :last-frame-time 0}
+        expected (+ 0.25 (* -0.25 (Math/exp -0.25)))]
+    (testing "1 beat with a resync rate of 4 beats: exponential decay toward the target"
+      (is (< (Math/abs (- expected (:phase-offset (ct/update-cue-timing start 500 120.0 4.0 no-loop)))) 1e-12))
+      (is (< (Math/abs (- expected (:phase-offset (ct/update-global-clock start 500 120.0 4.0)))) 1e-12)))
+    (testing "within 0.02 beats of the target it snaps"
+      (let [near (assoc start :phase-offset 0.24)]
+        (is (= 0.25 (:phase-offset (ct/update-cue-timing near 500 120.0 4.0 no-loop))))
+        (is (= 0.25 (:phase-offset (ct/update-global-clock near 500 120.0 4.0))))))))
+
+(deftest align-phase-targets-test
+  (testing "the target moves the phase to the nearest whole beat, the shorter way"
+    (doseq [[timing target] [[{:accumulated-beats 3.3 :phase-offset 0.0} -0.3]
+                             [{:accumulated-beats 4.7 :phase-offset 0.1} 0.3]
+                             [{:effective-beats 2.25 :accumulated-beats 9.0 :phase-offset 0.05} -0.2]]]
+      (is (< (Math/abs (- target (:phase-offset-target (ct/align-cue-timing-phase timing)))) 1e-9) (pr-str timing))
+      (is (< (Math/abs (- target (:phase-offset-target (ct/align-global-clock-phase timing)))) 1e-9) (pr-str timing))))
+  (testing "the global clock starts from zeros when there is none yet"
+    (is (= {:accumulated-beats 0.0 :accumulated-ms 0.0 :last-frame-time 0
+            :phase-offset 0.0 :phase-offset-target 0.0}
+           (ct/align-global-clock-phase nil)))))
+
 (deftest non-timeline-cue-unchanged-test
   (let [t (ct/create-cue-timing-state 0 2.25)
         r (-> t
