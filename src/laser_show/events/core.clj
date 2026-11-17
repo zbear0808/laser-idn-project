@@ -395,16 +395,15 @@
       history-handlers/wrap-history
       history-handlers/wrap-dirty))
 
-(def event-handler
-  "Main event handler wrapped with co-effects and effects.
-   
-   This is the handler to pass to fx/create-app.
-   
-   Co-effects inject:
+(def co-effects
+  "Co-effects injected into every event:
    - :state - current application state
-   - :time - current timestamp
-   
-   Effects handle:
+   - :time - current timestamp"
+  {:state co-effect-state
+   :time co-effect-time})
+
+(def effects
+  "Effects handled for every event:
    - :state - update application state
    - :dispatch - dispatch another event
    - :dispatch-later - dispatch event after delay
@@ -424,40 +423,38 @@
    - :clipboard/paste-effects - paste effects from clipboard (effects grid)
    - :clipboard/paste-projector-effects - paste effects from clipboard (projector chain)
    - :projectors/scan - scan network for IDN devices"
+  {:state effect-state
+   :dispatch effect-dispatch
+   :dispatch-later effect-dispatch-later
+   :timing/calculate-bpm effect-timing-calculate-bpm
+   :link/sync-to-downbeat effect-link-sync-to-downbeat
+   :input/await-learn effect-input-await-learn
+   ;; Multi-engine streaming (zone-aware system)
+   :multi-engine/start effect-multi-engine-start
+   :multi-engine/stop effect-multi-engine-stop
+   :multi-engine/refresh effect-multi-engine-refresh
+   ;; Project persistence
+   :project/save effect-save-project
+   :project/load effect-load-project
+   ;; File chooser dialog
+   :fx/show-file-chooser effect-show-file-chooser
+   ;; System
+   :system/exit effect-system-exit
+   :system/open-url effect-system-open-url
+   :dev/reload effect-dev-reload
+   ;; Clipboard effects for effect chain editor
+   :clipboard/copy-effects effect-clipboard-copy-effects
+   :clipboard/paste-effects effect-clipboard-paste-effects
+   :clipboard/paste-projector-effects effect-clipboard-paste-projector-effects
+   ;; Projector scanning effects
+   :projectors/scan effect-projectors-scan})
+
+(def event-handler
+  "The pipeline wrapped with co-effects and effects, run synchronously on the
+   calling thread (tests, and dispatch! without an app)."
   (-> handle-event-pipeline
-
-      ;; Inject co-effects into events
-      (fx/wrap-co-effects
-       {:state co-effect-state
-        :time co-effect-time})
-
-      ;; Handle effects from events
-      (fx/wrap-effects
-       {:state effect-state
-        :dispatch effect-dispatch
-        :dispatch-later effect-dispatch-later
-        :timing/calculate-bpm effect-timing-calculate-bpm
-        :link/sync-to-downbeat effect-link-sync-to-downbeat
-        :input/await-learn effect-input-await-learn
-        ;; Multi-engine streaming (zone-aware system)
-        :multi-engine/start effect-multi-engine-start
-        :multi-engine/stop effect-multi-engine-stop
-        :multi-engine/refresh effect-multi-engine-refresh
-        ;; Project persistence
-        :project/save effect-save-project
-        :project/load effect-load-project
-        ;; File chooser dialog
-        :fx/show-file-chooser effect-show-file-chooser
-        ;; System
-        :system/exit effect-system-exit
-        :system/open-url effect-system-open-url
-        :dev/reload effect-dev-reload
-        ;; Clipboard effects for effect chain editor
-        :clipboard/copy-effects effect-clipboard-copy-effects
-        :clipboard/paste-effects effect-clipboard-paste-effects
-        :clipboard/paste-projector-effects effect-clipboard-paste-projector-effects
-        ;; Projector scanning effects
-        :projectors/scan effect-projectors-scan})))
+      (fx/wrap-co-effects co-effects)
+      (fx/wrap-effects effects)))
 
 ;; Convenience Functions
 
