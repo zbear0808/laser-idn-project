@@ -136,7 +136,7 @@ Label text colour: `#FFFFFF` if the body colour's relative luminance is < 0.5, e
 
 **Empty states:**
 - No tracks: centred text in the lane area, "Add a track to get started", with a `+ Track` button.
-- Tracks but no clips: ghost text in the first lane, "Pick a preset below to add it at the cursor (bar 1)".
+- Tracks but no clips: ghost text in the first lane, "Click or drag a preset from the browser to add it (cursor at bar 1.1.1)" (since `08-drag-from-browser.md`).
 
 ### 3.5 Header column (220 px)
 ```
@@ -191,7 +191,7 @@ It replaces the "properties" third of the bottom panel. Section headers are 11 p
 ### 3.9 Content browser (bottom drawer, 132 px, toggled from the toolbar)
 - Presets only, as the existing `preset-bank` (`timeline_editor.clj:991-1001`) with its tabs. Effects move to the inspector (§3.8).
 - A hint line on the right says what a click will do: "Adds at bar 3.2 on Front 1". It's computed from the cursor and the insert target.
-- Clicking adds the preset (`:timeline/add-preset-to-track`, unchanged). Drag-to-lane is out of scope (`03` §9).
+- Clicking adds the preset (`:timeline/add-preset-to-track`, unchanged). Dragging into a lane, a header or the device chain was added later: `08-drag-from-browser.md` (done 2026-11-16).
 
 ### 3.10 Dialog chrome
 - Remove the separate 52 px header (`timeline_cue_editor.clj:126-141`); the name moves into the toolbar. The window title already says "Timeline Editor - Cell C3" (`:235-238`).

@@ -1,7 +1,7 @@
 # Drag presets and effects from the browser (07 L1, option A)
 
 **Written:** 2026-11-11   **Written for commit:** `716688d` (branch `timeline/effects-panel`)
-**Status:** Proposed   **Related:** `07-effects-panel-followups.md` L1-A; `05-visual-design.md` (tokens, drag visuals, §3 browser note "drag-to-lane is out of scope", now in scope); `00-overview.md` D4, D6
+**Status:** Done (2026-11-16, `4314dba`..`49fe9c9` on `master`; differences from the plan in §11)   **Last verified against:** `49fe9c9`   **Related:** `07-effects-panel-followups.md` L1-A; `05-visual-design.md` (tokens, drag visuals, §3 browser note "drag-to-lane is out of scope", now in scope); `00-overview.md` D4, D6
 
 Presets can be dragged into the lanes to add a clip at the drop beat. Effects can be dragged onto a clip, an empty lane, a track or folder header, or a position in the device chain. Clicking works exactly as it does today.
 
@@ -245,3 +245,68 @@ Payloads: preset `{:laser-show/drag :bank-item :kind :preset :id :square :catego
 | 8 | UI tests, manual check, docstrings (`browser.clj`, `device_chain.clj` ns) | 0.25 d |
 
 Total: about 2–2.25 days, slightly above 07's estimate because of the list_dnd guard and the spike.
+
+## 11. As built (2026-11-16)
+
+Committed on `master` after `2d1ad87`, one commit per step:
+
+| Step | Commit |
+|---|---|
+| 1 Generic payload helpers + list_dnd guard (+ spike, below) | `4314dba` |
+| 2 `:add-effect :index`; handler `:index` / `:select-target?` / lookup | `e07f540` |
+| 3 `timeline/drop.clj` + `drop-test` | `4741d9a` |
+| 4 Bank drag source, browser enable + hints | `76a5a84` |
+| 5 Canvas DnD opts, editor wiring, `draw-drop-preview!`, tokens | `7004034` |
+| 6 Header drop + CSS | `eb6dcea` |
+| 7 Device chain drop + insertion line | `08b4315` |
+| 8 UI tests | `f772f47`, `49fe9c9` |
+
+**Step 1 spike: JavaFX's headless glass platform does not deliver drag-and-drop.** `DRAG_DETECTED` fires and `startDragAndDrop` returns a Dragboard, but right after the handler `Scene$DnDGesture.dragDetectedProcessed` calls `QuantumToolkit.startDrag`, which calls `HeadlessPlatformFactory$HeadlessDnDClipboard.pushToSystem`. That throws `UnsupportedOperationException: Not supported yet.` (JavaFX 28-ea+11; every method of that class does). No `DRAG_OVER` or `DRAG_DROPPED` reaches a target, and the robot call that crossed the drag threshold throws. Synthetic events do work: `com.sun.javafx.scene.input.DragboardHelper/createDragboard` with a reified `com.sun.javafx.tk.TKClipboard` builds a Dragboard carrying the app's payload (JavaFX is on the classpath, so those packages are reachable without `--add-exports`). `Event/fireEvent` then delivers `DRAG_OVER`/`DRAG_DROPPED`, and `acceptTransferModes`, `isAccepted`, `getContent` during `DRAG_OVER`, and `setDropCompleted` all behave. The drag *source* can't be faked: `startDragAndDrop` outside the Scene's own DnD gesture throws `IllegalStateException`. So the target-side UI tests run headless with synthetic events, and the source side plus R2 are covered by a windowed-only test.
+
+**Differences from the plan above**
+
+| Plan | As built | Why |
+|---|---|---|
+| `drag_drop_cell` gets `start-drag!`, `read-payload`, `has-payload?` (§4.1) | Also public: `encode-drag-payload` / `parse-drag-payload` (the EDN codec, same rules and 1024-char cap), `drag-content` (the ClipboardContent) and `end-drag!` | The codec and the content can be unit-tested without a JavaFX toolkit (a Dragboard needs the FX thread); `end-drag!` is for the R6 fallback below |
+| Cell payload shapes stay the same | The parsed shape `{:type :col :row}` is the same. The string on the dragboard is now `{:col :row :laser-show/drag :grid-cell}` (shared marker) instead of `{:laser-show/cell-drag true :type …}` | One codec for every drag type. The string never outlives a drag. `payload-rejects-foreign-or-malformed-input` gained two bad-coordinate cases in the new encoding; its old-format cases still pass |
+| R6: if a platform hides the content before the drop, fall back to the last payload (§10) | Built in: `read-payload` returns the payload of the drag this app started (an atom set by `start-drag!`, cleared by `end-drag!`) when the dragboard has the bank format but its content isn't a string | Can't be checked headless (no native DnD). It only applies to drags carrying the app-private format |
+| `drop-target` hits from `layout/hit-test` (§4.4) | The editor adds the pointer's `:beat` to the hit (`(assoc (hit …) :beat (layout/x->beat view x))`), and `drop-target` reads it | `:clip` hits carry no `:beat`, and a preset dropped on a clip needs one |
+| Zone effects: nil on "anything but a clip (lane or chain)" | A zone effect is accepted on a clip in the lanes and in the chain of a clip; it's refused on lanes, summary bars, headers and the chain of a track or folder | Read as "a clip, in the lanes or in the chain"; invariant 6 ("zone effects only land on clips") holds. The browser only lists zone effects with a clip selected, and then the chain is that clip's |
+| Header handlers read track-id, col and row from the `on-created` closure (§4.6) | The row label carries `:user-data {:col :row :track-id}`, set every render; the handlers read it at drop time | A row node is reused while its `:fx/key` (track id) stays the same, so a closure would keep the cell the node was created for |
+| Header uses `DRAG_OVER`/`DRAG_ENTERED`/`DRAG_EXITED`/`DRAG_DROPPED` | `DRAG_OVER` (accept + set the highlight), `DRAG_EXITED` (clear) and `DRAG_DROPPED`; no `DRAG_ENTERED` handler | `DRAG_OVER` follows every enter at once, so it can set the highlight itself |
+| CSS `.label:drop-target .tl-header-row` | `.label:drop-target > .tl-header-row` | Only the row's own graphic, not a nested label's |
+| "With no cards … the hint label highlights" (§4.7) | Pseudo-class `drop-target` on `#timeline-device-hint`: blue text | – |
+| — | NEW ids: `#timeline-browser-effects` (the effect bank's box, idle class), `#timeline-device-cards` (§4.7 asked for this one) | Stable ids for tests |
+| UI tests use `ui/drag-node!` (§8) | `timeline-drag-preset-into-lane` and `timeline-drag-effect-onto-header-and-chain` fire synthetic DragEvents through NEW `ui/fire-drop!` (`testfx.clj`), so they run headless. A real mouse drag (NEW `ui/drag-node-to!`) is in `timeline-real-drag-from-browser`, which skips under `(ui/headless?)` with a log line | The spike above. Real drags need windowed mode |
+| — | Extra tests: `tabbed-bank-test/bank-click-event-unchanged-test` (invariant 1) and `timeline-track-reorder-survives-bank-drop-targets` (R5: a bank drop on a header is the header's alone, and a list drag still reorders) | The two places this plan could break existing behaviour |
+| — | `05-visual-design.md`: the empty-state text and the "drag-to-lane is out of scope" note now point here | Keep the design doc true |
+
+**Behaviour worth knowing**
+- Bank click events are unchanged (no `:index`, no `:select-target?`); banks without `:drag-kind` (the cue chain editor) render exactly the same button.
+- With nothing selected, the effect bank is dimmed (`tl-browser-bank-idle`, opacity 0.55) but not disabled; a click still does nothing, a drag works.
+- Every accepted drop dispatches one event and makes one undo step: "Add Clip" or "Add Effect". Drops on lanes or headers select their target. Chain drops don't, because the chain already shows its target.
+- The ghost is drawn in the row's track colour at 0.35 with a dashed outline. Over an existing clip of the same track it's faint, but the dashed outline and the orange snap guide show where it goes.
+
+**Tests**
+- `laser-show.views.components.visual-editors.timeline.drop-test` (NEW): `preset-on-lane-snaps-start-test`, `preset-on-folder-row-targets-folder-test`, `preset-on-clip-adds-overlapping-clip-test`, `preset-on-header-uses-cursor-test`, `effect-on-clip-targets-clip-test`, `effect-on-lane-header-and-summary-targets-track-test`, `zone-effect-only-on-clips-test`, `rejected-hits-and-payloads-test`, `chain-insert-index-test`, `chain-drop-needs-single-target-test`. All pass on the first run.
+- `laser-show.views.components.drag-drop-cell-test`: `bank-payload-round-trips-test`, `bank-payload-rejects-foreign-input-test` (NEW). The two existing tests still pass.
+- `laser-show.views.components.tabbed-bank-test/bank-click-event-unchanged-test` (NEW ns).
+- `laser-show.timeline.model-test/add-effect-at-index-test`.
+- `laser-show.events.timeline-handlers-test`: `add-effect-with-index-and-select-target-test`, `add-effect-looks-up-definition-test`, `drop-is-one-undo-step-test` (through `events/handle-event-pipeline`, then `:edit/undo`), `ghost-matches-committed-clip-test` (snap 0.25, 1.0 and off).
+- `laser-show.ui-test.timeline-editor-test`: `timeline-drag-preset-into-lane` (ghost while hovering, one clip at 8.25, one undo "Add Clip", ruler / foreign text / other drag types refused, then a bank click adds exactly one clip), `timeline-drag-effect-onto-header-and-chain` (empty chain, before the first card, after the last card, header, zone effect refused on a header, clip in the lanes), `timeline-track-reorder-survives-bank-drop-targets`, `timeline-real-drag-from-browser` (windowed only). `timeline-effects-from-browser-show-in-detail-panel` now expects the new hint text.
+
+**Verification, 2026-11-16, macOS arm64, JDK 25.0.5, headless**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test` (full unit suite) | 768 tests, 31,151 assertions, 0 failures (750 before) |
+| `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | 47 tests, 179 assertions, 0 failures (43 before); `timeline-real-drag-from-browser` logs its skip |
+| `clj -M:kondo --lint src test --parallel --fail-level error` | 0 errors, 22 warnings, none new (the one in `canvas_interaction.clj`, "Unused value: :on-scroll", was there before) |
+| Screenshots of the hover states (synthetic events, headless) | Ghost + snap guide on a lane; lane highlight; header highlight; insertion line before a card |
+
+Not run: windowed UI tests (they move the real mouse) and the Linux and Windows suites (CI). Manual checks still to do on macOS:
+- A trackpad drag inside the timeline dialog: a preset into a lane (the ghost follows while hovering, which also checks R6), onto a header, and an effect onto a clip, a lane, a header and between two device cards.
+- A bank-button click right after a drag adds exactly one clip, and the button isn't left looking pressed (R2).
+- Dragging header rows still reorders tracks.
+- Text dragged in from another app is refused by the lanes, headers and chain.
+- `clj -M:test-ui:mac-arm timeline-real-drag-from-browser` (windowed; needs Accessibility permission).

@@ -1,7 +1,7 @@
 # Effects panel follow-ups: drag-and-drop, effect groups, panel size
 
 **Written:** 2026-11-11   **Written for commit:** `6edef3a` (branch `timeline/effects-panel`)
-**Status:** Options chosen: A for each. Detailed plans: `08-drag-from-browser.md` (L1-A), `09-effect-racks.md` (L2-A), `10-detail-panel-size.md` (L3-A, done 2026-11-14).   **Related:** `05-visual-design.md` (layout note, 2026-11-11)
+**Status:** Options chosen: A for each. Detailed plans: `08-drag-from-browser.md` (L1-A, done 2026-11-16), `09-effect-racks.md` (L2-A), `10-detail-panel-size.md` (L3-A, done 2026-11-14).   **Related:** `05-visual-design.md` (layout note, 2026-11-11)
 
 The Ableton-style detail panel and browser shipped with three known limitations. This file explains each one and gives resolution options with rough effort. One related bug found while researching is listed at the end.
 
