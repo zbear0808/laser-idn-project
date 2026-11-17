@@ -396,18 +396,12 @@
 
 
 (defstate backend
-  "Backend services state - IDN, streaming, input, logging."
-  {:idn {:default {:connected? false
-                   :connecting? false
-                   :error nil}
-         :doc "IDN connection state"}
-   :streaming {:default {:engines {}
-                         :running? false
-                         :connected-targets #{}
+  "Backend services state - streaming, input, logging."
+  {:streaming {:default {:running? false
+                         :status nil
                          :frame-stats {}
-                         :multi-engine-state nil
                          :current-frame nil}
-               :doc "Streaming engine state for IDN output"}
+               :doc "IDN output. :running? is the operator's intent (Stream/Stop); :status is what actually streams, pure data from backend/output_runtime.clj (the engines live there)"}
    :input {:default {:midi {:enabled? true
                             :devices {}                ; Map of device-name -> device instance
                             :connected-devices #{}     ; Set of connected device names

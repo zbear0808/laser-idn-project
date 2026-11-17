@@ -25,15 +25,18 @@
    - An effect that continues the event (:dispatch, :project/save's :on-saved,
      ...) runs the follow-up inline through run-inline, in the same turn
    - Effects that work later on another thread (futures: scan, learn,
-     :dispatch-later, streaming lifecycle; the FX thread: file chooser) only do
-     their side effect there. Their result goes through the dispatch fn the
-     effect was given, which queues it on the agent behind the current event
+     :dispatch-later; the FX thread: file chooser; the output runtime's status
+     thread) only do their side effect there. Their result goes through the
+     dispatch fn the effect was given, which queues it on the agent behind the
+     current event
+   - The streaming lifecycle effects only queue a command on the output
+     runtime's own thread (backend/output_runtime.clj), which owns every engine
    - Nothing running on the agent may block waiting for an event it
      dispatched: that event only runs after the current one
    - Writers outside the pipeline: the preview timer
-     (frame-service/preview-timer-paths) and the streaming engine handles
-     (multi-engine). In dev mode effect-state warns when a write other than
-     the timer's landed between an event's snapshot and its write-back
+     (frame-service/preview-timer-paths). In dev mode effect-state warns when a
+     write other than the timer's landed between an event's snapshot and its
+     write-back
    - State updates (atom swap) are thread-safe
    - Re-rendering happens on FX thread via atom watch
    
@@ -55,7 +58,8 @@
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.events.handlers.timeline :as timeline-handlers]
-            [laser-show.backend.multi-engine :as multi-engine]
+            [laser-show.backend.output-runtime :as output-runtime]
+            [laser-show.events.handlers.output-sync :as output-sync]
             [laser-show.common.util :as u]
             [laser-show.idn.hello :as idn-hello]
             [laser-show.input.link :as link]
@@ -415,53 +419,26 @@
          (when on-result
            (dispatch (assoc on-result :file-path nil))))))))
 
-;; Multi-Engine Streaming Effects
+;; Output Effects
 
-(defn- effect-multi-engine-start
-  "Effect that starts multi-engine streaming to all enabled projectors.
-   Creates one streaming engine per projector with zone-aware frame providers."
-  [_ dispatch]
-  (future
-    (try
-      (log/info "Starting multi-engine streaming...")
-      (let [engines (multi-engine/start-engines!)
-            engine-count (count engines)]
-        (log/info (format "Multi-engine streaming started: %d engine(s)" engine-count))
-        (dispatch {:event/type :idn/multi-streaming-started
-                   :engine-count engine-count}))
-      (catch Exception e
-        (log/error "Multi-engine streaming failed:" (.getMessage e))
-        (dispatch {:event/type :idn/connection-failed
-                   :error (.getMessage e)})))))
+(defn- effect-output-sync
+  "Effect that queues a sync of the streaming engines with the projector
+   snapshot the handler read ({:projectors …}), on the output lifecycle thread.
+   The runtime publishes :output/status through dispatch."
+  [{:keys [projectors]} dispatch]
+  (output-runtime/submit-sync! projectors dispatch))
 
-(defn- effect-multi-engine-stop
-  "Effect that stops all streaming engines."
-  [_ dispatch]
-  (future
-    (try
-      (log/info "Stopping multi-engine streaming...")
-      (multi-engine/stop-engines!)
-      (log/info "Multi-engine streaming stopped")
-      (dispatch {:event/type :idn/multi-streaming-stopped})
-      (catch Exception e
-        (log/error "Error stopping multi-engine streaming:" (.getMessage e))))))
+(defn- effect-output-write-status
+  "Effect that stores the output runtime's status at its path (an atomic
+   update of that path only)."
+  [status _dispatch]
+  (state/swap-state! assoc-in output-runtime/status-path status))
 
-(defn- effect-multi-engine-refresh
-  "Effect that refreshes streaming engines when projector state changes.
-   This is called when projectors are enabled/disabled while streaming is running.
-   It will start engines for newly enabled projectors and stop engines for disabled ones."
+(defn- effect-output-stop
+  "Effect that queues a stop of every streaming engine, on the output
+   lifecycle thread."
   [_ dispatch]
-  (future
-    (try
-      (when (multi-engine/streaming-running?)
-        (log/info "Refreshing streaming engines...")
-        (let [engines (multi-engine/refresh-engines!)
-              engine-count (count engines)]
-          (log/info (format "Engine refresh complete: %d engine(s) running" engine-count))
-          (dispatch {:event/type :idn/multi-streaming-refreshed
-                     :engine-count engine-count})))
-      (catch Exception e
-        (log/error "Error refreshing streaming engines:" (.getMessage e))))))
+  (output-runtime/submit-stop! dispatch))
 
 
 ;; Wrapped Event Handler
@@ -470,7 +447,9 @@
   "Event handler pipeline: timeline invariants enforced on changed cue chains
    (innermost, so history sees normalized state), undo history for undoable
    document edits, then the unsaved-changes flag derived for every event
-   (see handlers/history.clj). Outermost, in dev mode only, the lost-update
+   (see handlers/history.clj), then the output sync: a change to what the
+   engines are built from (undo included) requests a refresh while streaming
+   (handlers/output_sync.clj). Outermost, in dev mode only, the lost-update
    check tags the :state effect with the event's snapshot.
 
    app/create-app gives this to fx/create-app together with co-effects and
@@ -479,6 +458,7 @@
       timeline-handlers/wrap-normalize-timelines
       history-handlers/wrap-history
       history-handlers/wrap-dirty
+      output-sync/wrap-output-sync
       wrap-lost-update-check))
 
 (def co-effects
@@ -498,9 +478,11 @@
    - :timing/calculate-bpm - calculate BPM from taps (inline)
    - :link/sync-to-downbeat - align phase to Link's downbeat (inline)
    - :input/await-learn - wait for a learn capture, then dispatch the binding (later, future)
-   - :multi-engine/start - start multi-engine streaming to all projectors (later, future)
-   - :multi-engine/stop - stop multi-engine streaming (later, future)
-   - :multi-engine/refresh - refresh engines when projectors change (later, future)
+   - :multi-engine/start, :multi-engine/refresh - queue a sync of the engines
+     with {:projectors …} on the output thread; :output/status comes back
+     later through dispatch (later, output-status thread)
+   - :multi-engine/stop - queue a stop of every engine on the output thread
+   - :output/write-status - store the output status at its path only
    - :project/save - write project zip to disk, then :on-saved (inline)
    - :project/load - read project zip from disk, then :on-loaded (inline)
    - :fx/show-file-chooser - show file open/save dialog (later, FX thread)
@@ -517,10 +499,11 @@
    :timing/calculate-bpm effect-timing-calculate-bpm
    :link/sync-to-downbeat effect-link-sync-to-downbeat
    :input/await-learn effect-input-await-learn
-   ;; Multi-engine streaming (zone-aware system)
-   :multi-engine/start effect-multi-engine-start
-   :multi-engine/stop effect-multi-engine-stop
-   :multi-engine/refresh effect-multi-engine-refresh
+   ;; Streaming engines (queued on the output runtime)
+   :multi-engine/start effect-output-sync
+   :multi-engine/stop effect-output-stop
+   :multi-engine/refresh effect-output-sync
+   :output/write-status effect-output-write-status
    ;; Project persistence
    :project/save effect-save-project
    :project/load effect-load-project

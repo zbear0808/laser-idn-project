@@ -56,8 +56,7 @@
     (ask-first state event)
     (do
       (log/info "File > New Project")
-      {:state (persistent/new-project-state state)
-       :multi-engine/refresh true})))
+      {:state (persistent/new-project-state state)})))
 
 (defn- handle-file-open
   "Open a project from disk using file chooser dialog.
@@ -90,8 +89,7 @@
   "Replace the document with the loaded project contents."
   [{:keys [state file-path contents]}]
   (log/info "Project loaded:" file-path)
-  {:state (persistent/apply-loaded-project state contents file-path)
-   :multi-engine/refresh true})
+  {:state (persistent/apply-loaded-project state contents file-path)})
 
 (defn- handle-file-project-load-failed
   [{:keys [file-path]}]

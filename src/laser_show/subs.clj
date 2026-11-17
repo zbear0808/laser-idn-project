@@ -365,25 +365,55 @@
 ;; Level 2: Computed Connection Subscriptions
 
 
+(defn streaming-status
+  "The output runtime's last published status ([:backend :streaming :status],
+   nil when nothing runs), see backend/output_runtime.clj status."
+  [context]
+  (fx/sub-val context get-in [:backend :streaming :status]))
+
+(defn projector-output-status
+  "{:state :streaming|:starting|:error :fps :error} of one projector, or nil
+   when it isn't streaming."
+  [context projector-id]
+  (get-in (fx/sub-ctx context streaming-status) [:projectors projector-id]))
+
 (defn connection-status
-  "Computed connection status for toolbar.
+  "Streaming status for the toolbar.
    
-   Depends on: idn-data from backend domain
+   Depends on: [:backend :streaming :running?] (the operator's intent, which
+   picks the button) and the output runtime's status (what actually streams).
    
    Returns map with:
-   - :connected? - is connected?
-   - :connecting? - is connecting?
-   - :target - target hostname
-   - :error - error message
-   - :status-text - human-readable status"
+   - :running? - streaming is on
+   - :state - :stopped, :stopping, :starting, :streaming, :error or :idle
+     (on, with no enabled projectors)
+   - :status-text - e.g. \"Streaming to 2 of 3 · 1 error\"
+   - :errors - [\"<projector name>: <error>\" …]"
   [context]
-  (let [{:keys [connected? connecting? target error] :as i} (fx/sub-val context ex/idn-data)]
-    (u/->map& connected? connecting? target error
-              :status-text (cond
-                             connected? (str "Connected: " target)
-                             connecting? "Connecting..."
-                             error (str "Error: " error)
-                             :else "Disconnected"))))
+  (let [running? (boolean (fx/sub-val context get-in [:backend :streaming :running?]))
+        {:keys [engines wanted pending? projectors] :as status} (fx/sub-ctx context streaming-status)
+        names (fx/sub-val context :projectors)
+        streaming (count (filter #(= :streaming (:state %)) (vals projectors)))
+        errors (vec (for [[id {:keys [state error]}] (sort-by key projectors)
+                          :when (= :error state)]
+                      (str (or (get-in names [id :name]) (name id)) ": " error)))
+        state (cond
+                (not running?) (if (pos? (or engines 0)) :stopping :stopped)
+                (or (nil? status) pending?) :starting
+                (seq errors) :error
+                (zero? (or wanted 0)) :idle
+                :else :streaming)]
+    {:running? running?
+     :state state
+     :errors errors
+     :status-text (case state
+                    :stopped "Not streaming"
+                    :stopping "Stopping…"
+                    :starting "Starting…"
+                    (str "Streaming to " streaming " of " wanted
+                         (when (zero? wanted) " (no enabled projectors)")
+                         (when (seq errors)
+                           (str " · " (count errors) (if (= 1 (count errors)) " error" " errors")))))}))
 
 
 ;; Level 2: Computed UI State Subscriptions

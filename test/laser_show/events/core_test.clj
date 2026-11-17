@@ -34,6 +34,7 @@
   (is (every? #(contains? events/effects %)
               [:state :dispatch :dispatch-later :timing/calculate-bpm :link/sync-to-downbeat
                :input/await-learn :multi-engine/start :multi-engine/stop :multi-engine/refresh
+               :output/write-status
                :project/save :project/load :fx/show-file-chooser :system/exit :system/open-url
                :dev/reload :clipboard/copy-effects :clipboard/paste-effects
                :clipboard/paste-projector-effects :projectors/scan])))

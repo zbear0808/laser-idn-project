@@ -178,9 +178,6 @@
 (defn backend [state]
   (:backend state))
 
-(defn idn-data [state]
-  (:idn (backend state)))
-
 (defn streaming-data [state]
   (:streaming (backend state)))
 

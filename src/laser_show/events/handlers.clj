@@ -47,6 +47,7 @@
       "preview" (ui/handle event)  ; Preview settings (zone filter) -> UI handler
       "project" (project/handle event)
       "idn" (connection/handle event)
+      "output" (connection/handle event)
       "config" (connection/handle event)
       "file" (menu/handle event)
       "edit" (menu/handle event)

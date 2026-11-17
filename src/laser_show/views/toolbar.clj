@@ -1,6 +1,7 @@
 (ns laser-show.views.toolbar
   "Toolbar component with transport controls, BPM, beat indicator, and connection status."
   (:require [cljfx.api :as fx]
+            [clojure.string :as str]
             [laser-show.subs :as subs]
             [laser-show.events.core :as events]
             [clj-font-awesome.core :as fa]
@@ -199,48 +200,46 @@
 
 
 (defn connection-indicator
-  "Visual connection status indicator.
-   Uses dynamic inline style for color based on connection state."
-  [{:keys [connected? connecting?]}]
+  "Visual streaming status indicator (a style class per state)."
+  [{:keys [state]}]
   {:fx/type :region
+   :id "streaming-indicator"
    :pref-width 10
    :pref-height 10
    :style-class ["status-indicator"
-                 (cond
-                   connected? "status-indicator-connected"
-                   connecting? "status-indicator-connecting"
-                   :else "status-indicator-disconnected")]})
+                 (case state
+                   :streaming "status-indicator-connected"
+                   (:starting :stopping :idle) "status-indicator-connecting"
+                   "status-indicator-disconnected")]})
 
 (defn connection-status
-  "Connection status display for multi-projector streaming.
+  "Streaming status and the Stream/Stop button.
    
-   Uses zone-aware streaming to all enabled projectors based on their
-   zone group assignments. Legacy single-target streaming is deprecated."
+   The button follows the operator's intent ([:backend :streaming :running?]);
+   the label says what the output runtime reports is actually streaming."
   [{:keys [fx/context]}]
-  (let [{:keys [connected? connecting? status-text]} (fx/sub-ctx context subs/connection-status)
-        ;; Get enabled projector count for display
-        projectors (fx/sub-val context :projectors)
-        enabled-count (count (filter (fn [[_ p]] (:enabled? p)) projectors))]
+  (let [{:keys [running? state status-text errors]} (fx/sub-ctx context subs/connection-status)]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
      :children [{:fx/type connection-indicator
-                 :connected? connected?
-                 :connecting? connecting?}
-                {:fx/type :label
-                 :text (if connected?
-                         (format "Streaming to %d projector(s)" enabled-count)
-                         status-text)
-                 :style-class "label-secondary"}
+                 :state state}
+                (cond-> {:fx/type :label
+                         :id "streaming-status-label"
+                         :text status-text
+                         :style-class "label-secondary"}
+                  (seq errors) (assoc :tooltip {:fx/type :tooltip
+                                                :text (str/join "\n" errors)}))
                 {:fx/type :button
-                  :text (if connected? "Stop" "Stream")
-                  :graphic {:fx/type fa/icon
-                            :name :network-wired
-                            :size 12}
-                  :style-class "btn-sm"
-                  :on-action {:event/type (if connected?
-                                            :idn/stop-multi-streaming
-                                            :idn/start-multi-streaming)}}]}))
+                 :id "stream-btn"
+                 :text (if running? "Stop" "Stream")
+                 :graphic {:fx/type fa/icon
+                           :name :network-wired
+                           :size 12}
+                 :style-class "btn-sm"
+                 :on-action {:event/type (if running?
+                                           :idn/stop-multi-streaming
+                                           :idn/start-multi-streaming)}}]}))
 
 
 

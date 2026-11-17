@@ -22,7 +22,7 @@
             [laser-show.events.core :as events]
             [laser-show.views.root :as root]
             [laser-show.services.frame-service :as frame-service]
-            [laser-show.backend.multi-engine :as multi-engine]
+            [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.link :as link]
             [laser-show.input.gamepad :as gamepad]
@@ -146,6 +146,9 @@
 
   (init-styles!)
 
+  (output-runtime/open!)
+  (output-runtime/install-shutdown-hook!)
+
   (frame-service/start-preview-updates! 30)
 
   (let [app (create-app)]
@@ -193,14 +196,14 @@
       (log/warn "Error releasing input devices:" (.getMessage e)))))
 
 (defn- stop-streaming!
-  "Stop the streaming engines, if any are running, so each DAC gets its IDN close
-   packets instead of waiting for its link timeout."
+  "Drain the output runtime: every engine is stopped, so each DAC gets its IDN
+   close packets instead of waiting for its link timeout, and nothing starts
+   an engine again until the app is started again."
   []
-  (when (seq (get-in (state/get-raw-state) [:backend :streaming :multi-engine-state :engines]))
-    (try
-      (multi-engine/stop-engines!)
-      (catch Exception e
-        (log/warn "Error stopping streaming engines:" (.getMessage e))))))
+  (try
+    (output-runtime/drain! 2000)
+    (catch Exception e
+      (log/warn "Error stopping streaming engines:" (.getMessage e)))))
 
 (defn- disconnect-link!
   "Disconnect from the Carabiner daemon if we connected to it."
@@ -213,8 +216,9 @@
 
 (defn stop!
   "Stop the mounted cljfx application and release application-owned services:
-   the UI, the preview timer, the input mapper, the streaming engines, input
-   devices and the Carabiner link.
+   the UI, the preview timer, the input mapper, the streaming engines (the
+   output runtime is drained), input devices and the Carabiner link. dispatch!
+   falls back to the synchronous handler afterwards.
 
    This is intentionally idempotent so UI fixtures can safely call it from
    `finally` blocks after a failed startup or test."
@@ -227,6 +231,7 @@
   (stop-input-devices!)
   (disconnect-link!)
   (events/set-exit-fn! nil)
+  (events/set-dispatch-fn! nil)
   (reset! *app nil)
   (when (dev-config/dev-mode?)
     (Platform/setImplicitExit false))
@@ -255,6 +260,7 @@
    (stop!)
    (state/init-state! initial-state)
    (init-styles!)
+   (output-runtime/open!)
    (let [app (create-app)]
      (reset! *app app)
      (events/set-dispatch-fn! (:handler app))

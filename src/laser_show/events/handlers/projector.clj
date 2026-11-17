@@ -99,8 +99,7 @@
    :enabled? enabled?
    :scan-rate scan-rate
    :output-config {:color-bit-depth 8
-                   :xy-bit-depth 16}
-   :status {:connected? false}})
+                   :xy-bit-depth 16}})
 
 
 ;; Network Discovery
@@ -198,37 +197,26 @@
 
 (defn- handle-projectors-enable-all-by-ip
   "Enable all projectors matching a given IP address.
-   Used by 'Enable All' button in discovery panel.
-   Triggers engine refresh if streaming is currently running."
+   Used by 'Enable All' button in discovery panel."
   [{:keys [address state]}]
   (let [projector-ids (->> (get state :projectors {})
                            (filter (fn [[_ p]] (= (:host p) address)))
-                           (map first))
-        streaming-running? (get-in state [:backend :streaming :running?])]
-    (if (seq projector-ids)
-      (cond-> {:state (-> (reduce #(assoc-in %1 [:projectors %2 :enabled?] true)
-                                  state
-                                  projector-ids))}
-        ;; Trigger engine refresh if streaming is active
-        streaming-running? (assoc :multi-engine/refresh true))
-      {:state state})))
+                           (map first))]
+    {:state (reduce #(assoc-in %1 [:projectors %2 :enabled?] true)
+                    state
+                    projector-ids)}))
 
 
 (defn- handle-projectors-set-service-enabled
   "Set enabled state for a projector identified by host and service-id.
    Used by enable/disable toggles in discovery panel.
-   Coerces enabled? to boolean to prevent ClassCastException.
-   Triggers engine refresh if streaming is currently running."
+   Coerces enabled? to boolean to prevent ClassCastException."
   [{:keys [host service-id enabled? state]}]
   (let [projector-id (make-projector-id host service-id)
         ;; Coerce to boolean to handle edge cases where :fx/event might not be substituted
-        enabled-bool? (boolean enabled?)
-        streaming-running? (get-in state [:backend :streaming :running?])]
+        enabled-bool? (boolean enabled?)]
     (if (get-in state [:projectors projector-id])
-      (cond-> {:state (-> state
-                          (assoc-in [:projectors projector-id :enabled?] enabled-bool?))}
-        ;; Trigger engine refresh if streaming is active
-        streaming-running? (assoc :multi-engine/refresh true))
+      {:state (assoc-in state [:projectors projector-id :enabled?] enabled-bool?)}
       {:state state})))
 
 
@@ -265,33 +253,34 @@
 
 
 
+(defn valid-port?
+  "A UDP port number: an integer from 1 to 65535."
+  [port]
+  (and (int? port) (<= 1 port 65535)))
+
 (defn- handle-projectors-update-settings
   "Update projector settings (name, host, port, enabled, output-config).
    
-   Validates that host (if provided in updates) is not nil or blank."
+   A nil or blank host and a port outside 1-65535 are ignored (the other
+   updates still apply), so a half-cleared field can't reach an engine."
   [{:keys [projector-id updates state]}]
-  ;; If updating host, validate it's not nil or blank
-  (when (and (contains? updates :host)
-             (let [new-host (:host updates)]
-               (or (nil? new-host) (str/blank? new-host))))
-    (throw (ex-info "Invalid host: host cannot be nil or blank"
-                    {:projector-id projector-id
-                     :updates updates})))
-  {:state (-> state
-              (update-in [:projectors projector-id] merge updates))})
+  (let [updates (cond-> updates
+                  (and (contains? updates :host)
+                       (not (and (string? (:host updates))
+                                 (not (str/blank? (:host updates))))))
+                  (dissoc :host)
+
+                  (and (contains? updates :port) (not (valid-port? (:port updates))))
+                  (dissoc :port))]
+    {:state (update-in state [:projectors projector-id] merge updates)}))
 
 
 (defn- handle-projectors-toggle-enabled
   "Toggle a projector's enabled state.
-   Coerces enabled? to boolean to prevent ClassCastException.
-   Triggers engine refresh if streaming is currently running."
+   Coerces enabled? to boolean to prevent ClassCastException."
   [{:keys [projector-id state]}]
-  (let [current (boolean (get-in state [:projectors projector-id :enabled?]))
-        streaming-running? (get-in state [:backend :streaming :running?])]
-    (cond-> {:state (-> state
-                        (assoc-in [:projectors projector-id :enabled?] (not current)))}
-      ;; Trigger engine refresh if streaming is active
-      streaming-running? (assoc :multi-engine/refresh true))))
+  (let [current (boolean (get-in state [:projectors projector-id :enabled?]))]
+    {:state (assoc-in state [:projectors projector-id :enabled?] (not current))}))
 
 
 

@@ -16,7 +16,7 @@
           :selected-cell [0 0]}
    :ui {:active-tab :grid
         :preview {:frame {:points []}}}
-   :backend {:idn {:connected? true}}
+   :backend {:streaming {:running? true}}
    :projectors {:proj-1 {:name "Main" :enabled? true}}
    :virtual-projectors {}
    :zone-groups {:all {:id :all :name "All"}}
@@ -97,7 +97,7 @@
       (is (= [3 3] (get-in restored [:config :preview :grid-layout]))))
     (testing "runtime state is untouched and dirty is not set"
       (is (= true (get-in restored [:playback :playing?])))
-      (is (= true (get-in restored [:backend :idn :connected?])))
+      (is (= true (get-in restored [:backend :streaming :running?])))
       (is (= 4.0 (get-in restored [:timing :global-clock :accumulated-beats])))
       (is (nil? (get-in restored [:project :dirty?]))))))
 

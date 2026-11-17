@@ -12,6 +12,7 @@
    [clojure.test :refer [deftest is testing]]
    [laser-show.state.history :as history]
    [clojure.string :as str]
+   [laser-show.events.core :as events]
    [laser-show.events.handlers.projector :as projectors]
    [laser-show.state.domains :refer [build-initial-state]]))
 
@@ -219,23 +220,36 @@
           updated-host (get-in result [:state :projectors test-projector-id :host])]
       (is (= "192.168.1.200" updated-host) "Should update to new valid host"))))
 
-(deftest handle-projectors-update-settings-with-nil-host-throws-test
-  (testing "Updating host to nil throws exception"
+(deftest handle-projectors-update-settings-ignores-nil-host-test
+  (testing "A nil host is ignored; the other updates still apply"
     (let [event {:event/type :projectors/update-settings
                  :projector-id test-projector-id
-                 :updates {:host nil}
-                 :state state-with-projector}]
-      (is (thrown? clojure.lang.ExceptionInfo (projectors/handle event))
-          "Should throw ExceptionInfo for nil host"))))
+                 :updates {:host nil :name "Renamed"}
+                 :state state-with-projector}
+          projector (get-in (projectors/handle event) [:state :projectors test-projector-id])]
+      (is (= "192.168.1.100" (:host projector)) "Host is unchanged")
+      (is (= "Renamed" (:name projector))))))
 
-(deftest handle-projectors-update-settings-with-blank-host-throws-test
-  (testing "Updating host to blank string throws exception"
-    (let [event {:event/type :projectors/update-settings
-                 :projector-id test-projector-id
-                 :updates {:host ""}
-                 :state state-with-projector}]
-      (is (thrown? clojure.lang.ExceptionInfo (projectors/handle event))
-          "Should throw ExceptionInfo for blank host"))))
+(deftest handle-projectors-update-settings-ignores-blank-host-test
+  (testing "A blank host is ignored instead of throwing"
+    (doseq [blank ["" "   "]]
+      (let [event {:event/type :projectors/update-settings
+                   :projector-id test-projector-id
+                   :updates {:host blank}
+                   :state state-with-projector}]
+        (is (= "192.168.1.100"
+               (get-in (projectors/handle event) [:state :projectors test-projector-id :host])))))))
+
+(deftest handle-projectors-update-settings-validates-port-test
+  (doseq [[port expected] [[7300 7300] [1 1] [65535 65535]
+                           [0 7255] [65536 7255] [-1 7255] [nil 7255] ["7300" 7255] [72.5 7255]]]
+    (testing (pr-str port)
+      (let [event {:event/type :projectors/update-settings
+                   :projector-id test-projector-id
+                   :updates {:port port}
+                   :state (assoc-in state-with-projector [:projectors test-projector-id :port] 7255)}]
+        (is (= expected
+               (get-in (projectors/handle event) [:state :projectors test-projector-id :port])))))))
 
 (deftest handle-projectors-update-settings-without-host-succeeds-test
   (testing "Updating other settings without touching host succeeds"
@@ -252,8 +266,10 @@
 
 ;; Engine Refresh on Projector Enable/Disable Tests
 ;;
-;; These tests verify that when streaming is running and projector enabled state
-;; changes, the :multi-engine/refresh effect is returned to trigger engine recreation.
+;; When streaming is running and a projector's enabled state changes, the
+;; event pipeline's output-sync middleware adds :multi-engine/refresh with the
+;; new projector snapshot (handlers/output_sync.clj); the handlers themselves
+;; no longer ask for it. These run the handlers through that pipeline.
 ;; This fixes the bug where starting streaming before enabling projectors would
 ;; result in zero engines being created, and later enabling projectors would not
 ;; create new engines.
@@ -271,25 +287,29 @@
       (assoc-in [:projectors test-projector-id :enabled?] false)
       (assoc-in [:backend :streaming :running?] false)))
 
+(defn- through-pipeline [event]
+  (events/handle-event-pipeline event))
+
 
 (deftest handle-projectors-toggle-enabled-triggers-refresh-when-streaming-test
-  (testing "Toggle enabled returns :multi-engine/refresh when streaming is running"
+  (testing "Toggle enabled requests a refresh when streaming is running"
     (let [event {:event/type :projectors/toggle-enabled
                  :projector-id test-projector-id
                  :state state-with-streaming-running}
-          result (projectors/handle event)]
-      (is (true? (:multi-engine/refresh result))
-          "Should return :multi-engine/refresh effect when streaming is running")
+          result (through-pipeline event)]
+      (is (= (get-in result [:state :projectors])
+             (get-in result [:multi-engine/refresh :projectors]))
+          "Should request a refresh with the new projectors when streaming is running")
       (is (true? (get-in result [:state :projectors test-projector-id :enabled?]))
           "Should toggle the enabled state")))
   
-  (testing "Toggle enabled does NOT return :multi-engine/refresh when streaming is stopped"
+  (testing "Toggle enabled does NOT request a refresh when streaming is stopped"
     (let [event {:event/type :projectors/toggle-enabled
                  :projector-id test-projector-id
                  :state state-with-streaming-stopped}
-          result (projectors/handle event)]
+          result (through-pipeline event)]
       (is (nil? (:multi-engine/refresh result))
-          "Should NOT return :multi-engine/refresh effect when streaming is stopped")
+          "Should NOT request a refresh when streaming is stopped")
       (is (true? (get-in result [:state :projectors test-projector-id :enabled?]))
           "Should still toggle the enabled state"))))
 
@@ -307,28 +327,28 @@
                                        :zone-groups [:all]})
                             (assoc-in [:backend :streaming :running?] true))]
     
-    (testing "Set service enabled returns :multi-engine/refresh when streaming is running"
+    (testing "Set service enabled requests a refresh when streaming is running"
       (let [event {:event/type :projectors/set-service-enabled
                    :host host
                    :service-id service-id
                    :enabled? true
                    :state state-with-proj}
-            result (projectors/handle event)]
-        (is (true? (:multi-engine/refresh result))
-            "Should return :multi-engine/refresh effect when streaming is running")
+            result (through-pipeline event)]
+        (is (contains? (get-in result [:multi-engine/refresh :projectors]) proj-id)
+            "Should request a refresh when streaming is running")
         (is (true? (get-in result [:state :projectors proj-id :enabled?]))
             "Should set the enabled state")))
     
-    (testing "Set service enabled does NOT return :multi-engine/refresh when streaming is stopped"
+    (testing "Set service enabled does NOT request a refresh when streaming is stopped"
       (let [state-stopped (assoc-in state-with-proj [:backend :streaming :running?] false)
             event {:event/type :projectors/set-service-enabled
                    :host host
                    :service-id service-id
                    :enabled? true
                    :state state-stopped}
-            result (projectors/handle event)]
+            result (through-pipeline event)]
         (is (nil? (:multi-engine/refresh result))
-            "Should NOT return :multi-engine/refresh effect when streaming is stopped")))))
+            "Should NOT request a refresh when streaming is stopped")))))
 
 
 (deftest handle-projectors-enable-all-by-ip-triggers-refresh-when-streaming-test
@@ -348,33 +368,33 @@
                                         :zone-groups [:all]})
                              (assoc-in [:backend :streaming :running?] true))]
     
-    (testing "Enable all by IP returns :multi-engine/refresh when streaming is running"
+    (testing "Enable all by IP requests a refresh when streaming is running"
       (let [event {:event/type :projectors/enable-all-by-ip
                    :address host
                    :state state-with-projs}
-            result (projectors/handle event)]
-        (is (true? (:multi-engine/refresh result))
-            "Should return :multi-engine/refresh effect when streaming is running")
+            result (through-pipeline event)]
+        (is (= #{proj-id-1 proj-id-2} (set (keys (get-in result [:multi-engine/refresh :projectors]))))
+            "Should request a refresh when streaming is running")
         (is (true? (get-in result [:state :projectors proj-id-1 :enabled?]))
             "Should enable first projector")
         (is (true? (get-in result [:state :projectors proj-id-2 :enabled?]))
             "Should enable second projector")))
     
-    (testing "Enable all by IP does NOT return :multi-engine/refresh when streaming is stopped"
+    (testing "Enable all by IP does NOT request a refresh when streaming is stopped"
       (let [state-stopped (assoc-in state-with-projs [:backend :streaming :running?] false)
             event {:event/type :projectors/enable-all-by-ip
                    :address host
                    :state state-stopped}
-            result (projectors/handle event)]
+            result (through-pipeline event)]
         (is (nil? (:multi-engine/refresh result))
-            "Should NOT return :multi-engine/refresh effect when streaming is stopped")))))
+            "Should NOT request a refresh when streaming is stopped")))))
 
 
 (deftest handle-projectors-enable-all-by-ip-no-refresh-when-no-matching-projectors-test
-  (testing "Enable all by IP returns no refresh when no projectors match"
+  (testing "Enable all by IP requests no refresh when no projectors match"
     (let [event {:event/type :projectors/enable-all-by-ip
                  :address "10.0.0.1"  ;; No projectors with this IP
                  :state state-with-streaming-running}
-          result (projectors/handle event)]
+          result (through-pipeline event)]
       (is (nil? (:multi-engine/refresh result))
-          "Should not return refresh when no projectors match"))))
+          "Should not request a refresh when no projectors match"))))

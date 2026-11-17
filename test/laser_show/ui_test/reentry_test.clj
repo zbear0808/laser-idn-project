@@ -26,13 +26,23 @@
     (handle event)))
 
 (deftest lifecycle-results-run-on-the-agent-test
-  (let [threads (atom [])]
-    (with-redefs [connection/handle (recording-threads connection/handle threads)]
+  (let [threads (atom [])
+        handle connection/handle
+        status-handled? (fn [pred] (some (fn [[t _ e]] (and (= :output/status t) (pred e))) @threads))]
+    (with-redefs [connection/handle (fn [event]
+                                      (swap! threads conj [(:event/type event)
+                                                           (.getName (Thread/currentThread))
+                                                           event])
+                                      (handle event))]
+      ;; Nothing to stream: the output runtime still publishes that it's on
       (events/dispatch! {:event/type :idn/start-multi-streaming})
-      (ui/wait-for! #(some (fn [[t]] (= :idn/multi-streaming-started t)) @threads)))
-    (let [[_ thread-name] (first (filter #(= :idn/multi-streaming-started (first %)) @threads))]
-      (is (agent-thread? thread-name) thread-name))
-    (is (every? (comp agent-thread? second) @threads) (pr-str @threads))))
+      (ui/wait-for! #(status-handled? (comp false? :pending? :status)))
+      (events/dispatch! {:event/type :idn/stop-multi-streaming})
+      (ui/wait-for! #(status-handled? (comp nil? :status))))
+    (is (status-handled? #(= {:engines 0 :wanted 0 :pending? false :projectors {}} (:status %)))
+        "the status the output thread published")
+    (is (nil? (get-in (state/get-raw-state) [:backend :streaming :status])) "stopped")
+    (is (every? (comp agent-thread? second) @threads) (pr-str (mapv pop @threads)))))
 
 (deftest dispatch-later-runs-on-the-agent-test
   (let [threads (atom [])

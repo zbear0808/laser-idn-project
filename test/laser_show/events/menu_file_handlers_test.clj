@@ -170,7 +170,13 @@
       (is (false? (get-in new-state [:project :dirty?]))))
     (testing "runtime/backend state is kept"
       (assert-runtime-kept new-state))
-    (is (true? (:multi-engine/refresh result)))))
+    (testing "while streaming, the new projectors are synced (through the pipeline)"
+      (is (= (:projectors new-state)
+             (get-in (events/handle-event-pipeline {:event/type :file/project-loaded
+                                                    :file-path test-file
+                                                    :contents (zip-contents-of loaded-doc)
+                                                    :state current})
+                     [:multi-engine/refresh :projectors]))))))
 
 (deftest project-loaded-fills-missing-config-defaults-test
   (let [contents {"project-metadata.edn" {:config {:cue {:trigger-mode :toggle}}}}
@@ -224,7 +230,10 @@
       (is (= {} (get-in new-state [:playback :active-cues]))))
     (testing "runtime/backend state is kept"
       (assert-runtime-kept new-state))
-    (is (true? (:multi-engine/refresh result)))))
+    (testing "while streaming, the engines are synced to no projectors (through the pipeline)"
+      (is (= {} (get-in (events/handle-event-pipeline {:event/type :file/new-project
+                                                        :force? true :state current})
+                        [:multi-engine/refresh :projectors]))))))
 
 
 ;; Unsaved-changes guard (New / Open / Exit ask first when the project is dirty)
@@ -269,7 +278,11 @@
   (testing "same effect maps as before the guard existed"
     (let [new-result (menu/handle {:event/type :file/new-project :state clean-document-state})]
       (is (= 120.0 (get-in new-result [:state :timing :bpm])))
-      (is (true? (:multi-engine/refresh new-result))))
+      (is (= #{:state} (set (keys new-result))) "the output sync comes from the pipeline"))
+    (is (some? (:multi-engine/refresh
+                (events/handle-event-pipeline
+                 {:event/type :file/new-project
+                  :state (assoc-in clean-document-state [:backend :streaming :running?] true)}))))
     (is (contains? (menu/handle {:event/type :file/open :state clean-document-state})
                    :fx/show-file-chooser))
     (is (= {:system/exit true}

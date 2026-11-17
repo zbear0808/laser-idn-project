@@ -1,105 +1,49 @@
 (ns laser-show.events.handlers.connection
-  "Event handlers for IDN connection management and configuration.
-   
-   Handles:
-   - Multi-engine streaming (one engine per projector)
-   - Connection status updates
-   - Configuration updates
-   
-   The connection system supports multi-projector streaming:
-   - :idn/start-multi-streaming - Start streaming to all enabled projectors
-   - :idn/stop-multi-streaming - Stop all streaming engines
-   - :idn/connection-failed - Handle connection failures")
+  "Event handlers for multi-projector streaming (one engine per projector).
 
+   - :idn/start-multi-streaming - streaming on (the operator's intent); queues a
+     sync of the engines with the current projectors
+   - :idn/stop-multi-streaming - streaming off; queues a stop
+   - :output/status - what is actually streaming, published by the output
+     runtime (backend/output_runtime.clj) at most 4 times a second
 
-;; Connection Status Handler
-
-
-(defn- handle-idn-connection-failed
-  "IDN connection failed."
-  [{:keys [error state]}]
-  {:state (-> state
-              (assoc-in [:backend :idn :connected?] false)
-              (assoc-in [:backend :idn :connecting?] false)
-              (assoc-in [:backend :idn :error] error))})
-              
-              
-              ;; Multi-Projector Streaming Handlers
+   The engines themselves live in the output runtime, never in app state.
+   While streaming is on, projector edits that change an engine are synced by
+   the output-sync middleware (handlers/output_sync.clj).")
 
 
 (defn- handle-start-multi-streaming
-  "Start streaming to all enabled projectors.
-   
-   Creates one streaming engine per enabled projector, using the routing
-   system to determine which cues go to which projector/zone.
-   
-   Effects returned:
-   - :multi-engine/start - Triggers multi-engine startup"
+  "Turn streaming on and queue a sync with the projectors as they are now.
+   Pressing it again queues an identical sync, which changes nothing."
   [{:keys [state]}]
-  {:state (-> state
-              (assoc-in [:backend :streaming :running?] true)
-              (assoc-in [:backend :idn :connecting?] false)
-              (assoc-in [:backend :idn :connected?] true))
-   :multi-engine/start true})
+  {:state (assoc-in state [:backend :streaming :running?] true)
+   :multi-engine/start {:projectors (:projectors state)}})
 
 (defn- handle-stop-multi-streaming
-  "Stop streaming to all projectors.
-   
-   Stops all streaming engines and clears multi-engine state.
-   
-   Effects returned:
-   - :multi-engine/stop - Triggers multi-engine shutdown"
+  "Turn streaming off and queue a stop of every engine."
   [{:keys [state]}]
-  {:state (-> state
-              (assoc-in [:backend :streaming :running?] false)
-              (assoc-in [:backend :idn :connected?] false))
+  {:state (assoc-in state [:backend :streaming :running?] false)
    :multi-engine/stop true})
 
-(defn- handle-multi-streaming-started
-  "Multi-engine streaming successfully started.
-   Called by effect handler after engines are started."
-  [{:keys [engine-count state]}]
-  {:state (assoc-in state [:backend :streaming :engine-count] engine-count)})
-
-(defn- handle-multi-streaming-stopped
-  "Multi-engine streaming stopped.
-   Called by effect handler after engines are stopped."
-  [{:keys [state]}]
-  {:state (-> state
-              (assoc-in [:backend :streaming :engine-count] 0)
-              (assoc-in [:backend :streaming :multi-engine-state] nil))})
-
-(defn- handle-multi-streaming-refreshed
-  "Multi-engine streaming refreshed after projector state change.
-   Called by effect handler after engines are refreshed."
-  [{:keys [engine-count state]}]
-  {:state (assoc-in state [:backend :streaming :engine-count] engine-count)})
+(defn- handle-output-status
+  "Store the output runtime's status (pure data; nil when nothing runs).
+   Written by the :output/write-status effect at its path only, never as a
+   whole-state write-back: without an app this event runs on the runtime's
+   status thread, next to whatever the calling thread is doing."
+  [{:keys [status]}]
+  {:output/write-status status})
 
 
 ;; Public API
 
 
 (defn handle
-  "Dispatch connection and config events to their handlers.
-   
-   Accepts events with :event/type in the :idn/* or :config/* namespace.
-   
-   Multi-projector streaming events:
-   - :idn/start-multi-streaming - Start engines for all enabled projectors
-   - :idn/stop-multi-streaming - Stop all streaming engines
-   - :idn/multi-streaming-started - Engines started confirmation
-   - :idn/multi-streaming-stopped - Engines stopped confirmation
-   - :idn/multi-streaming-refreshed - Engines refreshed after projector state change
-   - :idn/connection-failed - Connection failed"
+  "Dispatch streaming events (:idn/* and :output/*) to their handlers."
   [{:keys [event/type] :as event}]
   (case type
-    ;; Multi-projector streaming
     :idn/start-multi-streaming (handle-start-multi-streaming event)
     :idn/stop-multi-streaming (handle-stop-multi-streaming event)
-    :idn/multi-streaming-started (handle-multi-streaming-started event)
-    :idn/multi-streaming-stopped (handle-multi-streaming-stopped event)
-    :idn/multi-streaming-refreshed (handle-multi-streaming-refreshed event)
-    :idn/connection-failed (handle-idn-connection-failed event)
+    :output/status (handle-output-status event)
     
     ;; Unknown event in this domain
     {}))

@@ -61,15 +61,6 @@
   {:active-tab (get-in state [:ui :active-tab])
    :selected-cell (get-in state [:grid :selected-cell])})
 
-(defn- hardware-changed?
-  "True when projector configuration differs, so streaming engines need a refresh."
-  [old-state new-state]
-  (some (fn [path]
-          (let [a (get-in old-state path)
-                b (get-in new-state path)]
-            (and (not (identical? a b)) (not= a b))))
-        [[:projectors] [:virtual-projectors] [:chains :projector-effects]]))
-
 (defn- prune-active-cues
   "Drop active cues whose cue cell no longer exists."
   [state]
@@ -88,8 +79,7 @@
                            (assoc :history history)
                            prune-active-cues)]
     (log/info verb "performed:" (:description snapshot))
-    (cond-> {:state restored-state}
-      (hardware-changed? state restored-state) (assoc :multi-engine/refresh true))))
+    {:state restored-state}))
 
 (defn handle-undo
   "Undo the last action."

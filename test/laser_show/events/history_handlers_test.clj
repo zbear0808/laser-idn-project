@@ -210,12 +210,17 @@
     (is (= 1.0 (size-of (run s {:event/type :edit/undo}))))))
 
 (deftest undo-emits-engine-refresh-when-projectors-change-test
-  (let [s1 (run (test-state) {:event/type :projectors/add-manual :name "P" :host "10.0.0.9" :port 7255})
+  (let [streaming (assoc-in (test-state) [:backend :streaming :running?] true)
+        s1 (run streaming {:event/type :projectors/add-manual :name "P" :host "10.0.0.9" :port 7255})
         effects (pipeline {:event/type :edit/undo :state s1})]
     (is (seq (:projectors s1)))
-    (is (true? (:multi-engine/refresh effects)))
+    (is (= {} (get-in effects [:multi-engine/refresh :projectors]))
+        "the output-sync middleware sees the restored projectors")
     (testing "no refresh when only content changed"
-      (let [s (run (test-state) edit-size)]
+      (let [s (run streaming edit-size)]
+        (is (nil? (:multi-engine/refresh (pipeline {:event/type :edit/undo :state s}))))))
+    (testing "no refresh while not streaming"
+      (let [s (run (test-state) {:event/type :projectors/add-manual :name "P" :host "10.0.0.9" :port 7255})]
         (is (nil? (:multi-engine/refresh (pipeline {:event/type :edit/undo :state s}))))))))
 
 (deftest undo-prunes-active-cues-for-removed-cells-test
