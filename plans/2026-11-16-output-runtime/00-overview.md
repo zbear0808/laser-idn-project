@@ -1,7 +1,7 @@
 # Output runtime — overview
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** In progress. Phase 1 done (`2c23e63`), Phase 2 done (`645da70`), Phase 3 done (`47e7f8d`, `a37f690`) and Phase 4 done (`a8b2fd2`, `5dce132`, `20aeed9`), 2026-11-16; Phase 5 next; O1–O8 answered (O1: A; O2: skip only the failing effect; O3: filter bad points; O4: C, no switch; O5–O8: A, with one streaming thread per projector kept); O9–O10 open   **Last verified against:** `70e049e` (13 probes on loopback, JDK 25.0.5, macOS 27.2; see §1). Phases 1–2 changed `streaming_engine.clj`, `multi_engine.clj`, `frame_service.clj`, `effects.clj`, `calibration.clj`, `types.clj` and `generators.clj`, so citations into those files in docs 03–05 are against `70e049e` and get re-checked before each phase starts. After Phase 2, p2, p3, p9 and p11 show the new behaviour (02 §10). After Phase 3, callbacks from futures and the FX thread run on the event agent; p6 improves (one orphan sender after Stop instead of two), p7 is unchanged until Phase 4 takes the engine handles out of app state (03 §10). After Phase 4 one output runtime owns every engine (each still on its own streaming thread): p4–p7 leave 0 senders after Stop, and the dev-mode detector reports no lost update (04 §10)
+**Status:** In progress. Phase 1 done (`2c23e63`), Phase 2 done (`645da70`), Phase 3 done (`47e7f8d`, `a37f690`) and Phase 4 done (`a8b2fd2`, `5dce132`, `20aeed9`), 2026-11-16; Phase 5 next; O1–O9 answered (O1: A; O2: skip only the failing effect; O3: filter bad points; O4: C, no switch; O5–O8: A, with one streaming thread per projector kept; O9: A, 25 000 pts/s by default, and the status shows the fps each projector draws); O10 open   **Last verified against:** `70e049e` (13 probes on loopback, JDK 25.0.5, macOS 27.2; see §1). Phases 1–2 changed `streaming_engine.clj`, `multi_engine.clj`, `frame_service.clj`, `effects.clj`, `calibration.clj`, `types.clj` and `generators.clj`, so citations into those files in docs 03–05 are against `70e049e` and get re-checked before each phase starts. After Phase 2, p2, p3, p9 and p11 show the new behaviour (02 §10). After Phase 3, callbacks from futures and the FX thread run on the event agent; p6 improves (one orphan sender after Stop instead of two), p7 is unchanged until Phase 4 takes the engine handles out of app state (03 §10). After Phase 4 one output runtime owns every engine (each still on its own streaming thread): p4–p7 leave 0 senders after Stop, and the dev-mode detector reports no lost update (04 §10)
 **Supersedes / Superseded by:** none. Takes over the output items of `plans/2026-11-07-improvement-review/` listed in §6
 **Related findings:** review 04 findings 5, 7, 8, 11–16, 26 and LE3/LE4; 03 findings 6, 7, 9, 10 (MR4, the output half of MR5); 02 #23, M1 (output writers), M7, M8
 
@@ -24,7 +24,7 @@ None of that needs hardware to fix or to test.
 | `02-phase2-output-safety.md` | Nothing unsafe reaches the wire | ~1.5 days | O2, O3, O4 (answered) |
 | `03-phase3-event-reentry.md` | Background results come back through the event agent | ~1 day | O5 |
 | `04-phase4-engine-ownership.md` | One owner for the engines; status the UI can trust | ~2–3 days | O6, O7, O8 (and Phase 3) |
-| `05-phase5-frame-timing.md` | Scan rate, pacing, timestamps; the show clock for later | ~1–1.5 days (+ a hardware check; no IDN DAC available as of 2026-11-16) | O9, O10 |
+| `05-phase5-frame-timing.md` | Scan rate, pacing, timestamps; the show clock for later | ~1–1.5 days (+ a hardware check; no IDN DAC available as of 2026-11-16) | O9 (answered), O10 |
 
 About 7–9 days in total. The show clock (O10) would be its own plan after these.
 
@@ -124,7 +124,7 @@ Each decision is written out with options and a recommendation in the doc that n
 | O6 | Who owns the engines | 04 | Phase 4 | **A, answered 2026-11-16**: runtime registry plus one output executor for start, stop and sync; each projector keeps its own streaming thread |
 | O7 | What a refresh restarts | 04 | Phase 4 | **A, answered 2026-11-16**: diff by config fingerprint; requests coalesced |
 | O8 | How link health is shown | 04 | Phase 4 | **A, answered 2026-11-16**: engine stats at ≤ 4 Hz → toolbar and the projector dot; no ping yet |
-| O9 | Frame duration | 05 | Phase 5 | A: from the point count and the projector's scan rate, editable; verify on hardware |
+| O9 | Frame duration | 05 | Phase 5 | **A, answered 2026-11-17**: from the point count and the projector's scan rate (default 25 000 pts/s), editable; the status shows the fps the projector draws; verify on hardware |
 | O10 | Where show time advances | 05 | after Phase 5 | A: one show clock, as its own plan after Phases 1–5 |
 
 ## 6. Review items, re-checked 2026-11-16

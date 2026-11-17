@@ -1,31 +1,35 @@
 # Phase 5 — Frame timing: scan rate, pacing, timestamps (and the show clock, later)
 
 **Written:** 2026-11-16   **Written for commit:** `70e049e` (`master`)
-**Status:** Proposed. Needs O9 (O10 is for after this phase) and Phase 1   **Last verified against:** `70e049e`
+**Status:** In progress. O9 answered 2026-11-17: A, with a default of 25 000 pts/s and a projector status that shows the fps the projector actually draws (§4, §7). Needs Phase 1 (done)   **Last verified against:** `f39a998` (citations in §1–9 re-checked 2026-11-17 after Phases 2–4)
 **Supersedes / Superseded by:** none   **Related findings:** O-14 to O-17 (`00-overview.md` §2); review 04 findings 5, 7, 11, 14, QW3, MR2 step 1, MR3, LE1; 03 MR1; 02 M1 step 3
 
-Every frame is told to the DAC to take 16.7 ms to draw, whatever its size. A 10-point frame is drawn at 600 points/s and a 3000-point frame at 180 000 points/s, on a projector whose stored scan rate is 30 000 (p10). The first is a slow, bright beam; the second drives the galvos at six times their rate.
+Every frame is told to the DAC to take 16.7 ms to draw, whatever its size. A 10-point frame is drawn at 660 points/s and a 3000-point frame at 180 000 points/s, on a projector whose stored scan rate is 30 000 (p10). The first is a slow, bright beam; the second drives the galvos at six times their rate.
 
 Frames are also paced by sleeping the rest of each frame, which gives 44–48.5 fps here instead of 60 (p12, p13). And timestamps are whole milliseconds from a clock that can step backwards.
 
-This phase fixes all three: about 1–1.5 days, plus a check on real hardware before release. As of 2026-11-16 no IDN DAC is available, so the code and its fake-DAC tests can be done, but the hardware check has to wait. The show clock (O10) is decided here and built later.
+The projector's status line ("Streaming · 46.0 fps", Phase 4) reports how often the engine *sends*. It says nothing about how often the projector *draws* a new frame, which the scan rate limits.
+
+This phase fixes all four: about 1–1.5 days, plus a check on real hardware before release. As of 2026-11-16 no IDN DAC is available, so the code and its fake-DAC tests can be done, but the hardware check has to wait. The show clock (O10) is decided here and built later.
 
 ## 1. Current behaviour (file:line)
 
 | What | Where | Today |
 |---|---|---|
-| Frame duration | `streaming_engine.clj:147` → `stream/frame-duration-us` (`stream.clj:543-546`) = 10⁶ / fps | 16 666 µs whatever the point count (p10) |
-| Scan rate | `make-projector-config` defaults `:scan-rate` to 30 000 (`projector.clj:89,100`); documented at `domains.clj:267` | Never read; grep finds only those lines. There is no field for it in the projector settings (`projectors.clj:296-335`). |
+| Frame duration | `streaming_engine.clj:153` → `stream/frame-duration-us` (`stream.clj:543-546`) = 10⁶ / fps | 16 666 µs whatever the sample count (p10) |
+| Samples on the wire | `frame-rules/sanitize-frame` (`streaming_engine.clj:253`, since Phase 2) puts a dark copy in front of a lit first point; `frame->packet` truncates to one message (`stream.clj:333-345`, `max-points-per-message` `:209-218`) | A lit 10-point frame goes out as 11 samples, a lit 3000-point one as 3001 (p10) |
+| Scan rate | `make-projector-config` defaults `:scan-rate` to 30 000 (`projector.clj:89,100`); documented at `domains.clj:267`; part of the Phase 4 fingerprint (`output_runtime.clj:35-39`) | Read nowhere else: a scan-rate change restarts the engine, which then ignores it. There is no field for it in the projector settings (`projectors.clj:353-418`). |
 | What the spec says | Stream §6.2: the duration is the frame's, in µs, and "the first sample SHALL not be taken into account when calculating the sample timing". §3.3 (discrete mode): frames that started must finish, newer frames replace older ones, and a frame is repeated if no new one has arrived (unless the once flag is set) | – |
-| Timestamps | `current-timestamp-us` (`streaming_engine.clj:109-114`): `(* (System/currentTimeMillis) 1000)` minus the start time | Millisecond resolution: every timestamp is a multiple of 1000 (p10). Goes backwards if the wall clock does. Stream §2.1: "the timestamp has to increase monotonically". |
-| Config resend | `should-resend-config?` (`:116-122`) on wall-clock ms, every 200 ms (`:40`) | If the clock steps back, config stops being resent until the clock catches up |
-| Pacing | `streaming-loop` (`:190-264`): time the iteration on the wall clock, then `(Thread/sleep (long (- 16.67 elapsed)))` (`:261-264`) | Each frame's lateness is lost for good: 44–48.5 fps measured (p12). A 16 ms sleep often returns after 24 ms on this Mac; a deadline loop with `parkNanos` held 59.8 fps on the same machine (p13). |
+| Timestamps | `current-timestamp-us` (`streaming_engine.clj:115-120`): `(* (System/currentTimeMillis) 1000)` minus the start time (`:315`) | Millisecond resolution: every timestamp is a multiple of 1000 (p10). Goes backwards if the wall clock does. Stream §2.1: "the timestamp has to increase monotonically". The close pair uses the same clock (`:353`). |
+| Config resend | `should-resend-config?` (`:122-128`) on wall-clock ms, every 200 ms (`:41`) | If the clock steps back, config stops being resent until the clock catches up |
+| Pacing | `streaming-loop` (`:223-290`): time the iteration on the wall clock, then `(Thread/sleep (long (- 16.67 elapsed)))` (`:287-290`) | Each frame's lateness is lost for good: 44–48.5 fps measured (p12), with gaps from 2 to 56 ms. A 16 ms sleep often returns after 24 ms on this Mac; a deadline loop with `parkNanos` held 59.8 fps on the same machine (p13). |
+| The fps the UI shows | `engine-status` (`output_runtime.clj:172-180`) shows the engine's `:actual-fps`: an EMA of 1000 / (ms since the last send) (`streaming_engine.clj:134-140,260-274`), shown by `output-status-text` (`projectors.clj:261-268`) | The send rate, at ms resolution. Nothing tells the operator that a frame takes longer to draw than one interval. |
 | Unused helper | `stream/microseconds-now` (`stream.clj:538-541`) | Returns a `Ratio`; no callers |
-| Show time | `update-timing-accumulators!` (`frame_service.clj:108-145`) runs only inside the 30 Hz preview tick (`:805-831`, timer `:847-866`). It is started at `app.clj:144` and stopped during code reloads (`dev/reload.clj:120,136`). | Engines take beats from that tick (`multi_engine.clj:173-174`) but elapsed ms from the wall clock (`:171`). Beat-synced motion therefore steps at 30 Hz on 60 fps output, and it freezes when the tick stops (p11; Phase 2 keeps the tick alive after errors). |
+| Show time | `update-timing-accumulators!` (`frame_service.clj:121`) runs only inside the 30 Hz preview tick (`update-preview-frame!` `:822-848`, timer `:864-884`). It is started at `app.clj:152` and stopped during code reloads (`dev/reload.clj:120,136`). | Engines take beats from that tick (`multi_engine.clj:156,174`) but elapsed ms from the wall clock (`:145,154,173`). Beat-synced motion therefore steps at 30 Hz on 60 fps output, and it freezes when the tick stops (p11; Phase 2 keeps the tick alive after errors). |
 
 ## 2. Root cause
 
-The engine was written for a fixed-rate stream: "send a frame every 1/60 s and say it takes 1/60 s". But the DAC draws at whatever rate the duration implies, so the scan speed is set by accident by the point count. Pacing and timestamps use the wall clock, which neither keeps an average rate nor is monotonic.
+The engine was written for a fixed-rate stream: "send a frame every 1/60 s and say it takes 1/60 s". But the DAC draws at whatever rate the duration implies, so the scan speed is set by accident by the point count. Pacing and timestamps use the wall clock, which neither keeps an average rate nor is monotonic. And the only rate anyone measures is the send rate, so a frame that is too big for the scan rate can't show up in the UI.
 
 ## 3. Reuse / extend
 
@@ -33,68 +37,128 @@ The engine was written for a fixed-rate stream: "send a frame every 1/60 s and s
 |---|---|
 | `:scan-rate` on every projector (`projector.clj:89,100`; saved with the project's hardware, `persistent.clj:53-56`) | The duration's input; no migration needed |
 | `write-frame-chunk-header!` (`stream.clj:277-287`), 24-bit duration | Unchanged; durations are clamped to `0xFFFFFF` |
+| `max-points-per-message` (`stream.clj:209-218`) | How many samples of a frame go on the wire, so the duration counts what is sent |
 | The u32 timestamp mask (`stream.clj:255`) | Wraps the new µs timestamps |
-| Phase 4's projector fingerprint includes `:scan-rate` | A scan-rate edit restarts only that projector's engine |
-| Phase 1 fake DAC: `:duration-us`, `:timestamp`, arrival times | The tests below |
+| `timing/fps->interval-nanos` (`common/timing.clj:131-140`) | The pacing interval |
+| `timing/precise-sleep-until` (`common/timing.clj:38-68`) | Not reused: it busy-waits the last 5 ms of every wait, so at 60 fps each engine would spin about 30 % of the time (*unverified*: 5 ms of every 16.7 ms frame). Its NEW sibling `park-until` parks instead (§4). |
+| Phase 4's projector fingerprint includes `:scan-rate` (`output_runtime.clj:35-39`) | A scan-rate edit restarts only that projector's engine |
+| Phase 4's status (`engine-status`, `output_runtime.clj:172-180`) and status line (`output-status-text`, `projectors.clj:261-268`) | Carry the fps the projector draws and say when the scan rate limits it |
+| Phase 4's `commit-field` (`projectors.clj:48-74`) and the Port field's validation (`parse-port` `:76-81`, `valid-port?` `projector.clj:256-259`) | The scan-rate field commits on Enter or focus loss, validated in the view and in the handler |
+| Phase 1 fake DAC (`test/laser_show/idn/fake_dac.clj`): `:duration-us`, `:timestamp`, arrival times | The tests below |
 
 ## 4. Changes per namespace
 
-- `laser-show.idn.stream`: NEW `scan-duration-us [point-count scan-rate]` = `round(10⁶ × (n − 1) / rate)` for n ≥ 2, clamped to [1, 0xFFFFFF]. The first sample isn't timed (Stream §6.2). Empty frames keep `frame-duration-us`. `microseconds-now` is removed.
+- `laser-show.common.timing` (existing): NEW `park-until [deadline-ns keep-waiting?]`. Parks with `LockSupport/parkNanos` until `System/nanoTime` reaches the deadline, and returns early once `(keep-waiting?)` is false, so a stop never waits for a deadline. The low-CPU sibling of `precise-sleep-until`.
+- `laser-show.idn.stream`:
+  - NEW constants `DEFAULT_SCAN_RATE` 25 000, `MIN_SCAN_RATE` 1 000 and `MAX_SCAN_RATE` 100 000 (pts/s). At the minimum, the largest message (about 9 300 samples at 16/8) takes 9.3 s, which fits the 24-bit duration (16.7 s).
+  - NEW `clamp-scan-rate [v]`: a long within the range, or nil unless `v` is a finite number.
+  - NEW `scan-duration-us [samples scan-rate]` = `round(10⁶ × (samples − 1) / rate)`, clamped to [1, 0xFFFFFF]. The first sample isn't timed (Stream §6.2).
+  - `frame-duration-us` stays, for empty frames. `microseconds-now` is removed.
 - `laser-show.backend.streaming-engine`:
-  - `create-engine` (`:49-103`) takes `:scan-rate`, defaulting to 30 000. `create-idn-stream-packets` (`:136-172`) uses `scan-duration-us` for non-empty frames (O9-A; with O9-B only when the projector's toggle is on).
-  - `current-timestamp-us` (`:109-114`) and `should-resend-config?` (`:116-122`) use `System/nanoTime`. The engine keeps its start in ns, and timestamps are µs since start.
-  - The loop (`:212-264`) paces by deadline. `next-deadline-ns` grows by the interval each frame, and the thread parks with `LockSupport/parkNanos` until it. A frame more than one interval late moves the deadline to now plus the interval: frames are skipped, never sent in a burst.
-- `laser-show.backend.multi-engine` (`create-engine-for-projector`, `:218-248`): passes `(:scan-rate projector)`.
-- `laser-show.events.handlers.projector` (`update-settings`, `:268-281`): a `:scan-rate` update is clamped to 1 000–100 000.
-- `laser-show.views.tabs.projectors` (settings, `:296-335`): NEW "Scan rate (pts/s)" field, `#projector-scan-rate`. Like Host and Port after Phase 4, it commits on Enter or focus loss.
+  - `create-engine` (`:50-109`) takes `:scan-rate` (through `clamp-scan-rate`, default `DEFAULT_SCAN_RATE`) and keeps its output config's per-message sample limits. `:start-time-us` and `:last-config-time-ms` become `:start-ns` and `:last-config-ns`.
+  - `current-timestamp-us` (`:115-120`) and `should-resend-config?` (`:122-128`) use `System/nanoTime`: timestamps are µs since start, and config goes out when none has been sent yet or the last one is 200 ms old.
+  - `create-idn-stream-packets` (`:142-178`) and `send-frame!` (`:198-221`): a non-empty frame's duration is `scan-duration-us` of the samples that go on the wire (all of them when fragmentation splits the frame, otherwise at most one message's worth). An empty frame keeps `frame-duration-us`. `send-frame!` returns the packet count and the duration.
+  - The loop (`:223-290`) paces by deadline. The deadline grows by one interval per frame, and the thread parks until it (`park-until`). A frame that ends more than one interval past the next deadline moves that deadline to now plus the interval: frames are skipped, never sent in a burst. No frame, the error path's empty frame included, goes out less than half an interval after the one before.
+  - Stats: NEW private `update-stats`, on `System/nanoTime`, smoothed over about 10 frames (an EMA, as today):
+    - `:send-fps`: frames sent per second;
+    - `:draw-fps`: new frames the projector draws per second, 10⁶ / max(send interval, frame duration);
+    - `:frame-duration-us` of the last frame;
+    - `:scan-limited?`: the smoothed frame time is more than 2 % above the smoothed send interval.
+
+    `:last-frame-time`, `:actual-fps` and `calculate-actual-fps` (`:134-140`) go.
+- `laser-show.backend.multi-engine` (`create-engine-for-projector`, `:217-248`): passes `(:scan-rate projector)`.
+- `laser-show.backend.output-runtime` (`engine-status`, `:172-180`): `:fps` is the engine's `:draw-fps`, rounded to 0.1, plus `:scan-limited? true` when it is.
+- `laser-show.events.handlers.projector`: `make-projector-config` (`:78-102`) defaults `:scan-rate` to `stream/DEFAULT_SCAN_RATE` (was 30 000). `update-settings` (`:261-275`) clamps a numeric `:scan-rate` with `clamp-scan-rate` and drops anything else, as it does for the port.
+- `laser-show.views.tabs.projectors`:
+  - NEW `parse-scan-rate [text]`: pts/s from "25000", "25 000", "25,000", "25k" or "27.5k"; nil otherwise.
+  - `projector-basic-settings` (`:353-418`): a NEW row "Scan rate: [field] pts/s". The field, `#projector-scan-rate-field`, is a `commit-field` showing the projector's scan rate (the default if it has none). Like Host and Port, it commits on Enter or focus loss. A value that doesn't parse, or that clamps to the stored rate, puts the stored rate back; anything else dispatches `:projectors/update-settings`.
+  - `output-status-text` (`:261-268`): "Streaming · 25.0 fps (limited by scan rate)" when `:scan-limited?`.
+- `laser-show.state.domains` (`:267`): the docstring gives the default and the range.
 
 ## 5. State placement
 
-No new keys. `[:projectors id :scan-rate]` already exists and is saved; it becomes read.
+| Key / path | Lives in | Written by | Undo / dirty? |
+|---|---|---|---|
+| `[:projectors id :scan-rate]` (existing; becomes read) | document (the `:hardware` file) | `make-projector-config` (25 000), `:projectors/update-settings` (clamped) | Yes / yes (`:projectors` is a document root, `history.clj:48-50`) |
+| `[:backend :streaming :status :projectors id]` `:fps` (now the draw rate) and NEW `:scan-limited?` | app state, the output status | the status thread through `:output/status` (≤ 4 Hz, Phase 4) | No / no |
+| `:start-ns`, `:last-config-ns`, `:stats` of each engine | the engine's atoms, in the output runtime's registry | that engine's streaming thread | – |
+
+Projectors saved before this phase keep the scan rate stored with them: 30 000 for every one, since that was the old default and there was no field. The field shows it, and an edit applies.
 
 ## 6. Events and effects
 
-| Event / effect | Exists? | Change |
-|---|---|---|
-| `:projectors/update-settings` with `{:scan-rate n}` | exists | NEW caller (the scan-rate field); the value is clamped |
+| Event / effect | Exists? | Dispatched from | Change |
+|---|---|---|---|
+| `:projectors/update-settings` with `{:scan-rate n}` | exists (`projector.clj:261`) | NEW caller: the scan-rate field | The value is clamped; a non-number is dropped |
+| `:output/status` | exists (`connection.clj:28`) | the status thread (`output_runtime.clj:204-214`) | The status map carries the draw rate and `:scan-limited?` |
+
+No new effect keys.
 
 ## 7. Data examples and invariants
 
-| Points | Scan rate | Duration today (µs) | After (µs) | Times drawn per 16.7 ms |
-|---|---|---|---|---|
-| 0 | any | 16 666 | 16 666 (empty frame) | – |
-| 2 | 30 000 | 16 666 | 33 | ≈ 500 (repeated) |
-| 10 | 30 000 | 16 666 | 300 | ≈ 55 |
-| 500 | 30 000 | 16 666 | 16 633 | 1 |
-| 1 000 | 30 000 | 16 666 | 33 300 | 0.5 (the DAC drops every other frame, §3.3) |
-| 3 000 | 30 000 | 16 666 | 99 967 | ≈ 0.17 |
-| 3 000 | 60 000 | 16 666 | 49 983 | ≈ 0.33 |
+Frame durations at the default 25 000 pts/s, counting samples on the wire (a lit frame of n points goes out as n + 1 samples). "Shown" is the status line with frames sent every 16 667 µs.
 
-So small frames are repeated many times per frame period: brighter, steadier and faster-moving beams. Frames too big for the scan rate refresh more slowly: they flicker rather than distort.
+| Samples | Scan rate | Duration today (µs) | After (µs) | Times drawn per 16.7 ms | Shown |
+|---|---|---|---|---|---|
+| 0 (idle) | any | 16 666 | 16 666 (empty frame) | – | Streaming · 60.0 fps |
+| 2 | 25 000 | 16 666 | 40 | ≈ 417 (repeated) | Streaming · 60.0 fps |
+| 11 | 25 000 | 16 666 | 400 | ≈ 42 | Streaming · 60.0 fps |
+| 418 | 25 000 | 16 666 | 16 680 | 1 | Streaming · 60.0 fps |
+| 501 | 25 000 | 16 666 | 20 000 | 0.83 | Streaming · 50.0 fps (limited by scan rate) |
+| 1 001 | 25 000 | 16 666 | 40 000 | 0.42 (the DAC drops frames, §3.3) | Streaming · 25.0 fps (limited by scan rate) |
+| 3 001 | 25 000 | 16 666 | 120 000 | 0.14 | Streaming · 8.3 fps (limited by scan rate) |
+| 3 001 | 50 000 | 16 666 | 60 000 | 0.28 | Streaming · 16.7 fps (limited by scan rate) |
+| 1 | any | – | 1 (the clamp; `sanitize-frame` never sends 1) | – | – |
+| 20 000 | 1 000 | – | 16 777 215 (the 24-bit clamp) | – | – |
+
+So small frames are repeated many times per frame period: brighter, steadier and faster-moving beams. Frames too big for the scan rate refresh more slowly: they flicker rather than distort, and the status line says so. The shipped presets have 8–128 points (`presets.clj:48-116`), so a single cue stays below 418 samples.
+
+`clamp-scan-rate`: `25000` → 25000; `500` → 1000; `200000` → 100000; `27500.4` → 27500; `nil`, `"25000"`, `##NaN` → nil (dropped).
+
+`parse-scan-rate`: `"25000"`, `"25 000"`, `"25,000"`, `"25k"`, `"25K"` → 25000; `"27.5k"` → 27500; `""`, `"abc"`, `"-5"`, `"2.5"` → nil.
+
+Pacing, with an interval of 16.67 ms (times in ms from the deadline the frame was due at):
+
+| Frame ends at | Next deadline | Why |
+|---|---|---|
+| 2 | 16.67 | on time |
+| 25 | 16.67, so the next frame starts at once, but goes out no sooner than 25 + 8.33 | less than one interval late |
+| 50 | 50 + 16.67 = 66.67 | more than one interval late: skip |
+
+Stats: send interval 16 667 µs and duration 40 000 µs → `:draw-fps` 25.0, `:send-fps` 60.0, `:scan-limited?` true. Interval 16 667 µs and duration 400 µs → 60.0, 60.0, false. Interval 20 833 µs (an engine that only manages 48 fps) and duration 400 µs → 48.0, 48.0, false.
 
 **Invariants:**
-1. On the wire, the point rate of every non-empty frame equals the projector's scan rate, rounded to whole µs.
+1. On the wire, the point rate of every non-empty frame equals the projector's scan rate: duration = round(10⁶ × (samples − 1) / scan rate), clamped to [1, 0xFFFFFF].
 2. Timestamps on a channel strictly increase and aren't all whole milliseconds.
 3. Config is repeated at least every 250 ms, whatever the wall clock does.
-4. Over 2 s, the engine sends 60 ± 1 frames per second; after a slow frame it skips ahead, and never sends two frames less than 8 ms apart.
+4. Over 2 s, the engine sends 60 ± 1 frames per second; after a slow frame it skips ahead, and it never sends two frames less than half an interval (8.3 ms) apart.
+5. The fps shown for a projector is the rate at which it draws new frames: the lower of the send rate and 10⁶ / frame duration, smoothed over about 10 frames. It says "limited by scan rate" when the frame duration sets it.
+6. New projectors get 25 000 pts/s. A scan-rate edit is clamped to 1 000–100 000 and restarts only that projector's engine.
 
 ## 8. Tests
 
-- `laser-show.backend.idn-stream-test/scan-duration-examples-test`: the table above, including the clamping.
+- `laser-show.backend.idn-stream-test`: `scan-duration-examples-test` (the duration column above, with the clamping) and `clamp-scan-rate-test`.
+- `laser-show.common.timing-test`: `park-until-never-returns-early-test`, `park-until-returns-when-told-to-stop-test`.
+- `laser-show.backend.streaming-engine-test` (pure, through the private vars): `next-deadline-examples-test` (the pacing table), `stats-report-the-fps-the-projector-draws-test` (the stats examples).
 - `laser-show.backend.engine-wire-test` (fake DAC):
-  - `duration-follows-scan-rate-test` (p10)
-  - `timestamps-are-monotonic-microseconds-test` (p10)
-  - `late-frame-skips-instead-of-bursting-test`: the provider sleeps 50 ms once; no two frames arrive within 8 ms afterwards.
+  - `duration-follows-scan-rate-test` (p10): 11 and 1 001 samples at the 25 000 default, half the duration at 50 000, empty frames at 16 666.
+  - `timestamps-are-monotonic-microseconds-test` (p10).
+  - `late-frame-skips-instead-of-bursting-test`: the provider sleeps 50 ms once. Afterwards no two frames are less than 8 ms apart (engine clock), and the frame after the slow one comes at least an interval later.
+  - `draw-fps-follows-the-scan-rate-test`: 1 001-sample frames at 25 000 report 25 ± 1 fps and `:scan-limited?`; 11-sample frames report the send rate and aren't scan-limited.
 - `^:timing` `laser-show.backend.engine-wire-test/engine-holds-60-fps-test` (p12, p13), run with `clj -M:mac-arm:test-timing`.
-- `laser-show.events.projector-handlers-test/scan-rate-is-clamped-test`.
-- `laser-show.ui-test.projector-settings-test/scan-rate-field-commits-on-enter-test` (NEW namespace).
-- **Hardware check, before release** (manual, not automatic): on one DAC, compare a 10-point square and a 3000-point frame before and after; confirm small frames repeat and big frames slow down instead of distorting. Record the DAC model and firmware in this doc.
+- `laser-show.backend.multi-engine-test/engine-uses-the-projector-scan-rate-test`.
+- `laser-show.backend.output-lifecycle-test/status-shows-the-fps-the-projector-draws-test`: with `projector-frame` redefined to 1 000 lit points, the published status says 25 ± 1 fps and `:scan-limited? true`.
+- `laser-show.events.projector-handlers-test`: `scan-rate-is-clamped-test`, `new-projectors-default-to-25k-test`.
+- `laser-show.views.tabs.projectors-test` (NEW, pure): `output-status-text-test`, `parse-scan-rate-test`.
+- UI, `laser-show.ui-test.streaming-status-test` (next to `host-field-commits-on-enter-test`): `scan-rate-field-commits-on-enter-test`, `projector-status-says-when-the-scan-rate-limits-the-fps-test`.
+- **Hardware check, before release** (manual, not automatic): on one DAC, compare a 10-point square and a 3000-point frame before and after; confirm small frames repeat and big frames slow down instead of distorting, and that the status line's fps matches what is drawn. Record the DAC model and firmware in this doc.
 
-Run: `clj -M:mac-arm:test idn-stream engine-wire projector-handlers`, `clj -M:mac-arm:test-timing engine-holds`, then both full suites and the probes (p10, p12, p13).
+Run: `clj -M:mac-arm:test idn-stream common.timing engine-wire streaming-engine multi-engine output-lifecycle projector-handlers views.tabs.projectors`, `clj -M:mac-arm:test-timing engine-holds`, `clj -M:test-ui:mac-arm:test-ui-headless streaming-status`, then both full suites and the probes (p10, p12, p13).
 
 ## 9. Out of scope / alternatives considered
 
-- **Warning in the UI when a frame needs more time than one frame period at the scan rate:** useful, but it needs a design for where to show it. Log it once per projector, using Phase 2's `output-errors`, for now.
+- **Moving existing projectors to 25 000:** a project has no format version, so after this phase a stored 30 000 can't be told apart from one the user typed. The field shows the stored rate instead.
+- **A points-per-frame budget next to the field** ("416 points per frame at 60 fps"): the status line already says when a frame is too big for the scan rate.
 - **Continuous graphic mode or once-flag frames** (Stream §3.3) for tighter timing control: not needed for this app's frame-based content.
 - **The show clock** (O10 option A): its own plan.
 
@@ -102,19 +166,19 @@ Run: `clj -M:mac-arm:test idn-stream engine-wire projector-handlers`, `clj -M:ma
 
 ## Decisions
 
-> **DECISION O9 — How long does each frame take to draw?** *(open · needed before Phase 5 · recommended: A)*
+> **DECISION O9 — How long does each frame take to draw?** *(answered 2026-11-17: A)*
 >
 > | | What | For | Against |
 > |---|---|---|---|
-> | **A (recommended)** | From the point count and the projector's scan rate (default 30 000 pts/s, editable per projector), as the spec intends. Checked on one real DAC before release | The galvos never run faster than the projector's rating; small frames stop being slow, bright beams | Big frames refresh below 60 Hz (they visibly flicker), which shows content that has too many points |
+> | **A (chosen)** | From the point count and the projector's scan rate (editable per projector), as the spec intends. Checked on one real DAC before release | The galvos never run faster than the projector's rating; small frames stop being slow, bright beams | Big frames refresh below 60 Hz (they visibly flicker), which shows content that has too many points |
 > | B | Same, behind a per-projector "Use scan rate" toggle that starts off | Nothing changes until someone opts in | The galvo overdrive stays the default |
 > | C | Keep 1/fps | No change | O-14 stays |
 >
-> **Your answer:** _pending_
+> **Your answer:** A: "we should show the fps we are actually getting and base it on the scan rate we have set. (By default we should do 25 kpps)". So the default is 25 000 pts/s (not 30 000), and the projector's status line shows the fps it draws, with "limited by scan rate" when its frames are too big (§4, §7).
 
 > **DECISION O10 — Where does show time advance?** *(open · needed after Phase 5 · recommended: A)*
 >
-> Today beats advance only in the 30 Hz preview tick (`frame_service.clj:805-831`). Engines at 60 fps therefore see each beat position twice, and the timeline end and MTC chase also run there (`frame_service.clj:83-106,142-145`).
+> Today beats advance only in the 30 Hz preview tick (`frame_service.clj:822-848`). Engines at 60 fps therefore see each beat position twice, and the timeline end and MTC chase also run there (`frame_service.clj:84-107,121`).
 >
 > | | What | For | Against |
 > |---|---|---|---|
