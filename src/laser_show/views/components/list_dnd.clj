@@ -205,21 +205,23 @@
     (.setOnDragDropped node
                        (on-fx-event
                         (fn [event]
-                          (let [ui-state (get-ui-state component-id)
-                                dragging-ids (:dragging-ids ui-state)]
-                            (if (contains? (or dragging-ids #{}) target-id)
-                              (do
-                                (clear-drop-indicator-classes! node)
-                                (reset! current-drop-target-node nil)
-                                (.setDropCompleted event false)
-                                (.consume event))
-                              (let [drop-pos @drop-position-atom]
-                                (clear-drop-indicator-classes! node)
-                                (reset! current-drop-target-node nil)
-                                (handle-drop! component-id target-id drop-pos drop-props)
-                                (clear-drag-state! component-id)
-                                (.setDropCompleted event true)
-                                (.consume event)))))))))
+                          ;; Not a list drag (e.g. a timeline bank item): leave it to the other handlers
+                          (when (some-> (.getDragboard event) .hasString)
+                            (let [ui-state (get-ui-state component-id)
+                                  dragging-ids (:dragging-ids ui-state)]
+                              (if (contains? (or dragging-ids #{}) target-id)
+                                (do
+                                  (clear-drop-indicator-classes! node)
+                                  (reset! current-drop-target-node nil)
+                                  (.setDropCompleted event false)
+                                  (.consume event))
+                                (let [drop-pos @drop-position-atom]
+                                  (clear-drop-indicator-classes! node)
+                                  (reset! current-drop-target-node nil)
+                                  (handle-drop! component-id target-id drop-pos drop-props)
+                                  (clear-drag-state! component-id)
+                                  (.setDropCompleted event true)
+                                  (.consume event))))))))))
 
 
 (defn setup-container-drop-target!
@@ -240,13 +242,14 @@
   (.setOnDragDropped node
                      (on-fx-event
                       (fn [event]
-                        (when-let [old-target @current-drop-target-node]
-                          (clear-drop-indicator-classes! old-target)
-                          (reset! current-drop-target-node nil))
-                        (handle-drop! component-id :root-end :append drop-props)
-                        (clear-drag-state! component-id)
-                        (.setDropCompleted event true)
-                        (.consume event))))
+                        (when (some-> (.getDragboard event) .hasString)
+                          (when-let [old-target @current-drop-target-node]
+                            (clear-drop-indicator-classes! old-target)
+                            (reset! current-drop-target-node nil))
+                          (handle-drop! component-id :root-end :append drop-props)
+                          (clear-drag-state! component-id)
+                          (.setDropCompleted event true)
+                          (.consume event)))))
   (.setOnDragDone node
                   (on-fx-event
                    (fn [event]
