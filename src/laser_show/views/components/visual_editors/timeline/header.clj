@@ -9,14 +9,20 @@
    rename), zone chip (click for the zone menu), mute toggle. Right-click for
    rename / colour / zone / add track inside / delete. Rows drag to reorder
    through the shared list drag-and-drop (:list/perform-drop ->
-   :timeline/update-tracks)."
+   :timeline/update-tracks). Presets and effects dragged from the browser
+   drop on a row too (bank-drop-target!, rules in timeline.drop)."
   (:require [cljfx.api :as fx]
             [clj-font-awesome.core :as fa]
             [laser-show.events.core :as events]
             [laser-show.timeline.layout :as layout]
             [laser-show.timeline.model :as model]
-            [laser-show.views.components.list-dnd :as dnd])
-  (:import [javafx.scene.input KeyCode KeyEvent MouseButton MouseEvent]
+            [laser-show.views.components.drag-drop-cell :as dd]
+            [laser-show.views.components.list-dnd :as dnd]
+            [laser-show.views.components.visual-editors.timeline.drop :as drop])
+  (:import [javafx.css PseudoClass]
+           [javafx.event EventHandler EventType]
+           [javafx.scene Node]
+           [javafx.scene.input DragEvent KeyCode KeyEvent MouseButton MouseEvent TransferMode]
            [javafx.scene.layout Region]
            [javafx.scene.shape Rectangle]))
 
@@ -121,6 +127,42 @@
      :focus-traversable false
      :items (zone-menu-items props r)}))
 
+(def ^:private drop-target-class (PseudoClass/getPseudoClass "drop-target"))
+
+(defn- header-drop
+  "The browser drop on this row, or nil. The row's cell and track are in its
+   userData (set every render, so they're never stale)."
+  [^Node node ^DragEvent e]
+  (when-let [payload (dd/read-payload (.getDragboard e) :bank-item drop/valid-payload?)]
+    (let [{:keys [col row track-id]} (.getUserData node)]
+      (drop/drop-target payload {:type :header :track-id track-id} {:col col :row row}))))
+
+(defn- bank-drop-target!
+  "Make a header row a drop target for browser drags. Uses addEventHandler:
+   the setOnDrag* slots belong to the list drag-and-drop (track reorder),
+   and every handler on a node runs. Only :bank-item drags are touched."
+  [^Node node]
+  (let [on! (fn [^EventType type f]
+              (.addEventHandler node type (reify EventHandler (handle [_ e] (f e)))))
+        mark! #(.pseudoClassStateChanged node drop-target-class (boolean %))
+        bank? #(dd/has-payload? (.getDragboard ^DragEvent %) :bank-item)]
+    (on! DragEvent/DRAG_OVER
+         (fn [^DragEvent e]
+           (when (bank? e)
+             (let [t (header-drop node e)]
+               (when t (.acceptTransferModes e (into-array TransferMode [TransferMode/COPY])))
+               (mark! t)
+               (.consume e)))))
+    (on! DragEvent/DRAG_EXITED (fn [_] (mark! false)))
+    (on! DragEvent/DRAG_DROPPED
+         (fn [^DragEvent e]
+           (when (bank? e)
+             (let [t (header-drop node e)]
+               (mark! false)
+               (when t (events/dispatch! (:event t)))
+               (.setDropCompleted e (some? t))
+               (.consume e)))))))
+
 (defn- header-row
   [{:keys [col row selected-track-id items-path] :as props} idx r]
   (let [folder? (= :folder (:kind r))
@@ -134,11 +176,13 @@
      :fx/key track-id
      :on-created (fn [node]
                    (dnd/setup-drag-source! node track-id component-id items-path)
-                   (dnd/setup-drag-target! node track-id folder? component-id drop-props))
+                   (dnd/setup-drag-target! node track-id folder? component-id drop-props)
+                   (bank-drop-target! node))
      ;; A graphic-only Label hosts the row: only Controls take :context-menu
      :desc
      {:fx/type :label
       :id (str "timeline-track-header-" idx)
+      :user-data {:col col :row row :track-id track-id}
       :content-display :graphic-only
       :padding 0
       :min-height (:h r) :pref-height (:h r) :max-height (:h r)

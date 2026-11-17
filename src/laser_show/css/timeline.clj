@@ -111,6 +111,11 @@
        {:-fx-background-color (str blue "2E")
         :-fx-border-color ["transparent" "transparent" "transparent" blue]
         :-fx-border-width [0 0 0 2]}
+       ;; A browser drag over the row (pseudo-class set by header/bank-drop-target!)
+       ".label:drop-target > .tl-header-row"
+       {:-fx-background-color (str blue "2E")
+        :-fx-border-color blue
+        :-fx-border-width 1}
        ".tl-header-name"
        {:-fx-text-fill "#E0E0E0"
         :-fx-font-size 12}
