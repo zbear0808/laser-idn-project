@@ -326,9 +326,9 @@
   robot-instance)
 
 (defn- test-dragboard
-  "A Dragboard holding `content` (a ClipboardContent) that offers COPY, for
-   synthetic drag events. FX thread only."
-  [content]
+  "A Dragboard holding `content` (a ClipboardContent) that offers the
+   transfer `modes`, for synthetic drag events. FX thread only."
+  [content modes]
   (let [store (atom (into {} content))]
     (DragboardHelper/createDragboard
      (reify TKClipboard
@@ -338,7 +338,7 @@
          true)
        (getContent [_ fmt] (get @store fmt))
        (hasContent [_ fmt] (contains? @store fmt))
-       (getTransferModes [_] #{TransferMode/COPY})
+       (getTransferModes [_] (set modes))
        (setDragView [_ _])
        (setDragViewOffsetX [_ _])
        (setDragViewOffsetY [_ _])
@@ -352,20 +352,21 @@
    synthetic DragEvents (DRAG_ENTERED, DRAG_OVER, DRAG_DROPPED, and
    DRAG_EXITED unless :exit? is false), because the headless glass platform
    can't run a real drag-and-drop: its DnD clipboard throws
-   UnsupportedOperationException. The drag source isn't involved.
+   UnsupportedOperationException. The drag source isn't involved. :mode is
+   the one transfer mode the drag offers (default COPY, as bank drags do).
    Returns {:accepted? :completed?}."
-  [^Node node content x y & {:keys [drop? exit?] :or {drop? true exit? true}}]
+  [^Node node content x y & {:keys [drop? exit? mode] :or {drop? true exit? true mode TransferMode/COPY}}]
   (let [result (run-on-fx-thread!
                 (fn []
-                  (let [db (test-dragboard content)
+                  (let [db (test-dragboard content [mode])
                         scene-p (.localToScene node (double x) (double y))
                         screen-p (.localToScreen node (double x) (double y))
                         event (fn [type mode]
                                 (DragEvent. type db (.getX scene-p) (.getY scene-p)
                                             (.getX screen-p) (.getY screen-p)
                                             mode nil node nil))
-                        _ (Event/fireEvent node (event DragEvent/DRAG_ENTERED TransferMode/COPY))
-                        over (event DragEvent/DRAG_OVER TransferMode/COPY)
+                        _ (Event/fireEvent node (event DragEvent/DRAG_ENTERED mode))
+                        over (event DragEvent/DRAG_OVER mode)
                         _ (Event/fireEvent node over)
                         accepted? (.isAccepted over)
                         dropped (when (and accepted? drop?)
@@ -373,7 +374,7 @@
                                     (Event/fireEvent node d)
                                     d))]
                     (when exit?
-                      (Event/fireEvent node (event DragEvent/DRAG_EXITED TransferMode/COPY)))
+                      (Event/fireEvent node (event DragEvent/DRAG_EXITED mode)))
                     {:accepted? accepted?
                      :completed? (boolean (some-> ^DragEvent dropped .isDropCompleted))})))]
     (sync-fx!)

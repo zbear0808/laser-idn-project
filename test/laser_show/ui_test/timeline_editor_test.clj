@@ -551,3 +551,28 @@
           (Thread/sleep 200)
           (ui/sync-fx!)
           (is (= (+ 2 before) (count (items)))))))))
+
+(deftest timeline-track-reorder-survives-bank-drop-targets
+  (open-timeline!)
+  (events/dispatch! {:event/type :timeline/add-track :col 0 :row 0})
+  (ui/wait-for! #(= 2 (count (tracks))))
+  (ui/wait-for! #(some? (ui/query "#timeline-track-header-2")))
+  (let [moved (:id (last (tracks)))
+        before (vec (tracks))]
+    (testing "a bank drop on a header is the header's alone: list-dnd ignores it"
+      (let [undo-before (undo-count)]
+        (is (:completed? (ui/fire-drop! (ui/query "#timeline-track-header-0")
+                                        (bank-content :effect :scale :shape) 100 2)))
+        (ui/wait-for! #(= [:scale] (effect-ids (first (tracks)))))
+        (is (= (map :id before) (map :id (tracks))) "no reorder")
+        (is (= (inc undo-before) (undo-count)))))
+    (testing "a list drag (a string, MOVE) still reorders the tracks"
+      ;; The source side of a header drag, as list-dnd's drag-detected does it
+      (events/dispatch! {:event/type :list/start-drag :component-id [:timeline-tracks 0 0]
+                         :item-id moved :items-path [:chains :cue-chains [0 0] :tracks]})
+      (ui/wait-for! #(seq (get-in (state/get-raw-state) [:list-ui [:timeline-tracks 0 0] :dragging-ids])))
+      (is (:completed? (ui/fire-drop! (ui/query "#timeline-track-header-0")
+                                      (doto (javafx.scene.input.ClipboardContent.) (.putString (pr-str moved)))
+                                      100 2 :mode javafx.scene.input.TransferMode/MOVE)))
+      (ui/wait-for! #(= moved (:id (first (tracks)))))
+      (is (= 2 (count (tracks)))))))
