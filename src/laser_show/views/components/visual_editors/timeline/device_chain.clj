@@ -2,14 +2,21 @@
   "The effects of the selected clip, track or folder as a row of cards, like
    Ableton's device view: each card has an on/off switch, move left/right,
    remove, and the effect's parameters (the shared effect-parameter-editor).
-   Effects are added from the browser on the right."
+   Effects are added from the browser on the right: a click appends, a drag
+   inserts where it's dropped (between cards; the insertion line is the
+   drop-before / drop-after pseudo-class on a card)."
   (:require [cljfx.api :as fx]
             [clj-font-awesome.core :as fa]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
             [laser-show.events.core :as events]
+            [laser-show.views.components.drag-drop-cell :as dd]
             [laser-show.views.components.effect-parameter-editor :as param-editor]
-            [laser-show.views.components.visual-editors.timeline.inspector :as inspector]))
+            [laser-show.views.components.visual-editors.timeline.drop :as drop]
+            [laser-show.views.components.visual-editors.timeline.inspector :as inspector])
+  (:import [javafx.css PseudoClass]
+           [javafx.scene Node Parent]
+           [javafx.scene.input DragEvent TransferMode]))
 
 
 (defn- op-event [col row target op]
@@ -85,6 +92,41 @@
                  "An effect group from a converted cue. Edit it in the Cue Chain Editor."
                  "Unknown effect")})]}))
 
+(def ^:private drop-before (PseudoClass/getPseudoClass "drop-before"))
+(def ^:private drop-after (PseudoClass/getPseudoClass "drop-after"))
+(def ^:private drop-target-class (PseudoClass/getPseudoClass "drop-target"))
+
+(defn- cards-of [^Parent chain]
+  (some-> ^Parent (.lookup chain "#timeline-device-cards") .getChildrenUnmodifiable vec))
+
+(defn- chain-drop
+  "The browser drop at the event's position, plus where its insertion line
+   goes: {:event :index :cards}, or nil."
+  [^DragEvent e target col row]
+  (when-let [payload (dd/read-payload (.getDragboard e) :bank-item drop/valid-payload?)]
+    (let [chain ^Parent (.getSource e)
+          box (.lookup chain "#timeline-device-cards")
+          cards (or (cards-of chain) [])
+          index (if box
+                  (let [p (.sceneToLocal ^Node box (.getSceneX e) (.getSceneY e))]
+                    (drop/chain-insert-index
+                     (mapv (fn [^Node c] (let [b (.getBoundsInParent c)] [(.getMinX b) (.getWidth b)])) cards)
+                     (.getX p)))
+                  0)]
+      (when-let [t (drop/drop-target payload {:type :chain :target target :index index} {:col col :row row})]
+        (assoc t :index index :cards cards)))))
+
+(defn- show-insertion!
+  "Insertion line before card i, after the last card, or (no cards) on the
+   hint. nil clears it. Pseudo-classes: cljfx re-renders don't touch them."
+  [^Parent chain {:keys [index cards] :as at}]
+  (let [n (count cards)]
+    (doseq [[i ^Node c] (map-indexed vector (or (cards-of chain) []))]
+      (.pseudoClassStateChanged c drop-before (boolean (and at (< index n) (= i index))))
+      (.pseudoClassStateChanged c drop-after (boolean (and at (>= index n) (= i (dec n))))))
+    (when-let [hint (.lookup chain "#timeline-device-hint")]
+      (.pseudoClassStateChanged hint drop-target-class (boolean (and at (zero? n)))))))
+
 (defn device-chain
   "Props: :col :row :target (inspector/selection-target)."
   [{:keys [col row target]}]
@@ -98,6 +140,20 @@
     {:fx/type :v-box
      :id "timeline-device-chain"
      :style-class "tl-device-chain"
+     :on-drag-over (fn [^DragEvent e]
+                     (when (dd/has-payload? (.getDragboard e) :bank-item)
+                       (let [at (chain-drop e target col row)]
+                         (when at (.acceptTransferModes e (into-array TransferMode [TransferMode/COPY])))
+                         (show-insertion! (.getSource e) at)
+                         (.consume e))))
+     :on-drag-exited (fn [^DragEvent e] (show-insertion! (.getSource e) nil))
+     :on-drag-dropped (fn [^DragEvent e]
+                        (when (dd/has-payload? (.getDragboard e) :bank-item)
+                          (let [at (chain-drop e target col row)]
+                            (show-insertion! (.getSource e) nil)
+                            (when at (events/dispatch! (:event at)))
+                            (.setDropCompleted e (some? at))
+                            (.consume e))))
      :children
      [{:fx/type :label
        :style-class "tl-inspector-title"
@@ -112,7 +168,7 @@
 
         (empty? fx-list)
         (hint (str "No effects on " (inspector/target-name target)
-                   ". Click an effect in the browser on the right to add one."
+                   ". Click or drag an effect from the browser on the right to add one."
                    (when (= :track kind) " Track and folder effects apply to every clip on them.")))
 
         :else
@@ -122,6 +178,7 @@
          :vbar-policy :never
          :style "-fx-background: #121212; -fx-background-color: #121212;"
          :content {:fx/type :h-box
+                   :id "timeline-device-cards"
                    :spacing 6
                    :children (vec (map-indexed
                                    (fn [i fx]

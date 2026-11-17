@@ -195,6 +195,15 @@
         :-fx-spacing 6}
        ".tl-device-off"
        {:-fx-opacity 0.55}
+       ;; Insertion line for a browser drag (device-chain/show-insertion!)
+       ".tl-device:drop-before"
+       {:-fx-border-color ["#2E2E2E" "#2E2E2E" "#2E2E2E" blue]
+        :-fx-border-width [1 1 1 3]}
+       ".tl-device:drop-after"
+       {:-fx-border-color ["#2E2E2E" blue "#2E2E2E" "#2E2E2E"]
+        :-fx-border-width [1 3 1 1]}
+       ".tl-hint:drop-target"
+       {:-fx-text-fill blue}
        ".tl-device-header"
        {:-fx-padding [0 0 4 0]
         :-fx-border-color ["transparent" "transparent" "#2E2E2E" "transparent"]}
