@@ -157,7 +157,7 @@ Committed as `803140d` (the fix: `time.clj`, `modulator_evaluators.clj`, `keyfra
 | `clj -M:mac-arm:test animation.time-test once-mode timing-context-is-relative clip-timing-ctx` | 15 tests, 68 assertions, 0 failures |
 | `clj -M:mac-arm:test animation services timeline routing events.timeline` (with `803140d`'s changes) | 304 tests, 12,084 assertions, 0 failures |
 | `clj -M:mac-arm:test cue-timing timing-handlers frame-service playback modulation animation.time-test grid-handlers timeline` (with `8edfe59`'s) | 237 tests, 10,914 assertions, 0 failures |
-| `clj -M:mac-arm:test` (full unit suite) | 824 tests, 31,504 assertions, 0 failures (813 before; the assertion total varies by a few hundred from run to run, 05 §10) |
+| `clj -M:mac-arm:test` (full unit suite) | 824 tests, 31,504 assertions, 0 failures (813 before; until `ecc26a1` the total varied by a few hundred from run to run, 05 §10) |
 | `clj -M:mac-arm:test-integration` | 17 tests, 57 assertions, 0 failures |
 | `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | 55 tests, 209 assertions, 0 failures |
 | `clj -M:kondo --lint` on every touched file; loading them with reflection and boxed-math warnings on | 0 errors, 0 warnings; none |
