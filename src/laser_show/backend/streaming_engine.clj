@@ -94,6 +94,9 @@
    :socket (atom nil)
    ;; Resolved InetAddress for target-host, cached so packets don't do a DNS lookup each
    :target-address (atom nil)
+   ;; The last address resolved, kept when :target-address is cleared for a re-lookup;
+   ;; the close pair goes there. Nil if the host was never resolved (nothing was sent)
+   :last-address (atom nil)
    :thread (atom nil)
    :start-time-us (atom 0)
    :last-config-time-ms (atom 0)
@@ -184,7 +187,9 @@
   "Return the engine's resolved target InetAddress, resolving it on first use."
   ^InetAddress [engine]
   (or @(:target-address engine)
-      (reset! (:target-address engine) (InetAddress/getByName (:target-host engine)))))
+      (let [address (InetAddress/getByName (:target-host engine))]
+        (reset! (:last-address engine) address)
+        (reset! (:target-address engine) address))))
 
 ;; Debug logging for streaming (controlled by dev-config/idn-stream-logging?)
 (def ^:private stream-log-counter (atom 0))
@@ -253,8 +258,12 @@
               (profiler/record-idn-streaming! idn-time-us))
             
             (let [now (System/currentTimeMillis)
-                  last-time (:last-frame-time @stats)
-                  actual-fps (calculate-actual-fps last-time now)]
+                  {:keys [last-frame-time frames-sent]} @stats
+                  frame-fps (calculate-actual-fps last-frame-time now)
+                  ;; Smoothed over about 10 frames: one frame's interval has ms resolution
+                  actual-fps (if (pos? frames-sent)
+                               (+ (* 0.9 (:actual-fps @stats)) (* 0.1 frame-fps))
+                               frame-fps)]
               (swap! stats assoc
                      :frames-sent (inc (:frames-sent @stats))
                      :packets-sent (+ (:packets-sent @stats) packet-count)
@@ -284,10 +293,16 @@
 ;; Engine Control
 
 
+(defn- thread-name
+  "idn-streaming-<projector id>, so each engine's thread shows in a thread dump."
+  [engine]
+  (let [id (:id engine)]
+    (str "idn-streaming-" (if (keyword? id) (name id) id))))
+
 (defn start!
   "Start the streaming engine.
-   Creates a UDP socket and starts the streaming thread.
-   Returns the engine map, or throws on error."
+   Creates a UDP socket and starts the engine's own streaming thread.
+   Returns the engine map, or throws on error (with nothing left open)."
   [engine]
   (when @(:running? engine)
     (throw (ex-info "Engine already running" {})))
@@ -295,6 +310,7 @@
   (let [socket (hello/create-udp-socket)]
     (reset! (:socket engine) socket)
     (reset! (:target-address engine) nil)
+    (reset! (:last-address engine) nil)
     (reset! (:running? engine) true)
     (reset! (:start-time-us engine) (* (System/currentTimeMillis) 1000))
     (reset! (:last-config-time-ms engine) 0)
@@ -304,10 +320,17 @@
                              :last-frame-time (System/currentTimeMillis)
                              :actual-fps 0.0})
     
-    (let [thread (Thread. #(streaming-loop engine) "idn-streaming")]
-      (.setDaemon thread true)
-      (reset! (:thread engine) thread)
-      (.start thread))
+    (try
+      (let [thread (Thread. #(streaming-loop engine) (thread-name engine))]
+        (.setDaemon thread true)
+        (reset! (:thread engine) thread)
+        (.start thread))
+      (catch Throwable t
+        (reset! (:running? engine) false)
+        (reset! (:thread engine) nil)
+        (reset! (:socket engine) nil)
+        (.close socket)
+        (throw t)))
     
     (log/info (format "Streaming engine started: %s:%d (%s)"
                       (:target-host engine)
@@ -315,39 +338,61 @@
                       (output-config/config-name (:output-config engine))))
     engine))
 
-(defn stop!
-  "Stop the streaming engine gracefully.
-   Sends a channel close message, then an IDN-RT graceful close (0x44,
+(def ^:const STOP_JOIN_MS
+  "How long stop-all! waits, in total, for the engines' threads to end."
+  1000)
+
+(defn- send-close-pair!
+  "Send a channel close message, then an IDN-RT graceful close (0x44,
    IDN-Hello §6.2.2), both numbered with this engine's sequence counter.
-   Then closes the socket."
+   Skipped if the host was never resolved: nothing reached it, and a lookup
+   now could block on DNS."
+  [engine socket]
+  (if-let [address (or @(:target-address engine) @(:last-address engine))]
+    (try
+      (let [timestamp-us (current-timestamp-us engine)
+            close-packet (idn-stream/close-channel-packet (:channel-id engine) timestamp-us)
+            hello-packet (hello/wrap-channel-message close-packet
+                                                     {:sequence (get-next-sequence! engine)})
+            rt-close-packet (hello/create-packet-header hello/CMD_RT_CLOSE 0
+                                                        (get-next-sequence! engine))]
+        (hello/send-packet-to socket hello-packet address (:target-port engine))
+        (hello/send-packet-to socket rt-close-packet address (:target-port engine)))
+      (catch Exception e
+        (log/error "Error sending close packet:" (.getMessage e))))
+    (log/debug "No close pair for" (:id engine) "- its host was never resolved")))
+
+(defn- close!
+  "Send the close pair and close the socket of an engine whose thread has ended
+   (or was given up on)."
   [engine]
-  (when @(:running? engine)
-    (reset! (:running? engine) false)
-    
-    (when-let [thread @(:thread engine)]
-      (.join thread 1000))
-    
-    (when-let [socket @(:socket engine)]
-      (try
-        (let [timestamp-us (current-timestamp-us engine)
-              close-packet (idn-stream/close-channel-packet (:channel-id engine) timestamp-us)
-              hello-packet (hello/wrap-channel-message close-packet
-                                                       {:sequence (get-next-sequence! engine)})
-              rt-close-packet (hello/create-packet-header hello/CMD_RT_CLOSE 0
-                                                          (get-next-sequence! engine))
-              address (target-address! engine)]
-          (hello/send-packet-to socket hello-packet address (:target-port engine))
-          (hello/send-packet-to socket rt-close-packet address (:target-port engine)))
-        (catch Exception e
-          (log/error "Error sending close packet:" (.getMessage e))))
-      
-      (.close socket))
-    
-    (reset! (:socket engine) nil)
-    (reset! (:thread engine) nil)
-    
-    (log/info "Streaming engine stopped")
-    engine))
+  (when-let [socket @(:socket engine)]
+    (send-close-pair! engine socket)
+    (.close ^DatagramSocket socket))
+  (reset! (:socket engine) nil)
+  (reset! (:thread engine) nil)
+  (log/info "Streaming engine stopped:" (:id engine)))
+
+(defn stop-all!
+  "Stop several engines together. Clears every engine's running? flag first,
+   so they all go dark within about a frame of each other, then joins each
+   thread (sharing one STOP_JOIN_MS deadline) and sends its close pair. Engines
+   that aren't running, or that another stop-all! already claimed, are
+   skipped. Returns the engines this call stopped."
+  [engines]
+  (let [stopping (filterv #(compare-and-set! (:running? %) true false) engines)
+        deadline (+ (System/nanoTime) (* STOP_JOIN_MS 1000000))]
+    (doseq [engine stopping]
+      (when-let [^Thread thread @(:thread engine)]
+        (.join thread (max 1 (quot (- deadline (System/nanoTime)) 1000000))))
+      (close! engine))
+    stopping))
+
+(defn stop!
+  "Stop the streaming engine gracefully: (stop-all! [engine])."
+  [engine]
+  (stop-all! [engine])
+  engine)
 
 (defn running?
   "Check if the engine is currently running."
