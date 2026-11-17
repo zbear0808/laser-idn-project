@@ -2,9 +2,10 @@
   "Event handling core - wraps pure handlers with co-effects and effects.
    
    This module provides:
-   - Wrapped event handler with fx/wrap-co-effects and fx/wrap-effects
+   - handle-event-pipeline, the co-effects and effects maps that
+     app/create-app gives to fx/create-app
    - Effect implementations for side-effects (IDN streaming, timing, etc.)
-   - The main event-handler to pass to fx/create-app
+   - event-handler, the same pipeline run synchronously (tests, fallback)
    - dispatch! for programmatic event dispatch
    
    Architecture:
@@ -12,16 +13,32 @@
    Event Flow:
    1. UI dispatches event map {:event/type :grid/trigger-cell :col 0 :row 0}
    2. Event is queued to agent (returns immediately, non-blocking)
-   3. Agent thread: wrap-co-effects injects :state and :time into event
+   3. Agent thread: co-effects inject :state and :time into event
    4. Agent thread: Pure handler processes event, returns effects map
-   5. Agent thread: wrap-effects executes side effects (:state update, etc.)
+   5. Agent thread: effects execute (:state update, etc.)
    6. State atom watch triggers re-render on FX thread
    
-   Threading:
+   Threading (with the app running):
    - UI callbacks (inline fns) run briefly on FX thread, then delegate to agent
-   - Co-effects, handlers, and effects all run on agent thread (NOT FX thread)
+   - Co-effects, handlers and effects run on the agent thread
+     (clojure-agent-send-pool-*), one event at a time
+   - An effect that continues the event (:dispatch, :project/save's :on-saved,
+     ...) runs the follow-up inline through run-inline, in the same turn
+   - Effects that work later on another thread (futures: scan, learn,
+     :dispatch-later, streaming lifecycle; the FX thread: file chooser) only do
+     their side effect there. Their result goes through the dispatch fn the
+     effect was given, which queues it on the agent behind the current event
+   - Nothing running on the agent may block waiting for an event it
+     dispatched: that event only runs after the current one
+   - Writers outside the pipeline: the preview timer
+     (frame-service/preview-timer-paths) and the streaming engine handles
+     (multi-engine). In dev mode effect-state warns when a write other than
+     the timer's landed between an event's snapshot and its write-back
    - State updates (atom swap) are thread-safe
    - Re-rendering happens on FX thread via atom watch
+   
+   Without an app (tests, REPL), event-handler and dispatch! run everything
+   synchronously on the calling thread, and later callbacks on theirs.
    
    Benefits:
    - Pure handlers are easy to test
@@ -31,6 +48,7 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [clojure.tools.logging :as log]
+            [laser-show.dev-config :as dev-config]
             [laser-show.state.core :as state]
             [laser-show.state.clipboard :as clipboard]
             [laser-show.state.persistent :as persistent]
@@ -40,7 +58,8 @@
             [laser-show.backend.multi-engine :as multi-engine]
             [laser-show.common.util :as u]
             [laser-show.idn.hello :as idn-hello]
-            [laser-show.input.link :as link])
+            [laser-show.input.link :as link]
+            [laser-show.services.frame-service :as frame-service])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
            [javafx.application Platform]
            [java.awt Desktop Desktop$Action]
@@ -66,21 +85,81 @@
   (System/currentTimeMillis))
 
 ;; Effects (handle side effects FROM events)
+;;
+;; Every effect gets a dispatch fn. It is the way to CALL BACK LATER: from a
+;; future, a timer or the FX thread. With the app running it queues the event on
+;; the cljfx agent (behind the current one); tests and the no-app fallback get a
+;; synchronous one. An effect that CONTINUES the current event (a follow-up that
+;; must run now, before any other event) uses run-inline instead.
+
+(declare event-handler)
+
+(defn- run-inline
+  "Run event now, on this thread, as part of the current turn. Its effects get
+   the same dispatch."
+  [event dispatch]
+  (event-handler event dispatch))
+
+(defn- changed-paths
+  "Paths (at most depth+1 keys long) where maps a and b differ."
+  [a b depth]
+  (mapcat (fn [k]
+            (let [va (get a k)
+                  vb (get b k)]
+              (cond
+                (= va vb) nil
+                (and (pos? depth) (map? va) (map? vb)) (map #(into [k] %) (changed-paths va vb (dec depth)))
+                :else [[k]])))
+          (distinct (concat (keys a) (keys b)))))
+
+(defn- without-timer-paths [s]
+  (reduce #(assoc-in %1 %2 nil) s frame-service/preview-timer-paths))
+
+(defn- check-lost-update!
+  "Dev mode: report a write that landed between an event's state snapshot and
+   its write-back (that write is lost). Writes by the preview timer alone are
+   expected until the frame timing leaves app state, so they only log at TRACE."
+  [event-type snapshot replaced]
+  (when-not (identical? snapshot replaced)
+    (let [paths (changed-paths (without-timer-paths snapshot) (without-timer-paths replaced) 1)]
+      (if (seq paths)
+        (log/warn "Possible lost update:" event-type
+                  "wrote back a state snapshot, but another writer changed" (vec paths)
+                  "in the meantime")
+        (log/trace "Preview timer wrote during" event-type "(timer-only, not a lost update)")))))
+
+(defn- wrap-lost-update-check
+  "Dev mode only: attach the event's :state co-effect (the snapshot its handler
+   started from) to the :state effect as metadata, for effect-state to check."
+  [handler]
+  (fn [event]
+    (let [result (handler event)
+          new-state (:state result)]
+      (if (and (instance? clojure.lang.IObj new-state)
+               (some? (:state event))
+               (dev-config/dev-mode?))
+        (assoc result :state (vary-meta new-state assoc
+                                         ::snapshot (:state event)
+                                         ::event-type (:event/type event)))
+        result))))
 
 (defn- effect-state
   "Effect that updates application state.
    Preserves cljfx context memoization."
   [new-state _dispatch]
-  (state/reset-state! new-state))
+  (if-let [snapshot (::snapshot (meta new-state))]
+    (let [event-type (::event-type (meta new-state))
+          [replaced _] (state/reset-state-vals! (vary-meta new-state dissoc ::snapshot ::event-type))]
+      (check-lost-update! event-type snapshot replaced))
+    (state/reset-state! new-state)))
 
 (defn- effect-dispatch
-  "Effect that dispatches another event.
-   Useful for event chaining."
+  "Effect that continues with another event, inline in the current turn."
   [event dispatch]
-  (dispatch event))
+  (run-inline event dispatch))
 
 (defn- effect-dispatch-later
-  "Effect that dispatches an event after a delay.
+  "Effect that dispatches an event after a delay (from a future).
    Args: {:event event-map :delay-ms milliseconds}"
   [{:keys [event delay-ms]} dispatch]
   (future
@@ -88,7 +167,7 @@
     (dispatch event)))
 
 (defn- effect-timing-calculate-bpm
-  "Effect that calculates BPM from tap times and dispatches result."
+  "Effect that calculates BPM from tap times and continues with the result."
   [_ dispatch]
   (let [state (state/get-raw-state)
         tap-times (get-in state [:timing :tap-times] [])
@@ -101,30 +180,30 @@
             bpm (/ 60000.0 avg-interval)
             ;; Clamp to reasonable range
             clamped-bpm (u/clamp bpm 40.0 300.0)]
-        (dispatch {:event/type :timing/set-bpm :bpm clamped-bpm})))))
+        (run-inline {:event/type :timing/set-bpm :bpm clamped-bpm} dispatch)))))
 
 (defn- effect-save-project
   "Effect that writes a project zip.
    Args: {:file-path path :files {filename data} :on-saved event :on-failed event}
    The handler has already marked the project saved. After a successful write,
-   dispatches :on-saved (if given). On failure, dispatches :on-failed with
-   :file-path so the handler can revert the saved status."
+   continues with :on-saved (if given). On failure, continues with :on-failed
+   with :file-path so the handler can revert the saved status."
   [{:keys [file-path files on-saved on-failed]} dispatch]
   (if (persistent/write-project! file-path files)
     (when on-saved
-      (dispatch on-saved))
+      (run-inline on-saved dispatch))
     (when on-failed
-      (dispatch (assoc on-failed :file-path file-path)))))
+      (run-inline (assoc on-failed :file-path file-path) dispatch))))
 
 (defn- effect-load-project
   "Effect that reads a project zip.
    Args: {:file-path path :on-loaded event :on-failed event}
-   Dispatches :on-loaded with :file-path and :contents, or :on-failed."
+   Continues with :on-loaded with :file-path and :contents, or :on-failed."
   [{:keys [file-path on-loaded on-failed]} dispatch]
   (if-let [contents (persistent/read-project file-path)]
-    (dispatch (assoc on-loaded :file-path file-path :contents contents))
+    (run-inline (assoc on-loaded :file-path file-path :contents contents) dispatch)
     (when on-failed
-      (dispatch (assoc on-failed :file-path file-path)))))
+      (run-inline (assoc on-failed :file-path file-path) dispatch))))
 
 ;; Clipboard Effects (for effect chain editor)
 
@@ -135,24 +214,26 @@
 
 (defn- effect-clipboard-paste-effects
   "Effect that pastes effects from clipboard into a chain.
-   Dispatches :effects/insert-pasted with the effects to insert."
+   Continues with :effects/insert-pasted with the effects to insert."
   [{:keys [col row insert-pos]} dispatch]
   (when-let [effects (clipboard/get-effects-to-paste)]
-    (dispatch {:event/type :effects/insert-pasted
-               :col col
-               :row row
-               :insert-pos insert-pos
-               :effects effects})))
+    (run-inline {:event/type :effects/insert-pasted
+                 :col col
+                 :row row
+                 :insert-pos insert-pos
+                 :effects effects}
+                dispatch)))
 
 (defn- effect-clipboard-paste-projector-effects
   "Effect that pastes effects from clipboard into a projector chain.
-   Dispatches :projectors/insert-pasted-effects with the effects to insert."
+   Continues with :projectors/insert-pasted-effects with the effects to insert."
   [{:keys [projector-id insert-pos]} dispatch]
   (when-let [effects (clipboard/get-effects-to-paste)]
-    (dispatch {:event/type :projectors/insert-pasted-effects
-               :projector-id projector-id
-               :insert-pos insert-pos
-               :effects effects})))
+    (run-inline {:event/type :projectors/insert-pasted-effects
+                 :projector-id projector-id
+                 :insert-pos insert-pos
+                 :effects effects}
+                dispatch)))
 
 ;; Projector Scanning Effects
 
@@ -199,9 +280,9 @@
 ;; Link Effects
 
 (defn- effect-link-sync-to-downbeat
-  "Effect that queries Link's beat phase and dispatches a phase correction."
+  "Effect that queries Link's beat phase and continues with a phase correction."
   [{:keys [accumulated-beats]} dispatch]
-  (link/sync-to-downbeat! dispatch accumulated-beats))
+  (link/sync-to-downbeat! #(run-inline % dispatch) accumulated-beats))
 
 ;; Input Learn Effects
 
@@ -389,11 +470,16 @@
   "Event handler pipeline: timeline invariants enforced on changed cue chains
    (innermost, so history sees normalized state), undo history for undoable
    document edits, then the unsaved-changes flag derived for every event
-   (see handlers/history.clj)."
+   (see handlers/history.clj). Outermost, in dev mode only, the lost-update
+   check tags the :state effect with the event's snapshot.
+
+   app/create-app gives this to fx/create-app together with co-effects and
+   effects, so it runs on the cljfx agent."
   (-> handlers/handle-event
       timeline-handlers/wrap-normalize-timelines
       history-handlers/wrap-history
-      history-handlers/wrap-dirty))
+      history-handlers/wrap-dirty
+      wrap-lost-update-check))
 
 (def co-effects
   "Co-effects injected into every event:
@@ -403,26 +489,28 @@
    :time co-effect-time})
 
 (def effects
-  "Effects handled for every event:
+  "Effects handled for every event. Those marked (inline) continue the current
+   event through run-inline; those marked (later) call back through dispatch
+   from another thread, which with the app running queues on the agent.
    - :state - update application state
-   - :dispatch - dispatch another event
-   - :dispatch-later - dispatch event after delay
-   - :timing/calculate-bpm - calculate BPM from taps
-   - :link/sync-to-downbeat - align phase to Link's downbeat
-   - :input/await-learn - wait for a learn capture, then dispatch the binding
-   - :multi-engine/start - start multi-engine streaming to all projectors
-   - :multi-engine/stop - stop multi-engine streaming
-   - :multi-engine/refresh - refresh engines when projectors change
-   - :project/save - write project zip to disk, then dispatch :on-saved
-   - :project/load - read project zip from disk
-   - :fx/show-file-chooser - show file open/save dialog
+   - :dispatch - continue with another event (inline)
+   - :dispatch-later - dispatch event after delay (later, future)
+   - :timing/calculate-bpm - calculate BPM from taps (inline)
+   - :link/sync-to-downbeat - align phase to Link's downbeat (inline)
+   - :input/await-learn - wait for a learn capture, then dispatch the binding (later, future)
+   - :multi-engine/start - start multi-engine streaming to all projectors (later, future)
+   - :multi-engine/stop - stop multi-engine streaming (later, future)
+   - :multi-engine/refresh - refresh engines when projectors change (later, future)
+   - :project/save - write project zip to disk, then :on-saved (inline)
+   - :project/load - read project zip from disk, then :on-loaded (inline)
+   - :fx/show-file-chooser - show file open/save dialog (later, FX thread)
    - :system/exit - end the application through the fn registered with set-exit-fn!
    - :system/open-url - open a URL in the system browser
    - :dev/reload - reload :styles or :app code (dev only)
    - :clipboard/copy-effects - copy effects to clipboard
-   - :clipboard/paste-effects - paste effects from clipboard (effects grid)
-   - :clipboard/paste-projector-effects - paste effects from clipboard (projector chain)
-   - :projectors/scan - scan network for IDN devices"
+   - :clipboard/paste-effects - paste effects from clipboard (effects grid) (inline)
+   - :clipboard/paste-projector-effects - paste effects from clipboard (projector chain) (inline)
+   - :projectors/scan - scan network for IDN devices (later, future)"
   {:state effect-state
    :dispatch effect-dispatch
    :dispatch-later effect-dispatch-later
@@ -483,7 +571,8 @@
    The call returns immediately (non-blocking).
    
    Fallback: Before app initialization (or in tests when app not started),
-   processes synchronously on the calling thread with basic effect handling.
+   runs the event through event-handler synchronously on the calling thread,
+   with every effect.
    
    Use cases:
    - Imperative event handlers in UI (drag/drop, context menus)
@@ -494,44 +583,8 @@
    (dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})"
   [event]
   (if-let [dispatch @*dispatch-fn]
+    (dispatch event)
     (do
-      #_(when-not (= :drag (:interaction/type event))
-          (log/debug "dispatch! using app dispatch-fn for event:" (:event/type event)))
-      (dispatch event))
-    ;; Fallback: Manually inject co-effects and process effects
-    ;; (used during testing or before app is initialized)
-    (let [_ (when-not (= :drag (:interaction/type event))
-              (log/debug "dispatch! using FALLBACK for event:" (:event/type event)))
-          enriched-event (assoc event
-                                :state (state/get-raw-state)
-                                :time (System/currentTimeMillis))
-          effects (handle-event-pipeline enriched-event)]
-      (log/debug "dispatch! fallback - effects keys:" (keys effects))
-      ;; Apply state effect if present
-      (when-let [new-state (:state effects)]
-        (log/debug "dispatch! fallback - applying :state effect")
-        (state/reset-state! new-state))
-
-      ;; Handle clipboard effects (for keyboard shortcuts in effect chain editor)
-      (when-let [effects-to-copy (:clipboard/copy-effects effects)]
-        (effect-clipboard-copy-effects effects-to-copy nil))
-
-      (when-let [paste-params (:clipboard/paste-effects effects)]
-        (effect-clipboard-paste-effects paste-params dispatch!))
-
-      (when-let [paste-params (:clipboard/paste-projector-effects effects)]
-        (effect-clipboard-paste-projector-effects paste-params dispatch!))
-
-      ;; Handle projector scanning effect (for auto-scan on startup)
-      (when-let [scan-params (:projectors/scan effects)]
-        (effect-projectors-scan scan-params dispatch!))
-
-      ;; Handle dispatch effect (for event chaining)
-      (when-let [event-to-dispatch (:dispatch effects)]
-        (log/debug "dispatch! fallback - processing :dispatch effect:" (:event/type event-to-dispatch))
-        (try
-          (dispatch! event-to-dispatch)
-          (catch Exception e
-            (log/error e "dispatch! fallback - error dispatching nested event"))))
-
-      effects)))
+      (when-not (= :drag (:interaction/type event))
+        (log/debug "dispatch! using FALLBACK for event:" (:event/type event)))
+      (event-handler event))))

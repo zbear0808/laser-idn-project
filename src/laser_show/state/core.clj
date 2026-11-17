@@ -125,6 +125,17 @@
              (fx/swap-context ctx (constantly new-state))
              (throw (ex-info "State not initialized. Call init-state! first." {}))))))
 
+(defn reset-state-vals!
+  "Like reset-state!, but returns [old-state new-state], with old-state the
+   value it replaced."
+  [new-state]
+  (let [[old-ctx _] (swap-vals! *context
+                                (fn [ctx]
+                                  (if ctx
+                                    (fx/swap-context ctx (constantly new-state))
+                                    (throw (ex-info "State not initialized. Call init-state! first." {})))))]
+    [(:cljfx.context/m old-ctx) new-state]))
+
 (defn get-in-state
   "Get a value at a path in state.
    

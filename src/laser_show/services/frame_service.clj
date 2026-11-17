@@ -106,6 +106,18 @@
         ended (keep (fn [[k t]] (when (:ended? t) k)) advanced)]
     (reduce cue-timing/deactivate-cue (assoc playback :active-cues advanced) ended)))
 
+(def preview-timer-paths
+  "The state paths the preview timer writes outside the event pipeline
+   (update-timing-accumulators! and update-preview-frame!). Keep in step with
+   them: the dev-mode lost-update check in events/core ignores these."
+  [[:timing :global-clock]
+   [:playback :active-cues]
+   [:playback :playing?]
+   [:playback :active-cell]
+   [:backend :input :mtc]
+   [:backend :streaming :current-frame]
+   [:backend :streaming :frame-stats]])
+
 (defn update-timing-accumulators!
   "Update beat/time accumulators for the current frame.
    Call once per frame before generating animation.
