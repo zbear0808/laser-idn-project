@@ -1,9 +1,10 @@
 (ns laser-show.ui-test.streaming-status-test
   "The toolbar's streaming status and the projector dot show what the output
-   runtime reports is actually streaming, against the fake DAC; the Host and
-   Port fields apply on Enter or focus loss, not per keystroke."
+   runtime reports is actually streaming, against the fake DAC; the Host,
+   Port and Scan rate fields apply on Enter or focus loss, not per keystroke."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
+            [laser-show.backend.multi-engine :as me]
             [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.backend.streaming-engine :as se]
             [laser-show.css.core :as css]
@@ -120,3 +121,45 @@
     (ui/focus! robot "#projector-host-field")
     (ui/wait-for! #(= 7300 (port)))
     (is (= "192.168.1.50" (host)))))
+
+(deftest scan-rate-field-commits-on-enter-test
+  (let [robot (ui/robot)
+        rate #(get-in (state/get-raw-state) [:projectors :a :scan-rate])]
+    (state/swap-state! #(-> %
+                            (assoc :projectors {:a (assoc (projector 1 "127.0.0.1") :scan-rate 25000)})
+                            (assoc-in [:projector-ui :active-projector] :a)))
+    (ui/click! robot "#projectors-tab")
+    (ui/assert-text! "#projector-scan-rate-field" "25000")
+    (ui/fill! robot "#projector-scan-rate-field" "30k")
+    (ui/sync-fx!)
+    (is (= 25000 (rate)) "typing alone applies nothing")
+    (ui/submit! robot "#projector-scan-rate-field")
+    (ui/wait-for! #(= 30000 (rate)))
+    (ui/assert-text! "#projector-scan-rate-field" "30000")
+    (ui/fill! robot "#projector-scan-rate-field" "fast")
+    (ui/submit! robot "#projector-scan-rate-field")
+    (ui/assert-text! "#projector-scan-rate-field" "30000")
+    (is (= 30000 (rate)) "text that isn't a rate is put back, not applied")
+    (ui/fill! robot "#projector-scan-rate-field" "500")
+    (ui/submit! robot "#projector-scan-rate-field")
+    (ui/wait-for! #(= 1000 (rate)))
+    (ui/assert-text! "#projector-scan-rate-field" "1000")
+    (ui/fill! robot "#projector-scan-rate-field" "25,000")
+    (ui/focus! robot "#projector-host-field")
+    (ui/wait-for! #(= 25000 (rate)))))
+
+(deftest projector-status-says-when-the-scan-rate-limits-the-fps-test
+  (let [robot (ui/robot)
+        lit (vec (for [i (range 1000)] [(- (/ (double i) 1000) 0.5) 0.0 1.0 1.0 1.0]))]
+    (with-redefs-fn {#'me/projector-frame (constantly lit)}
+      (fn []
+        (state/swap-state! assoc :projectors {:a (assoc (projector 1 "127.0.0.1") :scan-rate 25000)})
+        (ui/click! robot "#projectors-tab")
+        (ui/wait-for! #(some? (ui/query "#projector-dot-a")))
+        (ui/click! robot "#stream-btn")
+        (ui/wait-for! #(str/ends-with? (str (ui/node-text "#projector-status-a")) "(limited by scan rate)"))
+        (is (re-matches #"Streaming · 2[456]\.\d fps \(limited by scan rate\)"
+                        (ui/node-text "#projector-status-a"))
+            "1 001 samples at 25 000 pts/s: about 25 fps")
+        (ui/click! robot "#stream-btn")
+        (ui/wait-for! #(nil? (ui/query "#projector-status-a")))))))

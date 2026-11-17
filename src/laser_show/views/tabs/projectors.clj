@@ -15,6 +15,7 @@
             [laser-show.state.clipboard :as clipboard]
             [laser-show.common.util :as u]
             [laser-show.css.core :as css]
+            [laser-show.idn.stream :as stream]
             [laser-show.views.components.visual-editors.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.list :as list]
@@ -79,6 +80,17 @@
   (let [port (parse-long (str/trim text))]
     (when (and port (<= 1 port 65535))
       port)))
+
+(defn- parse-scan-rate
+  "Points per second typed into the Scan rate field: digits, with spaces or
+   commas between them if you like (\"25 000\", \"25,000\"), or thousands with
+   a k (\"25k\", \"27.5k\"). nil for anything else."
+  [text]
+  (let [t (str/lower-case (str/trim text))]
+    (if-let [[_ thousands] (re-matches #"(\d+(?:\.\d+)?)\s*k" t)]
+      (Math/round (* 1000.0 (parse-double thousands)))
+      (when (re-matches #"\d[\d ,]*" t)
+        (parse-long (str/replace t #"[ ,]" ""))))))
 
 
 ;; Device Discovery Panel
@@ -259,10 +271,14 @@
 
 
 (defn- output-status-text
-  "One line for a projector's output status, or nil when it isn't streaming."
-  [{:keys [state fps error]}]
+  "One line for a projector's output status, or nil when it isn't streaming.
+   The fps is how many new frames the projector draws per second."
+  [{:keys [state fps scan-limited? error]}]
   (case state
-    :streaming (if fps (format "Streaming · %.1f fps" (double fps)) "Streaming")
+    :streaming (cond
+                 (nil? fps) "Streaming"
+                 scan-limited? (format "Streaming · %.1f fps (limited by scan rate)" (double fps))
+                 :else (format "Streaming · %.1f fps" (double fps)))
     :starting "Starting…"
     :error (str "Error: " error)
     nil))
@@ -351,9 +367,10 @@
 
 
 (defn- projector-basic-settings
-  "Basic projector settings (name, host, port, service info)."
+  "Basic projector settings (name, host, port, scan rate, service info)."
   [{:keys [projector]}]
-  (let [{:keys [id name host port service-id service-name]} projector]
+  (let [{:keys [id name host port scan-rate service-id service-name]} projector
+        stored-rate (or scan-rate stream/DEFAULT_SCAN_RATE)]
     {:fx/type :v-box
      :spacing 8
      :children (vec
@@ -402,7 +419,27 @@
                                               (when-let [new-port (parse-port typed)]
                                                 {:event/type :projectors/update-settings
                                                  :projector-id id
-                                                 :updates {:port new-port}}))}]}]
+                                                 :updates {:port new-port}}))}]}
+                    ;; Scan rate: sets how long each frame takes to draw
+                    {:fx/type :h-box
+                     :spacing 8
+                     :alignment :center-left
+                     :children [{:fx/type :label
+                                 :text "Scan rate:"
+                                 :style-class ["label-secondary"]}
+                                {:fx/type commit-field
+                                 :id "projector-scan-rate-field"
+                                 :text (str stored-rate)
+                                 :pref-width 80
+                                 :on-commit (fn [typed]
+                                              (let [rate (stream/clamp-scan-rate (parse-scan-rate typed))]
+                                                (when (and rate (not= rate stored-rate))
+                                                  {:event/type :projectors/update-settings
+                                                   :projector-id id
+                                                   :updates {:scan-rate rate}})))}
+                                {:fx/type :label
+                                 :text "pts/s"
+                                 :style-class ["label-secondary"]}]}]
                    ;; Service info (if multi-output device)
                    (when (and service-id (pos? service-id))
                      [{:fx/type :h-box
