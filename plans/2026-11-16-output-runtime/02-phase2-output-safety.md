@@ -233,7 +233,7 @@ Committed as `645da70` on top of `2c23e63` (Phase 1). No UI, event or lifecycle 
 | p8 | `true`, `true` | `true`, `true` (see above) |
 | p9 | `[0.5 0.5 0.1 0.0 0.0]`, blanked? `false` | **`[0.5 0.5 0.0 0.0 0.0]`, blanked? `true`** |
 | p11 | 3 ticks in 500 ms | **16 ticks** in 500 ms |
-| p4–p7, p10, p12, p13 | as in `00-overview.md` §1 | the same results (p12 50.0 fps, p13 49.2 vs 59.8 fps: run-to-run noise) |
+| p4–p7, p10, p12, p13 | as in `00-overview.md` §1 | the same findings (p12 50.0 fps, p13 49.2 vs 59.8 fps: run-to-run noise). p10's test frames start lit, so they now arrive with a dark first sample: 11 and 3001 samples, still 16 666 µs each (660 and 180 067 points/s). The probe prints the sizes it receives since the 2026-11-16 review. |
 
 **Verification, 2026-11-16, macOS arm64, JDK 25.0.5, headless**
 

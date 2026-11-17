@@ -329,10 +329,11 @@
     (se/stop! engine)
     (let [fs (frames dac)
           by-size (group-by #(count (:samples %)) fs)]
-      (doseq [k [10 3000]
-              :let [d (:duration-us (first (get by-size k)))]
-              :when d]
-        (say "p10" k "points: duration" d "µs =" (long (/ (* k 1e6) d)) "points/s"))
+      ;; Sizes as sent: since Phase 2 a lit first sample gets a dark copy in
+      ;; front, so the 10- and 3000-point frames arrive with 11 and 3001 samples
+      (doseq [k (sort (filter pos? (keys by-size)))
+              :let [d (:duration-us (first (get by-size k)))]]
+        (say "p10" k "samples: duration" d "µs =" (long (/ (* k 1e6) d)) "points/s"))
       (say "p10 timestamps mod 1000 µs:" (set (map #(mod (get-in % [:info :timestamp]) 1000) fs))))
     (close-dac! dac)))
 
