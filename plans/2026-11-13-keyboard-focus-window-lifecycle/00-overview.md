@@ -51,7 +51,7 @@ Fix (move the shell choice to the job, remove it from the step):
 | 2 | Timeline plan 10: panel height + blank-lanes fix | current: the only commits since it was written are docs and the `plorer` dev alias | ~2 h | independent; do any time. Has a real bug (lanes blank after a cell switch) and is a prerequisite for 08 |
 | 3 | Timeline plan 08: drag from browser | current; needs a headless drag-and-drop spike first | ~2–2.25 d | next timeline item |
 | 4 | Timeline plan 09: effect racks | current; the 07 write-up itself suggests a cheaper option if groups are rare | ~2–2.5 d | last of the timeline items |
-| 5 | **Output runtime** (review 02 M1/M7/M8, 03 MR1/MR4/MR5, 04 MR4/MR5/LE1/LE4): **no refined plan yet** | open, verified below | 2–3 weeks | the next big plan; can run in parallel with this one |
+| 5 | **Output runtime** (review 02 M1/M7/M8, 03 MR1/MR4/MR5, 04 MR4/MR5/LE1/LE4): refined plan in `plans/2026-11-16-output-runtime/` (2026-11-16) | open, verified below | 2–3 weeks | the next big plan; can run in parallel with this one |
 | 6 | Smaller output fixes that don't need a plan | open | ~0.5 d each | do any time: calibration failure falls back to the *uncalibrated* frame (`multi_engine.clj:111-116`) |
 | 7 | Later: review 05 M3–M6, L1–L4; 01 M2, L1; 03 LE1; 06 leftovers | open | – | after the above |
 
@@ -70,7 +70,7 @@ Done, safe to mark in the review overview: undo/dirty boundary (undo plan), Test
 - a failing calibration effect falls back to the uncalibrated frame (`multi_engine.clj:111-116`); `u/clamp` lets NaN through (`util.clj:13-27`) and a NaN coordinate encodes as the centre of the scan field (`output_config.clj:99-111`); the first point of a frame is never forced dark; a projector's `:scan-rate` is stored and never read; there is no master output-off;
 - nothing stops the engines, the preview timer or the Carabiner link on exit (`app.clj:186-199`, no shutdown hook anywhere).
 
-But the blast radius is smaller than it first reads. When the transport is stopped the frame provider returns nil and the engine streams empty frames (`multi_engine.clj:156-159`, `streaming_engine.clj:219`), so an orphaned engine cannot keep a beam on by itself. Almost none of it can be changed safely without a fake-DAC test harness first (only a 2-test loopback exists, `streaming_engine_test.clj:28-71`), and some of it needs hardware to confirm. It deserves its own plan with its own decisions (where runtime state lives, the executor policy, the failure policy for calibration, whether to build a single frame clock). I can write that next in the same format.
+But the blast radius is smaller than it first reads. When the transport is stopped the frame provider returns nil and the engine streams empty frames (`multi_engine.clj:156-159`, `streaming_engine.clj:219`), so an orphaned engine cannot keep a beam on by itself. Almost none of it can be changed safely without a fake-DAC test harness first (only a 2-test loopback exists, `streaming_engine_test.clj:28-71`), and some of it needs hardware to confirm. It deserves its own plan with its own decisions (where runtime state lives, the executor policy, the failure policy for calibration, whether to build a single frame clock). That plan is now `plans/2026-11-16-output-runtime/` (2026-11-16).
 
 **What would change this recommendation:** if a show is imminent, do the calibration fix and the Stop/Start race first; if the timeline editor is the priority, do plan 10 (2 hours) now and 08 next, and still do Phase 1 of this plan in between.
 
@@ -181,7 +181,7 @@ Each decision is written out in full, with options and a recommendation, in the 
 | Review 01 F7 / Q6, 02 #15 (clipboard) | Phase 4 | – |
 | Review 05 F17 / L3 (keyboard source), F9 (learn fires old binding) | Phase 5 | the rest of 05 F9 (learn threads), already reworked by the undo plan |
 | Menu stubs (carry-overs in 01, 02, 06) | listed in Phase 2 with defaults | – |
-| Output lifecycle, timing, safety (02 M1/M8, 03, 04) | nothing | the output runtime plan |
+| Output lifecycle, timing, safety (02 M1/M8, 03, 04) | nothing | `plans/2026-11-16-output-runtime/` |
 
 ## 9. Out of scope
 
