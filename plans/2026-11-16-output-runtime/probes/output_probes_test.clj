@@ -327,7 +327,7 @@
       (state/swap-state! assoc-in [:chains :projector-effects :probe-a :items]
                          [{:id (random-uuid) :effect-id effect-id :enabled? true :params {}}])
       (say "p8" effect-id "-> output equals the uncalibrated input?"
-           (= frame (apply-projector-effects frame :probe-a 0 120.0 0 nil))))))
+           (= frame (apply-projector-effects frame :probe-a {:time-ms 0 :bpm 120.0}))))))
 
 
 ;; p9 — RGB curves with a raised low end (diode threshold compensation)
@@ -337,7 +337,7 @@
                           :params {:r-curve-points [[0.0 0.1] [1.0 1.0]]
                                    :g-curve-points [[0.0 0.0] [1.0 1.0]]
                                    :b-curve-points [[0.0 0.0] [1.0 1.0]]}}]}
-        [out] (effects/apply-effect-chain [(t/blanked-point 0.5 0.5)] chain 0 120.0 nil nil)]
+        [out] (effects/apply-effect-chain [(t/blanked-point 0.5 0.5)] chain)]
     (say "p9 blanked point after rgb-curves (red 0 -> 0.1):" out "blanked?" (t/blanked? out))))
 
 

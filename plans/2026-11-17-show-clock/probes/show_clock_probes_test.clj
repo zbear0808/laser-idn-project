@@ -167,10 +167,18 @@
 
 ;; c3 — what one render of a cue costs
 
+(defn- render-at-beat
+  "(f i) renders cue at beat 0.01 × i as the show clock does: the cue's timing
+   context, and a render context made once, as the clock makes one a tick
+   (since Phase 4; before it, each render read app state for every zone)."
+  [cue]
+  (let [ctx (ct/get-cue-timing-context (ct/start-timing 0 0.0 {}) 120.0)
+        render-ctx (fs/render-context (state/get-raw-state) {} (show-time/global-clock))]
+    #(fs/generate-frames-by-zone cue (assoc ctx :accumulated-beats (* 0.01 %) :effective-beats (* 0.01 %)) render-ctx)))
+
 (defn- render-cost-us [cue n]
   (start-show! cue)
-  (let [ctx (ct/get-cue-timing-context (ct/start-timing 0 0.0 {}) 120.0)
-        once #(fs/generate-frames-by-zone cue 1000 120.0 0 (assoc ctx :accumulated-beats (* 0.01 %) :effective-beats (* 0.01 %)))]
+  (let [once (render-at-beat cue)]
     (dotimes [i 300] (once i))
     (let [ts (sort (for [i (range n)]
                      (let [t0 (System/nanoTime)]
@@ -276,11 +284,12 @@
                    "| distinct frames" (count (distinct (map :samples frames)))))))))))
 
 
-;; c7 — how much of a render goes into building modulation contexts
-;; (effects.clj builds one per modulated parameter: make-param-resolver,
-;; resolve-params-global, the keyframe path). The time is measured inside
-;; make-context and make-base-context only, so the merges that build their
-;; argument maps are not counted: a lower bound.
+;; c7 — how much of a render goes into building modulation contexts.
+;; Before Phase 4, effects.clj built one per modulated parameter
+;; (make-param-resolver, resolve-params-global, the keyframe path); since,
+;; one per effect chain, and none for a chain without modulators. The time is
+;; measured inside make-context and make-base-context only, so the merges that
+;; build their argument maps are not counted: a lower bound.
 
 (deftest c7-modulation-contexts-per-render
   (doseq [[label cue] [["1 preset, 1 effect" spinning-circle] ["4 presets, 3 effects each" busy-cue]]]
@@ -293,8 +302,7 @@
                             (swap! inside-ns + (- (System/nanoTime) t0))
                             (swap! calls inc)
                             r)))
-          ctx (ct/get-cue-timing-context (ct/start-timing 0 0.0 {}) 120.0)
-          once #(fs/generate-frames-by-zone cue 1000 120.0 0 (assoc ctx :accumulated-beats (* 0.01 %) :effective-beats (* 0.01 %)))
+          once (render-at-beat cue)
           n 2000]
       (dotimes [i 300] (once i))
       (let [t0 (System/nanoTime)

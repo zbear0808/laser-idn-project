@@ -86,7 +86,7 @@
 (defn- busy-frame []
   (state/init-state! (domains/build-initial-state))
   (let [ctx (ct/get-cue-timing-context (ct/start-timing 0 0.0 {}) 120.0)]
-    (fs/generate-frames-by-zone busy-cue 1000 120.0 0 (assoc ctx :accumulated-beats 1.3 :effective-beats 1.3))))
+    (fs/generate-frames-by-zone busy-cue (assoc ctx :accumulated-beats 1.3 :effective-beats 1.3))))
 
 (deftest c8-preview-redraw-cost
   (start-toolkit!)
