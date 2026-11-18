@@ -96,6 +96,23 @@
           parsed2 (idn/parse-packet-header (idn/wrap-channel-message (byte-array [0x00])))]
       (is (= 1 (- (:sequence parsed2) (:sequence parsed1)))))))
 
+(deftest wrap-channel-message-allocates-only-the-packet-test
+  (testing "Wrapping, done for every packet sent, allocates about the packet itself
+            (a reflective alength made it about 90 KB per call)"
+    (let [mx (java.lang.management.ManagementFactory/getThreadMXBean)
+          msg (byte-array 8024)
+          wrap #(idn/wrap-channel-message msg {:sequence 1})]
+      (when (and (instance? com.sun.management.ThreadMXBean mx)
+                 (.isThreadAllocatedMemorySupported ^com.sun.management.ThreadMXBean mx))
+        (dotimes [_ 2000] (wrap))
+        (let [before (.getCurrentThreadAllocatedBytes ^com.sun.management.ThreadMXBean mx)
+              _ (dotimes [_ 1000] (wrap))
+              per-call (/ (- (.getCurrentThreadAllocatedBytes ^com.sun.management.ThreadMXBean mx)
+                             before)
+                          1000.0)]
+          (is (< per-call (* 2 (+ 4 (alength msg))))
+              (str per-call " bytes allocated per call")))))))
+
 
 ;; Socket Tests
 

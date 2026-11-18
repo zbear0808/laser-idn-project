@@ -325,8 +325,8 @@
    Returns: byte array with IDN-Hello header + IDN-Stream message"
   ([idn-stream-message]
    (wrap-channel-message idn-stream-message {}))
-  ([idn-stream-message {:keys [client-group sequence]
-                        :or {client-group 0}}]
+  ([^bytes idn-stream-message {:keys [client-group sequence]
+                               :or {client-group 0}}]
    (let [seq-num (or sequence (swap! sequence-counter #(bit-and (inc %) 0xFFFF)))
          header (create-packet-header CMD_RT_CHANNEL_MESSAGE client-group seq-num)
          result (byte-array (+ 4 (alength idn-stream-message)))]
