@@ -22,7 +22,6 @@
             [laser-show.animation.effects :as effects]
             [laser-show.timeline.layout :as layout]
             [laser-show.timeline.playback :as playback]
-            [laser-show.state.extractors :as ex]
             [laser-show.events.handlers.list.helpers :as list-helpers]
             [laser-show.timeline.model :as model]))
 
@@ -376,25 +375,25 @@
       beat)))
 
 (defn- handle-play
-  "Play the timeline at [col row] from :from (default: the cursor).
-   Paused: resume (seeking to :from if given). Playing: seek to :from."
-  [{:keys [col row from state] :as event}]
-  (let [timing (active-timing state col row)]
+  "Play the timeline at [col row] from :from (default: the cursor), as a new
+   run. Paused: resume (seeking to :from if given). Playing: seek to :from.
+   The show clock does the moving; this only writes the intent."
+  [{:keys [col row from state]}]
+  (let [intent (active-timing state col row)]
     {:state
      (cond
        (nil? (get-in state (chain-path col row)))
        state
 
-       (nil? timing)
-       (update state :playback cue-timing/activate-cue [col row] (h/current-time-ms event)
-               (ex/global-accumulated-beats state)
+       (nil? intent)
+       (update state :playback cue-timing/activate-cue [col row] (random-uuid)
                {:timeline? true :start-beat (start-beat state col row from)})
 
        :else
        (update-in state [:playback :active-cues [col row]]
-                  (fn [t]
-                    (cond-> (assoc t :paused? false :timeline? true :phase-offset 0.0 :phase-offset-target 0.0)
-                      (some? from) (cue-timing/seek from)))))}))
+                  (fn [i]
+                    (cond-> (assoc i :paused? false :timeline? true)
+                      (some? from) (cue-timing/request-seek from (random-uuid))))))}))
 
 (defn- handle-pause
   "Pause or resume the playing timeline at [col row]. No-op when it isn't playing."
@@ -417,13 +416,14 @@
   {:state (update state :playback cue-timing/deactivate-cue [col row])})
 
 (defn- handle-seek
-  "Move the cursor to :beat; a playing (or paused) timeline jumps there too."
+  "Move the cursor to :beat; a playing (or paused) timeline jumps there too,
+   at the show clock's next tick."
   [{:keys [col row beat state] :as event}]
   (let [[col row] (if (and col row) [col row] (event-cell event))
         beat (max 0.0 (double (or beat 0.0)))]
     {:state (cond-> (view-assoc state col row :cursor-beat beat)
               (active-timing state col row)
-              (update-in [:playback :active-cues [col row]] cue-timing/seek beat))}))
+              (update-in [:playback :active-cues [col row]] cue-timing/request-seek beat (random-uuid)))}))
 
 (defn- handle-set-ruler-mode
   "Ruler labels: :bars (bar.beat) or :time (show timecode)."

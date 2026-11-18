@@ -5,6 +5,11 @@
    - BPM settings and tap tempo
    - Transport controls (play/stop/retrigger)
    - External BPM sync (Ableton Link via beat-carabiner)
+   - What the show clock reports back (:show-clock/*)
+   
+   Show time itself is the show clock's (laser-show.animation.show-time): these
+   handlers write intents and requests to [:playback], which it applies at its
+   next tick.
    
    Link Architecture:
    - Carabiner daemon auto-connects on app startup
@@ -14,8 +19,15 @@
             [laser-show.events.helpers :as h]
             [laser-show.input.link :as link]
             [laser-show.routing.zone-effects :as ze]
-            [laser-show.state.extractors :as ex]
+            [laser-show.timeline.playback :as playback]
             [clojure.tools.logging :as log]))
+
+
+(defn- request
+  "state asking the show clock for kind (:restart, :align or :shift) once."
+  ([state kind] (request state kind {}))
+  ([state kind extra]
+   (assoc-in state [:playback :requests kind] (assoc extra :id (random-uuid)))))
 
 
 ;; Timing Events
@@ -41,8 +53,7 @@
                         (conj old-tap-times now))]
     {:state (-> state
                 (assoc-in [:timing :tap-times] new-tap-times)
-                (update-in [:timing :global-clock] cue-timing/align-global-clock-phase)
-                (update-in [:playback :active-cues] cue-timing/align-all-active-cues-phase))
+                (request :align))
      :timing/calculate-bpm true}))
 
 
@@ -57,33 +68,18 @@
   (ze/reset-zone-debug!)
   {:state (assoc-in state [:playback :playing?] true)})
 
-(defn- reset-all-active-cues
-  "Reset timing accumulators for all active cues."
-  [active-cues]
-  (reduce-kv (fn [acc k v]
-               (assoc acc k (cue-timing/reset-cue-timing v)))
-             {}
-             active-cues))
-
 (defn- handle-transport-stop
-  "Stop playback and reset timing accumulators."
+  "Stop playback and restart every clock (the global one and each cue's)."
   [{:keys [state]}]
   {:state (-> state
               (assoc-in [:playback :playing?] false)
               (assoc-in [:playback :active-cue] nil)
-              ;; Reset global clock
-              (update-in [:timing :global-clock] cue-timing/reset-global-clock)
-              ;; Reset all active cue timings
-              (update-in [:playback :active-cues] reset-all-active-cues))})
+              (request :restart))})
 
 (defn- handle-transport-retrigger
-  "Retrigger the current animation and reset timing accumulators."
+  "Retrigger the current animation: restart every clock."
   [{:keys [state]}]
-  {:state (-> state
-              ;; Reset global clock
-              (update-in [:timing :global-clock] cue-timing/reset-global-clock)
-              ;; Reset all active cue timings
-              (update-in [:playback :active-cues] reset-all-active-cues))})
+  {:state (request state :restart)})
 
 
 ;; Link Events
@@ -107,34 +103,45 @@
 (defn- handle-timing-sync-to-downbeat
   "Synchronize playback to Link's next downbeat.
    Uses phase-offset-target mechanism for smooth correction.
-   The Link query runs in the :link/sync-to-downbeat effect, which dispatches
-   :timing/set-phase-offset-target."
-  [{:keys [state]}]
-  {:link/sync-to-downbeat {:accumulated-beats (ex/global-accumulated-beats state)}})
+   The Link query runs in the :link/sync-to-downbeat effect, which reads the
+   show clock's beats and dispatches :timing/set-phase-offset-target."
+  [_event]
+  {:link/sync-to-downbeat {}})
 
 (defn- handle-timing-set-phase-offset-target
-  "Set the phase offset target for beat alignment.
-   Used by external sync and tap-tempo resync."
+  "Ask the show clock to move the phase targets by :offset (the global clock
+   and every cue but timelines). Used by external sync."
   [{:keys [state offset]}]
-  (let [offset' (double (or offset 0.0))]
-    {:state (-> state
-                (assoc-in [:playback :phase-offset-target] offset')
-                (update-in [:timing :global-clock]
-                           (fn [gc]
-                             (let [cur (double (or (:phase-offset gc) 0.0))]
-                               (assoc gc :phase-offset-target (+ cur offset')))))
-                (update-in [:playback :active-cues]
-                           (fn [cues]
-                             (when cues
-                               (reduce-kv
-                                (fn [acc k v]
-                                  ;; Timeline cues keep their position (no phase correction)
-                                  (if (:timeline? v)
-                                    (assoc acc k v)
-                                    (let [cur (double (or (:phase-offset v) 0.0))]
-                                      (assoc acc k (assoc v :phase-offset-target (+ cur offset'))))))
-                                {}
-                                cues)))))}))
+  {:state (request state :shift {:offset (double (or offset 0.0))})})
+
+
+;; What the show clock reports
+
+
+(defn- handle-show-clock-cue-ended
+  "The show clock saw the timeline run at cell reach its end: stop the cue,
+   unless it was started again since (a new run)."
+  [{:keys [cell run state]}]
+  {:state (if (= run (get-in state [:playback :active-cues cell :run]))
+            (update state :playback cue-timing/deactivate-cue cell)
+            state)})
+
+(defn- handle-show-clock-chase
+  "The show clock started (:active? true) or stopped following timecode for
+   the chasing timeline at cell."
+  [{:keys [cell active? state]}]
+  (let [intent (get-in state [:playback :active-cues cell])
+        chases? (playback/chases-mtc? (get-in state [:chains :cue-chains cell]))]
+    {:state (cond
+              (and active? chases? (not (:chasing? intent)))
+              (-> state
+                  (assoc-in [:playback :active-cues cell] {:chasing? true :timeline? true})
+                  (update :playback assoc :playing? true :active-cell cell))
+
+              (and (not active?) intent (or chases? (:chasing? intent)))
+              (update state :playback cue-timing/deactivate-cue cell)
+
+              :else state)}))
 
 
 ;; Link Settings Events
@@ -218,7 +225,8 @@
 (defn handle
   "Dispatch timing and transport events to their handlers.
    
-   Accepts events with :event/type in the :timing/* or :transport/* namespace."
+   Accepts events with :event/type in the :timing/*, :transport/* or
+   :show-clock/* namespace."
   [{:keys [event/type] :as event}]
   (case type
     :timing/set-bpm (handle-timing-set-bpm event)
@@ -227,6 +235,10 @@
     :transport/play (handle-transport-play event)
     :transport/stop (handle-transport-stop event)
     :transport/retrigger (handle-transport-retrigger event)
+    
+    ;; Reports from the show clock
+    :show-clock/cue-ended (handle-show-clock-cue-ended event)
+    :show-clock/chase (handle-show-clock-chase event)
     
     ;; Link sync events
     :timing/toggle-link-sync (handle-timing-toggle-link-sync event)

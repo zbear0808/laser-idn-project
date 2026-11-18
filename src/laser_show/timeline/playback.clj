@@ -1,6 +1,6 @@
 (ns laser-show.timeline.playback
-  "Playback helpers for timeline cues, used on the render threads (preview
-   timer and streaming engines). Pure.
+  "Playback helpers for timeline cues, used by the show clock
+   (laser-show.animation.show-time) and the render. Pure.
    
    - A timeline may lock its own tempo (:timeline/tempo-bpm); otherwise it
      follows the global BPM like any cue.
@@ -68,12 +68,14 @@
 
 (defn apply-chase
   "Set every chasing timeline in cue-chains from the MTC position
-   (laser-show.input.mtc/position):
+   (laser-show.input.mtc/position), in (:active-cues chase), the show clock's
+   map of chased cues (show-time/step):
    - running or freewheeling inside [0, length): active, at the chased beat
    - otherwise (stopped, before beat 0, at or past the end): inactive
    The position is set, not integrated, so the playhead is always exactly
-   the timecode. Other cues are untouched."
-  [playback cue-chains {:keys [state seconds]} global-bpm now-ms]
+   the timecode. Other cues are untouched. App state's intents follow
+   through the :show-clock/chase event."
+  [chase cue-chains {:keys [state seconds]} global-bpm now-ms]
   (reduce-kv
    (fn [pb cell cue]
      (if-not (chases-mtc? cue)
@@ -87,7 +89,8 @@
            inside?
            (-> (if active?
                  pb
-                 (cue-timing/activate-cue pb cell now-ms 0.0 {:timeline? true :start-beat beat}))
+                 (assoc-in pb [:active-cues cell]
+                           (cue-timing/start-timing now-ms 0.0 {:timeline? true :start-beat beat})))
                (update-in [:active-cues cell]
                           (fn [t]
                             (-> (cue-timing/seek t beat)
@@ -97,7 +100,7 @@
                                        :accumulated-ms (* beat (/ 60000.0 (double bpm)))
                                        :last-frame-time now-ms)))))
 
-           active? (cue-timing/deactivate-cue pb cell)
+           active? (update pb :active-cues dissoc cell)
            :else pb))))
-   playback
+   chase
    (or cue-chains {})))

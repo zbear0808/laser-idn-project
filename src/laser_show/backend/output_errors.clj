@@ -1,5 +1,5 @@
 (ns laser-show.backend.output-errors
-  "Errors on the output path (engine threads, the preview timer, effect chains),
+  "Errors on the output path (engine threads, the show clock, effect chains),
    logged without flooding the log.
 
    report! logs a WARN with the stack the first time a key fails, then at most
@@ -8,7 +8,7 @@
 
    Keys: [:engine id], [:provider projector-id], [:projector-effects
    projector-id], [:item-effects item-id], [:global-effects], [:effect
-   instance-id], [:preview]."
+   instance-id], [:render cell], [:show-clock]."
   (:require [clojure.tools.logging :as log]))
 
 (def ^:const LOG_INTERVAL_MS 10000)

@@ -112,14 +112,20 @@
             (is (str/includes? (:message (first entries)) ":timing/set-bpm"))
             (is (str/includes? (:message (first entries)) ":projectors")))
           (is (= 128.0 (get-in (state/get-raw-state) [:timing :bpm])))))
-      (testing "only the preview timer writing in between is not a WARN"
+      (testing "only the show clock's mirror writing in between is not a WARN"
         (log-test/with-log
           (set-bpm-with-a-write-in-between!
            #(state/swap-state! (fn [s]
                                  (-> s
                                      (assoc-in [:timing :global-clock :accumulated-beats] 4.0)
+                                     (assoc-in [:playback :positions [0 0]] 2.5)
                                      (assoc-in [:backend :streaming :current-frame] {:points []})))))
           (is (not-any? #(= :warn (:level %)) (detector-entries)))))
+      (testing "the cues and transport are the event flow's alone now: a write to them in between is a WARN"
+        (log-test/with-log
+          (set-bpm-with-a-write-in-between!
+           #(state/assoc-in-state! [:playback :active-cues [0 0]] {:run (random-uuid)}))
+          (is (= 1 (count (filter #(= :warn (:level %)) (detector-entries)))))))
       (testing "nothing in between logs nothing"
         (log-test/with-log
           (events/event-handler {:event/type :timing/set-bpm :bpm 100.0})

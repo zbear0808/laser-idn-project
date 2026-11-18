@@ -75,121 +75,42 @@
 
 
 (deftest transport-stop-test
-  (testing "Stop resets playback state and timing accumulators"
-    (let [state {:playback {:playing? true
+  (testing "Stop sets playing? false and asks the show clock to restart (its numbers: show-time-test)"
+    (let [intents {[0 0] {:run #uuid "00000000-0000-0000-0000-000000000001"}
+                   [1 0] {:run #uuid "00000000-0000-0000-0000-000000000002"}}
+          state {:playback {:playing? true
                             :active-cue {:id :test}
-                            :active-cues {[0 0] {:trigger-time 500
-                                                 :accumulated-beats 5.0
-                                                 :accumulated-ms 2500.0
-                                                 :phase-offset 0.3
-                                                 :phase-offset-target 0.5
-                                                 :last-frame-time 1000}
-                                          [1 0] {:trigger-time 600
-                                                 :accumulated-beats 3.0
-                                                 :accumulated-ms 1500.0
-                                                 :phase-offset 0.2
-                                                 :phase-offset-target 0.4
-                                                 :last-frame-time 900}}}
-                 :timing {:global-clock {:accumulated-beats 10.0
-                                         :accumulated-ms 5000.0
-                                         :last-frame-time 1000}}}
-          event {:event/type :transport/stop
-                 :state state}
-          result (timing/handle event)]
+                            :active-cues intents}}
+          result (timing/handle {:event/type :transport/stop :state state})
+          restart (get-in result [:state :playback :requests :restart])]
       (is (false? (get-in result [:state :playback :playing?])))
       (is (nil? (get-in result [:state :playback :active-cue])))
-      ;; Check global clock was reset
-      (is (= 0.0 (get-in result [:state :timing :global-clock :accumulated-beats])))
-      (is (= 0.0 (get-in result [:state :timing :global-clock :accumulated-ms])))
-      ;; Check active cues were reset
-      (let [cue-0-0 (get-in result [:state :playback :active-cues [0 0]])
-            cue-1-0 (get-in result [:state :playback :active-cues [1 0]])]
-        (is (= 0.0 (:accumulated-beats cue-0-0)))
-        (is (= 0.0 (:accumulated-ms cue-0-0)))
-        (is (= 0.0 (:phase-offset cue-0-0)))
-        (is (= 0.0 (:phase-offset-target cue-0-0)))
-        (is (= 0.0 (:accumulated-beats cue-1-0)))
-        (is (= 0.0 (:accumulated-ms cue-1-0)))
-        (is (= 0.0 (:phase-offset cue-1-0)))
-        (is (= 0.0 (:phase-offset-target cue-1-0)))))))
+      (is (uuid? (:id restart)))
+      (is (= intents (get-in result [:state :playback :active-cues])) "the cues keep running (and counting)")
+      (is (not= restart (get-in (timing/handle {:event/type :transport/stop :state (:state result)})
+                                [:state :playback :requests :restart]))
+          "each Stop is a new request"))))
 
 
 (deftest transport-retrigger-test
-  (testing "Retrigger resets global clock and all active cue timing accumulators"
-    (let [state {:playback {:active-cues {[0 0] {:trigger-time 500
-                                                 :accumulated-beats 5.0
-                                                 :accumulated-ms 2500.0
-                                                 :phase-offset 0.3
-                                                 :phase-offset-target 0.5
-                                                 :last-frame-time 1000}
-                                          [1 0] {:trigger-time 600
-                                                 :accumulated-beats 3.0
-                                                 :accumulated-ms 1500.0
-                                                 :phase-offset 0.2
-                                                 :phase-offset-target 0.4
-                                                 :last-frame-time 900}}}
-                 :timing {:global-clock {:accumulated-beats 10.0
-                                         :accumulated-ms 5000.0
-                                         :last-frame-time 1000}}}
-          event {:event/type :transport/retrigger
-                 :state state}
-          result (timing/handle event)]
-      ;; Check global clock was reset
-      (is (= 0.0 (get-in result [:state :timing :global-clock :accumulated-beats])))
-      (is (= 0.0 (get-in result [:state :timing :global-clock :accumulated-ms])))
-      ;; Check active cues were reset
-      (let [cue-0-0 (get-in result [:state :playback :active-cues [0 0]])
-            cue-1-0 (get-in result [:state :playback :active-cues [1 0]])]
-        (is (= 0.0 (:accumulated-beats cue-0-0)))
-        (is (= 0.0 (:accumulated-ms cue-0-0)))
-        (is (= 0.0 (:phase-offset cue-0-0)))
-        (is (= 0.0 (:phase-offset-target cue-0-0)))
-        (is (= 0.0 (:accumulated-beats cue-1-0)))
-        (is (= 0.0 (:accumulated-ms cue-1-0)))
-        (is (= 0.0 (:phase-offset cue-1-0)))
-        (is (= 0.0 (:phase-offset-target cue-1-0)))))))
+  (testing "Retrigger asks the show clock to restart, and changes nothing else"
+    (let [state {:playback {:playing? true :active-cues {[0 0] {:run (random-uuid)}}}}
+          result (timing/handle {:event/type :transport/retrigger :state state})]
+      (is (uuid? (get-in result [:state :playback :requests :restart :id])))
+      (is (= state (update (:state result) :playback dissoc :requests))))))
 
 
 (deftest timing-tap-tempo-phase-alignment-test
-  (testing "Tap tempo sets target phase to align to nearest integer beat without snapping"
-    (let [state {:timing {:tap-times []
-                          :global-clock {:accumulated-beats 12.35
-                                         :accumulated-ms 6175.0
-                                         :phase-offset 0.0
-                                         :phase-offset-target 0.0
-                                         :last-frame-time 1000}}
-                 :playback {:active-cues {[0 0] {:accumulated-beats 4.35
-                                                 :phase-offset 0.0
-                                                 :phase-offset-target 0.0}}}}
-          event {:event/type :timing/tap-tempo
-                 :state state
-                 :time 2000}
-          result (timing/handle event)
-          new-state (:state result)
-          gc (get-in new-state [:timing :global-clock])
-          cue (get-in new-state [:playback :active-cues [0 0]])]
-      ;; Current phase-offset must NOT snap immediately at tap time (smooth alignment)
-      (is (= 0.0 (:phase-offset gc)))
-      (is (= 0.0 (:phase-offset cue)))
-      ;; Target phase offset must pull backward by -0.35 to align with integer beat
-      (is (< (Math/abs (- -0.35 (:phase-offset-target gc))) 0.001))
-      (is (< (Math/abs (- -0.35 (:phase-offset-target cue))) 0.001))))
-
-  (testing "Tap tempo pulls forward when past half-beat boundary"
-    (let [state {:timing {:tap-times []
-                          :global-clock {:accumulated-beats 12.80
-                                         :accumulated-ms 6400.0
-                                         :phase-offset 0.0
-                                         :phase-offset-target 0.0
-                                         :last-frame-time 1000}}}
-          event {:event/type :timing/tap-tempo
-                 :state state
-                 :time 2000}
-          result (timing/handle event)
-          gc (get-in result [:state :timing :global-clock])]
-      (is (= 0.0 (:phase-offset gc)))
-      ;; 12.80 -> nearest beat is 13.0, correction is +0.20
-      (is (< (Math/abs (- 0.20 (:phase-offset-target gc))) 0.001)))))
+  (testing "Tap tempo asks the show clock to align to the nearest beat (its numbers: show-time-test)"
+    (let [state {:timing {:tap-times []} :playback {:active-cues {[0 0] {:run (random-uuid)}}}}
+          result (timing/handle {:event/type :timing/tap-tempo :state state :time 2000})
+          align (get-in result [:state :playback :requests :align])]
+      (is (uuid? (:id align)))
+      (is (= [2000] (get-in result [:state :timing :tap-times])))
+      (is (= (get-in state [:playback :active-cues]) (get-in result [:state :playback :active-cues])))
+      (is (not= align (get-in (timing/handle {:event/type :timing/tap-tempo :state (:state result) :time 2500})
+                              [:state :playback :requests :align]))
+          "every tap aligns again"))))
 
 (deftest global-clock-smooth-decay-test
   (testing "update-global-clock smoothly glides phase-offset toward target across frames"

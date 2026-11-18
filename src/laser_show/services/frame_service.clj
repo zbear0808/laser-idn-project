@@ -1,13 +1,14 @@
 (ns laser-show.services.frame-service
-  "Frame service for generating preview frames.
+  "Frame service: renders cues into frames.
    
    This service:
-   - Reads from the new unified state
-   - Generates frames based on active cell and cue chain
+   - Renders a cue chain into frames per destination zone (generate-frames-by-zone)
    - Applies effects from the effects grid and per-preset effects
-   - Provides frames for preview canvas and IDN streaming
-   - Filters preview based on zone group routing
+   - Builds what the preview shows from a tick's rendered cues (preview-data)
    - Generates calibration frames for projector calibration mode
+   
+   The show clock (services/show_clock.clj) calls it once per playing cue per
+   tick; the engines and the preview take their frames from that tick.
    
    Cue Chain Support:
    - Cue chains are sequential lists of presets
@@ -27,25 +28,20 @@
    Performance Note:
    - All collection operations use eager evaluation (vec, mapv, filterv, keepv)
    - Lazy sequences avoided in frame generation hot paths"
-  (:require [clojure.tools.logging :as log]
-            [laser-show.state.core :as state]
-            [laser-show.state.extractors :as ex]
+  (:require [laser-show.state.core :as state]
             [laser-show.animation.presets :as presets]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.animation.types :as t]
             [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.backend.output-errors :as output-errors]
-            [laser-show.common.timing :as timing]
             [laser-show.common.util :as u]
-            [laser-show.profiling.frame-profiler :as profiler]
-            [laser-show.profiling.jfr-profiler :as jfr]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.input.store :as input-store]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.timeline.model :as model]
             [laser-show.timeline.playback :as playback]
-            [laser-show.input.mtc :as mtc]
             [laser-show.animation.effects.shape]
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
@@ -53,120 +49,15 @@
             [laser-show.animation.effects.zone]))
 
 
-;; Zone Frame Cache
-;;
-;; Multiple projectors may belong to the same zone group. Without caching,
-;; we would recompute identical frames multiple times per render cycle.
-;; This cache stores the zone frame map and returns it if still valid.
-
-(defonce ^:private !zone-frame-cache (atom {}))
-
-(defn- compute-zone-cache-key
-  "Compute cache key from inputs for zone frame caching.
-   Includes cue-chain identity, items, tracks, destination-zone, BPM, and time bucket.
-   Buckets elapsed-ms to 16ms intervals to allow cache hits across a frame period."
-  [cue-chain elapsed-ms bpm]
-  (hash [(:id cue-chain)
-         (:destination-zone cue-chain)
-         (:tracks cue-chain)
-         (:items cue-chain)
-         (quot (long elapsed-ms) 16)
-         bpm]))
-
-
-;; Beat Accumulation
-;;
-;; These functions manage the incremental beat/time accumulators that enable
-;; smooth animation during BPM changes. Instead of recalculating beats from
-;; elapsed time (which causes jumps), we accumulate beats incrementally.
-
-
-(defn- advance-active-cues
-  "Advance every active cue's timing to current-time-ms. Each cue runs at its
-   own tempo (a timeline's locked tempo, else the global BPM). Timeline cues
-   that reached their end are deactivated. Timelines chasing MTC are skipped:
-   apply-chase sets their position."
-  [playback cue-chains current-time-ms bpm resync-rate]
-  (let [advanced (reduce-kv
-                  (fn [acc cell-key cue-timing-state]
-                    (let [chain (get cue-chains cell-key)
-                          loop-config (get chain :loop {:enabled? false :start 0.0 :duration 4.0})]
-                      (assoc acc cell-key
-                             (if (playback/chases-mtc? chain)
-                               cue-timing-state
-                             (cue-timing/update-cue-timing
-                              cue-timing-state
-                              current-time-ms
-                              (playback/cue-bpm chain bpm)
-                              resync-rate
-                              loop-config
-                              (when (:timeline? cue-timing-state) (playback/timeline-cfg chain)))))))
-                  {}
-                  (or (:active-cues playback) {}))
-        ended (keep (fn [[k t]] (when (:ended? t) k)) advanced)]
-    (reduce cue-timing/deactivate-cue (assoc playback :active-cues advanced) ended)))
-
-(def preview-timer-paths
-  "The state paths the preview timer writes outside the event pipeline
-   (update-timing-accumulators! and update-preview-frame!). Keep in step with
-   them: the dev-mode lost-update check in events/core ignores these."
-  [[:timing :global-clock]
-   [:playback :active-cues]
-   [:playback :playing?]
-   [:playback :active-cell]
-   [:backend :input :mtc]
-   [:backend :streaming :current-frame]
-   [:backend :streaming :frame-stats]])
-
-(defn update-timing-accumulators!
-  "Update beat/time accumulators for the current frame.
-   Call once per frame before generating animation.
-   
-   Multi-Cue Architecture:
-   1. Updates global clock (for BPM visualization, runs always)
-   2. Updates each active cue's timing (with phase offset decay), and stops
-      timeline cues at their end
-   3. Sets timelines that chase MIDI timecode from the decoder, and mirrors
-      the decoder's status for the UI ([:backend :input :mtc])
-   
-   NOTE: Global clock and cue timing run continuously, not just when playing.
-   This allows modulators to animate in editor preview mode.
-   The retrigger button resets accumulators to zero."
-  [current-time-ms]
-  (let [raw-state (state/get-raw-state)
-        bpm (ex/bpm raw-state)
-        resync-rate (ex/resync-rate raw-state)
-        cue-chains (get-in raw-state [:chains :cue-chains])
-        mtc-pos (mtc/current)]
-    (state/swap-state!
-     (fn [s]
-       (-> s
-           ;; 1. Update global clock (always, for BPM visualization)
-           (update-in [:timing :global-clock]
-                      (fn [gc]
-                        (cue-timing/update-global-clock
-                         (or gc {:accumulated-beats 0.0
-                                 :accumulated-ms 0.0
-                                 :last-frame-time 0})
-                         current-time-ms
-                         bpm
-                         resync-rate)))
-           ;; 2. Update all active cues' timing
-           (update :playback advance-active-cues cue-chains current-time-ms bpm resync-rate)
-           ;; 3. MIDI timecode chase
-           (update :playback playback/apply-chase cue-chains mtc-pos bpm current-time-ms)
-           (update-in [:backend :input :mtc] mtc/mirror-status mtc-pos current-time-ms))))))
-
-
 ;; Frame Generation
 
 
 ;; NOTE: All these functions use get-raw-state instead of get-state because
-;; they are called from a background timer thread (preview-update), not the
-;; UI thread. Using fx/sub-val from a background thread causes assertion errors.
+;; they are called from the show clock's thread, not the UI thread. Using
+;; fx/sub-val from a background thread causes assertion errors.
 
 (defn get-active-cell-data
-  "DEPRECATED: Use get-all-active-cues-data for multi-cue support.
+  "DEPRECATED: Use show-time/active-runs for multi-cue support.
    
    Get the cell data for the currently active cell (first active cue).
    Returns a map with :cue-chain from the unified :chains domain.
@@ -179,24 +70,6 @@
             cue-chain-data (get-in s [:chains :cue-chains [col row]])]
         (when (seq (:items cue-chain-data))
           {:cue-chain cue-chain-data})))))
-
-(defn get-all-active-cues-data
-  "Get data for ALL active cues (multi-cue support).
-   
-   Returns a vector of maps, each with:
-   - :cell - [col row] coordinates
-   - :cue-chain - the cue chain data
-   - :cue-timing - the timing state for this cue"
-  []
-  (let [s (state/get-raw-state)
-        active-cues (get-in s [:playback :active-cues] {})]
-    (u/keepv (fn [[[col row] cue-timing]]
-               (let [cue-chain-data (get-in s [:chains :cue-chains [col row]])]
-                 (when (seq (:items cue-chain-data))
-                   {:cell [col row]
-                    :cue-chain cue-chain-data
-                    :cue-timing cue-timing})))
-             active-cues)))
 
 (defn get-bpm
   "Get the current BPM."
@@ -229,26 +102,6 @@
   [preview-zone final-targets]
   (or (nil? preview-zone)                    ;; nil = show all (master view)
       (contains? final-targets preview-zone))) ;; direct match only
-
-(defn get-timing-context
-  "DEPRECATED: Use get-cue-timing-context for per-cue timing.
-   
-   Get the timing context for modulator evaluation (from first active cue).
-   Returns a map with accumulated-beats, accumulated-ms, phase-offset, effective-beats.
-   For backward compatibility, returns context from first active cue."
-  []
-  (let [s (state/get-raw-state)
-        active-cues (get-in s [:playback :active-cues] {})]
-    (if-let [[_ first-cue-timing] (first active-cues)]
-      ;; Return context from first active cue
-      (cue-timing/get-cue-timing-context first-cue-timing (ex/bpm s))
-      ;; No active cues - return zeros
-      {:accumulated-beats 0.0
-       :accumulated-ms 0.0
-       :phase-offset 0.0
-       :effective-beats 0.0
-       :time-ms 0
-       :bpm (or (ex/bpm s) 120.0)})))
 
 (defn get-active-global-effects
   "Get all active effect instances from the effects grid.
@@ -499,11 +352,12 @@
         :else {}))))
 
 (defn- apply-global-effects-to-frame
-  "Apply global effects from the effects grid to a frame using global clock timing."
-  [frame raw-state bpm]
+  "Apply global effects from the effects grid to a frame using the show
+   clock's global clock."
+  [frame bpm]
   (let [effect-chain (get-active-global-effects)]
     (if effect-chain
-      (let [global-clock (get-in raw-state [:timing :global-clock])
+      (let [global-clock (show-time/global-clock)
             input-values (input-store/get-all-continuous-values)
             global-timing-ctx (assoc (cue-timing/get-global-timing-context global-clock bpm)
                                      :input-values input-values)
@@ -588,7 +442,6 @@
                      (assoc timing-ctx :window-beats
                             (wrap-into-loop (:effective-beats timing-ctx 0.0) loop-config))
                      timing-ctx)
-        raw-state (state/get-raw-state)
         timeline? (cue-chains/timeline-cue? cue-chain)
         item-zone-maps (u/keepv
                         (fn [item]
@@ -614,162 +467,34 @@
     (reduce-kv
      (fn [acc zone-id zone-frame]
        (if (seq zone-frame)
-         (let [frame-with-effects (apply-global-effects-to-frame zone-frame raw-state bpm)]
+         (let [frame-with-effects (apply-global-effects-to-frame zone-frame bpm)]
            (assoc acc zone-id frame-with-effects))
          acc))
      {}
      combined-by-zone)))
 
-(defn generate-frames-by-zone-cached
-  "Generate zone frames with per-frame caching to avoid redundant computation.
-   
-   Multiple projectors may belong to the same zone group. Without caching,
-   we would recompute identical frames multiple times per render cycle.
-   This function caches the zone frame map and returns it if still valid.
-   
-   Cache Strategy:
-   - Cache key: Hash of cue-chain structure (id, dest-zone, tracks, items), elapsed-ms bucket, and BPM
-   - Cache validity: ~16ms (one frame period at 60fps)
-   - Bounded cache map with automatic pruning
-   
-   Args:
-   - cue-chain: The cue chain data with :items and :destination-zone
-   - elapsed-ms: Elapsed time since cue trigger in milliseconds
-   - bpm: Current beats per minute
-   - trigger-time: Timestamp when cue was triggered
-   - timing-ctx: Timing context map for keyframe evaluation
-   
-   Returns:
-   Map of zone-group-id → frame (same as generate-frames-by-zone).
-   May return cached result if cache is valid."
-  [cue-chain elapsed-ms bpm trigger-time timing-ctx]
-  (let [new-cache-key (compute-zone-cache-key cue-chain elapsed-ms bpm)
-        current-time (System/currentTimeMillis)
-        cached-entry (get @!zone-frame-cache new-cache-key)]
-    (if (and cached-entry (< (- current-time (:timestamp cached-entry)) 16))
-      (:frames cached-entry)
-      (let [new-frames (generate-frames-by-zone cue-chain elapsed-ms bpm trigger-time timing-ctx)]
-        (swap! !zone-frame-cache
-               (fn [cache]
-                 (let [pruned (if (> (count cache) 32)
-                                (into {} (filter (fn [[_ v]] (< (- current-time (:timestamp v)) 50))) cache)
-                                cache)]
-                   (assoc pruned new-cache-key {:frames new-frames
-                                                :timestamp current-time}))))
-        new-frames))))
-
-(defn- combine-all-zone-frames
-  "Combine all zone frames into a single frame for master view.
-   Used by preview when zone filter is nil (show all content).
-   
-   Args:
-   - zone-frames-map: Map of {zone-group-id → frame}
-   
-   Returns: Combined frame with blanking between zones, or nil if empty."
-  [zone-frames-map]
-  (let [all-frames (vals zone-frames-map)]
-    (concatenate-frames (vec all-frames) 0)))
-
-(defn generate-current-frame
-  "Generate the current animation frame based on state.
-   Supports multi-cue playback: generates frames for all active cues and concatenates them.
-   Applies active effects from the effects grid to the combined frame.
-   
-   Returns a map with:
-   - :points - LaserFrame vector of points (or nil if nothing to render)
-   - :cue-destinations - Map of [col row] -> #{zone-ids} for each active cue
-   - :zone-frames - Map of zone-id -> points, aggregated across all cues
-   
-   Multi-cell preview architecture:
-   - Each preview cell has its own zone-group-id filter
-   - cue-destinations includes ALL active cues regardless of zone routing
-   - zone-frames provides per-zone frame data for zone-filtered preview cells
-   - Preview cells look up their zone in zone-frames directly
-   
-   Frame generation is profiled to track performance."
-  ([] (generate-current-frame {}))
-  ([{:keys [_for-preview? _skip-zone-filter?] :or {_for-preview? true _skip-zone-filter? false}}]
-   (when (is-playing?)
-     (let [all-cues (get-all-active-cues-data)]
-       (when (seq all-cues)
-         (let [raw-state (state/get-raw-state)
-               bpm (get-bpm)
-               current-time (System/currentTimeMillis)
-
-               ;; Measure base frame generation
-               base-start (timing/nanotime)
-
-               ;; Generate frame for each active cue using PER-ITEM zone routing
-               ;; Always process ALL cues - no filtering based on preview zone
-               ;; Each item routes to its own destination based on its zone effects
-               cue-results (mapv
-                            (fn [{:keys [cell cue-chain cue-timing]}]
-                              (let [trigger-time (:trigger-time cue-timing)
-                                    elapsed (- current-time trigger-time)
-                                    input-values (input-store/get-all-continuous-values)
-                                    cue-bpm (playback/cue-bpm cue-chain bpm)
-                                    timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing cue-bpm)
-                                                      :input-values input-values)
-                                    ;; Generate frames separated by zone
-                                    zone-frames (generate-frames-by-zone cue-chain elapsed cue-bpm trigger-time timing-ctx)
-                                    ;; Track all zones this cue routes to
-                                    cue-zone-targets (set (keys zone-frames))
-                                    ;; Always combine all zone frames (master view)
-                                    ;; Multi-cell preview handles zone filtering visually
-                                    frame (combine-all-zone-frames zone-frames)]
-                                {:cell cell
-                                 :frame frame
-                                 :targets cue-zone-targets
-                                 :zone-frames zone-frames}))
-                            all-cues)
-
-               ;; Concatenate all cue frames with blanking between them
-               ;; Filter out nil frames but include all in cue-destinations
-               all-frames (u/keepv :frame cue-results)
-               base-frame (concatenate-frames all-frames 0)
-
-               ;; Build cue-destinations map from ALL cues (not just those with frames)
-               ;; This ensures preview cells can correctly identify which zones are active
-               cue-destinations (into {}
-                                      (keep (fn [{:keys [cell targets]}]
-                                              (when (seq targets)
-                                                [cell targets])))
-                                      cue-results)
-
-               ;; Aggregate zone frames across all cues: zone-id -> combined points
-               ;; This allows preview cells to display points for their zone directly
-               zone-frames-aggregated (reduce #(merge-with into %1 %2)
-                                              {}
-                                              (u/keepv :zone-frames cue-results))
-               base-end (timing/nanotime)]
-
-           (when base-frame
-             (let [effect-chain (get-active-global-effects)
-                   final-frame base-frame]
-
-               ;; Record timing (profiler adds timestamp and calculates total)
-               (let [base-time-us (timing/nanos->micros (- base-end base-start))
-                     effects-time-us 0
-                     effect-count (if effect-chain (count (:effects effect-chain)) 0)
-                     point-count (count final-frame)]
-
-                 ;; Frame profiler (always-on stats)
-                 (profiler/record-frame-timing!
-                  {:base-time-us base-time-us
-                   :effects-time-us effects-time-us
-                   :effect-count effect-count})
-
-                 ;; JFR event (low-overhead, for continuous recording and spike detection)
-                 (jfr/emit-frame-event!
-                  {:base-time-us base-time-us
-                   :effects-time-us effects-time-us
-                   :effect-count effect-count
-                   :point-count point-count}))
-
-               ;; Return frame data with destinations and zone-frames for preview grid filtering
-               {:points final-frame
-                :cue-destinations cue-destinations
-                :zone-frames zone-frames-aggregated}))))))))
+(defn preview-data
+  "What the preview shows for one tick, from its rendered cues
+   [{:cell :zone-frames} …] in order (show-time's snapshot :cues):
+   - :points: every cue's zones joined, blanked between them (the master view);
+   - :zone-frames: each zone's frames joined across cues, blanked between them
+     as an engine on that zone joins them (multi-engine/projector-frame);
+   - :cue-destinations: {cell #{zone-id}} for each cue that rendered something.
+   Nil when nothing rendered."
+  [cues]
+  (when-let [points (concatenate-frames (u/keepv #(concatenate-frames (vec (vals (:zone-frames %))) 0) cues) 0)]
+    {:points points
+     :zone-frames (reduce (fn [acc {:keys [zone-frames]}]
+                            (reduce-kv (fn [m zone-id frame]
+                                         (update m zone-id #(if % (concatenate-frames [% frame] 0) frame)))
+                                       acc zone-frames))
+                          {}
+                          cues)
+     :cue-destinations (into {}
+                             (keep (fn [{:keys [cell zone-frames]}]
+                                     (when (seq zone-frames)
+                                       [cell (set (keys zone-frames))])))
+                             cues)}))
 
 
 ;; Frame Conversion for Preview
@@ -797,87 +522,11 @@
   (when (seq frame)
     (mapv laser-point->preview-point frame)))
 
-(defn get-preview-frame
-  "Get the current frame in preview-friendly format with cue destinations and zone frames.
-   Returns {:points [...] :cue-destinations {[col row] #{zone-ids}} :zone-frames {zone-id [...]}} or nil."
-  []
-  (when-let [frame-data (generate-current-frame {:for-preview? true})]
-    (when-let [points (:points frame-data)]
-      (let [zone-frames-raw (:zone-frames frame-data)
-            ;; Convert each zone's frame to preview format
-            zone-frames-preview (when zone-frames-raw
-                                  (into {}
-                                        (map (fn [[zone-id frame]]
-                                               [zone-id (frame->preview-data frame)]))
-                                        zone-frames-raw))]
-        {:points (frame->preview-data points)
-         :cue-destinations (:cue-destinations frame-data)
-         :zone-frames zone-frames-preview}))))
-
-
-;; State Update Integration
-
-
-(defn update-preview-frame!
-  "Update the preview frame in state.
-   Call this periodically to update the preview.
-   Also updates timing accumulators for smooth beat-synced animation."
-  []
-  ;; Update timing accumulators FIRST, before generating frame
-  (update-timing-accumulators! (System/currentTimeMillis))
-
-  (let [frame (get-preview-frame)
-        ;; Get recent profiler stats (last 30 frames = ~1 second at 30fps)
-        recent-stats (profiler/get-recent-stats 30)
-        frame-stats (when recent-stats
-                      (cond-> {:avg-latency-us (:avg-total-us recent-stats)
-                               :p95-latency-us (:p95-total-us recent-stats)
-                               :max-latency-us (:max-total-us recent-stats)
-                               :avg-base-us (:avg-base-us recent-stats)
-                               :avg-effects-us (:avg-effects-us recent-stats)}
-                        ;; Include IDN streaming stats when available
-                        (:avg-idn-us recent-stats)
-                        (merge {:avg-idn-us (:avg-idn-us recent-stats)
-                                :p95-idn-us (:p95-idn-us recent-stats)
-                                :max-idn-us (:max-idn-us recent-stats)})))]
-    (state/swap-state!
-     (fn [s]
-       (cond-> s
-         true (assoc-in [:backend :streaming :current-frame] frame)
-         frame-stats (assoc-in [:backend :streaming :frame-stats] frame-stats))))))
-
-
-;; Preview Update Timer
-
-
-(defonce ^:private preview-timer (atom nil))
-
-(defn stop-preview-updates!
-  "Stop periodic preview frame updates."
-  []
-  (when-let [timer @preview-timer]
-    (.cancel timer)
-    (reset! preview-timer nil)
-    (log/info "Preview updates stopped")))
-
-(defn start-preview-updates!
-  "Start periodic preview frame updates.
-   FPS determines how often frames are generated."
-  ([]
-   (start-preview-updates! 30)) ;; Default 30 FPS
-  ([fps]
-   (stop-preview-updates!)
-   (let [interval-ms (long (/ 1000 fps))
-         timer (java.util.Timer. "preview-update" true)]
-     (.scheduleAtFixedRate timer
-                           (proxy [java.util.TimerTask] []
-                             (run []
-                               (try
-                                 (update-preview-frame!)
-                                 (output-errors/ok! [:preview])
-                                 (catch Throwable e
-                                   (output-errors/report! [:preview] e)))))
-                           0
-                           interval-ms)
-     (reset! preview-timer timer)
-     (log/info "Preview updates started at" fps "FPS"))))
+(defn preview->mirror
+  "preview-data as [:backend :streaming :current-frame] holds it (points as
+   maps, for the preview views), or nil when nothing rendered."
+  [{:keys [points zone-frames cue-destinations]}]
+  (when (seq points)
+    {:points (frame->preview-data points)
+     :cue-destinations cue-destinations
+     :zone-frames (update-vals zone-frames frame->preview-data)}))

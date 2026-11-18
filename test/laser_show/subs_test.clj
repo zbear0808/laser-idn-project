@@ -21,7 +21,8 @@
                                                  :active? true
                                                  :items [{:type :effect :effect-id :scale}
                                                          {:type :effect :effect-id :rotate}]}})
-      (assoc-in [:playback :active-cues] {[0 0] {:accumulated-beats 0.0}})
+      (assoc-in [:playback :active-cues] {[0 0] {:run #uuid "00000000-0000-0000-0000-000000000001"}})
+      (assoc-in [:playback :positions] {[0 0] 0.0})
       (assoc-in [:grid :selected-cell] [0 0])))
 
 (defn- context [s]
@@ -54,11 +55,11 @@
 (deftest cell-display-data-ignores-unrelated-changes-test
   (let [ctx (context base-state)
         before (fx/sub-ctx ctx subs/cell-display-data 0 0)]
-    (testing "per-tick accumulator updates of active cues"
-      (let [ctx' (fx/swap-context ctx update-in [:playback :active-cues [0 0] :accumulated-beats] + 0.25)]
+    (testing "per-tick position updates from the show clock's mirror"
+      (let [ctx' (fx/swap-context ctx update-in [:playback :positions [0 0]] + 0.25)]
         (is (identical? before (fx/sub-ctx ctx' subs/cell-display-data 0 0)))))
     (testing "another cell starts playing"
-      (let [ctx' (fx/swap-context ctx assoc-in [:playback :active-cues [1 0]] {:accumulated-beats 0.0})]
+      (let [ctx' (fx/swap-context ctx assoc-in [:playback :active-cues [1 0]] {:run (random-uuid)})]
         (is (identical? before (fx/sub-ctx ctx' subs/cell-display-data 0 0)))))
     (testing "edits to another cell's chain"
       (let [ctx' (fx/swap-context ctx assoc-in [:chains :cue-chains [1 0] :name] "Other")]
@@ -85,7 +86,7 @@
     (testing "unaffected by cue-chain edits and playback ticks"
       (let [ctx' (-> ctx
                      (fx/swap-context assoc-in [:chains :cue-chains [0 0] :name] "Renamed")
-                     (fx/swap-context update-in [:playback :active-cues [0 0] :accumulated-beats] + 1.0))]
+                     (fx/swap-context update-in [:playback :positions [0 0]] + 1.0))]
         (is (identical? before (fx/sub-ctx ctx' subs/effect-cell-display-data 0 0)))))))
 
 (deftest timeline-playhead-only-depends-on-cell-test
@@ -93,7 +94,7 @@
     (is (= 0.0 (fx/sub-ctx ctx subs/timeline-playhead 0 0)))
     (is (nil? (fx/sub-ctx ctx subs/timeline-playhead 1 0)) "not playing")
     (testing "a tick on this cue changes the playhead"
-      (let [ctx' (fx/swap-context ctx update-in [:playback :active-cues [0 0] :accumulated-beats] + 0.25)]
+      (let [ctx' (fx/swap-context ctx update-in [:playback :positions [0 0]] + 0.25)]
         (is (= 0.25 (fx/sub-ctx ctx' subs/timeline-playhead 0 0)))))))
 
 (deftest timeline-dialog-subs-ignore-playback-and-other-cells-test
@@ -101,7 +102,7 @@
         chain (fx/sub-ctx ctx subs/cue-cell-chain 0 0)
         ui (fx/sub-ctx ctx subs/timeline-ui 0 0)]
     (testing "playback ticks don't invalidate the dialog's subs"
-      (let [ctx' (fx/swap-context ctx update-in [:playback :active-cues [0 0] :accumulated-beats] + 0.25)]
+      (let [ctx' (fx/swap-context ctx update-in [:playback :positions [0 0]] + 0.25)]
         (is (identical? chain (fx/sub-ctx ctx' subs/cue-cell-chain 0 0)))
         (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui 0 0)))))
     (testing "another cell's edits and view don't either"

@@ -21,7 +21,8 @@
             [laser-show.state.templates :as templates]
             [laser-show.events.core :as events]
             [laser-show.views.root :as root]
-            [laser-show.services.frame-service :as frame-service]
+            [laser-show.animation.show-time :as show-time]
+            [laser-show.services.show-clock :as show-clock]
             [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.link :as link]
@@ -149,14 +150,15 @@
   (output-runtime/open!)
   (output-runtime/install-shutdown-hook!)
 
-  (frame-service/start-preview-updates! 30)
-
   (let [app (create-app)]
     (reset! *app app)
     ;; Wire dispatch! to use app's handler (wrapped with async agent)
     (events/set-dispatch-fn! (:handler app))
     (events/set-exit-fn! #(exit!))
     (input-mapper/set-dispatch-fn! events/dispatch!))
+
+  ;; After dispatch! reaches the agent, so the clock's reports queue there
+  (show-clock/start!)
 
   ;; Start Carabiner service (auto-connect for Link support)
   (let [link-state (get-in (state/get-raw-state) [:backend :link])
@@ -216,7 +218,7 @@
 
 (defn stop!
   "Stop the mounted cljfx application and release application-owned services:
-   the UI, the preview timer, the input mapper, the streaming engines (the
+   the UI, the show clock, the input mapper, the streaming engines (the
    output runtime is drained), input devices and the Carabiner link. dispatch!
    falls back to the synchronous handler afterwards.
 
@@ -225,7 +227,7 @@
   []
   (when-let [{:keys [renderer]} @*app]
     (fx/unmount-renderer (state/get-context-atom) renderer))
-  (frame-service/stop-preview-updates!)
+  (show-clock/stop!)
   (input-mapper/stop-mapper!)
   (stop-streaming!)
   (stop-input-devices!)
@@ -251,7 +253,8 @@
 
    This is intended for TestFX and other UI integration tests. The supplied
    state is isolated at the cljfx context level, while the normal event
-   handler and production root view remain in use."
+   handler and production root view remain in use. No show clock runs: tests
+   tick it by hand (show-clock/tick!), and show time starts from nothing."
   ([]
    (start-test! (-> (domains/build-initial-state)
                     (templates/apply-starter-cue-chains)
@@ -259,6 +262,7 @@
   ([initial-state]
    (stop!)
    (state/init-state! initial-state)
+   (show-time/reset-runtime!)
    (init-styles!)
    (output-runtime/open!)
    (let [app (create-app)]

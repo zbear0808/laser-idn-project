@@ -33,10 +33,9 @@
      runtime's own thread (backend/output_runtime.clj), which owns every engine
    - Nothing running on the agent may block waiting for an event it
      dispatched: that event only runs after the current one
-   - Writers outside the pipeline: the preview timer
-     (frame-service/preview-timer-paths). In dev mode effect-state warns when a
-     write other than the timer's landed between an event's snapshot and its
-     write-back
+   - Writers outside the pipeline: the show clock's mirror, every second tick
+     (show-time/mirror-paths). In dev mode effect-state warns when any other
+     write landed between an event's snapshot and its write-back
    - State updates (atom swap) are thread-safe
    - Re-rendering happens on FX thread via atom watch
    
@@ -63,7 +62,7 @@
             [laser-show.common.util :as u]
             [laser-show.idn.hello :as idn-hello]
             [laser-show.input.link :as link]
-            [laser-show.services.frame-service :as frame-service])
+            [laser-show.animation.show-time :as show-time])
   (:import [javafx.stage FileChooser FileChooser$ExtensionFilter Stage]
            [javafx.application Platform]
            [java.awt Desktop Desktop$Action]
@@ -116,21 +115,22 @@
                 :else [[k]])))
           (distinct (concat (keys a) (keys b)))))
 
-(defn- without-timer-paths [s]
-  (reduce #(assoc-in %1 %2 nil) s frame-service/preview-timer-paths))
+(defn- without-mirror-paths [s]
+  (reduce #(assoc-in %1 %2 nil) s show-time/mirror-paths))
 
 (defn- check-lost-update!
   "Dev mode: report a write that landed between an event's state snapshot and
-   its write-back (that write is lost). Writes by the preview timer alone are
-   expected until the frame timing leaves app state, so they only log at TRACE."
+   its write-back (that write is lost). Writes by the show clock's mirror alone
+   are expected until the screen reads the clock itself, so they only log at
+   TRACE."
   [event-type snapshot replaced]
   (when-not (identical? snapshot replaced)
-    (let [paths (changed-paths (without-timer-paths snapshot) (without-timer-paths replaced) 1)]
+    (let [paths (changed-paths (without-mirror-paths snapshot) (without-mirror-paths replaced) 1)]
       (if (seq paths)
         (log/warn "Possible lost update:" event-type
                   "wrote back a state snapshot, but another writer changed" (vec paths)
                   "in the meantime")
-        (log/trace "Preview timer wrote during" event-type "(timer-only, not a lost update)")))))
+        (log/trace "Show clock mirror wrote during" event-type "(mirror-only, not a lost update)")))))
 
 (defn- wrap-lost-update-check
   "Dev mode only: attach the event's :state co-effect (the snapshot its handler
@@ -284,9 +284,10 @@
 ;; Link Effects
 
 (defn- effect-link-sync-to-downbeat
-  "Effect that queries Link's beat phase and continues with a phase correction."
-  [{:keys [accumulated-beats]} dispatch]
-  (link/sync-to-downbeat! #(run-inline % dispatch) accumulated-beats))
+  "Effect that queries Link's beat phase against the show clock's beats and
+   continues with a phase correction."
+  [_ dispatch]
+  (link/sync-to-downbeat! #(run-inline % dispatch) (show-time/global-beats)))
 
 ;; Input Learn Effects
 

@@ -189,10 +189,11 @@
   (fx/sub-val context get-in [:ui :timeline-prefs]))
 
 (defn timeline-playhead
-  "Beats played by the cue at [col row], or nil when it isn't playing.
-   Re-runs on every timing tick, so only the timeline canvas should use it."
+  "Beats played by the cue at [col row], from the show clock's mirror, or nil
+   when it isn't playing. Re-runs on every mirror write, so only the timeline
+   canvas should use it."
   [context col row]
-  (get-in (fx/sub-val context ex/active-cues) [[col row] :accumulated-beats]))
+  (get (fx/sub-val context get-in [:playback :positions]) [col row]))
 
 (defn timeline-transport
   "Transport status of the cue at [col row]: :stopped, :playing or :paused.
@@ -206,7 +207,7 @@
 
 (defn mtc-status
   "Incoming MIDI timecode for the UI: {:state (:running | :freewheel | :stopped)
-   :fps :text}. Mirrored by the preview timer, at most 10 times a second."
+   :fps :text}. Mirrored by the show clock, at most 10 times a second."
   [context]
   (select-keys (fx/sub-val context get-in [:backend :input :mtc]) [:state :fps :text]))
 
@@ -220,8 +221,8 @@
 
 (defn cue-cell-active?
   "True if the cue at [col row] is playing.
-   Returns a boolean, so the 30 Hz per-cue timing updates in active-cues
-   don't invalidate subscribers."
+   Returns a boolean, so changes inside the cues' intents in active-cues (a
+   pause, a seek) don't invalidate subscribers."
   [context col row]
   (fx/sub-val context active-cue? [col row]))
 

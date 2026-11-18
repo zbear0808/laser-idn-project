@@ -3,7 +3,10 @@
    
    This namespace provides functions for managing timing state for the multi-cue
    playback system. Each cue has independent timing accumulators, and there's also
-   a global clock for BPM visualization.
+   a global clock for BPM visualization. The show clock
+   (laser-show.animation.show-time) keeps these maps and calls the update
+   functions 60 times a second; app state only holds each cue's intent
+   (activate-cue, request-seek).
    
    Key concepts:
    - Global clock: Independent timing for BPM visualization, never reset by cue triggers
@@ -66,15 +69,6 @@
   (if (:timeline? cue-timing)
     cue-timing
     (with-aligned-target cue-timing)))
-
-(defn align-all-active-cues-phase
-  "Align phase target for all active cues."
-  [active-cues]
-  (when (seq active-cues)
-    (reduce-kv (fn [acc k v]
-                 (assoc acc k (align-cue-timing-phase v)))
-               {}
-               active-cues)))
 
 (defn update-global-clock
   "Update global clock accumulators based on delta time with smooth phase offset decay.
@@ -303,29 +297,40 @@
          :effective-beats 0.0))
 
 
-;; Activating cues on the :playback map
+;; Starting cues on the :playback map
+;;
+;; App state holds an intent per playing cue; the show clock
+;; (laser-show.animation.show-time) owns the timing and starts it with
+;; start-timing at its next tick.
 
+
+(defn start-timing
+  "Fresh timing for a cue started at now-ms, while the global clock is at
+   global-beats. Timeline cues (:timeline? true) start at :start-beat with no
+   phase glide; other cues glide toward the global beat phase."
+  [now-ms global-beats {:keys [timeline? start-beat]}]
+  (let [base (create-cue-timing-state now-ms global-beats)]
+    (if timeline?
+      (assoc base
+             :timeline? true
+             :accumulated-beats (double (or start-beat 0.0))
+             :phase-offset 0.0
+             :phase-offset-target 0.0
+             :paused? false)
+      base)))
 
 (defn activate-cue
-  "Start the cue at cell: add fresh timing to (:active-cues playback) and set
-   :playing?. Timeline cues (:timeline? true) start at :start-beat with no
-   phase glide; other cues glide toward the global beat phase."
-  [playback cell now global-beats {:keys [timeline? start-beat]}]
-  (let [base (create-cue-timing-state now global-beats)
-        timing (if timeline?
-                 (assoc base
-                        :timeline? true
-                        :accumulated-beats (double (or start-beat 0.0))
-                        :phase-offset 0.0
-                        :phase-offset-target 0.0
-                        :paused? false)
-                 base)]
-    (-> playback
-        (assoc-in [:active-cues cell] timing)
-        (assoc :playing? true)
-        ;; Deprecated fields kept for older readers
-        (assoc :active-cell cell
-               :trigger-time now))))
+  "Start the cue at cell as the run run-id: write its intent to
+   (:active-cues playback) and set :playing?. Timeline cues (:timeline? true)
+   say where to start (:start-beat). The intent holds no position: the show
+   clock starts the run's timing at its next tick."
+  [playback cell run-id {:keys [timeline? start-beat]}]
+  (-> playback
+      (assoc-in [:active-cues cell] (cond-> {:run run-id}
+                                      timeline? (assoc :timeline? true
+                                                       :start-beat (double (or start-beat 0.0)))))
+      (assoc :playing? true
+             :active-cell cell)))
 
 (defn deactivate-cue
   "Stop the cue at cell. :playing? is false once no cue remains."
@@ -335,6 +340,12 @@
                    :active-cues remaining
                    :playing? (boolean (seq remaining)))
       (= (:active-cell playback) cell) (assoc :active-cell (first (keys remaining))))))
+
+(defn request-seek
+  "The intent, asking the show clock to move its run to beat. id names the
+   request: the clock applies each id once."
+  [intent beat id]
+  (assoc intent :seek {:id id :beat (max 0.0 (double beat))}))
 
 (defn seek
   "Move a cue's position to beat (clears :ended?)."

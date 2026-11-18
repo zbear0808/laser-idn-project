@@ -168,8 +168,8 @@
       (is (= [0 0] (get-in result [:state :playback :active-cell])))
       (is (= [0 0] (get-in result [:state :grid :selected-cell])))
       (is (true? (get-in result [:state :playback :playing?])))
-      ;; Trigger time should be set (not checking exact value since handler uses System/currentTimeMillis)
-      (is (some? (get-in result [:state :playback :trigger-time]))))))
+      (is (uuid? (get-in result [:state :playback :active-cues [0 0] :run]))
+          "the cue's intent names a new run; the show clock starts it at its next tick"))))
 
 (deftest handle-grid-cell-clicked-empty
   (testing "Clicking empty cell selects it"

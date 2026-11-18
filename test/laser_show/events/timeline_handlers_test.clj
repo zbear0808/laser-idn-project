@@ -340,16 +340,18 @@
 (deftest play-from-cursor-test
   (let [s0 (assoc-in (transport-state) [:ui :timeline-editor [0 0] :cursor-beat] 6.0)
         s1 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :time 1000 :state s0}))]
-    (is (= 6.0 (:accumulated-beats (timing-at s1))))
+    (is (= 6.0 (:start-beat (timing-at s1))) "the show clock starts the run there")
     (is (true? (:timeline? (timing-at s1))))
+    (is (uuid? (:run (timing-at s1))))
+    (is (not (contains? (timing-at s1) :accumulated-beats)) "an intent holds no position")
     (is (true? (get-in s1 [:playback :playing?]))))
   (testing "a cursor at the end of a non-looping timeline plays from 0"
     (let [s0 (assoc-in (transport-state) [:ui :timeline-editor [0 0] :cursor-beat] 16.0)
           s1 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :state s0}))]
-      (is (= 0.0 (:accumulated-beats (timing-at s1))))))
+      (is (= 0.0 (:start-beat (timing-at s1))))))
   (testing ":from overrides the cursor"
     (let [s1 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :from 3.0 :state (transport-state)}))]
-      (is (= 3.0 (:accumulated-beats (timing-at s1)))))))
+      (is (= 3.0 (:start-beat (timing-at s1)))))))
 
 (deftest pause-freezes-position-test
   (let [s1 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :from 2.0 :state (transport-state)}))
@@ -357,18 +359,26 @@
         s3 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :state s2}))]
     (is (true? (:paused? (timing-at s2))))
     (is (false? (:paused? (timing-at s3))) "play resumes")
-    (is (= 2.0 (:accumulated-beats (timing-at s3))) "from where it paused")
+    (is (= (:run (timing-at s1)) (:run (timing-at s3))) "the same run, so from where it paused")
+    (is (nil? (:seek (timing-at s3))) "resuming without :from doesn't seek")
     (is (nil? (timing-at (:state (timeline/handle {:event/type :timeline/pause :col 0 :row 0 :state (transport-state)}))))
-        "pausing a stopped timeline does nothing")))
+        "pausing a stopped timeline does nothing")
+    (testing "play with :from while paused resumes and seeks"
+      (let [s4 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :from 7.0 :state s2}))]
+        (is (= [false 7.0] ((juxt :paused? (comp :beat :seek)) (timing-at s4))))))))
 
 (deftest seek-inactive-sets-cursor-only-test
   (let [s1 (:state (timeline/handle {:event/type :timeline/seek :col 0 :row 0 :beat 5.0 :state (transport-state)}))]
     (is (= 5.0 (get-in s1 [:ui :timeline-editor [0 0] :cursor-beat])))
     (is (nil? (timing-at s1))))
-  (testing "seeking a playing timeline moves it"
+  (testing "seeking a playing timeline asks the show clock to move it, once per seek"
     (let [s1 (:state (timeline/handle {:event/type :timeline/play :col 0 :row 0 :from 0.0 :state (transport-state)}))
-          s2 (:state (timeline/handle {:event/type :timeline/seek :col 0 :row 0 :beat 9.0 :state s1}))]
-      (is (= 9.0 (:accumulated-beats (timing-at s2)))))))
+          s2 (:state (timeline/handle {:event/type :timeline/seek :col 0 :row 0 :beat 9.0 :state s1}))
+          s3 (:state (timeline/handle {:event/type :timeline/seek :col 0 :row 0 :beat 9.0 :state s2}))]
+      (is (= 9.0 (get-in (timing-at s2) [:seek :beat])))
+      (is (uuid? (get-in (timing-at s2) [:seek :id])))
+      (is (not= (get-in (timing-at s2) [:seek :id]) (get-in (timing-at s3) [:seek :id]))
+          "seeking to the same beat again is a new request"))))
 
 (deftest stop-keeps-cursor-test
   (let [s0 (assoc-in (transport-state) [:ui :timeline-editor [0 0] :cursor-beat] 4.0)

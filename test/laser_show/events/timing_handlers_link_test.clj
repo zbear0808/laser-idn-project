@@ -115,33 +115,33 @@
 
 
 (deftest test-set-phase-offset-target
-  (testing "Set phase offset target for beat alignment"
+  (testing "Asks the show clock to shift the phase targets by the offset (its numbers: show-time-test)"
     (let [event {:state base-state
                  :event/type :timing/set-phase-offset-target
                  :offset 0.25}
           result (timing/handle event)
-          new-state (:state result)]
-      (is (= 0.25 (get-in new-state [:playback :phase-offset-target]))))))
+          shift (get-in result [:state :playback :requests :shift])]
+      (is (uuid? (:id shift)))
+      (is (= 0.25 (:offset shift)))
+      (is (= (:playback base-state) (dissoc (get-in result [:state :playback]) :requests))
+          "only the request: the old target path, which nothing read, isn't written"))))
 
 (deftest test-set-negative-phase-offset
   (testing "Set negative phase offset for backward correction"
     (let [event {:state base-state
                  :event/type :timing/set-phase-offset-target
                  :offset -0.15}
-          result (timing/handle event)
-          new-state (:state result)]
-      (is (= -0.15 (get-in new-state [:playback :phase-offset-target]))))))
+          result (timing/handle event)]
+      (is (= -0.15 (get-in result [:state :playback :requests :shift :offset]))))))
 
 
 ;; Sync To Downbeat Tests
 
 
 (deftest test-sync-to-downbeat-requests-effect
-  (testing "reads beats from the global clock and leaves the Link query to an effect"
-    (let [state (assoc-in base-state [:timing :global-clock] {:accumulated-beats 4.5
-                                                               :phase-offset 0.25})
-          result (timing/handle {:state state :event/type :timing/sync-to-downbeat})]
-      (is (= {:link/sync-to-downbeat {:accumulated-beats 4.75}} result)))))
+  (testing "leaves the Link query to an effect, which reads the show clock's beats itself"
+    (is (= {:link/sync-to-downbeat {}}
+           (timing/handle {:state base-state :event/type :timing/sync-to-downbeat})))))
 
 
 ;; Integration Tests

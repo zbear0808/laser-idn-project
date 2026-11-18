@@ -43,6 +43,7 @@
       "zone-groups" (zone-groups/handle event)
       "timing" (timing/handle event)
       "transport" (timing/handle event)  ; Transport grouped with timing
+      "show-clock" (timing/handle event)  ; What the show clock reports back
       "ui" (ui/handle event)
       "preview" (ui/handle event)  ; Preview settings (zone filter) -> UI handler
       "project" (project/handle event)

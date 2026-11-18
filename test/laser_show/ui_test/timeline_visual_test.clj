@@ -11,7 +11,7 @@
             [laser-show.animation.effects :as effects]
             [laser-show.events.core :as events]
             [laser-show.input.mtc :as mtc]
-            [laser-show.services.frame-service :as frame-service]
+            [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -72,9 +72,13 @@
         (events/dispatch! {:event/type :timeline/select-track :col 2 :row 2 :track-id t2})
         (ui/wait-for! #(true? (get-in (cue) [:loop :enabled?])))
         (shot! "02-content")
-        (state/swap-state! assoc-in [:playback :active-cues [2 2]] {:accumulated-beats 6.0})
+        (state/swap-state! #(-> %
+                                (assoc-in [:playback :active-cues [2 2]] {:run (random-uuid) :timeline? true})
+                                (assoc-in [:playback :positions [2 2]] 6.0)))
         (shot! "03-playing")
-        (state/swap-state! update-in [:playback :active-cues] dissoc [2 2])
+        (state/swap-state! #(-> %
+                                (update-in [:playback :active-cues] dissoc [2 2])
+                                (update-in [:playback :positions] dissoc [2 2])))
         (ui/click! (ui/robot) "#timeline-add-content")
         (shot! "04-drawer")
         ;; No loop: the timeline stops at its end, shown by the end marker
@@ -92,7 +96,7 @@
         (mtc/reset-decoder!)
         (doseq [b [0x00 0x10 0x21 0x30 0x40 0x50 0x60 0x72]]
           (mtc/on-quarter-frame! b))
-        (frame-service/update-timing-accumulators! (System/currentTimeMillis))
+        (dotimes [_ show-clock/MIRROR_EVERY] (show-clock/tick! (System/nanoTime)))
         (ui/wait-for! #(ui/visible? "#timeline-mtc-rate-warning"))
         (shot! "07-mtc-chase")
         (mtc/reset-decoder!)

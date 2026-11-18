@@ -7,7 +7,6 @@
    - Clipboard operations (copy, paste)"
   (:require [laser-show.events.helpers :as h]
             [laser-show.state.clipboard :as clipboard]
-            [laser-show.state.extractors :as ex]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.timeline.playback :as playback]
             [laser-show.animation.cue-timing :as cue-timing]
@@ -31,16 +30,15 @@
     resolved-mode))
 
 (defn- trigger-cue
-  "Trigger a cue: add it to active-cues with fresh timing. Timeline cues start
-   from the top (live use); the timeline editor's Play starts from its cursor.
-   A timeline following MIDI timecode isn't started: the timecode drives it."
+  "Trigger a cue: its intent in active-cues, as a new run, which the show
+   clock starts at its next tick. Timeline cues start from the top (live use);
+   the timeline editor's Play starts from its cursor. A timeline following
+   MIDI timecode isn't started: the timecode drives it."
   [state col row]
-  (let [now (h/current-time-ms {:time (System/currentTimeMillis)})
-        cue (get-in state [:chains :cue-chains [col row]])]
+  (let [cue (get-in state [:chains :cue-chains [col row]])]
     (if (playback/chases-mtc? cue)
       state
-      (update state :playback cue-timing/activate-cue [col row] now
-              (ex/global-accumulated-beats state)
+      (update state :playback cue-timing/activate-cue [col row] (random-uuid)
               {:timeline? (cue-chains/timeline-cue? cue) :start-beat 0.0}))))
 
 (defn- untrigger-cue

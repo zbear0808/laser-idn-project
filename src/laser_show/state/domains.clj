@@ -55,15 +55,16 @@
    :global-clock {:default {:accumulated-beats 0.0
                             :accumulated-ms 0.0
                             :last-frame-time 0}
-                  :doc "Global clock for BPM visualization, independent of cue triggers. Only reset by retrigger button."}})
+                  :doc "Mirror of the show clock's global clock (show-time/global-clock), written every second tick. Read it for display only; the show clock's own copy is the truth. Only reset by Stop and Retrigger."}})
 
 (defstate playback
   "Playback control state for animation triggering.
    
    MULTI-CUE ARCHITECTURE:
-   - active-cues: Map of [col row] -> per-cue timing state
-   - Each cue has independent accumulated-beats, phase-offset, etc.
-   - Global clock is in [:timing :global-clock] for BPM visualization"
+   - active-cues: Map of [col row] -> intent; the show clock
+     (laser-show.animation.show-time) owns each cue's timing
+   - requests: one-shot transport requests the show clock applies
+   - positions: the show clock's mirror of where each cue is"
   {:playing? {:default false
               :doc "Whether playback is active (any cues playing)"}
    :active-cue {:default nil
@@ -71,15 +72,18 @@
    :cue-queue {:default []
                :doc "Queue of pending cues for quantized triggering"}
 
-   ;; Multi-cue timing state
+   ;; Multi-cue playback
    :active-cues {:default {}
-                 :doc "Map of [col row] -> cue timing state. Each cue has:
-                       {:trigger-time long
-                        :accumulated-beats double
-                        :accumulated-ms double
-                        :phase-offset double
-                        :phase-offset-target double
-                        :last-frame-time long}"}
+                 :doc "Map of [col row] -> intent, with no position:
+                       {:run uuid :timeline? bool :start-beat double
+                        :paused? bool :seek {:id uuid :beat double}}
+                       or {:chasing? true :timeline? true} for a timeline
+                       following MIDI timecode. The show clock starts, moves
+                       and drops runs to match (show-time/step)."}
+   :requests {:default {}
+              :doc "{:restart {:id} :align {:id} :shift {:id :offset}}: the show clock applies each id once (Stop and Retrigger, tap tempo, Link)"}
+   :positions {:default {}
+               :doc "Mirror of {[col row] beats} from the show clock, written every second tick (timeline playheads)"}
 
    ;; Shared timing settings
    :resync-rate {:default 4.0

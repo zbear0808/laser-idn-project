@@ -457,7 +457,7 @@
 (defn emit-frame-event!
   "Emit a FrameGenerationEvent to the JFR recording.
    
-   Called automatically by frame-service.clj when generating frames.
+   Called by the show clock (services/show_clock.clj) for each tick's render.
    Can also be called manually for testing.
    
    Parameters map:

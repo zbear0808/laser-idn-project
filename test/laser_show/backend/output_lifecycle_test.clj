@@ -15,6 +15,7 @@
             [laser-show.idn.fake-dac :as dac]
             [laser-show.idn.hello :as hello]
             [laser-show.idn.stream :as stream]
+            [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains])
   (:import [java.net DatagramSocket UnknownHostException]))
@@ -22,11 +23,16 @@
 (def ^:dynamic *dac* nil)
 (def ^:dynamic *started* nil)
 
-(defn- with-fake-dac [f]
+(defn- with-fake-dac
+  "Each test streams to its own fake DAC; afterwards everything that arrived
+   is checked against the stream rules (fake-dac/check)."
+  [f]
   (let [fake (dac/start!)]
     (try
       (binding [*dac* fake] (f))
       (finally
+        (let [found (dac/violations fake)]
+          (is (empty? found) (str "the stream breaks IDN rules: " (pr-str (take 5 found)))))
         (dac/stop! fake)))))
 
 (defn- stopping-every-engine
@@ -276,6 +282,7 @@
             "the other projector kept its engine")
         (is (= 1 (count (closed-ports))) "only A's first engine was closed here"))
       (is (stop-streaming!))
+      (is (empty? (dac/violations other)) "the new address got a valid stream too")
       (finally
         (dac/stop! other)))))
 
@@ -385,7 +392,7 @@
         release (promise)
         send-frame! @#'se/send-frame!]
     (with-redefs-fn {#'me/projector-frame
-                     (fn [id]
+                     (fn [id _snapshot]
                        (swap! threads update id (fnil conj #{}) (.getName (Thread/currentThread)))
                        (when (= :slow id)
                          (deliver slow-entered true)
@@ -466,7 +473,7 @@
 
 (deftest ^:timing slow-projector-rate-test
   (init-with-projectors! {:fast (projector 1 true) :slow (projector 2 true)})
-  (with-redefs-fn {#'me/projector-frame (fn [id] (when (= :slow id) (Thread/sleep 250)) nil)}
+  (with-redefs-fn {#'me/projector-frame (fn [id _snapshot] (when (= :slow id) (Thread/sleep 250)) nil)}
     (fn []
       (dispatch! {:event/type :idn/start-multi-streaming})
       (is (wait-for-senders! 2))
@@ -476,6 +483,35 @@
           (is (<= 15 (get per-channel 1 0)) "the fast projector at its own rate")
           (is (<= (get per-channel 2 0) 5) "the slow one at its provider's rate")))
       (is (stop-streaming!)))))
+
+(deftest ^:timing every-projector-sends-every-tick-once-test
+  (testing "with the show clock running, three projectors send each tick once, in the same order (c1)"
+    (init-with-projectors! {:a (projector 1 true) :b (projector 2 true) :c (projector 3 true)})
+    (state/swap-state! assoc-in [:chains :cue-chains [0 0]]
+                       {:destination-zone {:zone-group-id :all}
+                        :items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true
+                                 :effects [{:id (random-uuid) :effect-id :rotation :enabled? true
+                                            :params {:angle {:type :sine :min 0.0 :max 360.0 :period 1.0}}}]}]})
+    (dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})
+    (show-clock/start!)
+    (try
+      (dispatch! {:event/type :idn/start-multi-streaming})
+      (is (wait-for-senders! 3))
+      (Thread/sleep 1000)
+      (let [since (System/nanoTime)]
+        (Thread/sleep 2000)
+        (let [frames (filterv (comp seq :samples) (dac/frames *dac* :since-ns since))
+              first-seen (reduce (fn [m {:keys [samples ns]}] (update m samples #(or % ns))) {} frames)]
+          (doseq [[port fs] (group-by :port frames)
+                  :let [samples (map :samples fs)
+                        repeats (count (filter true? (map = samples (rest samples))))]]
+            (is (<= 100 (count fs)) (str port ": " (count fs) " frames in 2 s"))
+            (is (<= repeats (* 0.02 (count fs))) (str port ": " repeats " frames repeat the one before"))
+            (is (apply <= (map first-seen (dedupe samples)))
+                (str port ": the ticks come in the order every sender sends them")))))
+      (is (stop-streaming!))
+      (finally
+        (show-clock/stop!)))))
 
 (deftest ^:timing stop-all-takes-about-one-frame-test
   (let [engines (mapv #(engine-taking 200 %) [:e1 :e2 :e3])]

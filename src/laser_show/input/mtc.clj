@@ -7,7 +7,7 @@
 
    The decoder is pure (step-quarter-frame, step-full-frame, position) and
    testable without MIDI hardware. The runtime atom below is written from
-   the MIDI receiver thread and read by the preview timer. MTC never goes
+   the MIDI receiver thread and read by the show clock. MTC never goes
    through the event queue or the cljfx context: it's 100+ messages a second.
    All connected, enabled MIDI inputs feed this one decoder."
   (:require [laser-show.timeline.timecode :as tc]))
@@ -178,7 +178,7 @@
 
 ;; Status for the UI
 ;;
-;; The UI never reads the runtime atom. The preview timer mirrors this small
+;; The UI never reads the runtime atom. The show clock mirrors this small
 ;; map into [:backend :input :mtc], at most every 100 ms while only the time
 ;; text changes, and right away when the state or rate change.
 

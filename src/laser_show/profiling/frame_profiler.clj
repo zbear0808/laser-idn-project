@@ -6,15 +6,23 @@
    average, min, max, and p95 timings.
    
    Also tracks IDN streaming timing (frame retrieval + packet creation + network send)
-   in a separate rolling window.
+   in a separate rolling window. Every engine records there once per frame,
+   all of them right after the same tick, so it is a ring buffer that a
+   recording never copies.
    
-   Overhead is negligible so profiler can be always-on.")
+   Overhead is negligible so profiler can be always-on."
+  (:import [java.util.concurrent.atomic AtomicLong AtomicReferenceArray]))
 
 (defonce ^:private !samples
   (atom []))
 
-(defonce ^:private !idn-samples
-  (atom []))
+(def ^:private ^:const idn-capacity 1000)
+
+(defonce ^:private ^AtomicReferenceArray idn-ring
+  (AtomicReferenceArray. (int idn-capacity)))
+
+(defonce ^:private ^AtomicLong idn-recorded
+  (AtomicLong.))
 
 (defonce !profiler-enabled
   (atom true))
@@ -56,9 +64,10 @@
    ```"
   [idn-time-us]
   (when @!profiler-enabled
-    (let [sample {:timestamp-ms (System/currentTimeMillis)
-                  :idn-time-us idn-time-us}]
-      (swap! !idn-samples (fn [s] (vec (take-last 1000 (conj s sample))))))))
+    (let [i (.getAndIncrement idn-recorded)]
+      (.set idn-ring (int (rem i idn-capacity))
+            {:timestamp-ms (System/currentTimeMillis)
+             :idn-time-us idn-time-us}))))
 
 ;; Query Functions
 
@@ -94,9 +103,12 @@
    (get-idn-samples 100) ; last 100 samples
    ```"
   ([]
-   @!idn-samples)
+   (get-idn-samples idn-capacity))
   ([n]
-   (vec (take-last n @!idn-samples))))
+   (let [recorded (.get idn-recorded)
+         k (min (long n) recorded idn-capacity)]
+     (into [] (keep #(.get idn-ring (int (rem (long %) idn-capacity))))
+           (range (- recorded k) recorded)))))
 
 
 ;; Statistics

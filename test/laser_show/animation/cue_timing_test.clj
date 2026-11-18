@@ -42,7 +42,7 @@
 
 (deftest timing-context-is-relative-test
   (let [t0 (System/currentTimeMillis)
-        t (-> (get-in (ct/activate-cue {} [0 0] t0 0.0 {}) [:active-cues [0 0]])
+        t (-> (ct/start-timing t0 0.0 {})
               (ct/update-cue-timing t0 120.0 4.0 no-loop)
               (ct/update-cue-timing (+ t0 1000) 120.0 4.0 no-loop))
         ctx (ct/get-cue-timing-context t 120.0)]
@@ -104,21 +104,35 @@
       (is (not (:ended? r))))))
 
 (deftest activate-deactivate-match-grid-behaviour-test
-  (let [p (ct/activate-cue {:active-cues {}} [1 2] 1000 3.5 {:timeline? false})]
+  (let [r (random-uuid)
+        p (ct/activate-cue {:active-cues {}} [1 2] r {:timeline? false})]
     (is (true? (:playing? p)))
     (is (= [1 2] (:active-cell p)))
-    (is (= 0.5 (get-in p [:active-cues [1 2] :phase-offset-target])))
+    (is (= {:run r} (get-in p [:active-cues [1 2]])) "an intent: the show clock starts the run")
     (let [p2 (ct/deactivate-cue p [1 2])]
       (is (false? (:playing? p2)))
       (is (empty? (:active-cues p2)))))
-  (testing "timeline cues start where asked with no glide"
-    (let [t (get-in (ct/activate-cue {} [0 0] 1000 3.5 {:timeline? true :start-beat 8.0}) [:active-cues [0 0]])]
-      (is (= [true 8.0 0.0 0.0 false]
-             ((juxt :timeline? :accumulated-beats :phase-offset :phase-offset-target :paused?) t)))))
+  (testing "timeline intents say where to start"
+    (is (= {:run :r :timeline? true :start-beat 8.0}
+           (get-in (ct/activate-cue {} [0 0] :r {:timeline? true :start-beat 8}) [:active-cues [0 0]]))))
   (testing "deactivating one of two keeps playing"
-    (let [p (-> {} (ct/activate-cue [0 0] 0 0.0 {}) (ct/activate-cue [1 0] 0 0.0 {}) (ct/deactivate-cue [1 0]))]
+    (let [p (-> {} (ct/activate-cue [0 0] :r1 {}) (ct/activate-cue [1 0] :r2 {}) (ct/deactivate-cue [1 0]))]
       (is (true? (:playing? p)))
       (is (= [0 0] (:active-cell p))))))
+
+(deftest start-timing-test
+  (testing "a grid cue starts at 0 and glides toward the global beat phase"
+    (is (= {:trigger-time 1000 :accumulated-beats 0.0 :accumulated-ms 0.0 :phase-offset 0.0
+            :phase-offset-target 0.5 :last-frame-time 1000}
+           (ct/start-timing 1000 3.5 {:timeline? false}))))
+  (testing "timeline cues start where asked with no glide"
+    (let [t (ct/start-timing 1000 3.5 {:timeline? true :start-beat 8.0})]
+      (is (= [true 8.0 0.0 0.0 false]
+             ((juxt :timeline? :accumulated-beats :phase-offset :phase-offset-target :paused?) t))))))
+
+(deftest request-seek-test
+  (is (= {:run :r :seek {:id :s :beat 4.0}} (ct/request-seek {:run :r} 4 :s)))
+  (is (= 0.0 (get-in (ct/request-seek {:run :r} -2.0 :s) [:seek :beat])) "never before beat 0"))
 
 (deftest seek-test
   (let [t (ct/seek (assoc (timeline-at 16.0) :ended? true) 4.0)]

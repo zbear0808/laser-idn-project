@@ -3,11 +3,10 @@
    
    These tests verify:
    - Preview zone filtering works correctly for UI preview
-   - IDN streaming bypasses preview zone filtering
+   - What the preview shows for a tick's rendered cues (preview-data)
    - Per-item zone routing generates separate frames per zone"
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.animation.cue-timing :as ct]
-            [laser-show.input.mtc :as mtc]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]))
@@ -20,43 +19,6 @@
   (f))
 
 (use-fixtures :each setup-test-state)
-
-
-;; Helper Functions
-
-
-(defn setup-playing-state-with-cue!
-  "Set up state as if playing with a cue chain.
-   Updated for multi-cue architecture: uses active-cues map."
-  [destination-zone-group]
-  (let [current-time (System/currentTimeMillis)]
-    (state/swap-state!
-     (fn [s]
-       (-> s
-           (assoc-in [:playback :playing?] true)
-           ;; New multi-cue structure: active-cues is a map
-           (assoc-in [:playback :active-cues [0 0]]
-                     {:trigger-time current-time
-                      :accumulated-beats 0.0
-                      :accumulated-ms 0.0
-                      :phase-offset 0.0
-                      :phase-offset-target 0.0
-                      :last-frame-time current-time})
-           ;; Initialize global clock
-           (assoc-in [:timing :global-clock]
-                     {:accumulated-beats 0.0
-                      :accumulated-ms 0.0
-                      :last-frame-time current-time})
-           (assoc-in [:chains :cue-chains [0 0]]
-                     {:destination-zone {:zone-group-id destination-zone-group}
-                      :tracks [{:id #uuid "10000000-0000-0000-0000-000000000000"
-                                :name "Track 1"
-                                :zone-group-id destination-zone-group}]
-                      :items [{:type :preset
-                               :preset-id :circle
-                               :track-id #uuid "10000000-0000-0000-0000-000000000000"
-                               :enabled? true
-                               :effects []}]}))))))
 
 
 ;; Preview Zone Filter Tests
@@ -93,79 +55,6 @@
   (testing "does not match when final-targets doesn't contain preview-zone"
     (is (not (#'frame-service/matches-preview-zone? :left #{:right})))
     (is (not (#'frame-service/matches-preview-zone? :all #{:left :right})))))
-
-
-(deftest generate-current-frame-zone-filter-integration-test
-  (testing "when for-preview? is true (default) - zone filter is bypassed for preview mode"
-    ;; Preview mode shows all cues regardless of zone filter
-    (setup-playing-state-with-cue! :left)
-    (state/assoc-in-state! [:config :preview :zone-group-filter] :all)
-    ;; With default for-preview? true, zone filter is bypassed
-    (let [frame-data (frame-service/generate-current-frame)]
-      ;; Frame should be generated with map structure
-      (is (or (nil? frame-data) (map? frame-data))
-          "Preview mode should return map with :points and :cue-destinations")
-      (when frame-data
-        (is (contains? frame-data :points))
-        (is (contains? frame-data :cue-destinations)))))
-
-  (testing "when skip-zone-filter? is true - zone filter is bypassed (legacy param)"
-    ;; Test legacy skip-zone-filter? parameter still works
-    (setup-playing-state-with-cue! :left)
-    (state/assoc-in-state! [:config :preview :zone-group-filter] :all)
-    ;; With skip-zone-filter? true, filter is bypassed
-    (let [frame-data (frame-service/generate-current-frame {:skip-zone-filter? true})]
-      ;; Frame should be generated
-      (is (or (nil? frame-data) (map? frame-data))
-          "skip-zone-filter? true should bypass zone filtering")))
-
-  (testing "when destination matches filter - frame is generated"
-    (setup-playing-state-with-cue! :all)
-    (state/assoc-in-state! [:config :preview :zone-group-filter] :all)
-    ;; Both modes should generate frame when zones match
-    (let [frame-preview (frame-service/generate-current-frame {:for-preview? true})
-          frame-idn (frame-service/generate-current-frame {:for-preview? false})]
-      ;; Both should produce same nil/non-nil result when zones match
-      (is (= (nil? frame-preview) (nil? frame-idn))
-          "Both preview and IDN modes should produce same result when zones match")))
-
-  (testing "when preview filter is nil (master view) - everything passes"
-    (setup-playing-state-with-cue! :left)
-    (state/assoc-in-state! [:config :preview :zone-group-filter] nil)
-    ;; With nil filter, frame generation should be attempted
-    (let [frame-data (frame-service/generate-current-frame)]
-      ;; Should return map structure or nil
-      (is (or (nil? frame-data) (and (map? frame-data)
-                                     (or (nil? (:points frame-data))
-                                         (vector? (:points frame-data)))))
-          "Frame should be nil or a map with :points vector"))))
-
-
-;; Timing Context Tests
-
-
-(deftest get-timing-context-test
-  (testing "returns timing context with accumulated values (from first active cue)"
-    (state/swap-state!
-     #(assoc-in % [:playback :active-cues [0 0]]
-                {:trigger-time (System/currentTimeMillis)
-                 :accumulated-beats 42.5
-                 :accumulated-ms 10000
-                 :phase-offset 0.25
-                 :phase-offset-target 0.0
-                 :last-frame-time (System/currentTimeMillis)}))
-    (let [ctx (frame-service/get-timing-context)]
-      (is (= 42.5 (:accumulated-beats ctx)))
-      (is (= 10000 (:accumulated-ms ctx)))
-      (is (= 0.25 (:phase-offset ctx)))
-      (is (= 42.75 (:effective-beats ctx)) "effective-beats = accumulated-beats + phase-offset")))
-
-  (testing "defaults to zero values when no active cues"
-    (let [ctx (frame-service/get-timing-context)]
-      (is (number? (:accumulated-beats ctx)))
-      (is (number? (:accumulated-ms ctx)))
-      (is (number? (:phase-offset ctx)))
-      (is (number? (:effective-beats ctx))))))
 
 
 ;; Playback State Tests
@@ -291,246 +180,94 @@
         (is (nil? (:right result)) ":right should not have a frame")
         (is (nil? (:center result)) ":center should not have a frame")))))
 
-(deftest test-generate-frames-by-zone-cached
-  (testing "Cached function returns same result on repeated calls within cache window"
-    (let [current-time (System/currentTimeMillis)]
-      (state/swap-state!
-       (fn [s]
-         (-> s
-             (assoc-in [:timing :global-clock]
-                       {:accumulated-beats 0.0
-                        :accumulated-ms 0.0
-                        :last-frame-time current-time}))))
-
-      (let [test-cue-chain {:destination-zone {:zone-group-id :left}
-                            :tracks [{:id #uuid "10000000-0000-0000-0000-000000000000"
-                                      :name "Track 1"
-                                      :zone-group-id :left}]
-                            :items [{:type :preset
-                                     :preset-id :circle
-                                     :track-id #uuid "10000000-0000-0000-0000-000000000000"
-                                     :enabled? true
-                                     :effects []}]}
-            result1 (frame-service/generate-frames-by-zone-cached
-                     test-cue-chain 0 120.0 0 test-timing-ctx)
-            result2 (frame-service/generate-frames-by-zone-cached
-                     test-cue-chain 0 120.0 0 test-timing-ctx)]
-
-        (is (= result1 result2) "Cached results should be identical")
-        (is (contains? result1 :left) "Result should contain :left zone")))))
-
-
-;; Multi-Cue Zone Destination Tests
+;; The preview from a tick's rendered cues (preview-data)
 ;;
-;; These tests verify the fix for BUG-2026-02-06:
-;; cue-destinations was missing cues with non-default zone routing because
-;; the single preview-zone filter excluded them entirely.
+;; BUG-2026-02-06: cue-destinations was missing cues with non-default zone
+;; routing because the single preview-zone filter excluded them entirely.
 
 
-(defn setup-multi-cue-state!
-  "Set up state with multiple active cues with different zone destinations.
-   This tests the core bug where cues routed to zones other than the preview filter
-   were being excluded from cue-destinations."
-  []
-  (let [current-time (System/currentTimeMillis)]
-    (state/swap-state!
-     (fn [s]
-       (-> s
-           (assoc-in [:playback :playing?] true)
-           ;; Initialize global clock
-           (assoc-in [:timing :global-clock]
-                     {:accumulated-beats 0.0
-                      :accumulated-ms 0.0
-                      :last-frame-time current-time})
-           ;; Cue 1: routed to :all (default zone)
-           (assoc-in [:playback :active-cues [5 0]]
-                     {:trigger-time current-time
-                      :accumulated-beats 0.0
-                      :accumulated-ms 0.0
-                      :phase-offset 0.0
-                      :phase-offset-target 0.0
-                      :last-frame-time current-time})
-           (assoc-in [:chains :cue-chains [5 0]]
-                     {:destination-zone {:zone-group-id :all}
-                      :tracks [{:id #uuid "10000000-0000-0000-0000-000000000000"
-                                :name "Track 1"
-                                :zone-group-id :all}]
-                      :items [{:type :preset
-                               :preset-id :circle
-                               :track-id #uuid "10000000-0000-0000-0000-000000000000"
-                               :enabled? true
-                               :effects []}]})
-           ;; Cue 2: routed to :left (non-default zone)
-           (assoc-in [:playback :active-cues [6 0]]
-                     {:trigger-time current-time
-                      :accumulated-beats 0.0
-                      :accumulated-ms 0.0
-                      :phase-offset 0.0
-                      :phase-offset-target 0.0
-                      :last-frame-time current-time})
-           (assoc-in [:chains :cue-chains [6 0]]
-                     {:destination-zone {:zone-group-id :left}
-                      :tracks [{:id #uuid "20000000-0000-0000-0000-000000000000"
-                                :name "Track 2"
-                                :zone-group-id :left}]
-                      :items [{:type :preset
-                               :preset-id :square
-                               :track-id #uuid "20000000-0000-0000-0000-000000000000"
-                               :enabled? true
-                               :effects []}]}))))))
+(def ^:private track-1 #uuid "10000000-0000-0000-0000-000000000000")
+(def ^:private track-2 #uuid "20000000-0000-0000-0000-000000000000")
+
+(defn- chain-to [zone preset-id track-id]
+  {:destination-zone {:zone-group-id zone}
+   :tracks [{:id track-id :name "Track" :zone-group-id zone}]
+   :items [{:type :preset :preset-id preset-id :track-id track-id :enabled? true :effects []}]})
+
+(defn- rendered
+  "[{:cell :zone-frames}] for cells and their chains, rendered at beat 2 as
+   the show clock renders a tick."
+  [& cells-and-chains]
+  (mapv (fn [[cell chain]]
+          {:cell cell
+           :zone-frames (frame-service/generate-frames-by-zone chain 1000 120.0 0 test-timing-ctx)})
+        (partition 2 cells-and-chains)))
+
+(defn- two-cues []
+  (rendered [5 0] (chain-to :all :circle track-1)
+            [6 0] (chain-to :left :square track-2)))
 
 
 (deftest test-cue-destinations-includes-all-active-cues
   (testing "cue-destinations includes ALL active cues regardless of zone routing"
-    (setup-multi-cue-state!)
-    ;; Set preview filter to :all (the default)
-    (state/assoc-in-state! [:config :preview :zone-group-filter] :all)
-
-    (let [frame-data (frame-service/generate-current-frame)]
-      (is (some? frame-data) "Frame data should not be nil")
-      (is (contains? frame-data :cue-destinations) "Should have :cue-destinations")
-
-      (let [cue-dests (:cue-destinations frame-data)]
-        ;; This is the critical test - both cues should be in cue-destinations
-        ;; even though only one targets :all (the preview filter zone)
-        (is (contains? cue-dests [5 0])
-            "Cue [5 0] with :all destination should be in cue-destinations")
-        (is (contains? cue-dests [6 0])
-            "Cue [6 0] with :left destination should ALSO be in cue-destinations (BUG FIX)")
-
-        ;; Verify the zone targeting is correct
-        (is (= #{:all} (get cue-dests [5 0]))
-            "Cue [5 0] should target :all")
-        (is (= #{:left} (get cue-dests [6 0]))
-            "Cue [6 0] should target :left")))))
-
+    (let [cue-dests (:cue-destinations (frame-service/preview-data (two-cues)))]
+      (is (= {[5 0] #{:all} [6 0] #{:left}} cue-dests)
+          "the cue routed to :left is there too (the bug fix), each with its zones"))))
 
 (deftest test-cue-destinations-not-affected-by-preview-filter
   (testing "cue-destinations tracking is independent of preview zone filter setting"
-    (setup-multi-cue-state!)
-
-    ;; Test with various preview filter settings
     (doseq [filter-zone [nil :all :left :right :center]]
       (state/assoc-in-state! [:config :preview :zone-group-filter] filter-zone)
-
-      (let [frame-data (frame-service/generate-current-frame)]
-        (when frame-data
-          (let [cue-dests (:cue-destinations frame-data)]
-            (is (= 2 (count cue-dests))
-                (str "Should have 2 cues in cue-destinations with filter=" filter-zone))
-            (is (contains? cue-dests [5 0])
-                (str "Cue [5 0] should be present with filter=" filter-zone))
-            (is (contains? cue-dests [6 0])
-                (str "Cue [6 0] should be present with filter=" filter-zone))))))))
+      (is (= #{[5 0] [6 0]} (set (keys (:cue-destinations (frame-service/preview-data (two-cues))))))
+          (str "with filter=" filter-zone)))))
 
 (deftest test-frame-data-contains-combined-points
-  (testing "frame-data :points contains combined frames from all cues"
-    (setup-multi-cue-state!)
-
-    (let [frame-data (frame-service/generate-current-frame)]
-      (is (some? frame-data) "Frame data should not be nil")
-      (is (contains? frame-data :points) "Should have :points")
-      (is (vector? (:points frame-data)) ":points should be a vector")
-      ;; Should have points from both cues combined
-      (is (seq (:points frame-data)) ":points should not be empty"))))
+  (testing ":points joins every cue's zones, blanked between them"
+    (let [cues (two-cues)
+          {:keys [points]} (frame-service/preview-data cues)
+          [a b] (map #(frame-service/concatenate-frames (vec (vals (:zone-frames %))) 0) cues)]
+      (is (vector? points))
+      (is (= (frame-service/concatenate-frames [a b] 0) points)))))
 
 
-;; Zone-Frames Tests
-;;
-;; These tests verify the :zone-frames key in generate-current-frame output.
-;; :zone-frames maps zone-id → points, aggregated across all cues.
-;; This allows preview cells to look up points for their zone directly.
-
-
-(defn setup-single-cue-state!
-  "Set up state with a single active cue at [5 0] routed to :all."
-  []
-  (let [current-time (System/currentTimeMillis)]
-    (state/swap-state!
-     (fn [s]
-       (-> s
-           (assoc-in [:playback :playing?] true)
-           (assoc-in [:timing :global-clock]
-                     {:accumulated-beats 0.0
-                      :accumulated-ms 0.0
-                      :last-frame-time current-time})
-           (assoc-in [:playback :active-cues [5 0]]
-                     {:trigger-time current-time
-                      :accumulated-beats 0.0
-                      :accumulated-ms 0.0
-                      :phase-offset 0.0
-                      :phase-offset-target 0.0
-                      :last-frame-time current-time})
-           (assoc-in [:chains :cue-chains [5 0]]
-                     {:destination-zone {:zone-group-id :all}
-                      :tracks [{:id #uuid "10000000-0000-0000-0000-000000000000"
-                                :name "Track 1"
-                                :zone-group-id :all}]
-                      :items [{:type :preset
-                               :preset-id :circle
-                               :track-id #uuid "10000000-0000-0000-0000-000000000000"
-                               :enabled? true
-                               :effects []}]}))))))
+;; Zone-frames: zone-id -> points across all cues, so a preview cell for a
+;; zone shows what an engine on that zone gets
 
 
 (deftest test-zone-frames-single-active-cue
   (testing "Single active cue produces zone-frames entry for its destination zone"
-    (setup-single-cue-state!)
-
-    (let [frame-data (frame-service/generate-current-frame)]
-      (is (some? frame-data) "Frame data should not be nil")
-      (is (contains? frame-data :zone-frames) "Should have :zone-frames key")
-
-      (let [zone-frames (:zone-frames frame-data)]
-        (is (map? zone-frames) ":zone-frames should be a map")
-        (is (contains? zone-frames :all) "Should contain entry for :all zone")
-        (is (vector? (get zone-frames :all)) "Zone frame should be a vector of points")
-        (is (seq (get zone-frames :all)) "Zone frame should not be empty")))))
-
+    (let [[cue] (rendered [5 0] (chain-to :all :circle track-1))
+          zone-frames (:zone-frames (frame-service/preview-data [cue]))]
+      (is (= #{:all} (set (keys zone-frames))))
+      (is (= (get-in cue [:zone-frames :all]) (get zone-frames :all))))))
 
 (deftest test-zone-frames-multiple-cues-same-zone
-  (testing "Multiple cues to same zone aggregate their points"
-    (setup-multi-cue-state!)
-
-    (let [frame-data (frame-service/generate-current-frame)]
-      (is (some? frame-data) "Frame data should not be nil")
-      (is (contains? frame-data :zone-frames) "Should have :zone-frames key")
-
-      (let [zone-frames (:zone-frames frame-data)]
-        (is (map? zone-frames) ":zone-frames should be a map")
-        ;; Both cues in setup-multi-cue-state! route to :all
-        (is (contains? zone-frames :all) "Should contain entry for :all zone")
-        (is (vector? (get zone-frames :all)) "Zone frame should be a vector")
-        (is (seq (get zone-frames :all)) "Zone frame should not be empty")))))
-
+  (testing "Cues to the same zone are joined there with a blanking jump, as the engine joins them"
+    (let [cues (rendered [5 0] (chain-to :all :circle track-1)
+                         [6 0] (chain-to :all :square track-2))
+          [a b] (map #(get-in % [:zone-frames :all]) cues)
+          zone (get-in (frame-service/preview-data cues) [:zone-frames :all])]
+      (is (= (frame-service/concatenate-frames [a b] 0) zone))
+      (is (= (+ (count a) 2 (count b)) (count zone)) "two blanking points between the cues"))))
 
 (deftest test-zone-frames-empty-when-no-active-cues
-  (testing "No active cues produces nil frame-data (no zone-frames)"
-    ;; State is already initialized with no active cues via fixture
-    ;; Just set playing to true but no cues
-    (state/assoc-in-state! [:playback :playing?] true)
-
-    (let [frame-data (frame-service/generate-current-frame)]
-      ;; When no active cues, generate-current-frame returns nil
-      (is (nil? frame-data) "Frame data should be nil when no active cues"))))
-
+  (testing "No cues, or cues that rendered nothing: nil"
+    (is (nil? (frame-service/preview-data [])))
+    (is (nil? (frame-service/preview-data [{:cell [0 0] :zone-frames {}}])))))
 
 (deftest test-zone-frames-zones-match-cue-destinations
   (testing "zone-frames keys match union of all cue destination zones"
-    (setup-multi-cue-state!)
+    (let [{:keys [zone-frames cue-destinations]} (frame-service/preview-data (two-cues))]
+      (is (= (set (keys zone-frames)) (into #{} cat (vals cue-destinations)))))))
 
-    (let [frame-data (frame-service/generate-current-frame)]
-      (is (some? frame-data) "Frame data should not be nil")
-
-      (let [zone-frames (:zone-frames frame-data)
-            cue-destinations (:cue-destinations frame-data)
-            ;; Collect all unique zones from cue-destinations (vals are sets of zones)
-            all-zones (into #{} cat (vals cue-destinations))]
-        ;; zone-frames should have entry for each unique zone
-        (is (= (set (keys zone-frames)) all-zones)
-            "zone-frames keys should match all unique zones from cue-destinations")))))
-
-
+(deftest preview->mirror-test
+  (let [preview (frame-service/preview-data (two-cues))
+        mirrored (frame-service/preview->mirror preview)]
+    (is (every? #(= #{:x :y :r :g :b :blanked?} (set (keys %))) (:points mirrored))
+        "points as maps, for the preview views")
+    (is (= (update-vals (:zone-frames preview) count) (update-vals (:zone-frames mirrored) count)))
+    (is (= (:cue-destinations preview) (:cue-destinations mirrored))))
+  (is (nil? (frame-service/preview->mirror nil))))
 
 
 (defn- render-with-tracks [tracks]
@@ -564,36 +301,6 @@
                    :timeline/start 0.0 :timeline/duration 4.0}]}
          extra))
 
-(defn- start-timeline! [cue start-beat now]
-  (state/swap-state!
-   (fn [s]
-     (-> s
-         (assoc-in [:chains :cue-chains [0 0]] cue)
-         (assoc-in [:timing :bpm] 120.0)
-         (assoc-in [:playback :playing?] true)
-         (assoc-in [:playback :active-cues [0 0]]
-                   {:timeline? true :trigger-time now :accumulated-beats start-beat :accumulated-ms 0.0
-                    :phase-offset 0.0 :phase-offset-target 0.0 :last-frame-time now})))))
-
-(defn- beats-at-00 [] (get-in (state/get-raw-state) [:playback :active-cues [0 0] :accumulated-beats]))
-
-(deftest timeline-cue-stops-at-end-test
-  (start-timeline! (timeline-cue {}) 3.5 1000)
-  (frame-service/update-timing-accumulators! 1500) ; +1 beat at 120 BPM
-  (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]]))
-      "past the last clip end (4 beats) the cue is deactivated")
-  (is (false? (get-in (state/get-raw-state) [:playback :playing?])))
-  (testing "with the loop on it keeps going"
-    (start-timeline! (timeline-cue {:loop {:enabled? true :start 0.0 :duration 4.0}}) 3.5 1000)
-    (frame-service/update-timing-accumulators! 1500)
-    (is (< (Math/abs (- 0.5 (beats-at-00))) 1e-9))))
-
-(deftest locked-tempo-ignores-global-bpm-test
-  (start-timeline! (timeline-cue {:timeline/tempo-bpm 60.0 :timeline/length 100.0}) 0.0 1000)
-  (state/swap-state! assoc-in [:timing :bpm] 180.0)
-  (frame-service/update-timing-accumulators! 2000) ; 1 s
-  (is (< (Math/abs (- 1.0 (beats-at-00))) 1e-9) "1 s at the locked 60 BPM = 1 beat, not 3"))
-
 (deftest clip-local-loop-modulator-starts-at-clip-test
   (let [clip (fn [start]
                {:id :a :type :preset :preset-id :circle :track-id :t :enabled? true
@@ -608,36 +315,6 @@
     (is (= (render 0.0 1.25) (render 8.0 9.25))
         "the same clip moved to beat 8 looks the same 1.25 beats into it")
     (is (not= (render 0.0 1.25) (render 0.0 2.0)) "the modulator does move")))
-
-;; Phase 5: MTC chase
-
-(deftest chasing-timeline-follows-mtc-test
-  (let [cue (timeline-cue {:timeline/chase :mtc :timeline/tc-start 3600.0 :timeline/tempo-bpm 120.0
-                           :timeline/length 64.0})
-        tick! (fn [pos now] (with-redefs [mtc/current (constantly pos)]
-                              (frame-service/update-timing-accumulators! now)))]
-    (state/swap-state! (fn [s] (-> s
-                                   (assoc-in [:chains :cue-chains [0 0]] cue)
-                                   (assoc-in [:playback :active-cues] {})
-                                   (assoc-in [:playback :playing?] false))))
-    (tick! {:state :running :seconds 3599.0 :fps 25 :tc {:h 0 :m 59 :s 59 :f 0 :drop? false}} 1000)
-    (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))
-    (is (= {:state :running :fps 25 :text "00:59:59:00"}
-           (dissoc (get-in (state/get-raw-state) [:backend :input :mtc]) :at-ms))
-        "the status is mirrored for the UI")
-    (tick! {:state :running :seconds 3605.48 :fps 25} 1033)
-    (is (< (Math/abs (- 10.96 (beats-at-00))) 1e-9))
-    (testing "the cue's own clock doesn't move it between timecode updates"
-      (tick! {:state :running :seconds 3605.48 :fps 25} 1500)
-      (is (< (Math/abs (- 10.96 (beats-at-00))) 1e-9)))
-    (tick! {:state :stopped :seconds 3605.48 :fps 25} 1600)
-    (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))))
-
-(deftest non-chasing-cues-ignore-mtc-test
-  (start-timeline! (timeline-cue {:timeline/length 100.0}) 2.0 1000)
-  (with-redefs [mtc/current (constantly {:state :running :seconds 50.0 :fps 25})]
-    (frame-service/update-timing-accumulators! 1500))
-  (is (< (Math/abs (- 3.0 (beats-at-00))) 1e-9) "advanced by its own clock (+1 beat), not set to 100"))
 
 ;; Track and folder effects
 
@@ -684,9 +361,8 @@
         t0 (System/currentTimeMillis)
         ;; Started and advanced the way the app does it, so the context is the app's
         width-at (fn [ms]
-                   (let [pb (ct/activate-cue {} [0 0] t0 0.0 {:timeline? true :start-beat 0.0})
-                         t (reduce (fn [t now] (ct/update-cue-timing t now 120.0 1.0 {:enabled? false} {:length 64.0}))
-                                   (get-in pb [:active-cues [0 0]])
+                   (let [t (reduce (fn [t now] (ct/update-cue-timing t now 120.0 1.0 {:enabled? false} {:length 64.0}))
+                                   (ct/start-timing t0 0.0 {:timeline? true :start-beat 0.0})
                                    (concat (range t0 (+ t0 ms) 33) [(+ t0 ms)]))
                          frame (get (frame-service/generate-frames-by-zone
                                      cue ms 120.0 t0 (ct/get-cue-timing-context t 120.0))
@@ -696,21 +372,3 @@
     (is (< (Math/abs (- 1.0 (width-at 0))) 0.01) "at the start the sawtooth is at 1")
     (is (< (Math/abs (- 0.5 (width-at 1000))) 0.01) "2 beats into 4: half")
     (is (< (width-at 3000) 0.01) "done: held at 0")))
-
-
-;; Preview timer (output runtime Phase 2)
-
-(deftest preview-timer-survives-an-error-test
-  (let [calls (atom 0)
-        deadline (+ (System/currentTimeMillis) 3000)]
-    (with-redefs [frame-service/update-preview-frame!
-                  (fn []
-                    (when (= 3 (swap! calls inc))
-                      (throw (AssertionError. "test: Assert failed"))))]
-      (try
-        (frame-service/start-preview-updates! 60)
-        (while (and (< @calls 10) (< (System/currentTimeMillis) deadline))
-          (Thread/sleep 10))
-        (is (<= 10 @calls) "ticks keep coming after the one that threw")
-        (finally
-          (frame-service/stop-preview-updates!))))))

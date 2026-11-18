@@ -595,8 +595,8 @@
 
 (defn- cue-timing
   "The timing of a grid cue started at the wall-clock time t0 and played for ms
-   at bpm, ticked every 33 ms like the preview timer."
-  ([t0 ms bpm] (cue-timing (get-in (ct/activate-cue {} [0 0] t0 0.0 {}) [:active-cues [0 0]]) t0 ms bpm))
+   at bpm, ticked every 33 ms."
+  ([t0 ms bpm] (cue-timing (ct/start-timing t0 0.0 {}) t0 ms bpm))
   ([timing from ms bpm]
    (reduce (fn [t now] (ct/update-cue-timing t now bpm 1.0 nil))
            timing

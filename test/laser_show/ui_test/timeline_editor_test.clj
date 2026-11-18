@@ -5,7 +5,7 @@
             [clojure.tools.logging :as log]
             [laser-show.events.core :as events]
             [laser-show.input.mtc :as mtc]
-            [laser-show.services.frame-service :as frame-service]
+            [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.state.history :as history]
             [laser-show.timeline.layout :as layout]
@@ -16,6 +16,16 @@
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
+
+(defn- tick-clock!
+  "app/start-test! runs no show clock: tick it by hand, MIRROR_EVERY times so
+   the mirror (positions, the MTC status) reaches app state."
+  []
+  (dotimes [_ show-clock/MIRROR_EVERY]
+    (show-clock/tick! (System/nanoTime))))
+
+(defn- position [cell]
+  (get-in (state/get-raw-state) [:playback :positions cell]))
 
 (deftest timeline-editor-controls-and-canvas-respond-to-clicks
   (let [robot (ui/robot)]
@@ -244,11 +254,10 @@
     (ui/wait-for! #(= 6.0 (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :cursor-beat])))
     (ui/click! robot "#timeline-play")
     (ui/wait-for! #(some? (get-in (state/get-raw-state) timing-path)))
-    ;; app/start-test! doesn't run the preview timer: advance the clock by hand
-    (frame-service/update-timing-accumulators! (System/currentTimeMillis))
+    (tick-clock!)
     (Thread/sleep 50)
-    (frame-service/update-timing-accumulators! (System/currentTimeMillis))
-    (is (>= (get-in (state/get-raw-state) (conj timing-path :accumulated-beats)) 6.0))
+    (tick-clock!)
+    (is (>= (position [0 0]) 6.0))
     (testing "the play button becomes pause, and pause freezes the cue"
       (ui/click! robot "#timeline-play")
       (ui/wait-for! #(true? (get-in (state/get-raw-state) (conj timing-path :paused?)))))
@@ -274,7 +283,7 @@
 (deftest timeline-follows-midi-timecode
   (let [robot (ui/robot)
         timing-path [:playback :active-cues [0 0]]
-        tick! #(frame-service/update-timing-accumulators! (System/currentTimeMillis))]
+        tick! tick-clock!]
     (mtc/reset-decoder!)
     (open-timeline!)
     (events/dispatch! {:event/type :timeline/apply-op :col 0 :row 0 :op {:op :set-length :beats 64.0}})
@@ -290,8 +299,8 @@
         (mtc/on-quarter-frame! b))
       (tick!)
       (ui/wait-for! #(some? (get-in (state/get-raw-state) timing-path)))
-      (is (< 2.0 (get-in (state/get-raw-state) (conj timing-path :accumulated-beats)) 2.3)
-          "1.07 s at 120 BPM")
+      (ui/wait-for! #(some? (position [0 0])))
+      (is (< 2.0 (position [0 0]) 2.3) "1.07 s at 120 BPM")
       (ui/wait-for! #(re-matches #"MTC 00:00:01:\d\d" (ui/node-text "#timeline-mtc-chip")))
       (is (ui/has-style-class? "#timeline-mtc-chip" "tl-mtc-running"))
       (ui/wait-for! #(ui/visible? "#timeline-mtc-rate-warning"))

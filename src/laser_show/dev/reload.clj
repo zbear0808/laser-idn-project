@@ -88,11 +88,12 @@
   "Reload all app code and trigger UI re-render.
    
    This function:
-   1. Stops services (frame-service timer)
-   2. Discovers and reloads all code namespaces (views, events, animation, backend)
-   3. Restarts services
-   4. Reinitializes CSS styles
-   5. Triggers a re-render by touching state
+   1. Discovers and reloads all code namespaces (views, events, animation, backend)
+   2. Reinitializes CSS styles
+   3. Triggers a re-render by touching state
+
+   The show clock keeps running through it: its loop calls tick! through the
+   var, so the next tick runs the reloaded code, and the output never stops.
 
    Note: Does NOT create a new app/renderer. The existing renderer continues
    watching the same context atom. Because views use var references
@@ -114,12 +115,7 @@
   (try
     (log/info "🔄 Reloading app code...")
     
-    ;; Step 1: Stop services before reloading
-    (log/info "  Stopping services...")
-    (require 'laser-show.services.frame-service)
-    ((resolve 'laser-show.services.frame-service/stop-preview-updates!))
-    
-    ;; Step 2: Discover and reload all code namespaces
+    ;; Step 1: Discover and reload all code namespaces
     (log/info "  Discovering namespaces...")
     (let [namespaces (discover-namespaces)]
       (log/info "  Found" (count namespaces) "namespaces to reload")
@@ -131,18 +127,13 @@
             (log/warn "  ⚠ Failed to reload" ns-sym ":" (.getMessage e)))))
       (log/info "  ✓ Code namespaces reloaded")
       
-      ;; Step 3: Restart services
-      (log/info "  Restarting services...")
-      ((resolve 'laser-show.services.frame-service/start-preview-updates!) 30)
-      (log/info "  ✓ Services restarted")
-      
-      ;; Step 4: Reinitialize CSS styles (URLs may have changed after reload)
+      ;; Step 2: Reinitialize CSS styles (URLs may have changed after reload)
       (log/info "  Reinitializing styles...")
       (let [init-styles-fn (resolve 'laser-show.app/init-styles!)]
         (init-styles-fn))
       (log/info "  ✓ Styles reinitialized")
       
-      ;; Step 5: Trigger re-render by touching state
+      ;; Step 3: Trigger re-render by touching state
       ;; The renderer watches the context atom; updating state triggers re-render.
       ;; Since view functions use var references, the new code is used.
       (log/info "  Triggering re-render...")

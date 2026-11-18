@@ -104,6 +104,20 @@
         (is (some? returned) "returned within 2 s of a 5 s target")
         (is (< (- (long returned) start) 1000000000))))))
 
+(defn- ms->ns [ms] (long (* ms 1000000)))
+
+(deftest next-deadline-examples-test
+  (let [interval 16666666]
+    (testing "on time: one interval after the deadline the frame was due at"
+      (is (= interval (timing/next-deadline 0 (ms->ns 2) interval))))
+    (testing "less than one interval late: the deadline stays, so the next frame starts at once"
+      (is (= interval (timing/next-deadline 0 (ms->ns 25) interval)))
+      (is (= interval (timing/next-deadline 0 (* 2 interval) interval)) "exactly one interval late"))
+    (testing "more than one interval late: the missed frames are skipped"
+      (is (= (+ (ms->ns 50) interval) (timing/next-deadline 0 (ms->ns 50) interval))))
+    (testing "deadlines keep their own grid, whatever the clock's origin"
+      (is (= (+ -5000 interval) (timing/next-deadline -5000 (ms->ns 2) interval))))))
+
 
 ;; Measurement Tests
 

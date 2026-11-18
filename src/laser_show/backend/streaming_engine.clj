@@ -59,14 +59,24 @@
    :frame-time-us 0.0
    :send-fps 0.0
    :draw-fps 0.0
-   :scan-limited? false})
+   :scan-limited? false
+   :tick-to-send-us nil})
+
+(def ^:const KEEPALIVE_INTERVALS
+  "While paced by the show clock, an engine that gets no tick for this many
+   frame intervals (50 ms at 60 fps) sends the newest frame again. In discrete
+   mode the DAC repeats the last frame anyway (Stream §3.3); this keeps the
+   link alive (Hello §7.2) and the config at most 250 ms apart (Stream §2.2)."
+  3)
 
 (defn create-engine
   "Create a new streaming engine configuration.
    
    Parameters:
    - target-host: IP address of the laser DAC
-   - frame-provider: Function that returns the current LaserFrame to send
+   - frame-provider: Function that returns the current LaserFrame to send. A
+     frame may carry {:tick :at-ns} metadata: the show clock's tick it shows
+     and when that was published (see :frame-signal)
    - opts: Optional map with:
      - :id - Names the engine in output-errors (default \"host:port/channel\")
      - :fps - Target frames per second (default 60)
@@ -82,13 +92,18 @@
        Off by default: frames up to the 0xFF00 message limit are sent in one message
        (Stream spec §6.2 prefers IP fragmentation), larger frames are truncated.
        The sequel-fragment layout has not been checked against a reference receiver.
+     - :frame-signal - The show clock's ticks to send on (show-time/frame-signal):
+       {:tick :running? :await}. While (:running?) is true the engine sends each
+       new tick's frame as soon as it is published, and the newest one again after
+       KEEPALIVE_INTERVALS without a tick; otherwise, and without a signal, it
+       paces itself at :fps
    
    NOTE: channel-id is for logical multiplexing (0-63), service-id targets physical outputs (0-255).
    For multi-head DACs, each output has a different service-id.
    
    Returns an engine map that can be started with start!"
   [target-host frame-provider & {:keys [id fps port channel-id service-id output-config
-                                        scan-rate target-mtu fragmentation-enabled?]
+                                        scan-rate target-mtu fragmentation-enabled? frame-signal]
                                   :or {fps DEFAULT_FPS
                                        port DEFAULT_PORT
                                        channel-id DEFAULT_CHANNEL_ID
@@ -100,6 +115,7 @@
    :target-host target-host
    :target-port port
    :frame-provider frame-provider
+   :frame-signal frame-signal
    :fps fps
    :channel-id channel-id
    :service-id service-id
@@ -248,16 +264,6 @@
         (hello/send-packet-to @socket hello-packet (target-address! engine) target-port)))
     [packet-count duration-us]))
 
-(defn- next-deadline
-  "When the frame after the one due at deadline should start: one interval
-   later. If now is already more than one interval past that, the missed
-   frames are skipped and the next one starts an interval from now."
-  ^long [^long deadline ^long now ^long interval]
-  (let [next (+ deadline interval)]
-    (if (> (- now next) interval)
-      (+ now interval)
-      next)))
-
 (defn- update-stats
   "Stats after a frame of duration-us went out at now-ns in packet-count
    packets. The rates are smoothed over about 10 frames (an EMA); target-us is
@@ -267,32 +273,39 @@
      for its duration, then the newest one it has (Stream §3.3), so this is
      10^6 / max(send interval, duration);
    - :scan-limited?: frames take more than 2 % longer to draw than the send
-     interval, so the scan rate, not the send rate, sets :draw-fps."
-  [{:keys [frames-sent packets-sent fragments-sent last-send-ns interval-us frame-time-us] :as stats}
-   now-ns duration-us packet-count target-us]
-  (let [interval (if last-send-ns
-                   (/ (- now-ns last-send-ns) 1000.0)
-                   (double target-us))
-        frame-time (max interval (double duration-us))
-        smooth (fn [old x]
-                 (if (pos? frames-sent)
-                   (+ (* 0.9 old) (* 0.1 x))
-                   x))
-        interval' (smooth interval-us interval)
-        frame-time' (smooth frame-time-us frame-time)]
-    (assoc stats
-           :frames-sent (inc frames-sent)
-           :packets-sent (+ packets-sent packet-count)
-           :fragments-sent (if (> packet-count 1)
-                             (+ fragments-sent packet-count)
-                             fragments-sent)
-           :last-send-ns now-ns
-           :frame-duration-us duration-us
-           :interval-us interval'
-           :frame-time-us frame-time'
-           :send-fps (/ 1e6 interval')
-           :draw-fps (/ 1e6 frame-time')
-           :scan-limited? (> frame-time' (* 1.02 interval')))))
+     interval, so the scan rate, not the send rate, sets :draw-fps;
+   - :tick-to-send-us: how long after the show clock published a tick its
+     frame went out (tick-to-send-us, nil for frames of no new tick)."
+  ([stats now-ns duration-us packet-count target-us]
+   (update-stats stats now-ns duration-us packet-count target-us nil))
+  ([{:keys [frames-sent packets-sent fragments-sent last-send-ns interval-us frame-time-us] :as stats}
+    now-ns duration-us packet-count target-us tick-to-send-us]
+   (let [interval (if last-send-ns
+                    (/ (- now-ns last-send-ns) 1000.0)
+                    (double target-us))
+         frame-time (max interval (double duration-us))
+         smooth (fn [old x]
+                  (if (pos? frames-sent)
+                    (+ (* 0.9 old) (* 0.1 x))
+                    x))
+         interval' (smooth interval-us interval)
+         frame-time' (smooth frame-time-us frame-time)]
+     (cond-> (assoc stats
+                    :frames-sent (inc frames-sent)
+                    :packets-sent (+ packets-sent packet-count)
+                    :fragments-sent (if (> packet-count 1)
+                                      (+ fragments-sent packet-count)
+                                      fragments-sent)
+                    :last-send-ns now-ns
+                    :frame-duration-us duration-us
+                    :interval-us interval'
+                    :frame-time-us frame-time'
+                    :send-fps (/ 1e6 interval')
+                    :draw-fps (/ 1e6 frame-time')
+                    :scan-limited? (> frame-time' (* 1.02 interval')))
+       tick-to-send-us (update :tick-to-send-us
+                               #(if % (+ (* 0.9 (double %)) (* 0.1 (double tick-to-send-us)))
+                                    (double tick-to-send-us)))))))
 
 (defn- streaming-loop
   "Main streaming loop - runs in a separate thread.
@@ -300,24 +313,35 @@
    Supports application-layer fragmentation for large frames.
    Records timing metrics for IDN streaming profiling.
    
-   Paced by deadline on System/nanoTime: each frame is due one interval after
-   the last (next-deadline), and the thread parks until then. No frame goes
-   out less than half an interval after the one before, so a frame that
-   overran can't be followed by a burst.
+   Paced by the show clock while it runs (:frame-signal): each new tick's
+   frame goes out as soon as the tick is published, and after
+   KEEPALIVE_INTERVALS without one the newest frame goes out again.
+   Otherwise paced by deadline on System/nanoTime: each frame is due one
+   interval after the last (timing/next-deadline), and the thread parks until
+   then. In that mode, and after an error, no frame goes out less than half an
+   interval after the one before, so a frame that overran can't be followed
+   by a burst. Timestamps are always the send time.
    
    Each engine uses its own sequence counter to avoid interleaving issues
    when multiple engines stream to the same device on different services."
   [engine]
-  (let [{:keys [target-host target-port frame-provider fps
+  (let [{:keys [target-host target-port frame-provider frame-signal fps
                 running? stats output-config service-id channel-id
                 fragmentation-enabled?]} engine
         interval-ns (timing/fps->interval-nanos fps)
         min-gap-ns (quot interval-ns 2)
+        keepalive-ns (* KEEPALIVE_INTERVALS interval-ns)
         target-us (quot interval-ns 1000)
         error-key [:engine (:id engine)]
         keep-running? (fn [] @running?)
+        clock-paced? (fn [] (boolean (and frame-signal ((:running? frame-signal)))))
         deadline (volatile! (System/nanoTime))
         last-sent (volatile! nil)
+        ;; When the last frame was tried, sent or not: a keepalive is due
+        ;; KEEPALIVE_INTERVALS after it, so failing sends wait for a tick too
+        last-attempt (volatile! nil)
+        ;; The newest clock tick this engine has tried to send
+        seen (volatile! -1)
         await-gap! (fn []
                      (when-let [prev @last-sent]
                        (timing/park-until (+ (long prev) min-gap-ns) keep-running?)))]
@@ -331,36 +355,50 @@
     (reset! (:sequence-counter engine) 0)  ;; Reset sequence on stream start
     
     (while @running?
-      (timing/park-until @deadline keep-running?)
-      (when @running?
-        (try
-          (let [produce-start (System/nanoTime)
-                frame (frame-provider)
-                frame-point-count (count (or frame []))
-                frame (frame-rules/sanitize-frame (or frame (t/empty-frame)))
-                produced (System/nanoTime)
-                _ (await-gap!)
-                send-start (System/nanoTime)
-                [packet-count duration-us] (send-frame! engine frame frame-point-count)
-                sent (System/nanoTime)]
-            (vreset! last-sent sent)
-            ;; IDN streaming time (µs): producing plus sending, without the wait between
-            (profiler/record-idn-streaming! (/ (+ (- produced produce-start) (- sent send-start)) 1000.0))
-            (swap! stats update-stats sent duration-us packet-count target-us)
-            (output-errors/ok! error-key))
-          
-          (catch Throwable e
-            ;; Re-resolve the host on the next frame in case its address changed
-            (reset! (:target-address engine) nil)
-            (output-errors/report! error-key e)
-            ;; Void the DAC's frame buffer instead of leaving the last frame drawn
+      (let [paced? (clock-paced?)]
+        (if paced?
+          ((:await frame-signal) @seen
+                                 (+ (long (or @last-attempt (System/nanoTime))) keepalive-ns)
+                                 keep-running?)
+          (timing/park-until @deadline keep-running?))
+        (when @running?
+          (let [tick (volatile! (when frame-signal ((:tick frame-signal))))]
             (try
-              (await-gap!)
-              (send-frame! engine (t/empty-frame) 0)
-              (vreset! last-sent (System/nanoTime))
-              (catch Throwable e2
-                (output-errors/report! error-key e2)))))
-        (vswap! deadline next-deadline (System/nanoTime) interval-ns)))))
+              (let [produce-start (System/nanoTime)
+                    frame (frame-provider)
+                    {frame-tick :tick at-ns :at-ns} (meta frame)
+                    _ (when frame-tick (vreset! tick frame-tick))
+                    new-tick? (and frame-tick (> (long frame-tick) (long @seen)))
+                    frame-point-count (count (or frame []))
+                    frame (frame-rules/sanitize-frame (or frame (t/empty-frame)))
+                    produced (System/nanoTime)
+                    _ (when-not paced? (await-gap!))
+                    send-start (System/nanoTime)
+                    [packet-count duration-us] (send-frame! engine frame frame-point-count)
+                    sent (System/nanoTime)]
+                (vreset! last-sent sent)
+                ;; IDN streaming time (µs): producing plus sending, without the wait between
+                (profiler/record-idn-streaming! (/ (+ (- produced produce-start) (- sent send-start)) 1000.0))
+                (swap! stats update-stats sent duration-us packet-count target-us
+                       (when (and new-tick? at-ns) (/ (- sent (long at-ns)) 1000.0)))
+                (output-errors/ok! error-key))
+              
+              (catch Throwable e
+                ;; Re-resolve the host on the next frame in case its address changed
+                (reset! (:target-address engine) nil)
+                (output-errors/report! error-key e)
+                ;; Void the DAC's frame buffer instead of leaving the last frame drawn
+                (try
+                  (await-gap!)
+                  (send-frame! engine (t/empty-frame) 0)
+                  (vreset! last-sent (System/nanoTime))
+                  (catch Throwable e2
+                    (output-errors/report! error-key e2)))))
+            ;; Wait for a newer tick next, whether or not this one went out
+            (when-let [t @tick]
+              (vswap! seen max (long t)))
+            (vreset! last-attempt (System/nanoTime))
+            (vswap! deadline timing/next-deadline (System/nanoTime) interval-ns)))))))
 
 
 ;; Engine Control
@@ -470,6 +508,6 @@
 
 (defn get-stats
   "Current streaming statistics: the counts, :send-fps, :draw-fps,
-   :scan-limited? and :frame-duration-us (see update-stats)."
+   :scan-limited?, :frame-duration-us and :tick-to-send-us (see update-stats)."
   [engine]
   @(:stats engine))

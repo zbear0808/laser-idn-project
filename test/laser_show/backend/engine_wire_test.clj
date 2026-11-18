@@ -15,13 +15,27 @@
 
 (def ^:private engines (atom []))
 
-(defn- with-fake-dac [f]
+(def ^:private broken-on-purpose (atom #{}))
+
+(defn- breaks!
+  "The test breaks these stream rules on purpose (fake-dac/check), so the
+   fixture's check leaves them out."
+  [& rules]
+  (swap! broken-on-purpose into rules))
+
+(defn- with-fake-dac
+  "Each test streams to its own fake DAC. Afterwards every engine is stopped
+   and everything that arrived is checked against the stream rules."
+  [f]
   (let [fake (dac/start!)]
+    (reset! broken-on-purpose #{})
     (try
       (binding [*dac* fake] (f))
       (finally
         (run! se/stop! @engines)
         (reset! engines [])
+        (let [found (dac/violations fake :skip @broken-on-purpose)]
+          (is (empty? found) (str "the stream breaks IDN rules: " (pr-str (take 5 found)))))
         (dac/stop! fake)))))
 
 (use-fixtures :each with-fake-dac)
@@ -199,6 +213,7 @@
                 (dac/frames *dac*)))))
 
 (deftest send-error-keeps-the-engine-alive-test
+  (breaks! :sequence)
   (let [sends (atom 0)
         send-packet-to hello/send-packet-to]
     (with-redefs [hello/send-packet-to (fn [& args]

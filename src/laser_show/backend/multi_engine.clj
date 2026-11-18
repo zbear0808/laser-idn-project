@@ -7,29 +7,28 @@
    
    ZONE-BASED ARCHITECTURE (v3):
    - One streaming engine per enabled projector
-   - Each engine has a frame provider that:
+   - The show clock renders every playing cue once per tick
+     (services/show_clock.clj) and publishes it (show-time/latest)
+   - Each engine wakes on the tick (show-time/frame-signal) and its frame
+     provider, on the engine's own thread:
      1. Looks up projector's zone-groups from config
-     2. Gets zone-frames map from frame-service (cached per frame)
-     3. Extracts and concatenates frames for projector's zones
-     4. Applies projector calibration effects (color curves + corner-pin)
+     2. Takes those zones from each cue of the tick and joins them
+     3. Applies projector calibration effects (color curves + corner-pin)
    
    Each projector receives only content routed to its assigned zones.
-   Multiple projectors in the same zone share cached frame computation.
    
    This namespace builds engines and their frame providers. Starting, stopping
    and keeping them is the output runtime's job (backend/output_runtime.clj)."
   (:require [clojure.tools.logging :as log]
             [clojure.string :as str]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.backend.output-errors :as output-errors]
             [laser-show.backend.streaming-engine :as engine]
             [laser-show.dev-config :as dev-config]
             [laser-show.state.core :as state]
             [laser-show.state.extractors :as ex]
             [laser-show.animation.effects :as effects]
-            [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.services.frame-service :as frame-service]
-            [laser-show.timeline.playback :as playback]
-            [laser-show.input.store :as input-store]
             [laser-show.idn.output-config :as output-config]))
 
 
@@ -63,7 +62,7 @@
   "Extract frames from a zone-frames map for the specified zone groups.
    
    Args:
-   - zone-frames-map: Map of {zone-group-id → frame} from generate-frames-by-zone-cached
+   - zone-frames-map: Map of {zone-group-id → frame}, one cue's render
    - zone-group-ids: Vector of zone-group-ids to extract frames for
    
    Returns: Vector of frames (may contain nils for zones with no content).
@@ -111,99 +110,62 @@
           frame))
       frame)))
 
-(defn- get-active-cues-data
-  "Get data for ALL active cues (multi-cue support for IDN streaming).
-   
-   Returns a vector of maps, each with:
-   - :cell - [col row] coordinates
-   - :cue-chain - the cue chain data
-   - :cue-timing - the timing state for this cue
-   
-   Returns empty vector if no active cues."
-  [raw-state]
-  (let [active-cues (get-in raw-state [:playback :active-cues] {})]
-    (into []
-          (keep (fn [[[col row] cue-timing]]
-                  (let [cue-chain-data (get-in raw-state [:chains :cue-chains [col row]])]
-                    (when (seq (:items cue-chain-data))
-                      {:cell [col row]
-                       :cue-chain cue-chain-data
-                       :cue-timing cue-timing}))))
-          active-cues)))
+(defn- stalled
+  "Why a projector sends an empty frame instead of the snapshot's."
+  [snapshot now-ns]
+  (ex-info "Show clock stalled"
+           {:stale-ms (quot (- (long now-ns) (long (:at-ns snapshot))) 1000000)}))
 
 (defn- projector-frame
-  "The projector's frame for now: every active cue routed to its zones, then
-   its projector effects. Nil while nothing is playing."
-  [projector-id]
-  (let [raw-state (state/get-raw-state)
-        playing? (get-in raw-state [:playback :playing?])
-        ;; Get ALL active cues (multi-cue support); idle frames return nil
-        all-cues (when playing? (get-active-cues-data raw-state))]
-    (when (seq all-cues)
-      (let [projector-zone-groups (get-projector-zone-groups raw-state projector-id)
-            bpm (get-in raw-state [:timing :bpm] 120.0)
-            current-time (System/currentTimeMillis)
-            input-values (input-store/get-all-continuous-values)
-            
-            ;; Generate frames for each active cue and extract this projector's zones
-            all-projector-frames
-            (into []
-                  (keep
-                    (fn [{:keys [cue-chain cue-timing]}]
-                      (let [trigger-time (:trigger-time cue-timing 0)
-                            elapsed (- current-time trigger-time)
-                            cue-bpm (playback/cue-bpm cue-chain bpm)
-                            timing-ctx (assoc (cue-timing/get-cue-timing-context cue-timing cue-bpm)
-                                              :input-values input-values)
-                            ;; Generate zone frames for this cue
-                            zone-frames-map (frame-service/generate-frames-by-zone-cached
-                                              cue-chain elapsed cue-bpm trigger-time timing-ctx)
-                            ;; Extract frames for this projector's zones
-                            projector-frames (extract-frames-for-zones zone-frames-map projector-zone-groups)]
-                        ;; Combine this cue's zone frames
-                        (combine-zone-frames projector-frames))))
-                  all-cues)
-            
-            ;; Combine frames from all cues
-            combined-frame (combine-zone-frames all-projector-frames)
-            
-            ;; Get timing info for projector effects (use first cue's timing)
-            first-cue-timing (:cue-timing (first all-cues))
-            trigger-time (:trigger-time first-cue-timing 0)
-            elapsed (- current-time trigger-time)
-            timing-ctx (assoc (cue-timing/get-cue-timing-context first-cue-timing bpm)
-                              :input-values input-values)
-            
+  "The projector's frame for the show clock's tick in snapshot: each cue's
+   frames for its zones, joined, then its projector effects at the first
+   cue's timing. Nil before the first tick, while nothing is playing and when
+   none of the cues reach its zones. A snapshot older than show-time/STALE_MS
+   throws \"Show clock stalled\". The frame carries the snapshot's
+   {:tick :at-ns} as metadata, so the engine knows which tick it sends."
+  [projector-id snapshot]
+  (when snapshot
+    (let [now (System/nanoTime)]
+      (when (show-time/stale? snapshot now)
+        (throw (stalled snapshot now))))
+    (when (:playing? snapshot)
+      (let [raw-state (state/get-raw-state)
+            zone-groups (get-projector-zone-groups raw-state projector-id)
+            cues (:cues snapshot)
+            combined-frame (combine-zone-frames
+                            (into [] (keep #(combine-zone-frames (extract-frames-for-zones (:zone-frames %) zone-groups)))
+                                  cues))
             log-count (swap! routing-log-counter inc)]
         
         (when (and (dev-config/idn-stream-logging?)
                    (zero? (mod log-count ROUTING_LOG_INTERVAL)))
           (log/debug (format "Zone routing [%s]: zone-groups=%s, active-cues=%d, combined-points=%s"
                              projector-id
-                             (pr-str projector-zone-groups)
-                             (count all-cues)
+                             (pr-str zone-groups)
+                             (count cues)
                              (if combined-frame (count combined-frame) "nil"))))
         
         (when combined-frame
-          (apply-projector-effects combined-frame projector-id elapsed bpm trigger-time timing-ctx))))))
+          (let [ctx (:projector-ctx snapshot)
+                frame (apply-projector-effects combined-frame projector-id (long (:accumulated-ms ctx 0.0))
+                                               (:bpm ctx) 0 ctx)]
+            (with-meta frame (select-keys snapshot [:tick :at-ns]))))))))
 
 (defn- create-projector-frame-provider
   "Create a frame provider function for a specific projector or virtual projector.
    
-   The frame provider uses multi-cue zone-based routing:
-   1. Gets ALL active cues from [:playback :active-cues]
-   2. For each active cue, generates frames by zone
-   3. Extracts frames for this projector's zones from each cue
-   4. Concatenates all zone frames from all cues
-   5. Applies projector calibration effects (color curves + corner-pin)
+   The frame provider takes the show clock's newest tick (show-time/latest):
+   1. For each cue the clock rendered, takes this projector's zones
+   2. Concatenates them, and then every cue
+   3. Applies projector calibration effects (color curves + corner-pin)
    
-   This aligns with how preview generates frames, supporting multi-cue playback.
+   The preview is built from the same tick, so it shows what the engines send.
    
    Returns a zero-arity function that returns a LaserFrame or nil."
   [projector-id]
   (fn []
     (try
-      (let [frame (projector-frame projector-id)]
+      (let [frame (projector-frame projector-id (show-time/latest))]
         (output-errors/ok! [:provider projector-id])
         frame)
       (catch Throwable e
@@ -246,7 +208,8 @@
                                   :channel-id service-id
                                   :service-id service-id
                                   :output-config output-cfg
-                                  :scan-rate (:scan-rate projector))))))
+                                  :scan-rate (:scan-rate projector)
+                                  :frame-signal show-time/frame-signal)))))
 
 (defn create-engines
   "Create streaming engines for all enabled projectors.

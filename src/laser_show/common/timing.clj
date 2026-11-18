@@ -103,6 +103,17 @@
         (LockSupport/parkNanos (min wait max-park-nanos))
         (recur)))))
 
+(defn next-deadline
+  "When the frame (or tick) after the one due at deadline should start: one
+   interval later. If now is already more than one interval past that, the
+   missed ones are skipped and the next starts an interval from now. Used by
+   the show clock and by engines pacing themselves."
+  ^long [^long deadline ^long now ^long interval]
+  (let [next (+ deadline interval)]
+    (if (> (- now next) interval)
+      (+ now interval)
+      next)))
+
 
 ;; Timing Utilities
 

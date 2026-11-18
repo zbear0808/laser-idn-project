@@ -36,8 +36,7 @@
     (let [rnd (java.util.Random. 11)]
       (dotimes [_ 50]
         (let [bpm (+ 60.0 (* 120.0 (.nextDouble rnd)))
-              t0 (get-in (ct/activate-cue {} [0 0] 0 (* 10 (.nextDouble rnd)) {:timeline? true :start-beat 0.0})
-                         [:active-cues [0 0]])
+              t0 (ct/start-timing 0 (* 10 (.nextDouble rnd)) {:timeline? true :start-beat 0.0})
               steps (reductions + (repeatedly 20 #(+ 5 (.nextInt rnd 40))))
               t (reduce (fn [t now] (ct/update-cue-timing t now bpm 4.0 {:enabled? false} {:length 1000.0}))
                         t0 steps)
@@ -56,15 +55,16 @@
 (defn- beats [pb] (get-in pb [:active-cues [0 0] :accumulated-beats]))
 
 (deftest apply-chase-examples-test
-  (testing "plan §7.2"
+  (testing "plan §7.2 (on the show clock's chase map, which has no :playing?)"
     (is (nil? (beats (chase {} {:state :running :seconds 3599.0}))) "before beat 0: inactive")
     (let [pb (chase {} {:state :running :seconds 3605.48})]
       (is (< (Math/abs (- 10.96 (beats pb))) 1e-9))
       (is (true? (get-in pb [:active-cues [0 0] :timeline?])))
-      (is (true? (:playing? pb)))
+      (is (true? (get-in pb [:active-cues [0 0] :chasing?])))
       (is (= 11.0 (beats (chase pb {:state :freewheel :seconds 3605.5}))) "freewheel keeps it active")
       (is (nil? (beats (chase pb {:state :stopped :seconds 3605.5}))) "stopped: deactivated")
-      (is (false? (:playing? (chase pb {:state :stopped :seconds 3605.5})))))
+      (is (= {:active-cues {}} (chase pb {:state :stopped :seconds 3605.5}))
+          "only the chase entry goes: the :show-clock/chase handler sets :playing?"))
     (is (= 40.0 (beats (chase {} {:state :running :seconds 3620.0}))) "located to 01:00:20:00, then running")
     (is (nil? (beats (chase (chase {} {:state :running :seconds 3620.0}) {:state :running :seconds 3632.0})))
         "beat 64 = the end: deactivated")))

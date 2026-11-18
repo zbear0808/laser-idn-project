@@ -6,6 +6,7 @@
    source port identifies an engine. messages decodes what arrived the way a
    DAC would: IDN-Hello header, channel message, channel config, and frame
    samples laid out by the last config seen on that sender's channel.
+   violations checks everything that arrived against the stream rules.
 
    Waits are bounded by deadlines (wait-for!, quiet?), never fixed sleeps.
 
@@ -192,3 +193,161 @@
   [dac ms]
   (let [n (count @(:received dac))]
     (not (wait-for! #(> (count @(:received dac)) n) ms))))
+
+
+;; Checking a stream against the rules
+
+(def ^:private max-config-gap-us
+  "Stream §2.2: on unreliable links the configuration is resent every 200 or
+   250 ms."
+  250000)
+
+(defn- u8 ^long [^bytes b i] (bit-and (aget b (int i)) 0xFF))
+
+(defn- u16 ^long [^bytes b i] (bit-or (bit-shift-left (u8 b i) 8) (u8 b (inc (long i)))))
+
+(defn- u32 ^long [^bytes b i] (bit-or (bit-shift-left (u16 b i) 16) (u16 b (+ 2 (long i)))))
+
+(defn- sample-size
+  "Octets per sample for a tag array, or nil when it describes none."
+  [tags]
+  (let [size (reduce + (map second (field-layout tags)))]
+    (when (pos? size) size)))
+
+(defn- message-violations
+  "Violations of one channel message (payload, the datagram minus its Hello
+   header) on a channel in state {:configured? :last-config-ts :last-ts :tags},
+   and the channel's next state."
+  [^bytes payload channel {:keys [configured? last-config-ts last-ts tags] :as cnl}]
+  (let [n (alength payload)
+        total-size (u16 payload 0)
+        cnl-byte (u8 payload 2)
+        chunk-type (u8 payload 3)
+        ts (u32 payload 4)
+        sequel? (>= chunk-type stream/CHUNK_TYPE_FRAME_SAMPLES_SEQUEL)
+        back? (and (not sequel?) last-ts
+                   (>= (bit-and (- ts (long last-ts)) 0xFFFFFFFF) 0x80000000))
+        has-config? (and (not sequel?) (bit-test cnl-byte 6))
+        [scwc cfl service-id service-mode] (when has-config? (map #(u8 payload %) (range 8 12)))
+        routing? (and has-config? (bit-test cfl 0))
+        close? (and has-config? (bit-test cfl 1))
+        config-tags (when (and has-config? (pos? scwc))
+                      (mapv #(u16 payload (+ 12 (* 2 %))) (range (* 2 scwc))))
+        tags (or config-tags tags)
+        data-at (if has-config? (+ 12 (* 4 scwc)) 8)
+        found (cond-> []
+                (not (bit-test cnl-byte 7))
+                (conj {:rule :message-size :detail "CNL bit 7 (channel message) is clear"})
+
+                back?
+                (conj {:rule :timestamps :detail (str "timestamp " ts " after " last-ts)})
+
+                (and (not sequel?) (not has-config?) (not configured?))
+                (conj {:rule :config :detail "the first message on the channel has no configuration"})
+
+                (and (not sequel?) (not back?) (not has-config?) configured?
+                     (> (bit-and (- ts (long last-config-ts)) 0xFFFFFFFF) max-config-gap-us))
+                (conj {:rule :config
+                       :detail (str (quot (bit-and (- ts (long last-config-ts)) 0xFFFFFFFF) 1000)
+                                    " ms after the last configuration")})
+
+                (and has-config? (not (zero? (bit-and cfl 0xFC))))
+                (conj {:rule :unused-bits :detail (format "CFL 0x%02X: SDM or reserved bits set" cfl)})
+
+                (and has-config? (not routing?) (not (zero? (bit-or scwc service-id service-mode))))
+                (conj {:rule :unused-bits :detail "SCWC, service ID or mode set without Routing"}))
+        frame (when (and (= chunk-type stream/CHUNK_TYPE_FRAME_SAMPLES) (<= (+ data-at 4) n))
+                (let [flags (u8 payload data-at)
+                      octets (- n data-at 4)
+                      size (sample-size tags)]
+                  (cond-> []
+                    (not (zero? (bit-and flags 0xFE)))
+                    (conj {:rule :unused-bits :detail (format "chunk flags 0x%02X: SCM or reserved bits set" flags)})
+
+                    (and (pos? octets) (nil? size))
+                    (conj {:rule :frame :detail "samples, but no configuration describes them"})
+
+                    (and (pos? octets) size (not (zero? (rem octets (long size)))))
+                    (conj {:rule :frame :detail (str octets " octets of samples, not a whole number of "
+                                                     size "-octet samples")})
+
+                    (and (pos? octets) size (zero? (rem octets (long size))) (< (quot octets (long size)) 2))
+                    (conj {:rule :frame :detail "one sample: a frame needs a start and an end point"})
+
+                    (and (pos? octets) size (zero? (rem octets (long size))))
+                    (into (let [buf (ByteBuffer/wrap payload (int (+ data-at 4)) (int size))
+                                [[_ _ r g b]] (decode-samples (.slice buf) tags)]
+                            (when-not (= 0 r g b)
+                              [{:rule :frame :detail (str "the first sample is lit: " [r g b])}]))))))]
+    [(if (or (not= total-size n) (< total-size 8) (> total-size stream/MAX_MESSAGE_SIZE))
+       (conj found {:rule :message-size :detail (str "total size " total-size ", message " n " octets")})
+       (into found frame))
+     (cond
+       close? {}
+       sequel? cnl
+       :else (cond-> (assoc cnl :last-ts ts :tags tags :configured? (or configured? has-config?))
+               has-config? (assoc :last-config-ts ts)))]))
+
+(defn check
+  "What in datagrams ({:port :ns :bytes}, in arrival order) breaks the IDN
+   stream rules: [{:rule :port :seq :detail} …], empty when nothing does.
+   - :hello-header: 4 octets at least, command 0x40 or 0x44 (Hello §2.1, §6.2)
+   - :sequence: +1 per packet from each sender, wrapping at 16 bits (Hello §6)
+   - :message-size: total size = datagram minus 4, in 0x0008-0xFF00, CNL bit 7
+     set (Hello §6.1, Stream §2.1)
+   - :timestamps: never decrease on a sender's channel, wrapping at 32 bits,
+     sequel fragments left out (Stream §2.1)
+   - :config: on each channel the first message (and the first after a close)
+     carries the configuration, and no message comes more than 250 ms after
+     the last one that did, by the messages' own timestamps (Stream §2.2)
+   - :frame: a non-empty frame has 2 samples at least, a whole number of them,
+     and a dark first one (Stream §6.2)
+   - :unused-bits: the upper Hello flags, SDM and the reserved CFL bits,
+     SCWC/service ID/mode without Routing, and the chunk flags other than Once
+     are zero (Hello §2.1, Stream §1.4, §2.2, §6.2)
+   :skip leaves out the rules a test breaks on purpose."
+  [datagrams & {:keys [skip]}]
+  (let [skip (set skip)]
+    (->> (reduce
+          (fn [{:keys [seqs channels] :as acc} {:keys [port ^bytes bytes]}]
+            (if (< (alength bytes) 4)
+              (update acc :found conj {:rule :hello-header :port port
+                                       :detail (str (alength bytes) " octets")})
+              (let [cmd (u8 bytes 0)
+                    flags (u8 bytes 1)
+                    sq (u16 bytes 2)
+                    expected (some-> (get seqs port) (+ 1) (bit-and 0xFFFF))
+                    tag #(assoc % :port port :seq sq)
+                    payload (when (> (alength bytes) 4) (Arrays/copyOfRange bytes 4 (alength bytes)))
+                    channel (when (and payload (>= (alength payload) 3)) (bit-and (aget payload 2) 0x3F))
+                    [msg-found cnl'] (if (and payload (>= (alength payload) 8)
+                                              (#{hello/CMD_RT_CHANNEL_MESSAGE hello/CMD_RT_CLOSE} cmd))
+                                       (message-violations payload channel (get channels [port channel] {}))
+                                       [(when payload
+                                          [{:rule :message-size :detail (str (alength payload) " octets after the header")}])
+                                        nil])
+                    found (cond-> []
+                            (not (#{hello/CMD_RT_CHANNEL_MESSAGE hello/CMD_RT_CLOSE} cmd))
+                            (conj {:rule :hello-header :detail (format "command 0x%02X" cmd)})
+
+                            (not (zero? (bit-and flags 0xF0)))
+                            (conj {:rule :unused-bits :detail (format "Hello flags 0x%02X" flags)})
+
+                            (and expected (not= sq expected))
+                            (conj {:rule :sequence :detail (str "expected " expected)})
+
+                            :always (into msg-found))]
+                (cond-> (-> acc
+                            (update :found into (map tag) found)
+                            (assoc-in [:seqs port] sq))
+                  cnl' (assoc-in [:channels [port channel]] cnl')))))
+          {:found [] :seqs {} :channels {}}
+          datagrams)
+         :found
+         (remove (comp skip :rule))
+         vec)))
+
+(defn violations
+  "check on every datagram dac has received (same options)."
+  [dac & opts]
+  (apply check @(:received dac) opts))

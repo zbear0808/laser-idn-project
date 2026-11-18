@@ -1,10 +1,18 @@
 (ns laser-show.backend.multi-engine-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [clojure.string :as str]
+            [laser-show.animation.cue-timing :as ct]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.effects.calibration]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.backend.multi-engine :as me]
+            [laser-show.backend.output-errors :as output-errors]
+            [laser-show.events.core :as events]
+            [laser-show.services.frame-service :as fs]
+            [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
-            [laser-show.state.domains :as domains]))
+            [laser-show.state.domains :as domains]
+            [laser-show.timeline.playback :as playback]))
 
 
 ;; Test Fixtures
@@ -13,9 +21,18 @@
   "Set up test state before each test"
   [f]
   (state/init-state! (domains/build-initial-state))
-  (f))
+  (show-time/reset-runtime!)
+  (output-errors/clear!)
+  (f)
+  (show-time/reset-runtime!))
 
 (use-fixtures :each setup-test-state)
+
+(defn- snapshot
+  "A snapshot as the show clock publishes it."
+  [cues & {:keys [at-ns playing? projector-ctx] :or {playing? true}}]
+  {:tick 1 :at-ns (or at-ns (System/nanoTime)) :playing? playing? :cues cues
+   :projector-ctx projector-ctx :preview (delay nil)})
 
 
 ;; Validation Tests
@@ -253,19 +270,15 @@
         (is (nil? (#'me/get-projector-zone-groups raw-state :unknown)))))))
 
 (deftest projector-receives-only-zone-specific-frames-test
-  (testing "Projector receives only frames for its configured zone groups"
+  (testing "Projector receives only frames for its configured zone groups, from the tick's snapshot"
     (let [zone-frames {:left   [[0.0 0.0 1.0 0.0 0.0]
                                 [0.1 0.0 1.0 0.0 0.0]]
                        :center [[0.5 0.5 0.0 1.0 0.0]
                                 [0.6 0.5 0.0 1.0 0.0]]
                        :right  [[1.0 0.0 0.0 0.0 1.0]
                                 [1.0 0.1 0.0 0.0 1.0]]}
-          projector-zones [:left :center]
-          projector-frames (#'me/extract-frames-for-zones zone-frames projector-zones)
-          combined (#'me/combine-zone-frames projector-frames)] 
-      
-      (testing "Extracts correct number of zone frames"
-        (is (= 2 (count projector-frames))))
+          _ (state/assoc-in-state! [:projectors :proj] {:zone-groups [:left :center]})
+          combined (#'me/projector-frame :proj (snapshot [{:cell [0 0] :zone-frames zone-frames}]))]
       
       (testing "Combined frame contains content from both zones"
         (is (some? combined))
@@ -285,7 +298,122 @@
         (let [has-blank? (fn [pt] (and (= 0.0 (nth pt 2))
                                        (= 0.0 (nth pt 3))
                                        (= 0.0 (nth pt 4))))]
-          (is (some has-blank? combined) "Should have at least one blanking point"))))))
+          (is (some has-blank? combined) "Should have at least one blanking point")))
+
+      (testing "the frame says which tick it shows"
+        (is (= {:tick 1} (select-keys (meta combined) [:tick])))
+        (is (number? (:at-ns (meta combined)))))
+
+      (testing "nothing for the projector's zones: nil"
+        (state/assoc-in-state! [:projectors :proj] {:zone-groups [:other]})
+        (is (nil? (#'me/projector-frame :proj (snapshot [{:cell [0 0] :zone-frames zone-frames}]))))))))
+
+
+;; Engine frames from the show clock's tick (show clock 02 §7)
+
+(def ^:private track-id #uuid "10000000-0000-0000-0000-000000000000")
+
+(defn- preset [preset-id & effects]
+  {:id (random-uuid) :type :preset :preset-id preset-id :enabled? true
+   :effects (vec effects)})
+
+(def ^:private spin {:id (random-uuid) :effect-id :rotation :enabled? true
+                     :params {:angle {:type :sine :min 0.0 :max 360.0 :period 1.0}}})
+
+(defn- direct-frame
+  "What the projector would send for the cues as they are now: each cue
+   rendered with generate-frames-by-zone at its own timing, its projector's
+   zones taken and joined, the cues joined, then the projector effects at the
+   first cue's timing and the global BPM."
+  [projector-id]
+  (let [s (state/get-raw-state)
+        bpm (get-in s [:timing :bpm])
+        zones (get-in s [:projectors projector-id :zone-groups])
+        runs (show-time/active-runs s)
+        per-cue (keep (fn [{:keys [cue-chain cue-timing]}]
+                        (let [cue-bpm (playback/cue-bpm cue-chain bpm)
+                              ctx (assoc (ct/get-cue-timing-context cue-timing cue-bpm) :input-values {})
+                              by-zone (fs/generate-frames-by-zone cue-chain (long (:accumulated-ms cue-timing)) cue-bpm 0 ctx)]
+                          (#'me/combine-zone-frames (#'me/extract-frames-for-zones by-zone zones))))
+                      runs)
+        combined (#'me/combine-zone-frames (vec per-cue))
+        ctx (assoc (ct/get-cue-timing-context (:cue-timing (first runs)) bpm) :input-values {})
+        projector-effects (get-in s [:chains :projector-effects projector-id :items])]
+    (when combined
+      (if (seq projector-effects)
+        (effects/apply-effect-chain combined {:effects projector-effects}
+                                    (long (:accumulated-ms ctx)) bpm 0 ctx)
+        combined))))
+
+(defn- tick-and-compare
+  "Two ticks 20 ms apart, then the engine's frame from the snapshot and the direct render."
+  [projector-id]
+  (show-clock/tick! (System/nanoTime))
+  (java.util.concurrent.locks.LockSupport/parkNanos 20000000)
+  (show-clock/tick! (System/nanoTime))
+  [(#'me/projector-frame projector-id (show-time/latest)) (direct-frame projector-id)])
+
+(deftest engine-frame-equals-direct-render-test
+  (testing "one cue"
+    (state/swap-state! #(-> %
+                            (assoc-in [:chains :cue-chains [0 0]] {:destination-zone {:zone-group-id :all}
+                                                                    :items [(preset :circle spin)]})
+                            (assoc-in [:projectors :p] {:zone-groups [:all]})))
+    (events/event-handler {:event/type :grid/trigger-cell :col 0 :row 0})
+    (let [[engine direct] (tick-and-compare :p)]
+      (is (seq engine))
+      (is (= direct engine))))
+  (testing "two cues on two zones"
+    (state/swap-state! #(-> %
+                            (assoc-in [:chains :cue-chains [1 0]] {:destination-zone {:zone-group-id :left}
+                                                                    :items [(preset :square spin)]})
+                            (assoc-in [:projectors :p] {:zone-groups [:left :all]})))
+    (events/event-handler {:event/type :grid/trigger-cell :col 1 :row 0})
+    (let [[engine direct] (tick-and-compare :p)]
+      (is (= 2 (count (show-time/active-runs (state/get-raw-state)))))
+      (is (= direct engine))))
+  (testing "a timeline with a track effect, to a projector with an RGB curve"
+    (show-time/reset-runtime!)
+    (state/swap-state! #(-> %
+                            (assoc-in [:playback :active-cues] {})
+                            (assoc-in [:chains :cue-chains [2 0]]
+                                      {:editor-type :timeline
+                                       :destination-zone {:zone-group-id :all}
+                                       :tracks [{:id track-id :type :track
+                                                 :effects [{:id (random-uuid) :effect-id :scale :enabled? true
+                                                            :params {:x-scale {:type :sine :min 0.5 :max 1.5 :period 2.0}}}]}]
+                                       :items [(assoc (preset :circle) :track-id track-id
+                                                      :timeline/start 0.0 :timeline/duration 16.0)]})
+                            (assoc-in [:chains :projector-effects :p :items]
+                                      [{:id (random-uuid) :effect-id :rgb-curves :enabled? true
+                                        :params {:r-curve-points [[0.0 0.2] [1.0 1.0]]
+                                                 :g-curve-points [[0.0 0.0] [1.0 0.5]]
+                                                 :b-curve-points [[0.0 0.0] [1.0 1.0]]}}])
+                            (assoc-in [:projectors :p] {:zone-groups [:all]})))
+    (events/event-handler {:event/type :timeline/play :col 2 :row 0 :from 1.5})
+    (let [[engine direct] (tick-and-compare :p)]
+      (is (seq engine))
+      (is (= direct engine)))))
+
+(deftest stale-snapshot-sends-an-empty-frame-test
+  (let [provider (#'me/create-projector-frame-provider :p)
+        cues [{:cell [0 0] :zone-frames {:all [[0.0 0.0 1.0 1.0 1.0] [0.5 0.0 1.0 1.0 1.0]]}}]]
+    (state/assoc-in-state! [:projectors :p] {:zone-groups [:all]})
+    (show-time/publish! (snapshot cues))
+    (is (seq (provider)) "a fresh tick is sent")
+    (show-time/publish! (snapshot cues :at-ns (- (System/nanoTime) (* (inc show-time/STALE_MS) 1000000))))
+    (is (nil? (provider)) "no frame from a tick older than STALE_MS: an empty frame goes out")
+    (is (str/includes? (str (get-in (output-errors/snapshot) [[:provider :p] :message])) "Show clock stalled")
+        "the projector's status says why")
+    (show-time/publish! (snapshot cues))
+    (is (seq (provider)) "ticks come back")
+    (is (nil? (get (output-errors/snapshot) [:provider :p])) "and the error clears")))
+
+(deftest no-snapshot-yet-reports-nothing-test
+  (state/assoc-in-state! [:projectors :p] {:zone-groups [:all]})
+  (is (nil? (show-time/latest)))
+  (is (nil? ((#'me/create-projector-frame-provider :p))) "no clock has ticked (start-test!): an empty frame")
+  (is (empty? (output-errors/snapshot)) "and no error"))
 
 
 ;; Frame Provider Tests
@@ -301,12 +429,13 @@
         ex-count (atom 0)
         orig-ex-info ex-info]
     (with-redefs [ex-info (fn [& args] (swap! ex-count inc) (apply orig-ex-info args))]
+      (testing "No tick yet"
+        (is (nil? (provider))))
       (testing "Not playing"
-        (state/assoc-in-state! [:playback :playing?] false)
+        (show-time/publish! (snapshot [] :playing? false))
         (is (nil? (provider))))
       (testing "Playing with no active cues"
-        (state/assoc-in-state! [:playback :playing?] true)
-        (state/assoc-in-state! [:playback :active-cues] {})
+        (show-time/publish! (snapshot []))
         (is (nil? (provider)))))
     (is (zero? @ex-count) "Idle frames should not build exceptions")))
 
