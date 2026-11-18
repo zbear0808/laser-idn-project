@@ -33,9 +33,12 @@
      runtime's own thread (backend/output_runtime.clj), which owns every engine
    - Nothing running on the agent may block waiting for an event it
      dispatched: that event only runs after the current one
-   - Writers outside the pipeline: the show clock's mirror, every second tick
-     (show-time/mirror-paths). In dev mode effect-state warns when any other
-     write landed between an event's snapshot and its write-back
+   - Writers outside the pipeline: start-up and shutdown (app.clj), the
+     clipboard helper (state/clipboard.clj) and a dev code reload. The show
+     clock's thread sends what it learns as events (:show-clock/*), and views
+     that move every frame draw its newest tick without app state. In dev
+     mode effect-state warns when any write landed between an event's
+     snapshot and its write-back
    - State updates (atom swap) are thread-safe
    - Re-rendering happens on FX thread via atom watch
    
@@ -115,22 +118,16 @@
                 :else [[k]])))
           (distinct (concat (keys a) (keys b)))))
 
-(defn- without-mirror-paths [s]
-  (reduce #(assoc-in %1 %2 nil) s show-time/mirror-paths))
-
 (defn- check-lost-update!
   "Dev mode: report a write that landed between an event's state snapshot and
-   its write-back (that write is lost). Writes by the show clock's mirror alone
-   are expected until the screen reads the clock itself, so they only log at
-   TRACE."
+   its write-back (that write is lost). No writer is exempt: the show clock
+   reports through events too."
   [event-type snapshot replaced]
   (when-not (identical? snapshot replaced)
-    (let [paths (changed-paths (without-mirror-paths snapshot) (without-mirror-paths replaced) 1)]
-      (if (seq paths)
-        (log/warn "Possible lost update:" event-type
-                  "wrote back a state snapshot, but another writer changed" (vec paths)
-                  "in the meantime")
-        (log/trace "Show clock mirror wrote during" event-type "(mirror-only, not a lost update)")))))
+    (when-let [paths (seq (changed-paths snapshot replaced 1))]
+      (log/warn "Possible lost update:" event-type
+                "wrote back a state snapshot, but another writer changed" (vec paths)
+                "in the meantime"))))
 
 (defn- wrap-lost-update-check
   "Dev mode only: attach the event's :state co-effect (the snapshot its handler

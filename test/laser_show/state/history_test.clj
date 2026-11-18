@@ -9,7 +9,7 @@
   {:config {:grid {:cols 8 :rows 4}
             :preview {:grid-layout [2 2]}}
    :timing {:bpm 120.0
-            :global-clock {:accumulated-beats 4.0}}
+            :beat-index 2}
    :playback {:playing? true
               :active-cues {[0 0] {:trigger-time 100}}}
    :grid {:size [8 4]
@@ -49,7 +49,7 @@
       (is (nil? (:playback d)))
       (is (nil? (:backend d)))
       (is (nil? (:ui d)))
-      (is (nil? (get-in d [:timing :global-clock]))))))
+      (is (nil? (get-in d [:timing :beat-index]))))))
 
 (deftest undoable-changed?-policy-test
   (let [changed? #(history/undoable-changed? (doc sample-state) (doc (% sample-state)))]
@@ -98,7 +98,7 @@
     (testing "runtime state is untouched and dirty is not set"
       (is (= true (get-in restored [:playback :playing?])))
       (is (= true (get-in restored [:backend :streaming :running?])))
-      (is (= 4.0 (get-in restored [:timing :global-clock :accumulated-beats])))
+      (is (= 2 (get-in restored [:timing :beat-index])))
       (is (nil? (get-in restored [:project :dirty?]))))))
 
 (deftest restore-document-grafts-live-item-fields-by-id-test

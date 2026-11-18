@@ -16,8 +16,11 @@
    - [:playback :requests]: {:restart {:id} :align {:id} :shift {:id :offset}},
      each applied once per id.
    step reads them once per tick. What the clock learns goes back to app state
-   as events (:show-clock/cue-ended, :show-clock/chase), and positions reach it
-   only through the clock's mirror (mirror-paths)."
+   as events: a timeline's end and a timecode chase (:show-clock/cue-ended,
+   :show-clock/chase), and what views show a few times a second, the beat
+   square, the stats and the MTC text (:show-clock/status, on status-paths).
+   Positions never reach app state: views that move every frame draw the
+   newest snapshot (views/components/clock_view.clj)."
   (:require [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.common.util :as u]
             [laser-show.state.extractors :as ex]
@@ -40,23 +43,26 @@
    :sent {}})
 
 (defonce ^{:doc "Show time ({:tick :t0-ns :global :runs {run-id timing} :chase {cell timing}
-                 :applied {kind request-id} :sent {report now-ms}}). Only the show clock
-                 thread writes it (show-clock/tick! in tests)."}
+                 :applied {kind request-id} :sent {report now-ms} :status {…}}). Only the
+                 show clock thread writes it (show-clock/tick! in tests)."}
   !runtime
   (atom initial-runtime))
 
-(def mirror-paths
-  "The app-state paths the show clock writes outside the event flow, every
-   second tick (show-clock/tick!). The dev-mode lost-update check in
-   events/core ignores them."
-  [[:timing :global-clock]
-   [:playback :positions]
-   [:backend :input :mtc]
-   [:backend :streaming :current-frame]
-   [:backend :streaming :frame-stats]])
+(def status-paths
+  "Where app state holds the show clock's status, which :show-clock/status
+   writes: what views show a few times a second."
+  {:beat-index [:timing :beat-index]
+   :frame-stats [:backend :streaming :frame-stats]
+   :mtc [:backend :input :mtc]})
+
+(defn app-status
+  "The show clock's status as app state holds it."
+  [state]
+  (update-vals status-paths #(get-in state %)))
 
 (def report-interval-ms
-  "The same report goes back to app state at most this often while it holds."
+  "The same report, or status, goes back to app state at most this often
+   while app state still differs."
   250.0)
 
 (defn- effective-beats ^double [clock]
@@ -274,9 +280,15 @@
   (:global @!runtime))
 
 (defn global-beats
-  "The global clock's effective beats."
-  ^double []
-  (effective-beats (:global @!runtime)))
+  "The global clock's effective beats, in runtime (default: !runtime)."
+  (^double [] (global-beats @!runtime))
+  (^double [runtime] (effective-beats (:global runtime))))
+
+(defn cue-beats
+  "Where snapshot (latest) has the cue at cell, in beats, or nil when it isn't
+   playing."
+  [snapshot cell]
+  (get (:positions snapshot) cell))
 
 
 ;; The newest tick, and the signal the engines wait on
@@ -290,7 +302,8 @@
 
 (defonce ^{:private true
            :doc "The newest tick's snapshot, nil before the first: {:tick :at-ns :playing? :cues
-                 [{:cell :run :zone-frames}] :projector-ctx :preview (delay …) :render-us}."}
+                 [{:cell :run :zone-frames}] :positions {cell beats} :projector-ctx
+                 :preview (delay …) :render-us}."}
   !snapshot
   (atom nil))
 

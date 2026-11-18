@@ -1,6 +1,8 @@
 (ns laser-show.ui-test.toolbar-test
-  "Toolbar: transport, BPM input, trigger mode and tap tempo."
+  "Toolbar: transport, BPM input, trigger mode, tap tempo and the beat
+   indicator."
   (:require [clojure.test :refer [deftest is use-fixtures]]
+            [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]))
@@ -53,3 +55,16 @@
     (let [taps (tap-times)]
       (is (<= 1 (count taps) 3))
       (is (every? #(<= % 2000) (map - (rest taps) taps)) "kept taps are at most 2 s apart"))))
+
+(deftest beat-indicator-moves-on-each-beat-test
+  ;; app/start-test! runs no show clock: tick it by hand, on a fake clock
+  (let [t0 (System/nanoTime)
+        tick! #(show-clock/tick! (+ t0 (* % 1000000)))
+        active #(set (keep (fn [i] (when (ui/has-style-class? (str "#beat-square-" i) "beat-active") i))
+                           (range 4)))]
+    (tick! 0)
+    (ui/wait-for! #(= #{0} (active)))
+    (doseq [[ms beat] [[600 1] [1100 2] [1600 3] [2100 0]]]
+      (tick! ms)
+      (ui/wait-for! #(= #{beat} (active)))
+      (is (= #{beat} (active)) (str (/ ms 500.0) " beats at 120 BPM")))))

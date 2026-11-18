@@ -53,22 +53,12 @@
 (defn active-cell [context]
   (fx/sub-val context ex/active-cell))
 
-(defn beat-position
-  "Get the current beat position within a 4-beat bar.
-   Returns a map with:
-   - :beat-index - Current beat, 0-3, where 0 is downbeat
-   - :beat-phase - Progress within current beat, 0.0-1.0
-   
-   Uses global-accumulated-beats from the global clock, which runs
-   continuously regardless of cue playback state. This ensures the
-   beat indicator animates even when no cues are active."
+(defn beat-index
+  "The beat in the bar, 0-3 (0 is the downbeat), from the show clock's
+   global clock, which runs whether or not cues play. It changes on each
+   beat only (:show-clock/status)."
   [context]
-  (let [effective-beats (fx/sub-val context ex/global-accumulated-beats)
-        beat-in-bar (mod effective-beats 4.0)
-        beat-index (int (Math/floor beat-in-bar))
-        beat-phase (- beat-in-bar beat-index)]
-    {:beat-index beat-index
-     :beat-phase beat-phase}))
+  (fx/sub-val context ex/beat-index))
 
 ;; --- Grid ---
 
@@ -188,13 +178,6 @@
   [context]
   (fx/sub-val context get-in [:ui :timeline-prefs]))
 
-(defn timeline-playhead
-  "Beats played by the cue at [col row], from the show clock's mirror, or nil
-   when it isn't playing. Re-runs on every mirror write, so only the timeline
-   canvas should use it."
-  [context col row]
-  (get (fx/sub-val context get-in [:playback :positions]) [col row]))
-
 (defn timeline-transport
   "Transport status of the cue at [col row]: :stopped, :playing or :paused.
    Changes only when that does, not on every timing tick."
@@ -207,7 +190,7 @@
 
 (defn mtc-status
   "Incoming MIDI timecode for the UI: {:state (:running | :freewheel | :stopped)
-   :fps :text}. Mirrored by the show clock, at most 10 times a second."
+   :fps :text}. From the show clock's status, at most 10 times a second."
   [context]
   (select-keys (fx/sub-val context get-in [:backend :input :mtc]) [:state :fps :text]))
 
@@ -438,19 +421,14 @@
 
 
 ;; Frame/Preview Subscriptions
+;;
+;; The preview frame itself never goes through app state: the preview cells
+;; draw the show clock's newest tick (views/components/clock_view.clj).
 
-
-(defn current-frame
-  "Get the current preview frame data.
-   
-   Depends on: streaming-data from backend domain
-   
-   Returns frame with :points vector and :cue-destinations map."
-  [context]
-  (:current-frame (fx/sub-val context ex/streaming-data)))
 
 (defn frame-stats
-  "Get frame rendering statistics.
+  "Get frame rendering statistics, from the show clock's status (at most 4
+   updates a second).
    
    Depends on: streaming-data from backend domain"
   [context]
@@ -459,12 +437,6 @@
 
 ;; Preview Grid Subscriptions
 
-
-(defn preview-frame-data
-  "Get the current preview frame with destinations.
-   Returns {:points [...] :cue-destinations {[col row] #{zones}}} or nil."
-  [context]
-  (fx/sub-ctx context current-frame))
 
 (defn preview-grid-layout
   "Get the current grid layout [cols rows]."

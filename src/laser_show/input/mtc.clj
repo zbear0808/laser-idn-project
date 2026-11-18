@@ -178,9 +178,10 @@
 
 ;; Status for the UI
 ;;
-;; The UI never reads the runtime atom. The show clock mirrors this small
-;; map into [:backend :input :mtc], at most every 100 ms while only the time
-;; text changes, and right away when the state or rate change.
+;; The UI never reads the runtime atom. The show clock sends this small map
+;; to [:backend :input :mtc] in its :show-clock/status, at most every 100 ms
+;; while only the time text changes, and right away when the state or rate
+;; change.
 
 
 (defn status

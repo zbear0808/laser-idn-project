@@ -15,6 +15,7 @@
   (:require [cljfx.api :as fx]
             [clj-font-awesome.core :as fa]
             [laser-show.animation.presets :as presets]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.css.canvas :as cc]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
@@ -22,6 +23,7 @@
             [laser-show.timeline.model :as model]
             [laser-show.timeline.playback :as playback]
             [laser-show.timeline.timecode :as tc]
+            [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.drag-drop-cell :as dd]
             [laser-show.views.components.visual-editors.canvas-interaction :as ci]
             [laser-show.views.components.visual-editors.timeline.browser :as browser]
@@ -30,10 +32,10 @@
             [laser-show.views.components.visual-editors.timeline.gesture :as gesture]
             [laser-show.views.components.visual-editors.timeline.header :as header]
             [laser-show.views.components.visual-editors.timeline.inspector :as inspector])
-  (:import [javafx.application Platform]
-           [javafx.scene.canvas Canvas GraphicsContext]
+  (:import [javafx.scene.canvas Canvas GraphicsContext]
+           [javafx.scene.control Label]
            [javafx.scene.input Dragboard KeyCode MouseButton MouseEvent ScrollEvent]
-           [javafx.scene.layout Region]
+           [javafx.scene.layout HBox Region]
            [javafx.scene.paint Color]
            [javafx.scene.text TextAlignment]))
 
@@ -515,36 +517,51 @@
           (.fillPolygon gc (double-array [(- x 5) (+ x 5) x])
                         (double-array [(- ruler-h 10) (- ruler-h 10) ruler-h]) 3))))))
 
-(defn- follow-playhead!
-  "ext-effect fn: when following and the playhead has left the visible page,
-   scroll so the page it entered starts with the playhead at 10 % of the
-   width. Its args only change when the page does, so it runs once per page
-   flip, not per frame."
-  [page follow? swap-state new-scroll-beat]
-  (when (and follow? page (not= 0 page))
-    (Platform/runLater
-     #(swap-state assoc-in [:view :scroll-beat] (max 0.0 (double new-scroll-beat)))))
-  nil)
+(defn- follow!
+  "When following and the playhead has left the visible page, scroll so the
+   page it entered starts with the playhead at 10 % of the width. Each scroll
+   is asked for once: ticks that come before the re-render see the old view
+   and would ask again."
+  [^Canvas canvas {:keys [view follow? swap-state]} playhead]
+  (let [vis (layout/visible-beats view)]
+    (when (and follow? playhead (pos? vis))
+      (let [page (long (Math/floor (/ (- playhead (:scroll-beat view)) vis)))]
+        (when-not (zero? page)
+          (let [scroll (max 0.0 (double (- (+ (:scroll-beat view) (* page vis)) (* 0.1 vis))))
+                asked [(:scroll-beat view) scroll]
+                props (.getProperties canvas)]
+            (when (not= asked (.get props ::asked-scroll))
+              (.put props ::asked-scroll asked)
+              (swap-state assoc-in [:view :scroll-beat] scroll))))))))
+
+(defn- redraw-overlay!
+  "The overlay from the show clock's tick (clock-view, on the FX thread): the
+   cursor, the cue's playhead, and a page flip while following. It draws only
+   when the playhead or the view moved, so a stopped or paused cue leaves the
+   canvas alone."
+  [^Canvas canvas snapshot {:keys [col row view cursor-beat] :as data}]
+  (let [playhead (show-time/cue-beats snapshot [col row])
+        drawn [playhead view cursor-beat]
+        props (.getProperties canvas)]
+    (when (not= drawn (.get props ::drawn))
+      (.put props ::drawn drawn)
+      (draw-overlay! canvas {:view view :cursor-beat cursor-beat :playhead playhead}))
+    (follow! canvas data playhead)))
 
 (defn- overlay-canvas
-  "Mouse-transparent canvas over the lanes. It subscribes to the playhead
-   itself, so playback ticks redraw two lines, not the timeline."
-  [{:keys [fx/context col row view cursor-beat follow? swap-state]}]
-  (let [playhead (fx/sub-ctx context subs/timeline-playhead col row)
-        vis (layout/visible-beats view)
-        page (when (and playhead (pos? vis))
-               (long (Math/floor (/ (- playhead (:scroll-beat view)) vis))))
-        new-scroll (when page (- (+ (:scroll-beat view) (* page vis)) (* 0.1 vis)))]
-    {:fx/type fx/ext-effect
-     :fn follow-playhead!
-     :args [page follow? swap-state new-scroll]
-     :desc {:fx/type :canvas
-            :id "timeline-overlay"
-            :managed false
-            :mouse-transparent true
-            :width (:width view)
-            :height (:height view)
-            :draw (fn [^Canvas c] (draw-overlay! c {:view view :cursor-beat cursor-beat :playhead playhead}))}}))
+  "Mouse-transparent canvas over the lanes. It draws the show clock's newest
+   tick itself, so playback redraws two lines, not the timeline."
+  [{:keys [col row view cursor-beat follow? swap-state]}]
+  {:fx/type clock-view/ext-clock-redraw
+   :redraw! #'redraw-overlay!
+   :desc {:fx/type :canvas
+          :id "timeline-overlay"
+          :managed false
+          :mouse-transparent true
+          :width (:width view)
+          :height (:height view)
+          :user-data {:col col :row row :view view :cursor-beat cursor-beat
+                      :follow? follow? :swap-state swap-state}}})
 
 
 ;; ============================================================
@@ -568,26 +585,50 @@
   (or (some (fn [[label v]] (when (< (Math/abs (- (double v) (double value))) 1e-9) label)) options)
       (format "%.3g" (double value))))
 
+(defn- readout-texts
+  "[bar.beat.sub timecode] at beat pos of cue. ≈ marks a timecode estimated
+   at the current global BPM (the tempo isn't locked)."
+  [cue pos global-bpm]
+  (let [{:keys [seconds approx?]} (tc/show-seconds cue pos global-bpm)]
+    [(bar-beat-sub pos)
+     (str (when approx? "≈") (tc/format-tc (tc/seconds->tc seconds (tc/cue-fps cue))))]))
+
+(defn- redraw-readout!
+  "The readout's labels from the show clock's tick (clock-view): the
+   playhead's position while the tick has one for the cue, else the
+   cursor's, which is also what cljfx renders."
+  [^HBox box snapshot {:keys [col row cue cursor-beat global-bpm]}]
+  (let [pos (or (show-time/cue-beats snapshot [col row]) cursor-beat 0.0)
+        [bbs timecode] (readout-texts cue pos global-bpm)
+        children (.getChildren box)
+        ^Label bbs-label (.get children 0)
+        ^Label tc-label (.get children 1)]
+    (when (not= bbs (.getText bbs-label))
+      (.setText bbs-label bbs))
+    (when (not= timecode (.getText tc-label))
+      (.setText tc-label timecode))))
+
 (defn- readout
   "Position readout: bar.beat.sub and show timecode, from the playhead while
-   playing, else the cursor. Subscribes to the playhead itself, so only this
-   label updates on playback ticks. ≈ marks a timecode estimated at the
-   current global BPM (the tempo isn't locked)."
-  [{:keys [fx/context col row cue cursor-beat global-bpm]}]
-  (let [playhead (fx/sub-ctx context subs/timeline-playhead col row)
-        pos (or playhead cursor-beat 0.0)
-        {:keys [seconds approx?]} (tc/show-seconds cue pos global-bpm)]
-    {:fx/type :h-box
-     :alignment :center-left
-     :spacing 6
-     :children [{:fx/type :label
-                 :id "timeline-readout"
-                 :style-class "tl-readout"
-                 :text (bar-beat-sub pos)}
-                {:fx/type :label
-                 :id "timeline-readout-tc"
-                 :style-class (cond-> ["tl-readout" "tl-readout-tc"] approx? (conj "tl-readout-approx"))
-                 :text (str (when approx? "≈") (tc/format-tc (tc/seconds->tc seconds (tc/cue-fps cue))))}]}))
+   playing, else the cursor. It follows the show clock's newest tick itself,
+   so playback changes two labels, not the toolbar."
+  [{:keys [col row cue cursor-beat global-bpm]}]
+  (let [[bbs timecode] (readout-texts cue (or cursor-beat 0.0) global-bpm)
+        approx? (nil? (:timeline/tempo-bpm cue))]
+    {:fx/type clock-view/ext-clock-redraw
+     :redraw! #'redraw-readout!
+     :desc {:fx/type :h-box
+            :alignment :center-left
+            :spacing 6
+            :user-data {:col col :row row :cue cue :cursor-beat cursor-beat :global-bpm global-bpm}
+            :children [{:fx/type :label
+                        :id "timeline-readout"
+                        :style-class "tl-readout"
+                        :text bbs}
+                       {:fx/type :label
+                        :id "timeline-readout-tc"
+                        :style-class (cond-> ["tl-readout" "tl-readout-tc"] approx? (conj "tl-readout-approx"))
+                        :text timecode}]}}))
 
 (defn- icon-button [{:keys [id icon tooltip on-action disable]}]
   (cond-> {:fx/type :button

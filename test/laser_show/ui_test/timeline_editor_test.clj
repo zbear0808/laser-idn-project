@@ -3,6 +3,7 @@
    canvas clicks and the Delete key, and drags from the browser."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.tools.logging :as log]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
             [laser-show.input.mtc :as mtc]
             [laser-show.services.show-clock :as show-clock]
@@ -18,14 +19,15 @@
 (use-fixtures :each fixtures/with-app)
 
 (defn- tick-clock!
-  "app/start-test! runs no show clock: tick it by hand, MIRROR_EVERY times so
-   the mirror (positions, the MTC status) reaches app state."
+  "app/start-test! runs no show clock: tick it by hand. The MTC status reaches
+   app state through the :show-clock/status event."
   []
-  (dotimes [_ show-clock/MIRROR_EVERY]
-    (show-clock/tick! (System/nanoTime))))
+  (show-clock/tick! (System/nanoTime)))
 
-(defn- position [cell]
-  (get-in (state/get-raw-state) [:playback :positions cell]))
+(defn- position
+  "Where the show clock has the cue at cell."
+  [cell]
+  (get (show-time/positions @show-time/!runtime) cell))
 
 (deftest timeline-editor-controls-and-canvas-respond-to-clicks
   (let [robot (ui/robot)]
@@ -265,6 +267,28 @@
       (ui/click! robot "#timeline-stop")
       (ui/wait-for! #(nil? (get-in (state/get-raw-state) timing-path)))
       (is (= 6.0 (get-in (state/get-raw-state) [:ui :timeline-editor [0 0] :cursor-beat]))))))
+
+(deftest timeline-readout-follows-the-clock-test
+  ;; The readout draws from the show clock's newest tick, on a fake clock here
+  (let [robot (ui/robot)
+        t0 (System/nanoTime)
+        tick! #(show-clock/tick! (+ t0 (* % 1000000)))
+        readout #(ui/node-text "#timeline-readout")]
+    (open-timeline!)
+    (events/dispatch! {:event/type :timeline/apply-op :col 0 :row 0 :op {:op :set-length :beats 64.0}})
+    (ui/wait-for! #(= "1.1.1" (readout)))
+    (ui/click! robot "#timeline-play")
+    (ui/wait-for! #(some? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))
+    (tick! 0)
+    (doseq [[ms text] [[600 "1.2.1"] [1100 "1.3.1"]]]
+      (tick! ms)
+      (ui/wait-for! #(= text (readout)))
+      (is (= text (readout)) (str (/ ms 500.0) " beats from the cursor at 120 BPM")))
+    (testing "stopped: the cursor's position again"
+      (ui/click! robot "#timeline-stop")
+      (ui/wait-for! #(nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))
+      (tick! 1200)
+      (ui/wait-for! #(= "1.1.1" (readout))))))
 
 (deftest timeline-ruler-time-mode-shows-timecode
   (let [robot (ui/robot)]

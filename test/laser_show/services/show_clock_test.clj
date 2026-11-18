@@ -124,32 +124,6 @@
         (is (< 100 (count s)))
         (is (empty? (filter neg? (map - (rest s) s))) "the cue never moved back")))))
 
-(deftest mirror-writes-once-per-two-ticks-test
-  (testing "60 ticks write app state 30 times, and only on show-time/mirror-paths (c4)"
-    (init! {[0 0] (cue :circle)})
-    (trigger! 0 0)
-    (let [writes (atom [])
-          k ::mirror
-          strip #(reduce (fn [m p] (assoc-in m p nil)) (:cljfx.context/m %) show-time/mirror-paths)]
-      (add-watch (state/get-context-atom) k
-                 (fn [_ _ old new] (swap! writes conj (= (strip old) (strip new)))))
-      (try
-        (ticks! 60)
-        (finally (remove-watch (state/get-context-atom) k)))
-      (is (= 30 (count @writes)))
-      (is (every? true? @writes) "nothing outside the mirror paths changed")
-      (let [s (state/get-raw-state)]
-        (is (= (position [0 0]) (get-in s [:playback :positions [0 0]])) "positions")
-        (is (= (:global @show-time/!runtime) (get-in s [:timing :global-clock])) "the beat clock")
-        (is (seq (get-in s [:backend :streaming :current-frame :points])) "the preview frame")))))
-
-(deftest mirror-carries-the-timecode-status-test
-  (with-redefs [mtc/current (constantly {:state :running :seconds 3599.0 :fps 25
-                                         :tc {:h 0 :m 59 :s 59 :f 0 :drop? false}})]
-    (ticks! 2))
-  (is (= {:state :running :fps 25 :text "00:59:59:00"}
-         (dissoc (get-in (state/get-raw-state) [:backend :input :mtc]) :at-ms))))
-
 (deftest reports-reach-app-state-test
   (testing "a timeline's end stops the cue through the :show-clock/cue-ended event"
     (init! {[0 0] one-clip-timeline})
@@ -229,7 +203,10 @@
       (is (= (:accumulated-beats r) (get-in s [:projector-ctx :accumulated-beats]))
           "projector effects run at the first cue's timing")
       (is (= 120.0 (get-in s [:projector-ctx :bpm])))
-      (is (number? (:render-us s))))))
+      (is (number? (:render-us s)))
+      (is (= {[0 0] (:accumulated-beats r)} (:positions s)) "where each cue is, for the screen")
+      (is (= (:accumulated-beats r) (show-time/cue-beats s [0 0])))
+      (is (nil? (show-time/cue-beats s [1 0])) "not playing"))))
 
 (deftest failing-cue-renders-empty-test
   (init! {[0 0] (cue :circle) [1 0] (cue :square)})
@@ -270,7 +247,7 @@
       (is (= 5 @samples) "one sample per rendering tick"))))
 
 (deftest preview-is-built-after-the-engines-wake-test
-  (testing "the snapshot's preview is joined after publish!, by the mirror (A3)"
+  (testing "the snapshot's preview is never joined on the clock thread: the screen forces it (A3)"
     (init! {[0 0] (cue :circle)})
     (trigger! 0 0)
     (let [seen (atom [])
@@ -282,5 +259,77 @@
         (let [first-tick (show-clock/tick! 0)
               second-tick (show-clock/tick! 16666667)]
           (is (= [false false] @seen) "not built when the engines wake")
-          (is (not (realized? (:preview first-tick))) "a tick without the mirror never builds it")
-          (is (realized? (:preview second-tick)) "the mirror tick builds it after publishing"))))))
+          (is (not-any? #(realized? (:preview %)) [first-tick second-tick]) "nor after: no mirror builds it")
+          (is (seq (:points @(:preview second-tick))) "forcing it gives the tick's preview"))))))
+
+
+;; Phase 3: app state only hears what changes a few times a second
+
+(def ^:private status-paths
+  [[:timing :beat-index] [:backend :streaming :frame-stats] [:backend :input :mtc]])
+
+(defn- watch-writes
+  "Run (f) and return its app-state writes: each the set of status paths it
+   changed, with :other when it changed anything else."
+  [f]
+  (let [writes (atom [])
+        k ::writes
+        strip #(reduce (fn [m p] (assoc-in m p nil)) % status-paths)]
+    (add-watch (state/get-context-atom) k
+               (fn [_ _ old new]
+                 (let [o (:cljfx.context/m old)
+                       n (:cljfx.context/m new)]
+                   (swap! writes conj (cond-> (set (filter #(not= (get-in o %) (get-in n %)) status-paths))
+                                        (not= (strip o) (strip n)) (conj :other))))))
+    (try (f) (finally (remove-watch (state/get-context-atom) k)))
+    @writes))
+
+(deftest app-state-is-quiet-while-a-cue-plays-test
+  (testing "2 s of ticks with one cue at 120 BPM write app state at most 14 times, all
+            on the status paths (c4; 61 a second before Phase 1, 30 before Phase 3)"
+    (init! {[0 0] (cue :circle)})
+    (trigger! 0 0)
+    (with-redefs [mtc/current (constantly {:state :stopped})]
+      (let [writes (watch-writes #(ticks! 121))]
+        (is (<= (count writes) 14) (str (count writes) " writes: " (frequencies (mapcat seq writes))))
+        (is (not-any? :other writes) "nothing but the status")
+        (is (<= 3 (count (filter #(contains? % [:timing :beat-index]) writes)) 4)
+            "the beat square moves 4 times in 2 s")))
+    (is (= (int (mod (show-time/global-beats) 4.0)) (get-in (state/get-raw-state) [:timing :beat-index])))
+    (is (seq (get-in (state/get-raw-state) [:backend :streaming :frame-stats])) "the stats arrived")))
+
+(deftest status-is-sent-only-when-it-changes-test
+  (let [sent (atom [])
+        stats (atom nil)
+        status-at (fn [ms]
+                    (reset! sent [])
+                    (show-clock/tick! (* ms 1000000))
+                    (mapv :status @sent))]
+    (with-redefs [events/dispatch! #(swap! sent conj %)
+                  profiler/get-recent-stats (fn [_] @stats)
+                  mtc/current (constantly {:state :stopped})]
+      (testing "app state already holds the status: nothing goes"
+        (is (= [] (status-at 0))))
+      (testing "the beat changed: it goes once"
+        (is (= [1] (map :beat-index (status-at 600))) "1.2 beats at 120 BPM")
+        (is (= :show-clock/status (:event/type (first @sent)))))
+      (testing "app state hasn't caught up 16 ms later: not again yet"
+        (is (= [] (status-at 616))))
+      (testing "250 ms after it went, app state still differs (the write was lost): again"
+        (is (= [1] (map :beat-index (status-at 850)))))
+      (testing "once app state has it, nothing"
+        (run! events/event-handler @sent)
+        (is (= 1 (get-in (state/get-raw-state) [:timing :beat-index])))
+        (is (= [] (status-at 900))))
+      (testing "the stats are recomputed at most every 250 ms"
+        (reset! stats {:avg-total-us 100 :p95-total-us 120 :max-total-us 150 :avg-base-us 90 :avg-effects-us 10})
+        (is (= [] (status-at 950)) "computed at 850, so not due; and still beat 1 (1.9 beats)")
+        (is (= [{:avg-latency-us 100 :p95-latency-us 120 :max-latency-us 150 :avg-base-us 90 :avg-effects-us 10}]
+               (map :frame-stats (status-at 1100))))))))
+
+(deftest timecode-status-reaches-app-state-test
+  (with-redefs [mtc/current (constantly {:state :running :seconds 3599.0 :fps 25
+                                         :tc {:h 0 :m 59 :s 59 :f 0 :drop? false}})]
+    (ticks! 2))
+  (is (= {:state :running :fps 25 :text "00:59:59:00"}
+         (dissoc (get-in (state/get-raw-state) [:backend :input :mtc]) :at-ms))))

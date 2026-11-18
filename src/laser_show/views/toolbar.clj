@@ -130,8 +130,9 @@
 
 (defn beat-square
   "Individual beat square in the indicator."
-  [{:keys [current-beat? downbeat?]}]
+  [{:keys [index current-beat? downbeat?]}]
   {:fx/type :region
+   :id (str "beat-square-" index)
    :pref-width 12
    :pref-height 12
    :style-class (cond-> ["beat-square"]
@@ -139,16 +140,18 @@
                   downbeat? (conj "beat-downbeat"))})
 
 (defn beat-indicator
-  "4-square beat indicator showing current beat position.
-   Uses effective-beats which smoothly adjusts during tap tempo resync."
+  "4-square beat indicator showing the beat in the bar. It re-renders on each
+   beat only: the show clock reports the beat (:show-clock/status), from
+   effective beats, which glide smoothly during a tap tempo resync."
   [{:keys [fx/context]}]
-  (let [{:keys [beat-index]} (fx/sub-ctx context subs/beat-position)]
+  (let [beat-index (fx/sub-ctx context subs/beat-index)]
     {:fx/type :h-box
      :spacing 3
      :alignment :center
      :style-class "beat-indicator"
      :children (mapv (fn [i]
                        {:fx/type beat-square
+                        :index i
                         :current-beat? (= i beat-index)
                         :downbeat? (= i 0)})
                      (range 4))}))

@@ -126,59 +126,41 @@
 
 (deftest test-generate-frames-by-zone-inherits-default
   (testing "Item without zone effects inherits cue chain default destination"
-    (let [current-time (System/currentTimeMillis)]
-      (state/swap-state!
-       (fn [s]
-         (-> s
-             (assoc-in [:timing :global-clock]
-                       {:accumulated-beats 0.0
-                        :accumulated-ms 0.0
-                        :last-frame-time current-time}))))
+    (let [test-cue-chain {:destination-zone {:zone-group-id :all}
+                          :tracks [{:id #uuid "10000000-0000-0000-0000-000000000000"
+                                    :name "Track 1"
+                                    :zone-group-id :all}]
+                          :items [{:type :preset
+                                   :preset-id :circle
+                                   :track-id #uuid "10000000-0000-0000-0000-000000000000"
+                                   :enabled? true
+                                   :effects []}]}
+          result (frame-service/generate-frames-by-zone
+                  test-cue-chain 0 120.0 0 test-timing-ctx)]
 
-      (let [test-cue-chain {:destination-zone {:zone-group-id :all}
-                            :tracks [{:id #uuid "10000000-0000-0000-0000-000000000000"
-                                      :name "Track 1"
-                                      :zone-group-id :all}]
-                            :items [{:type :preset
-                                     :preset-id :circle
-                                     :track-id #uuid "10000000-0000-0000-0000-000000000000"
-                                     :enabled? true
-                                     :effects []}]}
-            result (frame-service/generate-frames-by-zone
-                    test-cue-chain 0 120.0 0 test-timing-ctx)]
-
-        (is (= 1 (count result)) "Should have exactly 1 zone")
-        (is (contains? result :all) "Item without zone effects should route to :all")
-        (is (nil? (:left result)) "Should not have :left zone")
-        (is (nil? (:right result)) "Should not have :right zone")))))
+      (is (= 1 (count result)) "Should have exactly 1 zone")
+      (is (contains? result :all) "Item without zone effects should route to :all")
+      (is (nil? (:left result)) "Should not have :left zone")
+      (is (nil? (:right result)) "Should not have :right zone"))))
 
 (deftest test-generate-frames-by-zone-empty-zones-excluded
   (testing "Empty zones do not appear in result map"
-    (let [current-time (System/currentTimeMillis)]
-      (state/swap-state!
-       (fn [s]
-         (-> s
-             (assoc-in [:timing :global-clock]
-                       {:accumulated-beats 0.0
-                        :accumulated-ms 0.0
-                        :last-frame-time current-time}))))
+    (let [test-cue-chain {:destination-zone {:zone-group-id :left}
+                          :tracks [{:id #uuid "10000000-0000-0000-0000-000000000000"
+                                    :name "Track 1"
+                                    :zone-group-id :left}]
+                          :items [{:type :preset
+                                   :preset-id :circle
+                                   :track-id #uuid "10000000-0000-0000-0000-000000000000"
+                                   :enabled? true
+                                   :effects []}]}
+          result (frame-service/generate-frames-by-zone
+                  test-cue-chain 0 120.0 0 test-timing-ctx)]
 
-      (let [test-cue-chain {:destination-zone {:zone-group-id :left}
-                            :tracks [{:id #uuid "10000000-0000-0000-0000-000000000000"
-                                      :name "Track 1"
-                                      :zone-group-id :left}]
-                            :items [{:type :preset
-                                     :preset-id :circle
-                                     :track-id #uuid "10000000-0000-0000-0000-000000000000"
-                                     :enabled? true
-                                     :effects []}]}
-            result (frame-service/generate-frames-by-zone
-                    test-cue-chain 0 120.0 0 test-timing-ctx)]
-
-        (is (= #{:left} (set (keys result))) "Only :left should have a frame")
-        (is (nil? (:all result)) ":all should not have a frame")
-        (is (nil? (:right result)) ":right should not have a frame")
-        (is (nil? (:center result)) ":center should not have a frame")))))
+      (is (= #{:left} (set (keys result))) "Only :left should have a frame")
+      (is (nil? (:all result)) ":all should not have a frame")
+      (is (nil? (:right result)) ":right should not have a frame")
+      (is (nil? (:center result)) ":center should not have a frame"))))
 
 ;; The preview from a tick's rendered cues (preview-data)
 ;;
@@ -259,15 +241,6 @@
   (testing "zone-frames keys match union of all cue destination zones"
     (let [{:keys [zone-frames cue-destinations]} (frame-service/preview-data (two-cues))]
       (is (= (set (keys zone-frames)) (into #{} cat (vals cue-destinations)))))))
-
-(deftest preview->mirror-test
-  (let [preview (frame-service/preview-data (two-cues))
-        mirrored (frame-service/preview->mirror preview)]
-    (is (every? #(= #{:x :y :r :g :b :blanked?} (set (keys %))) (:points mirrored))
-        "points as maps, for the preview views")
-    (is (= (update-vals (:zone-frames preview) count) (update-vals (:zone-frames mirrored) count)))
-    (is (= (:cue-destinations preview) (:cue-destinations mirrored))))
-  (is (nil? (frame-service/preview->mirror nil))))
 
 
 (defn- render-with-tracks [tracks]

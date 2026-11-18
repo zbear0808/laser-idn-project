@@ -495,38 +495,3 @@
                                      (when (seq zone-frames)
                                        [cell (set (keys zone-frames))])))
                              cues)}))
-
-
-;; Frame Conversion for Preview
-
-
-(defn laser-point->preview-point
-  "Convert a LaserPoint vector to a map suitable for preview rendering.
-   
-   LaserPoints are 5-element vectors [x y r g b] with normalized values:
-   - x, y: -1.0 to 1.0 (already normalized)
-   - r, g, b: 0.0 to 1.0 (already normalized)
-   
-   Preview uses the same format, so we just pass through the values."
-  [point]
-  {:x (point t/X)           ;; Already normalized (-1.0 to 1.0)
-   :y (point t/Y)           ;; Already normalized (-1.0 to 1.0)
-   :r (point t/R)           ;; Already normalized (0.0 to 1.0)
-   :g (point t/G)           ;; Already normalized (0.0 to 1.0)
-   :b (point t/B)           ;; Already normalized (0.0 to 1.0)
-   :blanked? (t/blanked? point)})
-
-(defn frame->preview-data
-  "Convert a frame (vector of points) to preview-friendly data."
-  [frame]
-  (when (seq frame)
-    (mapv laser-point->preview-point frame)))
-
-(defn preview->mirror
-  "preview-data as [:backend :streaming :current-frame] holds it (points as
-   maps, for the preview views), or nil when nothing rendered."
-  [{:keys [points zone-frames cue-destinations]}]
-  (when (seq points)
-    {:points (frame->preview-data points)
-     :cue-destinations cue-destinations
-     :zone-frames (update-vals zone-frames frame->preview-data)}))

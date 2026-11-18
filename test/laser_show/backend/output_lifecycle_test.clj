@@ -488,10 +488,14 @@
   (testing "with the show clock running, three projectors send each tick once, in the same order (c1)"
     (init-with-projectors! {:a (projector 1 true) :b (projector 2 true) :c (projector 3 true)})
     (state/swap-state! assoc-in [:chains :cue-chains [0 0]]
+                       ;; Turning at constant speed, 0.75° a tick for 8 s: every tick's
+                       ;; frame differs, so a frame's samples name its tick. A sine
+                       ;; wouldn't do: it is symmetric about its peak and trough, so two
+                       ;; ticks half a beat apart can send the same frame
                        {:destination-zone {:zone-group-id :all}
                         :items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true
                                  :effects [{:id (random-uuid) :effect-id :rotation :enabled? true
-                                            :params {:angle {:type :sine :min 0.0 :max 360.0 :period 1.0}}}]}]})
+                                            :params {:angle {:type :sawtooth :min 0.0 :max 360.0 :period 16.0}}}]}]})
     (dispatch! {:event/type :grid/trigger-cell :col 0 :row 0})
     (show-clock/start!)
     (try

@@ -112,15 +112,6 @@
             (is (str/includes? (:message (first entries)) ":timing/set-bpm"))
             (is (str/includes? (:message (first entries)) ":projectors")))
           (is (= 128.0 (get-in (state/get-raw-state) [:timing :bpm])))))
-      (testing "only the show clock's mirror writing in between is not a WARN"
-        (log-test/with-log
-          (set-bpm-with-a-write-in-between!
-           #(state/swap-state! (fn [s]
-                                 (-> s
-                                     (assoc-in [:timing :global-clock :accumulated-beats] 4.0)
-                                     (assoc-in [:playback :positions [0 0]] 2.5)
-                                     (assoc-in [:backend :streaming :current-frame] {:points []})))))
-          (is (not-any? #(= :warn (:level %)) (detector-entries)))))
       (testing "the cues and transport are the event flow's alone now: a write to them in between is a WARN"
         (log-test/with-log
           (set-bpm-with-a-write-in-between!
@@ -132,6 +123,21 @@
           (is (empty? (detector-entries)))))
       (testing "the snapshot does not end up in app state"
         (is (empty? (meta (state/get-raw-state))))))))
+
+(deftest lost-update-check-has-no-exemptions-test
+  (testing "the show clock writes app state only through events now, so a write to what
+            its mirror wrote is a lost update like any other (show clock 03 §7, invariant 3)"
+    (with-dev-property "true"
+      (fn []
+        (doseq [[path value] [[[:timing :beat-index] 2]
+                              [[:backend :streaming :frame-stats] {:avg-latency-us 10}]
+                              [[:backend :input :mtc] {:state :running :fps 25 :text "00:00:01:00"}]
+                              [[:timing :global-clock] {:accumulated-beats 4.0}]
+                              [[:playback :positions] {[0 0] 2.5}]
+                              [[:backend :streaming :current-frame] {:points []}]]]
+          (log-test/with-log
+            (set-bpm-with-a-write-in-between! #(state/assoc-in-state! path value))
+            (is (= 1 (count (filter #(= :warn (:level %)) (detector-entries)))) (str path))))))))
 
 (deftest lost-update-detector-is-off-outside-dev-mode-test
   (with-dev-property nil

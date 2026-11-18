@@ -1,138 +1,163 @@
 (ns laser-show.views.components.preview
-  "Preview panel component for displaying laser frame output.
-   
-   This component renders the current laser frame to a JavaFX Canvas.
-   The :draw prop is a function that receives the Canvas and renders to it.
-   
+  "Preview panel: a grid of cells, each drawing the show clock's newest tick
+   on each screen refresh (clock-view), for one zone group or for all of them.
+   A cell shows what an engine on its zone sends, before projector effects.
+
    Features:
-   - Zone group filtering for preview (dropdown in header)
-   - Shows content based on routing destination
-   
-   NOTE: LaserPoints now use NORMALIZED colors (0.0-1.0).
-   This module converts normalized values to 8-bit for JavaFX Color display."
+   - Zone group filtering per cell (the label opens a zone picker)
+   - Layout selector in the header
+
+   LaserPoints are vectors [x y r g b] with NORMALIZED values: x, y in -1..1,
+   r, g, b in 0..1."
   (:require [cljfx.api :as fx]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.subs :as subs]
-            [laser-show.common.util :as u])
+            [laser-show.common.util :as u]
+            [laser-show.views.components.clock-view :as clock-view])
   (:import [javafx.scene.canvas Canvas GraphicsContext]
            [javafx.scene.paint Color]
+           [javafx.scene.text Font]
            [javafx.util StringConverter]))
 
 
-;; Drawing Helpers
-
-
-(defn- normalize-coord
-  "Convert normalized coordinate (-1 to 1) to pixel coordinate."
-  [normalized size]
-  (* (+ normalized 1.0) 0.5 size))
-
-(defn- color-from-normalized
-  "Create JavaFX Color from normalized RGB values (0.0-1.0).
-   Clamps values to valid range."
-  [r g b]
-  (Color/color (u/clamp (double (or r 1.0)) 0.0 1.0)
-               (u/clamp (double (or g 1.0)) 0.0 1.0)
-               (u/clamp (double (or b 1.0)) 0.0 1.0)))
-
-(defn- color-from-rgb
-  "Create JavaFX Color from normalized RGB values (0.0-1.0)."
-  [r g b]
-  (color-from-normalized (or r 1.0) (or g 1.0) (or b 1.0)))
-
-
 ;; Frame Drawing
+;;
+;; One indexed pass over the frame for the lines and one for the dots, on the
+;; tick's point vectors: no seqs or maps per point, and a new Color only when
+;; the colour changes (review 01 M2). The cells redraw on every tick.
 
+
+(def ^:private grid-color (Color/rgb 40 40 40))
+
+(def ^:private message-color (Color/rgb 80 80 80))
+
+(def ^:private message-font
+  ;; A Font needs the FX toolkit, so it's made on first use
+  (delay (Font. "System" 14.0)))
+
+(defn- value
+  "Point p's i-th value, or NaN if it isn't a number."
+  ^double [p ^long i]
+  (let [v (nth p i nil)]
+    (if (number? v) (double v) Double/NaN)))
+
+(defn- on-canvas? [^double x ^double y]
+  (and (Double/isFinite x) (Double/isFinite y)))
+
+(defn- lit?
+  "Is a colour drawn: every channel finite and one of them lit? A point whose
+   channels are all below 1e-6 is blanked (as t/blanked?)."
+  [^double r ^double g ^double b]
+  (and (Double/isFinite r) (Double/isFinite g) (Double/isFinite b)
+       (or (>= r 1e-6) (>= g 1e-6) (>= b 1e-6))))
+
+(defn- clamp01 ^double [^double v]
+  (Math/max 0.0 (Math/min 1.0 v)))
 
 (defn- draw-background
-  "Draw the preview background."
-  [^GraphicsContext gc width height]
+  [^GraphicsContext gc ^double width ^double height]
   (.setFill gc Color/BLACK)
   (.fillRect gc 0 0 width height)
-  ;; Draw grid lines
-  (.setStroke gc (Color/rgb 40 40 40))
+  (.setStroke gc grid-color)
   (.setLineWidth gc 0.5)
-  ;; Horizontal center line
   (.strokeLine gc 0 (/ height 2) width (/ height 2))
-  ;; Vertical center line
   (.strokeLine gc (/ width 2) 0 (/ width 2) height))
 
-(defn- point-blanked?
-  "Check if a point is blanked (preview-friendly format).
-   Preview points already have :blanked? set, or we can check RGB values."
-  [{:keys [blanked? r g b]}]
-  (if (some? blanked?)
-    blanked?
-    (let [epsilon 1e-6]
-      (and (< (or r 0) epsilon)
-           (< (or g 0) epsilon)
-           (< (or b 0) epsilon)))))
+(defn- draw-lines!
+  "Each segment between two drawn points, in the colour of the first, as the
+   laser draws it."
+  [^GraphicsContext gc points ^double w ^double h]
+  (.setLineWidth gc 2.0)
+  (let [n (count points)]
+    (loop [i 0
+           before? false            ; was the point before drawn?
+           x0 0.0 y0 0.0            ; where it is on the canvas
+           r0 0.0 g0 0.0 b0 0.0     ; its colour
+           sr -1.0 sg -1.0 sb -1.0] ; the stroke colour set last
+      (when (< i n)
+        (let [p (nth points i)
+              x (value p 0) y (value p 1) r (value p 2) g (value p 3) b (value p 4)
+              drawn? (and (on-canvas? x y) (lit? r g b))
+              cx (* (+ x 1.0) 0.5 w)
+              cy (* (- 1.0 y) 0.5 h)]
+          (if (and drawn? before?)
+            (if (and (== r0 sr) (== g0 sg) (== b0 sb))
+              (do (.strokeLine gc x0 y0 cx cy)
+                  (recur (inc i) drawn? cx cy r g b sr sg sb))
+              (do (.setStroke gc (Color/color (clamp01 r0) (clamp01 g0) (clamp01 b0)))
+                  (.strokeLine gc x0 y0 cx cy)
+                  (recur (inc i) drawn? cx cy r g b r0 g0 b0)))
+            (recur (inc i) drawn? cx cy r g b sr sg sb)))))))
 
-(defn- draw-frame-points
-  "Draw frame points as dots."
-  [^GraphicsContext gc width height frame]
-  (when-let [points (:points frame)]
-    (doseq [{:keys [x y r g b] :as pt} points]
-      (when-not (point-blanked? pt)
-        (let [px (normalize-coord x width)
-              py (normalize-coord (- y) height)  ;; Flip Y for screen coords
-              color (color-from-rgb r g b)]
-          (.setFill gc color)
-          (.fillOval gc (- px 2) (- py 2) 4 4))))))
+(defn- draw-dots!
+  "A dot on each drawn point, in its colour, on top of the lines."
+  [^GraphicsContext gc points ^double w ^double h]
+  (let [n (count points)]
+    (loop [i 0
+           fr -1.0 fg -1.0 fb -1.0] ; the fill colour set last
+      (when (< i n)
+        (let [p (nth points i)
+              x (value p 0) y (value p 1) r (value p 2) g (value p 3) b (value p 4)]
+          (if (and (on-canvas? x y) (lit? r g b))
+            (let [same? (and (== r fr) (== g fg) (== b fb))]
+              (when-not same?
+                (.setFill gc (Color/color (clamp01 r) (clamp01 g) (clamp01 b))))
+              (.fillOval gc (- (* (+ x 1.0) 0.5 w) 2.0) (- (* (- 1.0 y) 0.5 h) 2.0) 4.0 4.0)
+              (if same?
+                (recur (inc i) fr fg fb)
+                (recur (inc i) r g b)))
+            (recur (inc i) fr fg fb)))))))
 
-(defn- draw-frame-lines
-  "Draw frame as connected lines (more like actual laser output)."
-  [^GraphicsContext gc width height frame]
-  (when-let [points (:points frame)]
-    (let [point-pairs (partition 2 1 points)]
-      (doseq [[p1 p2] point-pairs]
-        (when (and (not (point-blanked? p1)) (not (point-blanked? p2)))
-          (let [x1 (normalize-coord (:x p1) width)
-                y1 (normalize-coord (- (:y p1)) height)
-                x2 (normalize-coord (:x p2) width)
-                y2 (normalize-coord (- (:y p2)) height)
-                color (color-from-rgb (:r p1) (:g p1) (:b p1))]
-            (.setStroke gc color)
-            (.setLineWidth gc 2)
-            (.strokeLine gc x1 y1 x2 y2)))))))
-
-(defn- draw-no-content
-  "Draw placeholder when no frame is available."
-  [^GraphicsContext gc width height]
-  (.setFill gc (Color/rgb 80 80 80))
-  (.setFont gc (javafx.scene.text.Font. "System" 14))
-  (let [text "No Preview"
-        text-width 80
-        x (- (/ width 2) (/ text-width 2))
-        y (/ height 2)]
-    (.fillText gc text x y)))
-
-
-;; Draw Function (called by cljfx Canvas :draw prop)
-
+(defn- draw-message
+  [^GraphicsContext gc ^double width ^double height ^String text]
+  (.setFill gc message-color)
+  (.setFont gc @message-font)
+  (.fillText gc text (- (/ width 2) (* 4.0 (count text))) (/ height 2)))
 
 (defn draw-preview
-  "Main draw function for the preview canvas.
-   
-   This is passed to the Canvas :draw prop and called whenever the canvas
-   needs to be redrawn.
-   
-   Parameters:
-   - canvas: The JavaFX Canvas
-   - frame: The frame data to render (or nil)"
-  [^Canvas canvas frame]
-  (let [gc (.getGraphicsContext2D canvas)
-        width (.getWidth canvas)
-        height (.getHeight canvas)]
-    ;; Clear and draw background
-    (draw-background gc width height)
-    ;; Draw frame content
-    (if frame
-      (do
-        ;; Draw lines first (underneath)
-        (draw-frame-lines gc width height frame)
-        ;; Draw points on top so they're visible
-        (draw-frame-points gc width height frame))
-      (draw-no-content gc width height))))
+  "Draw points (a LaserFrame) on canvas, or message (default \"No Preview\")
+   when there are none: lines first, then a dot on each point."
+  ([canvas points] (draw-preview canvas points "No Preview"))
+  ([^Canvas canvas points message]
+   (let [gc (.getGraphicsContext2D canvas)
+         width (.getWidth canvas)
+         height (.getHeight canvas)]
+     (draw-background gc width height)
+     (if (seq points)
+       (let [points (if (vector? points) points (vec points))]
+         (draw-lines! gc points width height)
+         (draw-dots! gc points width height))
+       (draw-message gc width height message)))))
+
+(defn- get-zone-filtered-points
+  "The points a cell for zone-id shows from a tick's preview
+   ({:points :zone-frames}, frame-service/preview-data):
+   - nil zone-id: every cue and zone (the master view)
+   - a zone-id: that zone's frame, looked up directly ([] when none)"
+  [preview zone-id]
+  (if (nil? zone-id)
+    (:points preview)
+    (get (:zone-frames preview) zone-id [])))
+
+(defn- redraw-cell!
+  "A preview cell's canvas from the tick in snapshot (clock-view): its zone's
+   frame, or every zone's for the master view (zone-id nil). It draws only
+   when that differs from what it drew last: while nothing plays, or a cue's
+   frame doesn't change, the canvas isn't touched. The canvas's accessible
+   text says what it shows."
+  [^Canvas canvas snapshot {:keys [zone-id width height]}]
+  (let [stale? (boolean (and snapshot (show-time/stale? snapshot (System/nanoTime))))
+        preview (when-not stale? (some-> snapshot :preview deref))
+        points (get-zone-filtered-points preview zone-id)
+        message (if stale? "Show clock stalled" "No Preview")
+        drawn [(not-empty points) message width height]
+        props (.getProperties canvas)]
+    (when (not= drawn (.get props ::drawn))
+      (.put props ::drawn drawn)
+      (draw-preview canvas points message)
+      (let [text (if (seq points) "Laser preview" message)]
+        (when (not= text (.getAccessibleText canvas))
+          (.setAccessibleText canvas text))))))
 
 
 ;; Zone Group Dropdown Helpers
@@ -240,31 +265,14 @@
                :style "-fx-text-fill: #808080; -fx-font-size: 8;"}]})
 
 
-;; Preview Grid Helper Functions
-
-
-(defn- get-zone-filtered-points
-  "Get points filtered for a specific zone.
-   - nil zone-id: Return all combined points (master view)
-   - specific zone-id: Look up zone-frames for the exact zone-id"
-  [frame-data zone-id]
-  (if (nil? zone-id)
-    ;; Master view - return all combined points
-    (:points frame-data)
-    ;; Specific zone - look up directly in zone-frames
-    (get (:zone-frames frame-data) zone-id [])))
-
-
 ;; Preview Grid Components
 
 
 (defn preview-cell
-  "Single preview cell in the grid.
-   Shows filtered frame based on zone configuration.
-   Includes clickable zone label that opens zone selector dropdown."
+  "Single preview cell in the grid: the show clock's tick for the cell's zone
+   (or every zone), and a clickable zone label that opens the zone picker."
   [{:keys [fx/context cell-index width height]}]
-  (let [frame-data (fx/sub-ctx context subs/preview-frame-data)
-        cell-config (fx/sub-ctx context subs/preview-cell-config cell-index)
+  (let [cell-config (fx/sub-ctx context subs/preview-cell-config cell-index)
         zone-id (:zone-group-id cell-config)
         zone-groups (fx/sub-ctx context subs/zone-groups-list)
         zone-group (u/seek #(= (:id %) zone-id) zone-groups)
@@ -274,9 +282,8 @@
         show-labels? (fx/sub-ctx context subs/preview-show-labels?)
         popup-open-cell (fx/sub-ctx context subs/preview-zone-selector-open)
         popup-open? (= popup-open-cell cell-index)
-        filtered-points (get-zone-filtered-points frame-data zone-id)
-        display-frame (when (seq filtered-points) {:points filtered-points})
         label-height (if show-labels? 20 0)
+        canvas-width (- width 4)
         canvas-height (- height label-height 4)]
     {:fx/type :v-box
      :style (str "-fx-border-color: " zone-color "; -fx-border-width: 2; -fx-background-color: #121212;")
@@ -293,11 +300,15 @@
                                                 (when popup-open?
                                                   {:fx/type zone-selector-popup
                                                    :cell-index cell-index})])})
-                         {:fx/type :canvas
-                          :id (str "preview-canvas-" cell-index)
-                          :width (- width 4)
-                          :height canvas-height
-                          :draw #(draw-preview % display-frame)}])}))
+                         ;; Draws the show clock's newest tick on each screen
+                         ;; refresh; the cell re-renders only for its own props
+                         {:fx/type clock-view/ext-clock-redraw
+                          :redraw! #'redraw-cell!
+                          :desc {:fx/type :canvas
+                                 :id (str "preview-canvas-" cell-index)
+                                 :width canvas-width
+                                 :height canvas-height
+                                 :user-data {:zone-id zone-id :width canvas-width :height canvas-height}}}])}))
 
 (defn preview-grid
   "Grid of preview cells."

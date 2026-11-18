@@ -16,6 +16,7 @@
    - Button toggles Link sync mode (:passive/:off)
    - UI shows both Carabiner and Link status"
   (:require [laser-show.animation.cue-timing :as cue-timing]
+            [laser-show.animation.show-time :as show-time]
             [laser-show.events.helpers :as h]
             [laser-show.input.link :as link]
             [laser-show.routing.zone-effects :as ze]
@@ -143,6 +144,14 @@
 
               :else state)}))
 
+(defn- handle-show-clock-status
+  "What views show a few times a second, from the show clock: the beat in the
+   bar, the frame stats and the MTC text (show-time/status-paths)."
+  [{:keys [status state]}]
+  {:state (reduce-kv (fn [s k path] (assoc-in s path (get status k)))
+                     state
+                     show-time/status-paths)})
+
 
 ;; Link Settings Events
 
@@ -239,6 +248,7 @@
     ;; Reports from the show clock
     :show-clock/cue-ended (handle-show-clock-cue-ended event)
     :show-clock/chase (handle-show-clock-chase event)
+    :show-clock/status (handle-show-clock-status event)
     
     ;; Link sync events
     :timing/toggle-link-sync (handle-timing-toggle-link-sync event)

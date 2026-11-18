@@ -98,21 +98,11 @@
 ;; Global Clock Extractors
 
 
-(defn global-clock
-  "Get the global clock state from timing domain.
-   Returns {:accumulated-beats :accumulated-ms :last-frame-time}"
+(defn beat-index
+  "The beat in the bar, 0-3, as the show clock last reported it
+   (:show-clock/status)."
   [state]
-  (get-in state [:timing :global-clock]))
-
-(defn global-accumulated-beats
-  "Get accumulated beats from global clock, including smooth phase offset.
-   Use for BPM visualization and phase calculations."
-  [state]
-  (let [gc (global-clock state)]
-    (or (:effective-beats gc)
-        (when-let [beats (:accumulated-beats gc)]
-          (+ (double beats) (double (or (:phase-offset gc) 0.0))))
-        0.0)))
+  (get-in state [:timing :beat-index] 0))
 
 
 ;; Playback Extractors

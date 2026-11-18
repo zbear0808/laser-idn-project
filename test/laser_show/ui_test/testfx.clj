@@ -8,6 +8,7 @@
            [javafx.scene Node]
            [javafx.scene.control CheckBox ComboBox Control Labeled TextInputControl ToggleButton]
            [javafx.scene SnapshotParameters]
+           [javafx.scene.image PixelFormat]
            [javafx.event ActionEvent Event]
            [javafx.stage Window]
            [javafx.embed.swing SwingFXUtils]
@@ -563,3 +564,22 @@
        (let [image (.snapshot node (SnapshotParameters.) nil)]
          (ImageIO/write (SwingFXUtils/fromFXImage image nil) "png" file))))
     file-path))
+
+(defn node-pixels
+  "The pixels of the first node matching selector, from a snapshot on the FX
+   thread: a vector of ARGB ints, row by row."
+  [selector]
+  (let [^Node node (query selector)]
+    (run-on-fx-thread!
+     (fn []
+       (let [image (.snapshot node (SnapshotParameters.) nil)
+             w (int (.getWidth image))
+             h (int (.getHeight image))
+             argb (int-array (* w h))]
+         (.getPixels (.getPixelReader image) 0 0 w h (PixelFormat/getIntArgbInstance) argb 0 w)
+         (vec argb))))))
+
+(defn on-fx-thread
+  "(f) on the FX thread, waiting for its value."
+  [f]
+  (run-on-fx-thread! f))

@@ -9,14 +9,14 @@
       each in its own try;
    3. publishes the result (show-time/publish!), which wakes every projector's
       engine: each takes its zones and sends them on its own thread
-      (backend/multi_engine.clj). The preview is built from the same tick,
-      after the engines are awake;
-   4. every MIRROR_EVERY ticks, mirrors positions, the beat clock, the MTC
-      status, the preview frame and the frame stats into app state, in one
-      swap on show-time/mirror-paths: the one write to app state outside the
-      event flow;
-   5. sends what it learned back as events (:show-clock/cue-ended,
-      :show-clock/chase).
+      (backend/multi_engine.clj). The snapshot also carries where each cue is,
+      and the preview as a delay that the screen forces (views/components/
+      clock_view.clj draws it on each screen refresh);
+   4. sends what it learned back as events: a timeline's end and a timecode
+      chase (:show-clock/cue-ended, :show-clock/chase), and the status views
+      show a few times a second, the beat square, the frame stats and the MTC
+      text (:show-clock/status), when app state doesn't have it yet. It writes
+      app state no other way.
 
    Only app requires this namespace; tests call tick! by hand."
   (:require [clojure.tools.logging :as log]
@@ -36,9 +36,9 @@
 
 (def ^:const TICK_HZ 60)
 
-(def ^:const MIRROR_EVERY
-  "The mirror writes app state every this many ticks (30 times a second)."
-  2)
+(def ^:private stats-interval-ms
+  "The frame stats are recomputed at most this often (4 times a second)."
+  250.0)
 
 
 ;; Rendering a tick
@@ -88,7 +88,7 @@
        :render-us (/ render-ns 1000.0)})))
 
 
-;; The mirror
+;; The status: what views show a few times a second
 
 (defn- frame-stats
   "Render and send times for the status bar, from the profiler's last second."
@@ -101,37 +101,47 @@
              :avg-effects-us (:avg-effects-us recent)}
       (:avg-idn-us recent) (merge (select-keys recent [:avg-idn-us :p95-idn-us :max-idn-us])))))
 
-(defn- mirror!
-  "Copy what views read into app state, in one swap on show-time/mirror-paths.
-   The MTC status keeps its 100 ms limit on monotonic ms, so a clock restart
-   can't hold it back."
-  [runtime snapshot mtc-pos now-ns]
-  (let [preview (frame-service/preview->mirror @(:preview snapshot))
-        stats (frame-stats)
-        positions (show-time/positions runtime)]
-    (state/swap-state!
-     (fn [s]
-       (cond-> (-> s
-                   (assoc-in [:timing :global-clock] (:global runtime))
-                   (assoc-in [:playback :positions] positions)
-                   (update-in [:backend :input :mtc] mtc/mirror-status mtc-pos (quot (long now-ns) 1000000))
-                   (assoc-in [:backend :streaming :current-frame] preview))
-         stats (assoc-in [:backend :streaming :frame-stats] stats))))))
+(defn- status-step
+  "[runtime event]: the runtime's :status one tick on, and the
+   :show-clock/status event to send, or nil. The status is the beat in the
+   bar, the frame stats (recomputed every stats-interval-ms, kept while the
+   profiler has none) and the MTC text (mtc/mirror-status's 100 ms limit), all
+   on the step's now-ms. It goes when app state doesn't hold it, and again at
+   most every report-interval-ms while app state still differs. The first
+   tick after a reset starts from what app state holds."
+  [runtime state mtc-pos now-ms]
+  (let [now-ms (double now-ms)
+        held (show-time/app-status state)
+        {:keys [value stats-at-ms sent sent-at-ms]} (or (:status runtime) {:value held})
+        stats-due? (or (nil? stats-at-ms) (>= (- now-ms (double stats-at-ms)) stats-interval-ms))
+        value' {:beat-index (int (mod (show-time/global-beats runtime) 4.0))
+                :frame-stats (or (when stats-due? (frame-stats)) (:frame-stats value))
+                :mtc (mtc/mirror-status (:mtc value) mtc-pos now-ms)}
+        send? (and (not= value' held)
+                   (or (not= value' sent)
+                       (>= (- now-ms (double sent-at-ms)) show-time/report-interval-ms)))]
+    [(assoc runtime :status {:value value'
+                             :stats-at-ms (if stats-due? now-ms stats-at-ms)
+                             :sent (if send? value' sent)
+                             :sent-at-ms (if send? now-ms sent-at-ms)})
+     (when send?
+       {:event/type :show-clock/status :status value'})]))
 
 
 ;; A tick
 
 (defn tick!
   "One tick at now-ns (System/nanoTime): step show time, render every playing
-   cue, publish, mirror every MIRROR_EVERY ticks, then send the step's reports
-   as events (events/dispatch!). now-ms, the step's time base, is fractional
+   cue, publish, then send the step's reports and the status as events
+   (events/dispatch!). now-ms, the step's time base, is fractional
    milliseconds since the first tick after a reset. Returns the snapshot."
   [now-ns]
   (let [state (state/get-raw-state)
         mtc-pos (mtc/current)
         before @show-time/!runtime
         t0 (or (:t0-ns before) now-ns)
-        {:keys [runtime reports]} (show-time/step before state mtc-pos (/ (- (long now-ns) (long t0)) 1e6))
+        now-ms (/ (- (long now-ns) (long t0)) 1e6)
+        {:keys [runtime reports]} (show-time/step before state mtc-pos now-ms)
         runtime (assoc runtime :t0-ns t0)
         _ (reset! show-time/!runtime runtime)
         playing? (boolean (get-in state [:playback :playing?]))
@@ -139,10 +149,12 @@
         snapshot (show-time/publish! (assoc rendered
                                             :at-ns (System/nanoTime)
                                             :playing? playing?
-                                            :preview (delay (frame-service/preview-data cues))))]
-    (when (zero? (mod (long (:tick runtime)) MIRROR_EVERY))
-      (mirror! runtime snapshot mtc-pos now-ns))
-    (run! events/dispatch! reports)
+                                            :positions (show-time/positions runtime)
+                                            :preview (delay (frame-service/preview-data cues))))
+        ;; After publish!, so the engines never wait for it
+        [runtime status] (status-step runtime state mtc-pos now-ms)]
+    (reset! show-time/!runtime runtime)
+    (run! events/dispatch! (cond-> reports status (conj status)))
     snapshot))
 
 

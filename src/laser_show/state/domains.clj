@@ -51,11 +51,9 @@
    :quantization {:default :beat
                   :doc "Quantization mode (:beat :bar :none)"}
 
-   ;; Global clock for BPM visualization
-   :global-clock {:default {:accumulated-beats 0.0
-                            :accumulated-ms 0.0
-                            :last-frame-time 0}
-                  :doc "Mirror of the show clock's global clock (show-time/global-clock), written every second tick. Read it for display only; the show clock's own copy is the truth. Only reset by Stop and Retrigger."}})
+   ;; The beat indicator
+   :beat-index {:default 0
+                :doc "The beat in the bar, 0-3 (0 = downbeat), from the show clock's global clock (:show-clock/status, on each beat). The clock itself is show time (show-time/global-clock): only reset by Stop and Retrigger."}})
 
 (defstate playback
   "Playback control state for animation triggering.
@@ -64,7 +62,8 @@
    - active-cues: Map of [col row] -> intent; the show clock
      (laser-show.animation.show-time) owns each cue's timing
    - requests: one-shot transport requests the show clock applies
-   - positions: the show clock's mirror of where each cue is"
+   - where each cue is never reaches app state: views draw it from the show
+     clock's newest tick (show-time/latest)"
   {:playing? {:default false
               :doc "Whether playback is active (any cues playing)"}
    :active-cue {:default nil
@@ -82,8 +81,6 @@
                        and drops runs to match (show-time/step)."}
    :requests {:default {}
               :doc "{:restart {:id} :align {:id} :shift {:id :offset}}: the show clock applies each id once (Stop and Retrigger, tap tempo, Link)"}
-   :positions {:default {}
-               :doc "Mirror of {[col row] beats} from the show clock, written every second tick (timeline playheads)"}
 
    ;; Shared timing settings
    :resync-rate {:default 4.0
@@ -404,8 +401,7 @@
   "Backend services state - streaming, input, logging."
   {:streaming {:default {:running? false
                          :status nil
-                         :frame-stats {}
-                         :current-frame nil}
+                         :frame-stats {}}
                :doc "IDN output. :running? is the operator's intent (Stream/Stop); :status is what actually streams, pure data from backend/output_runtime.clj (the engines live there)"}
    :input {:default {:midi {:enabled? true
                             :devices {}                ; Map of device-name -> device instance
@@ -422,7 +418,7 @@
                            :address-mappings {}        ; Map of OSC address -> event config
                            :handlers {}                ; Map of handler-id -> {:pattern :handler}
                            :learn-mode nil}            ; Promise when learning, nil otherwise
-                     :mtc {:state :stopped :fps nil :text nil} ; mirror of laser-show.input.mtc, see mirror-status
+                     :mtc {:state :stopped :fps nil :text nil} ; the show clock's status of laser-show.input.mtc, see mirror-status
                      :gamepad {:enabled? true}
                      :keyboard {:enabled? true
                                 :attached-components #{}}

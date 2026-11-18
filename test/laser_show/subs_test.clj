@@ -22,11 +22,18 @@
                                                  :items [{:type :effect :effect-id :scale}
                                                          {:type :effect :effect-id :rotate}]}})
       (assoc-in [:playback :active-cues] {[0 0] {:run #uuid "00000000-0000-0000-0000-000000000001"}})
-      (assoc-in [:playback :positions] {[0 0] 0.0})
       (assoc-in [:grid :selected-cell] [0 0])))
 
 (defn- context [s]
   (fx/create-context s state/cache-factory))
+
+(defn- status-write
+  "What a playing show changes in app state: the show clock's status (the beat
+   square, the stats)."
+  [ctx]
+  (fx/swap-context ctx #(-> %
+                            (update-in [:timing :beat-index] (fn [b] (mod (inc (or b 0)) 4)))
+                            (assoc-in [:backend :streaming :frame-stats] {:avg-latency-us 123}))))
 
 (deftest cell-display-data-output-test
   (let [ctx (context base-state)]
@@ -55,8 +62,8 @@
 (deftest cell-display-data-ignores-unrelated-changes-test
   (let [ctx (context base-state)
         before (fx/sub-ctx ctx subs/cell-display-data 0 0)]
-    (testing "per-tick position updates from the show clock's mirror"
-      (let [ctx' (fx/swap-context ctx update-in [:playback :positions [0 0]] + 0.25)]
+    (testing "the show clock's status while a show plays"
+      (let [ctx' (status-write ctx)]
         (is (identical? before (fx/sub-ctx ctx' subs/cell-display-data 0 0)))))
     (testing "another cell starts playing"
       (let [ctx' (fx/swap-context ctx assoc-in [:playback :active-cues [1 0]] {:run (random-uuid)})]
@@ -83,26 +90,27 @@
             :has-effects? true
             :display-text "scale +1"}
            before))
-    (testing "unaffected by cue-chain edits and playback ticks"
+    (testing "unaffected by cue-chain edits and the show clock's status"
       (let [ctx' (-> ctx
                      (fx/swap-context assoc-in [:chains :cue-chains [0 0] :name] "Renamed")
-                     (fx/swap-context update-in [:playback :positions [0 0]] + 1.0))]
+                     (status-write))]
         (is (identical? before (fx/sub-ctx ctx' subs/effect-cell-display-data 0 0)))))))
 
-(deftest timeline-playhead-only-depends-on-cell-test
+(deftest beat-index-sub-test
   (let [ctx (context base-state)]
-    (is (= 0.0 (fx/sub-ctx ctx subs/timeline-playhead 0 0)))
-    (is (nil? (fx/sub-ctx ctx subs/timeline-playhead 1 0)) "not playing")
-    (testing "a tick on this cue changes the playhead"
-      (let [ctx' (fx/swap-context ctx update-in [:playback :positions [0 0]] + 0.25)]
-        (is (= 0.25 (fx/sub-ctx ctx' subs/timeline-playhead 0 0)))))))
+    (is (= 0 (fx/sub-ctx ctx subs/beat-index)) "the downbeat before any status")
+    (testing "the status moves it"
+      (is (= 3 (fx/sub-ctx (fx/swap-context ctx assoc-in [:timing :beat-index] 3) subs/beat-index))))
+    (testing "the stats alone don't"
+      (let [ctx' (fx/swap-context ctx assoc-in [:backend :streaming :frame-stats] {:avg-latency-us 10})]
+        (is (= 0 (fx/sub-ctx ctx' subs/beat-index)))))))
 
 (deftest timeline-dialog-subs-ignore-playback-and-other-cells-test
   (let [ctx (context base-state)
         chain (fx/sub-ctx ctx subs/cue-cell-chain 0 0)
         ui (fx/sub-ctx ctx subs/timeline-ui 0 0)]
-    (testing "playback ticks don't invalidate the dialog's subs"
-      (let [ctx' (fx/swap-context ctx update-in [:playback :positions [0 0]] + 0.25)]
+    (testing "the show clock's status doesn't invalidate the dialog's subs"
+      (let [ctx' (status-write ctx)]
         (is (identical? chain (fx/sub-ctx ctx' subs/cue-cell-chain 0 0)))
         (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui 0 0)))))
     (testing "another cell's edits and view don't either"
