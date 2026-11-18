@@ -54,6 +54,7 @@ clj -M:dev .agents/skills/app-repl/nrepl_eval.clj @path/to/form.clj [namespace]
 ```
 
 - Prints stdout, then each result. Eval errors go to stderr and exit with status 1.
+- Each call takes about two seconds, so put several forms in one call. A form that throws doesn't stop the later forms in the same call; wrap steps that depend on each other in `(do ...)`.
 - Each call runs in a new session in the `user` namespace. Pass a namespace such as `laser-show.app` as the second argument, or fully qualify symbols. Namespaces, vars and app state persist across calls, but a namespace must be loaded before you call into it.
 - The examples in this skill are REPL forms. Inside a shell argument's single quotes, write `(quote x)` for `'x`, or put the form in a file and pass `@path`. Use the file form for multi-line code and for code with double quotes, because PowerShell can mangle double quotes in arguments.
 
@@ -63,9 +64,11 @@ Prefer test mode for experiments:
 
 ```clojure
 (require 'laser-show.app)      ; a fresh REPL hasn't loaded it yet
-(laser-show.app/start-test!)   ; mounts the UI from starter state; no IDN scan, MIDI, OSC, gamepad or Link
+(laser-show.app/start-test!)   ; stops any running app, then mounts the UI from starter state; no IDN scan, MIDI, OSC, gamepad or Link
 (laser-show.app/stop!)         ; unmounts the UI and input; safe to call any time
 ```
+
+`start-test!` replaces the app state with the starter state, so unsaved work in the running app is lost.
 
 Loading `laser-show.app` prints a `Reflection warning` from `cljfx/coerce.clj`. It is harmless.
 
@@ -75,11 +78,11 @@ Traps:
 
 - `(stop)` from `dev/user.clj` only stops an app started with `(start)`. After `start-test!` it prints "Stopped." and leaves the window open. Use `(laser-show.app/stop!)`.
 - `reload-styles!` and `watch-styles!` check the same flag, so they refuse after `start-test!`. Call `(require 'laser-show.css.reload)` and then `(laser-show.css.reload/reload-all-styles!)` directly; it returns `{:success? true}`.
-- `start!` does not stop an app that is already mounted. Call `(laser-show.app/stop!)` before switching between `start-test!` and `start!`.
+- `start!` does not stop an app that is already mounted. Call `(laser-show.app/stop!)` before `start!`.
 
 ## Reload changed code
 
-Reload an edited namespace with `(require 'the.ns :reload)`. Remount the UI with `(laser-show.app/stop!)` and then `(laser-show.app/start-test!)` to be sure view changes show up.
+Reload an edited namespace with `(require 'the.ns :reload)`. To be sure view changes show up, remount the UI with `(laser-show.app/start-test!)`, which also resets the state to the starter state.
 
 ## Read app state
 
@@ -92,7 +95,7 @@ For specific values, use the pure readers in `src/laser_show/state/extractors.cl
 
 ## UI work
 
-To inspect or drive the UI, load the `plorer` skill (`.agents/skills/plorer/`) in the same REPL.
+To inspect or drive the UI, use the `plorer` skill (`.agents/skills/plorer/`) in the same REPL.
 
 ## Ask first
 
