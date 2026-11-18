@@ -221,8 +221,8 @@ BPM 120, timing ctx at absolute beat 18, clip start 16.
   - LTC decoding.
   - Tempo maps with several tempo changes inside one timeline. A single locked tempo covers most pre-recorded shows; a tempo map is a later extension of `cue-bpm` and `show-seconds`.
   - Pre-rendering frames, and recording live triggers onto the timeline (README `:159-161`).
-  - Smoothing the 30 Hz playhead / timing step (04 #11, fixed by T4 / 04 LE1). *(2026-11-17: the timing step is 60 Hz since `plans/2026-11-17-show-clock/` Phase 1, `dd106de`; the playhead is still drawn from its 30 Hz mirror until its Phase 3.)*
-  - Moving playback runtime out of the cljfx context (02 M1.3). *(2026-11-17: the same plan. Its Phase 1 moved the positions into the clock's runtime (`dd106de`); app state keeps a mirror until its Phase 3.)*
+  - Smoothing the 30 Hz playhead / timing step (04 #11, fixed by T4 / 04 LE1). *(2026-11-18: the timing step is 60 Hz since `plans/2026-11-17-show-clock/` Phase 1, `dd106de`, and the playhead draws the clock's newest tick on each screen refresh since its Phase 3, `7d67aff`.)*
+  - Moving playback runtime out of the cljfx context (02 M1.3). *(2026-11-18: the same plan. Its Phase 1 moved the positions into the clock's runtime (`dd106de`), and since its Phase 3 app state keeps no copy of them (`7d67aff`).)*
 - **Alternatives considered:**
   - **Store clip positions in seconds** for pre-recorded shows. Rejected: every clip edit, snap and the renderer are beat-based. A locked tempo gives an exact seconds↔beats mapping with no data change.
   - **A separate timeline clock** (anchor time + BPM integration). Rejected for now: the existing accumulator already integrates BPM changes and is what T4 will replace.

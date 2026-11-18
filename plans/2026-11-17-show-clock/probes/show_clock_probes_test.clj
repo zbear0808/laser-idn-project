@@ -185,18 +185,26 @@
       (say "c3" label (str "(" points " points):") (format "median %.0f µs, p95 %.0f µs per render" median p95)))))
 
 
-;; c4 — app-state writes per second while one cue plays (no UI, no engines)
+;; c4 — app-state writes per second while one cue plays (no UI, no engines),
+;; by what they change: the paths Phase 1's mirror wrote, and since Phase 3
+;; the show clock's status
 
 (deftest c4-app-state-writes
   (start-show! spinning-circle)
   (let [writes (atom [])
-        k ::c4]
+        k ::c4
+        groups {:global-clock [[:timing :global-clock]]
+                :cue-timings-or-positions [[:playback :active-cues] [:playback :positions]]
+                :preview-frame [[:backend :streaming :current-frame]]
+                :beat-square [[:timing :beat-index]]
+                :stats [[:backend :streaming :frame-stats]]
+                :mtc-status [[:backend :input :mtc]]}]
     (add-watch (state/get-context-atom) k
                (fn [_ _ old new]
                  (let [o (:cljfx.context/m old) n (:cljfx.context/m new)]
-                   (swap! writes conj (set (keep (fn [p] (when (not= (get-in o p) (get-in n p)) p))
-                                                 [[:timing :global-clock] [:playback :active-cues]
-                                                  [:playback :positions] [:backend :streaming :current-frame]]))))))
+                   (swap! writes conj (set (keep (fn [[g paths]]
+                                                   (when (some #(not= (get-in o %) (get-in n %)) paths) g))
+                                                 groups))))))
     (try
       (with-clock
         (fn []
@@ -204,12 +212,15 @@
           (reset! writes [])
           (Thread/sleep 2000)))
       (finally (remove-watch (state/get-context-atom) k)))
-    (let [w @writes]
+    (let [w @writes
+          per-s #(/ (count (filter (fn [changed] (contains? changed %)) w)) 2.0)]
       (say "c4 app-state writes per second:" (/ (count w) 2.0)
-           "| changing the global clock" (/ (count (filter #(contains? % [:timing :global-clock]) w)) 2.0)
-           "| the cue timings or positions" (/ (count (filter #(or (contains? % [:playback :active-cues])
-                                                                   (contains? % [:playback :positions])) w)) 2.0)
-           "| the preview frame" (/ (count (filter #(contains? % [:backend :streaming :current-frame]) w)) 2.0)))))
+           "| changing the global clock" (per-s :global-clock)
+           "| the cue timings or positions" (per-s :cue-timings-or-positions)
+           "| the preview frame" (per-s :preview-frame)
+           "| the beat square" (per-s :beat-square)
+           "| the stats" (per-s :stats)
+           "| the MTC status" (per-s :mtc-status)))))
 
 
 ;; c5 — an event that is being handled while show time advances writes the

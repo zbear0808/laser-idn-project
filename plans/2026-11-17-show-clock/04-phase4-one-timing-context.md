@@ -1,7 +1,7 @@
 # Phase 4 — One timing context down the render
 
 **Written:** 2026-11-17   **Written for commit:** `f7fdd79` (`master`)
-**Status:** Proposed   **Last verified against:** `f7fdd79` (citations; probe c7 in `00-overview.md` §1). Phases 1 and 2 (`dd106de`) changed the frame-service callers cited here; re-check them before starting
+**Status:** Proposed   **Last verified against:** `f7fdd79` (citations; probe c7 in `00-overview.md` §1). Phases 1–3 (`dd106de`, `7d67aff`) changed the frame-service callers cited here; re-check them before starting
 **Supersedes / Superseded by:** none. Takes over review 03 MR1 step 3, which `plans/2026-11-17-modulator-time-base.md` §9 left open   **Related findings:** S-5 (rest), S-7 (`00-overview.md` §2); review 04 #23 (rest), #25 (deprecated helpers); overview T4 ("a single relative timing context down the effect chain")
 
 Since the modulator time base (`803140d`), every modulator reads its time from the timing context. But the render still threads `elapsed-ms`, `bpm` and `trigger-time` through about fifteen functions and every effect chain. Those values lose to the context's own wherever they meet (`effects.clj:243-245,389,443-446,453`).

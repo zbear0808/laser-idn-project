@@ -88,12 +88,14 @@
     (Thread/sleep 300) (ui/sync-fx!)
     (say "p2 Space in #bpm-input -> playing? =" (playing?))
     (state/swap-state! assoc-in [:playback :playing?] true)
-    (state/swap-state! assoc-in [:timing :global-clock :accumulated-beats] 5.0)
     (ui/sync-fx!)
-    (ui/press! robot KeyCode/R)
-    (Thread/sleep 300) (ui/sync-fx!)
-    (say "p2 R in #bpm-input (playing) -> global-clock beats stayed"
-         (get-in (raw) [:timing :global-clock :accumulated-beats]) "(5.0 = no retrigger)")
+    ;; A retrigger asks the show clock to restart (show clock 01 §4)
+    (let [restart (fn [] (get-in (raw) [:playback :requests :restart :id]))
+          before (restart)]
+      (ui/press! robot KeyCode/R)
+      (Thread/sleep 300) (ui/sync-fx!)
+      (say "p2 R in #bpm-input (playing) -> restart requested:" (not= before (restart))
+           "(false = no retrigger)"))
     (state/swap-state! assoc-in [:grid :selected-cell] [0 0])
     (ui/sync-fx!)
     (let [before (count (cue-items))]
