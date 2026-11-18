@@ -9,7 +9,7 @@ This is the plan the keyboard plan deferred (`plans/2026-11-13-keyboard-focus-wi
 
 ## Start here
 
-**All five phases are done (2026-11-17).** What's left: the check on a real DAC in `05-phase5-frame-timing.md` §8 (none available yet), and the show clock (O10), now planned in `plans/2026-11-17-show-clock/` (proposed; its decisions S1–S3 are open). The rest of this section is the original guidance.
+**All five phases are done (2026-11-17).** What's left: the check on a real DAC and the hidden-window check, both in `05-phase5-frame-timing.md` §8 (no DAC available yet), and the show clock (O10), now planned in `plans/2026-11-17-show-clock/` (proposed; S1–S3 answered 2026-11-17). The rest of this section is the original guidance.
 
 **Start with `01-phase1-fake-dac.md`.** It adds a loopback fake DAC and tests of the wire behaviour that must survive every later change. There are no app changes, it takes about a day, and it needs one answer (O1). Every later phase writes its failing test against the fake DAC first.
 
@@ -127,7 +127,7 @@ Each decision is written out with options and a recommendation in the doc that n
 | O7 | What a refresh restarts | 04 | Phase 4 | **A, answered 2026-11-16**: diff by config fingerprint; requests coalesced |
 | O8 | How link health is shown | 04 | Phase 4 | **A, answered 2026-11-16**: engine stats at ≤ 4 Hz → toolbar and the projector dot; no ping yet |
 | O9 | Frame duration | 05 | Phase 5 | **A, answered 2026-11-17**: from the point count and the projector's scan rate (default 25 000 pts/s), editable; the status shows the fps the projector draws; verify on hardware |
-| O10 | Where show time advances | 05 | after Phase 5 | **A, answered 2026-11-17** ("Go write the plan"): one show clock, `plans/2026-11-17-show-clock/` (its decisions S1–S3 are open) |
+| O10 | Where show time advances | 05 | after Phase 5 | **A, answered 2026-11-17** ("Go write the plan"): one show clock, `plans/2026-11-17-show-clock/` (its S1–S3 answered 2026-11-17: A, B, A) |
 
 ## 6. Review items, re-checked 2026-11-16
 

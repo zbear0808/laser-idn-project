@@ -1,7 +1,7 @@
 # Phase 3 — The screen reads the clock
 
 **Written:** 2026-11-17   **Written for commit:** `f7fdd79` (`master`)
-**Status:** Proposed. Needs S2 (below); this doc is written for its recommended option, B   **Last verified against:** `f7fdd79` (citations). Phases 1 and 2 change the subscriptions and the preview data cited here; re-check them when they land
+**Status:** Proposed. S2 answered B, 2026-11-17; the preview's draw loop is in scope (audit A12, `00-overview.md` §9)   **Last verified against:** `f7fdd79` (citations). Phases 1 and 2 change the subscriptions and the preview data cited here; re-check them when they land
 **Supersedes / Superseded by:** none   **Related findings:** S-3 (rest), S-6 (`00-overview.md` §2); review 02 M1 step 3; 01 F11 (stats part); overview T1, T5
 
 After Phase 2, a 30 Hz mirror is the clock's only write to app state. It covers the preview frame, the positions, the global clock, MTC text and stats. Every view that reads those paths re-renders 30 times a second, and the preview draws at 30 fps.
@@ -11,7 +11,7 @@ With S2 B, the three widgets that really move every frame draw straight from the
 - the timeline playhead;
 - the timeline's position readout.
 
-Everything else reaches app state as an event, and only when it changes: the beat square (2 a second at 120 BPM), the stats (at most 4 a second) and the MTC text (at most 10 a second, as today). The mirror goes, and with it the last writer outside the event flow, together with the dev check's exemption list. About 1–1.5 days.
+Everything else reaches app state as an event, and only when it changes: the beat square (2 a second at 120 BPM), the stats (at most 4 a second) and the MTC text (at most 10 a second, as today). The mirror goes, and with it the last writer outside the event flow, together with the dev check's exemption list. About 1.5–2 days, with the draw loop (A12).
 
 ## 1. Current behaviour (file:line)
 
@@ -50,6 +50,7 @@ The views take per-frame data through app state. Each value they need is one of 
   - It draws `(:points (:preview snapshot))` for the master view, or `(get-in snapshot [:preview :zone-frames zone-id])` for a zone.
   - The cell itself re-renders only when its zone, labels or popup change.
   - The draw helpers (`:59-98`) take point vectors. `frame->preview-data` and `laser-point->preview-point` (`frame_service.clj:778-798`) go.
+  - First, the draw loop is rewritten (review 01 M2 steps 1–5, F13; audit A12), because this phase redraws on every tick, twice as often as today's 30 Hz. Today `draw-frame-lines` builds `(partition 2 1 points)` (`:86`), both helpers destructure a map per point, and each point or segment makes a new `Color` (`:78`, `:93`). After: one indexed loop per frame with no seqs or maps, `setStroke`/`setFill` only when the colour changes, `.setLineWidth` once per draw, and the `Font` of "No Preview" (`:102`) made once. Blanked points are skipped as `point-blanked?` (`:59-68`) does today.
 - `laser-show.views.components.visual-editors.timeline-editor`:
   - `overlay-canvas` (`:529-547`) goes through `ext-clock-redraw`, with `:user-data {:col :row :view :cursor-beat :follow? :swap-state}`.
   - Its redraw takes the cue's beats from the tick (NEW `show-time/cue-beats [snapshot cell]`), calls `draw-overlay!` and, on a page flip, `swap-state` (the timer already runs on the FX thread).
@@ -93,6 +94,7 @@ App-state writes while a show plays (expected; `app-state-is-quiet-while-a-cue-p
 | Situation | Writes per second |
 |---|---|
 | One cue at 120 BPM, no timecode | 6: 2 beat squares and 4 stats updates (today 61, c4) |
+| Streaming to projectors | up to 4 more: the output status (`output_runtime.clj:28,209-219`), whose fps changes most times it's checked |
 | The same at 174 BPM | 6.9 |
 | MIDI timecode running | at most 10 more (the MTC text) |
 | Nothing playing | 2 (the beat square keeps moving with the global clock); the stats don't change, so they aren't sent |
@@ -106,7 +108,7 @@ What a preview cell draws:
 | a zone nothing plays to | none ("No Preview", as today) |
 
 **Invariants:**
-1. While a show plays, app state changes only through events: the beat squares (BPM / 60 a second), at most 4 stats updates and at most 10 MTC updates a second. That is 6 a second at 120 BPM without timecode.
+1. While a show plays, app state changes only through events: the beat squares (BPM / 60 a second), at most 4 stats updates and at most 10 MTC updates a second. That is 6 a second at 120 BPM without timecode, plus at most 4 output status updates while streaming.
 2. A preview cell redraws when the tick or its zone changes, at most once per screen refresh. It never re-renders its cljfx tree for a new tick.
 3. The dev-mode lost-update check has no exemptions.
 4. The playhead and readout show the cue's position in the newest tick the FX thread has seen.
@@ -127,7 +129,7 @@ What a preview cell draws:
 - UI, NEW `laser-show.ui-test.toolbar-test/beat-indicator-moves-on-each-beat-test`.
 - `timeline_visual_test` (`:75-77,95`) seeds the clock's runtime with a run at beat 6.0 instead of app state.
 
-Run: `clj -M:mac-arm:test show-clock subs events.core`, `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.preview-test -n laser-show.ui-test.timeline-editor-test -n laser-show.ui-test.toolbar-test`, then both full suites. Also look at the running app with plorer: the preview at the display's rate, and the playhead moving smoothly.
+Run: `clj -M:mac-arm:test show-clock subs events.core`, `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.preview-test -n laser-show.ui-test.timeline-editor-test -n laser-show.ui-test.toolbar-test`, then both full suites. Also look at the running app with plorer: the preview at the display's rate, and the playhead moving smoothly. Record the preview's draw time and allocation per redraw before and after the new loop, with the app's 6-cell layout playing (JFR, `deps.edn` `:jfr`; `docs/PROFILING.md`), as review 01 M2 asks.
 
 ## 9. Out of scope / alternatives considered
 
@@ -135,7 +137,7 @@ Run: `clj -M:mac-arm:test show-clock subs events.core`, `clj -M:test-ui:mac-arm:
   - `beat-position` becomes `beat-index`, so the toolbar re-renders on beats only;
   - the stats get their own path at 4 Hz, so the status bar and preview header stop re-rendering 30 times a second.
   - The mirror and the dev check's exemptions stay.
-- The preview draw loop's other allocations (review 01 F13: `partition 2 1`, a new `Color` per point).
+- The rest of review 01 M2's step 6: a flat `double[]` preview payload shared with the output. The new draw loop works on today's point vectors.
 - Not drawing the preview while its tab is hidden (`01-views-ui.md:265`).
 - One timer for all widgets instead of one each. JavaFX runs every `AnimationTimer` in the same pulse, so separate timers cost little (*unverified*; the UI tests and a plorer check will show).
 
@@ -143,7 +145,7 @@ Run: `clj -M:mac-arm:test show-clock subs events.core`, `clj -M:test-ui:mac-arm:
 
 ## Decisions
 
-> **DECISION S2: How does the screen get the moving parts (preview, playhead, beat)?** *(open · needed before Phase 3 · recommended: B)*
+> **DECISION S2: How does the screen get the moving parts (preview, playhead, beat)?** *(answered 2026-11-17: B)*
 >
 > Today the preview timer writes app state 61 times a second (c4). Every view that reads those paths re-renders 30 times a second, and the preview draws at 30 fps. Phase 1 halves this with one mirror write per two ticks.
 >
@@ -153,4 +155,4 @@ Run: `clj -M:mac-arm:test show-clock subs events.core`, `clj -M:test-ui:mac-arm:
 > | **B (recommended)** | The preview cells, the timeline playhead and its readout draw straight from the clock's newest tick on each screen refresh. App state only gets what changes rarely, through events: the beat square, MTC text (at most 10 Hz) and stats (at most 4 Hz) | App state stays quiet while a show plays (about 6 writes a second instead of 61). The preview runs at the display's rate. The event agent becomes the only writer of app state, which closes T1's last item here | About a day more. A new pattern in the views: an animation timer on two canvases and one label. UI tests read the clock instead of app state |
 > | C | As A, but the mirror goes through the event agent as an event | One writer, so no exemptions | 30 runs of the whole event pipeline a second, queued alongside input events |
 >
-> **Your answer:** _pending_
+> **Your answer:** B ("i trust your recommendations", 2026-11-17, after the audit in `00-overview.md` §9), with the preview's draw loop rewritten in this phase (A12), since B doubles how often it runs.

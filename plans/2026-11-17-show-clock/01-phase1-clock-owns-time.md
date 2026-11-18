@@ -1,7 +1,7 @@
 # Phase 1 — The clock owns show time
 
 **Written:** 2026-11-17   **Written for commit:** `f7fdd79` (`master`)
-**Status:** Proposed   **Last verified against:** `f7fdd79` (citations; probes c1, c4–c6 in `00-overview.md` §1)
+**Status:** Proposed. Audit changes A10 and A11 (`00-overview.md` §9) folded in 2026-11-17   **Last verified against:** `f7fdd79` (citations; probes c1, c4–c6 in `00-overview.md` §1)
 **Supersedes / Superseded by:** none   **Related findings:** S-1, S-3, S-4 (`00-overview.md` §2); output runtime O-17; review 04 #11, #25 (part); 02 M1 step 3; overview T1; timeline TL-28 (clock part)
 
 Today the 30 Hz preview timer advances show time, inside app state. Event handlers write the same paths from their own snapshots, so a slow event can put a cue back in time (c5).
@@ -79,7 +79,7 @@ This avoids a require cycle. The thread needs `frame-service` (to render) and `e
     - one `state/get-raw-state`, one `mtc/current`, then `show-time/step`, and the result goes into `show-time/!runtime`;
     - every second tick, the mirror (§5): one `state/swap-state!` that touches only `mirror-paths`. The preview frame in it comes from `frame-service/get-preview-frame`, as today;
     - then each report through `events/dispatch!`.
-    - `now-ms` is milliseconds since the first tick after `start!` or a reset, from `System/nanoTime`.
+    - `now-ms` is fractional milliseconds since the first tick after `start!` or a reset: `(/ (- now-ns t0) 1e6)` on `System/nanoTime`. Whole milliseconds would step 16, 17, 17, 16 ms from tick to tick, about 6 % step jitter at 60 Hz; `update-global-clock` and `update-cue-timing` already take doubles (`cue_timing.clj:102,158`) (audit A10).
   - `start! []`, `stop! []`, idempotent. They run one daemon thread, `show-clock`, that loops:
     - `park-until` the deadline;
     - `(tick! (System/nanoTime))`, catching any `Throwable` into `output-errors` `[:show-clock]`;
@@ -214,7 +214,7 @@ Run: `clj -M:mac-arm:test show-time show-clock timing-handlers timeline-handlers
 
 ## 9. Out of scope / alternatives considered
 
-- **Rendering once per tick**: Phase 2. Until then each engine renders from the clock's positions, which move at 60 Hz. Its own 60 fps deadline drifts against the clock's, so a few frames still repeat (c1 improves but isn't fixed).
+- **Rendering once per tick**: Phase 2. Until then each engine renders from the clock's positions, which move at 60 Hz. Its own 60 fps deadline drifts against the clock's, so a few frames still repeat (c1 improves but isn't fixed). A new cue also starts up to one tick later than today: `active-runs` leaves out an intent the clock hasn't started yet, and the engine then renders on its own deadline (about 8 ms later on average, 16.7 ms at worst). So Phase 2 lands right after this phase, with no show in between (audit A11).
 - **The views reading the clock directly**: Phase 3 (S2). Until then the mirror keeps every subscription working.
 - **Anchors instead of ticks.** Positions could be computed for any instant from a start time and a tempo, with no integration and no thread for timing. That would be exact at every engine's own send time. But every tempo change (Link, tap, a timeline's locked tempo, a loop edit) would have to re-anchor every running cue in the handler. The phase glide, loop wraps and the "skip deltas over 1 s" guard (`cue_timing.clj:103,160`) would need closed forms. The timeline plan already rejected a separate anchored clock for the same reason (`plans/2026-11-08-timeline-rework/04-phase4-transport-and-time.md:228`). Integrating at 60 Hz keeps today's maths and its tests.
 - **Events sending commands to the clock** (`:show-clock/seek` and similar effects) instead of writing intents and requests. The clock would still have to reconcile its cues against app state's active cues, for undo pruning, clear-cell and new documents. With intents it uses one mechanism for everything, and the handlers stay pure state updates.

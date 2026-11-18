@@ -1,7 +1,7 @@
 # Show clock — overview
 
 **Written:** 2026-11-17   **Written for commit:** `f7fdd79` (`master`; `src/` last changed in `8edfe59`)
-**Status:** Proposed. O10 answered 2026-11-17 (A: this plan); S1–S3 open (§5)   **Last verified against:** `f7fdd79` (7 probes on loopback, JDK 25.0.5, macOS arm64; see §1)
+**Status:** Proposed. O10 answered 2026-11-17 (A: this plan); S1–S3 answered 2026-11-17 (A, B, A), with the audit's changes (§9) folded into the phase docs   **Last verified against:** `f7fdd79` (7 probes on loopback, JDK 25.0.5, macOS arm64; see §1). The audit (§9) re-checked the citations it adds against `fc9d310`
 **Supersedes / Superseded by:** none. Takes over output runtime O10 / O-17 (`plans/2026-11-16-output-runtime/00-overview.md` §2, §5) and the review items in §6
 **Related findings:** review 04 #11, #23, #24 (part), #25 (part), #27, LE1; 03 MR1 step 3; 02 M1 step 3; 01 F11 (stats part); overview T1, T4, T5; timeline TL-28 (clock part)
 
@@ -11,20 +11,20 @@ This plan gives the show one clock: a thread at the output rate (60 Hz). It owns
 
 ## Start here
 
-**Start with `01-phase1-clock-owns-time.md`.** It needs no decision and takes about 2 days. It moves show time out of app state into the clock, which runs at 60 Hz. It also fixes two bugs:
+**Start with `01-phase1-clock-owns-time.md`, and land Phase 2 right after it.** Phase 1 needs no decision and takes about 2 days. It moves show time out of app state into the clock, which runs at 60 Hz. It also fixes two bugs:
 - a slow event no longer moves cues back in time (c5);
 - a code reload no longer freezes the output (c6).
 
-Phase 2 needs S1 and S3, and Phase 3 needs S2.
+Until Phase 2 lands, a newly triggered cue reaches the laser up to one tick later than today (01 §9), so don't play a show between the two phases. Every decision is answered (§5).
 
 | Doc | Phase | Size | Needs |
 |---|---|---|---|
 | `01-phase1-clock-owns-time.md` | The clock owns show time | ~2 days | none |
-| `02-phase2-render-once.md` | Render once per tick; every engine sends that tick | ~1 day | S1, S3 |
-| `03-phase3-screen-reads-the-clock.md` | The screen reads the clock; app state stays quiet while a show plays | ~0.5 day (S2 A) or ~1–1.5 days (S2 B) | S2 |
+| `02-phase2-render-once.md` | Render once per tick; every engine sends that tick | ~1.5 days (with the fake-DAC checker, §9 A9) | S1, S3 (answered) |
+| `03-phase3-screen-reads-the-clock.md` | The screen reads the clock; app state stays quiet while a show plays | ~1.5–2 days (S2 B, with the preview's draw loop, §9 A12) | S2 (answered) |
 | `04-phase4-one-timing-context.md` | One timing context down the render (review 03 MR1 step 3) | ~0.5–1 day | Phase 2 |
 
-About 4–5.5 days in total. O10 estimated 3–5.
+About 5.5–6.5 days in total with the audit's additions. O10 estimated 3–5.
 
 ## 1. What the code does today (probes)
 
@@ -109,9 +109,9 @@ Each decision is written out with options and a recommendation in the doc that n
 | ID | Question | Doc | Needed before | Recommended |
 |---|---|---|---|---|
 | O10 | Where show time advances | output runtime 05 | – | **A, answered 2026-11-17** ("Go write the plan"): one show clock, this plan |
-| S1 | Who renders, and when each engine sends | 02 | Phase 2 | **A**: the clock renders once per tick; each engine wakes on the tick, on its own thread |
-| S2 | How the screen gets the moving parts (preview, playhead, beat) | 03 | Phase 3 | **B**: the preview and playhead draw from the clock on each screen refresh; app state only gets slow facts |
-| S3 | What the lasers show if the clock stops publishing | 02 | Phase 2 | **A**: blank after 0.5 s without a tick, and say so in the projector status |
+| S1 | Who renders, and when each engine sends | 02 | Phase 2 | **A, answered 2026-11-17** ("i trust your recommendations"): the clock renders once per tick; each engine wakes on the tick, on its own thread. With the audit's changes A1–A5, A7–A9 (§9) |
+| S2 | How the screen gets the moving parts (preview, playhead, beat) | 03 | Phase 3 | **B, answered 2026-11-17**: the preview and playhead draw from the clock on each screen refresh; app state only gets slow facts. The preview's draw loop is rewritten first (A12) |
+| S3 | What the lasers show if the clock stops publishing | 02 | Phase 2 | **A, answered 2026-11-17**: blank after **250 ms** without a tick (the audit's change from 0.5 s, A6), and say so in the projector status |
 
 ## 6. Review items, re-checked 2026-11-17
 
@@ -137,8 +137,10 @@ Each decision is written out with options and a recommendation in the doc that n
 - **What Stop and blackout mean** (O4 kept them). Stop still rewinds every cue, and cues keep counting while stopped, unseen, as today (`handlers/timing.clj:68-77`; `update-cue-timing` doesn't look at `:playing?`).
 - **Per-projector frame rates** (LE1's "highest projector FPS"). Every engine runs at `DEFAULT_FPS` 60 (`streaming_engine.clj:31`), so the clock does too.
 - **How global effects apply.** They run per zone per cue at the cue's tempo (`frame_service.clj:614-619`). **Projector effects** take the first active cue's timing (`multi_engine.clj:171-175`). Both are unchanged, so frames stay identical: Phase 2 has a test for that.
-- The preview draw loop's allocation (review 01 F13), except the map conversion that Phase 3 B removes.
+- The preview draw loop's allocation (review 01 F13), except the map conversion that Phase 3 B removes and the draw loop Phase 3 rewrites (A12).
 - Dead timing defaults in app state (`domains.clj:43-52`, `:cue-queue` `:71`) and the unread `[:playback :active-cue]` (`handlers/timing.clj:73`).
+- **The event agent's blocking I/O.** Project save and load do their zip I/O inline on the agent (`events/core.clj:189-210`), and connecting a MIDI device runs inside a handler (`events/handlers/input.clj:53-63`). While one runs, every trigger waits, blackout included (`events/handlers/triggers.clj:77`); the clock keeps the output moving meanwhile. Review 02 #19, M3 step 4 and M4 describe the fix; it's the next item after this plan (`plans/2026-11-07-improvement-review/00-overview.md`).
+- **OS timer throttling while the window is hidden** (Windows 11 with the window covered or minimized, macOS App Nap). All pacing numbers so far are from macOS with the app in front. Checked later, before a show: output runtime `05-phase5-frame-timing.md` §8.
 
 ## 8. Re-running the probes
 
@@ -152,3 +154,48 @@ clj -Sdeps "{:aliases {:probe {:extra-paths [\"$P\"]}}}" \
 ```
 
 Use `:win`, `:linux` or `:mac` instead of `:mac-arm` on other machines. The run takes about two minutes. To run one probe, use `-v probes.show-clock-probes-test/c7-modulation-contexts-per-render`. When a phase fixes a behaviour, turn its probe into a real test that asserts the new behaviour. Each phase doc names those tests.
+
+## 9. Audit (2026-11-17)
+
+The pending plans were audited for live use and frame latency, against IDN-Stream rev 002 and IDN-Hello (draft 2022-03-27) in `docs/`. This plan doesn't change the bytes on the wire: encoding stays in `idn/stream.clj` and `idn/hello.clj`, so the stream is exactly as conformant as it is today. S1–S3 were answered on the audit's recommendations, and its changes (A1–A12) are folded into the phase docs.
+
+Measured with `src/` as at `8edfe59`, before `fc9d310` (macOS arm64, JDK 25, ZGC). The machine was heavily loaded by other work, so the tails are pessimistic.
+
+| What | Result |
+|---|---|
+| Encoding one 1,000-point frame at 16-bit XY, 8-bit colour (`sanitize-frame`, `frame->packet`, `wrap-channel-message`) | 252 µs median, 1.1 ms p99; 3,000 points 0.74 ms. The same points cost about half their render (c3: the busy cue's 346 points render in 179 µs), so after Phase 2 encoding is one of the main jobs left on each projector's thread |
+| `wrap-channel-message` | A reflective `alength` cost about 60 µs and 90 KB of garbage per packet. Fixed in `fc9d310`: one engine at 60 fps went from 228 to 99 KB of garbage per frame, at the same frame rate |
+| Waking 4 waiting threads every 16.7 ms (a shared monitor's `notifyAll`, or `LockSupport/unpark` per thread) | 20–80 µs median for both; tails of 0.1–30 ms depending on load |
+| `profiler/record-idn-streaming!`, always on | 12.5 µs and 10 KB per frame: one shared `swap!` copies a 1,000-entry vector (`frame_profiler.clj:57-61`). Four threads at once: p99 119 µs |
+
+Latency from a trigger to light, after Phase 2:
+
+| Stage | Typical | Worst |
+|---|---|---|
+| The event waits for the agent | short when idle | as long as a save, load or device connect on the agent (§7) |
+| The next tick | 8.3 ms | 16.7 ms |
+| Render, wake, projector effects, encode, send | 0.5–1 ms (1,000 points) | a few ms |
+| The DAC finishes the frame it is drawing (Stream §3.3) | half a frame | one frame: 40 ms for 1,000 points at 25 000 pts/s |
+| OS timers while the window is hidden | ~1 ms | 15.6 ms steps (Windows 11), ~100 ms (macOS App Nap) (§7) |
+
+The changes, and where they went:
+
+| # | Change | Why | Doc |
+|---|---|---|---|
+| A1 | An engine resends after 3 intervals (50 ms) without a tick, not 1.5 | In discrete mode the DAC repeats the last frame anyway (Stream §3.3). With the half-interval gap, a tick 8–17 ms late became a repeated frame plus a skipped one. 50 ms still keeps the config within 250 ms during a stall (Stream §2.2) and the link alive (Hello §7.2) | 02 §4, §7 |
+| A2 | A new tick's frame goes out at once; the half-interval gap stays only on the error path | The clock never publishes ticks closer than an interval unless one was late (`next-deadline`), and the DAC keeps only the newest frame | 02 §4 |
+| A3 | The snapshot's `:preview` is a `delay`, forced after `publish!` | Every projector waited while the preview joined every cue and zone again | 02 §4, §5 |
+| A4 | Timestamps stay the send time | IDN-Hello §6: a message may go out after its timestamp, never before it | 02 §4, §7 |
+| A5 | While no clock runs, engines pace themselves as today; with no snapshot yet they send empty frames and report nothing. Only a snapshot older than `STALE_MS` is "stalled" | `start-test!` starts no clock. Tests that stream through real engines would otherwise see "Show clock stalled" (`streaming-status-test/projector-dot-shows-status-test`) or a 20 fps keepalive instead of 60 fps (`…/projector-status-says-when-the-scan-rate-limits-the-fps-test`) | 02 §4, §8 |
+| A6 | `STALE_MS` 250 instead of 500 | Half a second of frozen frame is long for audience scanning, and ZGC pauses are well under 1 ms (the release build uses ZGC, `.github/workflows/release.yml:202`). Revisit after the hidden-window check | 02 §4, S3 |
+| A7 | The frame signal checks and waits under one monitor, kept in a `defonce`; each engine records its tick-to-send time | No lost wake-ups; a code reload can't leave the clock and the engines on different monitors; tick-to-send is the new critical path | 02 §4, §8 |
+| A8 | IDN profiler samples go into a ring buffer instead of a copied vector | Under S1 A every engine records in the same instant | 02 §4 |
+| A9 | NEW `fake-dac/violations`: every message an engine test receives is checked against the stream rules | Phase 2 rewrites the engine loop, and today each wire test checks a single rule | 02 §4, §8 |
+| A10 | `now-ms` is fractional | Whole milliseconds step 16, 17, 17, 16 ms from tick to tick, about 6 % step jitter | 01 §4 |
+| A11 | Land Phases 1 and 2 together | With Phase 1 alone a new cue starts up to a tick later than today | 01 §9 |
+| A12 | Phase 3 rewrites the preview's draw loop first (review 01 M2) | S2 B doubles the redraw rate, and the loop allocates per point (review 01 F13) | 03 §4 |
+
+Found in the same audit, outside this plan:
+- The event agent's blocking I/O and OS timer throttling (§7).
+- Fragmentation stays off. `fragmentation.clj:282` writes a chunk header in every sequel fragment, which Stream §6 doesn't (review 04 #3). A live show never needs it: a full 0xFF00 message holds about 8,150 points, which take 82 ms to draw even at 100 000 pts/s.
+- Each socket is its own IDN session (Hello §7.1), so a multi-head DAC gets one session per projector (review 04 LE2). Phase 2 keeps a merge possible (02 §9).

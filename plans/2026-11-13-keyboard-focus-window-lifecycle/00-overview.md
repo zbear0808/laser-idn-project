@@ -139,7 +139,7 @@ No focus context in app state, no `:command/*` router, no shortcut registry. Eve
 | 4 | One clipboard; atomic cut; Paste button works; type safety | Phase 3 (D7 decides how `:clipboard-type` reaches the list) |
 | 5 | Keyboard cue triggers | Phases 2 and 3 |
 
-Phases 1 and 2 are independent and can run in parallel; 3 follows 2; 4 and 5 can run in parallel after 3.
+Phases 1 and 2 are independent and can run in parallel; 3 follows 2; 4 and 5 can run in parallel after 3. If the app is used live before both are done, do 4 first: today a copy or paste blocks the event agent until the FX thread has run it (`state/clipboard.clj:64,82,116`), and every trigger waits behind it (audit, `plans/2026-11-17-show-clock/00-overview.md` §9).
 
 ## 7. Decisions
 

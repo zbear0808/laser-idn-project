@@ -150,6 +150,8 @@ Run: `clj -M:mac-arm:test keyboard input-mapper input`, then `clj -M:test-ui:mac
 > | B | Built-ins win; learning a colliding key is refused with a message | Nothing built-in ever changes | The most natural keys (Space, R) can't be used |
 > | C | A "performance mode" toggle: on = bindings win and built-ins (except Escape) are off; off = built-ins win | Explicit and visible | A new mode to remember and to show in the UI |
 >
+> *Audit note (2026-11-17), for whichever option:* probe p2 shows a focused text field swallowing Space, R and Delete before the menu accelerators see them. Escape wasn't probed; if it behaves the same, Escape stops nothing while someone is typing, for example in `#bpm-input`. Add Escape to p2 before deciding. If Escape is the show's panic key, the Phase 5 filter, which sees every key first, could fire Stop for Escape whatever has focus; the cost is that Escape in a text field (cancel the edit) would then also stop the show. Stop also goes through the event agent (`:transport/stop`), so it waits behind a save until the agent's I/O moves off it (`plans/2026-11-07-improvement-review/00-overview.md`, "Next").
+>
 > **Your answer:** _pending_
 
 > **DECISION D11 — Where do keyboard triggers work, and is there a switch?** *(open · needed before Phase 5 · recommended: A)*

@@ -19,7 +19,7 @@ Six parallel reviews, one per area. Each area plan has findings with file:line r
 
 ## Status, re-checked 2026-11-17
 
-The ranked priorities below, as of `111f3a0`. "Partly" says what is left. Items marked *not re-checked* weren't verified against the code this time.
+The ranked priorities below, as of `111f3a0`; rows 12, 14 and 17 updated after the 2026-11-17 audit of the pending plans (`fc9d310`, `plans/2026-11-17-show-clock/00-overview.md` §9). "Partly" says what is left. Items marked *not re-checked* weren't verified against the code this time.
 
 | # | Priority | Status | Where |
 |---|---|---|---|
@@ -27,12 +27,12 @@ The ranked priorities below, as of `111f3a0`. "Partly" says what is left. Items 
 | 2 | Track `/plans` | Done | `ba3c911` |
 | 3–10 | Phase 1 quick wins | Done, merged in `b384eae` (2026-11-08) | 3: `88cd72e`, `30eea6a`. 4: `6484400`, `cb29c25`, `7be2ec2`, `ac1b263`. 5: `adff199`, `48c0593`, `a702e9f`, `4198045`, `1c18dd6`, `5dd93e8`. 6: `d6f09f5`, `ccf3da3`, `3f1a0ed`, `2ae5459`. 7: `dd507cc`, `8e4ad9e`, `cd6d6d1`. 8: `3eb7a33`. 9: `5d1b43b`. 10: `f29d33c`, `d7eb526` |
 | 11 | T1: state-write discipline, runtime atoms | Partly. Done: output callbacks re-enter through the event agent and the engines live in a runtime registry (`plans/2026-11-16-output-runtime/` Phases 3–4); learn is an effect plus a pure handler (`plans/2026-11-08-undo-history-boundary.md`). Left: the preview timer writes app state from its own thread (`frame_service.clj` `preview-timer-paths`, which the dev-mode check allows; `plans/2026-11-17-show-clock/` Phases 1 and 3 remove it), the clipboard helper (`state/clipboard.clj:34`, keyboard plan Phase 4) and Link start-up (`app.clj:167`) | – |
-| 12 | T4: one frame clock, relative timing context | Partly. Done: deadline pacing and µs timestamps on the monotonic clock, scan-rate durations (output runtime Phase 5); modulators read relative time only (`plans/2026-11-17-modulator-time-base.md`). Left: one show clock, planned in `plans/2026-11-17-show-clock/` (proposed 2026-11-17; decisions S1–S3 open). Input timestamps (02 #10) and Link's clock (05 F8) stay outside it | – |
+| 12 | T4: one frame clock, relative timing context | Partly. Done: deadline pacing and µs timestamps on the monotonic clock, scan-rate durations (output runtime Phase 5); modulators read relative time only (`plans/2026-11-17-modulator-time-base.md`). Left: one show clock, planned in `plans/2026-11-17-show-clock/` (proposed 2026-11-17; S1–S3 answered the same day: A, B, A, with the audit's changes). Input timestamps (02 #10) and Link's clock (05 F8) stay outside it | – |
 | 13 | Serialised engine lifecycle, health in the UI | Done | output runtime Phase 4: `a8b2fd2`, `5dce132`, `20aeed9` |
-| 14 | T3: undo/dirty boundary; learn as an event flow | Done | `plans/2026-11-08-undo-history-boundary.md` |
+| 14 | T3: undo/dirty boundary; learn as an event flow | Done. T3's other half, keeping blocking I/O off the queue that live triggers use, is still open: see "Next" below | `plans/2026-11-08-undo-history-boundary.md` |
 | 15 | T5 (cheap part): narrow subscriptions | Partly: grid cells (`03314bf`) and the timeline dialog (`afd2306`). The chain dialogs: *not re-checked* | – |
 | 16 | Clamp once at the end of the chain, NaN → blank, calibration fails closed | Partly. Output side done: `sanitize-frame` drops bad points, and a failing effect skips only itself (`645da70`; O2 chose that over failing closed). Left: effect-side clamping, review 03 MR5 | – |
-| 17 | Benchmark harness | Open | – |
+| 17 | Benchmark harness | Open. Include the IDN encoder (`sanitize-frame`, `frame->packet`, `wrap-channel-message`): it would have caught the reflective `alength` fixed in `fc9d310` (one engine's garbage per 1,000-point frame: 228 → 99 KB) | – |
 | 18 | Test coverage | Partly: the fake-DAC UDP harness (`2c23e63`), a test that every effect parameter changes the output (`0153d5c`), MIDI fixtures shaped like what the library sends (`test/laser_show/input/fixtures.clj`, `6484400`), `test/laser_show/subs_test.clj` (`03314bf`). The same fixtures for OSC and Link: *not re-checked* | – |
 | 19 | CSS cleanup | Open, *not re-checked* | – |
 | 20 | Release packaging | Partly: one `VERSION`, the upload step (`a745f92`); jpackage: *not re-checked* | – |
@@ -40,7 +40,9 @@ The ranked priorities below, as of `111f3a0`. "Partly" says what is left. Items 
 
 Open decisions: `/plans` stays in git (`ba3c911`). The keyboard input source went into `plans/2026-11-13-keyboard-focus-window-lifecycle/` (Phase 5). Still open: adopt or delete the `triggers/` engine; the sequel-fragment chunk header (fragmentation stays off until a reference receiver is available, output runtime §7).
 
-Active plans: `plans/2026-11-13-keyboard-focus-window-lifecycle/` (Phases 2–5, decisions D4–D12), `plans/2026-11-08-timeline-rework/09-effect-racks.md` (proposed), `plans/2026-11-17-show-clock/` (proposed, decisions S1–S3) and the output runtime's hardware check (05 §8).
+Active plans: `plans/2026-11-13-keyboard-focus-window-lifecycle/` (Phases 2–5, decisions D4–D12), `plans/2026-11-08-timeline-rework/09-effect-racks.md` (proposed), `plans/2026-11-17-show-clock/` (proposed; S1–S3 answered 2026-11-17, Phases 1 and 2 to land together) and the output runtime's hardware and hidden-window checks (05 §8).
+
+Next after the show clock (approved 2026-11-17, from the audit): take the event agent's blocking I/O off it. Project save and load do their zip I/O inline on the agent (`events/core.clj:189-210`), and connecting a MIDI device runs inside a handler (`events/handlers/input.clj:53-63`). While one runs, every trigger waits, blackout included (`events/handlers/triggers.clj:77`). Review 02 #19, M3 step 4 and M4 ("Devices") describe the fix. It needs its own plan: the save handler clears the dirty flag before the write (`events/core.clj:189-200`), so with the write in the background an Exit right after Save could quit while the zip is still being written (keyboard plan Phase 1's guard would see nothing unsaved).
 
 ---
 
