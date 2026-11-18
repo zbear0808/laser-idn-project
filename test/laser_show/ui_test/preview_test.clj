@@ -28,7 +28,7 @@
 
 
 ;; The cells draw the show clock's tick (app/start-test! runs no clock: the
-;; tests tick it by hand)
+;; tests tick it from a thread of their own, with-clock)
 
 (def ^:private stretching-square
   "A square on :all whose width follows a 1-beat sine, which starts at its
@@ -66,52 +66,63 @@
   [i]
   (ui/on-fx-thread #(.getAccessibleText ^Node (ui/query (canvas i)))))
 
-(defn- fresh-tick!
-  "A tick at t0 + ms. A cell draws only a tick newer than STALE_MS, so the
-   waits below tick again on every try: a loaded machine can take longer
-   than that to draw."
-  [t0 ms]
-  (show-clock/tick! (+ t0 (* ms 1000000))))
+(defn- with-clock
+  "Call (f at-ms) while a thread ticks the show clock every 16 ms, as the
+   real clock does, at show time t0 + @at-ms (the test moves it). A cell
+   draws only a tick newer than STALE_MS, so the clock has to keep ticking
+   while a test reads the canvases: on a loaded machine one read can take
+   longer than that (the macOS CI runner)."
+  [t0 f]
+  (let [at-ms (atom 0)
+        running (atom true)
+        ticker (future (while @running
+                         (show-clock/tick! (+ t0 (* @at-ms 1000000)))
+                         (Thread/sleep 16)))]
+    (try
+      (f at-ms)
+      (finally
+        (reset! running false)
+        @ticker))))
 
 (deftest preview-draws-the-clocks-tick-test
   (play-square!)
-  (let [t0 (System/nanoTime)
-        first-tick (atom nil)
-        second-tick (atom nil)]
-    (ui/wait-for! #(do (fresh-tick! t0 0)
-                       (let [pixels (ui/node-pixels (canvas 0))]
+  (with-clock (System/nanoTime)
+    (fn [at-ms]
+      (let [first-tick (atom nil)
+            second-tick (atom nil)]
+        (ui/wait-for! #(let [pixels (ui/node-pixels (canvas 0))]
                          (when (pos? (lit pixels))
-                           (reset! first-tick pixels)))))
-    (testing "a quarter beat later the square is narrower: the cell draws the new tick"
-      (ui/wait-for! #(do (fresh-tick! t0 125)
-                         (let [pixels (ui/node-pixels (canvas 0))]
+                           (reset! first-tick pixels))))
+        (testing "a quarter beat later the square is narrower: the cell draws the new tick"
+          (reset! at-ms 125)
+          (ui/wait-for! #(let [pixels (ui/node-pixels (canvas 0))]
                            (when (and (pos? (lit pixels)) (not= @first-tick pixels)
                                       (= "Laser preview" (message 0)))
-                             (reset! second-tick pixels)))))
-      (is (> (lit @first-tick) (lit @second-tick)) "x-scale 1.0, then 0.6"))))
+                             (reset! second-tick pixels))))
+          (is (> (lit @first-tick) (lit @second-tick)) "x-scale 1.0, then 0.6"))))))
 
 (deftest preview-cell-shows-only-its-zone-test
   (play-square!)
-  (let [t0 (System/nanoTime)]
-    (ui/wait-for! #(do (fresh-tick! t0 0) (pos? (lit-in 0))))
-    (testing "the 2x2 grid's other cells show :left, :right and :center, which nothing plays to"
-      (doseq [i [1 2 3]]
-        (is (ui/wait-for! #(do (fresh-tick! t0 0)
-                               (and (= "No Preview" (message i)) (zero? (lit-in i)))))
-            (str "cell " i))))
-    (testing "switched to the cue's zone, a cell shows it"
-      (events/dispatch! {:event/type :preview/set-cell-zone :cell-index 1 :zone-group-id :all})
-      (ui/wait-for! #(do (fresh-tick! t0 0) (pos? (lit-in 1)))))))
+  (with-clock (System/nanoTime)
+    (fn [_]
+      (ui/wait-for! #(pos? (lit-in 0)))
+      (testing "the 2x2 grid's other cells show :left, :right and :center, which nothing plays to"
+        (doseq [i [1 2 3]]
+          (is (ui/wait-for! #(and (= "No Preview" (message i)) (zero? (lit-in i))))
+              (str "cell " i))))
+      (testing "switched to the cue's zone, a cell shows it"
+        (events/dispatch! {:event/type :preview/set-cell-zone :cell-index 1 :zone-group-id :all})
+        (ui/wait-for! #(pos? (lit-in 1)))))))
 
 (deftest preview-shows-a-stalled-clock-test
   (play-square!)
   (let [t0 (System/nanoTime)]
-    (ui/wait-for! #(do (fresh-tick! t0 0) (pos? (lit-in 0))))
+    (with-clock t0 (fn [_] (ui/wait-for! #(pos? (lit-in 0)))))
     (testing "no tick for longer than STALE_MS: the engines send empty frames, and the cell says why"
       (ui/wait-for! #(= "Show clock stalled" (message 0)))
       (is (zero? (lit-in 0))))
     (testing "ticks again: the frame is back"
-      (ui/wait-for! #(do (fresh-tick! t0 16) (pos? (lit-in 0)))))))
+      (with-clock t0 (fn [_] (ui/wait-for! #(pos? (lit-in 0))))))))
 
 (deftest preview-timers-stop-with-their-cells-test
   (let [robot (ui/robot)
