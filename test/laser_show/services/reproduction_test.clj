@@ -58,13 +58,12 @@
              :effects []}]}
 
           bpm 120.0
-          elapsed-ms 1000
-          trigger-time 0
-          timing-ctx {:accumulated-beats 2.0 :accumulated-ms 1000.0 :phase-offset 0.0 :effective-beats 2.0 :bpm bpm :trigger-time trigger-time}
+          timing-ctx {:accumulated-beats 2.0 :accumulated-ms 1000.0 :phase-offset 0.0 :effective-beats 2.0
+                      :time-ms 1000 :bpm bpm :trigger-time 0}
 
           full-cue-chain {:items (:items cue-chain) :tracks (:tracks cue-chain) :destination-zone {:zone-group-id :all}}
 
-          frames-by-zone (frame-service/generate-frames-by-zone full-cue-chain elapsed-ms bpm trigger-time timing-ctx)
+          frames-by-zone (frame-service/generate-frames-by-zone full-cue-chain timing-ctx)
           generated-frame (get frames-by-zone :all)]
 
       (is (vector? generated-frame))

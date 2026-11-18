@@ -6,7 +6,9 @@
    1. steps show time from app state's intents and requests and the MIDI
       timecode (show-time/step);
    2. renders every playing cue once (frame-service/generate-frames-by-zone),
-      each in its own try;
+      each in its own try, at its timing context and with one render context
+      for the whole tick: the tick's one read of app state, the input store
+      and the global effects (frame-service/render-context);
    3. publishes the result (show-time/publish!), which wakes every projector's
       engine: each takes its zones and sends them on its own thread
       (backend/multi_engine.clj). The snapshot also carries where each cue is,
@@ -44,14 +46,13 @@
 ;; Rendering a tick
 
 (defn- render-cue
-  "One cue's frames by zone at its run's timing; {} if the render throws,
-   reported under [:render cell]."
-  [{:keys [cell cue-chain cue-timing]} bpm input-values]
+  "One cue's frames by zone at its run's timing, with the tick's render
+   context; {} if the render throws, reported under [:render cell]."
+  [{:keys [cell cue-chain cue-timing]} bpm render-ctx]
   (let [cue-bpm (playback/cue-bpm cue-chain bpm)
-        ctx (assoc (cue-timing/get-cue-timing-context cue-timing cue-bpm) :input-values input-values)]
+        ctx (assoc (cue-timing/get-cue-timing-context cue-timing cue-bpm) :input-values (:input-values render-ctx))]
     (try
-      (let [zone-frames (frame-service/generate-frames-by-zone
-                         cue-chain (long (:accumulated-ms cue-timing 0.0)) cue-bpm 0 ctx)]
+      (let [zone-frames (frame-service/generate-frames-by-zone cue-chain ctx render-ctx)]
         (output-errors/ok! [:render cell])
         zone-frames)
       (catch Throwable e
@@ -60,27 +61,30 @@
 
 (defn- record-render!
   "The profiler sample and the JFR event for one tick's render."
-  [cues render-ns]
+  [cues render-ns global-effects]
   (let [base-time-us (quot (long render-ns) 1000)
-        effect-count (count (:effects (frame-service/get-active-global-effects)))]
+        effect-count (count (:effects global-effects))]
     (profiler/record-frame-timing! {:base-time-us base-time-us :effects-time-us 0 :effect-count effect-count})
     (jfr/emit-frame-event! {:base-time-us base-time-us :effects-time-us 0 :effect-count effect-count
                             :point-count (transduce (comp (mapcat (comp vals :zone-frames)) (map count)) + cues)})))
 
 (defn- render
   "The snapshot fields for runs (show-time/active-runs), or none while not
-   playing: {:cues [{:cell :run :zone-frames}] :projector-ctx :render-us}."
-  [state runs]
+   playing: {:cues [{:cell :run :zone-frames}] :projector-ctx :render-us}.
+   Every cue shares one render context (frame-service/render-context): the
+   tick's input values, its global effects and global-clock's timing."
+  [state global-clock runs]
   (if (empty? runs)
     {:cues [] :projector-ctx nil :render-us 0.0}
     (let [bpm (double (or (ex/bpm state) 120.0))
           input-values (input-store/get-all-continuous-values)
           t0 (System/nanoTime)
+          render-ctx (frame-service/render-context state input-values global-clock)
           cues (mapv (fn [run]
-                       {:cell (:cell run) :run (:run run) :zone-frames (render-cue run bpm input-values)})
+                       {:cell (:cell run) :run (:run run) :zone-frames (render-cue run bpm render-ctx)})
                      runs)
           render-ns (- (System/nanoTime) t0)]
-      (record-render! cues render-ns)
+      (record-render! cues render-ns (:global-effects render-ctx))
       {:cues cues
        ;; Projector effects run at the first cue's timing and the global BPM
        :projector-ctx (assoc (cue-timing/get-cue-timing-context (:cue-timing (first runs)) bpm)
@@ -145,7 +149,7 @@
         runtime (assoc runtime :t0-ns t0)
         _ (reset! show-time/!runtime runtime)
         playing? (boolean (get-in state [:playback :playing?]))
-        {:keys [cues] :as rendered} (render state (when playing? (show-time/active-runs state runtime)))
+        {:keys [cues] :as rendered} (render state (:global runtime) (when playing? (show-time/active-runs state runtime)))
         snapshot (show-time/publish! (assoc rendered
                                             :at-ns (System/nanoTime)
                                             :playing? playing?

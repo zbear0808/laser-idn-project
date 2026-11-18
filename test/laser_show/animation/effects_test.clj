@@ -80,7 +80,7 @@
                                             :green 0.0
                                             :blue 0.0}}]}
           
-          result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)
+          result-frame (effects/apply-effect-chain frame effect-chain {:time-ms 0 :bpm 120.0})
           p0 (first result-frame)    ;; x = -1.0
           p1 (second result-frame)   ;; x = 0.0
           p2 (nth result-frame 2)]
@@ -118,7 +118,7 @@
                                    :enabled? true
                                    :params {:hue {:type :pos-x :min 0 :max 240}}}]}  ;; red to blue gradient
           
-          result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)
+          result-frame (effects/apply-effect-chain frame effect-chain {:time-ms 0 :bpm 120.0})
           p0 (first result-frame)    ;; x = -1.0, hue = 0 (red)
           p1 (second result-frame)   ;; x = 0.0, hue = 120 (green)
           p2 (nth result-frame 2)]
@@ -156,7 +156,7 @@
                                    :enabled? true
                                    :params {:degrees {:type :pos-x :min 0 :max 180}}}]}
           
-          result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)
+          result-frame (effects/apply-effect-chain frame effect-chain {:time-ms 0 :bpm 120.0})
           p0 (first result-frame)    ;; x = -1.0, shift=0° -> still red
           p2 (nth result-frame 2)]
       
@@ -213,7 +213,7 @@
           (println "Red param config-requires-per-point?:" (mod/config-requires-per-point? (:red params))))
         
         ;; Step 5: Apply the effect (frame IS the points now)
-        (let [result-frame (effects/apply-effect-chain frame effect-chain 0 120.0)
+        (let [result-frame (effects/apply-effect-chain frame effect-chain {:time-ms 0 :bpm 120.0})
               result-left (first result-frame)
               result-right (second result-frame)]
           
@@ -309,7 +309,7 @@
       (let [effect-chain {:effects [{:effect-id :set-color
                                      :enabled? true
                                      :params {:red 0.0 :green {:type :pos-y :min 0.0 :max 1.0} :blue 0.0}}]}
-            result (effects/apply-effect-chain frame effect-chain 0 120.0)]
+            result (effects/apply-effect-chain frame effect-chain {:time-ms 0 :bpm 120.0})]
         (println "\n--- pos-y test ---")
         (println "Bottom (y=-1):" (point-g (first result)))
         (println "Center (y=0):" (point-g (second result)))
@@ -321,7 +321,7 @@
       (let [effect-chain {:effects [{:effect-id :set-color
                                      :enabled? true
                                      :params {:red 0.0 :green 0.0 :blue {:type :radial :min 0.0 :max 1.0}}}]}
-            result (effects/apply-effect-chain frame effect-chain 0 120.0)]
+            result (effects/apply-effect-chain frame effect-chain {:time-ms 0 :bpm 120.0})]
         (println "\n--- radial test ---")
         (println "Center:" (point-b (second result)))
         (println "Corner:" (point-b (nth result 2)))
@@ -333,14 +333,12 @@
     (testing "blackout with :enabled true zeroes all RGB and keeps positions"
       (let [result (effects/apply-effect-chain
                     frame {:effects [{:effect-id :blackout :enabled? true
-                                      :params {:enabled true}}]}
-                    0 120.0)]
+                                      :params {:enabled true}}]})]
         (is (every? #(= [0.0 0.0 0.0] [(point-r %) (point-g %) (point-b %)]) result))
         (is (= (mapv point-x frame) (mapv point-x result)))))
     (testing "blackout with default params (:enabled false) passes points through"
       (let [result (effects/apply-effect-chain
-                    frame {:effects [{:effect-id :blackout :enabled? true :params {}}]}
-                    0 120.0)]
+                    frame {:effects [{:effect-id :blackout :enabled? true :params {}}]})]
         (is (= frame result))))))
 
 
@@ -389,15 +387,14 @@
     (log-test/with-log
       (let [chain {:effects [(instance :test-shift-x) (instance :test-fails-per-point) (instance :test-halve-red)]}]
         (dotimes [_ 5]
-          (is (= a-then-c (effects/apply-effect-chain error-frame chain 0 120.0))
+          (is (= a-then-c (effects/apply-effect-chain error-frame chain))
               "a and c are applied, b is skipped"))
         (testing "inside a group"
           (is (= a-then-c (effects/apply-effect-chain
                            error-frame
                            {:effects [(instance :test-shift-x)
                                       {:type :group :id "g" :enabled? true
-                                       :items [(instance :test-fails-per-point) (instance :test-halve-red)]}]}
-                           0 120.0))))
+                                       :items [(instance :test-fails-per-point) (instance :test-halve-red)]}]}))))
         (is (= 6 (get-in (oe/snapshot) [[:effect :test-fails-per-point-1] :count])))
         (is (= 1 (count (error-log-entries))) "logged once")))))
 
@@ -406,7 +403,7 @@
     (log-test/with-log
       (let [chain {:effects [(instance :test-shift-x) (instance :test-fails-to-build) (instance :test-halve-red)]}]
         (dotimes [_ 5]
-          (is (= a-then-c (effects/apply-effect-chain error-frame chain 0 120.0))))
+          (is (= a-then-c (effects/apply-effect-chain error-frame chain))))
         (is (= 5 (get-in (oe/snapshot) [[:effect :test-fails-to-build-1] :count])))
         (is (= 1 (count (error-log-entries))) "logged once, not every frame")))))
 
@@ -420,12 +417,99 @@
                                     {:id :e3 :effect-id :test-fails-per-point :enabled? false :params {}}]}
                            {:id :e4 :effect-id :test-shift-x :enabled? true :params {}}
                            {:id :e5 :effect-id :test-halve-red :enabled? true :params {}}]}
-          frame-ctx {:point-count (count frame) :timing-ctx nil}
-          composed (into [] (effects/compose-effect-transducers chain 250 120.0 nil frame-ctx) frame)
+          timing-ctx {:time-ms 250 :bpm 120.0}
+          frame-ctx {:point-count (count frame) :timing-ctx timing-ctx}
+          composed (into [] (effects/compose-effect-transducers chain frame-ctx) frame)
           one-by-one (resolve 'laser-show.animation.effects/apply-effects-one-by-one)]
-      (is (= composed (effects/apply-effect-chain frame chain 250 120.0 nil nil))
+      (is (= composed (effects/apply-effect-chain frame chain timing-ctx))
           "the fast path is today's composed single pass")
       (is (some? one-by-one) "the per-effect fallback exists")
       (when one-by-one
-        (is (= composed (one-by-one frame chain 250 120.0 nil frame-ctx))
+        (is (= composed (one-by-one frame chain frame-ctx))
             "applying the effects one at a time gives the same frame")))))
+
+
+;; One timing context down the chain (plans/2026-11-17-show-clock/04)
+
+(defn- sine [lo hi period] {:type :sine :min lo :max hi :period period})
+
+(def ^:private half-a-beat-in
+  "A cue's timing context (cue-timing/get-cue-timing-context) half a beat in,
+   at 120 BPM."
+  {:accumulated-beats 0.5 :accumulated-ms 250.0 :phase-offset 0.0 :effective-beats 0.5
+   :time-ms 250.0 :bpm 120.0})
+
+(def ^:private three-modulated-params
+  {:effects [{:id :hue :effect-id :hue-shift :enabled? true :params {:degrees (sine 0.0 180.0 2.0)}}
+             {:id :filter :effect-id :color-filter :enabled? true
+              :params {:r-mult (sine 0.2 1.0 1.0) :g-mult (sine 0.5 1.0 4.0) :b-mult 1.0}}]})
+
+(defn- contexts-built
+  "{:make-context n :make-base-context n}: the modulation contexts (f) builds."
+  [f]
+  (let [calls (atom {:make-context 0 :make-base-context 0})
+        make-context mod/make-context
+        make-base-context mod/make-base-context]
+    (with-redefs [mod/make-context (fn [m] (swap! calls update :make-context inc) (make-context m))
+                  mod/make-base-context (fn [m] (swap! calls update :make-base-context inc) (make-base-context m))]
+      (f))
+    @calls))
+
+(deftest one-context-per-chain-test
+  (let [frame (make-test-frame [-0.5 0.0 0.5])]
+    (testing "three modulated parameters share the chain's one context (04 §7, invariant 3)"
+      (is (= {:make-context 1 :make-base-context 0}
+             (contexts-built #(effects/apply-effect-chain frame three-modulated-params half-a-beat-in)))))
+    (testing "per-point parameters without a compiled form share one base context"
+      (with-redefs [mod/compile-per-point-modulator (constantly nil)]
+        (is (= {:make-context 0 :make-base-context 1}
+               (contexts-built
+                #(effects/apply-effect-chain
+                  frame
+                  {:effects [{:id :hue :effect-id :set-hue :enabled? true
+                              :params {:hue {:type :pos-x :min 0.0 :max 360.0}}}
+                             {:id :filter :effect-id :color-filter :enabled? true
+                              :params {:r-mult {:type :pos-y :min 0.0 :max 1.0} :g-mult 1.0 :b-mult 1.0}}]}
+                  half-a-beat-in))))))
+    (testing "a chain whose parameters are all static builds none, also through resolve-params-global (blackout)"
+      (is (= {:make-context 0 :make-base-context 0}
+             (contexts-built
+              #(effects/apply-effect-chain
+                frame
+                {:effects [{:id :hue :effect-id :hue-shift :enabled? true :params {:degrees 90.0}}
+                           {:id :off :effect-id :blackout :enabled? true :params {:enabled false}}]}
+                half-a-beat-in)))))))
+
+(defn- each-param-its-own-context
+  "frame through chain's effects, each run by its own transducer with a frame
+   context that carries no shared modulation context, so every parameter's
+   resolver builds its own from the bare timing context (the chain before 04)."
+  [frame chain timing-ctx]
+  (reduce (fn [frame {:keys [effect-id params]}]
+            (into [] ((:apply-transducer (effects/get-effect effect-id))
+                      (:time-ms timing-ctx) (:bpm timing-ctx)
+                      (effects/merge-with-defaults effect-id params)
+                      {:point-count (count frame) :timing-ctx timing-ctx})
+                  frame))
+          frame
+          (:effects chain)))
+
+(deftest chain-takes-a-timing-context-test
+  (let [frame [[-0.5 0.0 1.0 0.2 0.0] [0.0 0.0 0.0 1.0 0.3] [0.5 0.0 0.4 0.1 0.9]]
+        at (fn [timing-ctx] (effects/apply-effect-chain frame three-modulated-params timing-ctx))]
+    (testing "the chain's one context gives the frame a context per parameter gives"
+      (is (= (each-param-its-own-context frame three-modulated-params half-a-beat-in)
+             (at half-a-beat-in)))
+      (is (not= (at half-a-beat-in) (at (assoc half-a-beat-in :accumulated-beats 0.75 :effective-beats 0.75)))
+          "a quarter beat later, another frame: the modulators read the context's time"))
+    (testing "the effects get the context's time and tempo: with no accumulators, trace fade
+              at 250 ms and 120 BPM is half a beat in"
+      (let [fade {:effects [{:id :fade :effect-id :trace-fade :enabled? true
+                             :params {:period 1.0 :tail-length 0.5}}]}]
+        (is (= (each-param-its-own-context frame fade half-a-beat-in)
+               (effects/apply-effect-chain frame fade {:time-ms 250.0 :bpm 120.0})))))
+    (testing "without a timing context, a static chain still applies"
+      (let [shift {:effects [{:id :hue :effect-id :hue-shift :enabled? true :params {:degrees 90.0}}]}]
+        (is (= (each-param-its-own-context frame shift nil)
+               (effects/apply-effect-chain frame shift)))
+        (is (not= frame (effects/apply-effect-chain frame shift)))))))

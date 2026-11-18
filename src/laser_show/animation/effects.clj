@@ -32,9 +32,7 @@
    [laser-show.animation.modulation :as mod]
    [laser-show.common.util :as u]
    [laser-show.animation.keyframes :as kf]
-   [laser-show.backend.output-errors :as oe]
-   [laser-show.state.core :as state]
-   [laser-show.state.extractors :as ex]))
+   [laser-show.backend.output-errors :as oe]))
 
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
@@ -199,15 +197,47 @@
 (defn- effect-error-key [effect-instance]
   [:effect (or (:id effect-instance) (:effect-id effect-instance))])
 
+(defn- timing-of
+  "The timing context in ctx: a frame context's :timing-ctx, or ctx itself
+   when it is a bare timing context."
+  [ctx]
+  (if (contains? ctx :timing-ctx) (:timing-ctx ctx) ctx))
+
+(defn- mod-context
+  "The modulation context for ctx: the one apply-effect-chain made for the
+   whole chain (:mod-ctx), or else a new one from ctx's timing context, whose
+   own :time-ms and :bpm win over time-ms and bpm."
+  [ctx time-ms bpm]
+  (if-let [shared (:mod-ctx ctx)]
+    @shared
+    (mod/make-context (merge {:time-ms time-ms :bpm bpm} (timing-of ctx)))))
+
+(defn- base-context
+  "As mod-context, the per-point base context (:base-ctx) for point-count points."
+  [ctx time-ms bpm point-count]
+  (if-let [shared (:base-ctx ctx)]
+    @shared
+    (mod/make-base-context (merge {:time-ms time-ms :bpm bpm :point-count point-count} (timing-of ctx)))))
+
+(defn- frame-context
+  "What every effect of one chain call shares: the frame's point count, the
+   timing context, and the modulation and per-point base contexts, each made
+   on first use, so a chain makes at most one of each and a chain with only
+   static parameters none."
+  [point-count timing-ctx]
+  {:point-count point-count
+   :timing-ctx timing-ctx
+   :mod-ctx (delay (mod/make-context timing-ctx))
+   :base-ctx (delay (mod/make-base-context (merge {:point-count point-count} timing-ctx)))})
+
 (defn make-effect-transducer
   "Create a transducer for a single effect instance.
    
    Parameters:
    - effect-instance: {:effect-id :scale :enabled? true :params {...} :keyframe-modulator {...}}
-   - time-ms: Current time in milliseconds
-   - bpm: Current BPM
-   - trigger-time: When the effect was triggered (for once-mode modulators)
-   - frame-ctx: {:point-count n :timing-ctx {...}}
+   - frame-ctx: {:point-count n :timing-ctx {...}}, and the chain's shared
+     :mod-ctx and :base-ctx when apply-effect-chain made it. The effect gets
+     the timing context's :time-ms and :bpm as its time and tempo.
    
    Supports keyframe modulation: if :keyframe-modulator is present and enabled,
    the keyframe modulator's interpolated params are used instead of per-param modulators.
@@ -216,11 +246,12 @@
    per-point modulator configs that get evaluated per-point by make-param-resolver.
    
    Returns: A transducer, or nil if effect is disabled or unknown."
-  [effect-instance time-ms bpm trigger-time frame-ctx]
+  [effect-instance frame-ctx]
   (when (effect-instance-enabled? effect-instance)
     (let [effect-id (:effect-id effect-instance)]
       (when-let [effect-def (get-effect effect-id)]
         (let [xf-fn (:apply-transducer effect-def)
+              {:keys [time-ms bpm]} (:timing-ctx frame-ctx)
               
               ;; Check for keyframe modulator FIRST
               keyframe-mod (:keyframe-modulator effect-instance)
@@ -239,11 +270,7 @@
                             
                             ;; Time-based keyframe mode: evaluate once per frame
                             keyframe-enabled?
-                            (let [timing-ctx (:timing-ctx frame-ctx)
-                                  context (mod/make-context (merge {:time-ms time-ms
-                                                                    :bpm bpm}
-                                                                   timing-ctx))]
-                              (kf/eval-keyframe keyframe-mod context))
+                            (kf/eval-keyframe keyframe-mod (mod-context frame-ctx time-ms bpm))
                             
                             ;; Normal mode: use per-param modulators
                             :else
@@ -264,10 +291,10 @@
 (defn- effect-transducers
   "[effect transducer] for each enabled, known effect of the chain, after
    flattening nested groups."
-  [chain time-ms bpm trigger-time frame-ctx]
+  [chain frame-ctx]
   (into []
         (keep (fn [effect]
-                (when-let [xf (make-effect-transducer effect time-ms bpm trigger-time frame-ctx)]
+                (when-let [xf (make-effect-transducer effect frame-ctx)]
                   [effect xf])))
         (chains/flatten-chain (:effects chain))))
 
@@ -284,14 +311,11 @@
    
    Parameters:
    - chain: Effect chain {:effects [...]} - may contain groups
-   - time-ms: Current time in milliseconds
-   - bpm: Current BPM
-   - trigger-time: When effects were triggered
-   - frame-ctx: {:point-count n}
+   - frame-ctx: {:point-count n :timing-ctx {...}} (see make-effect-transducer)
    
    Returns: A single composed transducer, or (map identity) for empty chains."
-  [chain time-ms bpm trigger-time frame-ctx]
-  (compose-pairs (effect-transducers chain time-ms bpm trigger-time frame-ctx)))
+  [chain frame-ctx]
+  (compose-pairs (effect-transducers chain frame-ctx)))
 
 (defn- apply-pairs-one-by-one
   "Apply each [effect transducer] on its own, skipping (and reporting) each
@@ -315,8 +339,8 @@
   "The fallback of apply-effect-chain: the chain's effects applied one at a
    time, each one that throws skipped. Without errors, equal to the composed
    single pass."
-  [frame chain time-ms bpm trigger-time frame-ctx]
-  (apply-pairs-one-by-one frame (effect-transducers chain time-ms bpm trigger-time frame-ctx)))
+  [frame chain frame-ctx]
+  (apply-pairs-one-by-one frame (effect-transducers chain frame-ctx)))
 
 
 ;; Effect Chain Application
@@ -333,28 +357,23 @@
    Parameters:
    - frame: LaserFrame (vector of points) to transform
    - chain: Effect chain {:effects [...]} or nil
-   - time-ms: Current time in milliseconds
-   - bpm: Current BPM (from global state if not provided)
-   - trigger-time: (optional) Time when the cue was triggered
-   - timing-ctx: (optional) Timing context for modulator evaluation
-                 {:accumulated-beats :accumulated-ms :phase-offset :effective-beats}
+   - timing-ctx: (optional) the timing context modulators read
+     (cue-timing/get-cue-timing-context, playback/clip-timing-ctx): its
+     :time-ms and :bpm are the effects' time and tempo. Without it, modulators
+     read beat 0.
+   
+   The chain's effects share one modulation context and one per-point base
+   context, each made only if a parameter needs it.
    
    Returns: Transformed frame (vector of points)"
-  ([frame chain time-ms]
-   (apply-effect-chain frame chain time-ms (ex/bpm (state/get-raw-state)) nil nil))
-  ([frame chain time-ms bpm]
-   (apply-effect-chain frame chain time-ms bpm nil nil))
-  ([frame chain time-ms bpm trigger-time]
-   (apply-effect-chain frame chain time-ms bpm trigger-time nil))
-  ([frame chain time-ms bpm trigger-time timing-ctx]
+  ([frame chain]
+   (apply-effect-chain frame chain nil))
+  ([frame chain timing-ctx]
    (if (or (nil? chain) (empty? (:effects chain)))
      frame
-     (let [point-count (count frame)
-           ;; Include timing context in frame-ctx for modulator evaluation
-           frame-ctx {:point-count point-count
-                      :timing-ctx timing-ctx}
+     (let [frame-ctx (frame-context (count frame) timing-ctx)
            ;; Points stay as 5-element vectors throughout - no conversion needed!
-           pairs (effect-transducers chain time-ms bpm trigger-time frame-ctx)]
+           pairs (effect-transducers chain frame-ctx)]
        (try
          (let [out (into [] (compose-pairs pairs) frame)]
            (when (oe/failing?)
@@ -378,16 +397,16 @@
    - frame-ctx-or-timing-ctx: Either frame-ctx {:point-count n :timing-ctx {...}}
                               or direct timing-ctx {:accumulated-beats n :accumulated-ms n :phase-offset n}
    
+   A context is only made when a parameter is a modulator: the chain's shared
+   one when the frame context has it.
+   
    Returns: Resolved parameter map."
   ([raw-params time-ms bpm]
    (resolve-params-global raw-params time-ms bpm nil))
   ([raw-params time-ms bpm frame-ctx-or-timing-ctx]
-   ;; Handle both frame-ctx with :timing-ctx key or direct timing context
-   (let [timing-ctx (if (contains? frame-ctx-or-timing-ctx :timing-ctx)
-                      (:timing-ctx frame-ctx-or-timing-ctx)
-                      frame-ctx-or-timing-ctx)
-         context (mod/make-context (merge {:time-ms time-ms :bpm bpm} timing-ctx))]
-     (mod/resolve-params raw-params context))))
+   (mod/resolve-params raw-params
+                       (when (some mod/modulator-config? (vals raw-params))
+                         (mod-context frame-ctx-or-timing-ctx time-ms bpm)))))
 
 
 
@@ -412,7 +431,9 @@
    - params: Full params map (may contain modulators)
    - time-ms: Current time in milliseconds
    - bpm: Current BPM
-   - ctx: Frame context {:point-count n :timing-ctx {...}}
+   - ctx: Frame context {:point-count n :timing-ctx {...}}, or a bare timing
+     context. When apply-effect-chain made it, the resolver uses the chain's
+     shared contexts (:mod-ctx, :base-ctx) instead of making its own.
    
    Returns: (fn [x y idx] -> resolved-value)
    
@@ -426,7 +447,6 @@
    ```"
   [param-key params time-ms bpm ctx]
   (let [param-val (get params param-key)
-        timing-ctx (if (contains? ctx :timing-ctx) (:timing-ctx ctx) ctx)
         point-count (:point-count ctx)]
     (cond
       ;; Static value (number, keyword, boolean, etc.) - return constant fn
@@ -439,19 +459,14 @@
         ;; Compiled path: use optimized function directly
         compiled-fn
         ;; Interpreter fallback: evaluate per point with context
-        (let [base-ctx (mod/make-base-context
-                         (merge {:time-ms time-ms
-                                 :bpm bpm
-                                 :point-count point-count}
-                                timing-ctx))]
+        (let [base-ctx (base-context ctx time-ms bpm point-count)]
           (fn [x y idx]
             (let [point-ctx (mod/with-point-context base-ctx x y idx)]
               (mod/evaluate-modulator param-val point-ctx)))))
       
       ;; Global modulator - resolve once, return constant fn
       :else
-      (let [context (mod/make-context (merge {:time-ms time-ms :bpm bpm} timing-ctx))
-            resolved (mod/resolve-param param-val context)]
+      (let [resolved (mod/resolve-param param-val (mod-context ctx time-ms bpm))]
         (constantly resolved)))))
 
 (def resolve-param-fn

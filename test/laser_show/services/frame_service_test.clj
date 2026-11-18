@@ -57,64 +57,6 @@
     (is (not (#'frame-service/matches-preview-zone? :all #{:left :right})))))
 
 
-;; Playback State Tests
-
-
-(deftest is-playing-test
-  (testing "returns false when not playing"
-    (is (not (frame-service/is-playing?))))
-
-  (testing "returns true when playing"
-    (state/assoc-in-state! [:playback :playing?] true)
-    (is (frame-service/is-playing?))))
-
-
-;; Active Cell Data Tests
-;; Note: Each test case is isolated to avoid state pollution between tests
-
-
-(deftest get-active-cell-data-nil-when-no-cues-test
-  (testing "returns nil when no active cues"
-    (is (nil? (frame-service/get-active-cell-data)))))
-
-(deftest get-active-cell-data-nil-when-empty-items-test
-  (testing "returns nil when active cue has empty cue chain"
-    (state/swap-state!
-     #(-> %
-          (assoc-in [:playback :active-cues [0 0]]
-                    {:trigger-time (System/currentTimeMillis)
-                     :accumulated-beats 0.0
-                     :accumulated-ms 0.0
-                     :phase-offset 0.0
-                     :phase-offset-target 0.0
-                     :last-frame-time (System/currentTimeMillis)})
-          (assoc-in [:chains :cue-chains [0 0]] {:items []})))
-    (is (nil? (frame-service/get-active-cell-data)))))
-
-(deftest get-active-cell-data-returns-data-when-present-test
-  (testing "returns cue chain data when present (from first active cue)"
-    (state/swap-state!
-     (fn [s]
-       (-> s
-
-           (assoc-in [:playback :active-cues [1 2]]
-                     {:trigger-time (System/currentTimeMillis)
-                      :accumulated-beats 0.0
-                      :accumulated-ms 0.0
-                      :phase-offset 0.0
-                      :phase-offset-target 0.0
-                      :last-frame-time (System/currentTimeMillis)})
-           (assoc-in [:chains :cue-chains [1 2]]
-                     {:destination-zone {:zone-group-id :left}
-                      :items [{:type :preset :preset-id :circle :enabled? true}]}))))
-    (let [data (frame-service/get-active-cell-data)]
-      (is (some? data))
-      (is (some? (:cue-chain data)))
-      (is (= :left (get-in data [:cue-chain :destination-zone :zone-group-id]))))))
-
-
-
-
 (def ^:private test-timing-ctx
   {:accumulated-beats 2.0
    :accumulated-ms 1000.0
@@ -136,7 +78,7 @@
                                    :enabled? true
                                    :effects []}]}
           result (frame-service/generate-frames-by-zone
-                  test-cue-chain 0 120.0 0 test-timing-ctx)]
+                  test-cue-chain test-timing-ctx)]
 
       (is (= 1 (count result)) "Should have exactly 1 zone")
       (is (contains? result :all) "Item without zone effects should route to :all")
@@ -155,7 +97,7 @@
                                    :enabled? true
                                    :effects []}]}
           result (frame-service/generate-frames-by-zone
-                  test-cue-chain 0 120.0 0 test-timing-ctx)]
+                  test-cue-chain test-timing-ctx)]
 
       (is (= #{:left} (set (keys result))) "Only :left should have a frame")
       (is (nil? (:all result)) ":all should not have a frame")
@@ -182,7 +124,7 @@
   [& cells-and-chains]
   (mapv (fn [[cell chain]]
           {:cell cell
-           :zone-frames (frame-service/generate-frames-by-zone chain 1000 120.0 0 test-timing-ctx)})
+           :zone-frames (frame-service/generate-frames-by-zone chain test-timing-ctx)})
         (partition 2 cells-and-chains)))
 
 (defn- two-cues []
@@ -207,9 +149,9 @@
   (testing ":points joins every cue's zones, blanked between them"
     (let [cues (two-cues)
           {:keys [points]} (frame-service/preview-data cues)
-          [a b] (map #(frame-service/concatenate-frames (vec (vals (:zone-frames %))) 0) cues)]
+          [a b] (map #(frame-service/concatenate-frames (vec (vals (:zone-frames %)))) cues)]
       (is (vector? points))
-      (is (= (frame-service/concatenate-frames [a b] 0) points)))))
+      (is (= (frame-service/concatenate-frames [a b]) points)))))
 
 
 ;; Zone-frames: zone-id -> points across all cues, so a preview cell for a
@@ -229,7 +171,7 @@
                          [6 0] (chain-to :all :square track-2))
           [a b] (map #(get-in % [:zone-frames :all]) cues)
           zone (get-in (frame-service/preview-data cues) [:zone-frames :all])]
-      (is (= (frame-service/concatenate-frames [a b] 0) zone))
+      (is (= (frame-service/concatenate-frames [a b]) zone))
       (is (= (+ (count a) 2 (count b)) (count zone)) "two blanking points between the cues"))))
 
 (deftest test-zone-frames-empty-when-no-active-cues
@@ -252,7 +194,7 @@
              :timeline/start 0.0 :timeline/duration 4.0}
             {:id :b :type :preset :preset-id :square :track-id :t2 :enabled? true :effects []
              :timeline/start 0.0 :timeline/duration 4.0}]}
-   0 120.0 0 test-timing-ctx))
+   test-timing-ctx))
 
 (deftest muted-track-clips-do-not-render-test
   (let [both (render-with-tracks [{:id :t1 :type :track} {:id :t2 :type :track}])
@@ -283,7 +225,7 @@
         render (fn [start beats]
                  (frame-service/generate-frames-by-zone
                   (timeline-cue {:items [(clip start)]})
-                  0 120.0 0 {:accumulated-beats beats :effective-beats beats :phase-offset 0.0
+                  {:accumulated-beats beats :effective-beats beats :phase-offset 0.0
                              :accumulated-ms (* beats 500.0) :time-ms (* beats 500.0) :bpm 120.0 :trigger-time 0}))]
     (is (= (render 0.0 1.25) (render 8.0 9.25))
         "the same clip moved to beat 8 looks the same 1.25 beats into it")
@@ -293,7 +235,7 @@
 
 (defn- render-at [cue beats]
   (frame-service/generate-frames-by-zone
-   cue 0 120.0 0 {:accumulated-beats beats :effective-beats beats :phase-offset 0.0
+   cue {:accumulated-beats beats :effective-beats beats :phase-offset 0.0
                   :accumulated-ms (* beats 500.0) :time-ms (* beats 500.0) :bpm 120.0 :trigger-time 0}))
 
 (def ^:private scale-fx {:id :fx :effect-id :scale :enabled? true :params {:x-scale 0.5}})
@@ -338,7 +280,7 @@
                                    (ct/start-timing t0 0.0 {:timeline? true :start-beat 0.0})
                                    (concat (range t0 (+ t0 ms) 33) [(+ t0 ms)]))
                          frame (get (frame-service/generate-frames-by-zone
-                                     cue ms 120.0 t0 (ct/get-cue-timing-context t 120.0))
+                                     cue (ct/get-cue-timing-context t 120.0))
                                     :all)
                          xs (map first (remove #(every? zero? (subvec % 2 5)) frame))]
                      (- (apply max xs) (apply min xs))))]

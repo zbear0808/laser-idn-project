@@ -46,11 +46,6 @@
                :time-ms ms
                :bpm bpm))))
 
-(defn clip-elapsed-ms
-  "elapsed-ms for a clip's effects (ms since the clip started)."
-  ^long [clip-ctx]
-  (long (:accumulated-ms clip-ctx 0.0)))
-
 
 ;; Chasing MIDI timecode
 

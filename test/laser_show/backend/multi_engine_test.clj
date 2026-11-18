@@ -333,7 +333,7 @@
         per-cue (keep (fn [{:keys [cue-chain cue-timing]}]
                         (let [cue-bpm (playback/cue-bpm cue-chain bpm)
                               ctx (assoc (ct/get-cue-timing-context cue-timing cue-bpm) :input-values {})
-                              by-zone (fs/generate-frames-by-zone cue-chain (long (:accumulated-ms cue-timing)) cue-bpm 0 ctx)]
+                              by-zone (fs/generate-frames-by-zone cue-chain ctx)]
                           (#'me/combine-zone-frames (#'me/extract-frames-for-zones by-zone zones))))
                       runs)
         combined (#'me/combine-zone-frames (vec per-cue))
@@ -341,8 +341,7 @@
         projector-effects (get-in s [:chains :projector-effects projector-id :items])]
     (when combined
       (if (seq projector-effects)
-        (effects/apply-effect-chain combined {:effects projector-effects}
-                                    (long (:accumulated-ms ctx)) bpm 0 ctx)
+        (effects/apply-effect-chain combined {:effects projector-effects} ctx)
         combined))))
 
 (defn- tick-and-compare
@@ -464,7 +463,7 @@
           (state/assoc-in-state! [:chains :projector-effects :proj-a :items]
                                  [{:id (random-uuid) :effect-id failing :enabled? true :params {}}
                                   curves])
-          (let [out (apply-projector-effects frame :proj-a 0 120.0 0 nil)]
+          (let [out (apply-projector-effects frame :proj-a {:time-ms 0 :bpm 120.0})]
             (is (= [[0.9 0.9] [-0.9 -0.9]] (mapv #(subvec % 0 2) out)) "positions unchanged")
             (is (every? #(< 0.49 (% 2) 0.51) out) "rgb-curves still raises red to 0.5")))))
     (finally

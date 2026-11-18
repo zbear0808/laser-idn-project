@@ -610,8 +610,7 @@
    (let [ctx (ct/get-cue-timing-context t bpm)
          effect (cond-> {:id :fx :effect-id :scale :enabled? true :params params}
                   keyframe-mod (assoc :keyframe-modulator keyframe-mod))]
-     (get-in (effects/apply-effect-chain [[0.5 0.0 1.0 1.0 1.0]] {:effects [effect]}
-                                         (long (:accumulated-ms t)) bpm (:trigger-time t) ctx)
+     (get-in (effects/apply-effect-chain [[0.5 0.0 1.0 1.0 1.0]] {:effects [effect]} ctx)
              [0 0]))))
 
 (def ^:private once-saw {:type :sawtooth :min 0.0 :max 1.0 :period 4.0 :loop-mode :once})

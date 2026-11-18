@@ -10,18 +10,18 @@
 
 (deftest concatenate-frames-test
   (testing "returns nil for empty input"
-    (is (nil? (sut/concatenate-frames [] 0)))
-    (is (nil? (sut/concatenate-frames nil 0))))
+    (is (nil? (sut/concatenate-frames [])))
+    (is (nil? (sut/concatenate-frames nil))))
 
   (testing "returns single frame unchanged"
     (let [frame [p1 p2]
-          result (sut/concatenate-frames [frame] 0)]
+          result (sut/concatenate-frames [frame])]
       (is (= frame result))))
 
   (testing "concatenates two frames with blanking"
     (let [frame1 [p1 p2]
           frame2 [p3 p4]
-          result (sut/concatenate-frames [frame1 frame2] 0)]
+          result (sut/concatenate-frames [frame1 frame2])]
       ;; Expected structure:
       ;; frame1 points (2)
       ;; blanking at end of frame1 (1)
@@ -55,7 +55,7 @@
     (let [frame1 [p1]
           frame2 []
           frame3 [p4]
-          result (sut/concatenate-frames [frame1 frame2 frame3] 0)]
+          result (sut/concatenate-frames [frame1 frame2 frame3])]
       ;; Should behave like concatenating [frame1 frame3]
       ;; p1, blank@p1, blank@p4, p4
       (is (= 4 (count result)))

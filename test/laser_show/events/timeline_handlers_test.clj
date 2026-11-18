@@ -68,7 +68,7 @@
                           [:state :chains :cue-chains [0 0]])
         render (fn [cue beats]
                  (let [frames (frame-service/generate-frames-by-zone
-                               cue 0 120.0 0 {:accumulated-beats beats :accumulated-ms 0.0
+                               cue {:accumulated-beats beats :accumulated-ms 0.0
                                               :phase-offset 0.0 :effective-beats beats
                                               :time-ms 0 :bpm 120.0 :trigger-time 0})]
                    (update-vals frames count)))]

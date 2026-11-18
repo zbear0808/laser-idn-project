@@ -8,7 +8,9 @@
    - Generates calibration frames for projector calibration mode
    
    The show clock (services/show_clock.clj) calls it once per playing cue per
-   tick; the engines and the preview take their frames from that tick.
+   tick, with the cue's timing context and the tick's render context
+   (render-context), read once per tick; the engines and the preview take
+   their frames from that tick.
    
    Cue Chain Support:
    - Cue chains are sequential lists of presets
@@ -56,31 +58,6 @@
 ;; they are called from the show clock's thread, not the UI thread. Using
 ;; fx/sub-val from a background thread causes assertion errors.
 
-(defn get-active-cell-data
-  "DEPRECATED: Use show-time/active-runs for multi-cue support.
-   
-   Get the cell data for the currently active cell (first active cue).
-   Returns a map with :cue-chain from the unified :chains domain.
-   For backward compatibility, returns data for first active cue."
-  []
-  (let [s (state/get-raw-state)
-        active-cues (get-in s [:playback :active-cues] {})]
-    (when-let [first-cell (first (keys active-cues))]
-      (let [[col row] first-cell
-            cue-chain-data (get-in s [:chains :cue-chains [col row]])]
-        (when (seq (:items cue-chain-data))
-          {:cue-chain cue-chain-data})))))
-
-(defn get-bpm
-  "Get the current BPM."
-  []
-  (get-in (state/get-raw-state) [:timing :bpm] 120.0))
-
-(defn is-playing?
-  "Check if playback is active."
-  []
-  (get-in (state/get-raw-state) [:playback :playing?] false))
-
 (defn get-preview-zone-filter
   "Get the current preview zone group filter from state.
    Returns:
@@ -104,13 +81,12 @@
       (contains? final-targets preview-zone))) ;; direct match only
 
 (defn get-active-global-effects
-  "Get all active effect instances from the effects grid.
-   Returns an effect chain or nil if no active effects.
+  "The active effects of the effects grid in state, as one effect chain, or
+   nil if there are none.
    
    Performance: Uses eager collection operations to avoid lazy evaluation overhead."
-  []
-  (let [s (state/get-raw-state)
-        effect-chains (get-in s [:chains :effect-chains] {})]
+  [state]
+  (let [effect-chains (get-in state [:chains :effect-chains] {})]
     (when (seq effect-chains)
       ;; Use eager operations: into with transducer (comp filter mapcat)
       (let [active-effects (into []
@@ -122,6 +98,20 @@
           ;; (println "[DEBUG get-active-effects] Found" (count active-effects) "effects:"
           ;;          (mapv :effect-id active-effects))
           {:effects active-effects})))))
+
+(defn render-context
+  "What every cue's render in one tick shares. The show clock makes it once
+   per tick, from the tick's app state, input values and global clock:
+   - :input-values: the input store's values;
+   - :global-effects: the effects grid's active chain in state, or nil;
+   - :global-ctx: the global clock's timing context, with the input values,
+     at the global BPM. Each cue's render puts its own tempo on it, so a
+     timeline with a locked tempo runs the global effects at that tempo."
+  [state input-values global-clock]
+  {:input-values input-values
+   :global-effects (get-active-global-effects state)
+   :global-ctx (assoc (cue-timing/get-global-timing-context global-clock (get-in state [:timing :bpm]))
+                      :input-values input-values)})
 
 ;; Cue Chain Rendering
 ;;
@@ -145,7 +135,7 @@
 (defn- render-preset-instance
   "Render a single preset instance with its parameters.
    Generates a frame directly from the preset generator."
-  [preset-instance _elapsed-ms]
+  [preset-instance]
   (let [{:keys [preset-id params]} preset-instance]
     (if (seq params)
       (presets/generate-frame-with-params preset-id params)
@@ -169,16 +159,16 @@
       beats)))
 
 (defn- apply-item-effects
-  "Apply an item's (preset or group) effect chain to a frame.
-   Effects with :timeline/start and :timeline/duration are filtered
-   so only those active at the current beat position are applied."
-  [frame item elapsed-ms bpm trigger-time timing-ctx]
+  "Apply an item's (preset, group or track) effect chain to a frame, at
+   timing-ctx. Effects with :timeline/start and :timeline/duration are
+   filtered so only those active at the current beat position are applied."
+  [frame item timing-ctx]
   (let [current-beats (window-beats timing-ctx)
         item-effects (->> (:effects item [])
                           (filterv #(model/active-at? % current-beats)))]
     (if (seq item-effects)
       (try
-        (let [out (effects/apply-effect-chain frame {:effects item-effects} elapsed-ms bpm trigger-time timing-ctx)]
+        (let [out (effects/apply-effect-chain frame {:effects item-effects} timing-ctx)]
           (output-errors/ok! [:item-effects (:id item)])
           out)
         (catch Throwable e
@@ -204,10 +194,8 @@
 
 (defn concatenate-frames
   "Concatenate multiple frames with blanking points between them.
-   Returns a frame (vector of points) or nil.
-   
-   The elapsed-ms parameter is kept for backwards compatibility but not used."
-  [frames _elapsed-ms]
+   Returns a frame (vector of points) or nil."
+  [frames]
   (when (seq frames)
     (let [combined-points (reduce
                            (fn [acc frame]
@@ -228,57 +216,6 @@
       (when (seq combined-points)
         combined-points))))
 
-(defn- render-item-with-effects
-  "Recursively render a cue chain item (preset or group) applying effects at each level.
-   
-   Timeline gating:
-   - Checks :timeline/start and :timeline/duration on the item.
-   - If the current beat position is outside the item's window, returns nil.
-   - Items without timeline keys are always rendered (backward compatible).
-   
-   Effect Pipeline:
-   - For presets: render → apply preset effects
-   - For groups: render children → concatenate → apply group effects
-   
-   Returns a frame (vector of points) or nil if disabled/empty/outside timeline."
-  [item elapsed-ms bpm trigger-time timing-ctx]
-  (let [current-beats (window-beats timing-ctx)]
-    (when (and (:enabled? item true)
-               (model/active-at? item current-beats))
-      (cond
-        ;; Preset: render and apply its effects
-        (= :preset (:type item))
-        (when-let [frame (render-preset-instance item elapsed-ms)]
-          (apply-item-effects frame item elapsed-ms bpm trigger-time timing-ctx))
-
-        ;; Group: render children, concatenate, then apply group effects
-        (chains/group? item)
-        (let [;; Use eager u/keepv to avoid lazy evaluation in frame rendering hot path
-              child-frames (u/keepv #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx)
-                                    (:items item []))
-              concatenated (concatenate-frames child-frames elapsed-ms)]
-          (when concatenated
-            (apply-item-effects concatenated item elapsed-ms bpm trigger-time timing-ctx)))
-
-        :else nil))))
-
-(defn- generate-frame-from-cue-chain
-  "Generate a frame from a cue chain using recursive item rendering.
-   
-   Renders ALL enabled presets/groups, applying effects at each level:
-   1. Preset-level effects on each preset
-   2. Group-level effects on concatenated group contents
-   3. Final concatenation of all top-level items
-   
-   This creates the effect of all shapes being displayed at once via persistence of vision.
-   
-   Performance: Uses eager u/keepv to avoid lazy evaluation overhead in hot path."
-  [cue-chain elapsed-ms bpm trigger-time timing-ctx]
-  (let [items (:items cue-chain [])
-        ;; Use eager u/keepv instead of lazy keep for frame rendering hot path
-        rendered-frames (u/keepv #(render-item-with-effects % elapsed-ms bpm trigger-time timing-ctx) items)]
-    (concatenate-frames rendered-frames elapsed-ms)))
-
 (defn- render-item-tree-by-zone
   "Recursively render a cue chain item (preset or group) partitioned by destination zone.
    Applies effects at each level (preset effects on presets, group effects on group zone sub-frames).
@@ -286,15 +223,12 @@
    Args:
    - item: A preset or group map
    - parent-zone-id: Inherited zone group keyword from parent container (or nil)
-   - elapsed-ms: Elapsed ms since cue trigger
-   - bpm: Current BPM
-   - trigger-time: Cue trigger timestamp
-   - timing-ctx: Timing context map
+   - timing-ctx: The cue's (or the clip's) timing context
    - tracks: Cue chain tracks vector (optional)
    - default-zone-id: Fallback zone group keyword
    
    Returns: Map of zone-group-id → LaserFrame (vector of points)"
-  [item parent-zone-id elapsed-ms bpm trigger-time timing-ctx tracks default-zone-id]
+  [item parent-zone-id timing-ctx tracks default-zone-id]
   (let [current-beats (window-beats timing-ctx)]
     (if-not (and (:enabled? item true)
                  (model/active-at? item current-beats))
@@ -307,8 +241,8 @@
                        {:tracks tracks
                         :default-zone-id default-zone-id
                         :inherited-zone parent-zone-id})]
-          (if-let [frame (render-preset-instance item elapsed-ms)]
-            (let [frame-with-fx (apply-item-effects frame item elapsed-ms bpm trigger-time timing-ctx)]
+          (if-let [frame (render-preset-instance item)]
+            (let [frame-with-fx (apply-item-effects frame item timing-ctx)]
               (if (seq frame-with-fx)
                 {zone-id frame-with-fx}
                 {}))
@@ -325,7 +259,7 @@
               children (:items item [])
               child-zone-maps (u/keepv
                                #(render-item-tree-by-zone
-                                 % group-zone elapsed-ms bpm trigger-time timing-ctx tracks default-zone-id)
+                                 % group-zone timing-ctx tracks default-zone-id)
                                children)
               merged-child-frames (reduce
                                    (fn [acc child-map]
@@ -334,7 +268,7 @@
                                         (update m zone-id
                                                 (fn [existing]
                                                   (if existing
-                                                    (concatenate-frames [existing frame] elapsed-ms)
+                                                    (concatenate-frames [existing frame])
                                                     frame))))
                                       acc
                                       child-map))
@@ -342,7 +276,7 @@
                                    child-zone-maps)]
           (reduce-kv
            (fn [acc zone-id sub-frame]
-             (let [processed-frame (apply-item-effects sub-frame item elapsed-ms bpm trigger-time timing-ctx)]
+             (let [processed-frame (apply-item-effects sub-frame item timing-ctx)]
                (if (seq processed-frame)
                  (assoc acc zone-id processed-frame)
                  acc)))
@@ -352,28 +286,22 @@
         :else {}))))
 
 (defn- apply-global-effects-to-frame
-  "Apply global effects from the effects grid to a frame using the show
-   clock's global clock."
-  [frame bpm]
-  (let [effect-chain (get-active-global-effects)]
-    (if effect-chain
-      (let [global-clock (show-time/global-clock)
-            input-values (input-store/get-all-continuous-values)
-            global-timing-ctx (assoc (cue-timing/get-global-timing-context global-clock bpm)
-                                     :input-values input-values)
-            global-elapsed (long (or (:accumulated-ms global-clock) 0))]
-        (try
-          (let [out (effects/apply-effect-chain frame effect-chain global-elapsed bpm 0 global-timing-ctx)]
-            (output-errors/ok! [:global-effects])
-            out)
-          (catch Throwable e
-            (output-errors/report! [:global-effects] e)
-            frame)))
-      frame)))
+  "Apply the effects grid's active chain (global-effects, or nil) to a frame,
+   at global-ctx: the show clock's global clock at the cue's tempo."
+  [frame global-effects global-ctx]
+  (if global-effects
+    (try
+      (let [out (effects/apply-effect-chain frame global-effects global-ctx)]
+        (output-errors/ok! [:global-effects])
+        out)
+      (catch Throwable e
+        (output-errors/report! [:global-effects] e)
+        frame))
+    frame))
 
 (defn- merge-zone-maps
   "Merge {zone-id frame} maps, concatenating frames that share a zone."
-  [zone-maps elapsed-ms]
+  [zone-maps]
   (reduce
    (fn [acc item-map]
      (reduce-kv
@@ -381,7 +309,7 @@
         (update m zone-id
                 (fn [existing]
                   (if existing
-                    (concatenate-frames [existing frame] elapsed-ms)
+                    (concatenate-frames [existing frame])
                     frame))))
       acc
       item-map))
@@ -393,21 +321,19 @@
    zone maps per track, apply each track's effects, then each folder's to the
    merged result of its tracks. Track effects run at timeline time (the
    cue's timing-ctx), not clip-local time."
-  [tracks clip-maps-by-track elapsed-ms bpm trigger-time timing-ctx]
+  [tracks clip-maps-by-track timing-ctx]
   (merge-zone-maps
    (mapv (fn [track]
            (let [inner (if (model/track-group? track)
-                         (render-track-tree (:items track []) clip-maps-by-track
-                                            elapsed-ms bpm trigger-time timing-ctx)
-                         (merge-zone-maps (get clip-maps-by-track (:id track)) elapsed-ms))]
+                         (render-track-tree (:items track []) clip-maps-by-track timing-ctx)
+                         (merge-zone-maps (get clip-maps-by-track (:id track))))]
              (if (seq (:effects track))
                (reduce-kv (fn [acc zone-id frame]
-                            (let [f (apply-item-effects frame track elapsed-ms bpm trigger-time timing-ctx)]
+                            (let [f (apply-item-effects frame track timing-ctx)]
                               (if (seq f) (assoc acc zone-id f) acc)))
                           {} inner)
                inner)))
-         tracks)
-   elapsed-ms))
+         tracks)))
 
 (defn generate-frames-by-zone
   "Generate frames organized by destination zone group.
@@ -418,60 +344,65 @@
    
    Args:
    - cue-chain: The cue chain data with :items, :destination-zone, and optional :tracks
-   - elapsed-ms: Elapsed time since cue trigger in milliseconds
-   - bpm: Current beats per minute
-   - trigger-time: Timestamp when cue was triggered
-   - timing-ctx: Timing context map for keyframe evaluation
+   - timing-ctx: The cue's timing context (cue-timing/get-cue-timing-context),
+     which every modulator, keyframe and clip window reads. Its :bpm is the
+     cue's tempo.
+   - render-ctx: What the tick's cues share (render-context). Without it, it
+     is made from app state, the input store and the show clock as they are.
    
    Returns:
    Map of zone-group-id → frame, where each frame is a vector of points.
    Only zones with rendered content are included.
    Empty map if no items render successfully."
-  [cue-chain elapsed-ms bpm trigger-time timing-ctx]
-  (ze/log-once :frame-service-generate
-               (format "[zone-debug] generate-frames-by-zone: destination-zone=%s effective-beats=%.2f item-count=%d"
-                       (pr-str (:destination-zone cue-chain))
-                       (double (:effective-beats timing-ctx 0.0))
-                       (count (:items cue-chain []))))
-  (let [tracks (:tracks cue-chain)
-        muted (model/muted-track-ids tracks)
-        items (cond->> (:items cue-chain [])
-                (seq muted) (filterv #(not (contains? muted (:track-id %)))))
-        destination-id (get-in cue-chain [:destination-zone :zone-group-id] :all)
-        timing-ctx (if-let [loop-config (:loop cue-chain)]
-                     (assoc timing-ctx :window-beats
-                            (wrap-into-loop (:effective-beats timing-ctx 0.0) loop-config))
-                     timing-ctx)
-        timeline? (cue-chains/timeline-cue? cue-chain)
-        item-zone-maps (u/keepv
-                        (fn [item]
-                          (if timeline?
+  ([cue-chain timing-ctx]
+   (generate-frames-by-zone cue-chain timing-ctx
+                            (render-context (state/get-raw-state)
+                                            (input-store/get-all-continuous-values)
+                                            (show-time/global-clock))))
+  ([cue-chain timing-ctx {:keys [global-effects global-ctx]}]
+   (ze/log-once :frame-service-generate
+                (format "[zone-debug] generate-frames-by-zone: destination-zone=%s effective-beats=%.2f item-count=%d"
+                        (pr-str (:destination-zone cue-chain))
+                        (double (:effective-beats timing-ctx 0.0))
+                        (count (:items cue-chain []))))
+   (let [bpm (:bpm timing-ctx)
+         tracks (:tracks cue-chain)
+         muted (model/muted-track-ids tracks)
+         items (cond->> (:items cue-chain [])
+                 (seq muted) (filterv #(not (contains? muted (:track-id %)))))
+         destination-id (get-in cue-chain [:destination-zone :zone-group-id] :all)
+         timing-ctx (if-let [loop-config (:loop cue-chain)]
+                      (assoc timing-ctx :window-beats
+                             (wrap-into-loop (:effective-beats timing-ctx 0.0) loop-config))
+                      timing-ctx)
+         timeline? (cue-chains/timeline-cue? cue-chain)
+         item-zone-maps (u/keepv
+                         (fn [item]
+                           (render-item-tree-by-zone
+                            item nil
                             ;; Each clip runs on its own clock, from its start
-                            (let [clip-ctx (playback/clip-timing-ctx timing-ctx item bpm)]
-                              (render-item-tree-by-zone
-                               item nil (playback/clip-elapsed-ms clip-ctx) bpm 0 clip-ctx tracks destination-id))
-                            (render-item-tree-by-zone
-                             item nil elapsed-ms bpm trigger-time timing-ctx tracks destination-id)))
-                        items)
-        combined-by-zone (if (and timeline? (model/track-effects? tracks))
-                           (let [by-track (group-by :track-id (map (fn [item m] {:track-id (:track-id item) :m m})
-                                                                    items item-zone-maps))
-                                 by-track (update-vals by-track #(mapv :m %))
-                                 leaf-ids (model/leaf-track-ids tracks)]
-                             (merge-zone-maps
-                              (into [(render-track-tree tracks by-track elapsed-ms bpm trigger-time timing-ctx)]
-                                    ;; Clips without a known track: no track effects
-                                    (mapcat val (remove #(contains? leaf-ids (key %)) by-track)))
-                              elapsed-ms))
-                           (merge-zone-maps item-zone-maps elapsed-ms))]
-    (reduce-kv
-     (fn [acc zone-id zone-frame]
-       (if (seq zone-frame)
-         (let [frame-with-effects (apply-global-effects-to-frame zone-frame bpm)]
-           (assoc acc zone-id frame-with-effects))
-         acc))
-     {}
-     combined-by-zone)))
+                            (if timeline? (playback/clip-timing-ctx timing-ctx item bpm) timing-ctx)
+                            tracks destination-id))
+                         items)
+         combined-by-zone (if (and timeline? (model/track-effects? tracks))
+                            (let [by-track (group-by :track-id (map (fn [item m] {:track-id (:track-id item) :m m})
+                                                                     items item-zone-maps))
+                                  by-track (update-vals by-track #(mapv :m %))
+                                  leaf-ids (model/leaf-track-ids tracks)]
+                              (merge-zone-maps
+                               (into [(render-track-tree tracks by-track timing-ctx)]
+                                     ;; Clips without a known track: no track effects
+                                     (mapcat val (remove #(contains? leaf-ids (key %)) by-track)))))
+                            (merge-zone-maps item-zone-maps))
+         ;; The global effects run at the cue's tempo
+         global-ctx (when global-effects (assoc global-ctx :bpm bpm))]
+     (reduce-kv
+      (fn [acc zone-id zone-frame]
+        (if (seq zone-frame)
+          (assoc acc zone-id (apply-global-effects-to-frame zone-frame global-effects global-ctx))
+          acc))
+      {}
+      combined-by-zone))))
 
 (defn preview-data
   "What the preview shows for one tick, from its rendered cues
@@ -482,11 +413,11 @@
    - :cue-destinations: {cell #{zone-id}} for each cue that rendered something.
    Nil when nothing rendered."
   [cues]
-  (when-let [points (concatenate-frames (u/keepv #(concatenate-frames (vec (vals (:zone-frames %))) 0) cues) 0)]
+  (when-let [points (concatenate-frames (u/keepv #(concatenate-frames (vec (vals (:zone-frames %)))) cues))]
     {:points points
      :zone-frames (reduce (fn [acc {:keys [zone-frames]}]
                             (reduce-kv (fn [m zone-id frame]
-                                         (update m zone-id #(if % (concatenate-frames [% frame] 0) frame)))
+                                         (update m zone-id #(if % (concatenate-frames [% frame]) frame)))
                                        acc zone-frames))
                           {}
                           cues)

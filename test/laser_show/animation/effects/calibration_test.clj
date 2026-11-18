@@ -15,7 +15,7 @@
   (let [[blank lit nan-red] (effects/apply-effect-chain [(t/blanked-point 0.5 0.5)
                                                          [0.2 0.2 0.0 1.0 0.0]
                                                          [0.3 0.3 ##NaN 1.0 0.0]]
-                                                        raised-red 0 120.0 nil nil)]
+                                                        raised-red)]
     (testing "a blanked point stays blanked"
       (is (= [0.5 0.5 0.0 0.0 0.0] blank))
       (is (t/blanked? blank)))

@@ -85,24 +85,24 @@
   [frames]
   (let [non-nil-frames (filterv some? frames)]
     (when (seq non-nil-frames)
-      (frame-service/concatenate-frames non-nil-frames 0))))
+      (frame-service/concatenate-frames non-nil-frames))))
 
 
 ;; Frame Provider Creation
 
 
 (defn- apply-projector-effects
-  "Apply projector-level calibration effects to a frame.
+  "Apply projector-level calibration effects to a frame, at timing-ctx (the
+   snapshot's projector context).
    
    Projector effects are stored in [:chains :projector-effects projector-id :items]
    These include RGB curves, corner-pin calibration, etc."
-  [frame projector-id elapsed-ms bpm trigger-time timing-ctx]
+  [frame projector-id timing-ctx]
   (let [raw-state (state/get-raw-state)
         projector-effects (get-in raw-state [:chains :projector-effects projector-id :items] [])]
     (if (seq projector-effects)
       (try
-        (let [out (effects/apply-effect-chain frame {:effects projector-effects}
-                                              elapsed-ms bpm trigger-time timing-ctx)]
+        (let [out (effects/apply-effect-chain frame {:effects projector-effects} timing-ctx)]
           (output-errors/ok! [:projector-effects projector-id])
           out)
         (catch Throwable e
@@ -146,9 +146,7 @@
                              (if combined-frame (count combined-frame) "nil"))))
         
         (when combined-frame
-          (let [ctx (:projector-ctx snapshot)
-                frame (apply-projector-effects combined-frame projector-id (long (:accumulated-ms ctx 0.0))
-                                               (:bpm ctx) 0 ctx)]
+          (let [frame (apply-projector-effects combined-frame projector-id (:projector-ctx snapshot))]
             (with-meta frame (select-keys snapshot [:tick :at-ns]))))))))
 
 (defn- create-projector-frame-provider

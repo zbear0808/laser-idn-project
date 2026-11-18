@@ -1,6 +1,6 @@
 (ns laser-show.services.show-clock-test
-  "The show clock thread and its tick (plans/2026-11-17-show-clock/01 §8,
-   02 §8). Most tests tick by hand; the ones that need the thread start it."
+  "The show clock thread and its tick (plans/2026-11-17-show-clock/01–04 §8).
+   Most tests tick by hand; the ones that need the thread start it."
   (:require [cljfx.api :as fx]
             [cljfx.event-handler :as event-handler]
             [clojure.test :refer [deftest is testing use-fixtures]]
@@ -15,6 +15,7 @@
             [laser-show.events.handlers.timing :as timing]
             [laser-show.idn.fake-dac :as dac]
             [laser-show.input.mtc :as mtc]
+            [laser-show.input.store :as input-store]
             [laser-show.profiling.frame-profiler :as profiler]
             [laser-show.services.frame-service :as fs]
             [laser-show.services.show-clock :as show-clock]
@@ -233,7 +234,7 @@
           jump (subvec zone (count a) (+ 2 (count a)))]
       (is (= (+ (count a) 2 (count b)) (count zone)))
       (is (every? (fn [[_ _ r g b]] (= 0.0 r g b)) jump) "dark from the end of one to the start of the next")
-      (is (= (fs/concatenate-frames [a b] 0) zone))
+      (is (= (fs/concatenate-frames [a b]) zone))
       (is (= #{[0 0] [1 0]} (set (keys (:cue-destinations @(:preview s)))))))))
 
 (deftest render-is-timed-test
@@ -333,3 +334,36 @@
     (ticks! 2))
   (is (= {:state :running :fps 25 :text "00:59:59:00"}
          (dissoc (get-in (state/get-raw-state) [:backend :input :mtc]) :at-ms))))
+
+
+;; Phase 4: one timing context down the render
+
+(deftest one-state-and-input-read-per-tick-test
+  (testing "a tick reads app state and the input store once, whatever the number of
+            cues, zones and global effects (04 §7, invariant 2)"
+    (init! {[0 0] (cue :circle)
+            [1 0] (assoc (cue :square) :destination-zone {:zone-group-id :left})
+            [2 0] (cue :triangle)})
+    (state/assoc-in-state! [:chains :effect-chains [0 0]]
+                           {:active? true
+                            :items [{:id (random-uuid) :effect-id :rotation :enabled? true
+                                     :params {:angle (sine 0.0 90.0 2.0)}}]})
+    (run! #(trigger! % 0) [0 1 2])
+    (let [me (Thread/currentThread)
+          reads (atom {:app-state 0 :input-store 0})
+          counted (fn [k f] (fn [& args]
+                              (when (identical? me (Thread/currentThread))
+                                (swap! reads update k inc))
+                              (apply f args)))
+          get-raw-state state/get-raw-state
+          get-all-continuous-values input-store/get-all-continuous-values]
+      ;; Without the app, events/dispatch! runs an event inline, which reads app
+      ;; state itself: the tick's events are left out
+      (with-redefs [events/dispatch! (fn [_])]
+        (show-clock/tick! 0)
+        (with-redefs [state/get-raw-state (counted :app-state get-raw-state)
+                      input-store/get-all-continuous-values (counted :input-store get-all-continuous-values)]
+          (let [s (show-clock/tick! 16666667)]
+            (is (= {:all 2 :left 1} (frequencies (mapcat (comp keys :zone-frames) (:cues s))))
+                "3 cues on 2 zones, each zone frame through the global effects")
+            (is (= {:app-state 1 :input-store 1} @reads))))))))

@@ -93,8 +93,9 @@
         (let [chain {:effects (:effects (load-preset f))}
               ;; 37ms steps avoid aliasing with beat-fraction periods (e.g. strobe)
               outputs (for [ms (range 0 2000 37)]
-                        (effects/apply-effect-chain test-frame chain ms 120.0 0
-                                                    {:accumulated-ms (double ms)
+                        (effects/apply-effect-chain test-frame chain
+                                                    {:time-ms ms :bpm 120.0
+                                                     :accumulated-ms (double ms)
                                                      :accumulated-beats (/ ms 500.0)
                                                      :effective-beats (/ ms 500.0)
                                                      :phase-offset 0.0}))]

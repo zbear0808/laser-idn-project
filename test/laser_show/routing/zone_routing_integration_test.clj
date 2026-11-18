@@ -325,7 +325,6 @@
   (testing "Static zone-selector routes frames to specified zone"
     (let [frames-by-zone (fs/generate-frames-by-zone
                           test-cue-chain-static-zone-selector
-                          0 120.0 0
                           (make-timing-ctx 0.0))]
 
       ;; Should have frames for :left only
@@ -347,7 +346,6 @@
   (testing "Cue chain without zone-selector uses default destination"
     (let [frames-by-zone (fs/generate-frames-by-zone
                           test-cue-chain-no-zone-effect
-                          0 120.0 0
                           (make-timing-ctx 0.0))]
 
       ;; Should route to :center (the cue chain default)
@@ -366,7 +364,6 @@
   (testing "Multiple items with different zone-selectors route correctly"
     (let [frames-by-zone (fs/generate-frames-by-zone
                           test-cue-chain-multiple-items
-                          0 120.0 0
                           (make-timing-ctx 0.0))]
 
       ;; Should have frames for :left, :right, and :center
@@ -394,7 +391,6 @@
   (testing "Child can override zone while non-overridden child inherits group zone"
     (let [frames-by-zone (fs/generate-frames-by-zone
                           test-cue-chain-group-with-zone-selector
-                          0 120.0 0
                           (make-timing-ctx 0.0))]
 
       ;; Child 2 had no zone effect -> inherits group's :center destination
@@ -445,7 +441,7 @@
                                        :preset-id :square
                                        :params {:size 0.3 :num-points 12}}]}]}
           frames-by-zone (fs/generate-frames-by-zone
-                          cue-chain 0 120.0 0 (make-timing-ctx 0.0))]
+                          cue-chain (make-timing-ctx 0.0))]
       (is (contains? frames-by-zone :left) "All children routed to :left")
       (is (> (count (:left frames-by-zone)) 24) "Combined frame has both children plus blanking")
       (is (nil? (:all frames-by-zone)) ":all is empty")
@@ -475,7 +471,7 @@
                                        :zone-group-id :right
                                        :params {:size 0.3 :num-points 4 :red 0.0 :green 1.0 :blue 0.0}}]}]}
           frames-by-zone (fs/generate-frames-by-zone
-                          cue-chain 0 120.0 0 (make-timing-ctx 0.0))]
+                          cue-chain (make-timing-ctx 0.0))]
       (is (contains? frames-by-zone :left) "Child 1 routed to :left")
       (is (contains? frames-by-zone :right) "Child 2 routed to :right")
       ;; Both zones should have points with color overridden to red (r=1.0, g=0.0) by group effect
@@ -509,7 +505,7 @@
                               :preset-id :circle
                               :params {:radius 0.3 :num-points 10}}]}
           frames-by-zone (fs/generate-frames-by-zone
-                          cue-chain 0 120.0 0 (make-timing-ctx 0.0))]
+                          cue-chain (make-timing-ctx 0.0))]
       (is (contains? frames-by-zone :left) "Item on track inside folder-1 inherits :left")
       (is (pos? (count (:left frames-by-zone))))
       (is (nil? (:all frames-by-zone))))))
@@ -530,7 +526,7 @@
                               :preset-id :circle
                               :params {:radius 0.3 :num-points 10}}]}
           frames-by-zone (fs/generate-frames-by-zone
-                          cue-chain 0 120.0 0 (make-timing-ctx 0.0))]
+                          cue-chain (make-timing-ctx 0.0))]
       (is (contains? frames-by-zone :right) "Item zone override :right beats track's :left")
       (is (nil? (:left frames-by-zone))))))
 
@@ -591,7 +587,6 @@
   (testing "Projector frame extraction works with zone-based frames"
     (let [frames-by-zone (fs/generate-frames-by-zone
                           test-cue-chain-multiple-items
-                          0 120.0 0
                           (make-timing-ctx 0.0))
           left-frame (:left frames-by-zone)
           right-frame (:right frames-by-zone)]
@@ -607,7 +602,6 @@
   (testing "Projector in multiple zones receives concatenated frames"
     (let [frames-by-zone (fs/generate-frames-by-zone
                           test-cue-chain-multiple-items
-                          0 120.0 0
                           (make-timing-ctx 0.0))
           left-frame (:left frames-by-zone)
           center-frame (:center frames-by-zone)
@@ -652,7 +646,6 @@
                                          :params {:target-zone :right}}]}]}
           frames-by-zone (fs/generate-frames-by-zone
                           cue-chain
-                          0 120.0 0
                           (make-timing-ctx 0.0))]
 
       ;; Should route to :left (default) since zone effect is disabled
@@ -686,7 +679,6 @@
                                          :params {:target-zone :right}}]}]}
           frames-by-zone (fs/generate-frames-by-zone
                           cue-chain
-                          0 120.0 0
                           (make-timing-ctx 0.0))]
 
       ;; Only enabled preset should generate frames
@@ -706,7 +698,6 @@
                      :items []}
           frames-by-zone (fs/generate-frames-by-zone
                           cue-chain
-                          0 120.0 0
                           (make-timing-ctx 0.0))]
 
       ;; Should be empty or have no content in any zone
