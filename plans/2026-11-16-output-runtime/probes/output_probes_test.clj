@@ -410,18 +410,20 @@
     (say "p13 deadline + parkNanos:" (format "%.1f fps" (fps 120 deadline-step)))))
 
 
-;; p11 — an Error in a preview tick ends the preview timer, and with it every
-;; advance of beat timing (update-preview-frame! is made to throw on its 3rd call)
+;; p11 — an Error in a tick of what advances beat timing. Before the show
+;; clock that was the preview timer, and an Error ended it; now it is the show
+;; clock (show-clock/tick! is made to throw on its 3rd call)
 
 (deftest p11-an-error-ends-the-preview-timer
-  (let [frame-service-ns (the-ns 'laser-show.services.frame-service)
-        tick (ns-resolve frame-service-ns 'update-preview-frame!)
+  (let [clock-ns (do (require 'laser-show.services.show-clock)
+                     (the-ns 'laser-show.services.show-clock))
+        tick (ns-resolve clock-ns 'tick!)
         calls (atom 0)]
-    (with-redefs-fn {tick (fn []
+    (with-redefs-fn {tick (fn [_]
                             (when (= 3 (swap! calls inc))
                               (throw (AssertionError. "probe: Assert failed"))))}
       (fn []
-        ((ns-resolve frame-service-ns 'start-preview-updates!) 30)
+        ((ns-resolve clock-ns 'start!))
         (Thread/sleep 500)
-        (say "p11 preview ticks in 500 ms at 30 fps:" @calls "(15 expected)")
-        ((ns-resolve frame-service-ns 'stop-preview-updates!))))))
+        (say "p11 show clock ticks in 500 ms at 60 Hz:" @calls "(30 expected)")
+        ((ns-resolve clock-ns 'stop!))))))

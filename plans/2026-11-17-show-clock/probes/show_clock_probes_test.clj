@@ -2,8 +2,10 @@
 ;; Not part of the test suite and not on any classpath.
 ;;
 ;; Each deftest prints PROBE lines describing what the timing and render code
-;; does TODAY (master f7fdd79; src last changed in 8edfe59). The plan docs
-;; quote them. When a phase changes a behaviour, turn the matching probe into a
+;; does. They first ran against master f7fdd79 (src last changed in 8edfe59),
+;; before the show clock; since Phases 1 and 2 they drive the clock instead of
+;; the preview timer, and the same lines show what changed. The plan docs quote
+;; both runs. When a phase changes a behaviour, turn the matching probe into a
 ;; real test asserting the new one.
 ;;
 ;; Everything runs on loopback with the fake DAC from test/ and no UI. One
@@ -31,12 +33,16 @@
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.shape]
             [laser-show.animation.modulation :as mod]
+            [laser-show.animation.show-time :as show-time]
+            [laser-show.app]
             [laser-show.backend.multi-engine :as me]
             [laser-show.backend.streaming-engine :as se]
+            [laser-show.dev.reload :as reload]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.timing :as timing]
             [laser-show.idn.fake-dac :as dac]
             [laser-show.services.frame-service :as fs]
+            [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]))
 
@@ -64,15 +70,17 @@
                          [:hue-shift {:degrees (sine 0.0 180.0 4.0)}])))})
 
 (defn- start-show!
-  "App state with cue at [0 0] playing, triggered now."
+  "App state with cue at [0 0] playing, triggered now (its intent: the show
+   clock starts the run at its next tick)."
   [cue]
   (state/init-state! (domains/build-initial-state))
+  (show-time/reset-runtime!)
   (state/swap-state! #(-> %
                           (assoc-in [:chains :cue-chains [0 0]] cue)
-                          (update :playback ct/activate-cue [0 0] (System/currentTimeMillis) 0.0 {}))))
+                          (update :playback ct/activate-cue [0 0] (random-uuid) {}))))
 
 (defn- cue-beats []
-  (get-in (state/get-raw-state) [:playback :active-cues [0 0] :accumulated-beats]))
+  (get (show-time/positions @show-time/!runtime) [0 0]))
 
 (defn- with-engines
   "Put n projectors (zone :all) in app state, start their engines streaming to
@@ -92,9 +100,9 @@
         (se/stop-all! engines)
         (dac/stop! fake)))))
 
-(defn- with-preview-timer [f]
-  (fs/start-preview-updates! 30)
-  (try (f) (finally (fs/stop-preview-updates!))))
+(defn- with-clock [f]
+  (show-clock/start!)
+  (try (f) (finally (show-clock/stop!))))
 
 (defn- identical-neighbours
   "How many frames repeat the frame before them, per sender."
@@ -110,11 +118,11 @@
 
 (deftest c1-engines-send-each-position-twice
   (start-show! spinning-circle)
-  (with-preview-timer
+  (with-clock
     (fn []
       (let [seen (atom [])
             projector-frame @#'me/projector-frame]
-        (with-redefs-fn {#'me/projector-frame (fn [id] (swap! seen conj (cue-beats)) (projector-frame id))}
+        (with-redefs-fn {#'me/projector-frame (fn [id snapshot] (swap! seen conj (:tick snapshot)) (projector-frame id snapshot))}
           (fn []
             (with-engines 1
               (fn [fake _]
@@ -122,9 +130,9 @@
                 (reset! seen [])
                 (let [since (System/nanoTime)]
                   (Thread/sleep 2000)
-                  (let [beats @seen
+                  (let [ticks @seen
                         frames (dac/frames fake :since-ns since)]
-                    (say "c1 in 2 s: engine frames" (count beats) "| distinct cue positions" (count (dedupe beats))
+                    (say "c1 in 2 s: engine frames" (count ticks) "| distinct ticks (each a new cue position)" (count (dedupe ticks))
                          "| frames on the wire" (count frames)
                          "| frames identical to the one before" (count (filter true? (map = (map :samples frames) (map :samples (rest frames))))))))))))))))
 
@@ -139,13 +147,13 @@
       (with-redefs-fn {#'fs/generate-frames-by-zone
                        (fn [& args]
                          (let [t (.getName (Thread/currentThread))
-                               who (cond (= t "preview-update") :preview
+                               who (cond (= t "show-clock") :clock
                                          (.startsWith t "idn-streaming") :engines
                                          :else :other)]
                            (swap! renders update who (fnil inc 0)))
                          (apply render args))}
         (fn []
-          (with-preview-timer
+          (with-clock
             (fn []
               (with-engines n
                 (fn [_ _]
@@ -154,15 +162,14 @@
                   (Thread/sleep 2000)
                   (let [r @renders]
                     (say "c2" n "projector(s), renders per second:" (/ (reduce + (vals r)) 2.0)
-                         "| preview" (/ (get r :preview 0) 2.0) "| engines" (/ (get r :engines 0) 2.0))))))))))))
+                         "| show clock" (/ (get r :clock 0) 2.0) "| engines" (/ (get r :engines 0) 2.0))))))))))))
 
 
 ;; c3 — what one render of a cue costs
 
 (defn- render-cost-us [cue n]
   (start-show! cue)
-  (let [timing (get-in (state/get-raw-state) [:playback :active-cues [0 0]])
-        ctx (ct/get-cue-timing-context timing 120.0)
+  (let [ctx (ct/get-cue-timing-context (ct/start-timing 0 0.0 {}) 120.0)
         once #(fs/generate-frames-by-zone cue 1000 120.0 0 (assoc ctx :accumulated-beats (* 0.01 %) :effective-beats (* 0.01 %)))]
     (dotimes [i 300] (once i))
     (let [ts (sort (for [i (range n)]
@@ -189,9 +196,9 @@
                  (let [o (:cljfx.context/m old) n (:cljfx.context/m new)]
                    (swap! writes conj (set (keep (fn [p] (when (not= (get-in o p) (get-in n p)) p))
                                                  [[:timing :global-clock] [:playback :active-cues]
-                                                  [:backend :streaming :current-frame]]))))))
+                                                  [:playback :positions] [:backend :streaming :current-frame]]))))))
     (try
-      (with-preview-timer
+      (with-clock
         (fn []
           (Thread/sleep 500)
           (reset! writes [])
@@ -200,12 +207,15 @@
     (let [w @writes]
       (say "c4 app-state writes per second:" (/ (count w) 2.0)
            "| changing the global clock" (/ (count (filter #(contains? % [:timing :global-clock]) w)) 2.0)
-           "| the cue timings" (/ (count (filter #(contains? % [:playback :active-cues]) w)) 2.0)
+           "| the cue timings or positions" (/ (count (filter #(or (contains? % [:playback :active-cues])
+                                                                   (contains? % [:playback :positions])) w)) 2.0)
            "| the preview frame" (/ (count (filter #(contains? % [:backend :streaming :current-frame]) w)) 2.0)))))
 
 
-;; c5 — an event that is being handled while the timer runs puts the cue back
-;; in time when it writes the whole state back (handler slowed to 300 ms)
+;; c5 — an event that is being handled while show time advances writes the
+;; whole state back when it finishes (handler slowed to 300 ms). Before the
+;; show clock, the preview timer kept the positions in app state, so this put
+;; the cue back in time; now they are in the clock's runtime
 
 (def ^:private agent-handler
   (-> events/handle-event-pipeline
@@ -215,7 +225,7 @@
 
 (deftest c5-a-slow-event-moves-the-cue-back
   (start-show! spinning-circle)
-  (with-preview-timer
+  (with-clock
     (fn []
       (Thread/sleep 300)
       (let [samples (atom [])
@@ -236,20 +246,23 @@
                "(at 120 BPM, 1 beat = 500 ms)"))))))
 
 
-;; c6 — when the preview timer stops (as during a dev code reload), the output freezes
+;; c6 — a dev code reload (with nothing to reload) while engines stream:
+;; before the show clock it stopped the preview timer, and the output froze
 
-(deftest c6-output-freezes-without-the-preview-timer
+(deftest c6-output-during-a-code-reload
   (start-show! spinning-circle)
-  (fs/start-preview-updates! 30)
-  (with-engines 1
-    (fn [fake _]
-      (Thread/sleep 800)
-      (fs/stop-preview-updates!)
-      (let [since (System/nanoTime)]
-        (Thread/sleep 1000)
-        (let [frames (dac/frames fake :since-ns since)]
-          (say "c6 1 s after stopping the timer: frames sent" (count frames)
-               "| distinct frames" (count (distinct (map :samples frames)))))))))
+  (with-clock
+    (fn []
+      (with-engines 1
+        (fn [fake _]
+          (Thread/sleep 800)
+          (with-redefs [reload/discover-namespaces (constantly [])]
+            (reload/reload-app-code!))
+          (let [since (System/nanoTime)]
+            (Thread/sleep 1000)
+            (let [frames (dac/frames fake :since-ns since)]
+              (say "c6 1 s after a code reload: frames sent" (count frames)
+                   "| distinct frames" (count (distinct (map :samples frames)))))))))))
 
 
 ;; c7 — how much of a render goes into building modulation contexts
@@ -269,7 +282,7 @@
                             (swap! inside-ns + (- (System/nanoTime) t0))
                             (swap! calls inc)
                             r)))
-          ctx (ct/get-cue-timing-context (get-in (state/get-raw-state) [:playback :active-cues [0 0]]) 120.0)
+          ctx (ct/get-cue-timing-context (ct/start-timing 0 0.0 {}) 120.0)
           once #(fs/generate-frames-by-zone cue 1000 120.0 0 (assoc ctx :accumulated-beats (* 0.01 %) :effective-beats (* 0.01 %)))
           n 2000]
       (dotimes [i 300] (once i))

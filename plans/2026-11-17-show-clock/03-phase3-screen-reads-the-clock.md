@@ -1,7 +1,7 @@
 # Phase 3 — The screen reads the clock
 
 **Written:** 2026-11-17   **Written for commit:** `f7fdd79` (`master`)
-**Status:** Proposed. S2 answered B, 2026-11-17; the preview's draw loop is in scope (audit A12, `00-overview.md` §9)   **Last verified against:** `f7fdd79` (citations). Phases 1 and 2 change the subscriptions and the preview data cited here; re-check them when they land
+**Status:** Proposed. S2 answered B, 2026-11-17; the preview's draw loop is in scope (audit A12, `00-overview.md` §9)   **Last verified against:** `f7fdd79` (citations). Phases 1 and 2 (`dd106de`) changed the subscriptions and the preview data cited here; re-check them before starting
 **Supersedes / Superseded by:** none   **Related findings:** S-3 (rest), S-6 (`00-overview.md` §2); review 02 M1 step 3; 01 F11 (stats part); overview T1, T5
 
 After Phase 2, a 30 Hz mirror is the clock's only write to app state. It covers the preview frame, the positions, the global clock, MTC text and stats. Every view that reads those paths re-renders 30 times a second, and the preview draws at 30 fps.

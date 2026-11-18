@@ -1,7 +1,7 @@
 # Show clock — overview
 
 **Written:** 2026-11-17   **Written for commit:** `f7fdd79` (`master`; `src/` last changed in `8edfe59`)
-**Status:** Proposed. O10 answered 2026-11-17 (A: this plan); S1–S3 answered 2026-11-17 (A, B, A), with the audit's changes (§9) folded into the phase docs   **Last verified against:** `f7fdd79` (7 probes on loopback, JDK 25.0.5, macOS arm64; see §1). The audit (§9) re-checked the citations it adds against `fc9d310`
+**Status:** In progress. Phases 1 and 2 done 2026-11-17 (`dd106de`; as built in 01 §10 and 02 §10). O10 answered 2026-11-17 (A: this plan); S1–S3 answered 2026-11-17 (A, B, A), with the audit's changes (§9) folded into the phase docs   **Last verified against:** `dd106de` for Phases 1–2 (the probes again, 01 §10 and 02 §10). §1–8 are as written for `f7fdd79` (7 probes on loopback, JDK 25.0.5, macOS arm64; see §1). The audit (§9) re-checked the citations it adds against `fc9d310`
 **Supersedes / Superseded by:** none. Takes over output runtime O10 / O-17 (`plans/2026-11-16-output-runtime/00-overview.md` §2, §5) and the review items in §6
 **Related findings:** review 04 #11, #23, #24 (part), #25 (part), #27, LE1; 03 MR1 step 3; 02 M1 step 3; 01 F11 (stats part); overview T1, T4, T5; timeline TL-28 (clock part)
 
@@ -11,6 +11,8 @@ This plan gives the show one clock: a thread at the output rate (60 Hz). It owns
 
 ## Start here
 
+**Phases 1 and 2 are done (2026-11-17, `dd106de`).** Every frame sent is a new tick (c1: 120 distinct in 120 frames), there is one render per tick whatever the number of projectors (c2: 60 a second), a slow event no longer moves a cue back (c5), and a code reload no longer freezes the output (c6). Next is Phase 3 (the screen reads the clock; S2 B, with the preview's draw loop first, A12) or Phase 4 (one timing context). They don't depend on each other. Both still cite the code before Phases 1–2, so re-check their citations against `dd106de` first. The rest of this section is the original guidance.
+
 **Start with `01-phase1-clock-owns-time.md`, and land Phase 2 right after it.** Phase 1 needs no decision and takes about 2 days. It moves show time out of app state into the clock, which runs at 60 Hz. It also fixes two bugs:
 - a slow event no longer moves cues back in time (c5);
 - a code reload no longer freezes the output (c6).
@@ -19,8 +21,8 @@ Until Phase 2 lands, a newly triggered cue reaches the laser up to one tick late
 
 | Doc | Phase | Size | Needs |
 |---|---|---|---|
-| `01-phase1-clock-owns-time.md` | The clock owns show time | ~2 days | none |
-| `02-phase2-render-once.md` | Render once per tick; every engine sends that tick | ~1.5 days (with the fake-DAC checker, §9 A9) | S1, S3 (answered) |
+| `01-phase1-clock-owns-time.md` | The clock owns show time (**done**, `dd106de`) | ~2 days | none |
+| `02-phase2-render-once.md` | Render once per tick; every engine sends that tick (**done**, `dd106de`) | ~1.5 days (with the fake-DAC checker, §9 A9) | S1, S3 (answered) |
 | `03-phase3-screen-reads-the-clock.md` | The screen reads the clock; app state stays quiet while a show plays | ~1.5–2 days (S2 B, with the preview's draw loop, §9 A12) | S2 (answered) |
 | `04-phase4-one-timing-context.md` | One timing context down the render (review 03 MR1 step 3) | ~0.5–1 day | Phase 2 |
 
@@ -28,7 +30,7 @@ About 5.5–6.5 days in total with the audit's additions. O10 estimated 3–5.
 
 ## 1. What the code does today (probes)
 
-These results come from `probes/show_clock_probes_test.clj`. They ran against `f7fdd79` on loopback with the fake DAC from `test/` and no UI. The command is in the file header and in §8.
+These results come from `probes/show_clock_probes_test.clj`. They ran against `f7fdd79` on loopback with the fake DAC from `test/` and no UI. The command is in the file header and in §8. They describe the code before Phases 1 and 2; the probes now drive the show clock, and 01 §10 and 02 §10 compare a run before (`e52e865`) with one after (`dd106de`).
 
 One grid cue plays at [0 0]: a circle rotated by a 1-beat sine, so every new position gives a different frame. c1–c6 ran at a load average of 3–4, and c7 at 7–10.
 
@@ -101,6 +103,8 @@ Phases 3 and 4 are independent of each other. What each probe should show afterw
 | c5 | 0 times backwards | – | – | – |
 | c6 | the clock keeps running through a reload | – | – | – |
 | c7 | – | – | – | one context per effect chain (busy cue: 16 → 4) |
+
+Measured after Phases 1 and 2 together (`dd106de`; 01 §10, 02 §10): c1 120 distinct ticks in 120 frames, no repeats; c2 60 a second with 0, 1, 2 and 4 projectors; c4 30; c5 0 times backwards; c6 61 distinct frames in the second after a reload.
 
 ## 5. Decisions
 

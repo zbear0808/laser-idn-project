@@ -1,7 +1,7 @@
 # Phase 1 — The clock owns show time
 
 **Written:** 2026-11-17   **Written for commit:** `f7fdd79` (`master`)
-**Status:** Proposed. Audit changes A10 and A11 (`00-overview.md` §9) folded in 2026-11-17   **Last verified against:** `f7fdd79` (citations; probes c1, c4–c6 in `00-overview.md` §1)
+**Status:** Done 2026-11-17 (`dd106de`, together with Phase 2; as built in §10). Audit changes A10 and A11 (`00-overview.md` §9) folded in 2026-11-17   **Last verified against:** `dd106de` (§10; §1–9 cite `f7fdd79`)
 **Supersedes / Superseded by:** none   **Related findings:** S-1, S-3, S-4 (`00-overview.md` §2); output runtime O-17; review 04 #11, #25 (part); 02 M1 step 3; overview T1; timeline TL-28 (clock part)
 
 Today the 30 Hz preview timer advances show time, inside app state. Event handlers write the same paths from their own snapshots, so a slow event can put a cue back in time (c5).
@@ -33,7 +33,7 @@ Show time is high-frequency runtime data, but it lives in app state (against `do
 | `update-global-clock`, `update-cue-timing`, `align-global-clock-phase`, `align-cue-timing-phase`, `reset-global-clock`, `reset-cue-timing`, `seek`, `get-cue-timing-context` (`cue_timing.clj:55-344`) | Unchanged maths. The clock calls them on its own maps, at 60 Hz |
 | `activate-cue` (`cue_timing.clj:309-328`) | Its timing half becomes NEW `start-timing`, which the clock uses for new runs. `activate-cue` keeps the bookkeeping (`:playing?`, `:active-cell`) and writes an intent |
 | `advance-active-cues` (`frame_service.clj:84-107`) | Moves into the pure step, with the same per-cue tempo, loop and timeline arguments (`:93-103`) |
-| `apply-chase` (`playback.clj:69-103`) | Unchanged, applied to the clock's chase map. Its `activate-cue` call (`:90`) becomes `start-timing` |
+| `apply-chase` (`playback.clj:69-103`) | Unchanged, applied to the clock's chase map. Its `activate-cue` call (`:90`) becomes `start-timing`, and its `deactivate-cue` (`:100`) a `dissoc`: the chase map has no `:playing?` or `:active-cell`, which the `:show-clock/chase` handler sets |
 | `mtc/current` (`mtc.clj:222-225`), `mtc/mirror-status` (`:193-203`) | Read once per tick; the status keeps its 10 Hz limit |
 | `timing/park-until` (`common/timing.clj:92-104`), `next-deadline` (`streaming_engine.clj:251-259`) | The clock's pacing, like Phase 5's engines. `next-deadline` moves to `laser-show.common.timing`, so both share one copy |
 | `output-errors` `report!` / `ok!` | The tick reports under `[:show-clock]` (today `[:preview]`, `frame_service.clj:877-879`) |
@@ -59,17 +59,18 @@ This avoids a require cycle. The thread needs `frame-service` (to render) and `e
        - Existing runs take `:cell`, `:paused?` and `:timeline?` from the intent.
        - A `:seek` whose `:id` differs from the run's `:seek-id` applies `seek`.
        - Runs that no intent names are dropped.
-       - Intents with `:chasing? true` are left to step 4.
+       - Intents with `:chasing? true`, and any intent whose chain chases MTC (`playback/chases-mtc?`, `playback.clj:58-61`), are left to step 4. Today `advance-active-cues` skips the second kind too (`frame_service.clj:95-96`); a cue playing when its chase is switched on is taken over by the timecode, or stopped if none runs.
     3. **Advance.** The global clock goes through `update-global-clock`. Each run goes through `update-cue-timing`, with `playback/cue-bpm`, the chain's `:loop` and `playback/timeline-cfg`, as `advance-active-cues` does today.
     4. **Chase.** `apply-chase` runs over `{:active-cues (:chase runtime)}`.
     5. **Reports.**
        - `{:event/type :show-clock/cue-ended :cell c :run r}` while a run is `:ended?` and app state still has its intent. The run stays, held at its end, but isn't rendered.
-       - `{:event/type :show-clock/chase :cell c :active? b}` while the chase map and app state's chasing intents disagree.
-       - Each report is sent at most once every 250 ms per cell (`report-interval-ms`).
+       - `{:event/type :show-clock/chase :cell c :active? b}` while the chase map and app state disagree about a chasing chain's cell: the chase is active and the cell's intent isn't `:chasing?`, or it's inactive and the cell still has an intent.
+       - The same report is sent at most once every 250 ms (`report-interval-ms`). A different one for the same cell, such as a chase stopping just after it started, goes out at once.
   - `positions [runtime] → {cell beats}`, used by the mirror and by Phase 3.
-  - `!runtime` (defonce atom), initially `{:tick 0 :global {…} :runs {} :chase {} :applied {} :sent {}}`. Only the clock thread writes it; `show-clock/tick!` writes it in tests. `reset-runtime! []` is for tests and `show-clock/start!`.
+  - `!runtime` (defonce atom), initially `{:tick 0 :t0-ns nil :global {…} :runs {} :chase {} :applied {} :sent {}}`. `:runs` is keyed by run id, so a moved cue keeps its run. Only the clock thread writes it; `show-clock/tick!` writes it in tests.
+  - `reset-runtime! []` (tests, `app/start-test!`) and `reset-runtime! [state]` (`show-clock/start!`). The second seeds `:applied` with the request ids already in `state`, so restarting the clock doesn't apply an old request again (invariant 5).
   - Readers, used by the render (which still runs on the engines' threads and in the mirror) and by effects:
-    - `active-runs [state]` → `[{:cell :cue-chain :cue-timing} …]`, in today's order. It joins app-state intents with their runs, leaving out ended runs and chains without items (as `frame_service.clj:195`), and adds the active chase entries;
+    - `active-runs [state]` (on `!runtime`) and `active-runs [state runtime]` → `[{:cell :run :cue-chain :cue-timing} …]`, in today's order (the order of `[:playback :active-cues]`). It joins app-state intents with their runs, at the intent's cell, leaving out ended runs and chains without items (as `frame_service.clj:195`). Active chase entries take their cell's place in that order, or go last, by cell, while app state has no chasing intent for them yet;
     - `global-clock []`;
     - `global-beats []`.
   - `mirror-paths`: `[[:timing :global-clock] [:playback :positions] [:backend :input :mtc] [:backend :streaming :current-frame] [:backend :streaming :frame-stats]]`. It replaces `frame-service/preview-timer-paths`.
@@ -77,7 +78,7 @@ This avoids a require cycle. The thread needs `frame-service` (to render) and `e
   - Constants: `TICK_HZ` 60 and `MIRROR_EVERY` 2.
   - `tick! [now-ns]`, public:
     - one `state/get-raw-state`, one `mtc/current`, then `show-time/step`, and the result goes into `show-time/!runtime`;
-    - every second tick, the mirror (§5): one `state/swap-state!` that touches only `mirror-paths`. The preview frame in it comes from `frame-service/get-preview-frame`, as today;
+    - every second tick, the mirror (§5): one `state/swap-state!` that touches only `mirror-paths`. The preview frame in it comes from `frame-service/get-preview-frame`, as today. The MTC status keeps its 100 ms limit (`mtc.clj:193-203`) on monotonic milliseconds from `now-ns`, so a clock restart can't hold the timecode text back;
     - then each report through `events/dispatch!`.
     - `now-ms` is fractional milliseconds since the first tick after `start!` or a reset: `(/ (- now-ns t0) 1e6)` on `System/nanoTime`. Whole milliseconds would step 16, 17, 17, 16 ms from tick to tick, about 6 % step jitter at 60 Hz; `update-global-clock` and `update-cue-timing` already take doubles (`cue_timing.clj:102,158`) (audit A10).
   - `start! []`, `stop! []`, idempotent. They run one daemon thread, `show-clock`, that loops:
@@ -110,7 +111,7 @@ This avoids a require cycle. The thread needs `frame-service` (to render) and `e
 - `laser-show.backend.multi-engine`: `projector-frame` (`:134-188`) takes its cues from `show-time/active-runs`. Its duplicate `get-active-cues-data` (`:114-132`) goes (review 04 #25).
 - `laser-show.subs`: `timeline-playhead` (`:191-195`) reads `[:playback :positions cell]`. `beat-position` keeps reading `[:timing :global-clock]`, which is now the mirror.
 - `laser-show.events.core`: `without-timer-paths` (`:119-120`) uses `show-time/mirror-paths`. The namespace doc (`:36-39`) names the clock's mirror as the one writer outside the event flow.
-- `laser-show.app`: `start!` calls `show-clock/start!` (`:152`), and `stop!` calls `show-clock/stop!` (`:228`). `start-test!` starts no clock, so tests tick it by hand as they do today.
+- `laser-show.app`: `start!` calls `show-clock/start!` (`:152`), and `stop!` calls `show-clock/stop!` (`:228`). `start-test!` starts no clock, so tests tick it by hand as they do today. It calls `show-time/reset-runtime!` after `state/init-state!` (`:261`): the runtime is outside app state now, so without it a test would inherit the runs and snapshot of the one before.
 - `laser-show.dev.reload` (`:117-137`): steps 1 and 3 go. The clock keeps running through a reload. Its loop calls `tick!` through the var, so it picks up reloaded code.
 - `laser-show.state.domains`: `:playback` gets NEW `:requests {}` and `:positions {}`; the `:active-cues` doc (`:75-82`) describes intents; the `:global-clock` doc says it's a mirror.
 
@@ -204,8 +205,12 @@ Updated:
 - `timeline_handlers_test`: `play-from-cursor-test`, `pause-freezes-position-test` and `seek-inactive-sets-cursor-only-test` assert intents and seek requests.
 - `cue_timing_test/activate-deactivate-match-grid-behaviour-test`.
 - `subs_test/timeline-playhead-only-depends-on-cell-test` uses the mirror path.
-- `modulation_test` (the `cue-timing` helper, `:599`) uses `start-timing`.
-- UI tests: `timeline_editor_test` (`timeline-play-button-starts-from-cursor`, `timeline-follows-midi-timecode`) call `show-clock/tick!` where they called `update-timing-accumulators!`. `timeline_visual_test` (`:75-77,95`) sets `[:playback :positions]`.
+- `modulation_test` (the `cue-timing` helper, `:599`) uses `start-timing`, as do `cue_timing_test/timing-context-is-relative-test` (`:45`), `playback_test/editor-and-renderer-agree-test` (`:39`) and `frame_service_test/once-mode-on-a-track-effect-follows-the-playhead-test` (`:687`).
+- `playback_test/apply-chase-examples-test` (`:58-70`): no `:playing?` assertions, since the chase map has none; the `:show-clock/chase` handler's test checks it instead.
+- `frame_service_test`: the setup helpers that put timing maps in `[:playback :active-cues]` (`setup-playing-state-with-cue!` `:28-59`, `setup-multi-cue-state!` `:330-380`, `setup-single-cue-state!` `:445-473`) write intents through `activate-cue` and step the runtime once, so the cues have runs. `get-active-cell-data` reads only the keys and chains, so its tests (`:187-224`) are unchanged.
+- UI tests: `timeline_editor_test` (`timeline-play-button-starts-from-cursor`, `timeline-follows-midi-timecode`) call `show-clock/tick!` where they called `update-timing-accumulators!`, `MIRROR_EVERY` times so that the mirror is written, and read positions from `[:playback :positions]`. `timeline_visual_test` (`:75-77,95`) sets `[:playback :positions]`.
+- The show-clock probes (`probes/show_clock_probes_test.clj:72,95-97,243-247`) move to the new API (an intent, and `show-clock/start!` instead of the preview timer) before the "after" run. Output runtime probe p11 (`plans/2026-11-16-output-runtime/probes/output_probes_test.clj:414-427`) resolves `update-preview-frame!`, which goes; it points at c6 instead.
+- Unchanged: the tests that only check whether a cell is in `[:playback :active-cues]` (`grid_trigger_test`, `triggers_test`, `menu_file_handlers_test`, `history_handlers_test`, `menu_handlers_test`, `state/history_test`, `multi_engine_test:309`).
 - Gone: `get-timing-context-test` (`frame_service_test.clj:147`).
 
 The dev-mode lost-update check must log no WARN across the full UI suite (as in output runtime Phase 3, `03-phase3-event-reentry.md` §10).
@@ -219,3 +224,74 @@ Run: `clj -M:mac-arm:test show-time show-clock timing-handlers timeline-handlers
 - **Anchors instead of ticks.** Positions could be computed for any instant from a start time and a tempo, with no integration and no thread for timing. That would be exact at every engine's own send time. But every tempo change (Link, tap, a timeline's locked tempo, a loop edit) would have to re-anchor every running cue in the handler. The phase glide, loop wraps and the "skip deltas over 1 s" guard (`cue_timing.clj:103,160`) would need closed forms. The timeline plan already rejected a separate anchored clock for the same reason (`plans/2026-11-08-timeline-rework/04-phase4-transport-and-time.md:228`). Integrating at 60 Hz keeps today's maths and its tests.
 - **Events sending commands to the clock** (`:show-clock/seek` and similar effects) instead of writing intents and requests. The clock would still have to reconcile its cues against app state's active cues, for undo pruning, clear-cell and new documents. With intents it uses one mechanism for everything, and the handlers stay pure state updates.
 - **Starting a cue at its event's time** instead of at the next tick: at most 16.7 ms earlier. It needs the input timestamps that 02 #10 says are lost (`00-overview.md` §7).
+
+## 10. As built (2026-11-17)
+
+Committed as `dd106de`, together with Phase 2 (audit A11), on top of `e52e865` (the S1–S3 answers and the audit). §1–9 describe the code before this phase. Their citations are against `f7fdd79`; up to `e52e865` only `idn/hello.clj` changed in `src/` (`fc9d310`). While the phase was built, §3, §4 and §8 gained what turned out to be missing: `reset-runtime! [state]`, the per-report rate limit, a chase taking over a playing cue, `start-test!` resetting show time, and the tests that build timing maps by hand.
+
+**Where it is now** (at `dd106de`)
+- `animation/show_time.clj` NEW (Phase 2's part is in 02 §10): `initial-runtime` `:30`, `!runtime` `:42`, `mirror-paths` `:48`, `report-interval-ms` `:58`, `request-ids` `:72`, `apply-requests` `:100`, `reconcile-runs` `:140`, `advance` `:156`, `pending-reports` `:181`, `due-reports` `:198`, `step` `:214`, `positions` `:239`, `active-runs` `:246`, `global-clock` `:271`, `global-beats` `:276`.
+- `services/show_clock.clj` NEW: `TICK_HZ` `:37`, `MIRROR_EVERY` `:39`, `mirror!` `:104`, `tick!` `:124`, `run-clock` `:157`, `running?` `:174`, `start!` `:179`, `stop!` `:194`.
+- `animation/cue_timing.clj`: NEW `start-timing` `:307`; `activate-cue` `:322`, which writes an intent; `deactivate-cue` `:335`; NEW `request-seek` `:344`; `seek` `:350`. `align-all-active-cues-phase` is gone.
+- `timeline/playback.clj`: `apply-chase` `:69`, on the clock's chase map.
+- Handlers: `trigger-cue` (`grid.clj:32`); `handle-play` and `handle-seek` (`timeline.clj:377,418`); in `handlers/timing.clj`, NEW `request` `:26`, NEW `handle-show-clock-cue-ended` `:121` and `handle-show-clock-chase` `:129`, and `handle` `:225`. `events/handlers.clj:46` routes `"show-clock"`.
+- `events/core.clj`: `without-mirror-paths` `:118`, `check-lost-update!` `:121`, `effect-link-sync-to-downbeat` `:286`.
+- `common/timing.clj`: `next-deadline` `:106`, moved from `streaming_engine.clj`.
+- `services/frame_service.clj`: `apply-global-effects-to-frame` `:354` reads `show-time/global-clock`. `advance-active-cues`, `preview-timer-paths`, `update-timing-accumulators!`, `get-timing-context`, `get-all-active-cues-data` and the timer are gone (883 → 532 lines, with Phase 2's removals).
+- `state/domains.clj`: `:global-clock` `:55`, `:active-cues` `:76`, NEW `:requests` `:83`, NEW `:positions` `:85`. `subs.clj`: `timeline-playhead` `:191`.
+- `app.clj`: `start!` `:124` starts the clock at `:161`; `stop!` `:219` stops it at `:230`; `start-test!` `:251` resets show time at `:265`.
+- `dev/reload.clj`: `reload-app-code!` `:87` stops and restarts nothing.
+
+**Differences from the plan above**
+
+| Plan | As built | Why |
+|---|---|---|
+| Until Phase 2 lands: `get-all-active-cues-data` returns `active-runs`, `projector-frame` renders from `active-runs`, and the mirror's preview frame comes from `get-preview-frame` (§4) | Not built. The engines and the mirror take Phase 2's snapshot, and the three functions are gone | Both phases landed in one change (A11), so these interim steps had no use |
+| `app/start!` calls `show-clock/start!` where the timer started (`:152`, §4) | After `events/set-dispatch-fn!` (`app.clj:161`) | Before that, `dispatch!` runs the fallback handler on the caller's thread, so the clock's first reports would be handled on the clock thread instead of the agent |
+| `activate-cue` writes the intent and the bookkeeping (§4) | It no longer writes the deprecated `[:playback :trigger-time]` either | Nothing in `src/` reads it. `grid_handlers_test/handle-grid-cell-clicked-with-content` asserted it, and now asserts the intent's `:run` |
+| `apply-global-effects-to-frame` takes the global clock from `show-time/global-clock` (§4) | It also loses its `raw-state` argument, so `generate-frames-by-zone` no longer reads app state for it | Unused after the change |
+| The NEW names in §4 | Also NEW: `show-time/initial-runtime`, `request-ids` (the ids `reset-runtime! [state]` counts as applied) and `show-clock/running?`. `tick!` returns the snapshot | Used by `reset-runtime!`, its test and the clock's tests |
+| Output runtime probe p11 points at c6 instead (§8) | p11 makes `show-clock/tick!` throw on its 3rd call and counts the ticks in 500 ms | It still answers its question (does an `Error` stop show time?), on the code that now advances it |
+| Probe c6 stops the preview timer (`00-overview.md` §1) | c6 is now "output during a code reload": `reload-app-code!`, with nothing to reload, while one engine streams | There is no timer to stop; a reload was what stopped it |
+| The `frame_service_test` helpers write intents and step the runtime (§8) | The tests that used them run on Phase 2's `preview-data` with rendered cues, and the helpers are gone | With both phases in, nothing in `frame-service` reads cue timing |
+
+**Tests**
+- Pure, in `show-time-test` (19 tests): the 17 in §8, and NEW `chase-takes-over-a-playing-cue-test` (a cue playing when its chase is switched on stops when no timecode runs) and `active-runs-keep-the-intents-order-test`. Their app state comes from the real handlers through `events/event-handler`.
+- `show-clock-test`: `^:timing ticks-advance-cues-at-60-hz-test`, `clock-survives-an-error-test`, `slow-event-cannot-move-a-cue-back-test` (on the agent wiring `app/create-app` uses, sampled every 2 ms), `mirror-writes-once-per-two-ticks-test`, `reports-reach-app-state-test`, `reload-keeps-the-clock-running-test`, and NEW `mirror-carries-the-timecode-status-test`.
+- `cue-timing-test`: NEW `start-timing-test` and `request-seek-test`; `activate-deactivate-match-grid-behaviour-test` asserts the intent.
+- Handlers: `timing-handlers-test` (Stop, Retrigger and a tap write requests, with a new id each time), `timing-handlers-link-test` (the shift request; `sync-to-downbeat` returns `{:link/sync-to-downbeat {}}`), `timeline-handlers-test` (play, pause and resume, one seek request per seek) and `grid-handlers-test` (above).
+- `subs-test` reads the mirror's positions. `playback-test/apply-chase-examples-test` runs on the chase map. `modulation-test`, `cue-timing-test/timing-context-is-relative-test`, `playback-test/editor-and-renderer-agree-test` and `frame-service-test/once-mode-on-a-track-effect-follows-the-playhead-test` use `start-timing`.
+- `core-test/lost-update-detector-test`: a write by the mirror alone stays at TRACE, and NEW: a write to `[:playback :active-cues]` in between is a WARN. The timer's paths hid it before (c5).
+- `common.timing-test/next-deadline-examples-test`, moved from `streaming-engine-test`.
+- UI: `timeline-editor-test` ticks the clock `MIRROR_EVERY` times where it advanced the timer, and reads `[:playback :positions]`. `timeline-visual-test` sets the positions.
+- Moved to `show-time-test`: the four timeline and MTC tests from `frame_service_test`. `preview-timer-survives-an-error-test` became `clock-survives-an-error-test`. Gone: `get-timing-context-test`.
+- Red first: with the new assertions and no implementation, the handler, link and subs tests had 24 failures in 55 tests. `cue-timing-test` and `playback-test` didn't compile (no `start-timing`), and `show-time-test` was written before `show_time.clj` existed.
+
+**Probes** (`probes/show_clock_probes_test.clj`, moved to the new API: a cue's intent, and the clock instead of the timer. Before = `e52e865`, on its own worktree; after = `dd106de`. Load average 3–5. c1–c3 and c7 are in 02 §10)
+
+| Probe | Before | After |
+|---|---|---|
+| c4 | **60** app-state writes a second: 30 change the global clock and the cue timings, 30 the preview frame | **30**: each is one mirror write that changes the global clock, the positions and the preview frame together |
+| c5 | the cue's position went back **once, by 0.60 beats** | **0 times** |
+| c6 | 1 s after the timer stopped: 60 frames, **1 distinct** | 1 s after a code reload: 61 frames, **61 distinct** |
+| p11 (output runtime) | 16 preview ticks in 500 ms at 30 fps (output runtime 02 §10) | **31 show clock ticks** in 500 ms at 60 Hz; the 3rd threw |
+
+**Verification, 2026-11-17, macOS arm64, JDK 25.0.5, headless, load average 3–10.** Both phases together, at `dd106de`.
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test show-time show-clock timing-handlers timeline-handlers cue-timing subs frame-service` (§8) | 119 tests, 464 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 866 tests, 32,450 assertions, 0 failures (825 / 32,254 at `fc9d310`) |
+| `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.timeline-editor-test -n laser-show.ui-test.streaming-status-test` | 29 tests, 134 assertions, 0 failures |
+| `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | 55 tests, 209 assertions, 0 failures (the same counts before) |
+| The same with `-J-Dlaser-show.dev=true` | 55 tests, 209 assertions, 0 failures. One lost-update WARN, from a test's own write (below) |
+| `clj -M:mac-arm:test-timing engine-wire output-lifecycle show-clock` | 5 tests, 25 assertions, 0 failures |
+| `clj -M:mac-arm:test-timing` | 9 tests, 29 assertions. `common.timing-test/precise-timing-loop-test` fails (a 4.75 ms deviation against a 1 ms bound) and `sleep-comparison-test` errors (`format "%d"` given a `BigInt`): the same two at `e52e865` (4.70 ms; the same error), in tests this change doesn't touch |
+| `clj -M:mac-arm:test-integration` | 17 tests, 57 assertions, 0 failures |
+| `clj -M:kondo --lint` on the 43 files changed in `src/` and `test/` | 0 errors, 0 warnings. Over `src test dev`: 8 errors and 22 warnings, the same as at `e52e865` |
+
+Observed, not changed:
+- The mirror is still app state, so an event that took a long time still writes back its old copy of `[:playback :positions]` and `[:timing :global-clock]`. The playhead and the beat indicator then show that old position until the next mirror write, at most 33 ms later. Show time itself doesn't move (`slow-event-cannot-move-a-cue-back-test`, c5). Phase 3 (S2 B) takes the playhead out of app state.
+- The dev-mode WARN in the UI suite is `:list/update-drop-target … changed [[:chains :cue-chains]]`, from `cue-chain-list-test/grouped-list-drag-and-drop-reorders-items`. The test writes the chain's items with `state/assoc-in-state!` (`cue_chain_list_test.clj:130-134`) while the drag events it dispatched (`:112-129`) are still queued, so the check is right. It isn't from this change: run alone in dev mode, the test logs the same WARN in 6 of 8 runs at `e52e865` and in 8 of 8 at `dd106de`. Output runtime Phase 3's dev-mode run logged none (`03-phase3-event-reentry.md` §10), so it depends on timing. The test's own `flush-event-queue!` (`:31-38`) before that write would silence it.
+
+Not testable here: a real DAC (none available), and the hidden-window check (output runtime `05-phase5-frame-timing.md` §8).
