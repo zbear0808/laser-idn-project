@@ -1,7 +1,7 @@
 # UX improvements: controls that work, a screen that tells the truth, the Grid tab as the performer's screen
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`)
-**Status:** In progress: Phase 0 done 2026-11-18 (`e2bce92`, as built in §8), Phase 1 done 2026-11-19 (`92c191a`, as built in §9), Phase 2 done 2026-11-19 (`e3d6d1b`, as built in §10); Phase 3 to do. Approved 2026-11-18 ("your plan with the rest of the stuff seems fine"; then "with the rest of the plan I agree with you. Go ahead and implement"). All decisions answered (§5): U1 performers, U2–U5 A   **Last verified against:** `b1da0f2`, by driving the app in test mode (headless, no hardware) through its REPL with plorer, 2026-11-18. The screenshots are in `debug-output/ux-*.png` (gitignored, not committed); Phase 0 as built against `e2bce92` (§8), Phase 1 against `92c191a` (§9), Phase 2 against `e3d6d1b` (§10)
+**Status:** Done: Phase 0 done 2026-11-18 (`e2bce92`, as built in §8), Phase 1 done 2026-11-19 (`92c191a`, as built in §9), Phase 2 done 2026-11-19 (`e3d6d1b`, as built in §10), Phase 3 done 2026-11-19 (`b9b9d55`, as built in §11). Approved 2026-11-18 ("your plan with the rest of the stuff seems fine"; then "with the rest of the plan I agree with you. Go ahead and implement"). All decisions answered (§5): U1 performers, U2–U5 A   **Last verified against:** `b1da0f2`, by driving the app in test mode (headless, no hardware) through its REPL with plorer, 2026-11-18. The screenshots are in `debug-output/ux-*.png` (gitignored, not committed); Phase 0 as built against `e2bce92` (§8), Phase 1 against `92c191a` (§9), Phase 2 against `e3d6d1b` (§10), Phase 3 against `b9b9d55` (§11)
 **Supersedes / Superseded by:** none   **Related findings:** review 01 (views); keyboard plan Phase 2 (dialog shell, menu stubs D4, `cell-label`), Phase 4 (clipboard); vibe plan V8 B (the vibe stuff has its own tabs, nothing on the Grid tab), V2 and output runtime O4 (Stop is the blackout)
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. "Ran" means seen in the running app or a REPL check; "read" means from the code. Anything marked **NEW** does not exist yet.
@@ -13,14 +13,14 @@ The look is coherent, and the timeline editor is the most polished part. The pro
 1. **Some controls silently do nothing**, or store junk. Phase 0, about 2 days. **Done** (`e2bce92`, §8).
 2. **The screen contradicts the output** in places. Phase 1, about 3 days. **Done** (`92c191a`, §9).
 3. **The layout doesn't scale**, which matters most on the Grid tab, now that you've said it is the performer's tab. Phase 2, about 3 days. **Done** (`e3d6d1b`, §10).
-4. **Guidance is stale or missing.** Phase 3, about 2 days.
+4. **Guidance is stale or missing.** Phase 3, about 2 days. **Done** (`b9b9d55`, §11).
 
 | Phase | Goal | Size | Needs |
 |---|---|---|---|
 | 0 | **Done 2026-11-18** (`e2bce92`, §8). Controls that work: one fix for the `:fx/event` placeholders, the cell colours, the single-output device, the trigger editor | ~2 d | none |
 | 1 | **Done 2026-11-19** (`92c191a`, §9). An honest screen: Stop shows what it did, the status bar names what plays, effects cells show on and off, one notice for failures, the stream state says why | ~3 d | 0 (the colours) |
 | 2 | **Done 2026-11-19** (`e3d6d1b`, §10). The Grid tab as a performer's screen: pads that grow, larger text; a Cue Chain Editor that fits; dialogs that match | ~3 d | 1; the keyboard plan's Phase 2 for the dialog parts (not built: the footer kept its dropdowns, §10) |
-| 3 | Guidance: true hints, tooltips, platform shortcut text, Settings tidy-up, QUICKSTART | ~2 d | none |
+| 3 | **Done 2026-11-19** (`b9b9d55`, §11). Guidance: true hints, tooltips, platform shortcut text, Settings tidy-up, QUICKSTART | ~2 d | none |
 
 ## 1. What the app does today
 
@@ -473,3 +473,123 @@ Committed as `e3d6d1b` on top of `f9fc352` (built as `5bb4472` on branch `ux-pha
 | `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | Not run here: it runs after the merge onto master. 87 tests now, 79 before |
 | After the merge, on `master` at `f7c51cb` (with vibe Phase 2): `clj -M:mac-arm:test`, then the full UI suite | 957 tests, 33,080 assertions, 0 failures; UI 97 tests, 430 assertions, 0 failures |
 | `clj -M:kondo --lint` on every touched file | 0 errors; 3 warnings, all there before (an unused require in `events/handlers/projector.clj`, two "Condition always true" in `views/dialogs/cue_chain_editor.clj`) |
+
+## 11. As built: Phase 3 (2026-11-19)
+
+Committed as `b9b9d55` on top of `f3ef771` (built as `1beb36d` on branch `ux-phase3` from `90e35c7`, master with vibe Phase 2; the cherry-pick past vibe Phases 3 and 4a conflicted only in two require lists, `grid_cell.clj`'s and `grid_test.clj`'s imports, resolved by keeping both). §1–7 cite `b1da0f2`; the lines below are at `1beb36d`: the same in `b9b9d55` except in the files the vibe phases also changed (events/handlers/input.clj, state/persistent.clj, subs.clj, views/components/grid_cell.clj, views/components/modulator_param_control.clj, events/handlers/input_test.clj, subs_test.clj, ui_test/grid_test.clj), where they are shifted by their lines.
+
+**Where it is now**
+- Hints:
+  - `views/tabs/grid.clj:23`: "Click: play or stop · Double-click or right-click: edit · Drag: move".
+  - `views/tabs/effects.clj:24`: "Click: on or off · Double-click or right-click: edit · Drag: move". While no effects cell has an effect, `:empty-hint` (`:25`) adds "Effect cells change every playing cue. Double-click one to start".
+  - `views/components/grid_tab.clj`: `generic-grid-tab` takes NEW optional `:empty-hint` (`:226-228`). The hint has NEW id `#grid-hint` (`:237`). NEW `#grid-empty-hint` (`:242`) is always in the v-box, unmanaged when there is no hint, so the measured grid area keeps its place and its size.
+  - `subs.clj:345`: NEW `effects-grid-empty?`: no effects cell has an effect in its flattened chain, as `effect-cell-display-data`'s `:has-effects?` says per cell (disabled effects and empty groups don't count). It sits after `effect-cell-display-data`, not at the end, for the merge with vibe Phase 3.
+- The timeline: `events/handlers/timeline.clj:458`. `handle-open-editor` (`:437`) also sets `[:ui :timeline-prefs :add-panel :open?]` when the timeline it opens has no clips: an empty cell's new timeline, or one whose clips were all deleted. A cue with clips opens with the browser as the user left it. It is UI state: no undo step, not unsaved. The lanes' hint (`views/components/visual_editors/timeline_editor.clj:265`) now has its browser.
+- Platform shortcut text:
+  - NEW `laser-show.views.components.shortcuts`: `shortcut-text` (`views/components/shortcuts.clj:12`), `[key]` or `[platform key]`. It gives "⌘C" on macOS and "Ctrl+C" elsewhere (`:mac` or `:other`, by default this JVM's from `os.name`, `:7`). A one-letter key is capitalised; a word stays as it is ("⌘Click").
+  - `views/components/grid_cell.clj:262, 265, 281, 360, 363`: the cell menus' Copy and Paste texts. The file's only other change is the require (`:24`), inserted between two unchanged lines, for the merge with vibe Phase 4a.
+  - `views/components/list.clj:674-675`: the list hint is "⌘Click multi-select • Drag to reorder • ⌘G group" on macOS; the toolbar's tooltips name the keys too.
+- Tooltips:
+  - `views/components/list.clj`: New "New empty group" (`:574`); Group "Group the selected items (⌘G)" (`:582`); Copy (`:692`); Paste "Paste after the selection (⌘V)" (`:701`); Delete (`:710`), which says "Delete" (`:706`, was "Del"). A group's chevron says "Collapse" or "Expand" (`:411`), its "⊗" "Ungroup: keep the items, lose the group" (`:442`). NEW ids `#chain-copy-selection`, `#chain-paste-items`.
+  - `views/dialogs/cue_chain_editor.clj`: Default zone (`:122`); Trigger (`:313`: the two modes, and that the toolbar's Trigger can set every cue's); "⚡ Triggers..." (`:627`); "Open in Timeline Editor" (`:640`: it makes the cue a timeline cue, and Undo turns it back).
+  - Icon-only or one-letter controls: the Zone Groups "+" (`views/tabs/zones.clj:109`), a parameter's "∿" (`views/components/modulator_param_control.clj:414`), an OSC mapping's "✕" (`views/components/osc_settings.clj:72`), a timeline folder's chevron and a track's "M" (`views/components/visual_editors/timeline/header.clj:221, 234`), and the timeline's add menu (`views/components/visual_editors/timeline_editor.clj:746`).
+- Settings:
+  - `views/tabs/settings.clj`: the Keyboard card and its placeholder fn are gone.
+  - `views/components/midi_settings.clj:212-217`: "Disconnect All" (NEW id `#midi-disconnect-all-button`) is a `button-secondary`, like Auto-Connect beside it.
+  - `css/buttons.clj:255`: NEW `.button-warning`, the theme's warning orange darkened to `#7F4C00` (less when hovered), disabled like the others. Six buttons had the class and no stylesheet defined it. cljfx's `:style-class` replaces `button`, so they showed as bare dark text: Disconnect All (F-17), a MIDI device's Disconnect, MIDI's and OSC's Cancel Learn, OSC's Stop Server and Link's Disable Link.
+  - OSC, `views/components/osc_settings.clj`: one switch (the finding is below). The Enabled checkbox is gone, and Start Server / Stop Server (NEW id `#osc-server-button`, `:132`, with a tooltip) does both:
+    - `events/handlers/input.clj:141` `handle-osc-start-server` lets the messages in once the server runs.
+    - `:159` `handle-osc-stop-server` stops letting them in.
+    - A port that won't open leaves both off and shows "Could not listen for OSC on port 9001" (`h/show-notice`, `:155`).
+  - Two fields returned their event map from a fn, which cljfx ignores, so typing did nothing. Both now `events/dispatch!` it: the OSC Port (NEW id `#osc-port-field`, `osc_settings.clj:120`) and the MIDI channel filter (NEW id `#midi-channel-filter-field`, `midi_settings.clj:163`).
+- Small things:
+  - `views/components/title_bar.clj:84-87`: Save As has no `:disable`. With no file yet it offers the default name (`events/handlers/menu.clj:131`). Export keeps its `:disable`: it is a menu stub (§6).
+  - BPM: NEW `laser-show.views.components.commit-field` (`views/components/commit_field.clj:7`) is the projectors tab's private `commit-field` (it was `views/tabs/projectors.clj:49`), moved so the toolbar can use it, with NEW `:style-class`. The Host, Port and Scan rate fields use it as before (`views/tabs/projectors.clj:384, 399, 415`).
+  - `views/toolbar.clj:110`: `bpm-display` uses it, so Enter or focus loss sets the BPM. Text left as it shows commits nothing: a BPM of 123.456 shows "123.5" and stays 123.456 when the field is left. NEW private `parse-bpm` (`:103`) takes a number above 0; anything else puts the BPM back.
+  - `views/tabs/zones.clj:339`: NEW id `#zones-subtitle`: "Routing targets for cues • Click a projector to add it to the group, or use the Projectors tab". The output rows have NEW ids `#zone-output-<id>` (`:160`).
+- `QUICKSTART.md:42-48`: the Grid tab (click to play and stop, the preview), double-click or right-click > Edit Cue..., drag to move, Projectors > Scan Network (tick the outputs: found ones start off) or Add Manual..., Stream, and Stop (Space) as the blackout; then one line for the Perform tab.
+- The items earlier phases left:
+  - a. `state/persistent.clj:149`: `reset-session` (`:135`) resets `[:ui :notice]`, so New and Open take an old notice away. Its timer then finds no notice with its id and writes nothing (`:ui/clear-notice`).
+  - b. `events/handlers/projector.clj:189-195`: a failed scan puts Scan Network back, as before, and shows "Could not scan the network: " and the reason through `h/show-notice` (without a reason, "Could not scan the network"). The scan at startup (`app.clj:175`) shows it too.
+  - c. `views/dialogs/cell_trigger_editor.clj:30`: the trigger editor's v-box takes `container-primary` instead of `dialog-content`, as the zone group editor did in Phase 2 (§10). The background is the same `#121212`, and its own `:spacing 12` now holds. `.dialog-content` is unchanged, so the other dialogs look as they did. The window is 434 high (`:82`, was 410): with one binding the content needs 397 px, and 410 less a macOS title bar left about 382.
+  - d. The divider's start position: unchanged.
+
+**What each OSC control did** (F-17: "read what each does before this phase")
+- `:input/osc-enable` and `-disable` (`events/handlers/input.clj:131, 136`) set `[:backend :input :osc :enabled?]` (false at start, `state/domains.clj:440`), nothing else. While it is false, the server's handler drops every message (`input/osc.clj:134`): no trigger, no learn, no value for the OSC modulator.
+- `:input/osc-start-server` and `-stop-server` (`:141, 159`) open and close the UDP socket on the port (`input/osc.clj:143, 173`).
+- So OSC input worked only with both on, and neither alone did anything a user could see. The card hid it: Start Server alone said "Listening on port 9000" by a green dot while every message was dropped, and OSC Learn, enabled once the server runs, waited forever. The pair's one extra state, a socket held open that ignores everything, has no use. They overlap, so the server's button is now the one switch. `:input/osc-enable` and `-disable` stay as events (the handler tests use them); no view dispatches them now.
+
+**State**: no new key.
+- `[:ui :timeline-prefs :add-panel :open?]` (existing UI state, `state/domains.clj:194`) is now also written by `:timeline-cue-editor/open`.
+- `[:ui :notice]` is now also written by `:projectors/scan-failed`, by a failed `:input/osc-start-server`, and by `reset-session`.
+- `[:backend :input :osc :enabled?]` (runtime) is written by the server's start and stop.
+- None of them is undoable or marks the project unsaved.
+
+**Differences from the plan**
+
+| Plan (§3) | As built | Why |
+|---|---|---|
+| `shortcut-text [key]` | Also `[platform key]`, and a word as the key ("Click") | The test checks both platforms' text in one JVM; the list's hint names a ⌘-click |
+| Used by the cell menus (F-16) | Also by the list's hint and its toolbar's tooltips | They said Ctrl on macOS too, and the list takes ⌘ (`views/components/list.clj:326, 743`) |
+| Tooltips on every icon-only or abbreviated control | The list's and the footer's (F-15), and the icon-only or one-letter controls a scan of the views found: `+`, `∿`, `✕`, `⊗`, the two chevrons, `M`, the timeline's add menu | F-15 named two places; the timeline had tooltips on its toolbar only |
+| "Disconnect All" becomes a secondary button | It is; NEW `.button-warning` styles the five other buttons with that class | The cause of the "low-contrast text": no stylesheet defined the class. §1 couldn't see the other five: they show only while something is connected, learning or running |
+| Merge Enabled and Start/Stop Server into one switch if they overlap | They overlap (above): the server's button is the switch, and a failed start shows a notice | Otherwise a switch that stays off silently would be the card's trap again |
+| BPM also commits when the field loses focus | Through the projectors tab's commit field, moved to NEW `laser-show.views.components.commit-field`. Text left as it shows commits nothing; a non-number, 0 or less puts the BPM back | One implementation. Leaving the field without typing must not round the BPM to the one decimal it shows |
+| The Zone Groups subtitle "Click a projector to add it to the group, or use the Projectors tab" | That, after the subtitle's first part, "Routing targets for cues • " | The first part says what a zone group is |
+| The Keyboard card goes until the keyboard plan's Phase 5 | It is gone | That Phase 5 planned to replace it (`plans/2026-11-13-keyboard-focus-window-lifecycle/05-phase5-keyboard-triggers.md:22, 40, 56`, `settings.clj:16-34`): it adds its section instead |
+| — | The trigger editor is 434 high | c.: the restored spacing needs 24 px |
+| — | The OSC Port and the MIDI channel filter take what is typed | Found on the way. With the one switch, the port matters |
+| — | `timeline_visual_test` (opt-in, `LASER_SHOW_VISUAL=1`) clicks the browser open only if it is closed (`test/laser_show/ui_test/timeline_visual_test.clj:84`) | Its empty timeline now opens with the browser, so the click for "04-drawer" would have closed it |
+
+**Found, not done**
+- The unsaved-changes dialog (`views/dialogs/unsaved_confirm.clj:34`) has the trigger editor's problem: its `:spacing 16` loses to `.dialog-content`'s 0. Left as it is: the brief kept the other dialogs' look.
+- The trigger editor doesn't scroll its bindings: with two, its content needs 431 px, more than the window.
+- In a cell's menu, "Copy Cue (⌘C)" copies that cell, but ⌘C copies the selected cell (`events/handlers/menu.clj:234`), and a right-click doesn't select the cell. The item and its shortcut can copy different cells.
+- `subs/osc-enabled?` (`subs.clj:768`) has no reader; it had none before.
+- No test opens a real OSC socket: the handler tests stand in for `osc/start-server`.
+
+**Tests** (UI: `with-toolkit` once, `with-app` each)
+- NEW `laser-show.views.components.shortcuts-test/mac-and-other-text-test`: "⌘C", "⌘V", "⌘Click"; "Ctrl+C", "Ctrl+G", "Ctrl+Click"; with no platform, this JVM's.
+- `laser-show.subs-test/effects-grid-empty-sub-test`: empty with no cell, a cell with no items, or one empty group; not empty with one effect, on or off.
+- `laser-show.events.timeline-handlers-test/open-editor-with-no-clips-opens-the-browser-test`: an empty cell opens with the browser, in the same one undo step; a timeline still without clips, reopened with the browser closed, opens it and leaves the document alone; a cue with clips leaves it closed.
+- `laser-show.events.handlers.input-test/osc-server-is-the-one-switch-test`: Start Server is `{:port 9001 :server-running? true :enabled? true}` and no notice; Stop Server makes both false. A port that won't open stays off, with the notice and its `:dispatch-later`.
+- `laser-show.events.menu-file-handlers-test/new-and-open-take-the-notice-away-test` (a).
+- `laser-show.events.projector-handlers-test/failed-scan-shows-a-notice-test` (b): Scan Network back, the notice and its 6 s timer; and the text without a reason.
+- UI `laser-show.ui-test.grid-test`:
+  - `hints-describe-the-clicks-test`: the Grid hint and no empty line; the Effects hint and the empty line, which goes once a cell has an effect.
+  - `cell-menus-name-the-platform-shortcut-test`: a cue cell's, an empty cell's and an effects cell's Copy and Paste; no "Ctrl+" on macOS ("⌘" elsewhere).
+- UI `laser-show.ui-test.timeline-editor-test/empty-timeline-opens-the-browser-test`: [0 0]'s circle opens with the browser closed; the empty C3 opens with it showing.
+- UI `laser-show.ui-test.toolbar-test/bpm-commits-on-focus-loss-test`: typed 128 sets nothing until the focus moves to the trigger selector, then 128.0. "fast", "0" and "-90" put "128.0" back. A BPM of 123.456 shows "123.5", and passing through the field leaves it 123.456.
+- UI `laser-show.ui-test.trigger-editor-test`:
+  - `trigger-editor-sections-are-spaced-test` (c): spacing 12.0; 12 px between the header, the bank and the footer; the `#121212` background. With a binding, the content fits the window less a 28 px macOS title bar.
+  - `cell-trigger-editor-opens-and-closes-modal` finds the dialog by `#trigger-editor-dialog` instead of `.dialog-content`.
+- UI `laser-show.ui-test.menu-bar-test/save-as-is-always-enabled-test`: enabled with no file, and with one.
+- UI `laser-show.ui-test.setup-dialogs-test/click-a-projector-to-add-it-to-the-group-test`: the subtitle; a click on the projector's name adds it to Left, and a click on its checkbox takes it out once (the box unticked). Events land in order, so later marker events check that nothing toggles twice.
+- NEW UI `laser-show.ui-test.settings-test`. No device or socket opens: the connected and listening states are set in the state by hand, and Stop Server is fired, not clicked, as the card can be below the scrolled view.
+  - `keyboard-card-is-gone-test`.
+  - `disconnect-all-is-a-button-test`: `button-secondary`, disabled `#404040`; with a controller connected, enabled, `#505050`.
+  - `midi-channel-filter-commits-test`: "1, 2" is `#{1 2}`; empty is all channels again.
+  - `osc-has-one-switch-test`: no Enabled box, Start Server with its tooltip; Port 9100 is kept. Listening: Stop Server is `#7F4C00`, and it stops the server and lets nothing in.
+- UI `laser-show.ui-test.cue-chain-list-test/list-buttons-say-what-they-do-test`: "Delete", as wide as its text; the five tooltips with this platform's keys; the hint; a new group's "⊗" and its chevron, "Collapse" then "Expand".
+- UI `laser-show.ui-test.main-window-test/cue-chain-editor-footer-says-what-it-does-test`: both choices and the two buttons have a tooltip.
+
+**Red first** (at `90e35c7`, with the tests and no source change)
+- Unit:
+  - `shortcuts-test` could not load `laser-show.views.components.shortcuts`. `subs-test`: "No such var: subs/effects-grid-empty?".
+  - input, menu-file-handlers, projector-handlers and timeline-handlers in one run (with shortcuts-test): 91 tests, 10 failures. Start Server left `:enabled? false`, and a failed start showed no notice. The notice stayed after New and after Open. A failed scan showed none. An empty timeline opened with the browser closed, twice.
+- UI, the 14 new or changed tests in one run: 14 tests, 14 failures, 10 errors.
+  - The cell menus said "Copy Cue (Ctrl+C)", "Paste Cue (Ctrl+V)", "Copy Effects (Ctrl+C)". The list said "Del", with no tooltips and "Ctrl+Click multi-select • Drag to reorder • Ctrl+G group". The footer's choices and buttons had no tooltip. Save As was disabled.
+  - The BPM stayed 120.0 when the focus left the field. An empty timeline's browser never showed. The trigger editor's spacing was 0.0, and its sections touched.
+  - The grid, zones and settings tests found no `#grid-hint`, `#zones-subtitle` or `#osc-server-button`. `cell-trigger-editor-opens-and-closes-modal` passed (a selector change only).
+- Settings with `90e35c7`'s views and stylesheet (`git stash` of the four files, a throwaway test finding the controls by their text): "1, 2" and Enter left the channel filter nil; 9100 and Enter left the port 9000; there were two Enabled boxes and the Keyboard card. Disconnect All had the class `button-warning` and no background, and so had Stop Server.
+
+**Verification, 2026-11-19, macOS arm64, JDK 25**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test -n` menu-file-handlers, projector-handlers, timeline-handlers, handlers.input, shortcuts, subs, views.tabs.projectors, grid-tab, css.theme | 111 tests, 577 assertions, 0 failures |
+| `clj -M:test-ui:mac-arm:test-ui-headless -n` grid, toolbar, timeline-editor, trigger-editor, setup-dialogs, main-window, menu-bar, status-bar, settings, cue-chain-list, streaming-status, timeline-visual, in one run | 92 tests, 414 assertions, 0 failures |
+| `cue-chain-list-test` again, after its Delete width check changed | 6 tests, 17 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 963 tests, 33,111 assertions, 0 failures (957 before, 6 new) |
+| `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | Not run here: it runs after the merge onto master. 110 tests now, 97 before |
+| `clj -M:kondo --lint` on every touched file | 0 errors; 4 warnings, all there at `90e35c7`: a redundant `let` in `events/handlers/input.clj`, an unused require in `events/handlers/projector.clj`, two "Condition always true" in `views/dialogs/cue_chain_editor.clj` |
