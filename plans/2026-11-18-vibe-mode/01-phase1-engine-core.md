@@ -1,7 +1,7 @@
 # Phase 1: the vibe model and its engine (no UI)
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`)
-**Status:** Proposed. Needs V1, V2, V3, V6, V7 (`00-overview.md` §7)   **Last verified against:** `b1da0f2` (probes v1–v10, v12 in `00-overview.md` §3)
+**Status:** Done in `9177b1e` (2026-11-19); V1, V2, V3, V6, V7 answered A. As built: §10   **Last verified against:** `9177b1e` (§10)
 **Supersedes / Superseded by:** supersedes the scaffolding named in V7 (`state/domains.clj:93-100, 106-111`, `events/handlers/triggers.clj:134-155`)   **Related findings:** review 05 F13, F15, L1, M4 step 1. K-15 (learn also fires the old binding) is *not* fixed here
 
 After this phase the engine works and is tested, and you can drive it from the REPL or from any trigger-map entry. There is no screen for it yet (Phase 2), so land the two together.
@@ -226,3 +226,89 @@ Run: `clj -M:mac-arm:test shuffle-bag vibes triggers cue-timing show-time grid-t
 - **The engine outside app state** (a runtime atom like show time): rejected: handlers would stop being pure, and a vibe changes a few times a second, not 60 (`docs/CLJFX_STATE_MANAGEMENT.md`). Fast data (faders) already bypasses app state.
 - **References by a stable cue id instead of `[col row]`**: rejected for now: cue chains have no id of their own, and adding one touches saving, the clipboard and the templates. `vibes.refs` does what the trigger map already does for moves.
 - **Making `:apply-preset` work** (`events/handlers/triggers.clj:85-86`): unrelated; noted as a dead branch.
+
+## 10. As built (2026-11-18)
+
+Committed as `9177b1e` on top of `67735d0` (UX Phase 0, `e2bce92`, is in it), after review. §1–9 cite `b1da0f2`; the lines below are at `9177b1e`.
+
+**Where it is now** (paths under `src/laser_show/`)
+- `vibes/library.clj` (NEW): `empty-library` `:21` (the domain default), `settings` `:25` (a key a file lacks gets its default), `vibe` `:30`, `current-id` `:35` (the first of `:order` when `:current` names no vibe), `current-vibe` `:45`, `next-id` `:48` (wraps), `audience-groups` `:59`, private `zone-group-ids` `:72`, `audience-cell?` `:90` (also `[state cell groups]`), `playable-cells` `:97`.
+- `vibes/refs.clj` (NEW): `move-cue` `:74`, `remove-cue` `:101`, `move-fx` `:118`, `remove-fx` `:136`, `move-trigger-targets` `:154`, `remove-trigger-targets` `:167`; the two copies in `grid.clj` and `effects.clj` are gone. A move renames in order and names a cell once; it also moves the voices, what a solo flash keeps waiting, the bags (their cycle kept) and `:fx-on`. A move onto the same cell changes nothing.
+- `vibes/engine.clj` (NEW): `press` `:373`, `release` `:387`, `select` `:399`, `release-all` `:407`. Private: `pick` `:171`, `switch-to` `:150`, `stop-voice` `:48`, `restore-ducked` `:255`, and `start` `:38`, `forget-stale` `:55`, `leave-look` `:105`, `start-bed` `:124`, `enter-look` `:135`, `ensure-current` `:159`, `play-next` `:182`, `press-pool` `:193`, `release-pool` `:228`, `release-flash` `:286`, `duck` `:295`, `press-flash` `:308`, `release-vibe` `:337`, `toggle-blackout` `:349`.
+- `events/handlers/vibes.clj` (NEW): `handle` `:10`, routed at `events/handlers.clj:64`; `"trigger-group"` is gone.
+- `events/handlers/triggers.clj`: `vibe-action?` `:60`, `vibe-event` `:64`, the first clause of `action-event` `:80-84`; `handle-input` `:140` leaves `[:trigger-runtime]` as it is for a vibe binding. `handle-group-toggle-lock`, `handle-tick`, `:trigger/tick` and `:trigger-group/toggle-lock` are gone.
+- `events/handlers/grid.clj`: public `start-cue` `:33` (was private `trigger-cue`); move `:139-140` and clear `:173-174` call `vibes.refs`. `events/handlers/effects.clj`: clear `:53-54`, move `:82-83`.
+- `events/handlers/timing.clj`: `handle-timing-tap-tempo` `:48` keeps the last `tap-history` (8, `:42`) taps, all that `:timing/calculate-bpm` reads (`events/core.clj:178`). HIT taps on every press, and the history used to grow for as long as the presses came under 2 s apart; the BPM a tap gives is unchanged. The report path is unchanged (`:122`, docstring only).
+- `animation/cue_timing.clj`: `decay-epsilon` `:23`; `update-cue-timing` `:124` ends a run with `:decay-beats` once its beats reach them while `:hold?` is false (`:185-186, 193`); `activate-cue` `:331` writes both keys (`:343-344`). `animation/show_time.clj`: `run-for` `:127` copies them (`:140-141`).
+- `state/domains.clj`: `[:config :vibes]` default `:266`; NEW `vibe-runtime` `:107`; `triggers` `:91` and `trigger-runtime` `:96` without the group keys (the `triggers` docstring no longer says "Persisted": probe v3); the intent's doc `:79`. `state/persistent.clj`: `reset-session` `:135` resets `:vibe-runtime` (`:143`); `new-project-state` `:176` applies the starter vibes (`:183`). `state/templates.clj`: `create-starter-vibes` `:70` (§7's data), `apply-starter-vibes` `:91` (only with no vibes; keeps the settings), called at `app.clj:146, 262`.
+- `subs.clj`: `trigger-group-state` is gone (it followed `active-trigger-count` `:791`). Deleted: `triggers/core.clj`, `definitions.clj`, `state_machine.clj` and their three tests.
+- `triggers/shuffle_bag.clj`: `make` `:13`, `seeded` `:29`, private `refill` `:45` (the guard), `next` `:55` (takes the shuffle fn), `sync` `:68`.
+
+**State** as §5, plus: a HIT or ACCENT voice keeps the `:mode` it was pressed with; the flash's keeps `:fx` (asked for), `:fx-on` (switched on by it) and `:solo?`, and keeps them without `:cell` and `:run` once its cue is gone, until its release. `:duck` holds `{:cell :mode}` (stepped aside) or `{:mode}` (a HIT or ACCENT pressed during the solo flash). NEW `:started` counts the cues the engine started this session.
+
+**Differences from the plan**
+
+| Plan | As built | Why |
+|---|---|---|
+| `start-cue [state col row opts]`, opts `:decay-beats`, `:hold?` | also `:run`, the run's id; and a 3-arity without opts | the engine names its runs (next row) |
+| run ids: not said (the grid uses `random-uuid`) | `(UUID. t n)`: the event's ms and NEW `[:vibe-runtime :started]` (`engine.clj:38-46`) | invariant 11 with run ids included. The counter resets with the session; a grid start keeps a random id, which can't equal one of these (its variant bits) |
+| a run ends when its beats reach `:decay-beats` | within `decay-epsilon`, 1e-9 beats (`cue_timing.clj:23, 185-186`); the run keeps its beats (a timeline's end is clamped to its length) | 30 ticks of 1/60 s at 120 BPM add up to 0.9999999999999996 beats: without it a 1-beat decay ends a tick late |
+| `run-for` copies `:decay-beats` and `:hold?` | only from an intent with `:decay-beats` | a held flash (`{:run r :hold? true}`) has no decay; its run is as before |
+| — (not defined) | HIT or ACCENT pressed while a solo flash is held: nothing is picked and the bag doesn't move; `:held` is recorded and HIT still taps. A `:decay` press plays nothing; a `:gate` or `:sustain` one waits in `:duck` and picks when the flash lets go, as the vibe current then has the role (a `:gate` one let go of first is dropped) | a pick that never plays costs a cell its turn (invariant 3; review). beyond-vibe starts its newest rhythm cue at the release (`janitor.rs:27-40`); a decay would have ended by then |
+| row 7: the ducked voices start again | only on a cell nothing plays now. FLASH pressed again without a release lets the first go and keeps what it ducked for the last release; a non-solo flash press starts what an earlier solo one ducked | fuzz seed 4242: a re-press restored a ducked HIT onto a cell the grid had taken, then ducked it, stopping the grid's cue (invariant 4) |
+| row 8: the new bed starts | not on a cell that already plays | stress seeds 38 and 54: the bed took over the grid's cue, and a solo flash then stopped it (invariant 4) |
+| row 11: the bed starts again | and the FX set comes back on | blackout switched it off (row 10) |
+| `:vibe/select` | during blackout the vibe becomes current, and its look starts when blackout ends | nothing plays (invariant 6); the strip (Phase 2) can show what comes back |
+| `:vibe/release-all {:only}` | a held HIT or ACCENT is cut as a long hold (`:sustain` stays), FLASH lets go after them, a held VIBE neither switches nor locks | a stuck key mustn't change the look |
+| audience groups: `:crowd`, and those of a tagged projector or virtual projector | also those of a virtual projector whose parent is tagged; a zone selector counts on or off; a destination with no group, missing or `nil`, is `:all` | the parent is the hardware that scans; a selector can be switched on mid-show; the routing sends a cue with no group to `:all` (`routing/zone_effects.clj:148-152`), and `cue_chain.clj:190` can write `nil` (review) |
+| first VIBE tap with nothing current | the second vibe | the first one is current by default (invariant 9) |
+| tap tempo: Phase 6 | the tap history is capped at 8 now (`events/handlers/timing.clj:42-63`) | with HIT tapping it grew by one entry per press for a whole set (review) |
+| `effects-cell-move-and-clear-follow-fx-FX sets-test` | `effects-cell-move-and-clear-follow-fx-sets-test` | a typo in §8 |
+| the fuzz: presses, releases, switches, blackouts, deletes and moves | also ticks and their reports, grid clicks (half of them restart a cell a voice plays, half of those followed by BLACKOUT), effect-cell moves and clears, vibes put back and reordered. Invariant 1 comes from its own `may-play?`, not `playable-cells`. `VIBE_FUZZ_SEED=<seed>` runs one seed, `VIBE_FUZZ_SEEDS=<n>` seeds 1 to n | M1 and M4 survived the first mutation run (below) |
+
+**Found, not done**
+- Phase 3: effect cells a vibe switched on are saved with `:active? true`, as the whole of `[:chains :effect-chains]` is (`state/persistent.clj:60`). The field is live, so neither undoable nor unsaved, but it is in the file, and after a load or New `[:vibe-runtime :fx-on]` is empty (`:143`): leaving that vibe never switches them off. The starter vibes have no FX sets, so nothing shows this until Phase 3 can edit them.
+- Phase 2: a grid click during blackout starts a cue and sets `:playing? true` (`animation/cue_timing.clj:345`). Light returns while `[:vibe-runtime :blackout?]` stays true and the vibe keys stay dead; the next BLACKOUT press "turns it off" and dispatches `:transport/play`. That is V2 A ("a click on the grid during blackout still starts a cue"), but the Perform screen must not show "dark" from `:blackout?` alone.
+- Phase 6: the tap HIT sends is timed when it is handled (the co-effect `:time`, probe v2), as the TAP button's is; the press itself is timed by the input.
+- Probe v1 (`probes/vibe_probes_test.clj:92-95`) calls the one-argument `bag/next` and now throws an `ArityException`. That file is another session's and is left alone; v1's "after" is `never-repeats-back-to-back-test`.
+- Invariant 13, measured (verification): a vibe press costs about 2.5 times v5's momentary cue, 4 times with the tap (two more events), all under 0.11 ms p99.
+- K-15 (learn also fires the old binding): not fixed, as the header says.
+
+**Tests**: 62 new, 5 deleted (868 → 925)
+- NEW `laser-show.vibes.engine-test` (25): rows 1–12 of §7, the ten more named in §8, and `hit-during-a-solo-flash-waits-for-its-release-test` (the bag doesn't move, `:held` and the tap do), `flash-and-fx-set-share-an-effect-cell-test`, `release-all-lets-go-of-one-source-test`. `never-stops-someone-elses-cue-test` also covers blackout and leaving a vanished vibe's look, the two paths that stop voices without forgetting stale ones first.
+- NEW `laser-show.vibes.library-test` (4), `vibes.refs-test` (5), `events.handlers.vibes-test` (3), `state.templates-test` (1), as named in §8. `audience-cell-test` has §7's four rows, items inside groups, folders, a track's zone selector, virtual projectors, and a destination with no group.
+- NEW `laser-show.vibes.engine-fuzz-test/engine-invariants-hold-for-random-events-test`: seeds 20261118, 7 and 4242, 2,000 steps each through `events/handle-event-pipeline` and `show-time/step`, checking invariants 1–12 after every step, and that every pick starts its cell. Its world: the starter cues (sent to `:center`), four vibes with every mode, beds, FX sets, a solo and a non-solo flash, a `:crowd` cue, a cue with no zone group, a timeline, one that follows timecode, and a `:crowd-scanning` projector in `:all`. A failure prints the seed and the steps up to it.
+- Extended: `triggers.shuffle-bag-test` (+5), `animation.cue-timing-test` (+4), `animation.show-time-test` (+2), `events.handlers.grid-trigger-test` (+3), `events.handlers.triggers-test` (+3, and the 2 group tests gone), `state.persistent-test` (+4), `state.history-test` (+1), `events.timing-handlers-test` (+1: `tap-history-keeps-the-last-8-test`, 20 taps 500 ms apart keep the last 8, and the real `:timing/calculate-bpm` effect gives 120.0 from them as from all 20, and the same BPM for a drifting tempo). Deleted with their namespaces: `triggers.core-test`, `definitions-test`, `state-machine-test`.
+
+**Red first**
+- The new tests against `67735d0`'s `src/`: `shuffle-bag-test` doesn't compile (no `bag/seeded`); `cue-timing-test` with `history-test`: 31 tests, 150 assertions, 5 failures (the four decay tests, `activate-cue-writes-decay-keys-test` twice). `config-vibes-is-undoable-content-test` passed, as §3 says: the document policy needs no change. Every other new or extended namespace failed to load (`templates/apply-starter-vibes`, `laser-show.vibes.*` missing).
+- The probes at `67735d0`: v1, a pool of 2 repeats 25.0 % of picks (3: 10.9 %, 4: 6.2 %, 8: 1.5 %); v7, a plain cue at 39.97 beats after 20 s, never ended; v8, six unmapped notes leave 6 held inputs, 6 active triggers and 6 taps.
+- Review fixes: the no-group row of `audience-cell-test` failed (1 failure) before `zone-group-ids` used `(or … :all)`; `hit-during-a-solo-flash-waits-for-its-release-test` failed 5 times against the engine before the change, and the fuzz caught that engine on all three seeds (M7); `tap-history-keeps-the-last-8-test` failed twice before the cap (all 20 taps kept), while its BPM checks passed, as they should: the effect reads the last 8 either way.
+- The fuzz's own first runs found the two engine bugs in the table above, and four mistakes in its checks: invariant 11 also compared what other handlers did with the events it dispatched (Stop's restart has a random id); a move onto the same cell; a pool that changes mid-cycle; two roles waiting on one solo flash picking the same cell, which starts once for both.
+
+**Mutants**: each run is the fuzz's three seeds and the engine, library, refs and bag tests (41 tests), with the mutated file ahead of `src/` on the classpath.
+
+| # | Mutant | Fuzz | Unit tests failing |
+|---|---|---|---|
+| M1 | `stop-voice` stops without checking the run is still its own (`engine.clj:51`) | 3 of 3 seeds, invariant 4 | `never-stops-someone-elses-cue-test` (2) |
+| M2 | no refill guard (`shuffle_bag.clj:45-53`) | 3 of 3, invariant 2 | `never-repeats-back-to-back-test` (7), `refill-guard-swaps-a-repeat-test` (2) |
+| M3 | every HIT or ACCENT release is a hold | 3 of 3, invariant 12 | 9 engine tests (13 failures) |
+| M4 | `playable-cells` without the audience rule | 3 of 3, invariant 1 | `audience-cells-never-play-unless-allowed-test` (2) |
+| M5 | blackout keeps the holds | 3 of 3, invariant 6 | `blackout-is-sticky-test` (2) |
+| M6 | a destination with no group isn't `:all` (review 1) | 2 of 3, invariant 1 | `audience-cell-test` (1) |
+| M7 | the engine before review 2: a press during a solo flash picks | 3 of 3, invariant 3 | `hit-during-a-solo-flash-waits-for-its-release-test` (5) |
+
+In the first run M1 and M4 survived the fuzz. M1: every path but blackout (and switching out of a vanished vibe) forgets stale voices before it stops one, and the walk never had a stale voice at a blackout; now it restarts cells that voices play from the grid, half the time followed by BLACKOUT. M4: the check took "playable" from `playable-cells`, the function under test; now it has its own `may-play?` and compares `playable-cells` with it at every press.
+
+**Verification, 2026-11-19, macOS arm64, JDK 25**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test shuffle-bag vibes triggers cue-timing show-time grid-trigger effects persistent history templates` | 210 tests, 1,165 assertions, 0 failures |
+| `clj -M:mac-arm:test -n` vibes.engine-fuzz, vibes.engine, vibes.library, vibes.refs, triggers.shuffle-bag | 41 tests, 267 assertions, 0 failures (7 s) |
+| `VIBE_FUZZ_SEEDS=200 clj -M:mac-arm:test -n laser-show.vibes.engine-fuzz-test` | seeds 1–200, 2,000 steps each: 0 failures (22 s) |
+| `clj -M:mac-arm:test` (full unit suite) | 925 tests, 32,864 assertions, 0 failures (31 s), after the tap cap. Before it: 924 tests, 32,859 and 32,861 assertions in two runs, 0 failures; the count moves between runs outside the new tests (the vibe and bag namespaces count 267 every run) |
+| `clj -M:mac-arm:test timing tap-tempo` | 57 tests, 162 assertions, 0 failures |
+| `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | 71 tests, 264 assertions, 0 failures (201 s), before a `:doc` string change in `state/domains.clj` and the tap cap; after the cap, `tap-tempo-button-records-taps`: 1 test, 2 assertions, 0 failures |
+| `clj -M:kondo --lint` on every touched file | 0 errors; 5 warnings, all there before (a redundant `let` in `triggers.clj` `update-runtime`, an unused require in `triggers/matcher.clj`, three unknown keys in `history_test.clj`) |
+| Invariant 13: probe v5's loop (10,000 events, press and release) in one JVM, warm runs 2 and 3, machine load 5–15 | momentary cue 4.9 µs median (p99 20 µs); vibe HIT 12 µs (p99 52–55 µs); vibe HIT with the tap 19–20 µs (p99 104–108 µs) |
