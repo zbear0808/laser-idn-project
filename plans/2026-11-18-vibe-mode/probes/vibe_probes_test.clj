@@ -5,7 +5,10 @@
 ;; persistence code does, for the claims the plan builds on. They ran against
 ;; master b1da0f2, whose src/ is unchanged since 378db47. The plan docs quote
 ;; the results (00-overview.md section 3). When a phase changes a behaviour,
-;; turn the matching probe into a real test that asserts the new one.
+;; turn the matching probe into a real test that asserts the new one. A probe
+;; stops reproducing its number once the phase that fixes it lands (with Phase 1
+;; in the working tree, v1 ends in an error and v3's [:triggers] lines read nil):
+;; to see the plan's numbers again, run it in a checkout of b1da0f2.
 ;;
 ;; No UI, no hardware, no sockets. Everything runs in the REPL-less test JVM
 ;; with state from domains/build-initial-state and the starter cue chains.
@@ -26,14 +29,19 @@
             [clojure.test :refer [deftest]]
             [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.animation.effects :as effects]
+            [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
+            [laser-show.animation.effects.shape]
+            [laser-show.animation.modulator-evaluators :as evaluators]
             [laser-show.animation.modulation :as mod]
             [laser-show.animation.show-time :as show-time]
+            [laser-show.backend.multi-engine :as me]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.events :as input-events]
             [laser-show.input.router :as router]
             [laser-show.input.store :as store]
+            [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
@@ -445,3 +453,317 @@
                                                                   {:accumulated-beats beats :accumulated-ms (* 500.0 beats)} 120.0))))]
     (say "v16 a once-mode random just after each of five restarts:" (pr-str (mapv (fn [_] (format "%.3f" (at 0.0))) (range 5)))
          " and 0.5 beats into each:" (pr-str (mapv (fn [_] (format "%.3f" (at 0.5))) (range 5))))))
+
+
+;; v17: a "complex" tap reaction, four effects whose parameters all follow one
+;; value (04-phase4-tap-reactions.md). A :midi modulator stands in for the
+;; planned Envelope / Step / Energy ones: all of them are global modulators, so
+;; apply-effect-chain resolves each once per parameter (effects.clj:467-470) and
+;; the cost is the same. Does a value reach a global effect through the chain,
+;; is each effect exactly neutral at its rest value, and what does a chain of
+;; one and of four effects cost on a 1,000-point frame? The cost is per zone
+;; frame of every playing cue (frame_service.clj:399-403).
+
+(defn- circle-frame [n]
+  (vec (for [i (range n)]
+         (let [a (* 2.0 Math/PI (/ i (double n)))]
+           [(* 0.8 (Math/cos a)) (* 0.8 (Math/sin a)) 1.0 0.6 0.2]))))
+
+(defn- max-abs-diff [a b]
+  (apply max (for [[p q] (map vector a b) i (range 5)]
+               (Math/abs (- (double (p i)) (double (q i)))))))
+
+(defn- measure-chain
+  "[median-us p99-us kb-garbage-per-call] of apply-effect-chain on frame."
+  [frame chain ctx]
+  (let [^ThreadMXBean bean (ManagementFactory/getThreadMXBean)
+        tid (.getId (Thread/currentThread))
+        n 3000]
+    (dotimes [_ 3000] (effects/apply-effect-chain frame chain ctx))
+    (let [a0 (.getThreadAllocatedBytes bean tid)
+          ts (vec (sort (for [_ (range n)]
+                          (let [t0 (System/nanoTime)]
+                            (effects/apply-effect-chain frame chain ctx)
+                            (- (System/nanoTime) t0)))))
+          a1 (.getThreadAllocatedBytes bean tid)]
+      [(/ (percentile ts 0.5) 1000.0) (/ (percentile ts 0.99) 1000.0) (/ (- a1 a0) n 1024.0)])))
+
+(deftest v17-complex-effect-chain
+  (let [frame (circle-frame 1000)
+        drive (fn [lo hi] {:type :midi :channel 1 :cc 7 :min lo :max hi})
+        fx (fn [id params] {:id (random-uuid) :effect-id id :enabled? true :params params})
+        impact {:effects [(fx :intensity {:amount (drive 1.0 2.0)})
+                          (fx :scale {:x-scale (drive 1.0 1.3) :y-scale (drive 1.0 1.3)})
+                          (fx :rotation {:angle (drive 0.0 25.0)})
+                          (fx :hue-shift {:degrees (drive 0.0 40.0)})]}
+        kick {:effects [(fx :intensity {:amount (drive 1.0 2.0)})]}
+        ctx (fn [v] (assoc (cue-timing/get-global-timing-context {} 120.0)
+                           :input-values {[:midi 0 7] v}))
+        idle (effects/apply-effect-chain frame impact (ctx 0.0))
+        half (effects/apply-effect-chain frame impact (ctx 0.5))
+        peak (effects/apply-effect-chain frame impact (ctx 1.0))
+        fmt (fn [pt] (mapv #(Double/parseDouble (format "%.3f" (double %))) pt))]
+    (say "v17 the value reaches a global effect: point 100 in" (pr-str (fmt (frame 100)))
+         "| value 0.0 ->" (pr-str (fmt (idle 100)))
+         "| 0.5 ->" (pr-str (fmt (half 100)))
+         "| 1.0 ->" (pr-str (fmt (peak 100))))
+    (say (format "v17 neutral at rest: frames equal? %s, largest difference %.2e (the 4-effect chain at value 0.0)"
+                 (= idle frame) (max-abs-diff frame idle)))
+    (let [alone (fn [id params] (max-abs-diff frame (effects/apply-effect-chain frame {:effects [(fx id params)]} (ctx 0.0))))]
+      (say "v17 largest difference from the input, each effect alone at its rest value:"
+           (pr-str (into (sorted-map)
+                         {:intensity (alone :intensity {:amount (drive 1.0 2.0)})
+                          :scale (alone :scale {:x-scale (drive 1.0 1.3) :y-scale (drive 1.0 1.3)})
+                          :rotation (alone :rotation {:angle (drive 0.0 25.0)})
+                          :translate (alone :translate {:x (drive 0.0 0.4) :y (drive 0.0 0.4)})
+                          :hue-shift (alone :hue-shift {:degrees (drive 0.0 40.0)})}))))
+    (let [[m1 p1 g1] (measure-chain frame kick (ctx 0.7))
+          [m4 p4 g4] (measure-chain frame impact (ctx 0.7))
+          [m4i p4i g4i] (measure-chain frame impact (ctx 0.0))]
+      (say (format "v17 1,000 points, one effect (kick):          median %.1f us, p99 %.1f us, %.0f KB garbage" m1 p1 g1))
+      (say (format "v17 1,000 points, four effects (impact), live: median %.1f us, p99 %.1f us, %.0f KB garbage" m4 p4 g4))
+      (say (format "v17 1,000 points, four effects (impact), idle: median %.1f us, p99 %.1f us, %.0f KB garbage" m4i p4i g4i)))))
+
+
+;; v18: the decay curves an envelope would use (the decay modulator's own,
+;; modulator_evaluators.clj:149-162): the fraction left at progress p.
+
+(deftest v18-decay-curves
+  (doseq [curve [:linear :exp :log]]
+    (say "v18" (name curve) "fraction left at progress 0, .25, .5, .75, 1:"
+         (pr-str (mapv #(Double/parseDouble (format "%.3f" (evaluators/decay-curve-factor curve (double %))))
+                       [0.0 0.25 0.5 0.75 1.0])))))
+
+
+;; Zone effects (08-phase8-zone-effects.md): zone chase, swap and shift.
+;;
+;; v19-v24 look at the zone path as it is today and run PROTOTYPES of the three
+;; remaps (the defns marked "prototype" below are probe code, the executable
+;; form of the plan's data tables, not the implementation).
+
+(def ^:private zone-cue-lcr
+  "Three items, each routed to its own zone, as zone_routing_integration_test.clj
+   does (that file's test-cue-chain-multiple-items)."
+  {:id "cue-lcr" :name "Left Center Right" :destination-zone {:zone-group-id :all}
+   :items [{:id "i-left" :type :preset :enabled? true :preset-id :circle
+            :params {:radius 0.3 :num-points 20 :red 1.0 :green 0.0 :blue 0.0}
+            :effects [{:effect-id :zone-selector :enabled? true :params {:target-zone :left}}]}
+           {:id "i-right" :type :preset :enabled? true :preset-id :square
+            :params {:size 0.3 :num-points 12 :red 0.0 :green 1.0 :blue 0.0}
+            :effects [{:effect-id :zone-selector :enabled? true :params {:target-zone :right}}]}
+           {:id "i-center" :type :preset :enabled? true :preset-id :triangle
+            :params {:size 0.3 :num-points 3 :red 0.0 :green 0.0 :blue 1.0}
+            :effects [{:effect-id :zone-selector :enabled? true :params {:target-zone :center}}]}]})
+
+(def ^:private zone-cue-all
+  "One item, no zone selector: it goes to the cue's destination, :all."
+  {:id "cue-all" :name "All" :destination-zone {:zone-group-id :all}
+   :items [{:id "i-ring" :type :preset :enabled? true :preset-id :circle
+            :params {:radius 0.5 :num-points 32 :red 1.0 :green 1.0 :blue 1.0}
+            :effects []}]})
+
+(def ^:private zone-projectors
+  "Three projectors in a row and each in :all (so a cue routed to :all reaches
+   them), one scanning the crowd, one for graphics."
+  {:p-left {:zone-groups [:all :left]} :p-center {:zone-groups [:all :center]} :p-right {:zone-groups [:all :right]}
+   :p-crowd {:zone-groups [:crowd] :tags #{:crowd-scanning}} :p-gfx {:zone-groups [:graphics]}})
+
+(defn- zone-state! []
+  (init! (domains/build-initial-state))
+  (state/assoc-in-state! [:projectors] zone-projectors))
+
+(defn- zone-snapshot [zone-frames]
+  {:tick 1 :at-ns (System/nanoTime) :playing? true :projector-ctx nil :preview (delay nil)
+   :cues [{:cell [0 0] :zone-frames zone-frames}]})
+
+(defn- render-zones
+  "generate-frames-by-zone for one cue at beats, through the same render context
+   the show clock makes (frame_service.clj:102-114)."
+  [cue beats]
+  (let [rctx (frame-service/render-context (state/get-raw-state) {} (:global show-time/initial-runtime))
+        ctx (cue-timing/get-cue-timing-context {:accumulated-beats beats :accumulated-ms (* 500.0 beats)} 120.0)]
+    (frame-service/generate-frames-by-zone cue ctx rctx)))
+
+(defn- points-by-zone [zone-frames]
+  (into (sorted-map) (map (fn [[z f]] [z (count f)])) zone-frames))
+
+(defn- drawn-by-projector
+  "Points each projector sends for one cue's zone frames (nil = nothing, which
+   the streaming engine sends as an empty frame, streaming_engine.clj:373)."
+  [zone-frames]
+  (into (sorted-map)
+        (map (fn [pid] [pid (some-> (#'me/projector-frame pid (zone-snapshot zone-frames)) count)]))
+        (keys zone-projectors)))
+
+;; --- prototypes: pure re-keyings of {zone-id frame} (04's data tables come from these)
+
+(defn- step-of
+  "The whole number of zones along: floor(offset + rate * beats)."
+  ^long [offset rate beats]
+  (long (Math/floor (+ (double offset) (* (double rate) (double beats)) 1e-9))))
+
+(defn- ring-index [step n path]
+  (if (= path :bounce)
+    (let [m (mod step (max 1 (- (* 2 n) 2)))] (if (< m n) m (- (* 2 n) 2 m)))
+    (mod step n)))
+
+(defn- merge-into [zone-map zone frame]
+  (update zone-map zone #(if % (frame-service/concatenate-frames [% frame]) frame)))
+
+(defn- proto-chase
+  "prototype: the frame in :from goes to one zone of zones, the one the step names."
+  [zone-map {:keys [zones from offset rate path] :or {from :all offset 0.0 rate 1.0 path :loop}} beats]
+  (let [n (count zones)]
+    (if (or (zero? n) (not (contains? zone-map from)))
+      zone-map
+      (merge-into (dissoc zone-map from) (nth zones (ring-index (step-of offset rate beats) n path)) (get zone-map from)))))
+
+(defn- proto-shift
+  "prototype: the frames of zones move k places along the ring."
+  [zone-map {:keys [zones offset rate] :or {offset 0.0 rate 0.0}} beats]
+  (let [n (count zones) k (if (< n 2) 0 (mod (step-of offset rate beats) n))]
+    (if (zero? k)
+      zone-map
+      (merge (apply dissoc zone-map zones)
+             (into {} (keep-indexed (fn [i z] (when-let [f (get zone-map z)] [(nth zones (mod (+ i k) n)) f]))) zones)))))
+
+(defn- proto-swap
+  "prototype: the frames of zone-a and zone-b trade places when amount >= 0.5."
+  [zone-map {:keys [zone-a zone-b amount] :or {amount 1.0}}]
+  (if (and (>= (double amount) 0.5) (not= zone-a zone-b))
+    (let [a (get zone-map zone-a) b (get zone-map zone-b)]
+      (cond-> (dissoc zone-map zone-a zone-b) b (assoc zone-a b) a (assoc zone-b a)))
+    zone-map))
+
+
+;; v19: what a cue's zone frames are, and who draws them (multi_engine.clj:47-73, 119-150).
+
+(deftest v19-zone-frames-and-who-draws-them
+  (zone-state!)
+  (let [lcr (render-zones zone-cue-lcr 0.0)
+        all (render-zones zone-cue-all 0.0)]
+    (say "v19 the project's zone groups:" (pr-str (sort (keys (:zone-groups (state/get-raw-state))))))
+    (say "v19 cue with items routed to left, right and center: points per zone" (pr-str (points-by-zone lcr))
+         "| points each projector sends" (pr-str (drawn-by-projector lcr)))
+    (say "v19 cue with no zone selector (destination :all): points per zone" (pr-str (points-by-zone all))
+         "| points each projector sends" (pr-str (drawn-by-projector all)))))
+
+
+;; v20: a zone selector in a global effect cell (the effects grid) does nothing:
+;; only items' own effects are read for routing (zone_effects.clj:143-145), and the
+;; effect itself is an identity transducer (effects/zone.clj:35-41).
+
+(deftest v20-a-global-zone-selector-changes-nothing
+  (zone-state!)
+  (let [before (render-zones zone-cue-all 0.0)
+        _ (state/assoc-in-state! [:chains :effect-chains [0 0]]
+                                 {:name "Zone" :active? true
+                                  :items [{:effect-id :zone-selector :enabled? true :params {:target-zone :left}}]})
+        after (render-zones zone-cue-all 0.0)]
+    (say "v20 a cue routed to :all, zones without and with an active effects-grid cell holding a zone selector for :left:"
+         (pr-str (vec (keys before))) (pr-str (vec (keys after)))
+         "| same frames?" (= before after))))
+
+
+;; v21: the three remaps on real zone frames, and what each projector then draws.
+
+(deftest v21-chase-shift-swap-on-real-zone-frames
+  (zone-state!)
+  (let [lcr (render-zones zone-cue-lcr 0.0)
+        all (render-zones zone-cue-all 0.0)
+        zones [:left :center :right]
+        chase {:zones zones :from :all :offset 0.0 :rate 1.0}
+        proj (fn [zf] (pr-str (drawn-by-projector (select-keys zf (keys zf)))))
+        short-drawn (fn [zf] (pr-str (into (sorted-map) (remove (comp nil? val)) (drawn-by-projector zf))))]
+    (say "v21 CHASE of the :all cue over [left center right], rate 1 zone per beat, beats 0 1 2 3 -> zone, projectors that draw:")
+    (doseq [beats [0.0 1.0 2.0 3.0]]
+      (let [zf (proto-chase all chase beats)]
+        (say "v21   beats" beats "zone" (pr-str (vec (keys zf))) (short-drawn zf))))
+    (say "v21 CHASE bounce, 3 zones, rate 1, beats 0..5 -> zone index:"
+         (pr-str (mapv #(ring-index (step-of 0.0 1.0 %) 3 :bounce) (range 6)))
+         "| loop:" (pr-str (mapv #(ring-index (step-of 0.0 1.0 %) 3 :loop) (range 6))))
+    (say "v21 HOP: the :all cue with offset 0, 1, 2 (rate 0) -> zones"
+         (pr-str (mapv #(vec (keys (proto-chase all (assoc chase :rate 0.0 :offset %) 0.0))) [0.0 1.0 2.0])))
+    (say "v21 SHIFT of the left/center/right cue by 1 over [left center right]: points per zone before"
+         (pr-str (points-by-zone lcr)) "after" (pr-str (points-by-zone (proto-shift lcr {:zones zones :offset 1.0} 0.0)))
+         "| by 2:" (pr-str (points-by-zone (proto-shift lcr {:zones zones :offset 2.0} 0.0)))
+         "| by 3 (a full turn, same as 0):" (= lcr (proto-shift lcr {:zones zones :offset 3.0} 0.0))
+         "| the :all cue shifted: unchanged?" (= all (proto-shift all {:zones zones :offset 1.0} 0.0)))
+    (say "v21 SWAP left and right: before" (pr-str (points-by-zone lcr))
+         "after" (pr-str (points-by-zone (proto-swap lcr {:zone-a :left :zone-b :right :amount 1.0})))
+         "| amount 0.49 changes nothing?" (= lcr (proto-swap lcr {:zone-a :left :zone-b :right :amount 0.49}))
+         "| the frames really trade places?" (let [s (proto-swap lcr {:zone-a :left :zone-b :right :amount 1.0})]
+                                                (and (= (:left lcr) (:right s)) (= (:right lcr) (:left s)) (= (:center lcr) (:center s)))))
+    (let [gctx (fn [beats] (cue-timing/get-global-timing-context {:accumulated-beats beats :accumulated-ms (* 500.0 beats)
+                                                                 :effective-beats beats :phase-offset 0.0 :phase-offset-target 0.0} 120.0))
+          params {:zones zones :from :all :rate 0.0
+                  :offset {:type :sawtooth :min 0.0 :max 3.0 :period 4.0 :time-unit :beats :loop-mode :loop}}
+          at (fn [beats] (effects/resolve-params-global params nil nil (gctx beats)))]
+      (say "v21 a Sawtooth 0..3 over 4 beats on :offset, resolved by effects/resolve-params-global at beats 0 1 2 3 3.99:"
+           (pr-str (mapv #(format "%.2f" (double (:offset (at %)))) [0.0 1.0 2.0 3.0 3.99]))
+           "| :zones comes through as" (pr-str (:zones (at 0.0)))))))
+
+
+;; v22: why the remaps move frames and never copy them. A projector in two zones
+;; that both hold the same frame draws it twice.
+
+(deftest v22-a-copied-frame-is-drawn-twice
+  (zone-state!)
+  (let [all (render-zones zone-cue-all 0.0)
+        frame (:all all)
+        moved {:left frame}
+        copied {:all frame :left frame}]
+    (say "v22 one 32-point frame. p-left is in [:all :left]. Moved to :left: p-left sends"
+         (count (#'me/projector-frame :p-left (zone-snapshot moved))) "points; the same frame under :all and :left: p-left sends"
+         (count (#'me/projector-frame :p-left (zone-snapshot copied))) "points (twice the frame plus the blanking jump between the copies)")))
+
+
+;; v23: what a remap costs on 1,000-point zone frames (a re-key, and a re-key that
+;; has to join two frames).
+
+(defn- measure-call
+  "[median-us p99-us kb-garbage-per-call] of (f), after a warm-up."
+  [f]
+  (let [^ThreadMXBean bean (ManagementFactory/getThreadMXBean)
+        tid (.getId (Thread/currentThread))
+        n 5000]
+    (dotimes [_ 20000] (f))
+    (let [a0 (.getThreadAllocatedBytes bean tid)
+          ts (vec (sort (for [_ (range n)] (let [t0 (System/nanoTime)] (f) (- (System/nanoTime) t0)))))
+          a1 (.getThreadAllocatedBytes bean tid)]
+      [(/ (percentile ts 0.5) 1000.0) (/ (percentile ts 0.99) 1000.0) (/ (- a1 a0) n 1024.0)])))
+
+(deftest v23-remap-cost
+  (let [frame (circle-frame 1000)
+        zm {:left frame :center frame :right frame :all frame}
+        zones [:left :center :right]
+        fmt (fn [[m p g]] (format "median %.2f us, p99 %.2f us, %.1f KB garbage" m p g))]
+    (say "v23 shift by 1 over 3 zones (3 frames of 1,000 points, a re-key):" (fmt (measure-call #(proto-shift zm {:zones zones :offset 1.0} 0.0))))
+    (say "v23 swap two zones:" (fmt (measure-call #(proto-swap zm {:zone-a :left :zone-b :right :amount 1.0}))))
+    (say "v23 chase, the :all frame to an empty zone (a re-key):" (fmt (measure-call #(proto-chase (dissoc zm :left) {:zones zones :rate 0.0 :offset 0.0} 0.0))))
+    (say "v23 chase, the :all frame to a zone that already has 1,000 points (a join of two frames):"
+         (fmt (measure-call #(proto-chase zm {:zones zones :rate 0.0 :offset 0.0} 0.0))))))
+
+
+;; v24: in what order the active cells of the effects grid become one chain
+;; (frame_service.clj:83-100). Zone effects don't commute (a shift then a swap is
+;; not a swap then a shift), so their order has to be known.
+
+(deftest v24-order-of-global-effect-cells
+  (zone-state!)
+  (let [cell-order (fn [cells]
+                     (state/assoc-in-state! [:chains :effect-chains]
+                                            (reduce (fn [m [col row]]
+                                                      (assoc m [col row] {:name (str col row) :active? true
+                                                                          :items [{:effect-id :intensity :enabled? true
+                                                                                   :params {:amount (double (+ (* 10 row) col))}}]}))
+                                                    {} cells))
+                     (mapv #(long (get-in % [:params :amount]))
+                           (:effects (frame-service/get-active-global-effects (state/get-raw-state)))))
+        scrambled (fn [cells] (vec (sort-by #(hash [% :seed]) cells)))
+        six (scrambled (for [row (range 2) col (range 3)] [col row]))
+        twelve (scrambled (for [row (range 3) col (range 4)] [col row]))
+        label (fn [cells] (mapv (fn [[c r]] (+ (* 10 r) c)) cells))]
+    (say "v24 six cells (row*10+col) put in the grid in this order" (pr-str (label six)) "-> the chain's order" (pr-str (cell-order six)))
+    (say "v24 twelve cells put in the grid in this order" (pr-str (label twelve)) "-> the chain's order" (pr-str (cell-order twelve))
+         "| reading order would be" (pr-str (vec (sort (label twelve)))))))

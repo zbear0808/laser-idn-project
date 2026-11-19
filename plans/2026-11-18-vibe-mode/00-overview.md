@@ -1,7 +1,7 @@
 # Vibe mode: five buttons, two faders, cues grouped by feel
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`; `src/` is unchanged since `378db47`)
-**Status:** Proposed. V1–V9 answered 2026-11-18 (§7: V8 B, V9 A with a palette option, the rest A)   **Last verified against:** `b1da0f2`. The unit tests whose names contain `triggers`, `input-mapper` or `show-time` pass (42 tests, 149 assertions, 0 failures). Probes v1–v16 (§3) ran on macOS arm64, JDK 25.0.5 (v13–v16, for Phase 4, on 2026-11-18 against the same commit).
+**Status:** Proposed. V1–V9 answered 2026-11-18 (§7: V8 B, V9 A with a palette option, the rest A)   **Last verified against:** `b1da0f2`. The unit tests whose names contain `triggers`, `input-mapper` or `show-time` pass (42 tests, 149 assertions, 0 failures). Probes v1–v24 (§3) ran on macOS arm64, JDK 25.0.5 (v13–v24, for Phases 4 and 8, on 2026-11-18; for v19–v24 the working tree also held Phase 1's uncommitted edits, in files those probes don't touch).
 **Supersedes / Superseded by:** supersedes the unused trigger-group scaffolding from `23fc7cc` ("build out vibe tapping", see V7); answers the open "adopt or delete the `triggers/` engine" decision (review 05 L1). Superseded by: none
 **Related findings:** review 05 F13, F14, F15, L1, M4 (step 1 only), M5, M6; review 02 #10, T3; keyboard plan K-13 (its Phase 5); output runtime O4 (blackout); show clock §7 (input timestamps, Stop and blackout, the agent's blocking I/O); modulator time base §9 ("once" on the effects grid counts from the clock's start); the UX plan (`plans/2026-11-18-ux-improvements/`: the Grid tab is the performer's tab)
 
@@ -23,9 +23,11 @@ You asked for the `beyond-vibe` idea inside this app: busk with a handful of key
 
 Two faders: **Intensity** (a master dimmer that works out of the box) and **Morph** (whatever the current vibe wires to it).
 
-**Presses move effects, not only cues** (Phase 4). Every press is also a **pulse** that effects can follow: a HIT can punch the size, step the colour or the spin; an ACCENT can flip or scatter the picture; a held FLASH can swell or strobe; the tapping rate itself can grow the look. A role may even have no cues at all and only move effects. These are ordinary modulators in the existing editors, three new ones (Envelope, Step, Energy) and a "Restart on" choice for the old ones, and a vibe gets them in one click as **tap reactions**.
+**Presses move effects, not only cues** (Phase 4). Every press is also a **pulse** that effects can follow: a HIT can punch the size, pump the brightness, step the colour or the spin; an ACCENT can flip or scatter the picture; a held FLASH can swell or strobe; a VIBE switch can fade the new look in; the tapping rate itself can grow the look. Any effect parameter that takes a modulator can follow a press (brightness, size, spin, colour, position, lens distortion, a comet's flare), and an effect cell holds a chain, so one press can move several effects at once. A role may even have no cues at all and only move effects. These are ordinary modulators in the existing editors, three new ones (Envelope, Step, Energy) and a "Restart on" choice for the old ones, and a vibe gets them in one click as **tap reactions**.
 
-**What the app already has:** the cue grid, the trigger map and learn, momentary cues, effect cells, the lock-free input store and modulators, and the show clock that owns time. **What is missing:** the grouping model, a beat-length decay, a picker that never repeats, a blackout that stays on, a screen you can read at a glance, a way for a press to reach an effect, and a way to learn a fader.
+**Looks that move between projectors** (Phase 8). Three effects on the effects grid move a finished picture between zones: **chase** (the picture runs across the zones, one at a time, on the beat), **swap** (two zones trade pictures) and **shift** (the pictures move along the zones). A FX set, a held FLASH or a Grid-tab cell switches them on, and a press can drive them: a HIT hops the picture to the next projector, an ACCENT swaps left and right. They only re-route what is drawn, and they obey the audience rule.
+
+**What the app already has:** the cue grid, the trigger map and learn, momentary cues, effect cells, the lock-free input store and modulators, and the show clock that owns time. **What is missing:** the grouping model, a beat-length decay, a picker that never repeats, a blackout that stays on, a screen you can read at a glance, a way for a press to reach an effect, a way to move a look between zones, and a way to learn a fader.
 
 | Phase | Doc | Goal | Size | Needs |
 |---|---|---|---|---|
@@ -36,8 +38,9 @@ Two faders: **Intensity** (a master dimmer that works out of the box) and **Morp
 | 5 | `05-phase5-faders-and-macros.md` | The fader path: macro modulator, CC learn, master intensity, Morph | ~1.75 d | 1, 2 |
 | 6 | `06-phase6-rotation-and-tempo.md` | Auto-advance on phrase gaps, and one tap-tempo algorithm | ~2.5 d | 1, 2 |
 | 7 | `07-phase7-safety-and-hardening.md` | Audience marks on Perform, show lock, stuck-key guards, hardware check, docs | ~2 d | 1–6 |
+| 8 | `08-phase8-zone-effects.md` | Zone chase, swap and shift: three effects, a render stage, the pickers. With vibes: four reactions and the audience rule | ~3.5 d (2.5 d for the effects, 1 d with vibes) | none for the effects; 1 and 4 for the reactions |
 
-About 19 days. Phase 1 alone is only drivable from the REPL, so **land 1 and 2 together** for first use. Each later phase ships on its own; Phase 4 is the one that makes tapping feel alive, so it comes before the faders.
+About 23 days. Phase 8 stands apart: its effects need nothing from the other phases and can land any time, and its reactions follow Phases 1 and 4. Phase 1 alone is only drivable from the REPL, so **land 1 and 2 together** for first use. Each later phase ships on its own; Phase 4 is the one that makes tapping feel alive, so it comes before the faders.
 
 ---
 
@@ -52,6 +55,7 @@ About 19 days. Phase 1 alone is only drivable from the REPL, so **land 1 and 2 t
 | R5 | Port the *model* of `beyond-vibe`, not its protocol (BEYOND OSC) | §2 |
 | R6 | Fit this app: pure handlers, registered effects, the show clock owns time, high-frequency data stays out of app state (`.agents/rules/planning-guide.md` rules 4–5) | §5 |
 | R7 | Tapping modulates effects, not only which cue shows: a press can punch, step, scatter or swell an effect, and the tapping rate can drive one | §4 controls, Phase 4 |
+| R8 | A look can move between projectors: zone chase, swap and shift, on the beat or on a key, and never to the crowd by accident | §4, Phase 8, V10 |
 
 ## 2. What `beyond-vibe` does, and where each piece lands
 
@@ -115,11 +119,19 @@ Run with the command in §10. "Read" means from the code only; "ran" means a pro
 | v6 (ran) | Can learn capture a fader? | No. A CC leaves learn waiting; a note binds | CC learn (Phase 5) |
 | v9 (ran) | Where do faders and notes go? | CC: input store only, 0 events to the app. Note: one `:trigger/input`. A fader nobody moved reads 0.0 | faders never wait on the agent; the macro needs a default |
 | v8 (ran) | What an unmapped note leaves behind | 6 notes: 6 held inputs, 6 active triggers, 6 taps, all unread | vibe actions skip this bookkeeping |
-| v11 (ran) | What a master effect costs | 1,000-point frame: static intensity 38–40 µs median, modulated 41–57 µs (p99 75–415 µs), about 240 KB of garbage per zone frame | with 4 voices ≈ 0.2 ms of the 16.7 ms tick. *Unverified under load*; re-measure in Phases 4 and 5 |
+| v11 (ran) | What a master effect costs | 1,000-point frame: static intensity 38–62 µs median, modulated 41–62 µs (p99 74–415 µs), 240–310 KB of garbage per zone frame. The high ends are from a run on a machine that was also running another JVM's tests (load about 3) | with 4 voices ≈ 0.15–0.25 ms of the 16.7 ms tick. *Unverified under show load*; re-measure in Phases 4 and 5 |
 | v13 (ran) | Can a press reach a modulator? | No. A `:pulses` key put on a cue's timing context is dropped by `mod/make-context` and `make-base-context` (fixed key lists, `animation/modulation.clj:42-101`); `playback/clip-timing-ctx` keeps it; `:input-values` gets through only because it is on the list | Phase 4 adds `:pulses` to both lists |
 | v14 (ran) | What the modulator editor's Retrigger does | Restarts **every** clock: two cues and the global clock from 3.97 beats to 0.03 in one tick | there is no per-effect restart; Phase 4's "Restart on" is one |
 | v15 (ran) | Can a press re-fire an envelope? | A Decay (1.5 → 1.0 over a beat) on an effects-grid cell: 1.000 after 8 beats, still 1.000 after a press starts another cue. As a cue's own effect: 1.500 only on the cue just started | today a punch needs its own cue restarted (Phase 4) |
 | v16 (ran) | Does a random vary per press? | A once-mode random gives 0.883 after each of five restarts (a hash of the step number) | Restart on mixes in the press count (Phase 4) |
+| v17 (ran) | What does a tap reaction cost, and is it neutral at rest? A `:midi` modulator stands in for Envelope, Step and Energy: all resolve once per parameter (`animation/effects.clj:467-470`) | A chain of one effect on a 1,000-point frame: median 53–70 µs (p99 0.13–0.24 ms), 240–310 KB of garbage. Four effects (size, spin, colour, brightness): **216–228 µs**, about 1.5 MB, and **the same when they are all at rest**. Each effect alone at its rest value leaves the frame exactly as it was, except Hue Shift (5.6e-17 off: it goes through HSV). Three runs, all with another JVM running tests on the machine (load 2.5–4), so read the times as upper bounds | the cost is per effect, per zone frame of every playing cue (`services/frame_service.clj:399-403`), and an effect at rest is not skipped (R-5); identity tests compare to a tolerance (04 invariant 11) |
+| v18 (ran) | What do the decay curves leave at a quarter, half and three quarters of a release? | linear 0.75 / 0.50 / 0.25; exp 0.28 / 0.08 / 0.02; log 0.98 / 0.92 / 0.72 (`animation/modulator_evaluators.clj:128-141`, k = 5) | an `:exp` release of ½ beat is over after about a quarter of a beat; 04 §7's Envelope numbers (1.091 at 0.1 beat, 1.019 at 0.25) match |
+| v19 (ran) | What are a cue's zone frames, and who draws them? | One item routed to each of left, right and center: `{:left 21 :center 10 :right 49}` points, and each side projector sends only its own zone. A cue routed to `:all`: `{:all 33}`, which all three side projectors (each in `[:all …]`) send; the crowd and graphics projectors send nothing. The project's zone groups: `:all :center :crowd :graphics :left :right` | a zone frame is the unit a zone effect moves. A projector that loses its zone goes dark (`backend/streaming_engine.clj:373`) |
+| v20 (ran) | Does a zone selector in an effects-grid cell do anything? | No: the zone frames are identical with and without an active cell holding one | the effects-grid editor offers an effect that does nothing; zone effects need a reader of their own (Phase 8) |
+| v21 (ran) | What do chase, shift and swap do to real zone frames? (prototypes in the probe file) | A chase of the `:all` cue over left, center, right on beats 0 to 3: left, center, right, left, with one projector sending each time. Bounce: 0 1 2 1 0 1. A shift by 1 turns 21/10/49 points into 49/21/10, by 3 the same as by 0. A swap trades left and right. A Sawtooth 0→3 over 4 beats **falls** 3.00, 2.25, 1.50, 0.75 | the tables of 08 §7. Waves start at their peak, so the effects carry their own `:rate` |
+| v22 (ran) | What if a picture were copied into two zones? | A projector in `[:all :left]`: the 33-point frame under `:left` alone sends 33 points, under `:all` and `:left` **68** | a remap moves and never copies (08 invariant 1) |
+| v23 (ran) | What does a remap cost? | 1,000-point frames, two runs (load 1.8 and 2.5): shift 0.7–0.8 µs, swap 0.2 µs, a chase that only re-keys 0.3 µs (about 1 KB of garbage each); a chase that joins two frames 11–12 µs (p99 12–50 µs, about 8 KB) | nothing next to a point chain (v17); 08 invariant 12 |
+| v24 (ran) | In what order do the effects grid's cells become one chain? | Six cells: the order they were put in. Twelve cells put in as 13 10 12 2 1 11 20 21 23 22 3 0 (row·10 + col) come out 22 0 1 11 3 20 2 13 12 21 23 10: hash order | zone effects don't commute, so they run in reading order (08 §7). The order of point effects is a separate finding (08 §9) |
 | (read) | Is `:trigger/tick` ever dispatched? | No: only its handler and one test mention it (`grep`) | the rotation timer is new work (Phase 6) |
 | (read) | Does anything read `:quantization` or `:cue-queue`? | No (`state/domains.clj:51, 71`; show clock §7) | no quantizer to build on; none needed (§9) |
 
@@ -140,6 +152,7 @@ Latency from a press to light, from the show clock audit (`plans/2026-11-17-show
 | Is the controller wired right | the pads show their binding and light while held |
 | Is a cue going to hit the crowd | a rule (V6), not memory |
 | How bright / how big | one master fader that works from the first second |
+| Which projector shows it | a zone chase, swap or shift: on the beat, or on a key (Phase 8) |
 
 ### Design rules
 
@@ -161,7 +174,7 @@ Latency from a press to light, from the show clock audit (`plans/2026-11-17-show
 | G3 | **Energy ladder**: vibes tagged 1–4 and ordered low to high | one number per vibe | "more or less energy" | **Adopt as a tag** (`:energy`): it orders the vibe strip and the auto-advance. It does not become a slider (a slider that selects a vibe is two meanings on one control) |
 | G4 | **Tag-driven vibes**: a vibe is a saved query over cue tags | tag every cue | the same | Later. Needs cue tags and an editor; G1 covers the need now |
 | G5 | **Sets / acts** above vibes | a second layer | "which set?" | **No new layer**: one project per set already exists (save/open) |
-| G6 | **Zone-scoped vibes**: a vibe overrides where cues go ("left only") | a zone per vibe | spatial scope as a third axis | Later; the render path would need a per-run zone override |
+| G6 | **Zone-scoped vibes**: a vibe overrides where cues go ("left only") | a zone per vibe | spatial scope as a third axis | Later; the render path would need a per-run zone override. Moving a look between zones, on the beat or on a key, is Phase 8's zone effects instead |
 
 **G1 with rules of thumb for authors** (shown in the Vibes tab, Phase 3):
 
@@ -171,13 +184,13 @@ Latency from a press to light, from the show clock audit (`plans/2026-11-17-show
 4. FLASH: one dramatic cue **or** an FX set, not both.
 5. Keep audience-capable cues out of pools.
 6. 4–6 vibes per set, ordered low energy to high. Name them by feel, not by shape.
-7. One or two tap reactions per role: a Punch or a Step on HIT, a Flip or a Scatter on ACCENT, a Swell or a Strobe on FLASH. More blur together. To combine two on one parameter, stack two effects (two Scales multiply).
+7. One or two tap reactions per role: a Punch or a Step on HIT, a Flip or a Scatter on ACCENT, a Swell or a Strobe on FLASH, a Fade in on VIBE. More blur together. To combine two on one parameter, stack two effects (two Scales multiply).
 
 Worked example, a house-music set (data in `01-phase1-engine-core.md` §7; the reactions are `04-phase4-tap-reactions.md` §7's templates):
 
 | Vibe | Energy | HIT pool (decay) | ACCENT | FLASH | BED / FX set | Tap reactions |
 |---|---|---|---|---|---|---|
-| Warm-up | 1 | slow waves, tunnels (sustain) | – | soft fan | slow haze cue | Energy: size |
+| Warm-up | 1 | slow waves, tunnels (sustain) | – | soft fan | slow haze cue | Fade in (VIBE), Energy: size |
 | Groove | 2 | beams, fans, rings (1 beat) | tall beam (2 beats) | wall of beams | – | Punch: size (HIT), Flip (ACCENT) |
 | Build | 3 | rotating shapes (1 beat) | zoom burst | strobe FX set | rising-speed FX set | Step: spin (HIT), Swell (FLASH) |
 | Peak | 4 | big shapes (½ beat) | full fan (2 beats) | everything | – | Pump (HIT), Scatter (ACCENT), Strobe (FLASH) |
@@ -189,7 +202,7 @@ Worked example, a house-music set (data in `01-phase1-engine-core.md` §7; the r
 | **HIT** | next cue from the HIT pool, never the previous one; stops the previous HIT cue | quick tap (< 150 ms): the decay runs. Held longer: stop now (`:mode :decay`). `:gate`: always stop. `:sustain`: stays until replaced | `:hit` | `:hit` (and `:cue` when it starts a cue) | yes (V3) |
 | **ACCENT** | same, from the ACCENT pool; its own voice, so it layers over a HIT | same | `:accent` | `:accent` | no |
 | **FLASH** | starts the flash cue and/or switches on the flash effect cells; with `:solo?` the other voices step aside | stops the flash, restores the voices that were ducked | `:flash` | `:flash`, held until the release | no |
-| **VIBE** | records the press | under 600 ms: next vibe (wraps). 600 ms or more: lock or unlock auto-advance | `:order` | `:vibe`, on every switch (also `:vibe/select` and auto-advance); not on a lock | no |
+| **VIBE** | records the press | under 600 ms: next vibe (wraps). 600 ms or more: lock or unlock auto-advance | `:order` | `:vibe`, on every switch (also `:vibe/select` and auto-advance); not on a lock (Fade in listens to it) | no |
 | **BLACKOUT** | toggles. On: every voice stops, holds clear, other keys are ignored. Off: the bed returns | – | – | none, and no press pulses while it is on | no |
 
 | Slider | Meaning | Where it acts |
@@ -241,10 +254,11 @@ Rules: handlers stay pure and return state; no new effect key (with V9 A); the s
 | 5 | 1, 2 | `events/handlers/input_mapper.clj`, `events/handlers/input.clj`, `animation/modulators.clj`, `animation/modulator_evaluators.clj` | medium: CC learn, and the mapper reads app state per CC |
 | 6 | 1, 2 | `services/show_clock.clj`, `animation/show_time.clj`, `triggers/tap_tempo.clj`, `events/handlers/timing.clj` | medium: the tap algorithm is shared with the TAP button |
 | 7 | 1–6 | `events/core.clj` (middleware), `input_mapper.clj`, `README.md` | low |
+| 8 | none for the effects; 1 and 4 for the reactions | `animation/effects.clj`, `animation/effects/zone.clj`, `services/frame_service.clj`, `services/show_clock.clj`, `views/components/effect_bank.clj`, `views/components/parameter_controls.clj`, `views/components/zone_chips.clj`, `views/dialogs/effect_chain_editor.clj`, `views/dialogs/cue_chain_editor.clj`, `views/components/visual_editors/timeline/browser.clj`; with vibes `vibes/library.clj`, `vibes/engine.clj`, `vibes/reactions.clj`, `subs.clj` | medium: one new stage in the render path and two new keys in the effect registry; pinned by `frame_service_test.clj`, `effects_test.clj`, `multi_engine_test.clj`, `show_clock_test.clj`, and "a project without zone effects renders exactly as before" (08 invariant 2) |
 
 ## 7. Decisions
 
-Answer with letters (for example `V1: A, V2: A`) or in your own words. Anything unanswered is asked again before its phase starts. **All answered 2026-11-18**: V8 B ("I think we should have a separate tab for the vibe stuff"), V9 A with a palette option on the Step modulator ("hue stepping could just be a step modulator. But also could have an option for a palette"), and V1–V7 A ("with the rest of the plan I agree with you").
+Answer with letters (for example `V1: A, V2: A`) or in your own words. Anything unanswered is asked again before its phase starts. **V1–V9 answered 2026-11-18**: V8 B ("I think we should have a separate tab for the vibe stuff"), V9 A with a palette option on the Step modulator ("hue stepping could just be a step modulator. But also could have an option for a palette"), and V1–V7 A ("with the rest of the plan I agree with you"). **V10 is open** (Phase 8's reactions).
 
 | ID | Question | Doc | Needed before | Answer |
 |---|---|---|---|---|
@@ -257,6 +271,7 @@ Answer with letters (for example `V1: A, V2: A`) or in your own words. Anything 
 | V7 | The unused trigger-group scaffolding | 01 | Phase 1 | **A**: delete it in Phase 1 |
 | V8 | Where the five pads live, now that the Grid tab is the performer's tab | 02 | Phase 2 | **B**: their own tabs (Perform to play, Vibes to set up); nothing on the Grid tab |
 | V9 | How hue stepping works | 04, 05 | Phase 4 | **A**, with a palette: a Step modulator, whose values can be even steps or a list you type (a palette); no `:macro/set` effect |
+| V10 | Can a vibe switch on a zone effect that sends a picture to the crowd | 08 | Phase 8, reactions | _pending_ |
 
 > **DECISION V1: The five buttons** *(answered 2026-11-18: A)*
 >
@@ -355,6 +370,18 @@ Answer with letters (for example `V1: A, V2: A`) or in your own words. Anything 
 >
 > **Your answer:** A with a palette (2026-11-18): "hue stepping could just be a step modulator. But also could have an option for a palette." The Step modulator takes either even steps or a typed list of values (`04-phase4-tap-reactions.md` §7); there is no `:macro/set` effect
 
+> **DECISION V10: Zone effects and the audience** *(pending)*
+>
+> V6 keeps a random pick from choosing a cue that can scan the crowd. A zone effect can send a picture there too: a chase that lists the crowd zone sweeps every cue through it, and a vibe switches its FX set on by itself (`08-phase8-zone-effects.md` §7, "The audience rule"). The crowd zone is `:crowd`, or any zone of a projector tagged `:crowd-scanning`; a zone only counts where the picture *goes* (`:zones`, `:zone-a`, `:zone-b`), not where it comes from (`:from`).
+>
+> | | What | For | Against |
+> |---|---|---|---|
+> | **A (recommended)** | A vibe doesn't switch such a cell on unless it has `:allow-audience? true`. The Vibes tab flags it (lint error), Perform says why. Clicking the cell on the effects grid is never blocked | the same rule as V6, so one thing to remember: a vibe never reaches the crowd by itself unless you said so | one checkbox when you do mean it |
+> | B | Warn only (the lint row, no block) | never blocks a vibe | at 1 am a missed warning sweeps the audience |
+> | C | The zone list can't hold an audience zone at all (the picker hides them) | nothing to remember | no audience chase, even by hand |
+>
+> **Your answer:** _pending_
+
 ## 8. Ownership with other plans
 
 | Item | This plan does | Stays with |
@@ -370,6 +397,10 @@ Answer with letters (for example `V1: A, V2: A`) or in your own words. Anything 
 | Live actions and undo (review 02 T3) | a press never writes an effect parameter (§5 rules) | – |
 | Velocity (05 F18) | nothing yet; an Envelope's depth from velocity is the natural next step | review 05 |
 | The Grid tab as the performer's tab (`plans/2026-11-18-ux-improvements/`) | nothing on the Grid tab (V8 B): the vibe stuff has its own tabs | the Grid tab's layout and scaling (that plan's Phase 2) |
+| Zone routing (`routing/zone_effects.clj`, the zone selector) | Phase 8 adds a remap stage **after** the item routing and leaves the selector's static routing alone; it hides the selector from the effects-grid editor, where it does nothing (probe v20) | per-item routing, tracks, the Zone Groups tab |
+| Zones and projectors setup (`plans/2026-11-18-zones-ux/`, a draft: its §4.5 and question 20 ask for zone chase and for pulses to drive it) | Phase 8 builds three zone effects on today's model: a re-key of a cue's zone frames after routing, effects grid only. A HIT can step a chase, which answers its question 20 for today's model. It touches no zone setup, safety zones or routing | that plan: the Rig tab, safety zones, per-output weights and distribution, roles and layouts. If it adopts weights, the effects keep their parameters and are re-expressed as weights (08 §9) |
+| The cue and effect chain editors (UX plan Phase 2 reshapes their layout and dialogs) | Phase 8 changes one prop in each (`:scope`, `:include-zone?`), nothing about layout | that plan's Phase 2; whichever lands second rebases the line numbers |
+| The order of point effects across effects-grid cells (probe v24: insertion order up to 8 cells, hash order after) | nothing: only zone effects get a defined order (reading order) | a separate change, because it alters how existing projects with many cells look (08 §9) |
 
 ## 9. Out of scope, and alternatives considered
 
@@ -384,6 +415,7 @@ Answer with letters (for example `V1: A, V2: A`) or in your own words. Anything 
 - **User-visible quantization settings** (`:quantization`, `:cue-queue`): dead keys, left alone (show clock §7).
 - **A press that writes an effect's parameters** (a `:chain/update-param` per tap): rejected, every tap would be an undo step and a document change, and it can't make an envelope (`04-phase4-tap-reactions.md` §9).
 - **Uneven step lists, a "next keyframe per press" driver, a fader that scales a reaction's depth**: later (04 §9).
+- **Zone effects on items, tracks and clips; a picture copied to several zones; a left-to-right order on zone groups; a reaction for one voice only**: later (08 §9).
 
 ## 10. Risks, and re-running the probes
 
@@ -393,11 +425,13 @@ Answer with letters (for example `V1: A, V2: A`) or in your own words. Anything 
 | R-2 | A lost release leaves a key "held" (unplugged pad) | BLACKOUT clears holds; CC 120/123 and a device disconnect release all; a hold watchdog (Phase 7) |
 | R-3 | A vibe points at a cell that moved or was cleared | `vibes.refs` rewrites every reference on move and clear; lint flags the rest (Phase 1, 3) |
 | R-4 | Random picks scan the audience | V6 |
-| R-5 | The master effect costs time on every cue and zone (v11) | measure in Phases 4 and 5; applying global effects once per tick is a separate render-path change |
+| R-5 | The master effect and every tap reaction cost time on every cue and zone (v11, v17): four effects are about 0.22 ms and 1.5 MB of garbage per zone frame, at rest or not | Four cues in one zone with a four-effect FX set is about 0.9 ms of the 16.7 ms tick and 6 MB of garbage (0.35 GB/s), twice that with two zones. *An estimate from v17, unverified under show load.* Keep a vibe's FX set to a few effects; watch frame time and GC pauses in hardware check 12 (Phase 7); measure with the real types in Phases 4 and 5. Applying global effects once per tick is a separate render-path change (the global effects run at each cue's own tempo, `services/frame_service.clj:398`) |
 | R-6 | An unmoved fader reads 0.0 (v9) and darkens the show | the macro modulator has a `:default`, 1.0 for Intensity |
 | R-7 | The shared tap-tempo change alters the TAP button | Phase 6 keeps its tests and adds the `beyond-vibe` ones |
 | R-8 | A reaction that moves the picture (Scatter, Swell, Punch) pushes beams toward the audience | calibration (the corner pin) runs after every reaction and never sees a press (04 invariant 4); the templates use small ranges; V6 still decides which cues play; hardware check 12 (Phase 7) |
 | R-9 | "Restart on" changes how existing modulators behave | its default is `:own`, so every saved modulator evaluates exactly as before (04 invariant 3, `restart-on-own-is-unchanged-test`) |
+| R-10 | A zone effect sends a look to the crowd, and a vibe switches it on by itself | V10: a vibe doesn't switch on a zone cell that lists an audience zone unless it allows the audience; the lint says so; Perform says why a cell stayed off (08 §7) |
+| R-11 | A chase, swap or shift leaves a projector dark or sends a picture to a zone nobody listens to (a zone group deleted, a projector in none of the listed zones) | zone ids that no longer exist are skipped at render; the lint names the projector and the zone (08 §7); hardware check 13 (Phase 7) |
 
 ```
 export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home
@@ -408,4 +442,4 @@ clj -Sdeps "{:aliases {:probe {:extra-paths [\"$P\"]}}}" \
     -n probes.vibe-probes-test 2>&1 | grep PROBE
 ```
 
-Use `:win`, `:linux` or `:mac` in place of `:mac-arm` on other machines. It takes about 40 seconds. To run only some, add their numbers as name patterns (for example `v13 v14 v15 v16` after `-n probes.vibe-probes-test`). When a phase fixes a behaviour, turn its probe into a real test that asserts the new behaviour; each phase doc names those tests.
+Use `:win`, `:linux` or `:mac` in place of `:mac-arm` on other machines. It takes about 60 seconds. To run only some, add their numbers as name patterns (for example `v19 v20 v21 v22 v23 v24` after `-n probes.vibe-probes-test`). When a phase fixes a behaviour, turn its probe into a real test that asserts the new behaviour; each phase doc names those tests. **A probe stops reproducing its number once the phase that fixes it lands**: with Phase 1's edits in the working tree, v1 ends in an error (the shuffle bag has a new signature) and v3's `[:triggers]` lines read nil (the scaffolding is gone). That is the point of them. To get the numbers in §3 again, run the probes in a checkout of `b1da0f2` (`git worktree add ../laser-idn-b1da0f2 b1da0f2`).

@@ -1,7 +1,7 @@
 # Phase 4: tap reactions (presses move effects, not only cues)
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`)
-**Status:** Proposed. Needs Phase 1; the pad parts need Phase 2 and the Vibes tab parts Phase 3; V9 answered A with a palette (2026-11-18)   **Last verified against:** `b1da0f2` (probes v11, v13–v16 in `00-overview.md` §3)
+**Status:** Proposed. Needs Phase 1; the pad parts need Phase 2 and the Vibes tab parts Phase 3; V9 answered A with a palette (2026-11-18)   **Last verified against:** `b1da0f2` (probes v11, v13–v18 in `00-overview.md` §3)
 **Supersedes / Superseded by:** with V9 A it replaces Phase 5's palette hue step (`:palette`, `[:vibe-runtime :palette-idx]`, the `:macro/set` effect)   **Related findings:** review 02 T3 (live actions must not flood undo); review 05 F18 (velocity) stays open; `plans/2026-11-17-modulator-time-base.md` §9 ("once" on the effects grid counts from the clock's start)
 
 A press today can only start or stop a cue. This phase lets a press **move effects**: punch the size on every HIT, step the colour or the spin, scatter the position on ACCENT, swell while FLASH is held, and let the tapping rate itself drive an effect. It works for the vibe roles and for anyone playing the Grid tab with a key bound to HIT.
@@ -23,7 +23,7 @@ The design has four parts:
 | The only manual restart | `views/components/modulator_param_control.clj:224-239` (the "Retrigger" button), `events/handlers/modulator.clj:211-221` | dispatches `:transport/retrigger`: **every** clock restarts (probe v14: two cues and the global clock from 3.97 beats to 0.03) |
 | Random | `animation/modulator_evaluators.clj:165-198` | a hash of the step number only, so every restart of a once-mode random lands on the same value (probe v16: 0.883 five times) |
 | What reaches a modulator | `services/show_clock.clj:48-60` (`render-cue` adds `:input-values`); `animation/modulation.clj:42-71, 73-101` | `make-context` and `make-base-context` build their map from a fixed list of keys: a new key on the timing context never reaches an evaluator (probe v13: `:pulses` dropped by both, kept by `clip-timing-ctx`) |
-| One modulator per parameter, resolved once per chain | `animation/effects.clj:417-470` (`make-param-resolver`, global path `:467-470`) | a non-per-point modulator costs one evaluation per effect chain per tick (probe v11: modulated intensity 41–57 µs against 38–40 µs static, 1,000 points) |
+| One modulator per parameter, resolved once per chain | `animation/effects.clj:417-470` (`make-param-resolver`, global path `:467-470`) | a non-per-point modulator costs one evaluation per modulated parameter each time a chain is applied, which is once per zone frame of every playing cue (`services/frame_service.clj:399-403`), never per point (probe v11: modulated intensity 41–62 µs against 38–62 µs static, 1,000 points; v17: four effects 216–228 µs) |
 | The modulator editor | `views/components/modulator_param_control.clj:46-63` (type list from `modulator-registry/all-ui-modulators`, `animation/modulator_registry.clj:126-133`), `:115-141` (a `:choice` param shows `(name item)`) | a registered type and its params appear with no UI work |
 | Categories | `animation/modulator_registry.clj:45-55` | `#{:wave :special :external :internal}` |
 | Keyframe animations | `animation/keyframes.clj:43-60` (`calculate-time-position`), `:218-269`; `animation/effects.clj:271-273`; the panel's time settings `views/components/visual_editors/keyframe_modulator_panel.clj:202-254, 278-330`, saved by `:keyframe/update-setting` (`events/handlers/keyframe.clj:175-188, 479-482`, any key) | time-driven keyframes use the same time base as the waves |
@@ -72,8 +72,8 @@ Nothing carries a press to the render. A press is an event on the agent; effects
 - `laser-show.events.handlers.vibes` (existing): NEW `:vibe/add-reaction {:vibe :kind}`: the template in the first empty effect cell, named "Groove · Punch size", added to the vibe's `:fx` (`:strobe` to `[:flash :fx]`); switched on now if the vibe is current (and recorded in `[:vibe-runtime :fx-on]`, Phase 1, so leaving the vibe switches it off).
 - `laser-show.events.handlers.effects` (existing): NEW `:effects/new-reaction {:col :row :kind}`: an empty effects cell becomes the template, `:active? true`. This is the Grid-tab way in, without vibes.
 - `laser-show.events.handlers.history` (existing, `event-descriptions` `:125-147`): both events "Add Tap Reaction".
-- `laser-show.views.components.grid-cell` (existing, the effects-cell menu `:326-360`): **New tap reaction ▸** (the nine templates, grouped by role) on an empty cell.
-- `laser-show.views.tabs.vibes` (Phase 3): a **Tap reactions ▸** menu in each role's section, and the list of cells that react to that role, from `library/reactions`.
+- `laser-show.views.components.grid-cell` (existing, the effects-cell menu `:326-360`): **New tap reaction ▸** (the templates, grouped HIT, ACCENT, FLASH, VIBE, any: ten here, four more from Phase 8) on an empty cell.
+- `laser-show.views.tabs.vibes` (Phase 3): a **Tap reactions ▸** menu in each role's section (and one beside the vibe's name for the VIBE reaction, Fade in), and the list of cells that react to that role, from `library/reactions`.
 - `laser-show.views.components.vibe-pads` (Phase 2): under each pad a **pulse bar** drawn by `ext-clock-redraw` from the snapshot's `:pulses` (full on a press, fading over half a beat, so even a 20 ms tap shows), and a line naming the pad's reactions; "effects only" when the pool has nothing playable but the role has reactions. The VIBE pulse flashes the header.
 - `laser-show.subs` (existing): `vibe-pad` (Phase 2) gains `:reactions` and `:effects-only?`, memoized on the chains and the library.
 - `laser-show.css.vibes` (Phase 2): `.vibe-pad-pulse`.
@@ -127,6 +127,7 @@ Pulse clock at 120 BPM. `:recent` holds press beats, newest first, at most 16.
 | `{:id 1 :held? false}` | id 1, held | 10.2 | `:held? false :release-beat 10.2` |
 | `{:id 1 :held? false}` | id 1, released | 10.3 | unchanged |
 | `{:id 3 :held? true}` | id 1 | 11.0 | `:id 3 :count 3 :press-beat 11.0 :recent [11.0 11.0 10.0]`: two presses in one tick count twice |
+| `{:id 4 :held? false}` | id 3 | 12.0 | `:id 4 :count 4 :press-beat 12.0 :held? false :release-beat 12.0 :recent [12.0 11.0 11.0 10.0]`: a press and its release inside one tick, as from a pad that sends its note-off at once (a 10 ms tap is inside one 16.7 ms tick about 4 times in 10). The Envelope plays its attack, then its release |
 | any | any, and a `:restart` request in the same tick (Stop, Retrigger) | | the pulse clock and every stamp unchanged |
 
 `pulse-view` at pulse clock 10.5, after row 2: `{:hit {:count 1 :beats 0.5 :ms 250.0 :held? false :since-release 0.3 :recent [0.5]}}`. A source with no press yet is absent. `:any` is derived from `:hit`, `:accent` and `:flash`: the counts summed, the newest press's ages, the three `:recent` merged.
@@ -162,6 +163,10 @@ Value at `a` beats since the press: no press → `:min`; `a < attack` → linear
 | the same | held for 2 beats | 1.400 |
 | the same | released 0.5 beats ago (pressed 2.5 ago) | 1.200 |
 | the same | released 0.2 beats after the press, now 1.0 beat after it | 1.200 (the attack ends at 0.5, then the release runs) |
+| Fade in: `:min 1.0 :max 0.0 :release 1.0 :curve :linear :hold? false`, VIBE | no switch yet | 1.000 |
+| the same | a switch 0 beats ago | 0.000 (the peak is below the rest: a dip) |
+| the same | a switch 0.25 beats ago | 0.250 |
+| the same | a switch 1 beat ago or more | 1.000 |
 
 ### Step (`:step`, "Next value on each press")
 
@@ -204,7 +209,10 @@ Params: `:source` (default `:any`), `:min`, `:max`, `:rise` (per press, 0.05–1
 | `:scatter` | Scatter: position | ACCENT | `:translate :x` ← Step −0.4→0.4, 9 steps, scatter | identity | FX set |
 | `:swell` | Swell while held | FLASH | `:scale` x and y ← Envelope 1.0→1.4, attack ½ beat, release 1 beat, linear, hold | identity | FX set (so the release tail plays after FLASH lets go) |
 | `:strobe` | Strobe while held | FLASH | `:intensity :amount` ← Square 0↔1, period ⅛ beat, Restart on FLASH | off: the cell is only on while FLASH is held | flash FX |
+| `:fade-in` | Fade in | VIBE | `:intensity :amount` ← Envelope on `:vibe`, rest 1.0, peak 0.0, release 1 beat, linear, no hold | identity (full until the vibe's first switch) | FX set |
 | `:energy-size` | Energy: size | any | `:scale` x and y ← Energy 1.0→1.4, rise 0.2, fall 0.25 | identity | FX set |
+
+Phase 8 adds four zone reactions to this table (`:zone-hop`, `:zone-swap`, `:zone-shift`, `:zone-chase`: `08-phase8-zone-effects.md` §7). They are made by the same `:vibe/add-reaction`, and Step and Restart on drive them like any other parameter.
 
 ```clojure
 ;; :vibe/add-reaction {:vibe :vibe-2 :kind :punch-size}, effects-grid [0 3] taken by Master, [1 3] empty
@@ -218,7 +226,7 @@ Params: `:source` (default `:any`), `:min`, `:max`, `:rise` (per press, 0.05–1
 [:config :vibes :library :vibe-2 :fx]   ;; => [… [1 3]]
 ```
 
-To combine two reactions on one parameter, stack two effects (two `:scale` effects multiply).
+To combine two reactions on one parameter, stack two effects (two `:scale` effects multiply). An effect cell holds a chain, so one reaction can also move several effects on one press (Punch size, Step spin and a hue Envelope in one cell make an "Impact"); each effect in the chain costs its own share (invariant 12).
 
 ### Lint rows (Phase 3's table gains)
 
@@ -240,14 +248,15 @@ To combine two reactions on one parameter, stack two effects (two `:scale` effec
 8. Pulse evaluation is pure: the same context and config always give the same value. Randomness comes from the press count only.
 9. During blackout no press pulses.
 10. Two presses in one tick count twice (count and energy), stamped at that tick.
-11. Adding a reaction is one undo step. Every template is identity at rest except Pump, whose menu name says its rest level.
-12. Cost: the new types resolve once per effect chain per tick, the path `:midi` takes (`animation/effects.clj:467-470`), so a reaction should cost about what probe v11's modulated amount did (41–57 µs against 38–40 µs static, 1,000 points). *Unverified*: re-run v11 with an `:envelope` and an `:energy` on `:amount` and write the numbers here. `pulse-view` makes at most seven small maps per tick.
+11. Adding a reaction is one undo step. Every template is identity at rest except Pump, whose menu name says its rest level. "Identity" means the same frame to within 1e-9, not `=`: Hue Shift goes through HSV and is 5.6e-17 off at 0°, while Intensity, Scale, Rotation and Translate are exactly neutral at their rest values (probe v17).
+12. Cost: the new types resolve once per effect parameter per chain, the path `:midi` takes (`animation/effects.clj:467-470`). Probe v17 ran that path with `:midi` standing in: on a 1,000-point frame one effect costs 53–70 µs and 240–310 KB of garbage, four effects 216–228 µs and about 1.5 MB, **and the same when every effect is at rest**: an effect at its rest value is not skipped. It is paid for every zone frame of every playing cue (`services/frame_service.clj:399-403`), so four cues in one zone with a four-effect FX set is about 0.9 ms of the 16.7 ms tick and 6 MB of garbage, and twice that with two zones. *Unverified* with the real types and under show load: re-run v17 with an `:envelope`, a `:step` and an `:energy` once they exist and write the numbers here. `pulse-view` makes at most seven small maps per tick.
+13. An Envelope's peak may be below its rest (Fade in starts dark and rises to full). Phase 4 registers `:min` and `:max` with no rule between them.
 
 ## 8. Tests (named test vars + fixtures)
 
 Pure first; states from `domains/build-initial-state` and the starter cues and vibes, clock steps by hand with `show-time/step`, as Phase 1 does.
 
-- `laser-show.animation.pulses-test` (NEW): `stamp-new-press-test`, `stamp-release-test`, `two-presses-in-one-tick-count-twice-test`, `pulse-clock-ignores-restart-align-and-shift-test`, `view-ages-test`, `any-merges-the-three-roles-test`, `rebase-test` (the Restart on table), `no-press-yet-is-at-rest-test`, `recent-is-capped-at-16-test`, `envelope-examples-test`, `envelope-release-during-attack-test`, `step-orders-test`, `step-palette-test` (the two palette rows), `step-glide-and-wrap-test`, `scatter-never-repeats-test` (steps 3–16, 10,000 presses), `energy-examples-test`.
+- `laser-show.animation.pulses-test` (NEW): `stamp-new-press-test`, `stamp-release-test`, `two-presses-in-one-tick-count-twice-test`, `press-and-release-in-one-tick-test` (the last stamp row: held? false and `:release-beat` both at the press beat, and a Swell still plays its attack and then its release), `pulse-clock-ignores-restart-align-and-shift-test`, `view-ages-test`, `any-merges-the-three-roles-test`, `rebase-test` (the Restart on table), `no-press-yet-is-at-rest-test`, `recent-is-capped-at-16-test`, `envelope-examples-test`, `envelope-release-during-attack-test`, `envelope-peak-below-rest-test` (the Fade in rows), `step-orders-test`, `step-palette-test` (the two palette rows), `step-glide-and-wrap-test`, `scatter-never-repeats-test` (steps 3–16, 10,000 presses), `energy-examples-test`.
 - `laser-show.events.modulator-handlers-test` (existing): `number-list-param-parses-the-palette-test` ("200, 215 320" → `[200.0 215.0 320.0]`; bad tokens dropped; "" → `[]`).
 - `laser-show.animation.modulation-test` (existing): `make-context-carries-pulses-test` (probe v13, turned around), `restart-on-once-and-decay-test` (v15), `restart-on-loop-resets-the-phase-test`, `restart-on-random-gives-a-new-value-per-press-test` (v16), `restart-on-own-is-unchanged-test`; `ui-modulator-list-test` (`:195`) also expects `:envelope :step :energy`. `laser-show.animation.keyframes-test` (existing): `keyframe-restart-on-press-test`.
 - `laser-show.animation.show-time-test` (existing): `step-stamps-pulses-test`, `restart-request-keeps-pulses-test`.
@@ -255,11 +264,11 @@ Pure first; states from `domains/build-initial-state` and the starter cues and v
 - `laser-show.services.frame-service-test` (existing): `timeline-clip-effects-see-pulses-test` (clips keep them, v13).
 - `laser-show.vibes.engine-test` (existing from Phase 1): `role-press-and-release-write-pulses-test`, `every-vibe-switch-pulses-test` (tap, select, advance), `lock-toggle-writes-no-pulse-test`, `blackout-writes-no-pulse-test`, `empty-pool-still-pulses-test`, `no-vibes-still-pulses-test`.
 - `laser-show.events.handlers.grid-trigger-test` (existing): `cue-start-pulses-test` (click, cell trigger, momentary).
-- `laser-show.vibes.reactions-test` (NEW): `every-template-is-valid-test` (registered effect and modulator types, params in range), `templates-are-identity-at-rest-test` (renders a cue through `frame-service/generate-frames-by-zone` with and without each cell, as Phase 5's master test does; Pump checked at 35 %), `punch-scales-then-returns-test` (frames at 0, 0.25 and 0.5 beats after a press), `strobe-goes-into-flash-fx-test`.
+- `laser-show.vibes.reactions-test` (NEW): `every-template-is-valid-test` (registered effect and modulator types, params in range), `templates-are-identity-at-rest-test` (renders a cue through `frame-service/generate-frames-by-zone` with and without each cell, as Phase 5's master test does, and compares the frames to within 1e-9, invariant 11; Pump checked at 35 %), `punch-scales-then-returns-test` (frames at 0, 0.25 and 0.5 beats after a press), `strobe-goes-into-flash-fx-test`, `fade-in-starts-dark-and-returns-to-full-test` (a vibe switch that also switches the cell on: frames at 0, 0.5 and 1 beat after it are dark, half and full, and no frame is at full brightness before the dip, because the cell and the pulse arrive in the same tick, invariant 7).
 - `laser-show.vibes.library-test` (existing): `reactions-index-test`, `lint-effects-only-role-is-info-test`, `lint-reaction-on-an-unbound-role-test`.
 - `laser-show.events.handlers.vibes-test` (existing): `add-reaction-uses-the-first-empty-effect-cell-test`, `add-reaction-to-the-current-vibe-switches-it-on-test`, `add-reaction-is-one-undo-step-test`. `laser-show.events.effects-handlers-test` (existing): `new-reaction-fills-an-empty-cell-test`. The history-label test (`events/history_handlers_test.clj:252-257`) passes with the two labels.
 - UI, `laser-show.ui-test.modulator-editor-test` (NEW; `with-toolkit` once, `with-app` each): `pulse-types-are-in-the-dropdown-test`, `source-choice-shows-its-labels-test`, `calibration-editor-hides-pulse-types-test`. `laser-show.ui-test.grid-test` (existing): `new-tap-reaction-on-an-effects-cell-test`. `laser-show.ui-test.perform-test` (Phase 2): `pad-pulse-bar-flashes-on-a-press-test`, `pad-names-its-reactions-test`, `effects-only-pad-says-so-test`. `laser-show.ui-test.vibes-test` (Phase 3): `tap-reaction-menu-adds-a-cell-to-the-vibe-test`.
-- Evidence: invariant 12's re-run of probe v11, written here.
+- Evidence: invariant 12's re-run of probe v17 with the real Envelope, Step and Energy types (the `:midi` stand-in numbers are in `00-overview.md` §3), written here.
 
 Run: `clj -M:mac-arm:test pulses modulation keyframes show-time show-clock frame-service engine grid-trigger reactions library vibes effects history`, then `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.modulator-editor-test`, `-n laser-show.ui-test.grid-test`, then the Phase 2 and 3 namespaces, then both full suites.
 
@@ -274,3 +283,5 @@ Run: `clj -M:mac-arm:test pulses modulation keyframes show-time show-clock frame
 - **"Next keyframe on each press"** (a count driver for keyframes): later; Step covers the common case.
 - **The Retrigger button restarting only its own modulator**: unchanged here (v14); with Restart on, a press is the targeted restart.
 - **Pulses into calibration effects**: never (invariant 4).
+- **A fade on BLACKOUT**: rejected. The one sure kill is instant (design rule 5, V2), and BLACKOUT never pulses (invariant 9). A slow fade-out is the Intensity fader at 0, or a Fade-out reaction on a later key.
+- **More templates**: not in the first set. A Lens bulge on HIT (Lens Distortion `:k1` ← Envelope, a small range), a Comet flare on HIT (a Trace Fade running all the time, its `:min-brightness` ← Envelope 0→1, so each hit lights the whole shape and it settles back to the comet) and a Saturation pulse on ACCENT are each one Envelope on one parameter that the modulator editor offers, so they can be built the day Phase 4 lands and promoted to templates after a look on hardware. A comet that *restarts* on a press is not among them: its head position comes from the cue's clock (`animation/effects/intensity.clj:115-140`) and has no parameter a press can drive.

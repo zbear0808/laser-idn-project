@@ -56,7 +56,7 @@ There is no timer that looks at a vibe, so the rotation scaffolding could never 
 
 | Key / path | Lives in | Written by | Undo / dirty? |
 |---|---|---|---|
-| `[:vibe-runtime :rotation]` `:active|:armed|:locked`, `:entered-at`, `:auto?` | app state, session | the engine, `:vibe/arm`, `:vibe/advance`, `:vibe/set-auto` | no / no |
+| `[:vibe-runtime :rotation]` one of `:active`, `:armed`, `:locked`; `:entered-at`, `:auto?` | app state, session | the engine, `:vibe/arm`, `:vibe/advance`, `:vibe/set-auto` | no / no |
 | `[:config :vibes :settings :rotation]` `{:mode :off :seconds 45 :pause-beats 2.0}` | document | the Vibes tab (Phase 3 editor) | yes / yes |
 | `[:timing :tap]` (replaces `:tap-times`) | app state, session | `:timing/tap-tempo` | no / no |
 | `[:timing :bpm]` | document, live (`state/history.clj:19-21`) | tap, Link, the BPM box | no / no (unchanged) |
