@@ -1,7 +1,7 @@
 # UX improvements: controls that work, a screen that tells the truth, the Grid tab as the performer's screen
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`)
-**Status:** In progress: Phase 0 done 2026-11-18 (`e2bce92`, as built in §8); Phases 1–3 to do. Approved 2026-11-18 ("your plan with the rest of the stuff seems fine"; then "with the rest of the plan I agree with you. Go ahead and implement"). All decisions answered (§5): U1 performers, U2–U5 A   **Last verified against:** `b1da0f2`, by driving the app in test mode (headless, no hardware) through its REPL with plorer, 2026-11-18. The screenshots are in `debug-output/ux-*.png` (gitignored, not committed); Phase 0 as built against `e2bce92` (§8)
+**Status:** In progress: Phase 0 done 2026-11-18 (`e2bce92`, as built in §8), Phase 1 done 2026-11-19 (`92c191a`, as built in §9); Phases 2–3 to do. Approved 2026-11-18 ("your plan with the rest of the stuff seems fine"; then "with the rest of the plan I agree with you. Go ahead and implement"). All decisions answered (§5): U1 performers, U2–U5 A   **Last verified against:** `b1da0f2`, by driving the app in test mode (headless, no hardware) through its REPL with plorer, 2026-11-18. The screenshots are in `debug-output/ux-*.png` (gitignored, not committed); Phase 0 as built against `e2bce92` (§8), Phase 1 against `92c191a` (§9)
 **Supersedes / Superseded by:** none   **Related findings:** review 01 (views); keyboard plan Phase 2 (dialog shell, menu stubs D4, `cell-label`), Phase 4 (clipboard); vibe plan V8 B (the vibe stuff has its own tabs, nothing on the Grid tab), V2 and output runtime O4 (Stop is the blackout)
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. "Ran" means seen in the running app or a REPL check; "read" means from the code. Anything marked **NEW** does not exist yet.
@@ -11,14 +11,14 @@ Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. "R
 The look is coherent, and the timeline editor is the most polished part. The problems, in the order to fix them:
 
 1. **Some controls silently do nothing**, or store junk. Phase 0, about 2 days. **Done** (`e2bce92`, §8).
-2. **The screen contradicts the output** in places. Phase 1, about 3 days.
+2. **The screen contradicts the output** in places. Phase 1, about 3 days. **Done** (`92c191a`, §9).
 3. **The layout doesn't scale**, which matters most on the Grid tab, now that you've said it is the performer's tab. Phase 2, about 3 days.
 4. **Guidance is stale or missing.** Phase 3, about 2 days.
 
 | Phase | Goal | Size | Needs |
 |---|---|---|---|
 | 0 | **Done 2026-11-18** (`e2bce92`, §8). Controls that work: one fix for the `:fx/event` placeholders, the cell colours, the single-output device, the trigger editor | ~2 d | none |
-| 1 | An honest screen: Stop shows what it did, the status bar names what plays, effects cells show on and off, one notice for failures, the stream state says why | ~3 d | 0 (the colours) |
+| 1 | **Done 2026-11-19** (`92c191a`, §9). An honest screen: Stop shows what it did, the status bar names what plays, effects cells show on and off, one notice for failures, the stream state says why | ~3 d | 0 (the colours) |
 | 2 | The Grid tab as a performer's screen: pads that grow, larger text; a Cue Chain Editor that fits; dialogs that match | ~3 d | 1; the keyboard plan's Phase 2 for the dialog parts |
 | 3 | Guidance: true hints, tooltips, platform shortcut text, Settings tidy-up, QUICKSTART | ~2 d | none |
 
@@ -262,3 +262,125 @@ Committed as `e2bce92` on top of `b54e0a5`. §1–7 cite `b1da0f2`; the lines be
 | `clj -M:mac-arm:test` (full unit suite) | 868 tests, 32,494 assertions, 0 failures |
 | `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | 71 tests, 264 assertions, 0 failures (it ran before a last test-only change, a `wait-for!` in `behavior-shows-plain-names-test`, and a comment in `events/core.clj`; after them `trigger-editor-test` ran again: 4 tests, 19 assertions, 0 failures; and `events.core-test` with `css.theme-test`: 10 tests, 54 assertions, 0 failures) |
 | `clj -M:kondo --lint` on every touched file | 0 errors; 2 warnings, both there before (a redundant `let` in `input.clj`, an unused require in `projector.clj`) |
+
+## 9. As built: Phase 1 (2026-11-19)
+
+Committed as `92c191a` on top of `6e26ee4` (built as `e9df4bf` on branch `ux-phase1` from `67735d0`, then cherry-picked past vibe Phase 1 with no conflicts). §1–7 cite `b1da0f2`; the lines below are at `92c191a`.
+
+**Where it is now**
+- Stop (U2 A):
+  - `subs.clj`: NEW `held-cue-count` `:259` (from private `held-count` `:256`): the number of intents while `:playing?` is false, else 0. NEW `output-held?` `:267` is `held-cue-count` above 0. Both come from the state Stop leaves, so a vibe blackout that dispatches `:transport/stop` reads the same.
+  - `subs.clj`: NEW `playing-cues` `:278` (cells from private `cue-cells-in-grid-order` `:273`): the cues that play, row by row (A1, A2 … B1), each `{:col :row :name :first-preset-id :preset-count :timeline?}` from `cell-display-data`. It is `[]` while `:playing?` is false, and stays identical when a pause or seek changes an intent.
+  - `views/components/grid_cell.clj:243-246`: a cue cell with an intent while the output is held gets `:held? true` and `:active? false`, so `build-style-classes` `:31` gives it NEW `grid-cell-held` instead of `grid-cell-active`. Only cells with an intent subscribe to `output-held?`.
+  - `css/grid_cells.clj:74`: NEW `.grid-cell.grid-cell-content.grid-cell-held`: a 2 px dashed blue outline, with the content colour inside.
+  - `views/toolbar.clj:228`: NEW `output-held-chip` (`#output-held-chip`, NEW `.output-held-chip`, amber, `css/layout.clj:65`) shows "OUTPUT OFF · 4 cues held". It sits before the streaming status (`:296`) and is unmanaged when nothing is held.
+  - `views/toolbar.clj:48-51` (`transport-controls` `:37`, NEW private `cues-text` `:32`): the button's tooltip is "Stop (blackout)" while playing, "Resume 4 cues" while cues are held, otherwise "Play".
+  - `views/components/title_bar.clj:146-169`: the Transport menu shows "Play" or "Stop (blackout)" (Space), then Retrigger. The old Stop item stays, hidden (`:visible false`, `:156-163`), for its Escape shortcut.
+- Status bar (`views/status_bar.clj`):
+  - Active and Preset are gone. In their place NEW `playing-list` `:75` and `playing-status` `:87` show "Playing: A1 circle · A2 square · +2" (`#status-playing`): two cells at most by name (`max-named-cues` `:73`), then "+n". Each cell is named by `views.dialogs.common/cell-label` and `grid-cell/cell-label`, the cell's own text.
+  - NEW `notice-status` `:47`, at the left (`#status-notice`, `#status-notice-text`): an icon and the text in the level's colour (`notice-looks` `:42`). A click dispatches `:ui/clear-notice` with the notice's id.
+  - NEW `output-health-text` `:155` and `output-health` `:178` (`#status-output-health`). They read the state and errors of `subs/connection-status` and each projector's `:fps` in `subs/streaming-status`, and show "59.8 fps", "25.0–59.8 fps", "59.8 fps · 1 error" (red, with the errors as the tooltip) or "Starting…". Nothing shows while streaming is off or has nothing enabled: the toolbar says that.
+  - `status-bar` `:219`: `frame-stats-status` only in dev mode (`:234`). `status-item` `:15` takes NEW optional `:id`, `:tooltip` and `:value-color`.
+  - `views/components/preview.clj:347-371`: the "µs/frame" label (`#preview-frame-stats`) only in dev mode. Outside it the header no longer subscribes to the frame stats.
+- One cell name:
+  - NEW `laser-show.views.dialogs.common` with `cell-label [col row]` (`views/dialogs/common.clj:4`), to the keyboard plan's Phase 2 §4.
+  - `views/dialogs/cell_trigger_editor.clj:38, 79` use it: "Cue Cell A1", "Triggers — Cue Cell A1".
+- Effects cells:
+  - `css/grid_cells.clj`: the two `.grid-cell-effects.grid-cell-content` rules (blue at 0.7, hovered 0.85) are gone, so an off cell with effects is `#505050`, hovered `#656565`. The playing rule `.grid-cell-content.grid-cell-active` `:68` and its hover rule `.grid-cell.grid-cell-content.grid-cell-active:hover` `:88` cover both kinds of cell; the hover rule was `.grid-cell-grid…`, cue cells only.
+  - `css/grid_cells.clj`: content hovered is `.grid-cell.grid-cell-content:hover` `:93`. The background rules now rank by specificity alone (`:38-46`): empty and content 1 class; playing and hovered 2; content hovered and held 3; playing hovered 4. Neither of the two pairs §8 left on the hash order relies on it now.
+  - `views/components/grid_cell.clj`: `effects-label` `:73` names the first effect as a cue cell names its first preset ("scale +1", "hue shift"; a custom name first). NEW `effects-tooltip` `:83` lists the effects, one per line (NEW private `effect-text` `:68`).
+  - `views/components/grid_cell.clj`: `generic-grid-cell` takes NEW optional `:tooltip-fn` (`:104`), set on the label that carries the cell's menu (`:205-211`). `subs/effect-cell-display-data` gives NEW `:effect-ids` (`subs.clj:329`).
+- Notices:
+  - `state/domains.clj:136`: NEW `[:ui :notice]`, nil or `{:id :text :level}`.
+  - `events/helpers.clj:109`: NEW `show-notice [state text level]` returns `{:state … :dispatch-later {:event {:event/type :ui/clear-notice :id id} :delay-ms notice-ms}}` (NEW `notice-ms` 6000, `:105`), with a `random-uuid` id per notice, like the transport requests' ids.
+  - `events/handlers/ui.clj:61`: NEW `:ui/clear-notice` (routed `:155`) clears the notice only if its `:id` is the one shown; otherwise it returns `{}`, so a stray timer writes nothing back.
+  - `events/handlers/menu.clj`: `handle-file-project-load-failed` `:99` shows "Could not open friday.zip", and `handle-file-save-failed` `:119` "Could not save friday.zip", after the same project-status restore as before. NEW private `file-name` `:94`.
+- Stream with nothing enabled:
+  - `subs.clj:415`: `:idle` reads "No projectors enabled".
+  - `views/toolbar.clj:263-269`: while `:idle`, NEW `#streaming-projectors-link` "Projectors…" (a `:hyperlink`, NEW `.toolbar-link`, `css/layout.clj:74`) dispatches `:ui/set-active-tab :projectors`.
+- Removed: `subs/active-cell`, `active-cell-preset`, `active-preset` and the deprecated `ex/active-cell` (`state/extractors.clj`). The status bar was their only reader; handlers still write `[:playback :active-cell]`.
+
+**State**: `[:ui :notice]` (NEW) is UI state, written by the two failure handlers (through `show-notice`) and by `:ui/clear-notice`. No undo, no dirty. Everything else is subs.
+
+**Differences from the plan**
+
+| Plan (§3) | As built | Why |
+|---|---|---|
+| The Transport menu gets one item, "Play" or "Stop (blackout)" | One item shows; the old Stop item stays hidden, so Escape still stops while playing | Without it Escape would stop nothing, and the keyboard plan's Phase 5 reserves it as the stop key (`escape-always-stops-test`, D10 A). A scene `:accelerators` map can't carry it: cljfx clears and refills the scene's accelerators, which would remove the menu's. JavaFX runs an enabled item's accelerator whether it shows or not (`ControlAcceleratorSupport` checks `isDisable` only) |
+| Play's tooltip says "Resume 4 cues" | The Stop button's tooltip is "Stop (blackout)" too (it said "Stop") | The menu item's name |
+| NEW subs `output-held?` and `playing-cues` | Also NEW `held-cue-count`, and `notice` (one `sub-val`) | The chip and the tooltip need the number; `output-held?` is `held-cue-count` above 0 |
+| `playing-cues`: the cells "with their names" | The sub gives what each cell's name is made from; the status bar names the cells with `grid-cell/cell-label` | `subs` can't require a view namespace: `grid-cell`, and the dialog shell to come, require `subs` |
+| "Playing: A1 circle · A2 square · +2" | At most two named, then "+n" (three cues: "… · +1") | The example's four cues, as one rule |
+| The µs stats only in dev mode; "in their place, output health" | Output health shows in both modes; dev mode adds the stats before it | A dev session, the usual way to run the app, sees it too |
+| Output health from `subs/connection-status` | Its state and errors, and each projector's `:fps` from `subs/streaming-status` (which `connection-status` reads), shown as a range | F-9 asks for the fps. With fps inside `connection-status`, the toolbar's streaming status would re-render up to 4 times a second |
+| `[:ui :notice] {:text :level}` | `{:id :text :level}`; `:ui/clear-notice` clears only its own id | An earlier notice's timer must never clear a later notice |
+| "One cell name everywhere ('A1')", from `cell-label` | `cell-label` is used by the status bar and the trigger editor only | The cue chain, effect chain and timeline editors already say "Cell A1", with their own formula (`views/dialogs/cue_chain_editor.clj:470, 674`, `effect_chain_editor.clj:103, 238`, `timeline_cue_editor.clj:107, 213`). Moving them onto `common` (`default-name`, `window-title`) is the keyboard plan's Phase 2 |
+| Held cells: "a blue outline, no fill" | A dashed 2 px blue outline; inside, the content colour | A solid blue outline is the selected cell's |
+| — | An effects cell that is on with no enabled effects looks empty (`#3D3D3D`, hovered `#606060`) | The playing rule needs `grid-cell-content`; such a cell changes nothing on output. §8 noted it hovered grey |
+| The single-cue status items go (F-6) | Their subs and `ex/active-cell` go too | Nothing else read them; "the first key of the map" is F-6 itself |
+| A "Projectors…" link | Its own class `.toolbar-link`, and not focus-traversable | cljfx's `:style-class` replaces `hyperlink`, as for every control here. Not traversable, so a click doesn't give it the focus, and Space still reaches the Play/Stop shortcut |
+
+**Found, not done**
+- A click during a blackout plays. `cue-timing/deactivate-cue` (`animation/cue_timing.clj:335`) sets `:playing?` to "any cue left", so toggling one held cue off resumes the others. A click on any cue cell (`activate-cue` `:322`) starts it with all the held ones. The screen shows it truthfully now (the cells turn blue, the chip goes). Whether a click should end a blackout is the output's question (O4, the vibe plan's sticky blackout).
+- A notice survives File > New and Open: `persistent/reset-session` (`state/persistent.clj:135-150`) resets the dialogs but not `[:ui :notice]`. It goes after its own 6 s.
+- A failed network scan (`events/handlers/projector.clj:189-193`) still only logs, though invariant 5 names devices. §3 named the open and save handlers only.
+- `ui/query` (`test/laser_show/ui_test/testfx.clj:65-74`) looks in the topmost window only. A tooltip that comes up hides the main window from it: an effects cell's, or a toolbar button's after about a second under a resting mouse. The new tests read through `query-all` or move the mouse off the button. An older test that rests on a button with a tooltip could time out on a slow machine.
+- `.grid-cell-selected` and `.grid-cell-learning` still beat `.grid-cell`'s border by hash order, one class each; they do today.
+- " (no enabled projectors)" (`subs.clj:417`) can still show, for an error while nothing is wanted (an engine failing as it is stopped).
+
+**Tests** (UI: `with-toolkit` once, `with-app` each)
+- NEW `laser-show.views.dialogs.common-test/cell-label-test`: A1; D8 for col 7, row 3; B3; nil, nil is A1.
+- `laser-show.subs-test`:
+  - `output-held-sub-test`, through `:transport/stop` and `:transport/play`: 3 cues held, count 3; none after Play; with no cue left, never held.
+  - `playing-cues-sub-test`: cues started at B1, A2, A1 come back A1, A2, B1, each with its name fields. The list stays identical after a pause inside an intent and a show-clock status; a stopped cue leaves it; it is empty while held.
+  - `connection-status-says-why-nothing-streams-test`.
+  - `effect-cell-display-data-test` now expects `:effect-ids`.
+- `laser-show.views.status-bar-test`:
+  - `playing-list-test`: nil; one cue; a custom name and "star +2"; two named, then "+2" or "+1".
+  - `output-health-text-test`: nil while off, stopping or idle; "Starting…"; "59.8 fps"; the range; "· 1 error"; "2 errors".
+  - `dev-stats-only-in-dev-mode-test`: the stats only in dev mode; the health in both; the notice first, then the playing list.
+- `laser-show.views.components.preview-test/frame-stats-only-in-dev-mode-test`.
+- `laser-show.events.menu-file-handlers-test`:
+  - `failed-save-sets-a-notice-test`.
+  - `failed-open-sets-a-notice-test`, also through the pipeline from `:file/open-result`.
+  - `open-missing-file-keeps-state-test` now checks that only the notice changed.
+- `laser-show.events.ui-handlers-test`:
+  - `notice-goes-after-6-s-or-on-a-click-test`.
+  - `earlier-notice-timer-keeps-a-later-notice-test`: the first notice's timer leaves the second, also when a click took the first away; the second's own timer clears it.
+- UI `laser-show.ui-test.toolbar-test/stop-shows-output-off-and-held-cells-test`:
+  - two cells clicked, then Stop: "OUTPUT OFF · 2 cues held"; both cells `grid-cell-held` and not `-active`; Play's tooltip "Resume 2 cues".
+  - Play: the cells are active, the chip is gone, "Stop (blackout)".
+  - both cells toggled off: "Play".
+- UI `laser-show.ui-test.grid-test`:
+  - `held-cell-has-an-outline-and-no-fill-test`: `#505050` with a dashed `#4992DB` outline; hovered `#656565`, still dashed. A selected empty cell's outline is solid, and selecting it resumes nothing.
+  - `effects-cell-on-and-off-look-different-test`: off `#505050` at opacity 1.0, "scale +1", tooltip "scale\nhue shift"; on `#4992DB`, hovered or not; off again `#656565` hovered, then `#505050`.
+  - The helpers read through `query-all`, because the cell's tooltip window hides it from `ui/query`.
+- UI `laser-show.ui-test.menu-bar-test/transport-menu-has-one-play-stop-item-test`: ["Play" "Retrigger"], and the open menu shows two items. While playing ["Stop (blackout)" "Retrigger"]. An Escape key event in the main window stops, and the cue is held.
+- UI `laser-show.ui-test.streaming-status-test/no-projectors-enabled-links-to-the-projectors-tab-test`: Stream with only a disabled projector says "No projectors enabled" beside Stop, and the link opens the Projectors tab. Once the projector is enabled, "Streaming to 1 of 1" and no link.
+- NEW UI `laser-show.ui-test.status-bar-test`:
+  - `status-bar-names-what-plays-test`: "A2 square", then "A1 circle · A2 square"; gone while held, back after Play.
+  - `failed-open-shows-a-notice-until-clicked-test`.
+  - `notice-goes-by-itself-after-6-s-test`: a second notice, 3 s after the first, is still up 7 s after the first; its own timer takes it. About 10 s.
+- UI `laser-show.ui-test.trigger-editor-test/cell-trigger-editor-opens-and-closes-modal`: the title is "Triggers — Cue Cell A1".
+
+**Red first** (at `67735d0`, with the tests and no source change)
+- Unit, one namespace at a time:
+  - `common-test` could not load `laser-show.views.dialogs.common`.
+  - `subs-test`: "No such var: subs/output-held?". `views.status-bar-test`: "No such var: status-bar/playing-list". `ui-handlers-test`: "No such var: h/show-notice".
+  - `views.components.preview-test`: 3 tests, 1 failure (the µs label outside dev mode).
+  - `menu-file-handlers-test`: 29 tests, 8 failures. No notice after a failed save or open, so no id and no `:dispatch-later`; and `open-missing-file-keeps-state-test`, because `[:ui :notice]` wasn't a declared key.
+- UI, the 9 new or changed tests in one run: 9 tests, 5 failures, 8 errors.
+  - An off effects cell was `#4992DB` at opacity 0.7, and "scale +1" never came; no `grid-cell-held`.
+  - The menu read ["Play" "Stop" "Retrigger"]; the Stop tooltip was "Stop", and no chip came.
+  - No `#status-playing` and no `#status-notice-text`; the toolbar never said "No projectors enabled".
+  - The title was "Triggers — Cue Cell [A, 1]".
+
+**Verification, 2026-11-19, macOS arm64, JDK 25**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test -n` views.dialogs.common-test, subs-test, views.status-bar-test, views.components.preview-test, menu-file-handlers-test, ui-handlers-test | 57 tests, 243 assertions, 0 failures |
+| `clj -M:test-ui:mac-arm:test-ui-headless -n` toolbar, grid, menu-bar, streaming-status, status-bar, trigger-editor, preview, main-window, in one run | 41 tests, 158 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 880 tests, 32,552 assertions, 0 failures (868 before, 12 new) |
+| `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | Not run here: it runs after the merge onto master. 79 tests now, 71 before |
+| `clj -M:kondo --lint` on every touched file | 0 errors, 0 warnings |
