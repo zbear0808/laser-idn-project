@@ -221,4 +221,5 @@ Committed as `94f905e` on top of `c556d71` (built as `3164717` on branch `vibe-p
 | `clj -M:kondo --lint` on every touched file | 0 errors; 1 warning, there before (a redundant `let` in `input.clj` `handle-input-update-cell-trigger-action`, `:310` before, `:332` now) |
 | this branch merged with `master` `c556d71` (`git merge-tree`, tree exported, no branch touched) | no conflict; full unit suite 951 tests, 33,041 assertions, 0 failures; perform, trigger editor and main window UI 22 tests, 119 assertions, 0 failures |
 | full UI suite | not run here: it runs after the merge onto `master` |
+| after the merge, on `master` at `f7ec338` (with UX Phase 1): `clj -M:mac-arm:test`, then `clj -M:test-ui:mac-arm:test-ui-headless` | 951 tests, 33,040 assertions, 0 failures; UI 89 tests, 376 assertions, 0 failures |
 | manual (unverified) | multi-touch on a real touchscreen, a visible (non-headless) run, the screen at 2 m (Phase 7 hardware check) |

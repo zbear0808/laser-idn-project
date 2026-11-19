@@ -383,4 +383,6 @@ Committed as `92c191a` on top of `6e26ee4` (built as `e9df4bf` on branch `ux-pha
 | `clj -M:test-ui:mac-arm:test-ui-headless -n` toolbar, grid, menu-bar, streaming-status, status-bar, trigger-editor, preview, main-window, in one run | 41 tests, 158 assertions, 0 failures |
 | `clj -M:mac-arm:test` (full unit suite) | 880 tests, 32,552 assertions, 0 failures (868 before, 12 new) |
 | `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | Not run here: it runs after the merge onto master. 79 tests now, 71 before |
+| After the merge, on `master` at `c556d71` (with vibe Phase 1): `clj -M:mac-arm:test`, then the full UI suite | 937 tests, 32,925 assertions, 0 failures; UI 79 tests, 311 assertions, 0 failures |
+| Again at `f7ec338` (vibe Phase 2 on top) | 951 tests, 33,040 assertions, 0 failures; UI 89 tests, 376 assertions, 0 failures |
 | `clj -M:kondo --lint` on every touched file | 0 errors, 0 warnings |
