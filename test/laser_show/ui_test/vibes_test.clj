@@ -234,6 +234,8 @@
     (ui/assert-text! "#vibe-name-field" "Lines")
     (ui/click! robot "#perform-tab")
     (ui/assert-text! "#vibe-header-name" "LINES")
+    ;; A busy machine can't stretch the click into a hold, which cuts the cue
+    (state/swap-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
     (ui/mouse-click! robot "#vibe-pad-hit")
     (ui/wait-for! #(#{[5 0] [7 0]} (rt :voices :hit :cell)))))
 
