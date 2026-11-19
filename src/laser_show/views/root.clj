@@ -12,7 +12,7 @@
    ├── toolbar
    ├── tab-bar
    ├── main-content (split-pane)
-   │   ├── tab-content (grid/perform/effects/projectors/zone-groups/settings)
+   │   ├── tab-content (grid/vibes/perform/effects/projectors/zone-groups/settings)
    │   └── preview-panel
    ├── status-bar
    └── dialogs (via refs)"
@@ -38,6 +38,7 @@
    [laser-show.views.tabs.projectors :as projectors-tab]
    [laser-show.views.tabs.zones :as zones-tab]
    [laser-show.views.tabs.settings :as settings-tab]
+   [laser-show.views.tabs.vibes :as vibes-tab]
    [laser-show.views.toolbar :as toolbar])
   (:import [javafx.stage WindowEvent]))
 
@@ -61,6 +62,7 @@
   (let [active-tab (fx/sub-ctx context subs/active-tab)]
     (case active-tab
       :grid {:fx/type grid-tab/grid-tab}
+      :vibes {:fx/type vibes-tab/vibes-tab}
       :perform {:fx/type perform-tab/perform-tab}
       :effects {:fx/type effects-tab/effects-tab}
       :projectors {:fx/type projectors-tab/projectors-tab}
@@ -76,6 +78,7 @@
 (def main-tabs
   "Tab definitions for the main window."
   [{:id :grid :label "Grid"}
+   {:id :vibes :label "Vibes"}
    {:id :perform :label "Perform"}
    {:id :effects :label "Effects"}
    {:id :projectors :label "Projectors"}
@@ -118,10 +121,10 @@
 
 (defn main-content
   "Main content area with tab content and optional preview panel.
-   Preview is hidden when on the projectors, zones, or settings tabs."
+   Preview is hidden when on the vibes, projectors, zones, or settings tabs."
   [{:keys [fx/context]}]
   (let [active-tab (fx/sub-ctx context subs/active-tab)
-        show-preview? (not (#{:projectors :zones :settings} active-tab))
+        show-preview? (not (#{:vibes :projectors :zones :settings} active-tab))
         bg-primary (css/bg-primary)
         bg-elevated (css/bg-elevated)]
     (if show-preview?

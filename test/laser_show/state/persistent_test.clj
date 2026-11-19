@@ -11,6 +11,7 @@
             [laser-show.state.persistent :as persistent]
             [laser-show.state.serialization :as ser]
             [laser-show.state.templates :as templates]
+            [laser-show.vibes.engine :as engine]
             [clojure.java.io :as io]))
 
 
@@ -271,3 +272,25 @@
     (is (= initial (:vibe-runtime (persistent/new-project-state busy))) "File > New")
     (is (= initial (:vibe-runtime (persistent/apply-loaded-project busy (persistent/project-files busy) "x.zip")))
         "File > Open")))
+
+(deftest vibe-switched-fx-cells-are-saved-off-test
+  (let [fx {:items [{:effect-id :scale}] :active? false}
+        cells [[0 3] [1 3] [2 3]]
+        on (fn [state] (mapv #(get-in state [:chains :effect-chains % :active?]) cells))
+        playing (-> (with-starter-vibes)
+                    (assoc-in [:chains :effect-chains] (zipmap cells (repeat fx)))
+                    (assoc-in [:config :vibes :library :vibe-2 :fx] [[0 3]])
+                    (assoc-in [:config :vibes :library :vibe-2 :flash] {:cue nil :fx [[1 3]] :solo? false})
+                    (assoc-in [:chains :effect-chains [2 3] :active?] true)
+                    (#(:state (engine/select % {:vibe :vibe-2 :time 1000})))
+                    (#(:state (engine/press % {:role :flash :time 1100}))))
+        files (persistent/project-files playing)]
+    (is (= [true true true] (on playing)) "the FX set's, the held flash's, and one switched on by hand")
+    (is (= [false false true] (on (get files "content.edn")))
+        "vibe mode's switches are the session's: after a load or New nothing would switch them off")
+    (is (= [true true true] (on playing)) "the live state stays as it is")
+    (testing "so a project loads with them off"
+      (is (persistent/write-project! test-project-file files))
+      (is (= [false false true] (on (persistent/apply-loaded-project (domains/build-initial-state)
+                                                                     (persistent/read-project test-project-file)
+                                                                     test-project-file)))))))

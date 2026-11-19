@@ -229,6 +229,21 @@
   [target-action]
   (select-keys target-action [:type :target :role]))
 
+(defn- wizard-target
+  "The learn Learn all waits on ([:ui :vibes :wizard], handlers/vibes.clj):
+   its next role's, or nil."
+  [state]
+  (when-let [role (first (get-in state [:ui :vibes :wizard :queue]))]
+    {:type :vibe :role role}))
+
+(defn- end-other-wizard
+  "state without Learn all, when the learn for target isn't the one it
+   waits on: any other learn (or a cancel) ends it."
+  [state target]
+  (cond-> state
+    (and (get-in state [:ui :vibes :wizard]) (not= target (wizard-target state)))
+    (assoc-in [:ui :vibes :wizard] nil)))
+
 (defn- handle-input-start-learn
   "Start generic input learn mode for a target action.
    Registers a temporary global handler to capture the next input event
@@ -249,7 +264,9 @@
     ;; The :input/await-learn effect waits for the captured input off the event
     ;; thread, then dispatches :input/learn-captured, which writes the binding
     ;; through the normal pipeline (undoable, marks the project unsaved).
-    {:state (assoc-in state [:backend :input :learning-target] (learn-target target-action))
+    {:state (-> state
+                (assoc-in [:backend :input :learning-target] (learn-target target-action))
+                (end-other-wizard (learn-target target-action)))
      :input/await-learn {:promise learn-promise
                          :on-captured {:event/type :input/learn-captured
                                        :target-action target-action}}}))
@@ -279,32 +296,52 @@
   "Bind the captured input to the target action, :behavior included (ignored
    if learn was cancelled or restarted for another target in the meantime).
    A vibe role keeps one control: its other bindings go, so learning it again
-   moves it. The undo label names what the input did before, if anything."
+   moves it. The undo label names what the input did before, if anything.
+   During Learn all the next role's learn follows, and a key already learned
+   for an earlier role of it is refused: the same learn starts again, and
+   the wizard says whose the key is (:refused)."
   [{:keys [state input-event target-action]}]
-  (let [learning? (= (get-in state [:backend :input :learning-target])
-                     (learn-target target-action))
+  (let [target (learn-target target-action)
+        learning? (= (get-in state [:backend :input :learning-target]) target)
         lookup-key (learn-lookup-key input-event)
         replaced (get-in state [:config :input :trigger-map lookup-key])
-        role (when (= :vibe (:type target-action)) (:role target-action))]
-    (if (and lookup-key learning?)
-      {:state (-> state
-                  (update-in [:config :input :trigger-map]
-                             #(cond->> % role (into {} (remove (fn [[_ action]] (library/binds-role? action role))))))
-                  (assoc-in [:config :input :trigger-map lookup-key] target-action)
-                  (update-in [:backend :input] dissoc :learning-target))
-       :history/description (if (and replaced (not= (learn-target replaced) (learn-target target-action)))
-                              (str "Learn Trigger (replaces " (action-name replaced) ")")
-                              "Learn Trigger")}
+        role (when (= :vibe (:type target-action)) (:role target-action))
+        {:keys [queue done] :as wizard} (when (= target (wizard-target state))
+                                          (get-in state [:ui :vibes :wizard]))
+        taken (some #(when (library/binds-role? replaced %) %) done)]
+    (cond
+      (not (and lookup-key learning?))
       {:state (cond-> state
-                learning? (update-in [:backend :input] dissoc :learning-target))})))
+                learning? (update-in [:backend :input] dissoc :learning-target))}
+
+      taken
+      {:state (assoc-in state [:ui :vibes :wizard :refused] taken)
+       :dispatch {:event/type :input/start-learn :target-action target-action}}
+
+      :else
+      (let [queue (vec (rest queue))]
+        (cond-> {:state (-> state
+                            (update-in [:config :input :trigger-map]
+                                       #(cond->> % role (into {} (remove (fn [[_ action]] (library/binds-role? action role))))))
+                            (assoc-in [:config :input :trigger-map lookup-key] target-action)
+                            (update-in [:backend :input] dissoc :learning-target)
+                            (cond-> wizard (assoc-in [:ui :vibes :wizard]
+                                                     (when (seq queue) {:queue queue :done (conj (vec done) role)}))))
+                 :history/description (if (and replaced (not= (learn-target replaced) target))
+                                        (str "Learn Trigger (replaces " (action-name replaced) ")")
+                                        "Learn Trigger")}
+          (and wizard (seq queue))
+          (assoc :dispatch {:event/type :input/start-learn :target-action {:type :vibe :role (first queue)}}))))))
 
 (defn- handle-input-cancel-learn
-  "Cancel generic input learn mode."
+  "Cancel generic input learn mode, and Learn all with it."
   [{:keys [state]}]
   (router/unregister-handler! ::generalized-input-learn)
   (release-pending-learn!)
   ;; Remove learning indicator
-  {:state (update-in state [:backend :input] dissoc :learning-target)})
+  {:state (-> state
+              (update-in [:backend :input] dissoc :learning-target)
+              (end-other-wizard nil))})
 
 (defn- handle-input-remove-trigger
   "Removes a generic trigger from the mapping."

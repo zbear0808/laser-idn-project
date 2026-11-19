@@ -449,3 +449,136 @@
       (is (empty? (playing s2)) "a held HIT is cut, however short")
       (is (= :vibe-1 (rt s2 :current)) "and VIBE neither switches nor locks")
       (is (= :active (rt s2 :rotation))))))
+
+
+;; Edits to the vibe that plays (Phase 3): the Vibes tab's edits take effect
+;; at once, so the lasers show what the editor says
+
+(defn- edited
+  "state after (f vibes & args) on [:config :vibes] at time t, as the edit
+   events run it (events/handlers/vibes.clj)."
+  [state t f & args]
+  (let [was (get-in state [:config :vibes])]
+    (engine/reconcile (assoc-in state [:config :vibes] (apply f was args)) was t)))
+
+(defn- select [state id t] (:state (engine/select state {:vibe id :time t})))
+
+(deftest removing-the-current-vibe-leaves-its-look-test
+  (let [s0 (-> (starter)
+               (with-vibe :vibe-1 {:fx [[0 3]] :bed [0 1]})
+               (with-vibe :vibe-2 {:fx [[1 3]] :bed [1 1]})
+               (tap :hit 1000))
+        hit (rt s0 :voices :hit)
+        s1 (edited s0 2000 library/remove-vibe :vibe-1)]
+    (is (and (fx-on? s0 [0 3]) (some? (intent s0 [0 1]))) "vibe-1's look: its FX set and its bed")
+    (is (not (fx-on? s1 [0 3])) "its FX set goes off")
+    (is (nil? (intent s1 [0 1])) "its bed stops")
+    (is (= [:vibe-2 2000] [(rt s1 :current) (rt s1 :entered-at)]) "the first of :order takes over (01 invariant 9)")
+    (is (and (fx-on? s1 [1 3]) (= [1 1] (rt s1 :voices :bed :cell))) "with its look")
+    (is (= (:run hit) (:run (intent s1 (:cell hit)))) "a decaying HIT plays out, as after a switch")
+    (testing "the last vibe: its look goes, and nothing is current"
+      (let [s2 (edited s1 3000 library/remove-vibe :vibe-2)]
+        (is (not (fx-on? s2 [1 3])))
+        (is (nil? (intent s2 [1 1])))
+        (is (nil? (rt s2 :current)))))
+    (testing "another vibe: nothing plays differently"
+      (is (= (:vibe-runtime s0) (:vibe-runtime (edited s0 2000 library/remove-vibe :vibe-2)))))
+    (testing "during blackout the next vibe is current, and its look waits for blackout to end"
+      (let [s (-> s0 (press :blackout 1500) (edited 2000 library/remove-vibe :vibe-1))]
+        (is (= :vibe-2 (rt s :current)))
+        (is (not (fx-on? s [1 3])))
+        (is (fx-on? (press s :blackout 2500) [1 3]))))))
+
+(deftest fx-set-edits-switch-the-playing-vibe-test
+  (let [s0 (-> (starter) (with-vibe :vibe-1 {:fx [[0 3]]}) (tap :hit 1000))
+        s1 (edited s0 2000 library/toggle-fx :vibe-1 :fx [1 3])
+        s2 (edited s1 3000 library/toggle-fx :vibe-1 :fx [0 3])]
+    (is (and (fx-on? s1 [1 3]) (= [[0 3] [1 3]] (rt s1 :fx-on))) "a cell the FX set gains switches on")
+    (is (and (not (fx-on? s2 [0 3])) (= [[1 3]] (rt s2 :fx-on))) "one it loses switches off")
+    (testing "a cell switched on by hand stays the user's: added, it isn't the set's to switch off"
+      (let [by-hand (assoc-in s0 [:chains :effect-chains [1 3] :active?] true)
+            s (edited by-hand 2000 library/toggle-fx :vibe-1 :fx [1 3])]
+        (is (= [[0 3]] (rt s :fx-on)))
+        (is (fx-on? (edited s 3000 library/toggle-fx :vibe-1 :fx [1 3]) [1 3]))))
+    (testing "another vibe's FX set and the flash's effects wait for their turn"
+      (is (not (fx-on? (edited s0 2000 library/toggle-fx :vibe-2 :fx [1 3]) [1 3])))
+      (is (not (fx-on? (edited s0 2000 library/toggle-fx :vibe-1 :flash-fx [1 3]) [1 3]))))
+    (testing "nothing before the first press, nor during blackout, which brings the new set back"
+      (is (not (fx-on? (edited (with-vibe (starter) :vibe-1 {:fx [[0 3]]}) 2000 library/toggle-fx :vibe-1 :fx [1 3]) [1 3])))
+      (let [s (-> s0 (press :blackout 1500) (edited 2000 library/toggle-fx :vibe-1 :fx [1 3]))]
+        (is (not (fx-on? s [1 3])))
+        (is (fx-on? (press s :blackout 2500) [1 3]))))
+    (testing "a held flash: a cell it switched on becomes the set's, one it asked for stays on until it lets go"
+      (let [s (-> (starter)
+                  (with-vibe :vibe-1 {:fx [[0 3]] :flash {:cue nil :fx [[0 3] [1 3]] :solo? false}})
+                  (tap :hit 1000)
+                  (press :flash 1100))
+            s1 (edited s 1200 library/toggle-fx :vibe-1 :fx [1 3])
+            s2 (edited s1 1300 library/toggle-fx :vibe-1 :fx [0 3])
+            s3 (release s2 :flash 1400)]
+        (is (= [[[0 3] [1 3]] []] [(rt s1 :fx-on) (rt s1 :voices :flash :fx-on)]))
+        (is (= [[[1 3]] [[0 3]]] [(rt s2 :fx-on) (rt s2 :voices :flash :fx-on)]))
+        (is (fx-on? s2 [0 3]))
+        (is (and (not (fx-on? s3 [0 3])) (fx-on? s3 [1 3])))))))
+
+(deftest bed-edits-restart-the-bed-test
+  (let [s0 (-> (starter) (with-vibe :vibe-1 {:bed [0 1]}) (tap :hit 1000))
+        bed (rt s0 :voices :bed)
+        s1 (edited s0 2000 library/set-single :vibe-1 :bed [1 1])]
+    (is (= [0 1] (:cell bed)))
+    (is (nil? (intent s1 [0 1])) "the old bed stops")
+    (is (and (= [1 1] (rt s1 :voices :bed :cell)) (some? (intent s1 [1 1]))) "the new one plays, as the bed")
+    (testing "cleared, it stops"
+      (let [s2 (edited s1 3000 library/set-single :vibe-1 :bed nil)]
+        (is (nil? (intent s2 [1 1])))
+        (is (nil? (rt s2 :voices :bed)))))
+    (testing "an edit that leaves the bed as it is doesn't restart it"
+      (is (= bed (rt (edited s0 2000 library/rename-vibe :vibe-1 "Calm") :voices :bed))))
+    (testing "a bed cell the grid started again is the grid's: it plays on"
+      (let [taken (:state (handlers/handle-event {:event/type :grid/activate-cell :col 0 :row 1 :time 1500 :state s0}))
+            s (edited taken 2000 library/set-single :vibe-1 :bed [1 1])]
+        (is (not= (:run bed) (:run (intent taken [0 1]))))
+        (is (= (intent taken [0 1]) (intent s [0 1])))
+        (is (= [1 1] (rt s :voices :bed :cell)))))
+    (testing "Allow audience cells: an audience bed plays only while the vibe allows it"
+      (let [crowd (-> s0
+                      (assoc-in [:chains :cue-chains [1 1] :destination-zone :zone-group-id] :crowd)
+                      (edited 2000 library/set-single :vibe-1 :bed [1 1]))
+            allowed (edited crowd 3000 library/set-role-option :vibe-1 nil :allow-audience? true)]
+        (is (nil? (intent crowd [0 1])))
+        (is (nil? (intent crowd [1 1])) "not allowed: it doesn't start")
+        (is (= [1 1] (rt allowed :voices :bed :cell)))
+        (is (nil? (intent (edited allowed 4000 library/set-role-option :vibe-1 nil :allow-audience? false) [1 1])))))
+    (testing "while a solo flash holds the bed back, the new bed waits for its release"
+      (let [s (-> s0 (press :flash 1500) (edited 2000 library/set-single :vibe-1 :bed [1 1]))]
+        (is (nil? (intent s [1 1])))
+        (is (= {:cell [1 1]} (rt s :duck :bed)))
+        (is (= [1 1] (rt (release s :flash 2500) :voices :bed :cell)))))))
+
+(deftest pool-edits-wait-for-the-next-press-test
+  (let [s0 (-> (starter)
+               (with-vibe :vibe-1 {:hit {:cells [[0 0] [1 0]] :select :sequence :mode :sustain}})
+               (tap :hit 1000))
+        {:keys [cell run]} (rt s0 :voices :hit)
+        s1 (edited s0 2000 library/toggle-cell :vibe-1 :hit [0 0])]
+    (is (= [0 0] cell))
+    (is (= run (:run (intent s1 cell))) "the cue a press started plays on")
+    (is (= (:vibe-runtime s0) (:vibe-runtime s1)))
+    (is (= [1 0] (rt (press s1 :hit 3000) :voices :hit :cell)) "the next press picks from the pool as it is now")))
+
+(deftest edits-after-an-undo-converge-test
+  (testing "an undo took the vibe that plays away (an undo runs no handler): the next edit leaves its look"
+    (let [s0 (-> (starter) (with-vibe :vibe-2 {:fx [[1 3]]}) (select :vibe-2 1000))
+          undone (-> s0 (update-in [:config :vibes :library] dissoc :vibe-2) (update-in [:config :vibes :order] pop))
+          s1 (edited undone 2000 library/rename-vibe :vibe-1 "Calm")]
+      (is (fx-on? undone [1 3]))
+      (is (not (fx-on? s1 [1 3])))
+      (is (= :vibe-1 (rt s1 :current)))))
+  (testing "an id handed out again after an undo isn't taken for the vibe that played"
+    (let [s0 (-> (starter) (edited 1000 library/add-vibe) (with-vibe :vibe-3 {:fx [[1 3]]}) (select :vibe-3 1500))
+          undone (assoc-in s0 [:config :vibes] (get-in (starter) [:config :vibes]))
+          s1 (edited undone 2000 library/add-vibe)]
+      (is (fx-on? s0 [1 3]))
+      (is (= :vibe-3 (peek (get-in s1 [:config :vibes :order]))) "the id comes back")
+      (is (= :vibe-1 (rt s1 :current)) "but not as the vibe that played")
+      (is (not (fx-on? s1 [1 3]))))))

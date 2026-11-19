@@ -277,6 +277,132 @@
       (is (= "BLACKOUT" (banner (handle lit-twice {:event/type :transport/stop}))) "Stop: dark again")
       (is (nil? (banner (handle lit {:event/type :vibe/press :role :blackout :time 2000}))) "BLACKOUT off"))))
 
+
+;; Vibe mode: the Vibes tab's subs (Phase 3)
+
+(defn- learned-all [state]
+  (assoc-in state [:config :input :trigger-map]
+            (into {} (map-indexed (fn [i role] [{:source :midi :channel 0 :note (+ 36 i)} {:type :vibe :role role}])
+                                  library/roles))))
+
+(deftest cell-vibes-ignores-other-cells-test
+  (let [ctx (context (vibe-state))
+        here (fx/sub-ctx ctx subs/cell-vibes :cue 0 0)
+        pick (fx/sub-ctx ctx subs/vibe-pick-cell 0 0)
+        label (fx/sub-ctx ctx subs/vibe-pick-label 0 0)]
+    (is (= [{:vibe :vibe-1 :color "#4A90D9" :role :hit :pos 1}] here))
+    (testing "invariant 6: another cell joins a pool; this cell's values stay identical"
+      (let [ctx' (handle ctx {:event/type :vibe/toggle-cell :vibe :vibe-1 :slot :hit :col 5 :row 0})]
+        (is (= [{:vibe :vibe-1 :color "#4A90D9" :role :hit :pos 5} {:vibe :vibe-2 :color "#9B59B6" :role :hit :pos 1}]
+               (fx/sub-ctx ctx' subs/cell-vibes :cue 5 0)))
+        (is (identical? here (fx/sub-ctx ctx' subs/cell-vibes :cue 0 0)))
+        (is (identical? pick (fx/sub-ctx ctx' subs/vibe-pick-cell 0 0)))))
+    (testing "nor do a press, the cue playing, the show clock's status or the grid's selection"
+      (let [ctx' (-> ctx (press :hit 1000) (status-write) (fx/swap-context assoc-in [:grid :selected-cell] [0 0]))]
+        (is (identical? here (fx/sub-ctx ctx' subs/cell-vibes :cue 0 0)))
+        (is (identical? pick (fx/sub-ctx ctx' subs/vibe-pick-cell 0 0)))
+        (is (identical? label (fx/sub-ctx ctx' subs/vibe-pick-label 0 0)))))
+    (testing "its own membership does"
+      (let [ctx' (handle ctx {:event/type :vibe/toggle-cell :vibe :vibe-1 :slot :hit :col 0 :row 0})]
+        (is (= [] (fx/sub-ctx ctx' subs/cell-vibes :cue 0 0)))
+        (is (false? (:in? (fx/sub-ctx ctx' subs/vibe-pick-cell 0 0))))))))
+
+(deftest vibe-cell-index-follows-a-move-test
+  (let [ctx (context (-> (vibe-state)
+                         (assoc-in [:chains :effect-chains [0 3]] {:items [{:effect-id :scale}] :active? false})
+                         (assoc-in [:config :vibes :library :vibe-2 :fx] [[0 3]])))
+        moved (handle ctx {:event/type :grid/move-cell :from-col 0 :from-row 0 :to-col 2 :to-row 3})]
+    (is (= [{:vibe :vibe-1 :color "#4A90D9" :role :hit :pos 1}] (fx/sub-ctx moved subs/cell-vibes :cue 2 3))
+        "invariant 5: the cell's place in the pool, at its new place on the grid")
+    (is (= [] (fx/sub-ctx moved subs/cell-vibes :cue 0 0)))
+    (is (= #{[2 3] [1 0] [2 0] [3 0] [4 0] [5 0] [6 0] [7 0]} (set (keys (fx/sub-ctx moved subs/vibe-cell-index :cue)))))
+    (testing "the effects grid has its own index"
+      (let [moved (handle ctx {:event/type :effects/move-cell :from-col 0 :from-row 3 :to-col 1 :to-row 2})]
+        (is (= [{:vibe :vibe-2 :color "#9B59B6" :role :fx}] (fx/sub-ctx moved subs/cell-vibes :fx 1 2)))
+        (is (= [] (fx/sub-ctx moved subs/cell-vibes :fx 0 3)))
+        (is (= [] (fx/sub-ctx moved subs/cell-vibes :cue 1 2)) "a cue cell [1 2] is another cell")))))
+
+(deftest vibe-pick-cell-sub-test
+  (let [ctx (context (-> (vibe-state)
+                         (assoc-in [:config :vibes :library :vibe-1 :bed] [5 0])
+                         (assoc-in [:chains :cue-chains [3 0] :destination-zone :zone-group-id] :crowd)
+                         (assoc-in [:chains :effect-chains [0 3]] {:items [{:effect-id :scale}] :active? false})
+                         (assoc-in [:config :vibes :library :vibe-2 :fx] [[0 3]])))
+        pick (fn [ctx col row] (fx/sub-ctx ctx subs/vibe-pick-cell col row))]
+    (is (= {:in? true :pos 1 :roles [] :others [] :blocked nil} (pick ctx 0 0)) "Shapes is edited, its HIT: the first of the pool")
+    (is (= {:in? false :pos nil :roles [:bed] :others ["#9B59B6"] :blocked nil} (pick ctx 5 0))
+        "Shapes' bed, and in Lines")
+    (is (= {:in? false :pos nil :roles [] :others [] :blocked nil} (pick ctx 0 2)) "an empty cell")
+    (is (= :crowd (:blocked (pick ctx 3 0))) "Shapes never plays a cue that reaches the audience")
+    (is (nil? (:blocked (pick (handle ctx {:event/type :vibe/set-option :vibe :vibe-1 :key :allow-audience? :value true}) 3 0)))
+        "unless it allows them")
+    (testing "another slot, another vibe"
+      (let [bed (handle ctx {:event/type :vibe/set-slot :slot :bed})
+            lines (handle ctx {:event/type :vibe/select-for-edit :vibe :vibe-2})]
+        (is (= {:in? true :pos nil :roles [] :others ["#9B59B6"] :blocked nil} (pick bed 5 0)))
+        (is (= {:in? true :pos 1 :roles [] :others ["#4A90D9"] :blocked nil} (pick lines 5 0)))
+        (is (= {:vibe :vibe-2 :slot :hit} (fx/sub-ctx lines subs/vibe-edit-target)))))
+    (testing "the effects grid"
+      (is (= {:in? false :pos nil :roles [] :others ["#9B59B6"]} (fx/sub-ctx ctx subs/vibe-pick-fx 0 3)))
+      (is (= {:in? true :pos nil :roles [] :others []}
+             (fx/sub-ctx (-> ctx
+                             (handle {:event/type :vibe/select-for-edit :vibe :vibe-2})
+                             (handle {:event/type :vibe/set-slot :slot :fx}))
+                         subs/vibe-pick-fx 0 3))))))
+
+(deftest vibe-editor-sub-test
+  (let [ctx (context (vibe-state))]
+    (is (= {:vibe :vibe-1 :slot :hit} (fx/sub-ctx ctx subs/vibe-edit-target)) "nothing selected: the first vibe, HIT")
+    (is (= (assoc (get-in (vibe-state) [:config :vibes :library :vibe-1]) :slot :hit :current? true)
+           (fx/sub-ctx ctx subs/vibe-editor)))
+    (is (= [[:vibe-1 true] [:vibe-2 false]] (mapv (juxt :id :selected?) (fx/sub-ctx ctx subs/vibe-list))))
+    (let [ctx' (handle ctx {:event/type :vibe/select-for-edit :vibe :vibe-2})]
+      (is (= [false "Lines"] ((juxt :current? :name) (fx/sub-ctx ctx' subs/vibe-editor))))
+      (is (= [[:vibe-1 false] [:vibe-2 true]] (mapv (juxt :id :selected?) (fx/sub-ctx ctx' subs/vibe-list)))))
+    (is (= :vibe-1 (:vibe (fx/sub-ctx (fx/swap-context ctx assoc-in [:ui :vibes :selected] :gone) subs/vibe-edit-target)))
+        "a vibe that went: the first")
+    (is (nil? (fx/sub-ctx (fx/swap-context ctx assoc-in [:config :vibes] library/empty-library) subs/vibe-editor)))))
+
+(deftest vibe-checklist-test
+  (let [done (fn [state] (mapv (juxt :step :done?) (fx/sub-ctx (context state) subs/vibe-checklist)))]
+    (is (= [[:cues false] [:vibes false] [:hit false] [:controls false]] (done (domains/build-initial-state))))
+    (is (= [[:cues true] [:vibes true] [:hit true] [:controls false]] (done (vibe-state)))
+        "the starter show, with HIT's key only")
+    (is (= "Learn the five controls (1 of 5)" (:text (peek (fx/sub-ctx (context (vibe-state)) subs/vibe-checklist)))))
+    (is (= [[:cues true] [:vibes true] [:hit true] [:controls true]] (done (learned-all (vibe-state)))))
+    (is (= [:hit false] (nth (done (assoc-in (vibe-state) [:config :vibes :library :vibe-2 :hit :cells] [])) 2))
+        "a vibe with no HIT cue to play")
+    (is (= [:hit false] (nth (done (assoc-in (vibe-state) [:config :vibes :library :vibe-2 :hit :cells] [[0 3]])) 2))
+        "nor with an empty cell")))
+
+(deftest vibe-lint-sub-test
+  (let [ctx (context (vibe-state))
+        lint (fx/sub-ctx ctx subs/vibe-lint)]
+    (is (= [{:level :info :text "1 of 5 controls learned"}] lint))
+    (is (identical? lint (fx/sub-ctx (-> ctx (press :hit 1000) (status-write)) subs/vibe-lint))
+        "a press and the show clock's status leave it alone")
+    (is (= [{:level :error :vibe :vibe-2 :text "Lines: HIT has no cues to play"}]
+           (filterv #(= :error (:level %))
+                    (fx/sub-ctx (-> ctx
+                                    (handle {:event/type :grid/clear-cell :col 5 :row 0})
+                                    (handle {:event/type :grid/clear-cell :col 7 :row 0}))
+                                subs/vibe-lint)))
+        "a cleared cell leaves its pools (vibes.refs): both of Lines' HIT cues cleared, it has nothing to play")))
+
+(deftest vibe-controls-sub-test
+  (let [ctx (context (vibe-state))
+        wizard {:queue [:accent :flash :vibe :blackout] :done [:hit] :refused :hit}]
+    (is (= {:role :hit :label "HIT" :bindings [hit-key] :learning? false} (fx/sub-ctx ctx subs/vibe-control :hit)))
+    (is (= {:role :blackout :label "BLACKOUT" :bindings [] :learning? false} (fx/sub-ctx ctx subs/vibe-control :blackout)))
+    (is (nil? (fx/sub-ctx ctx subs/vibe-wizard)))
+    (let [ctx' (fx/swap-context ctx #(-> %
+                                         (assoc-in [:ui :vibes :wizard] wizard)
+                                         (assoc-in [:backend :input :learning-target] {:type :vibe :role :accent})))]
+      (is (= {:role :accent :step 2 :of 5 :refused :hit} (fx/sub-ctx ctx' subs/vibe-wizard)))
+      (is (true? (:learning? (fx/sub-ctx ctx' subs/vibe-control :accent))))
+      (is (nil? (fx/sub-ctx (fx/swap-context ctx' update-in [:backend :input] dissoc :learning-target) subs/vibe-wizard))
+          "nothing learning: no wizard shows, whatever is left in the UI state"))))
+
 (deftest timeline-dialog-subs-ignore-playback-and-other-cells-test
   (let [ctx (context base-state)
         chain (fx/sub-ctx ctx subs/cue-cell-chain 0 0)

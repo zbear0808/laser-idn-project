@@ -160,3 +160,98 @@
           "HIT's own key: nothing changes, so no undo step (K-15: that press also fired HIT)"))
     (finally
       (stop-learning!))))
+
+
+;; Learn all (Phase 3)
+
+(defn- piped
+  "state after event through the pipeline, then each event it dispatches,
+   as the agent runs them."
+  [state event]
+  (let [effects (events/handle-event-pipeline (merge {:time 0} event {:state state}))
+        s (or (:state effects) state)]
+    (if-let [next-event (:dispatch effects)]
+      (piped s next-event)
+      s)))
+
+(defn- learning-target [state] (get-in state [:backend :input :learning-target]))
+(defn- wizard [state] (get-in state [:ui :vibes :wizard]))
+
+(defn- press-key
+  "state after the learn waiting now caught note n, as :input/await-learn
+   hands it on."
+  [state n]
+  (piped state {:event/type :input/learn-captured :target-action (learning-target state) :input-event (note n)}))
+
+(def ^:private learn-all {:event/type :vibe/learn-all})
+(def ^:private hit-role {:type :vibe :role :hit})
+(def ^:private accent-role {:type :vibe :role :accent})
+
+(deftest learn-all-chains-the-five-roles-test
+  (try
+    (let [s1 (piped (history/mark-clean (initial-state)) learn-all)
+          steps (reductions press-key s1 [36 37 38 39 40])
+          done (last steps)]
+      (is (= {:queue [:hit :accent :flash :vibe :blackout] :done []} (wizard s1)))
+      (is (= hit-role (learning-target s1)) "it starts with HIT")
+      (is (empty? (get-in s1 [:history :undo-stack])) "starting it is no undo step")
+      (is (= [:accent :flash :vibe :blackout nil] (map (comp :role learning-target) (rest steps)))
+          "each key caught starts the next role's learn")
+      (is (= [[:hit] [:hit :accent] [:hit :accent :flash] [:hit :accent :flash :vibe]]
+             (map (comp :done wizard) (butlast (rest steps)))))
+      (is (= (zipmap (map note-key [36 37 38 39 40]) (map #(hash-map :type :vibe :role %) [:hit :accent :flash :vibe :blackout]))
+             (trigger-map done)))
+      (is (nil? (wizard done)) "it ends after BLACKOUT")
+      (is (nil? (learning-target done)) "invariant 8")
+      (is (= ["Learn Trigger"] (distinct (map :description (get-in done [:history :undo-stack])))))
+      (is (= 5 (count (get-in done [:history :undo-stack]))) "one undo step a key"))
+    (finally
+      (stop-learning!))))
+
+(deftest learn-all-refuses-a-key-twice-test
+  (try
+    (let [s1 (-> (initial-state) (piped learn-all) (press-key 36))
+          s2 (press-key s1 36)
+          s3 (press-key s2 37)]
+      (is (= accent-role (learning-target s2)) "invariant 7: HIT's key pressed for ACCENT: the step waits for another key")
+      (is (= :hit (:refused (wizard s2))) "and says it is HIT's already")
+      (is (= {(note-key 36) hit-role} (trigger-map s2)))
+      (is (= {:type :vibe :role :flash} (learning-target s3)))
+      (is (nil? (:refused (wizard s3))))
+      (is (= {(note-key 36) hit-role (note-key 37) accent-role} (trigger-map s3))))
+    (testing "a key bound before Learn all moves to the role it is pressed for, as a re-learn does"
+      (let [s (-> (initial-state)
+                  (assoc-in [:config :input :trigger-map] {(note-key 50) accent-role})
+                  (piped learn-all)
+                  (press-key 50))]
+        (is (= {(note-key 50) hit-role} (trigger-map s)))
+        (is (= accent-role (learning-target s)))))
+    (finally
+      (stop-learning!))))
+
+(deftest cancel-leaves-no-learning-target-test
+  (try
+    (let [s1 (-> (initial-state) (piped learn-all) (press-key 36))]
+      (testing "Cancel"
+        (let [s (piped s1 {:event/type :vibe/wizard-cancel})]
+          (is (nil? (learning-target s)) "invariant 8")
+          (is (nil? (wizard s)))
+          (is (= {(note-key 36) hit-role} (trigger-map s)) "what was learned stays")
+          (testing "and the capture of the cancelled learn, if it comes late, binds nothing and starts nothing"
+            (let [s' (piped s {:event/type :input/learn-captured :target-action accent-role :input-event (note 37)})]
+              (is (= (trigger-map s) (trigger-map s')))
+              (is (nil? (learning-target s')))))))
+      (testing "a pad's Cancel learning ends it too"
+        (let [s (piped s1 {:event/type :input/cancel-learn})]
+          (is (nil? (learning-target s)))
+          (is (nil? (wizard s)))))
+      (testing "and so does a learn for anything else: that one's key is learned, and nothing follows"
+        (doseq [target [{:type :trigger-cue :target [0 0]} {:type :vibe :role :vibe}]]
+          (let [s (piped s1 {:event/type :input/start-learn :target-action target})
+                s' (press-key s 60)]
+            (is (= target (learning-target s)))
+            (is (nil? (wizard s)))
+            (is (= target (get (trigger-map s') (note-key 60))))
+            (is (nil? (learning-target s')))))))
+    (finally
+      (stop-learning!))))

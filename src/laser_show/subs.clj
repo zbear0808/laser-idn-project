@@ -1022,3 +1022,166 @@
                                            :name)
                             :locked? (fx/sub-val context vibe-locked?))
       (= :blackout role) (assoc :on? blackout?))))
+
+
+;; The Vibes tab (views/tabs/vibes.clj): its list, editor, picker
+;; (views/components/vibe_picker.clj), Controls panel
+;; (views/components/vibe_controls.clj), checklist and lint. A cell of the
+;; picker subscribes to its own memberships, its own cue and what is edited,
+;; and each level of its subs keeps its value while the level under it
+;; stays equal, so a click on one cell re-renders that cell only (03
+;; invariant 6).
+
+(defn vibe-edited-id
+  "The vibe the Vibes tab edits (vibes.library/edited-id): the one selected,
+   or the first."
+  [context]
+  (fx/sub-val context library/edited-id))
+
+(defn vibe-edit-target
+  "What the Vibes tab edits: {:vibe (vibe-edited-id) :slot (what a click on
+   its picker fills, vibes.library/slots)}."
+  [context]
+  {:vibe (fx/sub-ctx context vibe-edited-id)
+   :slot (fx/sub-val context get-in [:ui :vibes :slot] :hit)})
+
+(defn vibe-editor
+  "The vibe the Vibes tab edits, as the library has it, with :slot and
+   :current? (it is the vibe that plays); nil without vibes."
+  [context]
+  (let [{:keys [vibe slot]} (fx/sub-ctx context vibe-edit-target)]
+    (when-let [v (get-in (fx/sub-ctx context vibe-config) [:library vibe])]
+      (assoc v :slot slot :current? (= vibe (fx/sub-ctx context vibe-current-id))))))
+
+(defn vibe-list
+  "The Vibes tab's list: vibe-strip's entries, with :selected? for the one
+   edited."
+  [context]
+  (let [edited (fx/sub-ctx context vibe-edited-id)]
+    (mapv #(assoc % :selected? (= edited (:id %))) (fx/sub-ctx context vibe-strip))))
+
+(defn vibe-cell-index
+  "Who names each cell of the cue grid (grid :cue) or the effects grid
+   (:fx), and as what (vibes.library/cell-index). Follows the vibes only."
+  [context grid]
+  (library/cell-index (fx/sub-ctx context vibe-config) grid))
+
+(defn- indexed-cell-vibes [context grid col row]
+  (get (fx/sub-ctx context vibe-cell-index grid) [col row] []))
+
+(defn cell-vibes
+  "Who names the cell [col row] of grid, and as what: [{:vibe :color :role
+   :pos}]. The same vector while the cell's own memberships stay as they
+   are, whatever another cell's do."
+  [context grid col row]
+  (fx/sub-ctx context indexed-cell-vibes grid col row))
+
+(defn vibe-audience-groups
+  "The zone groups that reach the audience (vibes.library/audience-groups),
+   from the projectors alone."
+  [context]
+  (library/audience-groups {:projectors (fx/sub-val context :projectors)
+                            :virtual-projectors (fx/sub-val context :virtual-projectors)}))
+
+(defn- edited-allows-audience? [state]
+  (boolean (:allow-audience? (library/vibe state (library/edited-id state)))))
+
+(defn- cell-blocked [context col row]
+  (let [groups (when-not (fx/sub-val context edited-allows-audience?)
+                 (fx/sub-ctx context vibe-audience-groups))]
+    (#{:timecode :crowd} (library/unplayable (fx/sub-ctx context cue-cell-chain col row) groups))))
+
+(defn vibe-cell-blocked
+  "Why the vibe edited never plays the cue at [col row]: :timecode (it
+   follows MIDI timecode) or :crowd (it can reach the audience, which the
+   vibe doesn't allow); nil when it plays it, or the cell is empty."
+  [context col row]
+  (fx/sub-ctx context cell-blocked col row))
+
+(defn- pick-state
+  "A picker cell for what is edited ({:vibe :slot}), from the cell's
+   memberships (cell-vibes)."
+  [{:keys [vibe slot]} memberships]
+  (let [mine (filterv #(= vibe (:vibe %)) memberships)
+        in (some #(when (= slot (:role %)) %) mine)]
+    {:in? (some? in)
+     :pos (:pos in)
+     :roles (into [] (comp (map :role) (remove #{slot})) mine)
+     :others (into [] (comp (remove #(= vibe (:vibe %))) (map (juxt :vibe :color)) (distinct) (map second))
+                   memberships)}))
+
+(defn vibe-pick-cell
+  "A cue cell of the Vibes tab's picker: {:in? (in the slot edited) :pos
+   (its place in a HIT or ACCENT pool, from 1) :roles (its other roles in
+   the vibe) :others (the colours of the other vibes it is in) :blocked
+   (vibe-cell-blocked)}."
+  [context col row]
+  (assoc (pick-state (fx/sub-ctx context vibe-edit-target) (fx/sub-ctx context cell-vibes :cue col row))
+         :blocked (fx/sub-ctx context vibe-cell-blocked col row)))
+
+(defn vibe-pick-fx
+  "An effect cell of the Vibes tab's picker: {:in? :pos :roles :others}, as
+   vibe-pick-cell's."
+  [context col row]
+  (pick-state (fx/sub-ctx context vibe-edit-target) (fx/sub-ctx context cell-vibes :fx col row)))
+
+(defn- pick-label [context col row]
+  (select-keys (fx/sub-ctx context cell-display-data col row)
+               [:name :first-preset-id :preset-count :timeline? :has-content?]))
+
+(defn vibe-pick-label
+  "What a cue cell of the picker shows of its cue (views/components/
+   grid_cell.clj cell-label's keys, and :has-content?): not whether it
+   plays, nor the grid's selection."
+  [context col row]
+  (fx/sub-ctx context pick-label col row))
+
+(defn- pick-fx-label [context col row]
+  (let [data (fx/sub-ctx context effect-cell-display-data col row)]
+    (assoc (select-keys data [:name :first-effect-id :effect-count :effect-ids])
+           :has-content? (:has-effects? data))))
+
+(defn vibe-pick-fx-label
+  "What an effect cell of the picker shows of its effects (grid_cell.clj
+   effects-label's keys, and :has-content?): not whether it is on."
+  [context col row]
+  (fx/sub-ctx context pick-fx-label col row))
+
+(defn- lint-world
+  "What the lint and the checklist read (vibes.library/lint)."
+  [state]
+  {:config {:vibes (get-in state [:config :vibes])
+            :input {:trigger-map (get-in state [:config :input :trigger-map])}}
+   :chains {:cue-chains (get-in state [:chains :cue-chains])}
+   :projectors (:projectors state)
+   :virtual-projectors (:virtual-projectors state)
+   :zone-groups (:zone-groups state)})
+
+(defn vibe-lint
+  "What to fix before the show, worst first (vibes.library/lint)."
+  [context]
+  (library/lint (fx/sub-val context lint-world)))
+
+(defn vibe-checklist
+  "What is left to set up (vibes.library/checklist)."
+  [context]
+  (library/checklist (fx/sub-val context lint-world)))
+
+(defn vibe-control
+  "A row of the Vibes tab's Controls panel: {:role :label :bindings
+   (trigger-map keys) :learning?}."
+  [context role]
+  {:role role
+   :label (vibe-role-labels role)
+   :bindings (fx/sub-ctx context vibe-role-bindings role)
+   :learning? (fx/sub-val context vibe-learning? role)})
+
+(defn vibe-wizard
+  "Learn all, while it waits for a key: {:role (the one learned now) :step
+   (from 1) :of :refused (the role a key pressed for it is already)}; nil
+   otherwise."
+  [context]
+  (let [{:keys [queue done refused]} (fx/sub-val context get-in [:ui :vibes :wizard])
+        learning (fx/sub-val context learning-role)]
+    (when (and (seq queue) (= learning (first queue)))
+      {:role learning :step (inc (count done)) :of (+ (count queue) (count done)) :refused refused})))

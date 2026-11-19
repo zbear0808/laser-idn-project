@@ -7,7 +7,8 @@
    Pure: press, release, select and release-all take state and the event
    ({:role :input-time :time :src}, {:vibe}, {:only}) and return {:state}
    plus a :dispatch for HIT's tap of the tempo and blackout's transport stop
-   and play. The engine keeps [:vibe-runtime] (state.domains), starts and
+   and play; reconcile brings what plays up to date after an edit of the
+   vibes. The engine keeps [:vibe-runtime] (state.domains), starts and
    stops cues through their intents (cue-timing/activate-cue,
    deactivate-cue; the show clock ends a decay) and switches effect cells'
    :active?. Times are the event's own: the input's when it has one, else the
@@ -102,24 +103,44 @@
 (defn- ends-with-the-look? [role {:keys [mode]}]
   (or (= :bed role) (= :sustain mode)))
 
+(defn- release-fx
+  "The FX set gives cells back: those it switched on (:fx-on) go off, and
+   one the held flash asked for stays on, now the flash's."
+  [state cells]
+  (let [mine (filterv (set cells) (get-in state [:vibe-runtime :fx-on]))
+        flash-wants (set (get-in state [:vibe-runtime :voices :flash :fx]))
+        kept (filterv flash-wants mine)]
+    (-> (switch-off state (remove flash-wants mine))
+        (update-in [:vibe-runtime :fx-on] #(filterv (complement (set mine)) %))
+        (cond-> (seq kept) (update-in [:vibe-runtime :voices :flash :fx-on] into kept)))))
+
+(defn- take-fx
+  "The FX set takes cells (those that exist): switched on, or taken over
+   from the held flash that switched them on. One already on otherwise
+   stays as it is, and isn't the set's to switch off."
+  [state cells]
+  (let [flash-owned (set (get-in state [:vibe-runtime :voices :flash :fx-on]))
+        wanted (existing-fx state cells)
+        taken (filterv flash-owned wanted)
+        [state switched] (switch-on state (remove flash-owned wanted))]
+    (-> state
+        (update-in [:vibe-runtime :fx-on] (fnil into []) (concat taken switched))
+        (cond-> (seq taken) (update-in [:vibe-runtime :voices :flash :fx-on] #(filterv (complement (set taken)) %))))))
+
 (defn- leave-look
   "Stop the bed and the :sustain voices, forget those a solo flash stepped
    aside, and switch off the FX set's effect cells (one the held flash asked
    for stays on, now the flash's)."
   [state]
-  (let [{:keys [voices duck fx-on]} (:vibe-runtime state)
-        state (reduce-kv (fn [s role voice]
-                           (if (ends-with-the-look? role voice)
-                             (-> (stop-voice s voice) (update-in [:vibe-runtime :voices] dissoc role))
-                             s))
-                         state
-                         (dissoc voices :flash))
-        flash-wants (set (get-in state [:vibe-runtime :voices :flash :fx]))
-        kept (filterv flash-wants fx-on)]
-    (-> (switch-off state (remove flash-wants fx-on))
-        (assoc-in [:vibe-runtime :duck] (into {} (remove #(ends-with-the-look? (key %) (val %))) duck))
-        (assoc-in [:vibe-runtime :fx-on] [])
-        (cond-> (seq kept) (update-in [:vibe-runtime :voices :flash :fx-on] into kept)))))
+  (let [{:keys [voices duck fx-on]} (:vibe-runtime state)]
+    (-> (reduce-kv (fn [s role voice]
+                     (if (ends-with-the-look? role voice)
+                       (-> (stop-voice s voice) (update-in [:vibe-runtime :voices] dissoc role))
+                       s))
+                   state
+                   (dissoc voices :flash))
+        (release-fx fx-on)
+        (assoc-in [:vibe-runtime :duck] (into {} (remove #(ends-with-the-look? (key %) (val %))) duck)))))
 
 (defn- start-bed
   "The vibe's bed started (kept for its release while a solo flash is held),
@@ -138,14 +159,8 @@
   [state vibe t]
   (if (get-in state [:vibe-runtime :blackout?])
     state
-    (let [flash-owned (set (get-in state [:vibe-runtime :voices :flash :fx-on]))
-          wanted (existing-fx state (:fx vibe))
-          taken (filterv flash-owned wanted)
-          [state switched] (switch-on state (remove flash-owned wanted))]
-      (-> state
-          (update-in [:vibe-runtime :fx-on] (fnil into []) (concat taken switched))
-          (cond-> (seq taken) (update-in [:vibe-runtime :voices :flash :fx-on] #(filterv (complement (set taken)) %)))
-          (start-bed vibe t)))))
+    (-> (take-fx state (:fx vibe))
+        (start-bed vibe t))))
 
 (defn- switch-to
   "state with vibe id current from t: the old look left, the new one entered."
@@ -421,3 +436,54 @@
                         (update-in s [:vibe-runtime :held] dissoc role)))
                     state
                     roles)}))
+
+
+;; Edits (the Vibes tab, events/handlers/vibes.clj)
+
+(defn- refresh-fx
+  "The FX set from was's cells to vibe's: those it lost given back, those
+   it gained taken."
+  [state was vibe]
+  (let [before (existing-fx state (:fx was))
+        after (existing-fx state (:fx vibe))]
+    (-> state
+        (release-fx (remove (set after) before))
+        (take-fx (remove (set before) after)))))
+
+(defn- refresh-bed
+  "The bed started again when the cue it should play changed from was's to
+   vibe's (another cell, or the audience rule): the old one stopped, also
+   where a solo flash keeps it waiting, and the new one started."
+  [state was vibe t]
+  (if (= (playable state was (:bed was)) (playable state vibe (:bed vibe)))
+    state
+    (-> (stop-voice state (get-in state [:vibe-runtime :voices :bed]))
+        (update-in [:vibe-runtime :voices] dissoc :bed)
+        (update-in [:vibe-runtime :duck] dissoc :bed)
+        (start-bed vibe t))))
+
+(defn reconcile
+  "state after an edit of the vibes ([:config :vibes] was before it), with
+   the look of the vibe that plays following the edit at time t, so the
+   lasers show what the editor says: an effect cell its FX set gains
+   switches on and one it loses switches off (if the engine switched it
+   on), and its bed starts again when the cue it should play changed. When
+   the vibe that plays is gone (the edit removed it, or an undo did before,
+   which runs no handler), its look is left and the first of :order is
+   entered, as a press would find it (01 invariant 9). Nothing before the
+   first press or select, nor during blackout, whose end enters the look as
+   it is then. The pools, the flash and the options take effect at the next
+   press."
+  [state was t]
+  (let [{:keys [current blackout?]} (:vibe-runtime state)
+        old (get-in was [:library current])
+        vibe (library/vibe state current)]
+    (cond
+      (nil? current) state
+      (not (and old vibe)) (-> (leave-look state)
+                               (assoc-in [:vibe-runtime :current] nil)
+                               (ensure-current t))
+      blackout? state
+      :else (-> state
+                (refresh-fx old vibe)
+                (refresh-bed old vibe t)))))

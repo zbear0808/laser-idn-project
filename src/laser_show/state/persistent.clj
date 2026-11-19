@@ -91,14 +91,30 @@
     {}
     path-specs))
 
-(defn project-files
-  "Build the {filename data} map written into the project zip from state."
+(defn- vibe-switches-off
+  "state with the effect cells vibe mode switched on ([:vibe-runtime :fx-on],
+   and the held flash's) as off. Those switches are the session's: after a
+   load or New the vibe runtime starts empty, and nothing would switch them
+   off again."
   [state]
-  (into {}
-        (keep (fn [[file-key filename]]
-                (when-let [{:keys [paths]} (get persistent-state-mapping file-key)]
-                  [filename (collect-data-for-paths state paths)])))
-        zip-filenames))
+  (let [{:keys [fx-on voices]} (:vibe-runtime state)]
+    (reduce (fn [s cell]
+              (cond-> s
+                (get-in s [:chains :effect-chains cell])
+                (assoc-in [:chains :effect-chains cell :active?] false)))
+            state
+            (concat fx-on (get-in voices [:flash :fx-on])))))
+
+(defn project-files
+  "Build the {filename data} map written into the project zip from state.
+   Effect cells vibe mode switched on are written off (vibe-switches-off)."
+  [state]
+  (let [state (vibe-switches-off state)]
+    (into {}
+          (keep (fn [[file-key filename]]
+                  (when-let [{:keys [paths]} (get persistent-state-mapping file-key)]
+                    [filename (collect-data-for-paths state paths)])))
+          zip-filenames)))
 
 (defn mark-saved
   "Record that the project was saved to zip-path at time now.

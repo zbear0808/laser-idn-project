@@ -7,8 +7,17 @@
    time as :input-time, and by the Perform tab (views/tabs/perform.clj): its
    pads' pointer events (:vibe/pointer), the vibe strip (:vibe/select), a
    pad's menu (:vibe/clear-control) and the main window's focus
-   (:vibe/window-focus)."
-  (:require [laser-show.vibes.engine :as engine]
+   (:vibe/window-focus).
+
+   The Vibes tab (views/tabs/vibes.clj) edits the vibes (laser-show.vibes
+   .library) with :vibe/add, :duplicate, :remove, :move, :rename,
+   :set-color, :set-energy, :toggle-cell, :toggle-fx, :set-option and
+   :make-from-rows, each one undo step, and what plays follows the edit at
+   once (engine/reconcile). :vibe/select-for-edit and :set-slot are its
+   selection, :learn-all and :wizard-cancel its Learn all (handlers/input.clj
+   chains the learns): UI state, never undone."
+  (:require [laser-show.events.helpers :as h]
+            [laser-show.vibes.engine :as engine]
             [laser-show.vibes.library :as library])
   (:import [javafx.scene.input MouseButton MouseEvent TouchEvent]))
 
@@ -66,11 +75,85 @@
                      #(into {} (remove (fn [[_ action]] (library/binds-role? action role))) %))})
 
 
+;; The Vibes tab: edits (undoable; an edit with nothing to do, such as an
+;; unknown vibe, a bad value or no arguments, leaves state as it is)
+
+(defn- edit
+  "state with f applied to the vibes ([:config :vibes]), and what plays
+   following the edit (engine/reconcile)."
+  [{:keys [state] :as event} f & args]
+  (let [was (get-in state [:config :vibes])
+        vibes (apply f was args)]
+    (if (= was vibes)
+      state
+      (engine/reconcile (assoc-in state [:config :vibes] vibes) was (h/current-time-ms event)))))
+
+(defn- handle-add
+  "An edit that makes vibes (Add, Duplicate, Make from rows): the first new
+   one is selected."
+  [{:keys [state] :as event} f & args]
+  (let [state' (apply edit event f args)
+        new-id (first (remove (set (get-in state [:config :vibes :order])) (get-in state' [:config :vibes :order])))]
+    {:state (cond-> state' new-id (assoc-in [:ui :vibes :selected] new-id))}))
+
+(defn- handle-remove
+  "Delete a vibe. When it was the one edited, its neighbour is next."
+  [{:keys [state vibe] :as event}]
+  (let [order (vec (get-in state [:config :vibes :order]))
+        i (first (keep-indexed #(when (= vibe %2) %1) order))
+        state' (edit event library/remove-vibe vibe)]
+    {:state (cond-> state'
+              (and i (= vibe (library/edited-id state)))
+              (assoc-in [:ui :vibes :selected] (or (get order (inc i)) (get order (dec i)))))}))
+
+(defn- event-cell
+  "The cell an event names: :cell, or the :col and :row a grid cell's click
+   gives (views/components/grid_cell.clj)."
+  [{:keys [cell col row]}]
+  (or cell (when (and col row) [col row])))
+
+(defn- handle-toggle
+  "A click on the picker: the cell in or out of the vibe's slot (f:
+   library/toggle-cell on the cue grid, toggle-fx on the effects grid). An
+   empty cell isn't put in: it has nothing to play."
+  [{:keys [state vibe slot] :as event} f grid]
+  (let [cell (event-cell event)]
+    {:state (if (or (library/in-slot? (get-in state [:config :vibes]) vibe slot cell)
+                    (seq (get-in state [:chains grid cell :items])))
+              (edit event f vibe slot cell)
+              state)}))
+
+(defn- handle-edit [event f & args]
+  {:state (apply edit event f args)})
+
+
+;; The Vibes tab: its selection and Learn all (UI state, never undone)
+
+(defn- handle-select-for-edit [{:keys [state vibe]}]
+  {:state (cond-> state (library/vibe state vibe) (assoc-in [:ui :vibes :selected] vibe))})
+
+(defn- handle-set-slot [{:keys [state slot]}]
+  {:state (cond-> state (some #{slot} library/slots) (assoc-in [:ui :vibes :slot] slot))})
+
+(defn- handle-learn-all
+  "Learn the five controls in a row: the first role's learn now, each next
+   one when the one before it captured its key (handlers/input.clj)."
+  [{:keys [state]}]
+  {:state (assoc-in state [:ui :vibes :wizard] {:queue library/roles :done []})
+   :dispatch {:event/type :input/start-learn :target-action {:type :vibe :role (first library/roles)}}})
+
+(defn- handle-wizard-cancel
+  "Stop Learn all, and the learn it waits on."
+  [{:keys [state]}]
+  {:state (assoc-in state [:ui :vibes :wizard] nil)
+   :dispatch {:event/type :input/cancel-learn}})
+
+
 (defn handle
   "Dispatch vibe events to the engine.
    
    Accepts events with :event/type in the :vibe/* namespace."
-  [{:keys [event/type state] :as event}]
+  [{:keys [event/type state vibe] :as event}]
   (case type
     :vibe/press (engine/press state event)
     :vibe/release (engine/release state event)
@@ -79,6 +162,24 @@
     :vibe/pointer (handle-pointer event)
     :vibe/window-focus (handle-window-focus event)
     :vibe/clear-control (handle-clear-control event)
+
+    ;; The Vibes tab
+    :vibe/add (handle-add event library/add-vibe)
+    :vibe/duplicate (handle-add event library/duplicate-vibe vibe)
+    :vibe/make-from-rows (handle-add event library/make-from-rows
+                                     (get-in state [:chains :cue-chains]) (get-in state [:grid :size]))
+    :vibe/remove (handle-remove event)
+    :vibe/move (handle-edit event library/move-vibe vibe (:to event))
+    :vibe/rename (handle-edit event library/rename-vibe vibe (:name event))
+    :vibe/set-color (handle-edit event library/set-color vibe (:color event))
+    :vibe/set-energy (handle-edit event library/set-energy vibe (:energy event))
+    :vibe/toggle-cell (handle-toggle event library/toggle-cell :cue-chains)
+    :vibe/toggle-fx (handle-toggle event library/toggle-fx :effect-chains)
+    :vibe/set-option (handle-edit event library/set-role-option vibe (:role event) (:key event) (:value event))
+    :vibe/select-for-edit (handle-select-for-edit event)
+    :vibe/set-slot (handle-set-slot event)
+    :vibe/learn-all (handle-learn-all event)
+    :vibe/wizard-cancel (handle-wizard-cancel event)
     
     ;; Unknown event in this domain
     {}))

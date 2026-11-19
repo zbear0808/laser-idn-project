@@ -145,7 +145,18 @@
    :zone-groups/create-new "Add Zone Group"
    :zone-groups/save-edit "Edit Zone Group"
    :zone-groups/remove "Delete Zone Group"
-   :vibe/clear-control "Clear Control"})
+   :vibe/clear-control "Clear Control"
+   :vibe/add "Add Vibe"
+   :vibe/duplicate "Duplicate Vibe"
+   :vibe/remove "Delete Vibe"
+   :vibe/move "Reorder Vibes"
+   :vibe/rename "Rename Vibe"
+   :vibe/set-color "Change Vibe"
+   :vibe/set-energy "Change Vibe"
+   :vibe/toggle-cell "Edit Vibe Cues"
+   :vibe/toggle-fx "Edit Vibe Effects"
+   :vibe/set-option "Change Vibe Option"
+   :vibe/make-from-rows "Make Vibes From Rows"})
 
 (defn format-event-description
   "Generate a human-readable description for an event type."

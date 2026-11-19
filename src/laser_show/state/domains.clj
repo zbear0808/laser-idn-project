@@ -198,6 +198,8 @@
                     :doc "timeline editor preferences shared by every cue (snap, preset drawer, inspector, ruler mode, detail panel height); kept for the session, not saved"}
    :preview-zone-selector-open {:default nil
                                 :doc "Cell index whose zone selector popup is open, or nil if none"}
+   :vibes {:default {:selected nil :slot :hit :wizard nil}
+           :doc "the Vibes tab (views/tabs/vibes.clj): :selected, the vibe edited (nil: the first); :slot, what a click on the picker fills (vibes.library/slots); :wizard, Learn all while it runs: {:queue roles to learn, the first being learned :done learned roles :refused the role a key pressed again is already}; for the session, not saved"}
    :window {:default {:width default-window-width
                       :height default-window-height}
             :doc "window dimensions"}

@@ -101,3 +101,195 @@
     (is (= #{[0 0] [2 0]} (hits state)) "81 presses never pick the two crowd cues")
     (is (= #{[0 0] [1 0] [2 0] [3 0]} (hits (assoc-in state [:config :vibes :library :vibe-1 :allow-audience?] true)))
         "unless the vibe allows them")))
+
+
+;; Editing the vibes (Phase 3)
+
+(defn- vibes [state] (get-in state [:config :vibes]))
+
+(deftest add-vibe-makes-a-unique-id-test
+  (let [v0 (vibes (starter))
+        v1 (library/add-vibe v0)]
+    (is (= [:vibe-1 :vibe-2 :vibe-3] (:order v1)) "last in the order")
+    (is (= 4 (:next-id v1)))
+    (is (= (library/new-vibe :vibe-3 3 "Vibe 3") (get-in v1 [:library :vibe-3])))
+    (is (= {:name "Vibe 3" :color "#E67E22" :energy 2 :allow-audience? false}
+           (select-keys (get-in v1 [:library :vibe-3]) [:name :color :energy :allow-audience?]))
+        "the palette's third colour, as the starter vibes have the first two")
+    (is (= (dissoc v0 :order :next-id :library) (dissoc v1 :order :next-id :library)) "the settings stay")
+    (testing "an id a hand-edited file already uses is skipped"
+      (let [v (-> v0 (assoc-in [:library :vibe-3] {:id :vibe-3}) (update :order conj :vibe-3))]
+        (is (= :vibe-4 (peek (:order (library/add-vibe v)))))))
+    (testing "a library without :next-id starts at 1"
+      (is (= [:vibe-1] (:order (library/add-vibe (dissoc library/empty-library :next-id))))))))
+
+(deftest ids-come-from-next-id-test
+  (let [v (-> (vibes (starter)) library/add-vibe (library/remove-vibe :vibe-3) library/add-vibe)]
+    (is (= [:vibe-1 :vibe-2 :vibe-4] (:order v)) "deleting the newest vibe and adding one: a new id")
+    (is (nil? (get-in v [:library :vibe-3])))
+    (is (= 5 (:next-id v)))))
+
+(deftest remove-vibe-drops-it-from-order-test
+  (let [v0 (vibes (starter))
+        v1 (library/remove-vibe v0 :vibe-1)]
+    (is (= [:vibe-2] (:order v1)))
+    (is (= #{:vibe-2} (set (keys (:library v1)))))
+    (is (= 3 (:next-id v1)) ":next-id stays")
+    (is (= v0 (library/remove-vibe v0 :gone)))
+    (is (= [:vibe-1] (:order (library/remove-vibe (update v0 :library dissoc :vibe-2) :vibe-2)))
+        "an id in :order whose vibe is gone goes too")))
+
+(deftest duplicate-vibe-test
+  (let [v0 (library/add-vibe (vibes (starter)))
+        v1 (library/duplicate-vibe v0 :vibe-1)]
+    (is (= [:vibe-1 :vibe-4 :vibe-2 :vibe-3] (:order v1)) "right after the original")
+    (is (= (assoc (get-in v0 [:library :vibe-1]) :id :vibe-4 :name "Shapes copy") (get-in v1 [:library :vibe-4])))
+    (is (= v0 (library/duplicate-vibe v0 :gone)))))
+
+(deftest reorder-test
+  (let [v0 (library/add-vibe (vibes (starter)))
+        order #(:order (library/move-vibe v0 %1 %2))]
+    (is (= [:vibe-2 :vibe-1 :vibe-3] (order :vibe-1 1)))
+    (is (= [:vibe-3 :vibe-1 :vibe-2] (order :vibe-3 0)))
+    (is (= [:vibe-2 :vibe-3 :vibe-1] (order :vibe-1 99)) "clamped")
+    (is (= [:vibe-3 :vibe-1 :vibe-2] (order :vibe-3 -1)))
+    (is (= (:order v0) (order :gone 0)))
+    (is (= (:order v0) (order :vibe-1 nil)))))
+
+(deftest toggle-cell-test
+  (let [v0 (library/add-vibe (vibes (starter)))
+        in (fn [v slot] (library/slot-cells (get-in v [:library :vibe-3]) slot))
+        clicks (fn [slot & cells] (reduce #(library/toggle-cell %1 :vibe-3 slot %2) v0 cells))]
+    (doseq [slot [:hit :accent]]
+      (testing (str slot ": a click adds at the end, so the pool's order is the clicks'; a click on a cell in it takes it out")
+        (is (= [[5 0] [2 0] [7 0]] (in (clicks slot [5 0] [2 0] [7 0]) slot)))
+        (is (= [[5 0] [7 0]] (in (clicks slot [5 0] [2 0] [7 0] [2 0]) slot)))))
+    (doseq [slot [:flash-cue :bed]]
+      (testing (str slot ": one cell, replaced, and cleared by a click on it")
+        (is (= [[5 0]] (in (clicks slot [5 0]) slot)))
+        (is (= [[2 0]] (in (clicks slot [5 0] [2 0]) slot)))
+        (is (= [] (in (clicks slot [5 0] [5 0]) slot)))))
+    (is (nil? (get-in (clicks :flash-cue [5 0] [5 0]) [:library :vibe-3 :flash :cue])))
+    (is (= {:cue nil :fx [] :solo? true} (get-in (library/toggle-cell v0 :vibe-1 :flash-cue [6 0]) [:library :vibe-1 :flash]))
+        "a click on the FLASH cue clears the cue only")
+    (doseq [slot [:fx :flash-fx]]
+      (testing (str slot ": effect cells, added at the end or taken out")
+        (let [v (reduce #(library/toggle-fx %1 :vibe-3 slot %2) v0 [[0 3] [1 3] [0 3] [2 3]])]
+          (is (= [[1 3] [2 3]] (in v slot))))))
+    (testing "a cell may be in several roles and several vibes"
+      (let [v (-> v0 (library/toggle-cell :vibe-1 :accent [0 0]) (library/toggle-cell :vibe-3 :hit [0 0]))]
+        (is (library/in-slot? v :vibe-1 :hit [0 0]))
+        (is (library/in-slot? v :vibe-1 :accent [0 0]))
+        (is (library/in-slot? v :vibe-3 :hit [0 0]))))
+    (testing "an unknown vibe, a slot of the other grid, or no cell change nothing"
+      (is (= v0 (library/toggle-cell v0 :gone :hit [0 0])))
+      (is (= v0 (library/toggle-cell v0 :vibe-3 :fx [0 0])))
+      (is (= v0 (library/toggle-fx v0 :vibe-3 :hit [0 3])))
+      (is (= v0 (library/toggle-cell v0 :vibe-3 :hit nil))))))
+
+(deftest set-single-replaces-test
+  (let [v0 (vibes (starter))]
+    (is (= [1 1] (get-in (library/set-single v0 :vibe-1 :flash-cue [1 1]) [:library :vibe-1 :flash :cue])))
+    (is (= [1 1] (get-in (library/set-single v0 :vibe-1 :bed [1 1]) [:library :vibe-1 :bed])))
+    (is (nil? (get-in (library/set-single v0 :vibe-1 :flash-cue nil) [:library :vibe-1 :flash :cue])) "nil clears it")
+    (is (= v0 (library/set-single v0 :vibe-1 :hit [1 1])) "a pool isn't one cell")
+    (is (= v0 (library/set-single v0 :gone :bed [1 1])))))
+
+(deftest editing-a-vibe-takes-only-good-values-test
+  (let [v0 (vibes (starter))
+        vibe-1 #(get-in % [:library :vibe-1])]
+    (is (= "Groove" (:name (vibe-1 (library/rename-vibe v0 :vibe-1 "  Groove ")))) "trimmed")
+    (is (= v0 (library/rename-vibe v0 :vibe-1 "   ")) "a blank name changes nothing")
+    (is (= "#123ABC" (:color (vibe-1 (library/set-color v0 :vibe-1 "#123ABC")))))
+    (is (= v0 (library/set-color v0 :vibe-1 "blue")))
+    (is (= 4 (:energy (vibe-1 (library/set-energy v0 :vibe-1 4)))))
+    (is (= v0 (library/set-energy v0 :vibe-1 5)))
+    (is (= v0 (library/set-energy v0 :vibe-1 0)))
+    (testing "options"
+      (is (= :gate (get-in (vibe-1 (library/set-role-option v0 :vibe-1 :hit :mode :gate)) [:hit :mode])))
+      (is (= :sequence (get-in (vibe-1 (library/set-role-option v0 :vibe-1 :accent :select :sequence)) [:accent :select])))
+      (is (= 0.5 (get-in (vibe-1 (library/set-role-option v0 :vibe-1 :hit :beats 1/2)) [:hit :beats])))
+      (is (false? (get-in (vibe-1 (library/set-role-option v0 :vibe-1 :flash :solo? false)) [:flash :solo?])))
+      (is (true? (:allow-audience? (vibe-1 (library/set-role-option v0 :vibe-1 nil :allow-audience? true)))))
+      (doseq [[role k v] [[:hit :mode :loud] [:hit :beats 0] [:hit :beats "2"] [:flash :mode :gate]
+                          [:flash :solo? nil] [nil :allow-audience? "yes"] [:bed :mode :decay]]]
+        (is (= v0 (library/set-role-option v0 :vibe-1 role k v)) (pr-str [role k v]))))
+    (is (= v0 (library/rename-vibe v0 :gone "Groove")))))
+
+(deftest make-from-rows-test
+  (let [cue {:items [{:type :preset :preset-id :circle}]}
+        chains (merge (into {} (for [col (range 8)] [[col 0] cue]))
+                      (into {} (for [col (range 3)] [[col 1] cue]))
+                      {[5 2] {:items []}})
+        v0 (vibes (starter))
+        v1 (library/make-from-rows v0 chains [8 4])]
+    (is (= [:vibe-1 :vibe-2 :vibe-3 :vibe-4] (:order v1)))
+    (is (= 5 (:next-id v1)))
+    (is (= (assoc-in (library/new-vibe :vibe-3 3 "Row A") [:hit :cells] (vec (for [col (range 8)] [col 0])))
+           (get-in v1 [:library :vibe-3])))
+    (is (= {:id :vibe-3 :name "Row A" :color "#E67E22" :energy 2
+            :hit {:cells (vec (for [col (range 8)] [col 0])) :select :shuffle :mode :decay :beats 1.0}}
+           (select-keys (get-in v1 [:library :vibe-3]) [:id :name :color :energy :hit]))
+        "the data example of 03 §7")
+    (is (= ["Row B" [[0 1] [1 1] [2 1]]] ((juxt :name (comp :cells :hit)) (get-in v1 [:library :vibe-4]))))
+    (is (= (:library v0) (select-keys (:library v1) [:vibe-1 :vibe-2])) "invariant 4: no vibe changes")
+    (is (= v1 (library/make-from-rows v1 chains [8 4])) "idempotent: the rows are pools already")
+    (testing "a row whose cues are a vibe's HIT pool already, in any order, is left out"
+      (let [v (assoc-in v0 [:library :vibe-2 :hit :cells] [[2 1] [0 1] [1 1]])]
+        (is (= ["Row A"] (map #(get-in % [:name]) (vals (apply dissoc (:library (library/make-from-rows v chains [8 4]))
+                                                               [:vibe-1 :vibe-2])))))))
+    (is (= v0 (library/make-from-rows v0 {} [8 4])) "an empty grid makes nothing")))
+
+
+;; Lint (03 §7): one assertion per row
+
+(defn- lint-texts [state] (mapv (juxt :level :text) (library/lint state)))
+
+(defn- has-row? [state level text]
+  (some #{[level text]} (lint-texts state)))
+
+(defn- learned-all [state]
+  (assoc-in state [:config :input :trigger-map]
+            (into {} (map-indexed (fn [i role] [{:source :midi :channel 0 :note (+ 36 i)} {:type :vibe :role role}])
+                                  library/roles))))
+
+(deftest lint-test
+  (let [s0 (learned-all (starter))
+        with-vibe (fn [state id m] (update-in state [:config :vibes :library id] merge m))]
+    (is (= [] (library/lint s0)) "the starter show with its five controls: nothing to fix")
+    (testing "error: HIT has no playable cell"
+      (is (has-row? (with-vibe s0 :vibe-1 {:hit {:cells []}}) :error "Shapes: HIT has no cues to play")))
+    (testing "error: a pool cell with no cue, or one that follows timecode"
+      (is (has-row? (update-in s0 [:chains :cue-chains] dissoc [2 0]) :error "Shapes: A3 can't be played (empty)"))
+      (is (has-row? (assoc-in s0 [:chains :cue-chains [2 0]] chasing) :error "Shapes: A3 can't be played (follows timecode)")))
+    (testing "error: the flash cue can't be played"
+      (is (has-row? (update-in s0 [:chains :cue-chains] dissoc [6 0]) :error "Shapes: FLASH cue A7 can't be played (empty)")))
+    (testing "warn: neither a flash cue nor flash effects"
+      (is (has-row? (with-vibe s0 :vibe-1 {:flash {:cue nil :fx [] :solo? true}}) :warn "Shapes: FLASH does nothing in this vibe"))
+      (is (not (has-row? (with-vibe s0 :vibe-1 {:flash {:cue nil :fx [[0 3]] :solo? true}})
+                         :warn "Shapes: FLASH does nothing in this vibe"))
+          "flash effects are something"))
+    (testing "error: :order and the library disagree"
+      (is (has-row? (update-in s0 [:config :vibes :order] conj :gone) :error "Order and library disagree"))
+      (is (has-row? (update-in s0 [:config :vibes :order] pop) :error "Order and library disagree")))
+    (testing "warn: a HIT pool of one"
+      (is (has-row? (with-vibe s0 :vibe-2 {:hit {:cells [[5 0]]}}) :warn "Lines: one cue in HIT repeats on every press")))
+    (testing "warn: an audience cell in a vibe that doesn't allow them, naming the zone group and the projector"
+      (let [crowd (assoc-in s0 [:chains :cue-chains [1 0] :destination-zone :zone-group-id] :crowd)
+            text "Shapes: A2 reaches the audience through Crowd Scanning, so this vibe never plays it. Allow audience cells, or take it out"]
+        (is (has-row? crowd :warn text))
+        (is (not (has-row? (with-vibe crowd :vibe-1 {:allow-audience? true}) :warn text)) "unless it allows them"))
+      (is (has-row? (assoc-in s0 [:projectors :p3] {:name "P3" :zone-groups [:all] :tags #{:crowd-scanning}})
+                    :warn "Lines: A6 reaches the audience through All (P3), so this vibe never plays it. Allow audience cells, or take it out")))
+    (testing "warn: the same cell in HIT and ACCENT"
+      (is (has-row? (with-vibe s0 :vibe-1 {:accent {:cells [[1 0]]}}) :warn "Shapes: A2 is in both HIT and ACCENT")))
+    (testing "warn: two vibes with the same name"
+      (is (has-row? (with-vibe s0 :vibe-2 {:name "Shapes"}) :warn "Two vibes are called Shapes")))
+    (testing "info: fewer than five controls learned"
+      (is (= [[:info "0 of 5 controls learned"]] (lint-texts (starter))))
+      (is (has-row? (update-in s0 [:config :input :trigger-map] dissoc {:source :midi :channel 0 :note 36})
+                    :info "4 of 5 controls learned")))
+    (testing "worst first, and each row says which vibe"
+      (let [rows (library/lint (-> (starter) (with-vibe :vibe-2 {:hit {:cells []}}) (with-vibe :vibe-1 {:hit {:cells [[0 0]]}})))]
+        (is (= [:error :warn :info] (mapv :level rows)))
+        (is (= [:vibe-2 :vibe-1 nil] (mapv :vibe rows)))))))

@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.events.core :as events]
             [laser-show.events.handlers :as handlers]
+            [laser-show.events.handlers.history :as history-handlers]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.templates :as templates])
@@ -194,3 +195,101 @@
            (get-in s1 [:config :input :trigger-map])))
     (is (= "Clear Control" (history/undo-label (:history s1))) "an undoable edit, labelled")
     (is (true? (get-in s1 [:project :dirty?])))))
+
+
+;; The Vibes tab's edits (Phase 3)
+
+(def ^:private edits
+  "Each edit event, with what changes the starter vibes, and its undo label."
+  [[{:event/type :vibe/add} "Add Vibe"]
+   [{:event/type :vibe/duplicate :vibe :vibe-1} "Duplicate Vibe"]
+   [{:event/type :vibe/remove :vibe :vibe-2} "Delete Vibe"]
+   [{:event/type :vibe/move :vibe :vibe-2 :to 0} "Reorder Vibes"]
+   [{:event/type :vibe/rename :vibe :vibe-1 :name "Calm"} "Rename Vibe"]
+   [{:event/type :vibe/set-color :vibe :vibe-1 :color "#1ABC9C"} "Change Vibe"]
+   [{:event/type :vibe/set-energy :vibe :vibe-1 :energy 4} "Change Vibe"]
+   [{:event/type :vibe/toggle-cell :vibe :vibe-1 :slot :hit :col 7 :row 0} "Edit Vibe Cues"]
+   [{:event/type :vibe/toggle-fx :vibe :vibe-1 :slot :fx :col 0 :row 3} "Edit Vibe Effects"]
+   [{:event/type :vibe/set-option :vibe :vibe-1 :role :hit :key :mode :value :gate} "Change Vibe Option"]
+   [{:event/type :vibe/make-from-rows} "Make Vibes From Rows"]])
+
+(deftest every-edit-event-is-one-undo-step-test
+  (let [s0 (history/mark-clean (starter))]
+    (doseq [[event label] edits]
+      (testing (str (:event/type event))
+        (let [s1 (run s0 event)
+              s2 (run s1 {:event/type :edit/undo})]
+          (is (not= (get-in s0 [:config :vibes]) (get-in s1 [:config :vibes])) "it edits")
+          (is (= 1 (undo-count s1)))
+          (is (= label (history/undo-label (:history s1))))
+          (is (true? (get-in s1 [:project :dirty?])))
+          (is (= (get-in s0 [:config :vibes]) (get-in s2 [:config :vibes])) "invariant 1: undo restores the vibes exactly")
+          (is (false? (get-in s2 [:project :dirty?]))))))))
+
+(deftest selection-events-are-not-undoable-test
+  (let [s0 (history/mark-clean (starter))
+        s1 (-> s0
+               (run {:event/type :vibe/select-for-edit :vibe :vibe-2})
+               (run {:event/type :vibe/set-slot :slot :bed}))]
+    (is (= {:selected :vibe-2 :slot :bed :wizard nil} (get-in s1 [:ui :vibes])))
+    (is (= 0 (undo-count s1)))
+    (is (false? (get-in s1 [:project :dirty?])))
+    (is (history/document-roots-identical? s0 s1) "invariant 1: clicking around the editor makes no undo step")
+    (testing "an unknown vibe or slot changes nothing"
+      (is (= s1 (-> s1
+                    (run {:event/type :vibe/select-for-edit :vibe :gone})
+                    (run {:event/type :vibe/set-slot :slot :loud})))))))
+
+(deftest edit-events-return-state-without-arguments-test
+  (testing "the history-label test calls every labelled event with none (events/history_handlers_test.clj)"
+    (let [s0 (starter)]
+      (doseq [type (filter #(= "vibe" (namespace %)) (keys history-handlers/event-descriptions))]
+        (let [result (handlers/handle-event {:event/type type :state s0})]
+          (is (map? (:state result)) (str type))
+          (when-not (#{:vibe/add :vibe/make-from-rows} type)
+            (is (= (get-in s0 [:config :vibes]) (get-in result [:state :config :vibes])) (str type " changed nothing"))))))))
+
+(deftest picker-clicks-leave-empty-cells-out-test
+  (let [s0 (starter)
+        click (fn [state type slot col row] (run state {:event/type type :vibe :vibe-1 :slot slot :col col :row row}))]
+    (is (= s0 (click s0 :vibe/toggle-cell :hit 0 2)) "an empty cue cell has nothing to play")
+    (is (= s0 (click s0 :vibe/toggle-cell :bed 0 2)))
+    (is (= s0 (click s0 :vibe/toggle-fx :fx 5 3)) "nor an empty effect cell")
+    (testing "a cell in the pool comes out, whatever it holds"
+      (let [s (assoc-in s0 [:config :vibes :library :vibe-1 :hit :cells] [[0 0] [0 2]])]
+        (is (= [[0 0]] (get-in (click s :vibe/toggle-cell :hit 0 2) [:config :vibes :library :vibe-1 :hit :cells])))))
+    (is (= [0 0] (get-in (run s0 {:event/type :vibe/toggle-cell :vibe :vibe-2 :slot :bed :cell [0 0]})
+                         [:config :vibes :library :vibe-2 :bed]))
+        "or given as :cell")))
+
+(deftest new-vibes-are-selected-test
+  (let [selected #(get-in % [:ui :vibes :selected])]
+    (is (= :vibe-3 (selected (run (starter) {:event/type :vibe/add}))))
+    (is (= :vibe-3 (selected (run (starter) {:event/type :vibe/duplicate :vibe :vibe-2}))))
+    (is (= :vibe-3 (selected (run (starter) {:event/type :vibe/make-from-rows}))) "the first one made")
+    (testing "deleting the vibe being edited selects its neighbour"
+      (is (= :vibe-2 (selected (-> (starter)
+                                   (run {:event/type :vibe/select-for-edit :vibe :vibe-1})
+                                   (run {:event/type :vibe/remove :vibe :vibe-1})))))
+      (is (= :vibe-1 (selected (-> (starter)
+                                   (run {:event/type :vibe/select-for-edit :vibe :vibe-2})
+                                   (run {:event/type :vibe/remove :vibe :vibe-2})))))
+      (is (= :vibe-2 (selected (-> (starter)
+                                   (run {:event/type :vibe/select-for-edit :vibe :vibe-2})
+                                   (run {:event/type :vibe/remove :vibe :vibe-1}))))
+          "another vibe: the selection stays"))))
+
+(deftest editing-the-playing-vibe-plays-the-edit-test
+  (let [on? #(true? (get-in % [:chains :effect-chains [0 3] :active?]))
+        s0 (run (starter) {:event/type :vibe/press :role :hit :input-time 1000})
+        s1 (run s0 {:event/type :vibe/toggle-fx :vibe :vibe-1 :slot :fx :cell [0 3]})]
+    (is (= :vibe-1 (get-in s0 [:vibe-runtime :current])))
+    (is (on? s1) "added to the FX set of the vibe that plays: on at once")
+    (let [s2 (run s1 {:event/type :vibe/remove :vibe :vibe-1})]
+      (is (not (on? s2)) "the vibe deleted: its look goes")
+      (is (= :vibe-2 (get-in s2 [:vibe-runtime :current]))))
+    (testing "an undo runs no handler: the cell stays on until the next switch"
+      (let [s2 (run s1 {:event/type :edit/undo})]
+        (is (= [] (get-in s2 [:config :vibes :library :vibe-1 :fx])))
+        (is (on? s2))
+        (is (not (on? (run s2 {:event/type :vibe/select :vibe :vibe-2}))))))))

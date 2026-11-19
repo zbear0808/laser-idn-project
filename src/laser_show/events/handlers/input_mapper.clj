@@ -4,14 +4,16 @@
    Listens to all global input events from the generic router and:
    1. Continuous events (MIDI CC, OSC floats) -> updates fast input store (`laser-show.input.store`)
    2. Discrete events (Note ON, Key pressed) -> performs O(1) lookup in `[:config :input :trigger-map]`
-      and invokes the mapped action.
+      and invokes the mapped action, unless a learn is waiting for an input
+      ([:backend :input :learning-target]): that one is the learn's.
    
    State updates bypass cljfx's event queue to ensure the lowest possible latency
    and avoid blocking the UI."
   (:require [clojure.tools.logging :as log]
             [laser-show.input.router :as router]
             [laser-show.input.store :as store]
-            [laser-show.input.events :as input-events]))
+            [laser-show.input.events :as input-events]
+            [laser-show.state.core :as state]))
 
 (defonce ^:private *dispatch-fn (atom nil))
 
@@ -28,6 +30,13 @@
    e.g. source-key `[:midi 0 10]` -> value `0.5`"
   [source-key value]
   (store/set-continuous-value! source-key value))
+
+(defn- learning?
+  "Is a learn waiting for an input? It catches the press itself
+   (handlers/input.clj), so the press mustn't also fire the key's old
+   binding (keyboard plan K-15), nor its release."
+  []
+  (some? (get-in (state/get-raw-state) [:backend :input :learning-target])))
 
 
 ;; --- Main Event Processor ---
@@ -70,12 +79,13 @@
       (when (and (= :osc (:source event)) (:path event) (number? (:value event)))
         (update-input-value! [:osc (:path event)]
                              (max 0.0 (min 1.0 (double (:value event))))))
-      (if-let [dispatch @*dispatch-fn]
-        (dispatch {:event/type :trigger/input
-                   :input-event event
-                   :time (:timestamp event)})
-        (log/warn "No application dispatch function configured for input trigger"
-                  event)))))
+      (when-not (learning?)
+        (if-let [dispatch @*dispatch-fn]
+          (dispatch {:event/type :trigger/input
+                     :input-event event
+                     :time (:timestamp event)})
+          (log/warn "No application dispatch function configured for input trigger"
+                    event))))))
 
 ;; --- Lifecycle ---
 

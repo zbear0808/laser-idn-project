@@ -3,8 +3,10 @@
    show clock's step: presses and releases of every role from either source,
    vibe switches, blackouts, clock ticks and their reports, clicks on the grid
    (some on a cell a voice plays, which takes its cue over), moves and clears
-   of cue and effect cells, and vibes deleted, put back and reordered (as
-   Phase 3's edits and undo will). After every step it checks invariants 1-12
+   of cue and effect cells, vibes deleted, put back and reordered as an undo
+   would (no handler), and the Vibes tab's edits of FX sets, beds, pools,
+   the audience rule and deletes through their handlers (engine/reconcile).
+   After every step it checks invariants 1-12
    of plans/2026-11-18-vibe-mode/01-phase1-engine-core.md §7; what may play
    (invariant 1) is worked out here, not with laser-show.vibes.library.
    A failure prints the seed and the events up to the failing step, the
@@ -128,7 +130,7 @@
 
 (defn- next-step
   "A random step for world: {:kind :event? :next?}, kinds :vibe, :tick, :grid,
-   :fx and :edit; a step's :next is the step after it. Blackout is pressed
+   :fx, :edit and :vibe-edit; a step's :next is the step after it. Blackout is pressed
    rarely, and more often while it is on. Half the HIT and ACCENT presses are
    taps: the release follows within 140 ms. Half the grid's clicks start a
    cell a voice plays again (its cue is someone else's now), and half of those
@@ -139,6 +141,7 @@
       (let [blackout? (get-in state [:vibe-runtime :blackout?])
             role #(one-of rng [:hit :hit :accent :flash :vibe])
             cell #(one-of rng cue-cells)
+            vibe #(one-of rng [:vibe-1 :vibe-2 :vibe-3 :vibe-4])
             voice-cells (vec (distinct (keep :cell (vals (get-in state [:vibe-runtime :voices])))))]
         (if (< (.nextInt rng 100) (if blackout? 20 1))
           {:kind :vibe :event {:event/type :vibe/press :role :blackout}}
@@ -149,7 +152,14 @@
                            (and (#{:hit :accent} role) (.nextBoolean rng))
                            (assoc :next {:kind :vibe :event {:event/type :vibe/release :role role} :quick? true})))
               (< r 60) {:kind :vibe :event {:event/type :vibe/release :role (role)}}
-              (< r 75) {:kind :tick :ticks (inc (.nextInt rng 60))}
+              (< r 70) {:kind :tick :ticks (inc (.nextInt rng 60))}
+              (< r 75) {:kind :vibe-edit
+                        :event (case (.nextInt rng 5)
+                                 0 {:event/type :vibe/toggle-fx :vibe (vibe) :slot (one-of rng [:fx :fx :flash-fx]) :cell (one-of rng fx-cells)}
+                                 1 {:event/type :vibe/toggle-cell :vibe (vibe) :slot :bed :cell (cell)}
+                                 2 {:event/type :vibe/toggle-cell :vibe (vibe) :slot (one-of rng [:hit :accent]) :cell (cell)}
+                                 3 {:event/type :vibe/set-option :vibe (vibe) :key :allow-audience? :value (.nextBoolean rng)}
+                                 4 {:event/type :vibe/remove :vibe (vibe)})}
               (< r 78) {:kind :vibe :event {:event/type :vibe/select :vibe (one-of rng [:vibe-1 :vibe-2 :vibe-3 :vibe-4 :gone])}}
               (< r 80) {:kind :vibe :event {:event/type :vibe/release-all :only (one-of rng [nil :pad :input])}}
               (< r 84) (if (and (seq voice-cells) (.nextBoolean rng))
@@ -383,6 +393,49 @@
 
 (defn- rename [from to] #(if (= from %) to %))
 
+(defn- check-vibe-edit
+  "Phase 3's edits (engine/reconcile): they stop no cue the vibe layer
+   didn't start (invariant 4) and start only what may play (1). When they
+   edit the vibe that plays, a HIT or ACCENT cue plays on, a cell its FX set
+   gains is on, one it loses that the set switched on is off (unless the
+   held flash asked for it), and no other effect cell changes."
+  [before after]
+  (let [ours (set (keep :run (vals (vr before :voices))))
+        current (vr before :current)
+        old (library/vibe before current)
+        new (library/vibe after current)
+        refreshed? (and old new (= current (vr after :current)) (not (vr before :blackout?)))
+        existing (fn [state cells] (set (filter #(get-in state [:chains :effect-chains %]) cells)))
+        was (existing before (:fx old))
+        now (existing after (:fx new))
+        touched (into was now)
+        on (fn [state] (update-vals (get-in state [:chains :effect-chains]) #(true? (:active? %))))]
+    (concat
+     (for [[cell {:keys [run]}] (get-in before [:playback :active-cues])
+           :when (and (not (contains? ours run)) (nil? (get-in after [:playback :active-cues cell])))]
+       (bad "inv 4: an edit stopped " cell ", which the vibe layer didn't start"))
+     (for [[role {:keys [cell run]}] (vr after :voices)
+           :when (and run (not (contains? ours run))
+                      (not (may-play? after (library/vibe after (vr after :current)) cell)))]
+       (bad "inv 1: an edit started " cell " for " role ", which " (vr after :current) " may not play"))
+     (when refreshed?
+       (concat
+        (for [role [:hit :accent]
+              :let [voice (vr before :voices role)]
+              :when (and voice (live? before voice) (not (live? after voice)))]
+          (bad "an edit of " current " stopped its " role " cue"))
+        (for [cell (remove was now) :when (not (fx-on? after cell))]
+          (bad "an edit gave " current "'s FX set " cell ", which is off"))
+        (for [cell (remove now was)
+              :when (and (some #{cell} (vr before :fx-on))
+                         (not (some #{cell} (vr after :voices :flash :fx)))
+                         (fx-on? after cell))]
+          (bad "an edit took " cell " out of " current "'s FX set, and it is still on"))
+        (let [on-before (on before)]
+          (for [[cell on?] (on after)
+                :when (and (not (touched cell)) (not= on? (on-before cell false)))]
+            (bad "an edit switched " cell ", which " current "'s FX set neither gained nor lost"))))))))
+
 (defn- check-moved
   "Invariant 10 for a move or clear of a cue (grid? true) or effect cell."
   [before after {:keys [event/type from-col from-row to-col to-row col row]} grid?]
@@ -476,6 +529,7 @@
              (case kind
                :vibe (check-vibe-event before event after t)
                :tick (check-clock (:rt world))
+               :vibe-edit (check-vibe-edit before after)
                :grid (when (#{:grid/move-cell :grid/clear-cell} (:event/type event)) (check-moved before after event true))
                :fx (check-moved before after event false)
                nil))]))
