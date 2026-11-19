@@ -471,4 +471,5 @@ Committed as `e3d6d1b` on top of `f9fc352` (built as `5bb4472` on branch `ux-pha
 | `clj -M:test-ui:mac-arm:test-ui-headless -n` grid, main-window, setup-dialogs, trigger-editor, preview, status-bar, toolbar, cue-chain-list, menu-bar, streaming-status, in one run | 60 tests, 245 assertions, 0 failures |
 | `clj -M:mac-arm:test` (full unit suite) | 943 tests, 32,964 assertions, 0 failures (937 before, 6 new) |
 | `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | Not run here: it runs after the merge onto master. 87 tests now, 79 before |
+| After the merge, on `master` at `f7c51cb` (with vibe Phase 2): `clj -M:mac-arm:test`, then the full UI suite | 957 tests, 33,080 assertions, 0 failures; UI 97 tests, 430 assertions, 0 failures |
 | `clj -M:kondo --lint` on every touched file | 0 errors; 3 warnings, all there before (an unused require in `events/handlers/projector.clj`, two "Condition always true" in `views/dialogs/cue_chain_editor.clj`) |
