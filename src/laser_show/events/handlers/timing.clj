@@ -39,10 +39,17 @@
   [{:keys [bpm state]}]
   {:state (assoc-in state [:timing :bpm] (double bpm))})
 
+(def ^:private tap-history
+  "Taps kept: all that the :timing/calculate-bpm effect reads
+   (events/core.clj, the last 8). HIT taps on every press, so without a cap
+   the history grows for as long as the presses come under 2 s apart."
+  8)
+
 (defn- handle-timing-tap-tempo
   "Record a tap for tap-tempo calculation and smoothly align beat phase.
    Clears old taps if the last tap was more than 2 seconds ago,
-   preventing stale tap data from affecting BPM calculation."
+   preventing stale tap data from affecting BPM calculation, and keeps the
+   last tap-history taps."
   [{:keys [state] :as event}]
   (let [now (h/current-time-ms event)
         old-tap-times (get-in state [:timing :tap-times] [])
@@ -51,7 +58,9 @@
         new-tap-times (if (or (nil? last-tap)
                               (> (- now last-tap) 2000))
                         [now]
-                        (conj old-tap-times now))]
+                        (let [taps (conj old-tap-times now)]
+                          ;; A fresh vector: a subvec would hold the old one
+                          (cond-> taps (> (count taps) tap-history) (->> (take-last tap-history) vec))))]
     {:state (-> state
                 (assoc-in [:timing :tap-times] new-tap-times)
                 (request :align))
@@ -120,8 +129,8 @@
 
 
 (defn- handle-show-clock-cue-ended
-  "The show clock saw the timeline run at cell reach its end: stop the cue,
-   unless it was started again since (a new run)."
+  "The show clock saw the run at cell end (a timeline at its end, a vibe
+   cue's decay): stop the cue, unless it was started again since (a new run)."
   [{:keys [cell run state]}]
   {:state (if (= run (get-in state [:playback :active-cues cell :run]))
             (update state :playback cue-timing/deactivate-cue cell)

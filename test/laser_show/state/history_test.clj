@@ -268,3 +268,13 @@
                 (concat (:undo-stack h') (:redo-stack h'))))
     (is (= "New" (get-in (history/backfill-baseline (history/mark-clean sample-state) add-p)
                          [:project :saved-document :projectors :new :name])))))
+(deftest config-vibes-is-undoable-content-test
+  (let [s (assoc-in sample-state [:config :vibes] {:order [] :next-id 1 :library {}})
+        edited (-> s
+                   (assoc-in [:config :vibes :library :vibe-1] {:id :vibe-1 :name "Calm"})
+                   (assoc-in [:config :vibes :order] [:vibe-1]))]
+    (is (true? (history/undoable-changed? (doc s) (doc edited))))
+    (is (true? (history/persisted-changed? (doc s) (doc edited))))
+    (is (= (:vibes (:config s)) (:vibes (:config (history/restore-document edited (doc s))))) "undo brings it back")
+    (testing "what the engine is doing is not a document root (probe v3)"
+      (is (history/document-roots-identical? s (assoc-in s [:vibe-runtime :current] :vibe-1))))))

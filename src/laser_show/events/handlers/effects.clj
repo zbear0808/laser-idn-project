@@ -17,7 +17,8 @@
    for all effect-level operations."
  (:require [clojure.tools.logging :as log]
            [laser-show.events.helpers :as h]
-           [laser-show.state.clipboard :as clipboard]))
+           [laser-show.state.clipboard :as clipboard]
+           [laser-show.vibes.refs :as refs]))
 
 
 ;; Cell-Level Operations
@@ -44,36 +45,13 @@
                   (assoc-in [:chains :effect-chains [col row] :active?] new-active)
                   (assoc-in [:effects :selected-cell] [col row]))})))
 
-(defn- migrate-cell-triggers
-  "Migrates target coordinates for triggers mapped to from-pos."
-  [trigger-map from-pos to-pos target-type]
-  (if (seq trigger-map)
-    (into {}
-          (map (fn [[k v]]
-                 [k (if (and (= (:type v) target-type)
-                             (= (:target v) from-pos))
-                      (assoc v :target to-pos)
-                      v)]))
-          trigger-map)
-    trigger-map))
-
-(defn- remove-cell-triggers
-  "Removes all triggers targeting pos for target-type."
-  [trigger-map pos target-type]
-  (if (seq trigger-map)
-    (into {}
-          (remove (fn [[_ v]]
-                    (and (= (:type v) target-type)
-                         (= (:target v) pos))))
-          trigger-map)
-    trigger-map))
-
 (defn- handle-effects-clear-cell
-  "Clear all effects from a cell and remove associated triggers."
+  "Clear all effects from a cell, and the triggers and vibes that named it."
   [{:keys [col row state]}]
   {:state (-> state
               (update-in [:chains :effect-chains] dissoc [col row])
-              (update-in [:config :input :trigger-map] remove-cell-triggers [col row] :trigger-effect))})
+              (update-in [:config :input :trigger-map] refs/remove-trigger-targets [col row] :trigger-effect)
+              (refs/remove-fx [col row]))})
 
 (defn- handle-effects-copy-cell
   "Copy an effects cell to clipboard.
@@ -92,7 +70,8 @@
                                  :effects-cell))
 
 (defn- handle-effects-move-cell
-  "Move an effects cell from one position to another."
+  "Move an effects cell from one position to another. Trigger-map bindings
+   and vibes that named it follow."
   [{:keys [from-col from-row to-col to-row state]}]
   (let [cell-data (get-in state [:chains :effect-chains [from-col from-row]])]
     (if cell-data
@@ -100,7 +79,8 @@
                   (update-in [:chains :effect-chains] dissoc [from-col from-row])
                   (assoc-in [:chains :effect-chains [to-col to-row]] cell-data)
                   (update-in [:config :input :trigger-map]
-                             migrate-cell-triggers [from-col from-row] [to-col to-row] :trigger-effect))}
+                             refs/move-trigger-targets [from-col from-row] [to-col to-row] :trigger-effect)
+                  (refs/move-fx [from-col from-row] [to-col to-row]))}
       {:state state})))
 
 

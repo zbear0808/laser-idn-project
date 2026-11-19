@@ -133,12 +133,14 @@
   (reduce #(replace-at-path %1 initial file-data %2) state all-path-specs))
 
 (defn- reset-session
-  "Reset state that refers to the previous document (playback, selection,
-   list UI, dialogs, undo history, project metadata).
+  "Reset state that refers to the previous document (playback, what vibe
+   mode is doing, selection, list UI, dialogs, undo history, project
+   metadata).
    Backend/runtime state (streaming, Link, MIDI/OSC, discovered devices) is kept."
   [state initial]
   (-> state
       (assoc :playback (:playback initial))
+      (assoc :vibe-runtime (:vibe-runtime initial))
       (assoc :list-ui (:list-ui initial))
       (assoc :history (:history initial))
       (assoc :project (:project initial))
@@ -178,6 +180,7 @@
     (-> state
         (replace-document initial {})
         (templates/apply-starter-cue-chains)
+        (templates/apply-starter-vibes)
         (reset-session initial)
         history/mark-clean)))
 

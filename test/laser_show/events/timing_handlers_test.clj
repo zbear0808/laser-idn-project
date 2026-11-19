@@ -4,7 +4,10 @@
    Tests timing/transport handlers."
   (:require [clojure.test :refer [deftest is testing]]
             [laser-show.animation.cue-timing :as cue-timing]
-            [laser-show.events.handlers.timing :as timing]))
+            [laser-show.events.core :as events]
+            [laser-show.events.handlers.timing :as timing]
+            [laser-show.state.core :as state]
+            [laser-show.state.domains :as domains]))
 
 
 (deftest timing-set-bpm-test
@@ -63,6 +66,32 @@
           result (timing/handle event)]
       (is (= [1000 1500 3499] (get-in result [:state :timing :tap-times])))
       (is (true? (:timing/calculate-bpm result))))))
+
+
+(defn- tap [state t]
+  (:state (timing/handle {:event/type :timing/tap-tempo :state state :time t})))
+
+(defn- bpm-of
+  "The BPM the :timing/calculate-bpm effect sets from taps."
+  [taps]
+  (state/init-state! (assoc-in (domains/build-initial-state) [:timing :tap-times] taps))
+  ((:timing/calculate-bpm events/effects) true (fn [_]))
+  (get-in (state/get-raw-state) [:timing :bpm]))
+
+(deftest tap-history-keeps-the-last-8-test
+  (let [times (vec (range 1000 11000 500))
+        states (reductions tap {:timing {:tap-times []}} times)
+        kept (get-in (last states) [:timing :tap-times])]
+    (is (= 20 (count times)))
+    (is (every? #(<= (count (get-in % [:timing :tap-times])) 8) states)
+        "HIT taps on every press: the history mustn't grow for a whole set")
+    (is (= (subvec times 12) kept) "the last 8, all the BPM calculation reads")
+    (testing "20 steady taps give the BPM the whole history gave"
+      (is (= 120.0 (bpm-of kept) (bpm-of times))))
+    (testing "and so does a tempo that drifts"
+      (let [drifting (vec (reductions + 1000 (range 400 600 10)))]
+        (is (= (bpm-of drifting)
+               (bpm-of (get-in (reduce tap {:timing {:tap-times []}} drifting) [:timing :tap-times]))))))))
 
 
 (deftest transport-play-test

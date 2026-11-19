@@ -10,6 +10,7 @@
             [laser-show.state.domains :as domains]
             [laser-show.state.persistent :as persistent]
             [laser-show.state.serialization :as ser]
+            [laser-show.state.templates :as templates]
             [clojure.java.io :as io]))
 
 
@@ -230,3 +231,43 @@
       (is (= track-id (get-in cue [:items 0 :track-id])))
       (is (true? (get-in cue [:tracks 0 :muted?])) "old disabled track becomes muted")
       (is (false? (get-in loaded [:project :dirty?])) "loading doesn't make the project unsaved"))))
+
+(defn- with-starter-vibes []
+  (-> (domains/build-initial-state)
+      (templates/apply-starter-cue-chains)
+      (templates/apply-starter-vibes)))
+
+(deftest vibes-survive-save-and-load-test
+  (let [saved (-> (with-starter-vibes)
+                  (assoc-in [:config :vibes :settings :quick-tap-ms] 120)
+                  (assoc-in [:config :vibes :library :vibe-2 :hit :mode] :sustain))]
+    (is (persistent/write-project! test-project-file (persistent/project-files saved)))
+    (let [loaded (persistent/apply-loaded-project (domains/build-initial-state)
+                                                  (persistent/read-project test-project-file)
+                                                  test-project-file)]
+      (is (= (get-in saved [:config :vibes]) (get-in loaded [:config :vibes])))
+      (is (false? (get-in loaded [:project :dirty?]))))))
+
+(deftest old-project-gets-the-default-vibes-test
+  (let [files (update-in (persistent/project-files (domains/build-initial-state))
+                         ["project-metadata.edn" :config] dissoc :vibes)
+        loaded (persistent/apply-loaded-project (with-starter-vibes) files "old.zip")]
+    (is (not (contains? (get-in files ["project-metadata.edn" :config]) :vibes)) "a file from before vibes")
+    (is (= (:vibes domains/config-initial) (get-in loaded [:config :vibes])) "no vibes, the default settings")
+    (is (false? (get-in loaded [:project :dirty?])))))
+
+(deftest new-project-has-starter-vibes-test
+  (let [fresh (persistent/new-project-state (-> (domains/build-initial-state)
+                                                (assoc-in [:config :vibes :library :mine] {:id :mine})))]
+    (is (= (templates/create-starter-vibes) (get-in fresh [:config :vibes])))
+    (is (false? (get-in fresh [:project :dirty?])))))
+
+(deftest session-reset-clears-vibe-runtime-test
+  (let [busy (-> (with-starter-vibes)
+                 (assoc-in [:vibe-runtime :current] :vibe-2)
+                 (assoc-in [:vibe-runtime :blackout?] true)
+                 (assoc-in [:vibe-runtime :held :hit] {:at 1000 :src :input}))
+        initial (:vibe-runtime (domains/build-initial-state))]
+    (is (= initial (:vibe-runtime (persistent/new-project-state busy))) "File > New")
+    (is (= initial (:vibe-runtime (persistent/apply-loaded-project busy (persistent/project-files busy) "x.zip")))
+        "File > Open")))

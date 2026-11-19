@@ -6,7 +6,8 @@
             [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
-            [laser-show.state.domains :as domains]))
+            [laser-show.state.domains :as domains]
+            [laser-show.state.templates :as templates]))
 
 (def ^:private circle
   {:destination-zone {:zone-group-id :all}
@@ -256,6 +257,65 @@
     (let [before (state/get-raw-state)]
       (events/event-handler {:event/type :show-clock/cue-ended :cell [0 0] :run r2})
       (is (= (:playback before) (:playback (state/get-raw-state)))))))
+
+
+;; Vibe mode's decay (plans/2026-11-18-vibe-mode/01 §7 "The clock's side")
+
+(defn- init-vibes!
+  "The starter cue chains and vibes, HIT not tapping the tempo."
+  []
+  (state/init-state! (-> (domains/build-initial-state)
+                         (templates/apply-starter-cue-chains)
+                         (templates/apply-starter-vibes)
+                         (assoc-in [:timing :bpm] 120.0)
+                         (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)))
+  (show-time/reset-runtime!))
+
+(defn- hit-voice []
+  (get-in (state/get-raw-state) [:vibe-runtime :voices :hit]))
+
+(defn- ticks
+  "The runtime after ticks 0 to n at 1/60 s, and the last tick's reports."
+  [n]
+  (let [rt (apply run-at (:runtime start) (map #(* % tick-ms) (range n)))]
+    (step rt (* n tick-ms))))
+
+(deftest decayed-run-reports-cue-ended-test
+  (init-vibes!)
+  (handle! {:event/type :vibe/press :role :hit :input-time 1000})
+  (handle! {:event/type :vibe/release :role :hit :input-time 1090})
+  (let [{:keys [cell run]} (hit-voice)
+        report {:event/type :show-clock/cue-ended :cell cell :run run}]
+    (is (= {:run run :decay-beats 1.0 :hold? false} (get-in (state/get-raw-state) [:playback :active-cues cell]))
+        "a tap: the intent lets the run go after its beat")
+    (let [{rt29 :runtime reports29 :reports} (ticks 29)]
+      (is (not (:ended? (get-in rt29 [:runs run]))))
+      (is (empty? reports29))
+      (is (= [cell] (map :cell (show-time/active-runs (state/get-raw-state) rt29))) "still rendered"))
+    (let [{rt30 :runtime reports30 :reports} (ticks 30)]
+      (is (true? (:ended? (get-in rt30 [:runs run]))) "30 ticks of 1/60 s at 120 BPM: 1.0 beat")
+      (is (= [report] reports30))
+      (is (empty? (show-time/active-runs (state/get-raw-state) rt30)) "an ended run isn't rendered")
+      (run! events/event-handler reports30)
+      (is (nil? (get-in (state/get-raw-state) [:playback :active-cues cell])))
+      (is (false? (get-in (state/get-raw-state) [:playback :playing?]))))))
+
+(deftest release-before-decay-lets-the-run-finish-test
+  (init-vibes!)
+  (handle! {:event/type :vibe/press :role :hit :input-time 1000})
+  (let [{:keys [cell run]} (hit-voice)
+        rt (run-at (:runtime start) 0.0 250.0 400.0)]
+    (is (= true (get-in (state/get-raw-state) [:playback :active-cues cell :hold?])))
+    (is (close? 0.8 (get-in rt [:runs run :accumulated-beats])))
+    (testing "held past its beat, it plays on"
+      (is (not (:ended? (get-in (run-at rt 600.0 1000.0) [:runs run])))))
+    (handle! {:event/type :vibe/release :role :hit :input-time 1090})
+    (is (= false (get-in (state/get-raw-state) [:playback :active-cues cell :hold?])) "a tap at 0.8 beats")
+    (let [rt' (run-at rt 450.0)]
+      (is (not (:ended? (get-in rt' [:runs run]))) "0.9 beats: the release didn't cut it")
+      (let [{rt'' :runtime reports :reports} (step rt' 500.0)]
+        (is (true? (:ended? (get-in rt'' [:runs run]))) "it ends at its beat")
+        (is (= [{:event/type :show-clock/cue-ended :cell cell :run run}] reports))))))
 
 (def ^:private chasing
   (timeline {:timeline/chase :mtc :timeline/tc-start 0.0 :timeline/tempo-bpm 120.0 :timeline/length 64.0}))

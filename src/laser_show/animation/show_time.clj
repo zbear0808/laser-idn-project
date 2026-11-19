@@ -11,16 +11,17 @@
 
    App state keeps what events decide (state/domains :playback):
    - [:playback :active-cues cell]: an intent, with no position:
-     {:run id :timeline? :start-beat :paused? :seek {:id :beat}}, or
-     {:chasing? true :timeline? true} for a timeline following MIDI timecode;
+     {:run id :timeline? :start-beat :paused? :seek {:id :beat} :decay-beats :hold?},
+     or {:chasing? true :timeline? true} for a timeline following MIDI timecode;
    - [:playback :requests]: {:restart {:id} :align {:id} :shift {:id :offset}},
      each applied once per id.
    step reads them once per tick. What the clock learns goes back to app state
-   as events: a timeline's end and a timecode chase (:show-clock/cue-ended,
-   :show-clock/chase), and what views show a few times a second, the beat
-   square, the stats and the MTC text (:show-clock/status, on status-paths).
-   Positions never reach app state: views that move every frame draw the
-   newest snapshot (views/components/clock_view.clj)."
+   as events: a run's end (a timeline's, or a vibe cue's decay) and a timecode
+   chase (:show-clock/cue-ended, :show-clock/chase), and what views show a few
+   times a second, the beat square, the stats and the MTC text
+   (:show-clock/status, on status-paths). Positions never reach app state:
+   views that move every frame draw the newest snapshot
+   (views/components/clock_view.clj)."
   (:require [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.common.util :as u]
             [laser-show.state.extractors :as ex]
@@ -125,7 +126,7 @@
 
 (defn- run-for
   "The run the intent names (started now if the runtime doesn't have it yet),
-   at the intent's cell, with its pause and seek applied."
+   at the intent's cell, with its pause, decay and seek applied."
   [runs global cell intent now-ms]
   (let [run (or (get runs (:run intent))
                 (cue-timing/start-timing now-ms (effective-beats global)
@@ -135,7 +136,9 @@
                            :cell cell
                            :paused? (boolean (:paused? intent)))
               (and (:timeline? intent) (not (:timeline? run)))
-              (assoc :timeline? true :phase-offset 0.0 :phase-offset-target 0.0))
+              (assoc :timeline? true :phase-offset 0.0 :phase-offset-target 0.0)
+              (:decay-beats intent)
+              (assoc :decay-beats (double (:decay-beats intent)) :hold? (boolean (:hold? intent))))
         {:keys [id beat]} (:seek intent)]
     (if (and (some? id) (not= id (:seek-id run)))
       (-> run
@@ -185,9 +188,9 @@
 ;; Reports back to app state
 
 (defn- pending-reports
-  "What app state needs to hear now: timeline runs that ended while their
-   intent is still there, and chasing cells where app state and the chase
-   disagree."
+  "What app state needs to hear now: runs that ended (a timeline at its end,
+   a decay after its beats) while their intent is still there, and chasing
+   cells where app state and the chase disagree."
   [runtime state]
   (let [intents (or (get-in state [:playback :active-cues]) {})]
     (concat

@@ -143,6 +143,7 @@
   ;; Initialize with base state, then apply starter templates for fresh projects
   (state/init-state! (-> (domains/build-initial-state)
                          (templates/apply-starter-cue-chains)
+                         (templates/apply-starter-vibes)
                          (history/mark-clean)))
 
   (init-styles!)
@@ -258,6 +259,7 @@
   ([]
    (start-test! (-> (domains/build-initial-state)
                     (templates/apply-starter-cue-chains)
+                    (templates/apply-starter-vibes)
                     (history/mark-clean))))
   ([initial-state]
    (stop!)

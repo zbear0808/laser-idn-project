@@ -10,6 +10,7 @@
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.timeline.playback :as playback]
             [laser-show.animation.cue-timing :as cue-timing]
+            [laser-show.vibes.refs :as refs]
             [clojure.tools.logging :as log]))
 
 
@@ -29,46 +30,26 @@
                :resolved-mode resolved-mode})
     resolved-mode))
 
-(defn- trigger-cue
-  "Trigger a cue: its intent in active-cues, as a new run, which the show
-   clock starts at its next tick. Timeline cues start from the top (live use);
-   the timeline editor's Play starts from its cursor. A timeline following
-   MIDI timecode isn't started: the timecode drives it."
-  [state col row]
-  (let [cue (get-in state [:chains :cue-chains [col row]])]
-    (if (playback/chases-mtc? cue)
-      state
-      (update state :playback cue-timing/activate-cue [col row] (random-uuid)
-              {:timeline? (cue-chains/timeline-cue? cue) :start-beat 0.0}))))
+(defn start-cue
+  "Start the cue at [col row]: its intent in active-cues, as a new run, which
+   the show clock starts at its next tick. Timeline cues start from the top
+   (live use); the timeline editor's Play starts from its cursor. A timeline
+   following MIDI timecode isn't started: the timecode drives it. opts:
+   :decay-beats and :hold? (cue-timing/activate-cue), :run (the run's id,
+   a new random one without)."
+  ([state col row] (start-cue state col row {}))
+  ([state col row {:keys [decay-beats hold? run]}]
+   (let [cue (get-in state [:chains :cue-chains [col row]])]
+     (if (playback/chases-mtc? cue)
+       state
+       (update state :playback cue-timing/activate-cue [col row] (or run (random-uuid))
+               {:timeline? (cue-chains/timeline-cue? cue) :start-beat 0.0
+                :decay-beats decay-beats :hold? hold?})))))
 
 (defn- untrigger-cue
   "Remove a cue from active-cues. Sets playing? to false if no cues remain."
   [state col row]
   (update state :playback cue-timing/deactivate-cue [col row]))
-
-(defn- migrate-cell-triggers
-  "Migrates target coordinates for triggers mapped to from-pos."
-  [trigger-map from-pos to-pos target-type]
-  (if (seq trigger-map)
-    (into {}
-          (map (fn [[k v]]
-                 [k (if (and (= (:type v) target-type)
-                             (= (:target v) from-pos))
-                      (assoc v :target to-pos)
-                      v)]))
-          trigger-map)
-    trigger-map))
-
-(defn- remove-cell-triggers
-  "Removes all triggers targeting pos for target-type."
-  [trigger-map pos target-type]
-  (if (seq trigger-map)
-    (into {}
-          (remove (fn [[_ v]]
-                    (and (= (:type v) target-type)
-                         (= (:target v) pos))))
-          trigger-map)
-    trigger-map))
 
 (defn- handle-grid-trigger-cell
   "Trigger a grid cell from external input (MIDI/OSC).
@@ -86,9 +67,9 @@
         (case trigger-mode
           :toggle (if cue-active?
                     {:state (untrigger-cue state-with-selected col row)}
-                    {:state (trigger-cue state-with-selected col row)})
+                    {:state (start-cue state-with-selected col row)})
           ;; :retrigger or any other value - always trigger/restart
-          {:state (trigger-cue state-with-selected col row)}))
+          {:state (start-cue state-with-selected col row)}))
       ;; Triggering an empty cell just selects it
       {:state state-with-selected})))
 
@@ -96,7 +77,7 @@
   "Start a cue regardless of trigger mode (momentary press)."
   [{:keys [col row state]}]
   (if (get-in state [:chains :cue-chains [col row]])
-    {:state (trigger-cue (assoc-in state [:grid :selected-cell] [col row]) col row)}
+    {:state (start-cue (assoc-in state [:grid :selected-cell] [col row]) col row)}
     {:state state}))
 
 (defn- handle-grid-release-cell
@@ -136,16 +117,17 @@
                       {:state (untrigger-cue state-with-selected col row)})
                     (do
                       (log/info "Toggle mode: Turning ON cue" {:col col :row row})
-                      {:state (trigger-cue state-with-selected col row)}))
+                      {:state (start-cue state-with-selected col row)}))
           ;; :retrigger or any other value - always trigger/restart
           (do
             (log/info "Retrigger mode: Always triggering cue" {:col col :row row})
-            {:state (trigger-cue state-with-selected col row)})))
+            {:state (start-cue state-with-selected col row)})))
       ;; Left click on empty - select
       {:state state-with-selected})))
 
 (defn- handle-grid-move-cell
-  "Move a cell's cue chain from one position to another, preserving any active cue state."
+  "Move a cell's cue chain from one position to another, preserving any active
+   cue state. Trigger-map bindings and vibes that named it follow."
   [{:keys [from-col from-row to-col to-row state]}]
   (let [cue-chain-data (get-in state [:chains :cue-chains [from-col from-row]])]
     (if cue-chain-data
@@ -154,7 +136,8 @@
                        (update-in [:chains :cue-chains] dissoc [from-col from-row])
                        (assoc-in [:chains :cue-chains [to-col to-row]] cue-chain-data)
                        (update-in [:config :input :trigger-map]
-                                  migrate-cell-triggers [from-col from-row] [to-col to-row] :trigger-cue)
+                                  refs/move-trigger-targets [from-col from-row] [to-col to-row] :trigger-cue)
+                       (refs/move-cue [from-col from-row] [to-col to-row])
                        ;; Move active cell if it was the source
                        (cond-> (= (get-in state [:playback :active-cell]) [from-col from-row])
                          (assoc-in [:playback :active-cell] [to-col to-row]))
@@ -183,11 +166,12 @@
                                  :cue-chain))
 
 (defn- handle-grid-clear-cell
-  "Clear a cell's cue chain and associated triggers."
+  "Clear a cell's cue chain, and the triggers and vibes that named it."
   [{:keys [col row state]}]
   {:state (-> state
               (update-in [:chains :cue-chains] dissoc [col row])
-              (update-in [:config :input :trigger-map] remove-cell-triggers [col row] :trigger-cue)
+              (update-in [:config :input :trigger-map] refs/remove-trigger-targets [col row] :trigger-cue)
+              (refs/remove-cue [col row])
               (cond-> (= (get-in state [:playback :active-cell]) [col row])
                 (assoc-in [:playback :active-cell] nil))
               (update-in [:playback :active-cues] dissoc [col row]))})

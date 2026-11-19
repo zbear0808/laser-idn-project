@@ -20,6 +20,11 @@
    2% of a beat, ~10ms at 120 BPM - imperceptible to humans."
   0.02)
 
+(def ^:private ^:const decay-epsilon
+  "Beats a run may fall short of its :decay-beats and still end: the sum of
+   60 ticks a second misses a whole beat by about 1e-15."
+  1e-9)
+
 (defn calculate-beat-phase-correction
   "Calculate the shortest-path phase correction (-0.5 to 0.5) to align
    current beat count with the nearest integer beat boundary (0.0 phase).
@@ -131,14 +136,16 @@
    
    Timeline cues (:timeline? true) have no phase glide (phase stays 0, so
    accumulated = effective beats), don't move while :paused?, and without an
-   enabled loop stop at :length with :ended? true. Missing accumulators and
-   phase keys count as 0, and a missing resync-rate as 4 beats.
+   enabled loop stop at :length with :ended? true. A cue with :decay-beats
+   (vibe mode) ends with :ended? true once its accumulated beats reach them
+   while :hold? is false. Missing accumulators and phase keys count as 0, and
+   a missing resync-rate as 4 beats.
    
    Returns: Updated cue timing state"
   ([ct current-time-ms bpm resync-rate loop-config]
    (update-cue-timing ct current-time-ms bpm resync-rate loop-config nil))
   ([{:keys [accumulated-beats accumulated-ms phase-offset phase-offset-target
-            last-frame-time timeline? paused?] :as ct}
+            last-frame-time timeline? paused? decay-beats hold?] :as ct}
     current-time-ms bpm resync-rate {:keys [enabled? start duration] :as _loop-config} timeline-cfg]
    (cond
      (nil? last-frame-time)
@@ -173,15 +180,17 @@
                                (let [overshoot (- new-accumulated-beats (+ start duration))]
                                  (+ start (mod overshoot duration)))
                                new-accumulated-beats)
-               ended? (and timeline? (not looping?) length
-                           (>= wrapped-beats (double length)))]
+               at-end? (and timeline? (not looping?) length
+                            (>= wrapped-beats (double length)))
+               decayed? (and decay-beats (not hold?)
+                             (>= (+ new-accumulated-beats decay-epsilon) (double decay-beats)))]
            (cond-> (assoc ct
-                          :accumulated-beats (if ended? (double length) wrapped-beats)
+                          :accumulated-beats (if at-end? (double length) wrapped-beats)
                           :accumulated-ms (+ (or accumulated-ms 0.0) delta-ms)
                           :phase-offset new-phase
                           :last-frame-time current-time-ms)
              timeline? (assoc :phase-offset-target 0.0)
-             ended? (assoc :ended? true))))))))
+             (or at-end? decayed?) (assoc :ended? true))))))))
 
 
 (defn get-cue-timing-context
@@ -322,13 +331,17 @@
 (defn activate-cue
   "Start the cue at cell as the run run-id: write its intent to
    (:active-cues playback) and set :playing?. Timeline cues (:timeline? true)
-   say where to start (:start-beat). The intent holds no position: the show
-   clock starts the run's timing at its next tick."
-  [playback cell run-id {:keys [timeline? start-beat]}]
+   say where to start (:start-beat). With :decay-beats the run ends after
+   that many beats once :hold? is false (vibe mode: a press holds it, its
+   release lets it go). The intent holds no position: the show clock starts
+   the run's timing at its next tick."
+  [playback cell run-id {:keys [timeline? start-beat decay-beats hold?]}]
   (-> playback
       (assoc-in [:active-cues cell] (cond-> {:run run-id}
                                       timeline? (assoc :timeline? true
-                                                       :start-beat (double (or start-beat 0.0)))))
+                                                       :start-beat (double (or start-beat 0.0)))
+                                      decay-beats (assoc :decay-beats (double decay-beats))
+                                      (some? hold?) (assoc :hold? (boolean hold?))))
       (assoc :playing? true
              :active-cell cell)))
 

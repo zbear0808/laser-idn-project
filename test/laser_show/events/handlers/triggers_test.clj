@@ -1,7 +1,11 @@
 (ns laser-show.events.handlers.triggers-test
   (:require [clojure.test :refer [deftest is testing]]
+            [laser-show.events.core :as events]
             [laser-show.events.handlers :as handlers]
-            [laser-show.events.handlers.triggers :as triggers]))
+            [laser-show.events.handlers.triggers :as triggers]
+            [laser-show.state.core :as state]
+            [laser-show.state.domains :as domains]
+            [laser-show.state.templates :as templates]))
 
 (deftest legacy-cue-trigger-dispatches-grid-event
   (let [input {:type :trigger :source :keyboard :id :space :timestamp 1000}
@@ -28,26 +32,6 @@
                                  :input-event input
                                  :time 1100})]
     (is (empty? (get-in result [:state :trigger-runtime :held-inputs])))))
-
-(deftest trigger-group-lock-and-expiry
-  (let [state {:triggers {:settings {:group-duration-secs 1}}
-               :trigger-runtime {:active-groups
-                                 {:rhythm {:state :active :entered-at 0}}}}
-        armed (:state (triggers/handle {:event/type :trigger/tick
-                                        :state state
-                                        :time 1000}))
-        locked (:state (triggers/handle {:event/type :trigger-group/toggle-lock
-                                         :state armed
-                                         :group-id :rhythm}))]
-    (is (= :armed (get-in armed [:trigger-runtime :active-groups :rhythm :state])))
-    (is (= :locked (get-in locked [:trigger-runtime :active-groups :rhythm :state])))))
-
-(deftest trigger-group-events-are-routed
-  (let [state {:trigger-runtime {:active-groups {:rhythm {:state :active}}}}
-        result (handlers/handle-event {:event/type :trigger-group/toggle-lock
-                                       :state state
-                                       :group-id :rhythm})]
-    (is (= :locked (get-in result [:state :trigger-runtime :active-groups :rhythm :state])))))
 
 (def ^:private note-key {:source :midi :channel 0 :note 60})
 
@@ -106,3 +90,57 @@
     (is (= {:event/type :timeline/play :col 2 :row 1} (fire {:type :start-timeline :target [2 1]})))
     (is (= {:event/type :timeline/stop :col 2 :row 1} (fire {:type :stop-timeline :target [2 1]})))
     (is (nil? (fire {:type :start-timeline :target :some-id})) "non-cell targets do nothing")))
+
+
+;; Vibe mode's role bindings
+
+(def ^:private pad-key {:source :midi :channel 0 :note 36})
+
+(defn- pad-state [action]
+  {:config {:input {:trigger-map {pad-key action}}}
+   :trigger-runtime {:held-inputs #{} :active-triggers {} :tap-history []}})
+
+(defn- pad [state type timestamp]
+  (triggers/handle {:event/type :trigger/input
+                    :state state
+                    :input-event {:type type :source :midi :channel 0 :note 36 :timestamp timestamp}
+                    :time 99999}))
+
+(deftest vibe-action-maps-press-and-release-test
+  (let [state (pad-state {:type :vibe :role :hit})
+        press (:dispatch (pad state :note-on 1000))
+        release (:dispatch (pad state :note-off 1090))]
+    (is (= {:event/type :vibe/press :role :hit :input-time 1000} (select-keys press [:event/type :role :input-time])))
+    (is (= {:event/type :vibe/release :role :hit :input-time 1090} (select-keys release [:event/type :role :input-time]))
+        "every role hears its release")
+    (is (= {:type :vibe :role :hit} (:source-trigger press)) "so history skips it"))
+  (testing "a binding that selects a vibe does so on its press"
+    (let [state (pad-state {:type :vibe-select :vibe :vibe-2})]
+      (is (= {:event/type :vibe/select :vibe :vibe-2 :input-time 1000}
+             (select-keys (:dispatch (pad state :note-on 1000)) [:event/type :vibe :input-time])))
+      (is (nil? (:dispatch (pad state :note-off 1090)))))))
+
+(deftest vibe-action-skips-runtime-bookkeeping-test
+  (let [state (pad-state {:type :vibe :role :hit})]
+    (is (identical? state (:state (pad state :note-on 1000))) "probe v8: no held input, tap or active trigger")
+    (is (identical? state (:state (pad state :note-off 1090)))))
+  (testing "other bindings keep it"
+    (is (= #{pad-key} (get-in (pad (pad-state {:type :tap-tempo}) :note-on 1000) [:state :trigger-runtime :held-inputs])))))
+
+(deftest vibe-action-carries-the-input-timestamp-test
+  (state/init-state! (-> (domains/build-initial-state)
+                         (templates/apply-starter-cue-chains)
+                         (templates/apply-starter-vibes)
+                         (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)
+                         (assoc-in [:config :input :trigger-map pad-key] {:type :vibe :role :hit})))
+  (let [input (fn [type timestamp]
+                (events/event-handler {:event/type :trigger/input
+                                       :input-event {:type type :source :midi :channel 0 :note 36 :timestamp timestamp}
+                                       :time timestamp})
+                (state/get-raw-state))
+        pressed (input :note-on 1000)
+        cell (get-in pressed [:vibe-runtime :voices :hit :cell])]
+    (is (= 1000 (get-in pressed [:vibe-runtime :held :hit :at]))
+        "probe v2: the pipeline's :time is when the event was handled; the press is timed by the input")
+    (is (nil? (get-in (input :note-off 1400) [:playback :active-cues cell]))
+        "held 400 ms by the input's clock (a few by the handler's): a hold, so it is cut")))

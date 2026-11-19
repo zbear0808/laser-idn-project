@@ -120,6 +120,53 @@
       (is (true? (:playing? p)))
       (is (= [0 0] (:active-cell p))))))
 
+(deftest activate-cue-writes-decay-keys-test
+  (is (= {:run :r :decay-beats 1.0 :hold? true}
+         (get-in (ct/activate-cue {} [1 0] :r {:decay-beats 1 :hold? true}) [:active-cues [1 0]])))
+  (is (= {:run :r :hold? true}
+         (get-in (ct/activate-cue {} [6 0] :r {:hold? true}) [:active-cues [6 0]]))
+      "a held flash: no decay")
+  (is (= {:run :r} (get-in (ct/activate-cue {} [0 0] :r {:decay-beats nil :hold? nil}) [:active-cues [0 0]]))
+      "nil keys leave the intent as before"))
+
+(defn- plain-at
+  "A plain run at beats, last ticked at time 0."
+  [beats extra]
+  (merge {:accumulated-beats beats :accumulated-ms 0.0 :phase-offset 0.0
+          :phase-offset-target 0.0 :last-frame-time 0}
+         extra))
+
+(defn- after
+  "The run delta-beats after its last tick, at bpm (120 unless given)."
+  ([t delta-beats] (after t delta-beats 120.0))
+  ([t delta-beats bpm]
+   (ct/update-cue-timing t (+ (:last-frame-time t) (* delta-beats (/ 60000.0 bpm))) bpm 4.0 no-loop)))
+
+(deftest decay-ends-a-plain-run-test
+  (testing "probe v7: a plain run counted beats for ever; with :decay-beats it ends once let go"
+    (let [r (after (plain-at 0.9 {:decay-beats 1.0 :hold? false}) 0.2)]
+      (is (true? (:ended? r)))
+      (is (< (Math/abs (- 1.1 (:accumulated-beats r))) 1e-9) "not moved back, unlike a timeline's end"))
+    (is (not (:ended? (after (plain-at 0.5 {:decay-beats 1.0 :hold? false}) 0.2))) "not there yet")
+    (testing "an ended run stays put"
+      (let [r (after (plain-at 1.0 {:decay-beats 1.0 :hold? false :ended? true}) 1.0)]
+        (is (= 1.0 (:accumulated-beats r)))))))
+
+(deftest hold-suspends-decay-test
+  (let [held (plain-at 0.0 {:decay-beats 1.0 :hold? true})
+        r (reduce (fn [t _] (after t 0.4)) held (range 8))]
+    (is (< (Math/abs (- 3.2 (:accumulated-beats r))) 1e-9))
+    (is (not (:ended? r)) "held: never ends by decay")
+    (is (true? (:ended? (after (assoc r :hold? false) 0.01)))
+        ":hold? false at beat 3.2: the next tick ends it")))
+
+(deftest decay-follows-tempo-test
+  (let [r (after (plain-at 0.0 {:decay-beats 1.0 :hold? false}) 0.5 120.0)]
+    (is (not (:ended? r)))
+    (is (not (:ended? (after r 0.25 60.0))) "a quarter beat at 60 BPM")
+    (is (true? (:ended? (after (after r 0.25 60.0) 0.25 60.0)))
+        "0.5 more beats at the slower tempo: 500 ms, not the 250 ms they took at 120")))
+
 (deftest start-timing-test
   (testing "a grid cue starts at 0 and glides toward the global beat phase"
     (is (= {:trigger-time 1000 :accumulated-beats 0.0 :accumulated-ms 0.0 :phase-offset 0.0

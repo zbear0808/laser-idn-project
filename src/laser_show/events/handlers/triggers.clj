@@ -2,7 +2,8 @@
   "Internal trigger orchestration.
 
    Trigger inputs are resolved here and then translated into the existing
-   domain events so all input sources share the same playback behavior."
+   domain events so all input sources share the same playback behavior.
+   Vibe mode's role bindings become :vibe/* events (handlers/vibes.clj)."
   (:require [clojure.tools.logging :as log]
             [laser-show.input.events :as input-events]
             [laser-show.triggers.matcher :as matcher]))
@@ -56,9 +57,32 @@
                          :fx/event press?}
         nil))))
 
+(def ^:private vibe-action?
+  "Vibe mode's bindings: {:type :vibe :role r} and {:type :vibe-select :vibe id}."
+  #{:vibe :vibe-select})
+
+(defn- vibe-event
+  "A role hears its press and its release, timed by the input (the
+   pipeline's :time is when the event was handled); a vibe-select binding
+   selects its vibe on press."
+  [{:keys [type role vibe]} input-event]
+  (let [press? (pressed? input-event)
+        at (:timestamp input-event)]
+    (case type
+      :vibe {:event/type (if press? :vibe/press :vibe/release)
+             :role role
+             :input-time at}
+      :vibe-select (when press?
+                     {:event/type :vibe/select
+                      :vibe vibe
+                      :input-time at}))))
+
 (defn- action-event [action input-event]
   (let [{:keys [type target]} action]
     (cond
+      (vibe-action? type)
+      (vibe-event action input-event)
+
       (and (= :momentary (:behavior action))
            (#{:trigger-cue :trigger-effect} type))
       (momentary-event action input-event)
@@ -117,7 +141,11 @@
   [{:keys [state input-event time]}]
   (let [action (or (definition-action state input-event)
                    (legacy-action state input-event))
-        next-state (update-runtime state input-event (or action {}) time)]
+        ;; A vibe binding leaves the bookkeeping alone: nothing reads it
+        ;; (probe v8), and the engine keeps its own holds
+        next-state (if (vibe-action? (:type action))
+                     state
+                     (update-runtime state input-event (or action {}) time))]
     (if-let [event (and action (action-event action input-event))]
       {:state next-state
        :dispatch (assoc event :source-trigger action :source-input input-event)}
@@ -131,36 +159,11 @@
                    :time time})
     {:state state}))
 
-(defn- handle-group-toggle-lock
-  [{:keys [state group-id]}]
-  (let [current (get-in state [:trigger-runtime :active-groups group-id])
-        next-state (if (= :locked (:state current)) :active :locked)]
-    {:state (assoc-in state [:trigger-runtime :active-groups group-id]
-                      (assoc (or current {}) :state next-state))}))
-
-(defn- handle-tick
-  [{:keys [state time]}]
-  (let [settings (get-in state [:triggers :settings] {})
-        duration-ms (* 1000 (long (or (:group-duration-secs settings) 45)))
-        groups (get-in state [:trigger-runtime :active-groups] {})
-        updated (reduce-kv
-                 (fn [result group-id group]
-                   (if (and (= :active (:state group))
-                            (:entered-at group)
-                            (>= (- time (:entered-at group)) duration-ms))
-                     (assoc result group-id (assoc group :state :armed))
-                     (assoc result group-id group)))
-                 {}
-                 groups)]
-    {:state (assoc-in state [:trigger-runtime :active-groups] updated)}))
-
 (defn handle
   [{:keys [event/type] :as event}]
   (case type
     :trigger/input (handle-input event)
     :trigger/fire (handle-fire event)
-    :trigger-group/toggle-lock (handle-group-toggle-lock event)
-    :trigger/tick (handle-tick event)
     :trigger/tap-tempo
     {:dispatch {:event/type :timing/tap-tempo}}
     {}))

@@ -18,6 +18,7 @@
    [laser-show.events.handlers.keyframe :as keyframe]
    [laser-show.events.handlers.input :as input]
    [laser-show.events.handlers.triggers :as triggers]
+   [laser-show.events.handlers.vibes :as vibes]
    [laser-show.events.handlers.timeline :as timeline]
    [laser-show.events.handlers.history :as history]))
 
@@ -60,7 +61,7 @@
       "keyframe" (keyframe/handle event)
       "input" (input/handle event)  ; MIDI and OSC input management
       "trigger" (triggers/handle event)
-      "trigger-group" (triggers/handle event)
+      "vibe" (vibes/handle event)  ; Vibe mode's five roles
       "timeline" (timeline/handle event)  ; Timeline editor operations
       "timeline-cue-editor" (timeline/handle event)  ; Timeline open with initialization
       "history" (history/handle event)

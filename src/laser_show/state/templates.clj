@@ -8,7 +8,8 @@
    - Creating a new project
    - Resetting to a 'starter' state
    - Providing demo content for new users"
-  (:require [laser-show.animation.cue-chains :as cue-chains]))
+  (:require [laser-show.animation.cue-chains :as cue-chains]
+            [laser-show.vibes.library :as library]))
 
 
 ;; Starter Cue Chains
@@ -61,3 +62,37 @@
     (if (empty? current-cue-chains)
       (assoc-in state [:chains :cue-chains] (create-starter-cue-chains))
       state)))
+
+
+;; Starter Vibes
+
+
+(defn create-starter-vibes
+  "Two vibes over the starter cue chains (create-starter-cue-chains), for
+   [:config :vibes]: \"Shapes\" hits circle, square, triangle and star,
+   accents with the spiral and flashes the beam fan; \"Lines\" hits the wave
+   and the line, accents with the beam fan and flashes the spiral."
+  []
+  {:order [:vibe-1 :vibe-2]
+   :next-id 3
+   :library
+   {:vibe-1 {:id :vibe-1 :name "Shapes" :color "#4A90D9" :energy 2 :allow-audience? false
+             :hit {:cells [[0 0] [1 0] [2 0] [3 0]] :select :shuffle :mode :decay :beats 1.0}
+             :accent {:cells [[4 0]] :select :shuffle :mode :decay :beats 2.0}
+             :flash {:cue [6 0] :fx [] :solo? true}
+             :bed nil :fx []}
+    :vibe-2 {:id :vibe-2 :name "Lines" :color "#9B59B6" :energy 3 :allow-audience? false
+             :hit {:cells [[5 0] [7 0]] :select :shuffle :mode :decay :beats 1.0}
+             :accent {:cells [[6 0]] :select :shuffle :mode :decay :beats 2.0}
+             :flash {:cue [4 0] :fx [] :solo? true}
+             :bed nil :fx []}}
+   :settings (:settings library/empty-library)})
+
+(defn apply-starter-vibes
+  "Apply the starter vibes to a state map if it has no vibes, keeping its
+   vibe settings. Use it with apply-starter-cue-chains: the vibes name the
+   starter cues."
+  [state]
+  (if (empty? (get-in state [:config :vibes :library]))
+    (update-in state [:config :vibes] #(merge (create-starter-vibes) (select-keys % [:settings])))
+    state))

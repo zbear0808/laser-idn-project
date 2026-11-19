@@ -39,7 +39,7 @@
   {:bpm {:default default-bpm
          :doc "Beats per minute"}
    :tap-times {:default []
-               :doc "Vector of tap-tempo timestamps for BPM calculation"}
+               :doc "The last 8 tap-tempo timestamps (fewer after a 2 s gap), for the BPM calculation"}
    :beat-position {:default 0.0
                    :doc "Position within current beat (0.0-1.0)"}
    :bar-position {:default 0.0
@@ -75,10 +75,12 @@
    :active-cues {:default {}
                  :doc "Map of [col row] -> intent, with no position:
                        {:run uuid :timeline? bool :start-beat double
-                        :paused? bool :seek {:id uuid :beat double}}
+                        :paused? bool :seek {:id uuid :beat double}
+                        :decay-beats double :hold? bool}
                        or {:chasing? true :timeline? true} for a timeline
                        following MIDI timecode. The show clock starts, moves
-                       and drops runs to match (show-time/step)."}
+                       and drops runs to match (show-time/step); a run with
+                       :decay-beats ends after them once :hold? is false."}
    :requests {:default {}
               :doc "{:restart {:id} :align {:id} :shift {:id :offset}}: the show clock applies each id once (Stop and Retrigger, tap tempo, Link)"}
 
@@ -87,32 +89,49 @@
                  :doc "Beats to reach ~63% of target phase correction (shared across all cues)"}})
 
 (defstate triggers
-  "Persisted internal trigger definitions, groups, and global settings."
+  "Internal trigger definitions (laser-show.events.handlers.triggers, :trigger/fire)."
   {:definitions {:default {}
-                 :doc "Map of trigger ID to trigger definition"}
-   :groups {:default {}
-            :doc "Map of trigger-group ID to group configuration"}
-   :settings {:default {:enabled? true
-                        :quick-tap-threshold-ms 150
-                        :default-decay-beats 1.0
-                        :pause-beats-to-switch 2.0
-                        :group-duration-secs 45}
-              :doc "Global internal trigger behavior settings"}})
+                 :doc "Map of trigger ID to trigger definition"}})
 
 (defstate trigger-runtime
-  "Transient runtime state for active internal triggers and groups."
+  "Transient runtime state for active internal triggers."
   {:active-triggers {:default {}
                      :doc "Map of trigger ID to runtime timing state"}
-   :active-groups {:default {}
-                   :doc "Map of group ID to active/armed/locked state"}
    :tap-history {:default []
                  :doc "Recent internal trigger timestamps"}
-   :shuffle-bags {:default {}
-                  :doc "Per-group shuffle-bag state"}
    :held-inputs {:default #{}
                  :doc "Input identities currently held"}
    :last-input-time {:default nil
                      :doc "Timestamp of the most recent discrete input"}})
+
+(defstate vibe-runtime
+  "What vibe mode is doing (laser-show.vibes.engine, the :vibe/* events).
+   Session only: not saved, not a document root (no undo, never unsaved),
+   reset with the document (state.persistent/reset-session)."
+  {:current {:default nil
+             :doc "Id of the vibe playing, nil until the first press or :vibe/select"}
+   :entered-at {:default nil
+                :doc "Event time (ms) the current vibe began"}
+   :rotation {:default :active
+              :doc ":active or :locked (VIBE held)"}
+   :blackout? {:default false
+               :doc "BLACKOUT is on: every other press is ignored until it is pressed again"}
+   :held {:default {}
+          :doc "role -> {:at ms :src :input|:pad}: the roles pressed and not let go yet"}
+   :voices {:default {}
+            :doc "role -> what its press started: {:cell :run :mode} (:hit :accent), {:cell :run} (:bed), {:cell :run :fx :fx-on :solo?} (:flash)"}
+   :duck {:default {}
+          :doc "role -> what a held solo flash keeps waiting, started when it lets go: {:cell :mode} it stepped aside, or {:mode} for a HIT or ACCENT pressed while it was held (picked then)"}
+   :fx-on {:default []
+           :doc "Effect cells the current vibe's FX set switched on (only those are switched off)"}
+   :bags {:default {}
+          :doc "[vibe-id role] -> shuffle bag (laser-show.triggers.shuffle-bag) with its :seed and :n"}
+   :started {:default 0
+             :doc "Cues the engine has started this session: names each run, so the same press gives the same state"}
+   :last-hit-at {:default nil
+                 :doc "Event time (ms) of the last HIT press"}
+   :problem {:default nil
+             :doc "{:role :why} of the last press that had nothing to play ({:why :no-vibes} without vibes), until the next good one"}})
 
 (defstate grid
   "Cue grid state - the main trigger interface.
@@ -243,7 +262,14 @@
    :input {:default {:trigger-map {}}
            :doc "Map of generic input triggers (MIDI/OSC/Key -> actions)"}
    :cue {:default {:trigger-mode :default}
-         :doc "Cue playback settings. :trigger-mode can be :default (use per-cue setting), :toggle (click ON/OFF), or :retrigger (always restart)"}})
+         :doc "Cue playback settings. :trigger-mode can be :default (use per-cue setting), :toggle (click ON/OFF), or :retrigger (always restart)"}
+   :vibes {:default {:order []
+                     :next-id 1
+                     :library {}
+                     :settings {:quick-tap-ms 150
+                                :lock-hold-ms 600
+                                :hit-taps-tempo? true}}
+           :doc "Vibe mode: cues grouped by feel (laser-show.vibes.library). :library {vibe-id vibe} in :order; new ids count from :next-id. :settings: a press shorter than :quick-tap-ms is a tap, a VIBE press of :lock-hold-ms or more locks, :hit-taps-tempo? (not while Link sync is on). Saved, undoable content"}})
 
 (defstate projectors
   "Projector configurations for color calibration and routing.
