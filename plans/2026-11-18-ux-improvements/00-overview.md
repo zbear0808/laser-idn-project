@@ -265,7 +265,7 @@ Committed as `e2bce92` on top of `b54e0a5`. §1–7 cite `b1da0f2`; the lines be
 
 ## 9. As built: Phase 1 (2026-11-19)
 
-Committed as `92c191a` on top of `6e26ee4` (built as `e9df4bf` on branch `ux-phase1` from `67735d0`, then cherry-picked past vibe Phase 1 with no conflicts). §1–7 cite `b1da0f2`; the lines below are at `92c191a`.
+Committed as `92c191a` on top of `6e26ee4` (built as `e9df4bf` on branch `ux-phase1` from `67735d0`, then cherry-picked past vibe Phase 1 with no conflicts). §1–7 cite `b1da0f2`; the lines below are at `e9df4bf`: the same in `92c191a` except in `state/domains.clj` and `subs.clj`, which vibe Phase 1 also changed, where they are shifted by its lines.
 
 **Where it is now**
 - Stop (U2 A):
@@ -389,7 +389,7 @@ Committed as `92c191a` on top of `6e26ee4` (built as `e9df4bf` on branch `ux-pha
 
 ## 10. As built: Phase 2 (2026-11-19)
 
-Committed as `e3d6d1b` on top of `f9fc352` (built as `5bb4472` on branch `ux-phase2` from `c556d71`, then cherry-picked past vibe Phase 2 with no conflicts). §1–7 cite `b1da0f2`; the lines below are at `5bb4472`.
+Committed as `e3d6d1b` on top of `f9fc352` (built as `5bb4472` on branch `ux-phase2` from `c556d71`, then cherry-picked past vibe Phase 2 with no conflicts). §1–7 cite `b1da0f2`; the lines below are at `5bb4472`: the same in `e3d6d1b` except in `subs.clj`, `views/root.clj` and `testfx.clj`, which vibe Phase 2 also changed, where they are shifted by its lines.
 
 **Where it is now**
 - Pads that grow:

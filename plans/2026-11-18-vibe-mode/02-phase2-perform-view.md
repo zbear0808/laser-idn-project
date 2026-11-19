@@ -158,7 +158,7 @@ Run: `clj -M:mac-arm:test subs input vibes`, then `clj -M:test-ui:mac-arm:test-u
 
 ## 10. As built (2026-11-19)
 
-Committed as `94f905e` on top of `c556d71` (built as `3164717` on branch `vibe-phase2` from `6e26ee4`, then cherry-picked past UX Phase 1 with no conflicts; Phase 1 is `9177b1e`). §1–9 cite `b1da0f2`; the lines below are at `3164717`.
+Committed as `94f905e` on top of `c556d71` (built as `3164717` on branch `vibe-phase2` from `6e26ee4`, then cherry-picked past UX Phase 1 with no conflicts; Phase 1 is `9177b1e`). §1–9 cite `b1da0f2`; the lines below are at `3164717`: the same in `94f905e` except in `subs.clj` and `subs_test.clj`, which UX Phase 1 also changed, where they are shifted by its lines.
 
 **Where it is now** (paths under `src/laser_show/`)
 - `views/tabs/perform.clj` (NEW): `perform-tab` `:116` (banner, header, strip, pads, status line), private `banner` `:18`, `tempo` `:31` (BPM and four beat squares, the only part a beat re-renders), `header` `:55` (name in the vibe's colour, energy, LOCKED, "Press the key for HIT"), `status-line` `:96` (`subs/connection-status`'s text, `subs/midi-connected-devices`). The banner is always in the tree, hidden while it has nothing to say, so showing it never makes new nodes of the pads under it (a held pad keeps getting its release).
