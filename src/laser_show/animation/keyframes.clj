@@ -19,6 +19,7 @@
     :loop-mode :loop}"
   (:require
    [laser-show.animation.interpolation :as interp]
+   [laser-show.animation.pulses :as pulses]
    [laser-show.animation.time :as time]
    [laser-show.common.util :as u]))
 
@@ -44,16 +45,22 @@
   "Calculate position in [0,1] based on time and period settings.
    
    Parameters:
-   - config: Map with :period, :time-unit, :loop-mode keys
+   - config: Map with :period, :time-unit, :loop-mode keys, and :restart-on
+     to count from the newest press of a source (pulses/rebase), as the
+     waves do
    - time-ms: Current time in milliseconds (used when context has no accumulators)
    - context: Modulation context with the cue's accumulators and :bpm
    
    Returns: Position in [0, 1]"
-  ^double [{:keys [period time-unit loop-mode]
+  ^double [{:keys [period time-unit loop-mode restart-on]
             :or {period 1.0 time-unit :beats loop-mode :loop}}
            time-ms
            context]
-  (let [period' (double period)]
+  (let [period' (double period)
+        [time-ms context] (if (and restart-on (not= :own restart-on))
+                            (let [rebased (pulses/rebase (or context {}) restart-on (not= :once loop-mode))]
+                              [(:time-ms rebased time-ms) rebased])
+                            [time-ms context])]
     (if (= loop-mode :once)
       (time/calculate-once-progress (cond-> (or context {}) (some? time-ms) (assoc :time-ms time-ms))
                                     period' (or time-unit :beats))

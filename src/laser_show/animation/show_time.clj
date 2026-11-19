@@ -14,7 +14,10 @@
      {:run id :timeline? :start-beat :paused? :seek {:id :beat} :decay-beats :hold?},
      or {:chasing? true :timeline? true} for a timeline following MIDI timecode;
    - [:playback :requests]: {:restart {:id} :align {:id} :shift {:id :offset}},
-     each applied once per id.
+     each applied once per id;
+   - [:playback :pulses]: {source {:id :held?}}, the presses tap reactions
+     follow (laser-show.animation.pulses), stamped on the pulse clock, which
+     no request moves.
    step reads them once per tick. What the clock learns goes back to app state
    as events: a run's end (a timeline's, or a vibe cue's decay) and a timecode
    chase (:show-clock/cue-ended, :show-clock/chase), and what views show a few
@@ -23,6 +26,7 @@
    views that move every frame draw the newest snapshot
    (views/components/clock_view.clj)."
   (:require [laser-show.animation.cue-timing :as cue-timing]
+            [laser-show.animation.pulses :as pulses]
             [laser-show.common.util :as u]
             [laser-show.state.extractors :as ex]
             [laser-show.timeline.playback :as playback])
@@ -32,20 +36,25 @@
 ;; Runtime
 
 (def initial-runtime
-  "The runtime after a reset: no runs, the global clock at 0, waiting for its
-   first tick (which sets :t0-ns and the clocks' :last-frame-time)."
+  "The runtime after a reset: no runs, the global clock and the pulse clock
+   at 0, no press stamped, waiting for the first tick (which sets :t0-ns and
+   the clocks' :last-frame-time)."
   {:tick 0
    :t0-ns nil
    :global {:accumulated-beats 0.0 :accumulated-ms 0.0 :phase-offset 0.0
             :phase-offset-target 0.0 :effective-beats 0.0}
+   :pulse-clock {:accumulated-beats 0.0 :accumulated-ms 0.0 :phase-offset 0.0
+                 :phase-offset-target 0.0 :effective-beats 0.0}
+   :pulses {}
    :runs {}
    :chase {}
    :applied {}
    :sent {}})
 
-(defonce ^{:doc "Show time ({:tick :t0-ns :global :runs {run-id timing} :chase {cell timing}
-                 :applied {kind request-id} :sent {report now-ms} :status {…}}). Only the
-                 show clock thread writes it (show-clock/tick! in tests)."}
+(defonce ^{:doc "Show time ({:tick :t0-ns :global :pulse-clock :pulses {source stamp}
+                 :runs {run-id timing} :chase {cell timing} :applied {kind request-id}
+                 :sent {report now-ms} :status {…}}). Only the show clock thread writes it
+                 (show-clock/tick! in tests)."}
   !runtime
   (atom initial-runtime))
 
@@ -90,7 +99,8 @@
 (defn- apply-request
   "Transport Stop and Retrigger restart every clock; a tap aligns the beat
    phase to the nearest whole beat; Link shifts the phase targets. Timelines
-   keep their position through align and shift."
+   keep their position through align and shift. None of them touches the
+   pulse clock, so a press keeps its age."
   [runtime kind request]
   (case kind
     :restart (-> runtime
@@ -163,13 +173,14 @@
 (def ^:private no-loop {:enabled? false :start 0.0 :duration 4.0})
 
 (defn- advance
-  "Every clock to now-ms: the global clock at the global BPM, each run at its
-   cue's tempo, loop and timeline length."
+  "Every clock to now-ms: the global clock and the pulse clock at the global
+   BPM, each run at its cue's tempo, loop and timeline length."
   [runtime state bpm now-ms]
   (let [resync-rate (ex/resync-rate state)
         chains (get-in state [:chains :cue-chains])]
     (-> runtime
         (update :global cue-timing/update-global-clock now-ms bpm resync-rate)
+        (update :pulse-clock cue-timing/update-global-clock now-ms bpm resync-rate)
         (update :runs update-vals
                 (fn [run]
                   (let [chain (get chains (:cell run))]
@@ -220,22 +231,30 @@
 
 ;; The step
 
+(defn- stamp-pulses
+  "The presses in app state stamped on the pulse clock, as it is now."
+  [runtime state]
+  (update runtime :pulses pulses/stamp (get-in state [:playback :pulses]) (:pulse-clock runtime)))
+
 (defn step
   "Show time one tick on, at now-ms (fractional milliseconds on the clock's
-   monotonic time base), from app state's intents and requests and the MTC
-   position (laser-show.input.mtc/position, or nil). Pure: returns
+   monotonic time base), from app state's intents, requests and presses and
+   the MTC position (laser-show.input.mtc/position, or nil). Pure: returns
    {:runtime r :reports [event …]}. In order:
    1. requests not applied yet (restart, align, shift);
    2. runs: started, moved, paused, seeked or dropped to match the intents;
    3. every clock advanced to now-ms;
-   4. chasing timelines set from the timecode;
-   5. reports for app state, each at most every report-interval-ms."
+   4. the presses stamped on the pulse clock (pulses/stamp), so a press and
+      the cue it starts reach the render at the same tick;
+   5. chasing timelines set from the timecode;
+   6. reports for app state, each at most every report-interval-ms."
   [runtime state mtc-pos now-ms]
   (let [bpm (double (or (ex/bpm state) 120.0))
         rt (-> runtime
                (apply-requests (get-in state [:playback :requests]))
                (reconcile-runs state now-ms)
                (advance state bpm now-ms)
+               (stamp-pulses state)
                (chase state mtc-pos bpm now-ms)
                (update :tick inc))
         [sent reports] (due-reports rt (pending-reports rt state) now-ms)]
@@ -244,6 +263,12 @@
 
 
 ;; Readers
+
+(defn pulse-view
+  "What tap reactions see of the presses in runtime (pulses/view): their
+   ages on the pulse clock, by source."
+  [runtime]
+  (pulses/view (:pulses runtime) (:pulse-clock runtime)))
 
 (defn positions
   "{cell beats} of every run and chased cue in runtime."
@@ -305,8 +330,8 @@
 
 (defonce ^{:private true
            :doc "The newest tick's snapshot, nil before the first: {:tick :at-ns :playing? :cues
-                 [{:cell :run :zone-frames}] :positions {cell beats} :projector-ctx
-                 :preview (delay …) :render-us}."}
+                 [{:cell :run :zone-frames}] :positions {cell beats} :pulses (pulse-view)
+                 :projector-ctx :preview (delay …) :render-us}."}
   !snapshot
   (atom nil))
 
@@ -332,11 +357,13 @@
 
 (defn reset-runtime!
   "Forget show time and the newest tick (tests, app/start-test!). Given app
-   state (show-clock/start!), the requests already in it count as applied, so
-   restarting the clock doesn't apply one again."
+   state (show-clock/start!), the requests already in it count as applied and
+   its presses as stamped, so restarting the clock replays neither."
   ([] (reset-runtime! nil))
   ([state]
-   (reset! !runtime (assoc initial-runtime :applied (request-ids state)))
+   (reset! !runtime (assoc initial-runtime
+                           :applied (request-ids state)
+                           :pulses (pulses/seed (get-in state [:playback :pulses]))))
    (reset! !snapshot nil)
    nil))
 

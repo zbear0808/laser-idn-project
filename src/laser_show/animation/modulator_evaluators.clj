@@ -12,6 +12,7 @@
   (:require
    [laser-show.animation.time :as time]
    [laser-show.animation.interpolation :as interp]
+   [laser-show.animation.pulses :as pulses]
    [laser-show.common.util :as u]))
 
 (set! *warn-on-reflection* true)
@@ -125,20 +126,10 @@
 ;; Decay Modulators
 
 
-(def ^:private ^:const decay-curve-k 5.0)
-
-(defn decay-curve-factor
-  "Remaining fraction (1.0 -> 0.0) of a decay at progress p in [0, 1].
-   - :linear - constant rate
-   - :exp    - fast start, long tail (normalised to reach 0 at p = 1)
-   - :log    - slow start, fast finish (mirror of :exp)"
-  ^double [curve ^double p]
-  (let [k decay-curve-k
-        e-k (Math/exp (- k))]
-    (case curve
-      :exp (/ (- (Math/exp (- (* k p))) e-k) (- 1.0 e-k))
-      :log (- 1.0 (/ (- (Math/exp (* k p)) 1.0) (- (Math/exp k) 1.0)))
-      (- 1.0 p))))
+(def decay-curve-factor
+  "Remaining fraction (1.0 -> 0.0) of a decay at progress p in [0, 1]
+   (time/decay-curve-factor, which the Envelope's release shares)."
+  time/decay-curve-factor)
 
 (defn- eval-decay
   "Evaluate decay modulator: moves from :max to :min over :duration
@@ -152,7 +143,7 @@
             1.0)
         start-v (double max)
         end-v (double min)]
-    (+ end-v (* (decay-curve-factor decay-curve p) (- start-v end-v)))))
+    (+ end-v (* (time/decay-curve-factor decay-curve p) (- start-v end-v)))))
 
 
 ;; Random Modulators
@@ -179,7 +170,9 @@
    Holds a new random value for each period (or for each 1/changes-per-beat
    beats, when the legacy :changes-per-beat key is set). Values are a pure
    function of the step number, so they're deterministic for a given time.
-   In once mode, steps through once-periods values then holds the last one."
+   In once mode, steps through once-periods values then holds the last one.
+   With Restart on, the press count (:pulse-count) is mixed in, so each
+   press gives a new value."
   [{:keys [min max period changes-per-beat loop-mode once-periods] :as config} context]
   (let [phase (calculate-random-phase config context)
         steps-per-period (if changes-per-beat
@@ -193,9 +186,28 @@
                                  (dec (long (Math/ceil (* (double (or once-periods 1.0))
                                                           steps-per-period)))))
                step)
-        t (hash-unit step)
+        t (hash-unit (+ step (* 7919 (long (or (:pulse-count context) 0)))))
         range-v (- (double max) (double min))]
     (+ (double min) (* t range-v))))
+
+
+;; Pulse Modulators: they follow a press (laser-show.animation.pulses)
+
+
+(defn- eval-envelope
+  "Envelope: a punch, or a swell while held, on each press of :source."
+  [{:keys [source] :as config} context]
+  (pulses/envelope config (get (:pulses context) source)))
+
+(defn- eval-step
+  "Step: the next value (or the next of a palette) on each press of :source."
+  [{:keys [source] :as config} context]
+  (pulses/step-value config (get (:pulses context) source)))
+
+(defn- eval-energy
+  "Energy: rises as :source is tapped, falls when the taps stop."
+  [{:keys [source] :as config} context]
+  (pulses/energy config (get (:pulses context) source)))
 
 
 ;; External Input Modulators (MIDI/OSC)
@@ -414,6 +426,9 @@
    :square       eval-square
    :decay        eval-decay
    :random       eval-random
+   :envelope     eval-envelope
+   :step         eval-step
+   :energy       eval-energy
    :midi         eval-midi
    :osc          eval-osc
    :input        eval-input

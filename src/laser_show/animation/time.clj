@@ -209,6 +209,26 @@
         (period->frequency (double period)))
      (double (or phase-param 0.0))))
 
+
+;; Decay Curves
+
+
+(def ^:private ^:const decay-curve-k 5.0)
+
+(defn decay-curve-factor
+  "Remaining fraction (1.0 -> 0.0) of a decay at progress p in [0, 1]: the
+   Decay modulator's curve and the Envelope's release.
+   - :linear - constant rate
+   - :exp    - fast start, long tail (normalised to reach 0 at p = 1)
+   - :log    - slow start, fast finish (mirror of :exp)"
+  ^double [curve ^double p]
+  (let [k decay-curve-k
+        e-k (Math/exp (- k))]
+    (case curve
+      :exp (/ (- (Math/exp (- (* k p))) e-k) (- 1.0 e-k))
+      :log (- 1.0 (/ (- (Math/exp (* k p)) 1.0) (- (Math/exp k) 1.0)))
+      (- 1.0 p))))
+
 (set! *warn-on-reflection* false)
 (set! *unchecked-math* false)
 

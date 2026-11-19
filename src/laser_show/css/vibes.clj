@@ -14,6 +14,7 @@
    Usage:
    Include (::css/url vibes) in your scene's :stylesheets vector."
   (:require [cljfx.css :as css]
+            [laser-show.css.colors :as colors]
             [laser-show.css.theme :as theme]))
 
 (def vibes
@@ -25,6 +26,11 @@
        {:-fx-background-color bg-interactive
         :-fx-background-radius 10
         :-fx-padding 12}
+
+       ;; Over the header; the show clock's tick sets its opacity on a vibe change
+       ".vibe-header-flash"
+       {:-fx-background-color (colors/with-alpha text-primary 0.45)
+        :-fx-background-radius 10}
 
        ".vibe-header-name"
        {:-fx-text-fill text-primary
@@ -109,6 +115,16 @@
        {:-fx-text-fill text-secondary
         :-fx-font-size 12
         :-fx-text-alignment "center"}
+
+       ".vibe-pad-reactions"
+       {:-fx-text-fill text-primary
+        :-fx-font-size 13
+        :-fx-text-alignment "center"}
+
+       ;; The pulse bar: the show clock's tick sets its opacity, full at a press
+       ".vibe-pad-pulse"
+       {:-fx-background-color text-primary
+        :-fx-background-radius 4}
 
        ".vibe-pad-badge"
        {:-fx-text-fill orange

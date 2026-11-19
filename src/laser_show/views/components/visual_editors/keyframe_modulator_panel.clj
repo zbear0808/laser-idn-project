@@ -35,6 +35,7 @@
    - Timeline shows colored segments instead of line curves"
   (:require
    [cljfx.api :as fx]
+   [laser-show.animation.modulators :as modulators]
    [laser-show.subs :as subs]
    [laser-show.common.util :as u]
    [laser-show.views.components.visual-editors.keyframe-timeline :as timeline]))
@@ -199,59 +200,77 @@
 
 (defn- time-settings-row
   "Settings row for time-based keyframe modulator.
-   Shows period, time-unit, and loop-mode controls."
-  [{:keys [period time-unit loop-mode on-settings-event enabled?]}]
-  {:fx/type :h-box
-   :alignment :center-left
-   :spacing 15
-   :style-class "keyframe-panel-settings"
-   :disable (not enabled?)
-   :children [;; Period
-              {:fx/type :h-box
-               :alignment :center-left
-               :spacing 5
-               :children [{:fx/type :label
-                           :text "Period:"}
-                          {:fx/type :spinner
-                           :pref-width 80
-                           :value-factory {:fx/type :double-spinner-value-factory
-                                           :min 0.25
-                                           :max 64.0
-                                           :amount-to-step-by 0.25
-                                           :value (or period 4.0)}
-                           :on-value-changed (assoc on-settings-event :setting-key :period)}]}
-              
-              ;; Time unit
-              {:fx/type :h-box
-               :alignment :center-left
-               :spacing 5
-               :children [{:fx/type :combo-box
-                           :pref-width 90
-                           :value (or time-unit :beats)
-                           :items [:beats :seconds]
-                           :button-cell (fn [item]
-                                          {:text (name item)})
-                           :cell-factory {:fx/cell-type :list-cell
-                                          :describe (fn [item]
-                                                      {:text (name item)})}
-                           :on-value-changed (assoc on-settings-event :setting-key :time-unit)}]}
-              
-              ;; Loop mode
-              {:fx/type :h-box
-               :alignment :center-left
-               :spacing 5
-               :children [{:fx/type :label
-                           :text "Loop:"}
-                          {:fx/type :combo-box
-                           :pref-width 90
-                           :value (or loop-mode :loop)
-                           :items [:loop :once]
-                           :button-cell (fn [item]
-                                          {:text (name item)})
-                           :cell-factory {:fx/cell-type :list-cell
-                                          :describe (fn [item]
-                                                      {:text (name item)})}
-                           :on-value-changed (assoc on-settings-event :setting-key :loop-mode)}]}]})
+   Shows period, time-unit, loop-mode and restart-on (from the newest press
+   of a source, as the waves can) controls."
+  [{:keys [period time-unit loop-mode restart-on on-settings-event enabled?]}]
+  (let [{:keys [choices labels]} modulators/restart-on-param]
+    {:fx/type :h-box
+     :alignment :center-left
+     :spacing 15
+     :style-class "keyframe-panel-settings"
+     :disable (not enabled?)
+     :children [;; Period
+                {:fx/type :h-box
+                 :alignment :center-left
+                 :spacing 5
+                 :children [{:fx/type :label
+                             :text "Period:"}
+                            {:fx/type :spinner
+                             :pref-width 80
+                             :value-factory {:fx/type :double-spinner-value-factory
+                                             :min 0.25
+                                             :max 64.0
+                                             :amount-to-step-by 0.25
+                                             :value (or period 4.0)}
+                             :on-value-changed (assoc on-settings-event :setting-key :period)}]}
+                
+                ;; Time unit
+                {:fx/type :h-box
+                 :alignment :center-left
+                 :spacing 5
+                 :children [{:fx/type :combo-box
+                             :pref-width 90
+                             :value (or time-unit :beats)
+                             :items [:beats :seconds]
+                             :button-cell (fn [item]
+                                            {:text (name item)})
+                             :cell-factory {:fx/cell-type :list-cell
+                                            :describe (fn [item]
+                                                        {:text (name item)})}
+                             :on-value-changed (assoc on-settings-event :setting-key :time-unit)}]}
+                
+                ;; Loop mode
+                {:fx/type :h-box
+                 :alignment :center-left
+                 :spacing 5
+                 :children [{:fx/type :label
+                             :text "Loop:"}
+                            {:fx/type :combo-box
+                             :pref-width 90
+                             :value (or loop-mode :loop)
+                             :items [:loop :once]
+                             :button-cell (fn [item]
+                                            {:text (name item)})
+                             :cell-factory {:fx/cell-type :list-cell
+                                            :describe (fn [item]
+                                                        {:text (name item)})}
+                             :on-value-changed (assoc on-settings-event :setting-key :loop-mode)}]}
+
+                ;; Restart on
+                {:fx/type :h-box
+                 :alignment :center-left
+                 :spacing 5
+                 :children [{:fx/type :label
+                             :text "Restart on:"}
+                            {:fx/type :combo-box
+                             :id "keyframe-restart-on"
+                             :pref-width 150
+                             :value (or restart-on :own)
+                             :items choices
+                             :button-cell (fn [item] {:text (get labels item)})
+                             :cell-factory {:fx/cell-type :list-cell
+                                            :describe (fn [item] {:text (get labels item)})}
+                             :on-value-changed (assoc on-settings-event :setting-key :restart-on)}]}]}))
 
 (defn- spatial-driver-settings-row
   "Settings row for spatial driver keyframe modulator.
@@ -487,6 +506,7 @@
         period (:period keyframe-modulator 4.0)
         time-unit (:time-unit keyframe-modulator :beats)
         loop-mode (:loop-mode keyframe-modulator :loop)
+        restart-on (:restart-on keyframe-modulator :own)
         edge-behavior (:edge-behavior keyframe-modulator :clamp)
         normalize? (:normalize? keyframe-modulator false)
         
@@ -541,6 +561,7 @@
                                    :period period
                                    :time-unit time-unit
                                    :loop-mode loop-mode
+                                   :restart-on restart-on
                                    :enabled? enabled?
                                    :on-settings-event (assoc base-event
                                                              :event/type :keyframe/update-setting)})

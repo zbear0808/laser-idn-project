@@ -21,7 +21,7 @@
    - :id        - Keyword identifier (e.g., :sine, :decay)
    - :name      - Display name (e.g., \"Sine\", \"Decay\")
    - :icon      - Icon string/emoji for UI
-   - :category  - Category keyword (:wave, :special, :external, :internal)
+   - :category  - Category keyword (:wave, :special, :external, :pulse, :internal)
    - :evaluator - Function (fn [config context] -> value) for evaluation
    - :params    - Vector of parameter definition maps
    - :per-point?   - Boolean, true if requires per-point context (default false)
@@ -48,10 +48,12 @@
    - :wave      - Wave-based oscillators (sine, triangle, sawtooth, square, random)
    - :special   - Per-point/position based (pos-x, pos-y, radial, point-index)
    - :external  - External input (midi, osc)
+   - :pulse     - Follow a press (envelope, step, energy): plans/2026-11-18-vibe-mode/04
    - :internal  - Internal helpers (e.g. :unified-keyframe-param) - not exposed in UI"
   #{:wave
     :special
     :external
+    :pulse
     :internal})
 
 

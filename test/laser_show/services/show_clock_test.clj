@@ -193,7 +193,8 @@
     (let [s (show-clock/tick! 0)]
       (is (= [false []] ((juxt :playing? :cues) s)))
       (is (pos-int? (:tick s)))
-      (is (number? (:at-ns s)))))
+      (is (number? (:at-ns s)))
+      (is (= {} (:pulses s)) "what tap reactions see: no press yet")))
   (testing "playing"
     (trigger! 0 0)
     (let [s (show-clock/tick! 16666667)
@@ -367,3 +368,52 @@
             (is (= {:all 2 :left 1} (frequencies (mapcat (comp keys :zone-frames) (:cues s))))
                 "3 cues on 2 zones, each zone frame through the global effects")
             (is (= {:app-state 1 :input-store 1} @reads))))))))
+
+
+;; Tap reactions: every cue's and the effects grid's render sees the presses,
+;; calibration never does (plans/2026-11-18-vibe-mode/04 §4)
+
+(defn- punch [lo hi] {:type :envelope :source :hit :min lo :max hi :attack 0.0 :release 1.0 :curve :linear :hold? false})
+
+(defn- width [frame]
+  (let [xs (map first (remove (fn [[_ _ r g b]] (= 0.0 r g b)) frame))]
+    (- (apply max xs) (apply min xs))))
+
+(deftest render-context-carries-pulses-test
+  (init! {[0 0] {:destination-zone {:zone-group-id :all}
+                 :items [(preset :circle [:scale {:x-scale (punch 1.0 1.5) :y-scale 1.0}])]}})
+  (state/assoc-in-state! [:chains :effect-chains [0 0]]
+                         {:active? true
+                          :items [{:id (random-uuid) :effect-id :scale :enabled? true
+                                   :params {:x-scale (punch 1.0 1.2) :y-scale 1.0}}]})
+  (trigger! 0 0)
+  (let [seen (atom [])
+        render fs/generate-frames-by-zone]
+    (with-redefs [events/dispatch! (fn [_])
+                  fs/generate-frames-by-zone (fn [chain ctx render-ctx]
+                                               (swap! seen conj [(:pulses ctx) (get-in render-ctx [:global-ctx :pulses])])
+                                               (render chain ctx render-ctx))]
+      (let [rest-width (width (get-in (ticks! 2) [:cues 0 :zone-frames :all]))]
+        (state/assoc-in-state! [:playback :pulses :hit] {:id 1 :held? true})
+        (let [s (show-clock/tick! (* 2 16666667))
+              [cue-pulses global-pulses] (peek @seen)]
+          (is (= (show-time/pulse-view @show-time/!runtime) (:pulses s)) "the snapshot has the tick's view")
+          (is (= 1 (get-in s [:pulses :hit :count])))
+          (is (= [(:pulses s) (:pulses s)] [cue-pulses global-pulses])
+              "the cue's own effects and the effects grid's see the same presses")
+          (is (< (Math/abs (- (* 1.8 rest-width) (width (get-in s [:cues 0 :zone-frames :all])))) 1e-6)
+              "both punch at the press: by half again for the cue's scale, a fifth more for the grid's")
+          (let [later (show-clock/tick! (+ (* 2 16666667) 500000000))]
+            (is (< (Math/abs (- rest-width (width (get-in later [:cues 0 :zone-frames :all])))) 1e-6)
+                "and are back at rest a beat later")))))))
+
+(deftest projector-effects-never-see-pulses-test
+  (testing "invariant 4: calibration runs at the first cue's timing with the input values, and no presses"
+    (init! {[0 0] (cue :circle)})
+    (trigger! 0 0)
+    (state/assoc-in-state! [:playback :pulses] {:hit {:id 3 :held? false} :vibe {:id 1} :cue {:id 1}})
+    (with-redefs [events/dispatch! (fn [_])]
+      (let [s (ticks! 2)]
+        (is (= #{:hit :vibe :cue :any} (set (keys (:pulses s)))))
+        (is (some? (:projector-ctx s)))
+        (is (not (contains? (:projector-ctx s) :pulses)))))))

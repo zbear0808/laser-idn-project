@@ -19,7 +19,12 @@
    its cue's intent still names its run, so the engine never stops a cue that
    something else started since. Picks come from shuffle bags seeded by the
    press's time, and run ids from a counter, so the same state and event give
-   the same result."
+   the same result.
+
+   Every press of HIT, ACCENT and FLASH is also a pulse, held until its
+   release, and every vibe change one of :vibe ([:playback :pulses], which
+   the show clock stamps for tap reactions, laser-show.animation.pulses),
+   whether or not the press plays anything. Nothing pulses during blackout."
   (:require [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.events.handlers.grid :as grid]
             [laser-show.events.helpers :as h]
@@ -98,6 +103,33 @@
     (first (library/playable-cells state vibe [cell]))))
 
 
+;; Pulses: what tap reactions follow (plans/2026-11-18-vibe-mode/04)
+
+(defn- pulse-press
+  "role's pulse after a press from src: the next id, held."
+  [state role src]
+  (update-in state [:playback :pulses role]
+             (fn [{:keys [id]}] {:id (inc (or id 0)) :held? true :src src})))
+
+(defn- pulse-release
+  "role's pulse let go, if it is held: by whichever press, and whether or not
+   the engine holds the role (a press that played nothing)."
+  [state role]
+  (if (get-in state [:playback :pulses role :held?])
+    (update-in state [:playback :pulses role] #(-> % (assoc :held? false) (dissoc :src)))
+    state))
+
+(defn- release-pulses
+  "Every role's pulse that a press from only held (all with nil) let go."
+  [state only]
+  (reduce (fn [s role]
+            (if (or (nil? only) (= only (get-in s [:playback :pulses role :src])))
+              (pulse-release s role)
+              s))
+          state
+          [:hit :accent :flash]))
+
+
 ;; Entering and leaving a vibe's look: its bed and its FX set
 
 (defn- ends-with-the-look? [role {:keys [mode]}]
@@ -171,6 +203,16 @@
         (update :vibe-runtime assoc :current id :entered-at t :problem nil)
         (enter-look (library/vibe state id) t))))
 
+(defn- change-vibe
+  "switch-to for the performer's change (a VIBE tap, :vibe/select), which
+   pulses :vibe when the vibe does change, outside blackout. A press making
+   the first vibe current (ensure-current) isn't one."
+  [state id t]
+  (cond-> (switch-to state id t)
+    (and (not= id (get-in state [:vibe-runtime :current]))
+         (not (get-in state [:vibe-runtime :blackout?])))
+    (update-in [:playback :pulses :vibe :id] (fnil inc 0))))
+
 (defn- ensure-current
   "state whose :current names a vibe: the first of :order, entered at t, when
    it names none (nothing current yet, or the vibe was undone or deleted)."
@@ -205,12 +247,23 @@
                            t)]
     (assoc-in state [:vibe-runtime :voices role] {:cell cell :run run :mode mode})))
 
+(defn- with-tap
+  "effects with HIT's tap of the tempo (V3), on every HIT press, whatever it
+   plays, unless the setting is off or Link sync is on."
+  [effects state role]
+  (cond-> effects
+    (and (= :hit role)
+         (:hit-taps-tempo? (library/settings state))
+         (not (ex/link-sync-enabled? state)))
+    (assoc :dispatch {:event/type :timing/tap-tempo})))
+
 (defn- press-pool
   "{:state :dispatch?} for a HIT or ACCENT press: the role's last cue stops
    and the next of its pool starts (:decay held until the release). While a
    solo flash is held nothing is picked, so no press spends a turn of the
    bag: a :decay press is lost, and a :gate or :sustain one picks when the
-   flash lets go (restore-ducked). HIT taps the tempo either way."
+   flash lets go (restore-ducked). HIT taps the tempo either way, even when
+   it plays nothing."
   [state role t src]
   (let [state (ensure-current state t)
         id (library/current-id state)
@@ -218,8 +271,8 @@
         {:keys [cells select mode beats]} (get vibe role)
         pool (when vibe (library/playable-cells state vibe cells))]
     (cond
-      (nil? vibe) {:state (problem state {:why :no-vibes})}
-      (empty? pool) {:state (problem state {:role role :why :empty-pool})}
+      (nil? vibe) (with-tap {:state (problem state {:why :no-vibes})} state role)
+      (empty? pool) (with-tap {:state (problem state {:role role :why :empty-pool})} state role)
       :else
       (let [mode (or mode :decay)
             state (forget-stale state)
@@ -229,16 +282,13 @@
             state (cond
                     (not (solo-flash? state)) (play-next state id role pool select mode beats t)
                     (= :decay mode) state
-                    :else (assoc-in state [:vibe-runtime :duck role] {:mode mode}))
-            tap? (and (= :hit role)
-                      (:hit-taps-tempo? (library/settings state))
-                      (not (ex/link-sync-enabled? state)))]
-        (cond-> {:state (update state :vibe-runtime
-                                #(cond-> (-> %
-                                             (assoc-in [:held role] {:at t :src src})
-                                             (assoc :problem nil))
-                                   (= :hit role) (assoc :last-hit-at t)))}
-          tap? (assoc :dispatch {:event/type :timing/tap-tempo}))))))
+                    :else (assoc-in state [:vibe-runtime :duck role] {:mode mode}))]
+        (with-tap {:state (update state :vibe-runtime
+                                  #(cond-> (-> %
+                                               (assoc-in [:held role] {:at t :src src})
+                                               (assoc :problem nil))
+                                     (= :hit role) (assoc :last-hit-at t)))}
+                  state role)))))
 
 (defn- release-pool
   "A HIT or ACCENT release (cut? for release-all): a :decay voice let go
@@ -357,13 +407,14 @@
         state (update-in state [:vibe-runtime :held] dissoc :vibe)]
     (if (< (- t at) (:lock-hold-ms (library/settings state)))
       (if-let [id (library/next-id state (library/current-id state))]
-        (switch-to (forget-stale state) id t)
+        (change-vibe (forget-stale state) id t)
         (problem state {:why :no-vibes}))
       (update-in state [:vibe-runtime :rotation] #(if (= :locked %) :active :locked)))))
 
 (defn- toggle-blackout
-  "On: every voice stops, holds clear, effect cells off, and the transport
-   stops. Off: the current vibe's bed and FX set come back, and it plays."
+  "On: every voice stops, holds clear (the pulses' too, though nothing
+   pulses), effect cells off, and the transport stops. Off: the current
+   vibe's bed and FX set come back, and it plays."
   [state t]
   (if (get-in state [:vibe-runtime :blackout?])
     (let [state (assoc-in state [:vibe-runtime :blackout?] false)
@@ -376,6 +427,7 @@
     (let [{:keys [voices fx-on]} (:vibe-runtime state)]
       {:state (-> (reduce stop-voice state (vals voices))
                   (switch-off (concat fx-on (get-in voices [:flash :fx-on])))
+                  (release-pulses nil)
                   (update :vibe-runtime assoc :blackout? true :held {} :voices {} :duck {} :fx-on []))
        :dispatch {:event/type :transport/stop}})))
 
@@ -386,7 +438,8 @@
   (or (:input-time event) (h/current-time-ms event)))
 
 (defn press
-  "A role's press (:vibe/press). During blackout only BLACKOUT does anything."
+  "A role's press (:vibe/press). During blackout only BLACKOUT does anything.
+   HIT, ACCENT and FLASH pulse, whatever they play."
   [state {:keys [role] :as event}]
   (let [t (event-time event)
         src (or (:src event) :input)]
@@ -394,35 +447,38 @@
       (= :blackout role) (toggle-blackout state t)
       (get-in state [:vibe-runtime :blackout?]) {:state state}
       :else (case role
-              (:hit :accent) (press-pool state role t src)
-              :flash {:state (press-flash state t src)}
+              (:hit :accent) (update (press-pool state role t src) :state pulse-press role src)
+              :flash {:state (pulse-press (press-flash state t src) :flash src)}
               :vibe {:state (assoc-in state [:vibe-runtime :held :vibe] {:at t :src src})}
               {:state state}))))
 
 (defn release
-  "A role's release (:vibe/release). One that isn't held changes nothing."
+  "A role's release (:vibe/release). One that isn't held changes nothing,
+   but for its pulse: a press that played nothing holds that alone."
   [state {:keys [role] :as event}]
-  (if (get-in state [:vibe-runtime :held role])
-    (let [t (event-time event)]
-      {:state (case role
-                (:hit :accent) (release-pool state role t false)
-                :flash (release-flash state t)
-                :vibe (release-vibe state t)
-                state)})
-    {:state state}))
+  (let [state (pulse-release state role)]
+    (if (get-in state [:vibe-runtime :held role])
+      (let [t (event-time event)]
+        {:state (case role
+                  (:hit :accent) (release-pool state role t false)
+                  :flash (release-flash state t)
+                  :vibe (release-vibe state t)
+                  state)})
+      {:state state})))
 
 (defn select
   "Make the vibe with id current (:vibe/select). During blackout it becomes
    current and its look waits for blackout to end."
   [state {:keys [vibe] :as event}]
   {:state (if (and (library/vibe state vibe) (not= vibe (get-in state [:vibe-runtime :current])))
-            (switch-to (forget-stale state) vibe (event-time event))
+            (change-vibe (forget-stale state) vibe (event-time event))
             state)})
 
 (defn release-all
   "Let go of every held role whose :src is only (all with nil): HIT and
    ACCENT stop now unless they sustain, FLASH lets go, and a held VIBE
-   neither switches nor locks (:vibe/release-all)."
+   neither switches nor locks (:vibe/release-all). The pulses those
+   presses held, and those of presses that played nothing, are let go too."
   [state {:keys [only] :as event}]
   (let [t (event-time event)
         roles (sort-by #(= :flash %)
@@ -434,7 +490,7 @@
                         (:hit :accent) (release-pool s role t true)
                         :flash (release-flash s t)
                         (update-in s [:vibe-runtime :held] dissoc role)))
-                    state
+                    (release-pulses state only)
                     roles)}))
 
 

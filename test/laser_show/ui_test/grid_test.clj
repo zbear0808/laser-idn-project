@@ -7,9 +7,11 @@
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.scene Node]
            [javafx.scene.control Labeled SplitPane]
+           [javafx.scene.input KeyCode MouseButton]
            [javafx.scene.layout BackgroundFill BorderStroke Region]
            [javafx.scene.paint Color]
-           [org.testfx.api FxRobotInterface]))
+           [org.testfx.api FxRobot FxRobotInterface]
+           [org.testfx.robot Motion]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -265,3 +267,39 @@
       (ui/wait-for! #(some? (node "#main-split")))
       (ui/wait-for! #(near? (remembered-split) (divider-position)))
       (is (near? (remembered-split) (divider-position))))))
+
+
+(defn- click-in-submenu!
+  "Click the item found by selector in an open submenu, moving across first
+   and then down, as a hand does: straight there crosses the parent menu's
+   other items, which closes the submenu on the way."
+  [robot selector]
+  (ui/wait-for! #(ui/visible? selector))
+  (.clickOn ^FxRobot robot (node selector) Motion/HORIZONTAL_FIRST (into-array MouseButton [MouseButton/PRIMARY]))
+  (ui/sync-fx!))
+
+(deftest new-tap-reaction-on-an-effects-cell-test
+  (testing "an empty effects cell's menu makes it a tap reaction, on: no vibes needed (plans/2026-11-18-vibe-mode/04)"
+    (let [robot (ui/robot)
+          cell #(get-in (state/get-raw-state) [:chains :effect-chains [2 1]])]
+      (ui/click! robot "#effects-tab")
+      (ui/assert-visible! "#effects-cell-2-1")
+      (ui/right-click-node! robot (node "#effects-cell-2-1"))
+      (ui/click! robot "#new-reaction-menu")
+      (ui/wait-for! #(ui/visible? "#new-reaction-punch-size"))
+      (is (= 10 (count (filter #(let [id (str (.getId ^Node %))]
+                                  (and (.startsWith id "new-reaction-") (not= "new-reaction-menu" id)))
+                               (ui/query-all ".menu-item"))))
+          "the ten templates, under their roles")
+      (click-in-submenu! robot "#new-reaction-punch-size")
+      (ui/wait-for! #(= "Punch size" (:name (cell))))
+      (is (true? (:active? (cell))))
+      (is (= [:scale] (mapv :effect-id (:items (cell)))))
+      (is (= :envelope (get-in (cell) [:items 0 :params :x-scale :type])))
+      (ui/wait-for! #(ui/has-style-class? "#effects-cell-2-1" "grid-cell-active"))
+      (ui/wait-for! #(= "Punch size" (label-text "#effects-cell-2-1 .grid-cell-label")))
+      (testing "a cell with effects doesn't offer it"
+        (ui/right-click-node! robot (node "#effects-cell-2-1"))
+        (ui/wait-for! #(seq (ui/query-all ".context-menu")))
+        (is (empty? (ui/query-all "#new-reaction-menu")))
+        (ui/press! robot KeyCode/ESCAPE)))))

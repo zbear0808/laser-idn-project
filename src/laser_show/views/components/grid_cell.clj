@@ -21,6 +21,7 @@
             [clojure.tools.logging :as log]
             [laser-show.subs :as subs]
             [laser-show.events.core :as events]
+            [laser-show.vibes.reactions :as reactions]
             [laser-show.views.components.drag-drop-cell :as drag-drop])
   (:import [javafx.scene.input MouseEvent MouseButton]))
 
@@ -320,6 +321,32 @@
 ;; Effects Grid Cell
 
 
+(def ^:private reaction-groups
+  "The New tap reaction menu's headings, by the role a template follows."
+  {:hit "HIT" :accent "ACCENT" :flash "FLASH" :vibe "VIBE" :any "HIT, ACCENT or FLASH"})
+
+(defn- new-reaction-menu
+  "New tap reaction ▸, for an empty effects cell: the templates
+   (vibes.reactions), under the role each follows. A choice makes the cell
+   that reaction (:effects/new-reaction)."
+  [col row]
+  {:fx/type :menu
+   :id "new-reaction-menu"
+   :text "New tap reaction"
+   :items (into []
+                (comp (partition-by :role)
+                      (map-indexed (fn [i [{:keys [role]} :as group]]
+                                     (concat (when (pos? i) [{:fx/type :separator-menu-item}])
+                                             [{:fx/type :menu-item :text (reaction-groups role) :disable true}]
+                                             (for [{:keys [kind menu]} group]
+                                               {:fx/type :menu-item
+                                                :id (str "new-reaction-" (name kind))
+                                                :text menu
+                                                :on-action {:event/type :effects/new-reaction
+                                                            :col col :row row :kind kind}}))))
+                      cat)
+                reactions/templates)})
+
 (defn effects-cell
   "Effects grid cell - wrapper around generic-grid-cell.
    
@@ -364,6 +391,8 @@
                                      {:fx/type :menu-item
                                       :text "Edit Effect Chain..."
                                       :on-action {:event/type :effect-chain/open-editor :col col :row row}}
+                                     (when-not has-effects?
+                                       (new-reaction-menu col row))
                                      {:fx/type :separator-menu-item}
                                      (if learning?
                                        {:fx/type :menu-item

@@ -12,6 +12,7 @@
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.router :as input-router]
+            [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
@@ -280,3 +281,74 @@
     (input-router/dispatch! (note :note-off 36))
     (input-router/dispatch! (note :note-off 37))
     (ui/wait-for! #(empty? (rt :held)))))
+
+
+;; Tap reactions (plans/2026-11-18-vibe-mode/04 §4)
+
+(defn- opacity [selector]
+  (let [^Node n (first (ui/query-all selector))]
+    (ui/on-fx-thread #(.getOpacity n))))
+
+(defn- pulse [role] (get-in (app-state) [:playback :pulses role]))
+
+(deftest pad-pulse-bar-flashes-on-a-press-test
+  (let [robot (ui/robot)
+        t0 (System/nanoTime)
+        tick! #(show-clock/tick! (+ t0 (* % 1000000)))]
+    (open-perform! robot)
+    (tick! 0)
+    (is (= 0.0 (opacity "#vibe-pad-hit-pulse")) "dark before any press")
+    (ui/mouse-click! robot "#vibe-pad-hit")
+    (ui/wait-for! #(= {:id 1 :held? false} (pulse :hit)))
+    (tick! 17)
+    (ui/wait-for! #(= 1.0 (opacity "#vibe-pad-hit-pulse")))
+    (is (= 0.0 (opacity "#vibe-pad-accent-pulse")) "only its own pad's")
+    (is (= 0.0 (opacity "#vibe-header-flash")) "a press isn't a vibe change")
+    (tick! 142)
+    (ui/wait-for! #(< 0.45 (opacity "#vibe-pad-hit-pulse") 0.55))
+    (tick! 267)
+    (ui/wait-for! #(= 0.0 (opacity "#vibe-pad-hit-pulse")))
+    (is (= 0.0 (opacity "#vibe-pad-hit-pulse")) "gone half a beat after the press")
+    (testing "a vibe change flashes the header, and VIBE's bar"
+      (ui/mouse-click! robot "#vibe-pad-vibe")
+      (ui/wait-for! #(= {:id 1} (pulse :vibe)))
+      (tick! 300)
+      (ui/wait-for! #(= 1.0 (opacity "#vibe-header-flash")))
+      (is (= 1.0 (opacity "#vibe-pad-vibe-pulse"))))))
+
+(deftest pad-names-its-reactions-test
+  (let [robot (ui/robot)]
+    (doseq [kind [:punch-size :step-colour :fade-in]]
+      (events/dispatch! {:event/type :vibe/add-reaction :vibe :vibe-1 :kind kind}))
+    (ui/wait-for! #(= 3 (count (get-in (app-state) [:config :vibes :library :vibe-1 :fx]))))
+    (open-perform! robot)
+    (ui/assert-text! "#vibe-pad-hit-reactions" "Punch size · Step colour")
+    (ui/assert-visible! "#vibe-pad-hit-reactions")
+    (ui/assert-text! "#vibe-pad-vibe-reactions" "Fade in")
+    (is (not (ui/visible? "#vibe-pad-accent-reactions")) "ACCENT has none")
+    (testing "another vibe: its own"
+      (ui/click! robot "#vibe-chip-vibe-2")
+      (ui/wait-for! #(not (ui/visible? "#vibe-pad-hit-reactions"))))))
+
+(deftest effects-only-pad-says-so-test
+  (let [robot (ui/robot)]
+    (state/swap-state! assoc-in [:config :vibes :library :vibe-1 :accent :cells] [])
+    (events/dispatch! {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :scatter})
+    (ui/wait-for! #(seq (get-in (app-state) [:config :vibes :library :vibe-1 :fx])))
+    (open-perform! robot)
+    (ui/assert-text! "#vibe-pad-accent-now" "Effects only")
+    (ui/assert-text! "#vibe-pad-accent-reactions" "Scatter")
+    (ui/press-node! robot "#vibe-pad-accent")
+    (ui/wait-for! #(= {:id 1 :held? true :src :pad} (pulse :accent)))
+    (ui/wait-for! #(ui/has-style-class? "#vibe-pad-accent" "vibe-pad-held"))
+    (is (empty? (get-in (app-state) [:playback :active-cues])) "it plays no cue")
+    (is (true? (get-in (app-state) [:chains :effect-chains [0 3] :active?])) "the vibe's reactions are on")
+    (ui/assert-text! "#vibe-pad-accent-now" "Effects only")
+    (ui/release-node! robot "#vibe-pad-accent")
+    (ui/wait-for! #(= {:id 1 :held? false} (pulse :accent)))
+    (is (= {:id 1 :held? false} (pulse :accent)) "the pad's release lets go of the pulse")
+    (ui/wait-for! #(not (ui/has-style-class? "#vibe-pad-accent" "vibe-pad-held")))
+    (testing "a role with neither cues nor reactions says it has nothing to play"
+      (state/swap-state! assoc-in [:config :vibes :library :vibe-1 :hit :cells] [])
+      (ui/mouse-click! robot "#vibe-pad-hit")
+      (ui/assert-text! "#vibe-pad-hit-now" "Nothing to play"))))

@@ -23,6 +23,7 @@
    Also provides visual-editor-modulator-header for embedding modulator controls
    directly in single-parameter visual editors (rotation dial, hue slider, etc)."
   (:require [clj-font-awesome.core :as fa]
+            [clojure.string :as str]
             [laser-show.animation.modulator-registry :as reg]
             [laser-show.views.components.parameter-controls :as param-controls]))
 
@@ -43,16 +44,27 @@
       ;; String icon (emoji) - include in text
       {:text (str (:icon item) " " (:name item))})))
 
+(defn modulator-choices
+  "The modulator types the dropdown offers in an editor of domain: every UI
+   type, but the :pulse ones (Envelope, Step, Energy) for calibration
+   (:projector-effects), which never sees a press."
+  [domain]
+  (cond->> (reg/all-ui-modulators)
+    (= :projector-effects domain) (remove #(= :pulse (:category %)))))
+
 (defn- modulator-type-selector
   "Dropdown to select modulator type.
    
    Props:
    - :current-type - Current modulator type keyword
-   - :on-select-event - Event template for type selection (receives :mod-type)"
+   - :on-select-event - Event template for type selection (receives :mod-type);
+     its :domain picks the types (modulator-choices), its :param-key names it
+     (id modulator-type-<param>)"
   [{:keys [current-type on-select-event]}]
-  (let [all-types (reg/all-ui-modulators)
+  (let [all-types (modulator-choices (:domain on-select-event))
         current-info (reg/get-modulator current-type)]
     {:fx/type :combo-box
+     :id (str "modulator-type-" (some-> (:param-key on-select-event) name))
      :pref-width 140
      :value (or current-info (first all-types))
      :items (vec all-types)
@@ -61,6 +73,11 @@
                     :describe (fn [item] (modulator-cell-desc item))}
      ;; Event map pattern: merge event template with :mod-type
      :on-value-changed (assoc on-select-event :mod-type-item? true)}))
+
+(defn- param-id
+  "A modulator param control's id: modulator-<param>-<modulator param>."
+  [on-change-event key]
+  (str "modulator-" (some-> (:param-key on-change-event) name) "-" (name key)))
 
 (defn- modulator-param-slider
   "Slider for a single modulator parameter with editable text field.
@@ -90,6 +107,7 @@
                  :style-class ["text-small"]
                  :style "-fx-text-fill: #909090;"}
                 {:fx/type :slider
+                 :id (param-id on-change-event key)
                  :min min
                  :max max
                  :value (double value)
@@ -116,12 +134,14 @@
   "Choice dropdown for a modulator parameter.
    
    Props:
-   - :param-def - Parameter definition map with :key, :label, :choices, :default
+   - :param-def - Parameter definition map with :key, :label, :choices, :default,
+     and optionally :labels {choice text} (else the choice's name)
    - :current-value - Current value for this parameter
    - :on-change-event - Event template for value changes (receives :mod-param-key)"
   [{:keys [param-def current-value on-change-event]}]
-  (let [{:keys [key label choices default]} param-def
-        value (or current-value default)]
+  (let [{:keys [key label choices default labels]} param-def
+        value (or current-value default)
+        text (fn [item] (when item (get labels item (name item))))]
     {:fx/type :h-box
      :spacing 6
      :alignment :center-left
@@ -131,14 +151,52 @@
                  :style-class ["text-small"]
                  :style "-fx-text-fill: #909090;"}
                 {:fx/type :combo-box
+                 :id (param-id on-change-event key)
                  :items (vec choices)
                  :value value
-                 :pref-width 100
-                 :button-cell (fn [item] {:text (when item (name item))})
+                 :pref-width (if labels 170 100)
+                 :button-cell (fn [item] {:text (text item)})
                  :cell-factory {:fx/cell-type :list-cell
-                                :describe (fn [item] {:text (when item (name item))})}
+                                :describe (fn [item] {:text (text item)})}
                  ;; Event map pattern: add mod-param-key to template
                  :on-value-changed (assoc on-change-event :mod-param-key key)}]}))
+
+(defn- number-list-text
+  "A palette as it is typed: \"200 215 320\"."
+  [values]
+  (str/join " " (map (fn [v] (let [d (double v)]
+                               (if (== d (Math/rint d)) (str (long d)) (str d))))
+                     values)))
+
+(defn- modulator-param-number-list
+  "Text field for a list of numbers (the Step's palette), typed as \"200 215
+   320\" (commas too). Enter sends it; empty clears it.
+   
+   Props:
+   - :param-def - Parameter definition map with :key, :label
+   - :current-value - The numbers
+   - :on-change-event - Event template for value changes (receives :mod-param-key)"
+  [{:keys [param-def current-value on-change-event]}]
+  (let [{:keys [key label]} param-def]
+    {:fx/type :h-box
+     :spacing 6
+     :alignment :center-left
+     :children [{:fx/type :label
+                 :text label
+                 :pref-width 90
+                 :style-class ["text-small"]
+                 :style "-fx-text-fill: #909090;"}
+                {:fx/type :text-field
+                 :id (param-id on-change-event key)
+                 :text (number-list-text current-value)
+                 :prompt-text "200 215 320"
+                 :pref-width 140
+                 :style-class ["text-field" "param-text-field"]
+                 :style "-fx-font-size: 10; -fx-padding: 2 4;"
+                 :on-action (assoc on-change-event
+                                   :mod-param-key key
+                                   :text-field-type :number-list
+                                   :text-field? true)}]}))
 
 (defn- modulator-param-text
   "Text field for a modulator parameter (e.g., step values).
@@ -187,6 +245,7 @@
                  :style-class ["text-small"]
                  :style "-fx-text-fill: #909090;"}
                 {:fx/type :check-box
+                 :id (param-id on-change-event key)
                  :selected (boolean value)
                  ;; Event map pattern: add mod-param-key to template
                  :on-selected-changed (assoc on-change-event :mod-param-key key)}]}))
@@ -196,12 +255,16 @@
    
    Props:
    - :modulator-config - Current modulator configuration map
-   - :on-param-change-event - Event template for parameter changes
+   - :on-param-change-event - Event template for parameter changes; for
+     calibration (:domain :projector-effects), which never sees a press,
+     there is no Restart on
    - :on-retrigger-event - Event template for retrigger button (optional)
    - :param-spec - The original param spec (for getting min/max bounds)"
   [{:keys [modulator-config on-param-change-event on-retrigger-event param-spec]}]
   (let [mod-type (:type modulator-config)
-        base-params (reg/get-params mod-type)
+        base-params (cond->> (reg/get-params mod-type)
+                      (= :projector-effects (:domain on-param-change-event))
+                      (remove #(= :restart-on (:key %))))
         ;; Adjust min/max param bounds to use param-spec's bounds
         params (mapv (fn [param-def]
                        (case (:key param-def)
@@ -248,6 +311,10 @@
                             :param-def param-def
                             :current-value (get modulator-config (:key param-def))
                             :on-change-event on-param-change-event}
+                     :number-list {:fx/type modulator-param-number-list
+                                   :param-def param-def
+                                   :current-value (get modulator-config (:key param-def))
+                                   :on-change-event on-param-change-event}
                      :boolean {:fx/type modulator-param-boolean
                                :param-def param-def
                                :current-value (get modulator-config (:key param-def))

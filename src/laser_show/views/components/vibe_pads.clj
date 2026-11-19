@@ -2,6 +2,9 @@
   "The Perform tab's five pads: HIT, ACCENT, FLASH, VIBE and BLACKOUT. A pad
    shows its role, what it plays now (VIBE: the vibe a tap goes to) and the
    controls it answers to, and lights while its role is held, by any control.
+   Under that, the tap reactions that follow it, and a pulse bar that flashes
+   on each press (from the show clock's newest tick, so even a short tap
+   shows). A role that plays no cue but moves effects says so.
    
    A primary-button press or a touch presses the role and its release lets
    go (:vibe/pointer, events/handlers/vibes.clj, keeps one finger to one press
@@ -11,17 +14,32 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.subs :as subs]
+            [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.grid-cell :as grid-cell]
-            [laser-show.views.components.trigger-bank :as trigger-bank]))
+            [laser-show.views.components.trigger-bank :as trigger-bank])
+  (:import [javafx.scene Node]))
 
 (def ^:private roles
   "The pads, left to right."
   [:hit :accent :flash :vibe :blackout])
 
+(def ^:private pulse-beats
+  "How long a press's flash takes to fade, in beats."
+  0.5)
+
+(defn redraw-pulse!
+  "A pulse bar, whose user data is the source it follows, from the newest
+   tick's presses (show-time snapshot :pulses): full at a press, gone
+   pulse-beats later; dark before the first press."
+  [^Node node snapshot source]
+  (let [beats (get-in snapshot [:pulses source :beats])]
+    (.setOpacity node (if beats (max 0.0 (- 1.0 (/ (double beats) pulse-beats))) 0.0))))
+
 (defn- now-text
   "What the pad says under its role."
-  [context {:keys [role playing problem next on?]}]
+  [context {:keys [role playing problem next on? effects-only?]}]
   (cond
+    effects-only? "Effects only"
     problem "Nothing to play"
     (= :vibe role) (if next (str "→ " next) "–")
     (= :blackout role) (if on? "ON" "")
@@ -38,7 +56,7 @@
   "One pad (props: :role). Its children are the same on every render and
    don't take the mouse, so a press and its release reach the pad itself."
   [{:keys [fx/context role]}]
-  (let [{:keys [label bindings held? learning? dim? on?] :as data} (fx/sub-ctx context subs/vibe-pad role)
+  (let [{:keys [label bindings held? learning? dim? on? reactions] :as data} (fx/sub-ctx context subs/vibe-pad role)
         id (str "vibe-pad-" (name role))
         pointer {:event/type :vibe/pointer :role role}
         badge (badge-text data)]
@@ -97,12 +115,31 @@
                            :text (now-text context data)
                            :style-class "vibe-pad-now"}
                           {:fx/type :label
+                           :id (str id "-reactions")
+                           :text (str/join " · " reactions)
+                           :visible (boolean (seq reactions))
+                           :managed (boolean (seq reactions))
+                           :wrap-text true
+                           :style-class "vibe-pad-reactions"}
+                          {:fx/type :label
                            :id (str id "-keys")
                            :text (if (seq bindings)
                                    (str/join " · " (map trigger-bank/binding-label bindings))
                                    "Right-click to learn a control")
                            :wrap-text true
-                           :style-class "vibe-pad-keys"}]}}))
+                           :style-class "vibe-pad-keys"}
+                          {:fx/type clock-view/ext-clock-redraw
+                           :redraw! #'redraw-pulse!
+                           :desc {:fx/type :region
+                                  :id (str id "-pulse")
+                                  :user-data role
+                                  :opacity 0.0
+                                  :min-width 90
+                                  :pref-width 90
+                                  :min-height 8
+                                  :pref-height 8
+                                  :max-height 8
+                                  :style-class "vibe-pad-pulse"}}]}}))
 
 (defn pad-row
   "The five pads, side by side, sharing the width."

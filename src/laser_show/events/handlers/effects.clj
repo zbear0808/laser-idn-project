@@ -6,6 +6,7 @@
    - clear-cell: Clear all effects from a cell
    - copy-cell/paste-cell: Cell clipboard operations
    - move-cell: Move a cell between positions
+   - new-reaction: Make an empty cell a tap reaction (vibes.reactions)
    
    Effect-level operations have moved to chain.clj:
    - Effect CRUD (add, remove, reorder, set-enabled)
@@ -18,6 +19,7 @@
  (:require [clojure.tools.logging :as log]
            [laser-show.events.helpers :as h]
            [laser-show.state.clipboard :as clipboard]
+           [laser-show.vibes.reactions :as reactions]
            [laser-show.vibes.refs :as refs]))
 
 
@@ -82,6 +84,22 @@
                              refs/move-trigger-targets [from-col from-row] [to-col to-row] :trigger-effect)
                   (refs/move-fx [from-col from-row] [to-col to-row]))}
       {:state state})))
+
+(defn- handle-effects-new-reaction
+  "An empty effects cell (none, or one with no effects left) becomes the tap
+   reaction kind (vibes.reactions), switched on: the Grid-tab way in,
+   without vibes. The Strobe, meant to be on only while FLASH is held,
+   starts off."
+  [{:keys [col row kind state]}]
+  (if-let [cell (and (empty? (get-in state [:chains :effect-chains [col row] :items]))
+                     (reactions/reaction-cell kind nil))]
+    {:state (-> state
+                (assoc-in [:chains :effect-chains [col row]]
+                          (-> cell
+                              (update :items #(mapv h/ensure-item-fields %))
+                              (assoc :active? (not= :flash-fx (:into (reactions/template kind))))))
+                (assoc-in [:effects :selected-cell] [col row]))}
+    {:state state}))
 
 
 
@@ -177,6 +195,7 @@
     :effects/copy-cell (handle-effects-copy-cell event)
     :effects/paste-cell (handle-effects-paste-cell event)
     :effects/move-cell (handle-effects-move-cell event)
+    :effects/new-reaction (handle-effects-new-reaction event)
     
     :effect-chain/open-editor (handle-effect-chain-open-editor event)
     :effect-chain/set-name (handle-effect-chain-set-name event)

@@ -8,10 +8,12 @@
    re-renders its own pad, a vibe change the strip, the header and VIBE's
    pad, and a beat the tempo only. The banner is always there, hidden while
    it has nothing to say, so showing it never makes new nodes of the pads
-   below it: a held pad keeps getting its release."
+   below it: a held pad keeps getting its release. The header flashes on
+   each vibe change, from the show clock's newest tick."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.subs :as subs]
+            [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.vibe-pads :as vibe-pads]
             [laser-show.views.components.vibe-strip :as vibe-strip]))
 
@@ -54,44 +56,54 @@
 
 (defn- header
   "The current vibe in its colour, its energy, the lock, the tempo, and what
-   a learn waits for."
+   a learn waits for; a flash over it on each vibe change."
   [{:keys [fx/context]}]
   (let [{vibe-name :name :keys [color energy rotation learning]} (fx/sub-ctx context subs/vibe-header)
         locked? (= :locked rotation)]
-    {:fx/type :v-box
-     :id "vibe-header"
-     :style-class "vibe-header"
-     :style (when color (str "-fx-background-color: " color ";"))
-     :spacing 6
-     :children [{:fx/type :h-box
-                 :alignment :center-left
-                 :spacing 16
-                 :children [{:fx/type :label
-                             :id "vibe-header-name"
-                             :style-class "vibe-header-name"
-                             :text (if vibe-name (str/upper-case vibe-name) "No vibes yet")}
-                            {:fx/type :label
-                             :id "vibe-header-locked"
-                             :style-class "vibe-header-locked"
-                             :text "LOCKED"
-                             :visible locked?
-                             :managed locked?}
-                            {:fx/type :region
-                             :h-box/hgrow :always}
-                            {:fx/type tempo}]}
-                {:fx/type :h-box
-                 :alignment :center-left
-                 :spacing 16
-                 :children [{:fx/type :label
-                             :id "vibe-header-energy"
-                             :style-class "vibe-header-text"
-                             :text (if energy (str "energy " (vibe-strip/energy-dots energy)) "")}
-                            {:fx/type :label
-                             :id "vibe-learn-prompt"
-                             :style-class "vibe-learn-prompt"
-                             :text (if learning (str "Press the key for " (str/upper-case (name learning))) "")
-                             :visible (some? learning)
-                             :managed (some? learning)}]}]}))
+    {:fx/type :stack-pane
+     :children
+     [{:fx/type :v-box
+       :id "vibe-header"
+       :style-class "vibe-header"
+       :style (when color (str "-fx-background-color: " color ";"))
+       :spacing 6
+       :children [{:fx/type :h-box
+                   :alignment :center-left
+                   :spacing 16
+                   :children [{:fx/type :label
+                               :id "vibe-header-name"
+                               :style-class "vibe-header-name"
+                               :text (if vibe-name (str/upper-case vibe-name) "No vibes yet")}
+                              {:fx/type :label
+                               :id "vibe-header-locked"
+                               :style-class "vibe-header-locked"
+                               :text "LOCKED"
+                               :visible locked?
+                               :managed locked?}
+                              {:fx/type :region
+                               :h-box/hgrow :always}
+                              {:fx/type tempo}]}
+                  {:fx/type :h-box
+                   :alignment :center-left
+                   :spacing 16
+                   :children [{:fx/type :label
+                               :id "vibe-header-energy"
+                               :style-class "vibe-header-text"
+                               :text (if energy (str "energy " (vibe-strip/energy-dots energy)) "")}
+                              {:fx/type :label
+                               :id "vibe-learn-prompt"
+                               :style-class "vibe-learn-prompt"
+                               :text (if learning (str "Press the key for " (str/upper-case (name learning))) "")
+                               :visible (some? learning)
+                               :managed (some? learning)}]}]}
+      {:fx/type clock-view/ext-clock-redraw
+       :redraw! #'vibe-pads/redraw-pulse!
+       :desc {:fx/type :region
+              :id "vibe-header-flash"
+              :user-data :vibe
+              :opacity 0.0
+              :mouse-transparent true
+              :style-class "vibe-header-flash"}}]}))
 
 (defn- status-line
   "Whether the output streams and which MIDI controllers are connected."

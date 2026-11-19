@@ -25,6 +25,7 @@
    [laser-show.animation.keyframes :as kf]
    [laser-show.animation.modulator-registry :as reg]
    [laser-show.animation.modulators] ;; Load modulator registrations
+   [laser-show.animation.pulses :as pulses]
    [laser-show.common.util :as u]))
 
 (set! *warn-on-reflection* true)
@@ -48,6 +49,8 @@
    - trigger-time: (hand-built contexts only) what time-ms counts from when
      there are no accumulators; timing contexts from cue-timing don't have it
    - input-values: Map of input values from generic router (optional)
+   - pulses: the presses tap reactions follow (pulses/view), on the render's
+     timing contexts (optional)
    
    Per-Point Parameters (for position-based modulators):
    - x: Normalized x coordinate (-1.0 to 1.0)
@@ -60,13 +63,13 @@
    - accumulated-ms: Running total of ms since cue trigger (incremental)
    - phase-offset: Current smoothed phase correction offset
    - effective-beats: accumulated-beats + phase-offset (use for looping modulators)"
-  [{:keys [time-ms bpm trigger-time input-values
+  [{:keys [time-ms bpm trigger-time input-values pulses
            x y point-index point-count
            accumulated-beats accumulated-ms phase-offset]
     :or {input-values {}
          accumulated-beats 0.0 accumulated-ms 0.0 phase-offset 0.0}}]
   (u/->map&
-   time-ms bpm trigger-time input-values x y point-index
+   time-ms bpm trigger-time input-values pulses x y point-index
    point-count accumulated-beats accumulated-ms phase-offset
    :effective-beats (+ (double (or accumulated-beats 0.0)) (double (or phase-offset 0.0)))))
 
@@ -82,15 +85,16 @@
   - time-ms: Current time in milliseconds
   - bpm: Current BPM
   - point-count: Total number of points in frame
+  - pulses: the presses tap reactions follow (optional, as make-context)
   - timing-ctx: Optional map with accumulated-beats, accumulated-ms, phase-offset"
-  [{:keys [time-ms bpm point-count trigger-time input-values
+  [{:keys [time-ms bpm point-count trigger-time input-values pulses
            accumulated-beats accumulated-ms phase-offset]
     :or {input-values {}}}]
   (let [acc-beats (double (or accumulated-beats 0.0))
         acc-ms (double (or accumulated-ms 0.0))
         phase-off (double (or phase-offset 0.0))]
     (u/->map&
-     time-ms bpm trigger-time input-values point-count
+     time-ms bpm trigger-time input-values pulses point-count
      :accumulated-beats acc-beats
      :accumulated-ms acc-ms
      :phase-offset phase-off
@@ -172,12 +176,20 @@
   "Evaluate a modulator config with the given context.
    Uses the modulator registry to look up the evaluator fn (hot path).
    Merges in default values from registry for any missing config keys.
+   A config whose :restart-on names a source (not :own) is evaluated at
+   the time since that source's newest press (pulses/rebase; a Decay
+   counts as once-mode).
    Returns the calculated value, or default from :value/:min if evaluator not found."
   [config context]
   (if-let [eval-fn (reg/get-evaluator (:type config))]
     (let [defaults (get-defaults-for-type (:type config))
-          full-config (merge defaults config)]
-      (eval-fn full-config context))
+          full-config (merge defaults config)
+          source (:restart-on full-config)]
+      (eval-fn full-config
+               (if (or (nil? source) (= :own source))
+                 context
+                 (pulses/rebase context source (and (not= :decay (:type full-config))
+                                                    (not= :once (:loop-mode full-config)))))))
     ;; Default fallback for unknown types
     (get config :value (get config :min 0.0))))
 

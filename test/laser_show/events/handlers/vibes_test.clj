@@ -165,6 +165,16 @@
         "a key pressed HIT after the pad: the key's release ends that hold")
     (is (nil? (pointer s :hit up)) "nothing held: the press opened the menu, or a focus loss let go")))
 
+(deftest pad-release-ends-a-press-that-played-nothing-test
+  (testing "a pad's press that played nothing holds its pulse only, and the pad's release still lets it go"
+    (let [s0 (assoc-in (starter) [:config :vibes :library :vibe-1 :hit :cells] [])
+          [s sent] (pad-presses s0 [[:hit (mouse MouseEvent/MOUSE_PRESSED)] [:hit (mouse MouseEvent/MOUSE_RELEASED)]])]
+      (is (= [[:vibe/press :hit] [:vibe/release :hit]] sent))
+      (is (= {:id 1 :held? false} (get-in s [:playback :pulses :hit])))
+      (is (nil? (pointer (assoc-in s0 [:playback :pulses :hit] {:id 1 :held? true :src :input}) :hit
+                         (mouse MouseEvent/MOUSE_RELEASED)))
+          "a key's press that played nothing: its own release ends it, not the pad's"))))
+
 (deftest window-focus-lost-releases-pad-holds-only-test
   (let [s1 (-> (starter)
                (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)
@@ -293,3 +303,56 @@
         (is (= [] (get-in s2 [:config :vibes :library :vibe-1 :fx])))
         (is (on? s2))
         (is (not (on? (run s2 {:event/type :vibe/select :vibe :vibe-2}))))))))
+
+
+;; Tap reactions (Phase 4, plans/2026-11-18-vibe-mode/04 §7)
+
+(deftest add-reaction-uses-the-first-empty-effect-cell-test
+  (let [s0 (history/mark-clean (starter))
+        s1 (run s0 {:event/type :vibe/add-reaction :vibe :vibe-2 :kind :punch-size})
+        cell (get-in s1 [:chains :effect-chains [1 3]])
+        punch {:type :envelope :active? true :source :hit :min 1.0 :max 1.25
+               :attack 0.0 :release 0.5 :curve :exp :hold? false}]
+    (is (= "Lines · Punch size" (:name cell)) "[0 3] is taken: the next of the bottom row")
+    (is (false? (:active? cell)) "vibe-2 isn't playing")
+    (is (= [{:effect-id :scale :enabled? true :params {:x-scale punch :y-scale punch :uniform? false}}]
+           (mapv #(dissoc % :id) (:items cell))))
+    (is (uuid? (get-in cell [:items 0 :id])))
+    (is (= [[1 3]] (get-in s1 [:config :vibes :library :vibe-2 :fx])))
+    (testing "no such vibe or kind, or no free cell: nothing"
+      (is (= (:chains s0) (:chains (run s0 {:event/type :vibe/add-reaction :vibe :gone :kind :punch-size}))))
+      (is (= (:chains s0) (:chains (run s0 {:event/type :vibe/add-reaction :vibe :vibe-2 :kind :nope}))))
+      (let [full (update-in s0 [:chains :effect-chains] merge (into {} (for [c (range 8) r (range 4)] [[c r] {:items []}])))]
+        (is (= (:config full) (:config (run full {:event/type :vibe/add-reaction :vibe :vibe-2 :kind :flip}))))))))
+
+(deftest add-reaction-to-the-current-vibe-switches-it-on-test
+  (let [s0 (run (starter) {:event/type :vibe/select :vibe :vibe-1 :input-time 1000})
+        s1 (run s0 {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :scatter})]
+    (is (true? (get-in s1 [:chains :effect-chains [1 3] :active?])) "playing: on at once")
+    (is (= [[1 3]] (get-in s1 [:vibe-runtime :fx-on])))
+    (is (false? (get-in (run s1 {:event/type :vibe/select :vibe :vibe-2 :input-time 2000})
+                        [:chains :effect-chains [1 3] :active?]))
+        "leaving the vibe switches it off")
+    (testing "the Strobe goes into the flash FX, off until FLASH is held"
+      (let [s (run s0 {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :strobe})]
+        (is (= [[1 3]] (get-in s [:config :vibes :library :vibe-1 :flash :fx])))
+        (is (false? (get-in s [:chains :effect-chains [1 3] :active?])))
+        (is (true? (get-in (run s {:event/type :vibe/press :role :flash :input-time 1500})
+                           [:chains :effect-chains [1 3] :active?])))))
+    (testing "during blackout it waits for blackout to end"
+      (let [s (-> s0
+                  (run {:event/type :vibe/press :role :blackout :input-time 1100})
+                  (run {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :flip}))]
+        (is (false? (get-in s [:chains :effect-chains [1 3] :active?])))
+        (is (true? (get-in (run s {:event/type :vibe/press :role :blackout :input-time 1200})
+                           [:chains :effect-chains [1 3] :active?])))))))
+
+(deftest add-reaction-is-one-undo-step-test
+  (let [s0 (history/mark-clean (starter))
+        s1 (run s0 {:event/type :vibe/add-reaction :vibe :vibe-2 :kind :fade-in})]
+    (is (= 1 (undo-count s1)))
+    (is (= "Add Tap Reaction" (history/undo-label (:history s1))))
+    (is (true? (get-in s1 [:project :dirty?])))
+    (let [undone (run s1 {:event/type :history/undo})]
+      (is (nil? (get-in undone [:chains :effect-chains [1 3]])))
+      (is (= [] (get-in undone [:config :vibes :library :vibe-2 :fx]))))))

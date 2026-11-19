@@ -83,6 +83,8 @@
                        :decay-beats ends after them once :hold? is false."}
    :requests {:default {}
               :doc "{:restart {:id} :align {:id} :shift {:id :offset}}: the show clock applies each id once (Stop and Retrigger, tap tempo, Link)"}
+   :pulses {:default {}
+            :doc "source -> {:id n :held? bool :src}: the presses tap reactions follow (laser-show.animation.pulses). The vibe engine counts each HIT, ACCENT and FLASH press, held until its release (:src while held), and each vibe change ({:id n}, :vibe); grid/start-cue each cue start (:cue). The show clock stamps them on its pulse clock (show-time/step); their ages never come back here."}
 
    ;; Shared timing settings
    :resync-rate {:default 4.0

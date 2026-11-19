@@ -263,3 +263,22 @@
       (is (= :random (:type new-value)))
       (is (contains? new-value :period))
       (is (contains? new-value :time-unit)))))
+
+
+;; The Step's palette (plans/2026-11-18-vibe-mode/04 §4)
+
+(deftest number-list-param-parses-the-palette-test
+  (let [step {:type :step :source :hit :min 0.0 :max 1.0 :steps 4 :values []}
+        typed (fn [text]
+                (get-in (modulator/handle (merge sample-event-base
+                                                 {:event/type :modulator/update-param
+                                                  :current-value step
+                                                  :mod-param-key :values
+                                                  :text-field? true
+                                                  :text-field-type :number-list
+                                                  :fx/event text}))
+                        [:dispatch :value :values]))]
+    (is (= [200.0 215.0 320.0] (typed "200, 215 320")))
+    (is (= [200.0 320.0] (typed "200 abc 320,,")) "what doesn't parse is left out")
+    (is (= [-12.5 3.0] (typed " -12.5 ,3 ")))
+    (is (= [] (typed "")) "empty clears the palette")))

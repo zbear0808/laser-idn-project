@@ -7,7 +7,8 @@
    would (no handler), and the Vibes tab's edits of FX sets, beds, pools,
    the audience rule and deletes through their handlers (engine/reconcile).
    After every step it checks invariants 1-12
-   of plans/2026-11-18-vibe-mode/01-phase1-engine-core.md §7; what may play
+   of plans/2026-11-18-vibe-mode/01-phase1-engine-core.md §7, and the pulses
+   presses write for tap reactions (04 §7, check-pulses); what may play
    (invariant 1) is worked out here, not with laser-show.vibes.library.
    A failure prints the seed and the events up to the failing step, the
    shortest failing prefix. To run one seed: VIBE_FUZZ_SEED=<seed>; seeds 1
@@ -230,6 +231,14 @@
 
 (defn- bad [& kvs] (apply str kvs))
 
+(defn- pulse [state role] (get-in state [:playback :pulses role]))
+
+(defn- let-go
+  "state with role's pulse let go, as every release of role does (Phase 4)."
+  [state role]
+  (cond-> state
+    (:held? (pulse state role)) (update-in [:playback :pulses role] #(-> % (assoc :held? false) (dissoc :src)))))
+
 (defn- check-always
   "Invariants 1, 3, 4 and 6 on any state. (A voice's cell can come to follow
    timecode or reach the crowd only by a move under a playing intent, which
@@ -248,9 +257,13 @@
                      (and (some? last) (some #{last} remaining)))]
        (bad "inv 3: bag " k " is inconsistent " (pr-str (vr state :bags k))))
      (when (vr state :blackout?)
-       (for [k [:voices :held :duck :fx-on]
-             :when (seq (vr state k))]
-         (bad "inv 6: during blackout " k " is " (pr-str (vr state k))))))))
+       (concat
+        (for [k [:voices :held :duck :fx-on]
+              :when (seq (vr state k))]
+          (bad "inv 6: during blackout " k " is " (pr-str (vr state k))))
+        (for [r [:hit :accent :flash]
+              :when (:held? (pulse state r))]
+          (bad "04 inv 9: during blackout " r "'s pulse is held")))))))
 
 (defn- check-press
   "Invariants 1, 2, 6 and 9 for a press."
@@ -290,8 +303,11 @@
               (concat (when (not= {:role role :why :empty-pool} (vr after :problem))
                         [(bad "inv 1: an empty " role " pool and no problem")])
                       (when (and (= (vr before :current) (vr after :current))
-                                 (not= (assoc-in before [:vibe-runtime :problem] (vr after :problem)) after))
-                        [(bad "inv 1: an empty " role " pool changed more than :problem")]))
+                                 (not= (-> before
+                                           (assoc-in [:vibe-runtime :problem] (vr after :problem))
+                                           (assoc-in [:playback :pulses role] (pulse after role)))
+                                       after))
+                        [(bad "inv 1: an empty " role " pool changed more than :problem and its pulse")]))
               (concat
                (when (and started? (not (some #{(:cell v1)} pool)))
                  [(bad "inv 1: " role " started " (:cell v1) ", not one of the cells that may play " pool)])
@@ -315,8 +331,8 @@
         live (and voice (live? before voice))]
     (cond
       (nil? held)
-      (when (and (not cut?) (not= before after))
-        [(bad "inv 5: releasing " role ", which isn't held, changed the state")])
+      (when (and (not cut?) (not= (let-go before role) after))
+        [(bad "inv 5: releasing " role ", which isn't held, changed more than its pulse")])
 
       (= role :flash)
       (concat
@@ -340,6 +356,35 @@
 
       :else nil)))
 
+(defn- check-pulses
+  "Phase 4's pulses (plans/2026-11-18-vibe-mode/04 §7): a HIT, ACCENT or
+   FLASH press outside blackout pulses, held, whatever it plays; every
+   release lets its pulse go, and release-all those its source held;
+   BLACKOUT never pulses; :vibe pulses once per change a VIBE tap or a
+   select makes, never during blackout, and for nothing else."
+  [before {:keys [event/type role only src]} after]
+  (let [blackout? (vr before :blackout?)
+        id (fn [s r] (:id (pulse s r) 0))
+        vibe-change? (and (or (= :vibe/select type) (and (= :vibe/release type) (= :vibe role)))
+                          (not= (vr before :current) (vr after :current))
+                          (not blackout?))]
+    (concat
+     (when (and (= :vibe/press type) (#{:hit :accent :flash} role) (not blackout?)
+                (not= {:id (inc (id before role)) :held? true :src (or src :input)} (pulse after role)))
+       [(bad "04: a " role " press left its pulse " (pr-str (pulse after role)))])
+     (when (and (= :vibe/press type) (= :blackout role)
+                (not= (map #(id before %) [:hit :accent :flash :vibe]) (map #(id after %) [:hit :accent :flash :vibe])))
+       ["04 inv 9: BLACKOUT pulsed"])
+     (when (and (= :vibe/release type) (:held? (pulse after role)))
+       [(bad "04: " role "'s pulse is held after its release")])
+     (when (= :vibe/release-all type)
+       (for [r [:hit :accent :flash]
+             :when (and (:held? (pulse after r)) (or (nil? only) (= only (:src (pulse before r)))))]
+         (bad "04: release-all " (pr-str only) " kept " r "'s pulse held")))
+     (when (not= (id after :vibe) (cond-> (id before :vibe) vibe-change? inc))
+       [(bad "04: " type " " role " moved :vibe's pulse from " (id before :vibe) " to " (id after :vibe)
+             (when vibe-change? ", for a change"))]))))
+
 (defn- check-vibe-event
   "Invariants 4, 5, 7, 11 and 12 for any vibe event, and 1, 2, 6, 9 for presses."
   [before {:keys [event/type role only] :as event} after t]
@@ -348,6 +393,7 @@
                      :when (not (contains? ours run))]
                  cell)]
     (concat
+     (check-pulses before event after)
      (for [cell theirs
            :when (nil? (get-in after [:playback :active-cues cell]))]
        (bad "inv 4: " type " stopped " cell ", which the vibe layer didn't start"))

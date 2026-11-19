@@ -231,6 +231,26 @@
         "the same clip moved to beat 8 looks the same 1.25 beats into it")
     (is (not= (render 0.0 1.25) (render 0.0 2.0)) "the modulator does move")))
 
+(deftest timeline-clip-effects-see-pulses-test
+  (testing "a clip's own clock keeps the presses (probe v13: playback/clip-timing-ctx keeps the key)"
+    (let [punch {:type :envelope :source :hit :min 1.0 :max 1.5 :attack 0.0 :release 1.0 :curve :linear :hold? false}
+          cue (timeline-cue {:items [{:id :a :type :preset :preset-id :circle :track-id :t :enabled? true
+                                      :timeline/start 8.0 :timeline/duration 8.0
+                                      :effects [{:id :fx :effect-id :scale :enabled? true
+                                                 :params {:x-scale punch :y-scale 1.0}}]}]})
+          width (fn [pulses]
+                  (let [frame (:all (frame-service/generate-frames-by-zone
+                                     cue (cond-> {:accumulated-beats 9.0 :effective-beats 9.0 :phase-offset 0.0
+                                                  :accumulated-ms 4500.0 :time-ms 4500.0 :bpm 120.0}
+                                           pulses (assoc :pulses pulses))))
+                        xs (map first (remove (fn [[_ _ r g b]] (= 0.0 r g b)) frame))]
+                    (- (apply max xs) (apply min xs))))
+          hit (fn [beats] {:hit {:count 1 :beats beats :ms (* 500.0 beats) :held? false :since-release beats :recent [beats]}})
+          rest-width (width nil)]
+      (is (< (Math/abs (- (* 1.5 rest-width) (width (hit 0.0)))) 1e-9) "a press now: the peak")
+      (is (< (Math/abs (- (* 1.25 rest-width) (width (hit 0.5)))) 1e-9) "half a beat on: half way back")
+      (is (< (Math/abs (- rest-width (width (hit 2.0)))) 1e-9) "at rest again"))))
+
 ;; Track and folder effects
 
 (defn- render-at [cue beats]

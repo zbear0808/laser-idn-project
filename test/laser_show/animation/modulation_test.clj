@@ -8,7 +8,8 @@
             [laser-show.animation.keyframes :as kf]
             [laser-show.animation.modulation :as mod]
             [laser-show.animation.modulator-evaluators :as mod-eval]
-            [laser-show.animation.modulator-registry :as mod-reg]))
+            [laser-show.animation.modulator-registry :as mod-reg]
+            [laser-show.timeline.playback :as playback]))
 
 
 ;; Helper Functions
@@ -200,6 +201,9 @@
     (testing "user-facing modulators, including MIDI/OSC, are listed"
       (is (every? ids [:sine :triangle :sawtooth :square :random :decay
                        :pos-x :pos-y :radial :point-index :angle :midi :osc])))
+    (testing "and the three that follow a press, under :pulse"
+      (is (every? ids [:envelope :step :energy]))
+      (is (= #{:pulse} (set (map #(:category (mod-reg/get-modulator %)) [:envelope :step :energy])))))
     (testing "internal modulator is still registered for keyframe evaluation"
       (is (mod-reg/valid-modulator-type? :unified-keyframe-param)))))
 
@@ -1072,3 +1076,87 @@
       (is (= 15.0 (resolver 0.0 0.0 0)))
       (is (= 15.0 (resolver 1.0 1.0 10))))))
 
+
+
+;; Tap reactions: presses reach modulators (plans/2026-11-18-vibe-mode/04 §7)
+
+(defn- with-press
+  "ctx with source pressed (or switched) beats ago, the count-th time."
+  [ctx source beats & {:keys [count] :or {count 1}}]
+  (assoc-in ctx [:pulses source] {:count count :beats beats :ms (* 500.0 beats) :held? false
+                                  :since-release beats :recent [beats]}))
+
+(def ^:private cue-ctx
+  "A cue 9 beats into its run."
+  (ct/get-cue-timing-context {:accumulated-beats 9.0 :accumulated-ms 4500.0} 120.0))
+
+(defn- at [cfg ctx] (mod/resolve-param cfg (mod/make-context ctx)))
+
+(deftest make-context-carries-pulses-test
+  (testing "probe v13 turned around: a :pulses key on a timing context reaches every modulator"
+    (let [ctx (-> cue-ctx (assoc :input-values {[:midi 0 1] 0.5}) (with-press :hit 0.5 :count 3))
+          pulses (:pulses ctx)]
+      (is (= pulses (:pulses (mod/make-context ctx))))
+      (is (= pulses (:pulses (mod/make-base-context ctx))))
+      (is (= pulses (:pulses (mod/with-point-context (mod/make-base-context ctx) 0.1 0.2 3))))
+      (is (= pulses (:pulses (playback/clip-timing-ctx ctx {:timeline/start 1.0} 120.0))))
+      (is (nil? (:pulses (mod/make-context cue-ctx))) "none without")
+      (testing "through an effect chain"
+        (let [chain {:effects [{:id :fx :effect-id :scale :enabled? true
+                                :params {:x-scale {:type :envelope :source :hit :min 1.0 :max 3.0 :attack 0.0
+                                                   :release 1.0 :curve :linear :hold? false}}}]}]
+          (is (approx= 1.0 (ffirst (effects/apply-effect-chain [[0.5 0.0 1.0 1.0 1.0]] chain ctx)) 1e-9)
+              "half a beat into a one-beat release from 3x: 2x"))))))
+
+(deftest restart-on-once-and-decay-test
+  (let [swing {:type :triangle :min 0.0 :max 30.0 :period 1.0 :phase 0.5 :loop-mode :once :restart-on :hit}]
+    (testing "a Triangle once restarts on each HIT"
+      (is (approx= 30.0 (at (dissoc swing :restart-on) (assoc cue-ctx :accumulated-beats 0.5 :effective-beats 0.5)) 1e-9)
+          "today: it swings once when its cue starts")
+      (is (approx= 0.0 (at swing cue-ctx) 1e-9) "no HIT yet: at rest, though its cue is 9 beats in")
+      (is (approx= 30.0 (at swing (with-press cue-ctx :hit 0.5)) 1e-9) "half a beat after a HIT: the top of the swing")
+      (is (approx= 0.0 (at swing (with-press cue-ctx :hit 1.0)) 1e-9) "a beat after it: at rest again"))
+    (testing "probe v15 turned around: a Decay on an effects-grid cell fires on each HIT"
+      (let [decay {:type :decay :min 1.0 :max 1.5 :duration 1.0 :time-unit :beats :decay-curve :exp}
+            grid (ct/get-global-timing-context {:accumulated-beats 8.0 :accumulated-ms 4000.0} 120.0)
+            on-hit (assoc decay :restart-on :hit)]
+        (is (approx= 1.0 (at decay grid) 1e-9) "8 beats into the clock: done, for ever")
+        (is (approx= 1.0 (at on-hit grid) 1e-9) "no HIT yet: at rest")
+        (is (approx= 1.5 (at on-hit (with-press grid :hit 0.0)) 1e-9) "at the press: the top")
+        (is (approx= 1.038 (at on-hit (with-press grid :hit 0.5)) 5e-4))
+        (is (approx= 1.0 (at on-hit (with-press grid :hit 1.0)) 1e-9))))))
+
+(deftest restart-on-loop-resets-the-phase-test
+  (let [sweep {:type :sine :min 0.0 :max 1.0 :period 4.0 :restart-on :hit}]
+    (is (= (at (dissoc sweep :restart-on) cue-ctx) (at sweep cue-ctx)) "no HIT yet: it runs as it would")
+    (is (approx= 1.0 (at sweep (with-press cue-ctx :hit 0.0)) 1e-9) "each HIT starts the sweep again, at its top")
+    (is (approx= 0.5 (at sweep (with-press cue-ctx :hit 1.0)) 1e-9) "a beat later: phase 0.25")
+    (testing "the Strobe template's square: its first flash starts on the press"
+      (let [strobe {:type :square :min 0.0 :max 1.0 :period 0.125 :duty-cycle 0.5 :restart-on :flash}]
+        (is (= [1.0 0.0 1.0] (mapv #(at strobe (with-press cue-ctx :flash %)) [0.0 0.07 0.13])))))))
+
+(deftest restart-on-random-gives-a-new-value-per-press-test
+  (let [cfg {:type :random :min 0.0 :max 1.0 :period 1.0 :time-unit :beats :loop-mode :once :once-periods 1.0}
+        restarted (ct/get-cue-timing-context {:accumulated-beats 0.0 :accumulated-ms 0.0} 120.0)]
+    (testing "probe v16: today every restart of a once-mode random lands on the same value"
+      (is (= 1 (count (set (repeatedly 5 #(at cfg restarted)))))))
+    (testing "with Restart on, a different value after each press"
+      (let [presses #(mapv (fn [n] (at (assoc cfg :restart-on :hit) (with-press cue-ctx :hit 0.0 :count n))) (range 1 6))
+            vals (presses)]
+        (is (= 5 (count (set vals))))
+        (is (every? #(<= 0.0 % 1.0) vals))
+        (is (= vals (presses)) "invariant 8: the same press count, the same value")))))
+
+(deftest restart-on-own-is-unchanged-test
+  (testing "invariant 3: a saved modulator without :restart-on, or with :own, evaluates exactly as before"
+    (let [pressed (-> cue-ctx (with-press :hit 0.25) (with-press :vibe 1.5))]
+      (doseq [cfg [{:type :sine :min 0.0 :max 1.0 :period 3.0}
+                   {:type :triangle :min -1.0 :max 1.0 :period 2.0 :loop-mode :once}
+                   {:type :sawtooth :min 0.0 :max 5.0 :period 4.0}
+                   {:type :square :min 0.0 :max 1.0 :period 0.5 :duty-cycle 0.3}
+                   {:type :random :min 0.0 :max 1.0 :period 0.5}
+                   {:type :random :min 0.0 :max 1.0 :period 4.0 :loop-mode :once}
+                   {:type :decay :min 1.0 :max 2.0 :duration 16.0}]]
+        (let [before (at cfg cue-ctx)]
+          (is (= before (at cfg pressed)) (str (:type cfg) ": presses don't move it"))
+          (is (= before (at (assoc cfg :restart-on :own) pressed)) (str (:type cfg) " with :own")))))))

@@ -156,7 +156,9 @@
    :vibe/toggle-cell "Edit Vibe Cues"
    :vibe/toggle-fx "Edit Vibe Effects"
    :vibe/set-option "Change Vibe Option"
-   :vibe/make-from-rows "Make Vibes From Rows"})
+   :vibe/make-from-rows "Make Vibes From Rows"
+   :vibe/add-reaction "Add Tap Reaction"
+   :effects/new-reaction "Add Tap Reaction"})
 
 (defn format-event-description
   "Generate a human-readable description for an event type."

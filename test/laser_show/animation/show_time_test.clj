@@ -424,3 +424,51 @@
       (handle! {:event/type :grid/trigger-cell :col 3 :row 0})
       (is (some? (run-id [3 0])))
       (is (not-any? #{[3 0]} (map :cell (show-time/active-runs (state/get-raw-state) rt)))))))
+
+
+;; Tap reactions: the pulse clock and its stamps (plans/2026-11-18-vibe-mode/04 §7)
+
+(deftest step-stamps-pulses-test
+  (init-vibes!)
+  (let [rt0 (run-at (:runtime start) 0.0 500.0)]
+    (is (= [{} {}] [(:pulses rt0) (show-time/pulse-view rt0)]) "no press yet")
+    (is (close? 1.0 (get-in rt0 [:pulse-clock :accumulated-beats])) "the pulse clock runs at the global BPM")
+    (handle! {:event/type :vibe/press :role :hit :input-time 1000})
+    (let [rt1 (run-at rt0 1000.0)
+          {:keys [run]} (hit-voice)]
+      (is (= {:id 1 :count 1 :press-beat 2.0 :press-ms 1000.0 :held? true :release-beat nil :recent [2.0]}
+             (get-in rt1 [:pulses :hit]))
+          "stamped at the tick after the press")
+      (is (= [0.0 0.0] [(get-in rt1 [:runs run :accumulated-beats]) (get-in (show-time/pulse-view rt1) [:hit :beats])])
+          "invariant 7: the press and the cue it starts reach the render at the same tick")
+      (is (= 1 (get-in (show-time/pulse-view rt1) [:any :count])) "and :any")
+      (handle! {:event/type :vibe/release :role :hit :input-time 1250})
+      (let [rt2 (run-at rt1 1250.0)
+            {:keys [beats ms held? since-release]} (:hit (show-time/pulse-view rt2))]
+        (is (= [2.5 false] ((juxt :release-beat :held?) (get-in rt2 [:pulses :hit]))))
+        (is (close? 0.5 beats))
+        (is (close? 250.0 ms))
+        (is (= [false 0.0] [held? since-release])))
+      (testing "a clock that starts again doesn't replay the presses app state has"
+        (show-time/reset-runtime! (state/get-raw-state))
+        (let [rt (run-at @show-time/!runtime 2000.0 2500.0)]
+          (is (= {} (show-time/pulse-view rt)))
+          (handle! {:event/type :vibe/press :role :hit :input-time 3000})
+          (is (= 1 (get-in (show-time/pulse-view (run-at rt 3000.0)) [:hit :count])) "the next press is new"))))))
+
+(deftest restart-request-keeps-pulses-test
+  (testing "Stop and Retrigger restart every clock but the pulse clock, and leave every stamp as it was"
+    (init-vibes!)
+    (let [rt0 (run-at (:runtime start) 0.0 500.0)
+          _ (handle! {:event/type :vibe/press :role :flash :input-time 1000})
+          rt1 (run-at rt0 1000.0)
+          stamps (:pulses rt1)]
+      (is (= 1 (get-in stamps [:flash :count])))
+      (handle! {:event/type :transport/stop})
+      (let [rt2 (run-at rt1 1250.0)]
+        (is (close? 0.5 (get-in rt2 [:global :accumulated-beats])) "the global clock started again")
+        (is (close? 2.5 (get-in rt2 [:pulse-clock :accumulated-beats])) "the pulse clock didn't")
+        (is (= stamps (:pulses rt2)))
+        (is (close? 0.5 (get-in (show-time/pulse-view rt2) [:flash :beats]))))
+      (handle! {:event/type :transport/retrigger})
+      (is (= stamps (:pulses (run-at rt1 1250.0 1500.0)))))))

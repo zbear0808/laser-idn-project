@@ -401,3 +401,25 @@
           context {:point-index 2 :point-count 5 :time-ms 0}]
       ;; 2-arity extracts time-ms from context
       (is (< (Math/abs (- 50.0 (:v (kf/eval-keyframe config context)))) 0.001)))))
+
+;; =============================================================================
+;; Restart on (plans/2026-11-18-vibe-mode/04 §7)
+;; =============================================================================
+
+(deftest keyframe-restart-on-press-test
+  (let [config {:driver :time :period 2.0 :time-unit :beats :loop-mode :once :restart-on :accent
+                :keyframes [{:position 0.0 :params {:v 0.0}} {:position 1.0 :params {:v 100.0}}]}
+        cue {:accumulated-beats 6.0 :effective-beats 6.0 :accumulated-ms 3000.0 :time-ms 3000.0 :bpm 120.0}
+        accent (fn [beats]
+                 (assoc cue :pulses {:accent {:count 1 :beats beats :ms (* 500.0 beats) :held? false
+                                              :since-release beats :recent [beats]}}))]
+    (is (= 1.0 (kf/calculate-time-position (dissoc config :restart-on) 3000.0 cue)) "today: done 6 beats into its cue")
+    (is (= 1.0 (kf/calculate-time-position config 3000.0 cue)) "no ACCENT yet: done, at rest")
+    (is (= 0.5 (kf/calculate-time-position config 3000.0 (accent 1.0))) "ACCENT a beat ago: half way through")
+    (is (< (Math/abs (- 50.0 (:v (kf/eval-keyframe config (accent 1.0))))) 1e-9))
+    (testing "looping, it runs as today until the first press, then from it"
+      (let [looping (assoc config :loop-mode :loop)
+            later (assoc cue :accumulated-beats 6.5 :effective-beats 6.5)]
+        (is (= (kf/calculate-time-position (dissoc looping :restart-on) 3000.0 later)
+               (kf/calculate-time-position looping 3000.0 later)))
+        (is (= 0.25 (kf/calculate-time-position looping 3000.0 (accent 0.5))))))))

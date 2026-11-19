@@ -27,6 +27,7 @@
   (:require [cljfx.api :as fx]
             [laser-show.state.extractors :as ex]
             [laser-show.vibes.library :as library]
+            [laser-show.vibes.reactions :as reactions]
             [laser-show.css.core :as css]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.chains :as chains]
@@ -972,8 +973,12 @@
        (sort-by pr-str)
        vec))
 
-(defn- vibe-held? [state role]
-  (some? (get-in state [:vibe-runtime :held role])))
+(defn- vibe-held?
+  "Is role held: by the engine, or by the pulse of a press that played
+   nothing (an effects-only role)?"
+  [state role]
+  (or (some? (get-in state [:vibe-runtime :held role]))
+      (true? (get-in state [:playback :pulses role :held?]))))
 
 (defn- vibe-playing-cell
   "The cell role's voice plays, while that cue still plays the voice's run:
@@ -999,13 +1004,47 @@
 (defn- vibe-locked? [state]
   (= :locked (get-in state [:vibe-runtime :rotation])))
 
+(defn- reaction-inputs
+  "What the cells that react to a press depend on (vibes.reactions/reactions
+   and what may play)."
+  [state]
+  (select-keys state [:chains :projectors :virtual-projectors]))
+
+(defn- vibe-reactions
+  "The current vibe's tap reactions by role (vibes.reactions/reactions), and
+   :quiet, the roles whose press plays no cue: HIT or ACCENT with nothing
+   playable in its pool, FLASH without a playable cue. Recomputed when the
+   chains, the vibes, the projectors or the current vibe change."
+  [context]
+  (let [id (fx/sub-ctx context vibe-current-id)
+        {:keys [library]} (fx/sub-ctx context vibe-config)
+        state (assoc (fx/sub-val context reaction-inputs) :config {:vibes {:library library}})
+        vibe (get library id)]
+    {:by-role (if vibe (reactions/reactions state id) {})
+     :quiet (set (for [role [:hit :accent :flash]
+                       :let [cells (if (= :flash role)
+                                     (keep identity [(get-in vibe [:flash :cue])])
+                                     (get-in vibe [role :cells]))]
+                       :when (empty? (library/playable-cells state vibe cells))]
+                   role))}))
+
+(defn- vibe-pad-reactions
+  "role's pad: the names of its reactions, and :effects-only? when its
+   press plays no cue but moves some."
+  [context role]
+  (let [{:keys [by-role quiet]} (fx/sub-ctx context vibe-reactions)
+        names (mapv :name (get by-role role))]
+    {:reactions names
+     :effects-only? (boolean (and (contains? quiet role) (seq names)))}))
+
 (defn vibe-pad
   "One of the Perform tab's five pads: {:role :label :bindings (trigger-map
    keys) :held? :playing (the cell its voice plays, while it does)
-   :learning? :problem :dim?}, with :next (the next vibe's name) and
-   :locked? for VIBE, and :on? for BLACKOUT. A pad lights while its role is
-   held, whatever pressed it. Every pad is dim without vibes, and all but
-   BLACKOUT during blackout."
+   :learning? :problem :dim? :reactions (the names of the current vibe's
+   cells that react to it) :effects-only?}, with :next (the next vibe's
+   name) and :locked? for VIBE, and :on? for BLACKOUT. A pad lights while
+   its role is held, whatever pressed it. Every pad is dim without vibes,
+   and all but BLACKOUT during blackout."
   [context role]
   (let [blackout? (fx/sub-ctx context vibe-blackout?)]
     (cond-> {:role role
@@ -1016,7 +1055,9 @@
              :learning? (fx/sub-val context vibe-learning? role)
              :problem (fx/sub-val context vibe-problem role)
              :dim? (or (not (fx/sub-val context vibes?))
-                       (and blackout? (not= :blackout role)))}
+                       (and blackout? (not= :blackout role)))
+             :reactions (:reactions (fx/sub-ctx context vibe-pad-reactions role))
+             :effects-only? (:effects-only? (fx/sub-ctx context vibe-pad-reactions role))}
       (= :vibe role) (assoc :next (some->> (fx/sub-ctx context vibe-next-id)
                                            (get (:library (fx/sub-ctx context vibe-config)))
                                            :name)

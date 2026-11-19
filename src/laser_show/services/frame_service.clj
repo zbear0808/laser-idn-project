@@ -101,17 +101,24 @@
 
 (defn render-context
   "What every cue's render in one tick shares. The show clock makes it once
-   per tick, from the tick's app state, input values and global clock:
+   per tick, from the tick's app state, input values, global clock and
+   presses (show-time/pulse-view, nil without):
    - :input-values: the input store's values;
+   - :pulses: the presses, which the clock puts on each cue's timing context;
    - :global-effects: the effects grid's active chain in state, or nil;
-   - :global-ctx: the global clock's timing context, with the input values,
-     at the global BPM. Each cue's render puts its own tempo on it, so a
-     timeline with a locked tempo runs the global effects at that tempo."
-  [state input-values global-clock]
-  {:input-values input-values
-   :global-effects (get-active-global-effects state)
-   :global-ctx (assoc (cue-timing/get-global-timing-context global-clock (get-in state [:timing :bpm]))
-                      :input-values input-values)})
+   - :global-ctx: the global clock's timing context, with the input values
+     and the presses, at the global BPM. Each cue's render puts its own tempo
+     on it, so a timeline with a locked tempo runs the global effects at that
+     tempo."
+  ([state input-values global-clock]
+   (render-context state input-values global-clock nil))
+  ([state input-values global-clock pulses]
+   {:input-values input-values
+    :pulses pulses
+    :global-effects (get-active-global-effects state)
+    :global-ctx (assoc (cue-timing/get-global-timing-context global-clock (get-in state [:timing :bpm]))
+                       :input-values input-values
+                       :pulses pulses)}))
 
 ;; Cue Chain Rendering
 ;;

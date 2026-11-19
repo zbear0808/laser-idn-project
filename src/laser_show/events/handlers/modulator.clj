@@ -157,13 +157,23 @@
     (catch Exception _
       nil)))
 
+(defn- parse-number-list
+  "The numbers in text, split on commas and spaces, as doubles; what doesn't
+   parse is left out, so \"\" is []."
+  [text]
+  (into []
+        (keep #(try (Double/parseDouble %) (catch NumberFormatException _ nil)))
+        (remove str/blank? (str/split (str text) #"[\s,]+"))))
+
 (defn- handle-update-mod-param
   "Handle updating a sub-parameter of a modulator.
    
    Updates a specific key within the modulator config (e.g., :period, :phase).
    
    Supports both slider values (:fx/event) and text field values.
-   For text fields, looks for :mod-text-field? true and parses the text.
+   For text fields, looks for :mod-text-field? true and parses the text: a
+   number, clamped, or with :text-field-type :text the text or EDN, or with
+   :number-list a vector of numbers (the Step's palette).
    
    Returns a :dispatch effect to update the parameter via :chain/update-param."
   [{:keys [domain entity-key effect-path param-key current-value mod-param-key] :as event}]
@@ -181,7 +191,8 @@
                                        (.getText ^javafx.scene.control.TextField source)))
                                    :else (str raw-val))
                         text-type (:text-field-type event)]
-                    (if (= :text text-type)
+                    (case text-type
+                      :text
                       (try
                         (if (or (str/starts-with? text-val "[")
                                 (str/starts-with? text-val "{")
@@ -189,6 +200,10 @@
                           (edn/read-string text-val)
                           text-val)
                         (catch Exception _ text-val))
+
+                      :number-list
+                      (parse-number-list text-val)
+
                       (let [min-val (or (:mod-param-min event) -10.0)
                             max-val (or (:mod-param-max event) 10.0)]
                         (parse-text-value text-val min-val max-val))))

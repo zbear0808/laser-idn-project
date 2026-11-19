@@ -241,9 +241,13 @@
           empty (update-in s1 [:chains :cue-chains] dissoc [0 0])
           s2 (press empty :hit 1000)]
       (is (= {:role :hit :why :empty-pool} (rt s2 :problem)))
-      (is (= (assoc-in empty [:vibe-runtime :problem] {:role :hit :why :empty-pool}) s2)
-          "nothing changes but :problem: nothing plays, nothing is held")
-      (is (nil? (:dispatch (engine/press empty {:role :hit :time 1000}))) "no tap either")
+      (is (= (-> empty
+                 (assoc-in [:vibe-runtime :problem] {:role :hit :why :empty-pool})
+                 (assoc-in [:playback :pulses :hit] {:id 1 :held? true :src :input}))
+             s2)
+          "nothing changes but :problem and HIT's pulse (Phase 4): nothing plays, the engine holds nothing")
+      (is (= {:event/type :timing/tap-tempo} (:dispatch (engine/press empty {:role :hit :time 1000})))
+          "and HIT still taps the tempo (Phase 4, V3)")
       (is (nil? (rt (press s2 :accent 1100) :problem)) "until the next good press"))
     (testing "a flash with neither a cue nor effect cells"
       (is (= {:role :flash :why :empty-pool}
@@ -582,3 +586,90 @@
       (is (= :vibe-3 (peek (get-in s1 [:config :vibes :order]))) "the id comes back")
       (is (= :vibe-1 (rt s1 :current)) "but not as the vibe that played")
       (is (not (fx-on? s1 [1 3]))))))
+
+
+;; Pulses: what tap reactions follow (plans/2026-11-18-vibe-mode/04 §7, "What a press writes")
+
+(defn- pulse [state source] (get-in state [:playback :pulses source]))
+(defn- pulse-of [state source] (select-keys (pulse state source) [:id :held?]))
+
+(deftest role-press-and-release-write-pulses-test
+  (let [s0 (assoc-in (starter) [:playback :pulses :hit] {:id 11 :held? false})
+        s1 (press s0 :hit 1000)]
+    (is (= {:id 12 :held? true :src :input} (pulse s1 :hit)) "HIT press, the count was 11")
+    (is (= {:id 12 :held? false} (pulse (release s1 :hit 1090) :hit)) "its release")
+    (is (= {:id 12 :held? false} (pulse (release s1 :hit 1400) :hit)) "a hold's release too")
+    (is (= {:id 1 :held? true :src :pad} (pulse (:state (engine/press s0 {:role :accent :time 1000 :src :pad})) :accent)))
+    (testing "FLASH, held 2 beats"
+      (let [s2 (press s0 :flash 1000)]
+        (is (= {:id 1 :held? true} (pulse-of s2 :flash)))
+        (is (= {:id 1 :held? false} (pulse-of (release s2 :flash 2000) :flash)))))
+    (testing "a release with nothing held changes nothing"
+      (is (= s0 (release s0 :hit 1000))))
+    (testing "release-all lets go of the pulses its source held, as of the holds"
+      (let [s (-> s0 (press :hit 1000) (#(:state (engine/press % {:role :flash :time 1010 :src :pad}))))
+            pad (:state (engine/release-all s {:only :pad :time 1030}))]
+        (is (= [true false] [(:held? (pulse pad :hit)) (:held? (pulse pad :flash))]))
+        (is (= [false false] (mapv #(:held? (pulse (:state (engine/release-all pad {:time 1040})) %)) [:hit :flash])))))))
+
+(deftest every-vibe-switch-pulses-test
+  (let [s0 (starter)]
+    (testing "a VIBE tap"
+      (let [s1 (-> s0 (press :vibe 1000) (release :vibe 1200))]
+        (is (= :vibe-2 (rt s1 :current)))
+        (is (= {:id 1} (pulse s1 :vibe)))
+        (is (= {:id 2} (pulse (-> s1 (press :vibe 1300) (release :vibe 1400)) :vibe)) "and the next, which wraps")))
+    (testing ":vibe/select, once per change"
+      (let [s1 (:state (engine/select s0 {:vibe :vibe-2 :time 1000}))]
+        (is (= {:id 1} (pulse s1 :vibe)))
+        (is (= s1 (:state (engine/select s1 {:vibe :vibe-2 :time 1100}))) "the vibe playing: no change, no pulse")))
+    (testing "the first press makes the first vibe current: not a change of the performer's"
+      (is (nil? (pulse (press s0 :hit 1000) :vibe))))
+    (testing "a tap with one vibe goes nowhere"
+      (let [one (assoc-in s0 [:config :vibes :order] [:vibe-1])]
+        (is (nil? (pulse (-> one (press :hit 900) (press :vibe 1000) (release :vibe 1100)) :vibe)))))))
+
+(deftest lock-toggle-writes-no-pulse-test
+  (let [s1 (-> (starter) (tap :hit 900))
+        s2 (-> s1 (press :vibe 1000) (release :vibe 1700))]
+    (is (= :locked (rt s2 :rotation)))
+    (is (= (get-in s1 [:playback :pulses]) (get-in s2 [:playback :pulses])))))
+
+(deftest blackout-writes-no-pulse-test
+  (let [s0 (-> (starter) (tap :accent 900) (press :hit 1000) (press :flash 1100))
+        {:keys [state]} (engine/press s0 {:role :blackout :time 1200})]
+    (is (= (update-vals (get-in s0 [:playback :pulses]) :id) (update-vals (get-in state [:playback :pulses]) :id))
+        "BLACKOUT is no press")
+    (is (not-any? #(:held? (pulse state %)) [:hit :accent :flash]) "it lets go of every hold, as of the engine's")
+    (testing "invariant 9: no press pulses during blackout, nor a vibe change"
+      (let [s (-> state (press :hit 1300) (press :flash 1310) (press :vibe 1320) (release :vibe 1330)
+                  (#(:state (engine/select % {:vibe :vibe-2 :time 1340}))))]
+        (is (= :vibe-2 (rt s :current)))
+        (is (= (get-in state [:playback :pulses]) (get-in s [:playback :pulses])))
+        (is (= (get-in state [:playback :pulses]) (get-in (press s :blackout 1400) [:playback :pulses]))
+            "nor BLACKOUT going off")))))
+
+(deftest empty-pool-still-pulses-test
+  (testing "a press that plays nothing still moves its reactions, and its release ends its hold"
+    (let [s0 (-> (starter)
+                 (with-vibe :vibe-1 {:hit {:cells [] :select :shuffle :mode :decay :beats 1.0}
+                                     :flash {:cue nil :fx [] :solo? true}}))
+          {:keys [state dispatch]} (engine/press s0 {:role :hit :time 1000})]
+      (is (= {:role :hit :why :empty-pool} (rt state :problem)))
+      (is (nil? (rt state :held :hit)) "the engine holds nothing")
+      (is (= {:id 1 :held? true :src :input} (pulse state :hit)))
+      (is (= {:event/type :timing/tap-tempo} dispatch) "and HIT taps the tempo (V3)")
+      (is (= {:id 1 :held? false} (pulse (release state :hit 1050) :hit)))
+      (let [s (press s0 :flash 1000)]
+        (is (= {:role :flash :why :empty-pool} (rt s :problem)))
+        (is (= {:id 1 :held? false} (pulse (release s :flash 3000) :flash)) "FLASH the same")))))
+
+(deftest no-vibes-still-pulses-test
+  (testing "with no vibes at all, HIT still pulses and taps: a Grid-tab player can bind HIT to move effects"
+    (let [none (assoc-in (starter) [:config :vibes] library/empty-library)
+          {:keys [state dispatch]} (engine/press none {:role :hit :time 1000 :src :pad})]
+      (is (= {:why :no-vibes} (rt state :problem)))
+      (is (= {:id 1 :held? true :src :pad} (pulse state :hit)))
+      (is (= {:event/type :timing/tap-tempo} dispatch))
+      (is (= {:id 1 :held? false} (pulse (release state :hit 1100) :hit)))
+      (is (= {:id 1 :held? false} (pulse (release (press none :accent 1000) :accent 1100) :accent))))))

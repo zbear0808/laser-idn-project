@@ -137,3 +137,26 @@
     (is (= [[0 0] [1 0] [2 0] [3 0]] (vibe moved :vibe-1 :hit :cells)) "cue cell [0 0] is another cell")
     (is (= [] (vibe cleared :vibe-1 :fx)))
     (is (= [] (vibe cleared :vibe-2 :flash :fx)))))
+
+(deftest cue-start-pulses-test
+  (testing "every cue start pulses :cue for the tap reactions that follow it (plans/2026-11-18-vibe-mode/04)"
+    (let [s0 (-> (domains/build-initial-state) (templates/apply-starter-cue-chains))
+          cue-pulse #(get-in % [:playback :pulses :cue])
+          run (fn [s event] (:state (grid-handlers/handle (assoc event :state s))))]
+      (testing "a click that starts a cue, and one that stops it"
+        (let [s1 (run s0 {:event/type :grid/cell-clicked :col 0 :row 0 :has-content? true})]
+          (is (= {:id 1} (cue-pulse s1)))
+          (is (= {:id 1} (cue-pulse (run s1 {:event/type :grid/cell-clicked :col 0 :row 0 :has-content? true}))))))
+      (testing "a cell trigger, and momentary presses"
+        (is (= {:id 1} (cue-pulse (run s0 {:event/type :grid/trigger-cell :col 1 :row 0}))))
+        (is (= {:id 2} (cue-pulse (-> s0
+                                      (run {:event/type :grid/activate-cell :col 1 :row 0})
+                                      (run {:event/type :grid/activate-cell :col 2 :row 0}))))))
+      (testing "a vibe's pick"
+        (is (= {:id 1} (cue-pulse (:state (engine/press (templates/apply-starter-vibes s0) {:role :hit :time 1000}))))))
+      (testing "a timeline that follows MIDI timecode isn't started, so no pulse"
+        (let [s (assoc-in s0 [:chains :cue-chains [0 1]] {:editor-type :timeline :timeline/chase :mtc
+                                                          :items [{:type :preset :preset-id :circle}]})]
+          (is (nil? (cue-pulse (run s {:event/type :grid/trigger-cell :col 0 :row 1}))))))
+      (testing "an empty cell starts nothing"
+        (is (nil? (cue-pulse (run s0 {:event/type :grid/activate-cell :col 7 :row 3}))))))))

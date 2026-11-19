@@ -209,3 +209,29 @@
           result (effects/handle event)]
       ;; Should have empty items
       (is (empty? (get-in result [:state :chains :effect-chains [0 0] :items]))))))
+
+
+;; Tap reactions on the effects grid (plans/2026-11-18-vibe-mode/04 §4)
+
+(deftest new-reaction-fills-an-empty-cell-test
+  (let [s0 (build-initial-state)
+        new-reaction (fn [s col row kind]
+                       (:state (effects/handle {:event/type :effects/new-reaction :col col :row row :kind kind :state s})))
+        s1 (new-reaction s0 2 1 :step-colour)
+        cell (get-in s1 [:chains :effect-chains [2 1]])]
+    (is (= "Step colour" (:name cell)))
+    (is (true? (:active? cell)) "on: the Grid-tab way in, without vibes")
+    (is (= [:hue-shift] (mapv :effect-id (:items cell))))
+    (is (= :step (get-in cell [:items 0 :params :degrees :type])))
+    (is (uuid? (get-in cell [:items 0 :id])))
+    (is (= [2 1] (get-in s1 [:effects :selected-cell])))
+    (testing "the Strobe, on only while FLASH is held, starts off"
+      (is (false? (get-in (new-reaction s0 0 0 :strobe) [:chains :effect-chains [0 0] :active?]))))
+    (testing "a cell that has content, or no such kind: nothing"
+      (is (= s1 (new-reaction s1 2 1 :flip)))
+      (is (= s0 (new-reaction s0 2 1 :nope))))
+    (testing "a cell with no effects left counts as empty; one with a disabled effect doesn't"
+      (is (= "Flip" (get-in (new-reaction (assoc-in s0 [:chains :effect-chains [2 1]] {:items [] :active? false :name "Old"}) 2 1 :flip)
+                            [:chains :effect-chains [2 1] :name])))
+      (let [off (assoc-in s0 [:chains :effect-chains [2 1]] {:items [{:effect-id :scale :enabled? false}] :active? false})]
+        (is (= off (new-reaction off 2 1 :flip)))))))

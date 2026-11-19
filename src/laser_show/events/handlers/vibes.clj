@@ -7,7 +7,8 @@
    time as :input-time, and by the Perform tab (views/tabs/perform.clj): its
    pads' pointer events (:vibe/pointer), the vibe strip (:vibe/select), a
    pad's menu (:vibe/clear-control) and the main window's focus
-   (:vibe/window-focus).
+   (:vibe/window-focus). :vibe/add-reaction makes a tap reaction for a vibe
+   (vibes.reactions/add-to-vibe), an undoable edit.
 
    The Vibes tab (views/tabs/vibes.clj) edits the vibes (laser-show.vibes
    .library) with :vibe/add, :duplicate, :remove, :move, :rename,
@@ -18,7 +19,8 @@
    chains the learns): UI state, never undone."
   (:require [laser-show.events.helpers :as h]
             [laser-show.vibes.engine :as engine]
-            [laser-show.vibes.library :as library])
+            [laser-show.vibes.library :as library]
+            [laser-show.vibes.reactions :as reactions])
   (:import [javafx.scene.input MouseButton MouseEvent TouchEvent]))
 
 
@@ -46,6 +48,14 @@
                  nil)
     nil))
 
+(defn- pad-holds?
+  "Does a pad's press hold role: the engine's hold, or, when the press played
+   nothing (the engine holds nothing), its pulse's?"
+  [state role]
+  (if-let [held (get-in state [:vibe-runtime :held role])]
+    (= :pad (:src held))
+    (= :pad (get-in state [:playback :pulses role :src]))))
+
 (defn- handle-pointer
   "A pad's pointer event (:fx/event): a press is the role's :vibe/press from
    the pad; a release is its :vibe/release while the pad's press still holds
@@ -54,7 +64,7 @@
   [{:keys [state role] e :fx/event}]
   (case (pointer-action e)
     :press {:dispatch {:event/type :vibe/press :role role :src :pad}}
-    :release (if (= :pad (get-in state [:vibe-runtime :held role :src]))
+    :release (if (pad-holds? state role)
                {:dispatch {:event/type :vibe/release :role role :src :pad}}
                {})
     {}))
@@ -180,6 +190,9 @@
     :vibe/set-slot (handle-set-slot event)
     :vibe/learn-all (handle-learn-all event)
     :vibe/wizard-cancel (handle-wizard-cancel event)
+
+    ;; Tap reactions
+    :vibe/add-reaction {:state (reactions/add-to-vibe state (:vibe event) (:kind event))}
     
     ;; Unknown event in this domain
     {}))

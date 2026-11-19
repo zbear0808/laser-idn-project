@@ -18,6 +18,29 @@
 ;; These are copied from modulator-defs to avoid circular dependency
 
 
+(def ^:private source-labels
+  "How the editor names what a reaction follows (a :choice param's :labels)."
+  {:own "Its cue's start"
+   :hit "HIT"
+   :accent "ACCENT"
+   :flash "FLASH"
+   :vibe "Vibe change"
+   :any "HIT, ACCENT or FLASH"
+   :cue "Any cue start"})
+
+(def restart-on-param
+  "Restart on: count from the newest press of a source (pulses/rebase)
+   instead of from the cue's start. :own is today's behaviour. Time-driven
+   keyframe animations offer the same (keyframe-modulator-panel)."
+  {:key :restart-on :label "Restart on" :type :choice
+   :choices [:own :hit :accent :flash :vibe :any :cue] :labels source-labels :default :own})
+
+(defn- source-param
+  "The source a pulse modulator follows."
+  [default]
+  {:key :source :label "Follows" :type :choice
+   :choices [:hit :accent :flash :vibe :any :cue] :labels source-labels :default default})
+
 (def ^:private wave-params
   "Common wave modulator parameters."
   [{:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
@@ -26,7 +49,8 @@
    {:key :time-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
    {:key :loop-mode :label "Mode" :type :choice :choices [:loop :once] :default :loop}
    {:key :once-periods :label "# Periods" :type :float :min 0.125 :max 8.0 :default 1.0}
-   {:key :phase :label "Phase" :type :float :min 0.0 :max 1.0 :default 0.0}])
+   {:key :phase :label "Phase" :type :float :min 0.0 :max 1.0 :default 0.0}
+   restart-on-param])
 
 (def ^:private square-params
   "Square wave parameters (has duty cycle)."
@@ -37,7 +61,8 @@
    {:key :loop-mode :label "Mode" :type :choice :choices [:loop :once] :default :loop}
    {:key :once-periods :label "# Periods" :type :float :min 0.125 :max 8.0 :default 1.0}
    {:key :duty-cycle :label "Duty Cycle" :type :float :min 0.0 :max 1.0 :default 0.5}
-   {:key :phase :label "Phase" :type :float :min 0.0 :max 1.0 :default 0.0}])
+   {:key :phase :label "Phase" :type :float :min 0.0 :max 1.0 :default 0.0}
+   restart-on-param])
 
 (def ^:private random-params
   "Random modulator parameters."
@@ -46,7 +71,8 @@
    {:key :period :label "Period" :type :float :min 0.0625 :max 16.0 :default 1.0}
    {:key :time-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
    {:key :loop-mode :label "Mode" :type :choice :choices [:loop :once] :default :loop}
-   {:key :once-periods :label "# Periods" :type :float :min 0.125 :max 8.0 :default 1.0}])
+   {:key :once-periods :label "# Periods" :type :float :min 0.125 :max 8.0 :default 1.0}
+   restart-on-param])
 
 (def ^:private decay-params
   "Decay modulator parameters."
@@ -54,7 +80,37 @@
    {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}
    {:key :duration :label "Duration" :type :float :min 0.0625 :max 16.0 :default 1.0}
    {:key :time-unit :label "Unit" :type :choice :choices [:beats :seconds] :default :beats}
-   {:key :decay-curve :label "Curve" :type :choice :choices [:linear :exp :log] :default :exp}])
+   {:key :decay-curve :label "Curve" :type :choice :choices [:linear :exp :log] :default :exp}
+   restart-on-param])
+
+(def ^:private envelope-params
+  "Envelope: :min at rest, :max at its peak (it may be below :min, a dip)."
+  [(source-param :hit)
+   {:key :min :label "Rest" :type :float :min -10.0 :max 10.0 :default 0.0}
+   {:key :max :label "Peak" :type :float :min -10.0 :max 10.0 :default 1.0}
+   {:key :attack :label "Attack" :type :float :min 0.0 :max 4.0 :default 0.0}
+   {:key :release :label "Release" :type :float :min 0.0625 :max 16.0 :default 1.0}
+   {:key :curve :label "Curve" :type :choice :choices [:linear :exp :log] :default :exp}
+   {:key :hold? :label "Hold while down" :type :boolean :default true}])
+
+(def ^:private step-params
+  "Step: even steps from :min to :max, or the palette's values when it has any."
+  [(source-param :hit)
+   {:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
+   {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}
+   {:key :steps :label "Steps" :type :int :min 2 :max 16 :default 4}
+   {:key :order :label "Order" :type :choice :choices [:up :down :ping-pong :scatter] :default :up}
+   {:key :wrap? :label "Wrap round" :type :boolean :default false}
+   {:key :glide :label "Glide" :type :float :min 0.0 :max 4.0 :default 0.0}
+   {:key :values :label "Palette" :type :number-list :default []}])
+
+(def ^:private energy-params
+  "Energy: :min at rest, :max when the taps come fast enough."
+  [(source-param :any)
+   {:key :min :label "Min" :type :float :min -10.0 :max 10.0 :default 0.0}
+   {:key :max :label "Max" :type :float :min -10.0 :max 10.0 :default 1.0}
+   {:key :rise :label "Rise per tap" :type :float :min 0.05 :max 1.0 :default 0.25}
+   {:key :fall :label "Fall per beat" :type :float :min 0.01 :max 2.0 :default 0.25}])
 
 (def ^:private min-max-params
   "Simple min/max parameters for position-based modulators."
@@ -159,6 +215,43 @@
   :params      decay-params
   :per-point?  false
   :retrigger?  true})
+
+
+;; Pulse Modulators: they follow a press (plans/2026-11-18-vibe-mode/04)
+
+
+(reg/register-modulator!
+ {:id          :envelope
+  :name        "Envelope"
+  :icon        "⋀"
+  :category    :pulse
+  :evaluator   (get eval/modulator-evaluators :envelope)
+  :params      envelope-params
+  :per-point?  false
+  :retrigger?  false
+  :description "On press: punch on each press, or swell while held"})
+
+(reg/register-modulator!
+ {:id          :step
+  :name        "Step"
+  :icon        "⊓"
+  :category    :pulse
+  :evaluator   (get eval/modulator-evaluators :step)
+  :params      step-params
+  :per-point?  false
+  :retrigger?  false
+  :description "On press: the next value on each press"})
+
+(reg/register-modulator!
+ {:id          :energy
+  :name        "Energy"
+  :icon        "⚡"
+  :category    :pulse
+  :evaluator   (get eval/modulator-evaluators :energy)
+  :params      energy-params
+  :per-point?  false
+  :retrigger?  false
+  :description "On press: rises as you tap, falls when you stop"})
 
 
 ;; Per-Point Modulators

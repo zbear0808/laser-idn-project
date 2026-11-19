@@ -7,13 +7,15 @@
       timecode (show-time/step);
    2. renders every playing cue once (frame-service/generate-frames-by-zone),
       each in its own try, at its timing context and with one render context
-      for the whole tick: the tick's one read of app state, the input store
-      and the global effects (frame-service/render-context);
+      for the whole tick: the tick's one read of app state, the input store,
+      the presses tap reactions follow (show-time/pulse-view; calibration
+      gets none) and the global effects (frame-service/render-context);
    3. publishes the result (show-time/publish!), which wakes every projector's
       engine: each takes its zones and sends them on its own thread
       (backend/multi_engine.clj). The snapshot also carries where each cue is,
-      and the preview as a delay that the screen forces (views/components/
-      clock_view.clj draws it on each screen refresh);
+      the presses (the Perform pads' pulse bars), and the preview as a delay
+      that the screen forces (views/components/clock_view.clj draws it on
+      each screen refresh);
    4. sends what it learned back as events: a timeline's end and a timecode
       chase (:show-clock/cue-ended, :show-clock/chase), and the status views
       show a few times a second, the beat square, the frame stats and the MTC
@@ -47,10 +49,13 @@
 
 (defn- render-cue
   "One cue's frames by zone at its run's timing, with the tick's render
-   context; {} if the render throws, reported under [:render cell]."
+   context (its input values and presses); {} if the render throws, reported
+   under [:render cell]."
   [{:keys [cell cue-chain cue-timing]} bpm render-ctx]
   (let [cue-bpm (playback/cue-bpm cue-chain bpm)
-        ctx (assoc (cue-timing/get-cue-timing-context cue-timing cue-bpm) :input-values (:input-values render-ctx))]
+        ctx (assoc (cue-timing/get-cue-timing-context cue-timing cue-bpm)
+                   :input-values (:input-values render-ctx)
+                   :pulses (:pulses render-ctx))]
     (try
       (let [zone-frames (frame-service/generate-frames-by-zone cue-chain ctx render-ctx)]
         (output-errors/ok! [:render cell])
@@ -72,14 +77,15 @@
   "The snapshot fields for runs (show-time/active-runs), or none while not
    playing: {:cues [{:cell :run :zone-frames}] :projector-ctx :render-us}.
    Every cue shares one render context (frame-service/render-context): the
-   tick's input values, its global effects and global-clock's timing."
-  [state global-clock runs]
+   tick's input values, its presses (pulses, show-time/pulse-view), its
+   global effects and global-clock's timing. Calibration gets no presses."
+  [state global-clock runs pulses]
   (if (empty? runs)
     {:cues [] :projector-ctx nil :render-us 0.0}
     (let [bpm (double (or (ex/bpm state) 120.0))
           input-values (input-store/get-all-continuous-values)
           t0 (System/nanoTime)
-          render-ctx (frame-service/render-context state input-values global-clock)
+          render-ctx (frame-service/render-context state input-values global-clock pulses)
           cues (mapv (fn [run]
                        {:cell (:cell run) :run (:run run) :zone-frames (render-cue run bpm render-ctx)})
                      runs)
@@ -149,11 +155,13 @@
         runtime (assoc runtime :t0-ns t0)
         _ (reset! show-time/!runtime runtime)
         playing? (boolean (get-in state [:playback :playing?]))
-        {:keys [cues] :as rendered} (render state (:global runtime) (when playing? (show-time/active-runs state runtime)))
+        pulses (show-time/pulse-view runtime)
+        {:keys [cues] :as rendered} (render state (:global runtime) (when playing? (show-time/active-runs state runtime)) pulses)
         snapshot (show-time/publish! (assoc rendered
                                             :at-ns (System/nanoTime)
                                             :playing? playing?
                                             :positions (show-time/positions runtime)
+                                            :pulses pulses
                                             :preview (delay (frame-service/preview-data cues))))
         ;; After publish!, so the engines never wait for it
         [runtime status] (status-step runtime state mtc-pos now-ms)]

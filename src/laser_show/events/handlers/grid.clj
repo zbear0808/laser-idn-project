@@ -32,7 +32,8 @@
 
 (defn start-cue
   "Start the cue at [col row]: its intent in active-cues, as a new run, which
-   the show clock starts at its next tick. Timeline cues start from the top
+   the show clock starts at its next tick, and a :cue pulse for the tap
+   reactions that follow any cue start. Timeline cues start from the top
    (live use); the timeline editor's Play starts from its cursor. A timeline
    following MIDI timecode isn't started: the timecode drives it. opts:
    :decay-beats and :hold? (cue-timing/activate-cue), :run (the run's id,
@@ -42,9 +43,11 @@
    (let [cue (get-in state [:chains :cue-chains [col row]])]
      (if (playback/chases-mtc? cue)
        state
-       (update state :playback cue-timing/activate-cue [col row] (or run (random-uuid))
-               {:timeline? (cue-chains/timeline-cue? cue) :start-beat 0.0
-                :decay-beats decay-beats :hold? hold?})))))
+       (-> state
+           (update :playback cue-timing/activate-cue [col row] (or run (random-uuid))
+                   {:timeline? (cue-chains/timeline-cue? cue) :start-beat 0.0
+                    :decay-beats decay-beats :hold? hold?})
+           (update-in [:playback :pulses :cue :id] (fnil inc 0)))))))
 
 (defn- untrigger-cue
   "Remove a cue from active-cues. Sets playing? to false if no cues remain."

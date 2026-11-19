@@ -10,7 +10,8 @@
    [laser-show.events.handlers :as handlers]
    [laser-show.state.templates :as templates]
    [laser-show.vibes.engine :as engine]
-   [laser-show.vibes.library :as library]))
+   [laser-show.vibes.library :as library]
+   [laser-show.vibes.reactions :as reactions]))
 
 (def cue-chain {:name "Intro"
                 :items [{:type :group
@@ -146,7 +147,7 @@
 (deftest vibe-pad-sub-test
   (let [ctx (context (vibe-state))]
     (is (= {:role :hit :label "HIT" :bindings [hit-key] :held? false :playing nil
-            :learning? false :problem nil :dim? false}
+            :learning? false :problem nil :dim? false :reactions [] :effects-only? false}
            (fx/sub-ctx ctx subs/vibe-pad :hit)))
     (testing "a press holds the pad and names the cell it plays"
       (let [ctx' (press ctx :hit 1000)
@@ -402,6 +403,30 @@
       (is (true? (:learning? (fx/sub-ctx ctx' subs/vibe-control :accent))))
       (is (nil? (fx/sub-ctx (fx/swap-context ctx' update-in [:backend :input] dissoc :learning-target) subs/vibe-wizard))
           "nothing learning: no wizard shows, whatever is left in the UI state"))))
+
+
+(deftest pad-names-its-reactions-sub-test
+  (let [ctx (context (-> (vibe-state)
+                         (reactions/add-to-vibe :vibe-1 :punch-size)
+                         (reactions/add-to-vibe :vibe-1 :fade-in)
+                         (reactions/add-to-vibe :vibe-2 :flip)))]
+    (is (= ["Punch size"] (:reactions (fx/sub-ctx ctx subs/vibe-pad :hit))) "the current vibe's, by role")
+    (is (= ["Fade in"] (:reactions (fx/sub-ctx ctx subs/vibe-pad :vibe))))
+    (is (= [] (:reactions (fx/sub-ctx ctx subs/vibe-pad :accent))) "vibe-2's Flip isn't vibe-1's")
+    (is (= ["Flip"] (:reactions (fx/sub-ctx (handle ctx {:event/type :vibe/select :vibe :vibe-2 :time 1000})
+                                            subs/vibe-pad :accent))))
+    (testing "effects only: nothing to play, but reactions"
+      (let [no-hits (fx/swap-context ctx assoc-in [:config :vibes :library :vibe-1 :hit :cells] [])]
+        (is (false? (:effects-only? (fx/sub-ctx ctx subs/vibe-pad :hit))))
+        (is (true? (:effects-only? (fx/sub-ctx no-hits subs/vibe-pad :hit))))
+        (is (false? (:effects-only? (fx/sub-ctx (fx/swap-context no-hits assoc-in [:config :vibes :library :vibe-1 :accent :cells] [])
+                                                subs/vibe-pad :accent)))
+            "nothing to play and no reactions: not effects only")
+        (testing "and its press lights the pad while held, though the engine holds nothing"
+          (let [pressed (press no-hits :hit 1000)]
+            (is (nil? (in-state pressed :vibe-runtime :held :hit)))
+            (is (true? (:held? (fx/sub-ctx pressed subs/vibe-pad :hit))))
+            (is (false? (:held? (fx/sub-ctx (release pressed :hit 1100) subs/vibe-pad :hit))))))))))
 
 (deftest timeline-dialog-subs-ignore-playback-and-other-cells-test
   (let [ctx (context base-state)
