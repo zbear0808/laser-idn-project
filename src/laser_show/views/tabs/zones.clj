@@ -103,6 +103,7 @@
                              :style-class ["header-section"]}
                             {:fx/type :region :h-box/hgrow :always}
                             {:fx/type :button
+                             :id "zone-groups-add-button"
                              :text "+"
                              :style-class ["button-primary"]
                              :on-action {:event/type :zone-groups/add}}]}

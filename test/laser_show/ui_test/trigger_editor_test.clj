@@ -1,15 +1,49 @@
 (ns laser-show.ui-test.trigger-editor-test
   "Cell trigger editor dialog: opening and closing, learning an input and
    setting its behaviour."
-  (:require [clojure.test :refer [deftest is use-fixtures]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.input.router :as input-router]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui]))
+            [laser-show.ui-test.testfx :as ui])
+  (:import [javafx.scene.control ComboBox Labeled]
+           [javafx.scene.control.skin ComboBoxListViewSkin]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
+
+(def ^:private follow "Follow the cue's mode (toggle or retrigger)")
+(def ^:private while-held "While held (momentary)")
+
+(defn- open-trigger-editor! [col row cell-mode]
+  (events/dispatch! {:event/type :ui/open-dialog
+                     :dialog-id :trigger-editor
+                     :data {:col col :row row :cell-mode cell-mode}})
+  (ui/wait-for! #(true? (get-in (state/get-raw-state)
+                                [:ui :dialogs :trigger-editor :open?])))
+  (ui/wait-for! #(some (fn [title]
+                         (and title (.startsWith ^String title "Triggers")))
+                       (ui/window-titles))))
+
+(defn- behavior-shown
+  "The text the behaviour selector shows (on its button)."
+  []
+  (let [^ComboBox combo (ui/query "#trigger-behavior-selector")]
+    (ui/on-fx-thread #(some-> ^ComboBoxListViewSkin (.getSkin combo) ^Labeled (.getDisplayNode) .getText))))
+
+(defn- behavior-choices
+  "The names of the behaviour selector's choices."
+  []
+  (let [^ComboBox combo (ui/query "#trigger-behavior-selector")]
+    (ui/on-fx-thread #(mapv :name (.getItems combo)))))
+
+(defn- space-press! []
+  (input-router/dispatch! {:type :trigger
+                           :source :keyboard
+                           :id :space
+                           :state :pressed
+                           :timestamp (System/currentTimeMillis)}))
 
 (deftest cell-trigger-editor-opens-and-closes-modal
   ;; Open the modal through the same event used by production controls.
@@ -59,7 +93,7 @@
                                  {:source :keyboard :id :space}])
                         [:type :target])))
     (ui/assert-visible! "#trigger-behavior-selector")
-    (ui/select! robot "#trigger-behavior-selector" ":momentary")
+    (ui/select! robot "#trigger-behavior-selector" while-held)
     (ui/wait-for! #(= :momentary
                       (get-in (state/get-raw-state)
                               [:config :input :trigger-map
@@ -72,3 +106,37 @@
     (is (nil? (get-in (state/get-raw-state)
                       [:config :input :trigger-map
                        {:source :keyboard :id :space}])))))
+
+(deftest behavior-shows-plain-names-test
+  (open-trigger-editor! 0 0 :cue)
+  (ui/assert-visible! "#trigger-behavior-selector")
+  (is (= [follow while-held] (behavior-choices)))
+  (ui/wait-for! #(= follow (behavior-shown)))
+  (ui/assert-visible! "#trigger-behavior-description")
+  (ui/assert-no-node! "#trigger-decay-beats")
+  (testing "a binding with an old behaviour shows as following the cue, as it plays"
+    (state/swap-state! assoc-in [:config :input :trigger-map {:source :keyboard :id :q}]
+                       {:type :trigger-cue :target [0 0] :behavior :quantized-decay})
+    (ui/assert-visible! "#trigger-mapped-list")
+    (is (= follow (behavior-shown))))
+  (testing "an effect cell has no cue mode to follow: a press toggles it"
+    (open-trigger-editor! 0 0 :effects)
+    (ui/wait-for! #(= ["Toggle on each press" while-held] (behavior-choices)))
+    (ui/wait-for! #(= "Toggle on each press" (behavior-shown)))
+    (is (= "Toggle on each press" (behavior-shown)))))
+
+(deftest behavior-chosen-before-learning-sticks-test
+  (let [robot (ui/robot)
+        space {:source :keyboard :id :space}
+        binding #(get-in (state/get-raw-state) [:config :input :trigger-map space])]
+    (open-trigger-editor! 0 0 :cue)
+    (ui/select! robot "#trigger-behavior-selector" while-held)
+    (ui/wait-for! #(= :momentary (get-in (state/get-raw-state) [:ui :dialogs :trigger-editor :behavior])))
+    (ui/wait-for! #(= while-held (behavior-shown)))
+    (ui/click! robot "#trigger-learn-button")
+    (ui/assert-visible! "#trigger-learning-panel")
+    (space-press!)
+    (ui/wait-for! #(some? (binding)))
+    (is (= {:type :trigger-cue :target [0 0] :behavior :momentary} (binding)))
+    (ui/wait-for! #(= while-held (behavior-shown)))
+    (is (= while-held (behavior-shown)))))

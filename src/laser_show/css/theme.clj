@@ -93,8 +93,8 @@
 (def computed-colors
   "Automatically derived color variants for different UI states.
    Generated using the color utility functions."
-  (let [{:keys [bg-interactive accent-success accent-danger selection-bg text-muted border]} semantic-colors
-        {:keys [blue interactive]} base-colors]
+  (let [{:keys [bg-interactive accent-success accent-danger selection-bg text-muted]} semantic-colors
+        {:keys [blue interactive border]} base-colors]
     {;; Interactive element states
      :bg-interactive-hover  (colors/lighten bg-interactive 0.10)
      :bg-interactive-active (colors/darken bg-interactive 0.10)

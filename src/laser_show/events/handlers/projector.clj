@@ -210,14 +210,11 @@
 
 (defn- handle-projectors-set-service-enabled
   "Set enabled state for a projector identified by host and service-id.
-   Used by enable/disable toggles in discovery panel.
-   Coerces enabled? to boolean to prevent ClassCastException."
+   Used by enable/disable toggles in discovery panel."
   [{:keys [host service-id enabled? state]}]
-  (let [projector-id (make-projector-id host service-id)
-        ;; Coerce to boolean to handle edge cases where :fx/event might not be substituted
-        enabled-bool? (boolean enabled?)]
+  (let [projector-id (make-projector-id host service-id)]
     (if (get-in state [:projectors projector-id])
-      {:state (assoc-in state [:projectors projector-id :enabled?] enabled-bool?)}
+      {:state (assoc-in state [:projectors projector-id :enabled?] enabled?)}
       {:state state})))
 
 

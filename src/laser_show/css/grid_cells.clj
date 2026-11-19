@@ -33,12 +33,20 @@
         :-fx-border-radius 4
         :-fx-border-color border-default
         :-fx-border-width 1
-        :-fx-cursor "hand"
-        :-fx-background-color bg-interactive}
+        :-fx-cursor "hand"}
        
        
        ;; State-Based Background Colors
+       ;; This map is a hash map, so cljfx.css writes the rules in hash order,
+       ;; not in the order they are written here, and of two rules with the
+       ;; same specificity the one written later wins. So the empty colour has
+       ;; its own class instead of being .grid-cell's (which came after
+       ;; .grid-cell-content), and the playing cell's hover rule has one class
+       ;; more than the content cell's.
        
+       ;; Empty cell (a cell has either this class or grid-cell-content)
+       ".grid-cell-empty"
+       {:-fx-background-color bg-interactive}
        
        ;; Selected cell (accent border)
        ".grid-cell-selected"
@@ -77,8 +85,8 @@
        {:-fx-background-color bg-hover
         :-fx-border-color text-muted}
        
-       ;; Active cells stay blue on hover, just reduce opacity slightly
-       ".grid-cell-active:hover"
+       ;; Active cue cells stay blue on hover, just reduce opacity slightly
+       ".grid-cell-grid.grid-cell-active:hover"
        {:-fx-background-color selection-bg
         :-fx-opacity 0.9}
        

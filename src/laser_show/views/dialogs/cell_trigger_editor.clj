@@ -50,7 +50,8 @@
          :row row
          :cell-mode cell-mode
          :trigger-map trigger-map
-         :learning-target learning-target}]}
+         :learning-target learning-target
+         :chosen-behavior (:behavior dialog-data)}]}
 
       ;; Footer
       {:fx/type :h-box
@@ -78,7 +79,7 @@
      :showing open?
      :title (str "Triggers — " mode-title " " cell-coord-str)
      :width 440
-     :height 380
+     :height 410
      :modality :none
      :on-close-request {:event/type :ui/close-dialog :dialog-id :trigger-editor}
      :scene {:fx/type :scene

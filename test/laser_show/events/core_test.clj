@@ -146,3 +146,53 @@
         (set-bpm-with-a-write-in-between!
          #(state/assoc-in-state! [:projectors :elsewhere] {:name "written meanwhile"}))
         (is (empty? (detector-entries)))))))
+
+
+;; :fx/event placeholders
+
+
+(defn- seen-by-handler
+  "The event as the pipeline's handlers see it."
+  [event]
+  ((#'events/with-fx-event identity) event))
+
+(deftest fx-event-placeholder-test
+  (testing "what the handler sees (UX plan 00 §3, Phase 0)"
+    (is (= {:name "Balcony"}
+           (:updates (seen-by-handler {:event/type :ui/update-dialog-data :dialog-id :zone-group-editor
+                                       :updates {:name :fx/event} :fx/event "Balcony"}))))
+    (is (false? (:enabled? (seen-by-handler {:event/type :projectors/set-service-enabled :host "10.0.0.5"
+                                             :service-id 1 :enabled? :fx/event :fx/event false}))))
+    (is (= 0.4 (:brightness (seen-by-handler {:event/type :projectors/set-calibration-brightness
+                                              :brightness :fx/event :fx/event 0.4}))))
+    (doseq [unchanged [{:event/type :timing/set-bpm :bpm 128.0}
+                       {:event/type :x :updates {:label ":fx/event"}}
+                       {:event/type :x :updates {:name {:nested :fx/event}} :fx/event "deeper"}]]
+      (is (identical? unchanged (seen-by-handler unchanged)) (pr-str unchanged)))
+    (testing ":state is never looked at"
+      (let [state {:placeholder :fx/event}
+            event (seen-by-handler {:event/type :x :state state :name :fx/event :fx/event "x"})]
+        (is (identical? state (:state event)))
+        (is (= "x" (:name event))))))
+  (let [state (assoc-in (domains/build-initial-state) [:projectors :projector-10-0-0-5-1]
+                        {:name "Out 1" :host "10.0.0.5" :service-id 1 :enabled? true :zone-groups [:all]})
+        after (fn [event] (:state (events/handle-event-pipeline (assoc event :state state))))]
+    (testing "through the pipeline, the handlers of the views' placeholders store the value"
+      (is (= "Balcony" (get-in (after {:event/type :ui/update-dialog-data :dialog-id :zone-group-editor
+                                       :updates {:name :fx/event} :fx/event "Balcony"})
+                               [:ui :dialogs :zone-group-editor :name])))
+      (is (false? (get-in (after {:event/type :projectors/set-service-enabled :host "10.0.0.5" :service-id 1
+                                  :enabled? :fx/event :fx/event false})
+                          [:projectors :projector-10-0-0-5-1 :enabled?])))
+      (is (= 0.4 (get-in (after {:event/type :projectors/set-calibration-brightness
+                                 :brightness :fx/event :fx/event 0.4})
+                         [:projector-ui :calibration-brightness]))))
+    (testing "a placeholder without :fx/event (dispatched by hand) is left, with a warning"
+      (log-test/with-log
+        (is (= :fx/event (get-in (after {:event/type :ui/update-dialog-data :dialog-id :zone-group-editor
+                                         :updates {:name :fx/event}})
+                                 [:ui :dialogs :zone-group-editor :name])))
+        (is (some #(and (= :warn (:level %))
+                        (= "laser-show.events.core" (str (:logger-ns %)))
+                        (str/includes? (str (:message %)) ":ui/update-dialog-data"))
+                  (log-test/the-log)))))))

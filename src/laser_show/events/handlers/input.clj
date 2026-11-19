@@ -220,6 +220,12 @@
   (when-let [p (first (reset-vals! !pending-learn nil))]
     (deliver p nil)))
 
+(defn- learn-target
+  "What a learn is for: the target action's :type and :target. The binding it
+   learns is the whole action, its :behavior included."
+  [target-action]
+  (select-keys target-action [:type :target]))
+
 (defn- handle-input-start-learn
   "Start generic input learn mode for a target action.
    Registers a temporary global handler to capture the next input event
@@ -240,7 +246,7 @@
     ;; The :input/await-learn effect waits for the captured input off the event
     ;; thread, then dispatches :input/learn-captured, which writes the binding
     ;; through the normal pipeline (undoable, marks the project unsaved).
-    {:state (assoc-in state [:backend :input :learning-target] target-action)
+    {:state (assoc-in state [:backend :input :learning-target] (learn-target target-action))
      :input/await-learn {:promise learn-promise
                          :on-captured {:event/type :input/learn-captured
                                        :target-action target-action}}}))
@@ -256,18 +262,19 @@
     {:source (:source input-event) :id (:id input-event)}))
 
 (defn- handle-input-learn-captured
-  "Bind the captured input to the target action (ignored if learn was cancelled
-   or restarted for another target in the meantime)."
+  "Bind the captured input to the target action, :behavior included (ignored
+   if learn was cancelled or restarted for another target in the meantime)."
   [{:keys [state input-event target-action]}]
-  (let [learning (get-in state [:backend :input :learning-target])
+  (let [learning? (= (get-in state [:backend :input :learning-target])
+                     (learn-target target-action))
         lookup-key (learn-lookup-key input-event)]
-    (if (and lookup-key (= learning target-action))
+    (if (and lookup-key learning?)
       {:state (-> state
                   (assoc-in [:config :input :trigger-map lookup-key] target-action)
                   (update-in [:backend :input] dissoc :learning-target))
        :history/description "Learn Trigger"}
       {:state (cond-> state
-                (= learning target-action) (update-in [:backend :input] dissoc :learning-target))})))
+                learning? (update-in [:backend :input] dissoc :learning-target))})))
 
 (defn- handle-input-cancel-learn
   "Cancel generic input learn mode."
@@ -295,7 +302,9 @@
                                m)))}))
 
 (defn- handle-input-update-cell-trigger-action
-  "Updates behavior metadata for all bindings targeting a cell."
+  "Updates behavior metadata for all bindings targeting a cell. The behavior
+   also becomes the trigger editor's choice, which its Learn button passes on,
+   so a binding learned next gets it too."
   [{:keys [state target-action updates] :as event}]
   (let [{:keys [type target]} target-action]
     (let [selected (or (:fx/event event) (:event event))
@@ -304,15 +313,18 @@
                      (map? selected) (or (:behavior selected) (:id selected))
                      :else nil)
           updates (merge updates (when behavior {:behavior behavior}))]
-      {:state (update-in state [:config :input :trigger-map]
-                         (fn [m]
-                           (into {}
-                                 (map (fn [[k action]]
-                                        [k (if (and (= (:type action) type)
-                                                    (= (:target action) target))
-                                             (merge action updates)
-                                             action)]))
-                                 m)))})))
+      (cond-> {:state (update-in state [:config :input :trigger-map]
+                                 (fn [m]
+                                   (into {}
+                                         (map (fn [[k action]]
+                                                [k (if (and (= (:type action) type)
+                                                            (= (:target action) target))
+                                                     (merge action updates)
+                                                     action)]))
+                                         m)))}
+        behavior (assoc :dispatch {:event/type :ui/update-dialog-data
+                                   :dialog-id :trigger-editor
+                                   :updates {:behavior behavior}})))))
 
 
 ;; Public API

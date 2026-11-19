@@ -3,7 +3,36 @@
    
    Provides UI for assigning MIDI, OSC, or Keyboard inputs to trigger
    the current cue or effect cell."
-  (:require [laser-show.common.util :as u]))
+  (:require [laser-show.common.util :as u])
+  (:import [javafx.util StringConverter]))
+
+(def ^:private option-name
+  "Shows a behaviour option by its :name, in the list and on the button. A
+   converter rather than cell factories: the button shows the converter's
+   text while its value isn't among the items, as when one render changes
+   both (opening the editor on an effect cell after a cue cell)."
+  (proxy [StringConverter] []
+    (toString [option] (str (:name option)))
+    (fromString [_] nil)))
+
+(defn- behavior-options
+  "The behaviours a binding can have. The trigger path acts only on
+   :momentary; any other behaviour plays the cue the way its own trigger mode
+   says, or toggles the effect cell (events/handlers/triggers.clj)."
+  [cell-mode]
+  (if (= cell-mode :effects)
+    [{:id :follow
+      :name "Toggle on each press"
+      :description "A press turns the effect on or off."}
+     {:id :momentary
+      :name "While held (momentary)"
+      :description "The effect is on while the input is held down."}]
+    [{:id :follow
+      :name "Follow the cue's mode (toggle or retrigger)"
+      :description "A press does what the cue's trigger mode says."}
+     {:id :momentary
+      :name "While held (momentary)"
+      :description "The cue plays while the input is held down."}]))
 
 (defn trigger-bank
   "Configuration UI for resolving generalized triggers.
@@ -12,8 +41,10 @@
    - :col, :row - Cell coordinates
    - :cell-mode - :cue or :effects (default: :cue)
    - :trigger-map - Map of input-key -> target-action
-   - :learning-target - Current learning target action (or nil)"
-  [{:keys [col row cell-mode trigger-map learning-target]
+   - :learning-target - Current learning target action (or nil)
+   - :chosen-behavior - The behaviour picked for the next learned binding
+     (or nil), shown while the cell has no bindings"
+  [{:keys [col row cell-mode trigger-map learning-target chosen-behavior]
     :or {cell-mode :cue}}]
   (let [target-type (if (= cell-mode :effects) :trigger-effect :trigger-cue)
         target-label (if (= cell-mode :effects) "effect" "cue")
@@ -31,8 +62,13 @@
                                             (= (:target action) [col row]))
                                  action))
                              trigger-map)
-        behavior (or (:behavior current-action) :retrigger)
-        decay-beats (or (:decay-beats current-action) 1.0)]
+        ;; A :retrigger, :toggle, :quantized-decay or :one-shot binding from
+        ;; an older project follows the cue's mode, so it shows as that
+        behavior (if (= :momentary (if current-action (:behavior current-action) chosen-behavior))
+                   :momentary
+                   :follow)
+        options (behavior-options cell-mode)
+        option (u/seek #(= behavior (:id %)) options)]
     {:fx/type :v-box
      :spacing 10
      :padding 10
@@ -96,19 +132,17 @@
        [{:fx/type :label :text "Behavior:"}
         {:fx/type :combo-box
          :id "trigger-behavior-selector"
-         :value behavior
-         :items [:toggle :retrigger :momentary :quantized-decay :one-shot]
+         :value option
+         :items options
+         :converter option-name
          :on-value-changed {:event/type :input/update-cell-trigger-action
-                            :target-action current-target
-                            :updates {}}}
-        {:fx/type :label :text "Decay (beats):"}
-        {:fx/type :text-field
-         :id "trigger-decay-beats"
-         :text (str decay-beats)
-         :pref-width 60
-         :on-action {:event/type :input/update-cell-trigger-action
-                     :target-action current-target
-                     :updates {:decay-beats decay-beats}}}]}
+                            :target-action current-target}}]}
+
+      {:fx/type :label
+       :id "trigger-behavior-description"
+       :text (:description option)
+       :wrap-text true
+       :style-class "label-secondary"}
 
       (if learning?
         {:fx/type :v-box
@@ -128,4 +162,4 @@
          :text "Learn Next Input"
          :style-class "button-primary"
          :on-action {:event/type :input/start-learn
-                     :target-action current-target}})]}))
+                     :target-action (assoc current-target :behavior behavior)}})]}))

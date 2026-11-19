@@ -441,14 +441,51 @@
 
 ;; Wrapped Event Handler
 
+(defn- fx-event-placeholders
+  "Paths in event whose value is the keyword :fx/event: a top-level key
+   (other than :state and :fx/event), or a key one level inside :updates."
+  [event]
+  ;; identical?, as keywords are interned: = would realize the head of a lazy seq
+  (let [placeholder? #(identical? :fx/event %)
+        updates (:updates event)]
+    (concat (for [[k v] event
+                  :when (and (not (#{:state :fx/event} k)) (placeholder? v))]
+              [k])
+            (when (map? updates)
+              (for [[k v] updates
+                    :when (placeholder? v)]
+                [:updates k])))))
+
+(defn- with-fx-event
+  "Pipeline step: cljfx gives a map event its value under the :fx/event key
+   only, so a view may write the keyword :fx/event as a value (at the top
+   level, or one level inside :updates) and the handler sees the value there.
+   :state is never looked at. A placeholder in an event without :fx/event
+   (dispatched by hand) stays as it is, with a warning."
+  [handler]
+  (fn [event]
+    (let [paths (fx-event-placeholders event)]
+      (cond
+        (empty? paths)
+        (handler event)
+
+        (contains? event :fx/event)
+        (handler (reduce #(assoc-in %1 %2 (:fx/event event)) event paths))
+
+        :else
+        (do (log/warn "Event" (:event/type event) "has :fx/event placeholders at" (vec paths)
+                      "but no :fx/event value; they stay as they are")
+            (handler event))))))
+
 (def handle-event-pipeline
   "Event handler pipeline: timeline invariants enforced on changed cue chains
    (innermost, so history sees normalized state), undo history for undoable
    document edits, then the unsaved-changes flag derived for every event
    (see handlers/history.clj), then the output sync: a change to what the
    engines are built from (undo included) requests a refresh while streaming
-   (handlers/output_sync.clj). Outermost, in dev mode only, the lost-update
-   check tags the :state effect with the event's snapshot.
+   (handlers/output_sync.clj). Then, in dev mode only, the lost-update check
+   tags the :state effect with the event's snapshot. Outermost, with-fx-event
+   puts a map event's :fx/event value where its view wrote the placeholder.
 
    app/create-app gives this to fx/create-app together with co-effects and
    effects, so it runs on the cljfx agent."
@@ -457,7 +494,8 @@
       history-handlers/wrap-history
       history-handlers/wrap-dirty
       output-sync/wrap-output-sync
-      wrap-lost-update-check))
+      wrap-lost-update-check
+      with-fx-event))
 
 (def co-effects
   "Co-effects injected into every event:

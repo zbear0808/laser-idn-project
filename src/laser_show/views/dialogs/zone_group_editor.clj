@@ -70,6 +70,7 @@
                            :style-class ["label-hint"]
                            :style "-fx-font-style: normal;"}
                           {:fx/type :text-field
+                           :id "zone-group-color-field"
                            :text (or selected-color "#808080")
                            :pref-width 90
                            :style-class ["text-field" "text-monospace"]
@@ -115,6 +116,7 @@
                                          :text "Name"
                                          :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
                                         {:fx/type :text-field
+                                         :id "zone-group-name-field"
                                          :text name-value
                                          :prompt-text "e.g., Left Side, Audience, Stage"
                                          :style "-fx-background-color: #404040; -fx-text-fill: white;"
@@ -128,6 +130,7 @@
                                          :text "Description (optional)"
                                          :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
                                         {:fx/type :text-field
+                                         :id "zone-group-description-field"
                                          :text description-value
                                          :prompt-text "Brief description of this zone group"
                                          :style "-fx-background-color: #404040; -fx-text-fill: white;"
@@ -149,6 +152,7 @@
                              :on-action {:event/type :ui/close-dialog
                                          :dialog-id :zone-group-editor}}
                             {:fx/type :button
+                             :id "zone-group-save-button"
                              :text (if editing? "Save Changes" "Create Group")
                              :style-class ["button-primary"]
                              :disable (str/blank? name-value)

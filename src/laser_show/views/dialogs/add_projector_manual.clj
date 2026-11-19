@@ -37,6 +37,7 @@
                                          :pref-width 50
                                          :style-class ["label-secondary"]}
                                         {:fx/type :text-field
+                                         :id "add-projector-name-field"
                                          :text name-value
                                          :prompt-text "My Projector"
                                          :pref-width 280
@@ -52,6 +53,7 @@
                                          :pref-width 50
                                          :style-class ["label-secondary"]}
                                         {:fx/type :text-field
+                                         :id "add-projector-host-field"
                                          :text host-value
                                          :prompt-text "192.168.1.100"
                                          :pref-width 180
@@ -63,6 +65,7 @@
                                          :text "Port:"
                                          :style-class ["label-secondary"]}
                                         {:fx/type :text-field
+                                         :id "add-projector-port-field"
                                          :text port-value
                                          :prompt-text "7255"
                                          :pref-width 60
@@ -79,6 +82,7 @@
                              :on-action {:event/type :ui/close-dialog
                                          :dialog-id :add-projector-manual}}
                             {:fx/type :button
+                             :id "add-projector-confirm-button"
                              :text "Add Projector"
                              :style-class ["button-primary"]
                              :disable (str/blank? host-value)

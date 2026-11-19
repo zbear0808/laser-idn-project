@@ -96,6 +96,11 @@
 ;; Device Discovery Panel
 
 
+(defn- address-id
+  "A device address as part of a node id (a CSS id selector can't have dots)."
+  [address]
+  (str/replace (str address) "." "-"))
+
 (defn- service-entry-item
   "Single service/output entry within a device.
    Shows service name and checkbox showing enabled state for multi-output devices."
@@ -114,6 +119,7 @@
                  :style "-fx-font-size: 11;"}
                 {:fx/type :region :h-box/hgrow :always}
                 {:fx/type :check-box
+                 :id (str "discovered-output-" (address-id address) "-" service-id)
                  :selected enabled?
                  :on-selected-changed {:event/type :projectors/set-service-enabled
                                        :host address
@@ -186,6 +192,7 @@
                                                         0
                                                         (:service-id (first services)))]
                                        [{:fx/type :check-box
+                                         :id (str "discovered-output-" (address-id address) "-" service-id)
                                          :selected (or single-service-enabled? no-service-enabled?)
                                          :on-selected-changed {:event/type :projectors/set-service-enabled
                                                                :host address
@@ -197,14 +204,16 @@
      (vec
        (concat
          ;; Device header row - clickable anywhere for multi-service devices
-         [{:fx/type :h-box
-           :spacing 8
-           :alignment :center-left
-           :padding 8
-           :style (str "-fx-background-color: #3D3D3D; -fx-background-radius: 4;"
-                       (when has-multiple-services? " -fx-cursor: hand;"))
-           :on-mouse-clicked (when has-multiple-services? on-toggle-expand)
-           :children header-children}]
+         [(cond-> {:fx/type :h-box
+                   :id (str "discovered-device-" (address-id address))
+                   :spacing 8
+                   :alignment :center-left
+                   :padding 8
+                   :style (str "-fx-background-color: #3D3D3D; -fx-background-radius: 4;"
+                               (when has-multiple-services? " -fx-cursor: hand;"))
+                   :children header-children}
+            ;; cljfx can't take a nil handler
+            has-multiple-services? (assoc :on-mouse-clicked on-toggle-expand))]
          ;; Expanded services list for multi-service devices
           (when (and has-multiple-services? expanded?)
             (for [service services]
@@ -238,6 +247,7 @@
                              :style-class ["button-primary"]
                              :on-action {:event/type :projectors/scan-network}}
                             {:fx/type :button
+                             :id "projectors-add-manual-button"
                              :text "Add Manual..."
                              :style-class ["button-secondary"]
                              :on-action {:event/type :ui/open-dialog
@@ -384,6 +394,7 @@
                                  :pref-width 50
                                  :style-class ["label-secondary"]}
                                 {:fx/type :text-field
+                                 :id "projector-name-field"
                                  :text (or name "")
                                  :pref-width 200
                                  :style-class ["text-field-dark"]
@@ -670,6 +681,7 @@
                                :text "CALIBRATION:"
                                :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
                               {:fx/type :button
+                               :id "projector-calibration-button"
                                :text (if calibrating? "Stop Calibration" "Start Calibration")
                                :style-class [(if calibrating? "button-danger" "button-primary")]
                                :on-action {:event/type :projectors/toggle-calibration
@@ -682,6 +694,7 @@
                                  :text "Brightness:"
                                  :style "-fx-text-fill: #808080; -fx-font-size: 11;"}
                                 {:fx/type :slider
+                                 :id "calibration-brightness-slider"
                                  :min 0.05
                                  :max 0.5
                                  :value brightness
@@ -689,6 +702,7 @@
                                  :on-value-changed {:event/type :projectors/set-calibration-brightness
                                                     :brightness :fx/event}}
                                 {:fx/type :label
+                                 :id "calibration-brightness-label"
                                  :text (format "%.0f%%" (* brightness 100))
                                  :pref-width 40
                                  :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]})])}))
@@ -738,6 +752,7 @@
                                          :spacing 8
                                          :pref-width 280
                                          :children [{:fx/type :label
+                                                     :id "projector-config-title"
                                                      :text (str "CONFIGURE: " (:name projector))
                                                      :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
                                                     {:fx/type projector-basic-settings
