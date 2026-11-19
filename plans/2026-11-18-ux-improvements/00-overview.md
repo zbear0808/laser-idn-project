@@ -1,7 +1,7 @@
 # UX improvements: controls that work, a screen that tells the truth, the Grid tab as the performer's screen
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`)
-**Status:** Approved 2026-11-18 ("your plan with the rest of the stuff seems fine"; then "with the rest of the plan I agree with you. Go ahead and implement"). All decisions answered (§5): U1 performers, U2–U5 A   **Last verified against:** `b1da0f2`, by driving the app in test mode (headless, no hardware) through its REPL with plorer, 2026-11-18. The screenshots are in `debug-output/ux-*.png` (gitignored, not committed)
+**Status:** In progress: Phase 0 done 2026-11-18 (`e2bce92`, as built in §8); Phases 1–3 to do. Approved 2026-11-18 ("your plan with the rest of the stuff seems fine"; then "with the rest of the plan I agree with you. Go ahead and implement"). All decisions answered (§5): U1 performers, U2–U5 A   **Last verified against:** `b1da0f2`, by driving the app in test mode (headless, no hardware) through its REPL with plorer, 2026-11-18. The screenshots are in `debug-output/ux-*.png` (gitignored, not committed); Phase 0 as built against `e2bce92` (§8)
 **Supersedes / Superseded by:** none   **Related findings:** review 01 (views); keyboard plan Phase 2 (dialog shell, menu stubs D4, `cell-label`), Phase 4 (clipboard); vibe plan V8 B (the vibe stuff has its own tabs, nothing on the Grid tab), V2 and output runtime O4 (Stop is the blackout)
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. "Ran" means seen in the running app or a REPL check; "read" means from the code. Anything marked **NEW** does not exist yet.
@@ -10,14 +10,14 @@ Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. "R
 
 The look is coherent, and the timeline editor is the most polished part. The problems, in the order to fix them:
 
-1. **Some controls silently do nothing**, or store junk. Phase 0, about 2 days.
+1. **Some controls silently do nothing**, or store junk. Phase 0, about 2 days. **Done** (`e2bce92`, §8).
 2. **The screen contradicts the output** in places. Phase 1, about 3 days.
 3. **The layout doesn't scale**, which matters most on the Grid tab, now that you've said it is the performer's tab. Phase 2, about 3 days.
 4. **Guidance is stale or missing.** Phase 3, about 2 days.
 
 | Phase | Goal | Size | Needs |
 |---|---|---|---|
-| 0 | Controls that work: one fix for the `:fx/event` placeholders, the cell colours, the single-output device, the trigger editor | ~2 d | none |
+| 0 | **Done 2026-11-18** (`e2bce92`, §8). Controls that work: one fix for the `:fx/event` placeholders, the cell colours, the single-output device, the trigger editor | ~2 d | none |
 | 1 | An honest screen: Stop shows what it did, the status bar names what plays, effects cells show on and off, one notice for failures, the stream state says why | ~3 d | 0 (the colours) |
 | 2 | The Grid tab as a performer's screen: pads that grow, larger text; a Cue Chain Editor that fits; dialogs that match | ~3 d | 1; the keyboard plan's Phase 2 for the dialog parts |
 | 3 | Guidance: true hints, tooltips, platform shortcut text, Settings tidy-up, QUICKSTART | ~2 d | none |
@@ -205,3 +205,60 @@ Every phase: the focused namespaces first, then `clj -M:test-ui:mac-arm:test-ui-
 - **A distinct project file extension** instead of `.zip`: later; it touches the file chooser filters and existing files.
 - **Fixing the ten call sites one by one** (U3 B): rejected; the next one would bring the bug back.
 - **Making Stop clear the cells** (U2 B): rejected; it reverses O4.
+
+## 8. As built: Phase 0 (2026-11-18)
+
+Committed as `e2bce92` on top of `b54e0a5`. §1–7 cite `b1da0f2`; the lines below are at `e2bce92`.
+
+**Where it is now**
+- `events/core.clj`: NEW private `fx-event-placeholders` `:444` and `with-fx-event` `:459`, the outermost step of `handle-event-pipeline` (`:480-498`). A value `identical?` to `:fx/event` at the top level (not `:state`, not `:fx/event` itself) or one level inside a map `:updates` becomes the event's `:fx/event`; with no `:fx/event` key the event goes on unchanged after a WARN naming its type and the paths. The ten call sites are unchanged. It looks at the event's top-level entries and at most one `:updates` map, never inside `:state`.
+- `events/handlers/projector.clj:211-218`: `set-service-enabled` stores `:enabled?` as given; the `boolean` is gone.
+- `css/theme.clj:96-97`: `border` comes from `base-colors`, so `:cell-content` is `#505050` and `:cell-content-hover` `#656565`.
+- `css/grid_cells.clj`: the empty colour moved from `.grid-cell` to NEW rule `.grid-cell-empty` (`:48`; `views/components/grid_cell.clj:41` already gives that class to every cell without content), and the playing hover rule is `.grid-cell-grid.grid-cell-active:hover` (`:89`). Why both: the first row of the differences below.
+- `views/tabs/projectors.clj:207-216`: the device row gets `:on-mouse-clicked` only when the device has several outputs.
+- `views/components/trigger_bank.clj`: `behavior-options` `:18` (two per kind of cell, each a `:name` and a one-line `:description`; U5's "For N beats" goes here once the vibe plan's decay exists), shown through the `option-name` converter `:9` (combo `:133-139`); NEW label `#trigger-behavior-description` `:141`; no decay field; Learn sends `(assoc current-target :behavior behavior)` `:165`. The combo shows the cell's bindings' behaviour when it has any, else the editor's choice; anything but `:momentary` shows as the first choice (`:65-69`). `views/dialogs/cell_trigger_editor.clj:54` passes the choice in; the window is 410 high (`:82`, was 380).
+- `events/handlers/input.clj`: NEW private `learn-target` `:223` (`select-keys [:type :target]`). `[:backend :input :learning-target]` stays the cell, which three views compare with the cell (`views/components/grid_cell.clj:226, 317`, `trigger_bank.clj:52`); the binding learned is the whole target action, `:behavior` included (`:229-277`). `update-cell-trigger-action` `:304` still updates the cell's bindings and now also returns `:dispatch` (existing, `events/core.clj:157`) of `{:event/type :ui/update-dialog-data :dialog-id :trigger-editor :updates {:behavior b}}`.
+- Stable ids for the tests: `#projectors-add-manual-button`, `#discovered-device-<address>`, `#discovered-output-<address>-<service-id>` (dots as dashes, `address-id` `:99`), `#projector-name-field`, `#projector-config-title`, `#projector-calibration-button`, `#calibration-brightness-slider`, `#calibration-brightness-label` (`views/tabs/projectors.clj`); `#add-projector-name-field`, `-host-field`, `-port-field`, `#add-projector-confirm-button` (`views/dialogs/add_projector_manual.clj`); `#zone-group-name-field`, `-description-field`, `-color-field`, `#zone-group-save-button` (`views/dialogs/zone_group_editor.clj`); `#zone-groups-add-button` (`views/tabs/zones.clj:106`).
+
+**State**: `[:ui :dialogs :trigger-editor :behavior]` is `:follow` or `:momentary`, UI state, no undo, no dirty. A binding's `:behavior` can now be NEW `:follow`; the trigger path treats it like every value but `:momentary` (`events/handlers/triggers.clj:62`), and old values stay as they are.
+
+**Differences from the plan**
+
+| Plan (§3) | As built | Why |
+|---|---|---|
+| `.grid-cell-active:hover` moves after `.grid-cell-content:hover`; the theme fix makes a cue cell `#505050` | The playing hover rule has one class more (`.grid-cell-grid.grid-cell-active:hover`), and the empty colour has its own rule (`.grid-cell-empty`) | `cljfx.css` writes the rules in the style map's order, and a 13-rule map is a hash map: moving a rule in the source changes nothing. In that order `.grid-cell` also came after `.grid-cell-content`, so with only the theme fixed a cue cell was still `#3D3D3D` (`filled-cell-differs-from-empty-test` failed). Two pairs still rely on that order (content hover after `.grid-cell:hover`, active after content), which only a change to those selectors can change; the grid tests pin all five rows of the table |
+| — | The rule matches cue cells only | Effect cells have their own hover rule, which already outranked the old one; only an effect cell that is on with no effects left now hovers grey (`#606060`) instead of blue. Phase 1 redoes effect cells |
+| Two choices: "Follow the cue's mode (toggle or retrigger)" and "While held (momentary)" | Those for a cue cell; an effect cell's first choice says "Toggle on each press" | An effect cell has no trigger mode: a press toggles it (`events/handlers/triggers.clj:72-75`) |
+| The choice is written by `:ui/update-dialog-data` | It is, dispatched by `:input/update-cell-trigger-action` | One change of the combo has to keep the choice and update the cell's existing bindings |
+| — | "Follow" is stored as NEW `:follow` | The combo's options need an id; storing it keeps `update-cell-trigger-action` a merge, as today |
+| — | `:learning-target` stays `{:type :target}` | With `:behavior` in it, the grid's LEARN badge and the editor's "Waiting for input..." no longer matched the cell |
+| A one-line description each | Under the combo, for the chosen one, in `label-secondary` | The bank's own `description-text` class is in no stylesheet (it renders dark grey) |
+| — | A converter, not a button cell and a cell factory | With cells, the button showed the option map's text when one render changed both the items and the value (opening the editor on an effect cell after a cue cell); `behavior-shows-plain-names-test` caught it |
+| — | The trigger editor is 410 high, not 380 | The description adds about 30 px; at 380 a cell with one binding no longer fit under a macOS title bar |
+
+**Found, not done**
+- The Add Projector dialog stays open after Add (§1 couldn't see it: the button never enabled), and a second click adds a second projector. For Phase 2 or the keyboard plan's dialog shell.
+- F-3 was worse than §1 says: with the device already discovered, clicking the Projectors tab selected the tab but left the Grid tab's content on screen.
+- The editor's choice lasts the session: on a cell with no bindings it shows the last choice made on any cell (dialog data is kept between opens, `events/handlers/ui.clj:18-30`). It is what Learn will use, so the screen tells the truth.
+
+**Tests** (UI: `with-toolkit` once, `with-app` each)
+- `laser-show.events.core-test/fx-event-placeholder-test`: the table above through the private step with `identity` as the handler, plus a placeholder two levels down (unchanged) and `:state` untouched; then through `handle-event-pipeline` the three handlers store the value, and a hand-dispatched placeholder is stored as is, with the WARN.
+- NEW `laser-show.css.theme-test/computed-colors-have-no-nil-test`: every computed colour is a hex string; `:cell-content` `#505050`, `:cell-content-hover` `#656565`.
+- NEW `laser-show.ui-test.setup-dialogs-test`: `add-projector-by-hand-test` (disabled, then enabled by a host; name, host and port reach the projector), `create-zone-group-test` (name, description and hex colour; editing renames it), `rename-projector-test` (the panel header follows two edits), `untick-a-discovered-output-disables-it-test` (a two-output device from `:projectors/scan-complete`: expand, tick, untick; the other output untouched), `calibration-brightness-slider-test` (0.4 and "40%"), `single-output-device-renders-test` (a one-output and a no-output device show; the inline checkbox ticks and unticks).
+- `laser-show.ui-test.grid-test`: `filled-cell-differs-from-empty-test` (`#3D3D3D`, `#505050`, hovered `#656565`), `playing-cell-stays-blue-on-hover-test` (clicked and hovered `#4992DB` at 0.9; mouse away `#4992DB` at 1.0). Both read the node's `BackgroundFill` after `applyCss`; the hover is a real mouse move, which works headless.
+- `laser-show.ui-test.trigger-editor-test`: `behavior-shows-plain-names-test` (the two names, the one shown, the description, no decay field, an old `:quantized-decay` binding shows as following the cue, an effect cell's names), `behavior-chosen-before-learning-sticks-test`; `trigger-editor-learns-input-and-configures-behavior` selects "While held (momentary)".
+
+**Red first** (at `b54e0a5` with only the ids added)
+- Unit (`fx-event-placeholder computed-colors-have-no-nil`): 2 tests, 6 failures, 1 error. The name stored as `:fx/event`; unticking left `:enabled? true`; the brightness threw `ClassCastException` (Keyword to Number); no WARN; `:cell-content` nil, `:cell-content-hover` `#1E1E1E`.
+- UI (the three namespaces): 13 tests, 4 failures, 9 errors. Each setup test timed out where the value should have arrived (host, Create Group enabling, the name, the untick, 0.4); the device row never showed (cljfx: "Don't know how to coerce {:target EventHandler :x nil}"); a cue cell `#3D3D3D`, hovered `#1E1E1E`, playing and hovered `#1E1E1E`; the behaviour choices `[nil nil nil nil nil]` and no "While held (momentary)" to select.
+
+**Verification, 2026-11-18, macOS arm64, JDK 25**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test fx-event-placeholder computed-colors-have-no-nil` | 2 tests, 30 assertions, 0 failures |
+| `clj -M:mac-arm:test -n` events.core, css.theme, input.trigger, handlers.input, handlers.triggers, history-handlers, projector-handlers, ui-handlers, zone-groups-handlers | 98 tests, 398 assertions, 0 failures |
+| `clj -M:test-ui:mac-arm:test-ui-headless -n` setup-dialogs, grid, trigger-editor | 13 tests, 54 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 868 tests, 32,494 assertions, 0 failures |
+| `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | 71 tests, 264 assertions, 0 failures (it ran before a last test-only change, a `wait-for!` in `behavior-shows-plain-names-test`, and a comment in `events/core.clj`; after them `trigger-editor-test` ran again: 4 tests, 19 assertions, 0 failures; and `events.core-test` with `css.theme-test`: 10 tests, 54 assertions, 0 failures) |
+| `clj -M:kondo --lint` on every touched file | 0 errors; 2 warnings, both there before (a redundant `let` in `input.clj`, an unused require in `projector.clj`) |
