@@ -97,6 +97,8 @@
    - :col, :row - Cell coordinates
    - :cell-type - :grid or :effects (used for CSS class)
    - :display-data - Map with cell state (:active?, :has-content?, :selected?)
+   - :size - [width height] of the cell (default [80 60])
+   - :font-size - Optional size in px of its label (default: the stylesheet's)
    - :on-click - Event map for click handling
    - :on-right-click - Event map for right-click (augmented with :col, :row)
    - :drag-config - Map with :drag-type and :on-drop event
@@ -118,8 +120,9 @@
     :context-menu-items [{:fx/type :menu-item :text \"Create Cue\" ...}]}
     "
   [{:keys [col row cell-type display-data on-click on-right-click
-           drag-config label-fn tooltip-fn context-menu-items]}]
+           drag-config label-fn tooltip-fn context-menu-items size font-size]}]
   (let [{:keys [active? has-content?]} display-data
+        [width height] (or size [80 60])
         label-text (label-fn display-data)
         tooltip-text (when tooltip-fn (tooltip-fn display-data))
         style-classes (build-style-classes cell-type display-data)
@@ -130,8 +133,10 @@
         node {:fx/type :stack-pane
               :id (format "%s-cell-%d-%d" (name cell-type) col row)
               :pick-on-bounds true  ; Ensure mouse events are captured by parent, not children
-              :pref-width 80
-              :pref-height 60
+              :min-width width
+              :pref-width width
+              :min-height height
+              :pref-height height
               :style-class style-classes
 
               ;; Mouse click handler - handle left/right click and double-click
@@ -189,9 +194,10 @@
                                                 {:fx/type :label
                                                  :text "LEARN"
                                                  :style-class "grid-cell-learning-badge"})
-                                              {:fx/type :label
-                                               :text label-text
-                                               :style-class "grid-cell-label"}
+                                              (cond-> {:fx/type :label
+                                                       :text label-text
+                                                       :style-class "grid-cell-label"}
+                                                font-size (assoc :style (str "-fx-font-size: " font-size "px;")))
                                               (when active?
                                                 {:fx/type :region
                                                  :pref-width 8
@@ -221,6 +227,7 @@
    Props:
    - col: Column index
    - row: Row index
+   - size, font-size: The cell's [width height], and its label's size
    
    Behavior:
    - Left-click: Trigger the cell (if has content) or select (if empty)
@@ -228,7 +235,7 @@
    - Right-click: Context menu with Copy/Paste/Edit/Clear and Trigger actions
    - Drag from cell: Start dragging cell content
    - Drop on cell: Move cell content"
-  [{:keys [fx/context col row]}]
+  [{:keys [fx/context col row size font-size]}]
   (let [display-data (fx/sub-ctx context subs/cell-display-data col row)
         trigger-map (fx/sub-ctx context subs/input-trigger-map)
         learning-target (fx/sub-ctx context subs/input-learning-target)
@@ -298,6 +305,8 @@
     {:fx/type generic-grid-cell
      :col col
      :row row
+     :size size
+     :font-size font-size
      :cell-type :grid
      :display-data cell-display-data
      :on-click {:event/type :grid/cell-clicked}
@@ -317,6 +326,7 @@
    Props:
    - col: Column index
    - row: Row index
+   - size, font-size: The cell's [width height], and its label's size
    
    Behavior:
    - Left-click: Toggle the effect cell
@@ -324,7 +334,7 @@
    - Right-click: Context menu with Copy/Paste/Edit/Clear and Trigger actions
    - Drag from cell: Start dragging effects
    - Drop on cell: Move effects"
-  [{:keys [fx/context col row]}]
+  [{:keys [fx/context col row size font-size]}]
   (let [display-data (fx/sub-ctx context subs/effect-cell-display-data col row)
         trigger-map (fx/sub-ctx context subs/input-trigger-map)
         learning-target (fx/sub-ctx context subs/input-learning-target)
@@ -382,6 +392,8 @@
     {:fx/type generic-grid-cell
      :col col
      :row row
+     :size size
+     :font-size font-size
      :cell-type :effects
      :display-data adapted-data
      :on-click {:event/type :effects/toggle-cell}

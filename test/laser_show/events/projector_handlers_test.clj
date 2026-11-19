@@ -156,6 +156,16 @@
         (is (= "192.168.1.100" (:host projector)) "Should have valid host")
         (is (true? (:enabled? projector)) "Manual projectors should be enabled by default")))))
 
+(deftest add-manual-closes-and-clears-its-dialog-test
+  (let [open (assoc-in sample-state [:ui :dialogs :add-projector-manual]
+                       {:open? true :name "Stage left" :host "10.0.0.5" :port "7300"})
+        result (projectors/handle {:event/type :projectors/add-manual
+                                   :name "Stage left" :host "10.0.0.5" :port 7300
+                                   :state open})]
+    (is (= 1 (count (get-in result [:state :projectors]))))
+    (is (= {:open? false} (get-in result [:state :ui :dialogs :add-projector-manual]))
+        "closed, so a second click can't add it again, and blank when it opens next")))
+
 (deftest handle-projectors-add-manual-with-nil-host-throws-test
   (testing "Manual projector with nil host throws exception"
     (let [event {:event/type :projectors/add-manual

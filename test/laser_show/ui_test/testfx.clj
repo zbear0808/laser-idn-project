@@ -10,7 +10,8 @@
            [javafx.scene SnapshotParameters]
            [javafx.scene.image PixelFormat]
            [javafx.event ActionEvent Event]
-           [javafx.stage Window]
+           [javafx.scene.text Text]
+           [javafx.stage Stage Window]
            [javafx.embed.swing SwingFXUtils]
            [javafx.scene.input DragEvent KeyCode MouseButton MouseEvent TransferMode]
            [javafx.util Pair]
@@ -453,6 +454,35 @@
        (sync-fx!)))
    robot-instance))
 
+(defn fire-drag!
+  "Drag node by dx, dy from its centre with mouse events fired at it, the
+   primary button down: pressed, dragged in steps and released; with :hold?
+   true it returns before the release, as a fn to call. Headless, a robot
+   drag (drag-by!) leaves the node it pressed once the mouse does: the glass
+   robot's drag events don't carry the button, so the events after that,
+   the release too, go to the nodes under the mouse. A small handle, such as
+   a split pane's divider, needs this instead."
+  [^Node node dx dy & {:keys [hold? steps] :or {steps 4}}]
+  (let [[x0 y0] (run-on-fx-thread! #(let [b (.localToScene node (.getBoundsInLocal node))]
+                                      [(/ (+ (.getMinX b) (.getMaxX b)) 2)
+                                       (/ (+ (.getMinY b) (.getMaxY b)) 2)]))
+        fire! (fn [event-type x y]
+                (run-on-fx-thread!
+                 #(let [screen (.localToScreen node (.sceneToLocal node (double x) (double y)))]
+                    (Event/fireEvent
+                     node
+                     (MouseEvent. event-type (double x) (double y) (.getX screen) (.getY screen)
+                                  MouseButton/PRIMARY 1
+                                  false false false false
+                                  (not= event-type MouseEvent/MOUSE_RELEASED) false false
+                                  false false false nil))))
+                (sync-fx!))
+        release! #(fire! MouseEvent/MOUSE_RELEASED (+ x0 dx) (+ y0 dy))]
+    (fire! MouseEvent/MOUSE_PRESSED x0 y0)
+    (doseq [i (range 1 (inc steps))]
+      (fire! MouseEvent/MOUSE_DRAGGED (+ x0 (* dx (/ i steps))) (+ y0 (* dy (/ i steps)))))
+    (if hold? release! (release!))))
+
 (defn release!
   "Release the primary mouse button (ends a drag-by! with :hold? true)."
   [^FxRobot robot-instance]
@@ -636,3 +666,34 @@
   "(f) on the FX thread, waiting for its value."
   [f]
   (run-on-fx-thread! f))
+
+(defn main-window
+  "The main window: the one that shows #main-layout."
+  ^Stage []
+  (some-> ^Node (first (query-all "#main-layout")) .getScene .getWindow))
+
+(defn set-size!
+  "Give a window this size on the FX thread, as the OS does when the user
+   resizes it, at the screen's top-left corner. The layout follows later:
+   wait for it with wait-for!. Headless, the screen is 1000×1000 and a
+   window that reaches past its last row can't be drawn (the headless
+   window's blit throws), so keep (+ y height) under 1000 there."
+  [^Window window width height]
+  (run-on-fx-thread! #(doto window
+                        (.setX 0.0)
+                        (.setY 0.0)
+                        (.setWidth (double width))
+                        (.setHeight (double height))))
+  (sync-fx!))
+
+(defn scene-bounds
+  "A node's bounds in its scene: [min-x min-y max-x max-y]."
+  [^Node node]
+  (run-on-fx-thread! #(let [b (.localToScene node (.getBoundsInLocal node))]
+                        [(.getMinX b) (.getMinY b) (.getMaxX b) (.getMaxY b)])))
+
+(defn shown-text
+  "The text a Labeled shows: all of its text, or the part that fits and an
+   ellipsis when it is too narrow (its skin's text node)."
+  [^Labeled node]
+  (run-on-fx-thread! #(some-> ^Text (.lookup node ".text") .getText)))

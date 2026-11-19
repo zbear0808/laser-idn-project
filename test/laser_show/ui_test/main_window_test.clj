@@ -1,14 +1,21 @@
 (ns laser-show.ui-test.main-window-test
   "Main window: default layout, top-level tabs, typing into the toolbar and the
-   unsaved-changes check when the window is closed."
+   unsaved-changes check when the window is closed. The Cue Chain Editor fits
+   its smallest size (its footer, a preset's parameters), and the zone group
+   editor looks like the other setup dialogs."
   (:require [clojure.java.io :as io]
-            [clojure.test :refer [deftest is use-fixtures]]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.event Event]
-           [javafx.stage Stage WindowEvent]))
+           [javafx.scene Node Parent]
+           [javafx.scene.control Labeled]
+           [javafx.scene.layout BackgroundFill Region]
+           [javafx.scene.paint Color]
+           [javafx.stage Stage Window WindowEvent]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -140,3 +147,129 @@
           (is (false? (get-in (state/get-raw-state) [:project :dirty?])))))
       (finally
         (when (.exists file) (.delete file))))))
+
+
+;; Dialogs that fit and match
+
+(defn- stage-titled
+  "The showing stage whose title starts with prefix, or nil."
+  ^Stage [prefix]
+  (ui/on-fx-thread
+   #(some (fn [^Window w]
+            (when (and (instance? Stage w) (.isShowing w)
+                       (some-> ^Stage w .getTitle (str/starts-with? prefix)))
+              w))
+          (vec (Window/getWindows)))))
+
+(defn- scene-root ^Parent [^Stage stage]
+  (ui/on-fx-thread #(.getRoot (.getScene stage))))
+
+(defn- all-nodes
+  "node and every node under it, skins' included."
+  [^Node node]
+  (ui/on-fx-thread
+   #(vec (tree-seq (fn [n] (instance? Parent n))
+                   (fn [^Parent p] (seq (.getChildrenUnmodifiable p)))
+                   node))))
+
+(defn- text-of [^Labeled l]
+  (ui/on-fx-thread #(.getText l)))
+
+(deftest cue-chain-editor-footer-fits-test
+  (events/dispatch! {:event/type :cue-chain/open-editor :col 0 :row 0})
+  (ui/wait-for! #(some? (stage-titled "Cue Chain Editor")))
+  (let [editor (stage-titled "Cue Chain Editor")
+        size #(ui/on-fx-thread (fn [] [(.getWidth editor) (.getHeight editor)]))]
+    (testing "it opens larger than the smallest size it can be made"
+      (is (= [960.0 640.0] (ui/on-fx-thread #(vector (.getMinWidth editor) (.getMinHeight editor)))))
+      (let [[w h] (size)]
+        (is (< 960 w))
+        (is (< 640 h))))
+    (testing "at that size, every label, button and choice in the footer shows its whole text"
+      (ui/set-size! editor 960 640)
+      (ui/wait-for! #(= [960.0 640.0] (size)))
+      (let [footer (ui/on-fx-thread #(.lookup (scene-root editor) ".dialog-footer"))
+            labeled (filterv #(instance? Labeled %) (all-nodes footer))
+            texts (set (map text-of labeled))]
+        (is (every? texts ["Default zone:" "Trigger:" "Open in Timeline Editor" "Close"])
+            "the timeline editor's short labels")
+        (ui/wait-for! #(every? (fn [l] (= (text-of l) (ui/shown-text l))) labeled))
+        (doseq [l labeled]
+          (is (= (text-of l) (ui/shown-text l))))))))
+
+(defn- labeled-with-text
+  "The first label or button under root whose text is text."
+  [root text]
+  (some #(when (and (instance? Labeled %) (= text (text-of %))) %) (all-nodes root)))
+
+(defn- inside?
+  "Are bounds b inside bounds a?"
+  [[ax0 ay0 ax1 ay1] [bx0 by0 bx1 by1]]
+  (and (<= ax0 bx0) (<= bx1 ax1) (<= ay0 by0) (<= by1 ay1)))
+
+(deftest cue-chain-editor-keeps-preset-params-in-view-test
+  (let [robot (ui/robot)]
+    (events/dispatch! {:event/type :cue-chain/open-editor :col 0 :row 0})
+    (ui/wait-for! #(some? (stage-titled "Cue Chain Editor")))
+    (let [editor (stage-titled "Cue Chain Editor")
+          root (scene-root editor)]
+      (ui/set-size! editor 960 640)
+      (testing "with an effect of the circle selected, its parameters below take their room"
+        (ui/wait-for! #(some? (labeled-with-text root "Scale")))
+        (ui/click-node! robot (labeled-with-text root "Scale"))
+        (ui/wait-for! #(seq (ui/on-fx-thread (fn [] (.lookupAll root "#list-editor-item-effects-0-0 .chain-item")))))
+        (ui/click-node! robot (first (ui/on-fx-thread #(vec (.lookupAll root "#list-editor-item-effects-0-0 .chain-item")))))
+        (ui/wait-for! #(some? (labeled-with-text root "PARAMETERS: Scale"))))
+      (testing "and the circle's three parameters still show, none scrolled away"
+        (let [params (ui/on-fx-thread #(.getParent ^Node (labeled-with-text root "PRESET: Circle")))
+              viewport (ui/on-fx-thread #(.lookup ^Node params ".viewport"))
+              rows (mapv #(labeled-with-text params %) ["Color" "Radius" "Point Count"])]
+          (is (every? some? rows))
+          (ui/wait-for! #(every? (fn [row] (inside? (ui/scene-bounds viewport) (ui/scene-bounds row))) rows))
+          (doseq [row rows]
+            (is (inside? (ui/scene-bounds viewport) (ui/scene-bounds row)) (text-of row))))))))
+
+(defn- fill-hex
+  "A region's background colour as #RRGGBB, with its CSS applied."
+  [^Region region]
+  (ui/on-fx-thread
+   #(do (.applyCss region)
+        (when-let [^Color c (some-> region .getBackground .getFills ^BackgroundFill first .getFill)]
+          (let [byte (fn [v] (Math/round (* 255.0 (double v))))]
+            (format "#%02X%02X%02X" (byte (.getRed c)) (byte (.getGreen c)) (byte (.getBlue c))))))))
+
+(defn- dialog-look
+  "A setup dialog's background and its name field's."
+  [^Stage stage name-field]
+  (let [root (scene-root stage)]
+    {:background (fill-hex root)
+     :field (fill-hex (ui/on-fx-thread #(.lookup root name-field)))}))
+
+(defn- inline-colours
+  "The nodes under root that set a colour in their inline style, but plain
+   regions: the colour swatches, whose colour is the zone group's."
+  [root]
+  (filterv (fn [^Node n]
+             (and (not= Region (class n))
+                  (re-find #"-fx-(background-color|text-fill)" (or (ui/on-fx-thread #(.getStyle n)) ""))))
+           (all-nodes root)))
+
+(deftest zone-group-editor-uses-theme-classes-test
+  (let [robot (ui/robot)]
+    (ui/click! robot "#zones-tab")
+    (ui/click! robot "#zone-groups-add-button")
+    (ui/wait-for! #(some? (stage-titled "New Zone Group")))
+    (let [editor (stage-titled "New Zone Group")
+          zone-group-look (dialog-look editor "#zone-group-name-field")]
+      (testing "its text and fields take the theme's classes, not colours of their own"
+        (is (empty? (inline-colours (scene-root editor))))
+        (doseq [field ["#zone-group-name-field" "#zone-group-description-field"]]
+          (is (ui/has-style-class? field "text-field") field)))
+      (events/dispatch! {:event/type :ui/close-dialog :dialog-id :zone-group-editor})
+      (ui/wait-for! #(nil? (stage-titled "New Zone Group")))
+      (testing "so it looks like the Add Projector dialog"
+        (ui/click! robot "#projectors-tab")
+        (ui/click! robot "#projectors-add-manual-button")
+        (ui/wait-for! #(some? (stage-titled "Add Projector")))
+        (is (= (dialog-look (stage-titled "Add Projector") "#add-projector-name-field")
+               zone-group-look))))))

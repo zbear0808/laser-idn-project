@@ -15,7 +15,9 @@
 
 (defn preset-param-editor
   "Parameter editor for the selected preset instance.
-   Shows controls for all parameters defined in the preset's spec.
+   Shows controls for all parameters defined in the preset's spec. It never
+   gets shorter than its rows: in the cue chain editor, what is below it (an
+   effect's parameters, which scroll) gives way first.
    
    Props:
    - :cell - [col row] of cell being edited
@@ -46,6 +48,7 @@
                         :effect-path preset-path}]
     {:fx/type :v-box
      :spacing 8
+     :min-height :use-pref-size
      :style-class "dialog-section"
      :children [{:fx/type :label
                  :text (if preset-def

@@ -8,7 +8,8 @@
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui]
             [laser-show.views.components.clock-view :as clock-view])
-  (:import [javafx.scene Node]))
+  (:import [javafx.scene Node]
+           [javafx.scene.canvas Canvas]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -134,3 +135,48 @@
     (ui/click! robot "#grid-tab")
     (ui/wait-for! #(ui/visible? "#preview-panel"))
     (ui/wait-for! #(= with-preview (clock-view/running-timers)))))
+
+
+;; The cells take their size from the pane, not from the config
+
+(defn- canvas-size
+  "[width height] of a cell's canvas."
+  [i]
+  (let [^Canvas c (ui/query (canvas i))]
+    (ui/on-fx-thread #(vector (.getWidth c) (.getHeight c)))))
+
+(defn- inside-the-panel?
+  "Is cell i's canvas inside the preview panel?"
+  [i]
+  (let [[px0 py0 px1 py1] (ui/scene-bounds (ui/query "#preview-panel"))
+        [x0 y0 x1 y1] (ui/scene-bounds (ui/query (canvas i)))]
+    (and (<= px0 x0) (<= x1 px1) (<= py0 y0) (<= y1 py1))))
+
+(defn- panel-width []
+  (let [[x0 _ x1 _] (ui/scene-bounds (ui/query "#preview-panel"))] (- x1 x0)))
+
+(defn- square-side
+  "Wait for every canvas of the layout to be square and inside the panel,
+   and return their side."
+  [cells]
+  (ui/wait-for! #(and (apply = (map canvas-size (range cells)))
+                      (let [[w h] (canvas-size 0)] (= w h))
+                      (every? inside-the-panel? (range cells))))
+  (first (canvas-size 0)))
+
+(deftest preview-cells-fill-their-pane-test
+  (let [robot (ui/robot)]
+    (ui/assert-visible! (canvas 3))
+    (testing "the 2x2 grid's canvases are square, as the laser draws, and share the pane's width"
+      (let [side (square-side 4)]
+        (is (< (- (/ (panel-width) 2) 20) side))
+        (testing "they grow with the window"
+          (ui/set-size! (ui/main-window) 1680 990)
+          (ui/wait-for! #(< side (first (canvas-size 0))))
+          (is (< side (square-side 4))))))
+    (testing "one cell takes the whole pane"
+      (let [two-by-two (square-side 4)]
+        (ui/select! robot "#preview-layout-selector" "1x1")
+        (ui/wait-for! #(nil? (ui/query (canvas 1))))
+        (ui/wait-for! #(< two-by-two (first (canvas-size 0))))
+        (is (< (* 1.5 two-by-two) (square-side 1)))))))

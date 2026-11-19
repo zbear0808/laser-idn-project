@@ -244,17 +244,15 @@
   {:grid {:default {:cols default-grid-cols :rows default-grid-rows}
           :doc "grid dimensions config"}
    :window {:default {:width default-window-width :height default-window-height}
-            :doc "window dimensions"}
-   :preview {:default {:width 400
-                       :height 400
-                       :zone-group-filter :all
+            :doc "window dimensions, and :grid-split (0-1), where the user left the divider between a tab and the preview (absent until it is moved: subs/grid-split gives 0.65)"}
+   :preview {:default {:zone-group-filter :all
                        :grid-layout [2 2]
                        :grid-cells [{:zone-group-id nil}    ;; nil = master view (show all)
                                     {:zone-group-id :left}
                                     {:zone-group-id :right}
                                     {:zone-group-id :center}]
                        :show-labels? true}
-             :doc "Preview grid configuration. grid-layout is [cols rows], grid-cells is vector of cell configs with :zone-group-id (nil = show all/master view)"}
+             :doc "Preview grid configuration. grid-layout is [cols rows], grid-cells is vector of cell configs with :zone-group-id (nil = show all/master view). The cells take their size from the preview's pane (views/components/preview.clj canvas-side)"}
    :idn {:default {:host nil :port 7255}
          :doc "default IDN connection settings"}
    :osc {:default {:enabled? false :port default-osc-port}

@@ -41,6 +41,35 @@
       (is (= :center-left (:alignment val-label)))
       (is (str/includes? (:style val-label) "Consolas")))))
 
+(defn- font-size
+  "The -fx-font-size an inline style sets, in px."
+  [style]
+  (some->> style (re-find #"-fx-font-size: *(\d+)") second parse-long))
+
+(deftest status-text-is-13-px-test
+  (testing "the performer reads the status bar from a step back"
+    (let [[label value] (:children (status-bar/status-item {:label "Playing" :value "A1 circle"}))]
+      (is (= 13 (font-size (:style label))))
+      (is (= 13 (font-size (:style value)))))
+    (let [notice (status-bar/notice-status
+                  {:fx/context (fx/create-context
+                                (assoc-in (domains/build-initial-state) [:ui :notice]
+                                          {:id 1 :text "Could not open a.zip" :level :error})
+                                state/cache-factory)})]
+      (is (= 13 (font-size (:style (second (:children notice))))))))
+  (testing "the frame times, for developers, stay small"
+    (let [stats (status-bar/frame-stats-status
+                 {:fx/context (fx/create-context
+                               (assoc-in (domains/build-initial-state) [:backend :streaming :frame-stats]
+                                         {:avg-base-us 10 :avg-effects-us 5 :avg-latency-us 15
+                                          :p95-latency-us 20 :max-latency-us 30})
+                               state/cache-factory)})
+          items (map #((:fx/type %) %) (:children stats))]
+      (is (= 5 (count items)))
+      (doseq [[label value] (map :children items)]
+        (is (= 11 (font-size (:style label))))
+        (is (= 11 (font-size (:style value))))))))
+
 (defn- cue
   "A playing cue as subs/playing-cues gives it."
   [col row preset-id preset-count]

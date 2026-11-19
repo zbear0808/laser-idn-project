@@ -5,6 +5,7 @@
    - Tab switching
    - Dialog management
    - The status bar's notice (clearing it)
+   - Where the divider between a tab and the preview sits
    - Preview zone filtering
    - Preview grid layout"
   (:require [clojure.tools.logging :as log]
@@ -65,6 +66,16 @@
   [{:keys [id state]}]
   (if (and (some? id) (= id (get-in state [:ui :notice :id])))
     {:state (assoc-in state [:ui :notice] nil)}
+    {}))
+
+(defn- handle-ui-set-grid-split
+  "Remember where the user left the divider between a tab and the preview
+   (the split pane dispatches it when the mouse lets go of the divider,
+   views/root.clj). [:config :window :grid-split] is a preference: saved
+   with the project, not undoable."
+  [{:keys [position state]}]
+  (if (number? position)
+    {:state (assoc-in state [:config :window :grid-split] (double position))}
     {}))
 
 (defn- handle-preview-set-zone-filter
@@ -153,6 +164,7 @@
     :ui/close-dialog (handle-ui-close-dialog event)
     :ui/update-dialog-data (handle-ui-update-dialog-data event)
     :ui/clear-notice (handle-ui-clear-notice event)
+    :ui/set-grid-split (handle-ui-set-grid-split event)
     :preview/set-zone-filter (handle-preview-set-zone-filter event)
     :preview/set-grid-layout (handle-preview-set-grid-layout event)
     :preview/set-cell-zone (handle-preview-set-cell-zone event)

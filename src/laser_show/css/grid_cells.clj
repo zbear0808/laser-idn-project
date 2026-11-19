@@ -97,9 +97,11 @@
        ;; Grid Cell Labels & Indicators
        
        
+       ;; 12 px; the grid gives the label up to 16 px as the cell grows
+       ;; (views/components/grid_tab.clj label-size)
        ".grid-cell-label"
        {:-fx-text-fill text-primary
-        :-fx-font-size 10
+        :-fx-font-size 12
         :-fx-wrap-text true
         :-fx-text-alignment "center"}
 

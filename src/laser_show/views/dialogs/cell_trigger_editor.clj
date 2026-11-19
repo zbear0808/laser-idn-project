@@ -61,7 +61,7 @@
        :children
        [{:fx/type :button
          :id "trigger-editor-done"
-         :text "Done"
+         :text "Close"
          :style-class ["button-primary"]
          :on-action {:event/type :ui/close-dialog
                      :dialog-id :trigger-editor}}]}]}))

@@ -128,6 +128,12 @@
 (defn window-config [context]
   (fx/sub-val context ex/window-config))
 
+(defn grid-split
+  "Where the divider between a tab and the preview sits, 0-1: where the
+   user left it ([:config :window :grid-split]), or 0.65."
+  [context]
+  (fx/sub-val context get-in [:config :window :grid-split] 0.65))
+
 (defn preview-config [context]
   (fx/sub-val context ex/preview-config))
 

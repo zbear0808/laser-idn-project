@@ -95,6 +95,27 @@
 ;; Main Content Area
 
 
+(defn- on-divider?
+  "Is node one of split's dividers, or inside one?"
+  [split node]
+  (loop [n node]
+    (cond
+      (or (not (instance? javafx.scene.Node n)) (identical? n split)) false
+      (.contains (.getStyleClass ^javafx.scene.Node n) "split-pane-divider") true
+      :else (recur (.getParent ^javafx.scene.Node n)))))
+
+(defn- remember-split
+  "The split pane's event filter: the mouse letting go of the divider (it
+   gets the release of the press that dragged it) is the user moving it, so
+   remember where it is now, [:config :window :grid-split]. A layout pass
+   that moves it, as a resize does, remembers nothing."
+  [^javafx.event.Event e]
+  (when (= javafx.scene.input.MouseEvent/MOUSE_RELEASED (.getEventType e))
+    (let [^javafx.scene.control.SplitPane split (.getSource e)]
+      (when (on-divider? split (.getTarget e))
+        (events/dispatch! {:event/type :ui/set-grid-split
+                           :position (first (.getDividerPositions split))})))))
+
 (defn main-content
   "Main content area with tab content and optional preview panel.
    Preview is hidden when on the projectors, zones, or settings tabs."
@@ -106,8 +127,10 @@
     (if show-preview?
       ;; Show split pane with preview grid for non-projector tabs
       {:fx/type :split-pane
+       :id "main-split"
        :style (str "-fx-background-color: " bg-primary ";")
-       :divider-positions [0.65]
+       :divider-positions [(fx/sub-ctx context subs/grid-split)]
+       :event-filter remember-split
        :items [{:fx/type :border-pane
                 :style (str "-fx-background-color: " bg-primary ";")
                 :center {:fx/type tab-content}}

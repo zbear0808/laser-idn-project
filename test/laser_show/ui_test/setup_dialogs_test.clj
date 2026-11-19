@@ -2,7 +2,9 @@
   "Setup controls whose value arrives as the event's :fx/event: the Add
    Projector dialog, the zone group editor, a projector's name, a discovered
    output's checkbox and the calibration brightness slider. A discovered
-   device with one output, or none, shows in the device list."
+   device with one output, or none, shows in the device list. The Add
+   Projector dialog closes after Add, and the projector panel's Port: label
+   shows whole."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
@@ -53,6 +55,24 @@
     (is (= {:name "Stage left" :host "10.0.0.5" :port 7300 :enabled? true}
            (select-keys (added) [:name :host :port :enabled?])))))
 
+(deftest add-projector-closes-after-add-test
+  (let [robot (ui/robot)
+        with-host #(filterv (fn [p] (= "10.0.0.8" (:host p))) (vals (:projectors (app-state))))]
+    (ui/click! robot "#projectors-tab")
+    (ui/click! robot "#projectors-add-manual-button")
+    (ui/wait-for! #(window-showing? "Add Projector"))
+    (ui/fill! robot "#add-projector-host-field" "10.0.0.8")
+    (ui/assert-enabled! "#add-projector-confirm-button")
+    (ui/click! robot "#add-projector-confirm-button")
+    (ui/wait-for! #(= 1 (count (with-host))))
+    (ui/wait-for! #(not (window-showing? "Add Projector")))
+    (is (= 1 (count (with-host))) "one click, one projector: no second click to make")
+    (testing "Add Manual... starts blank again"
+      (ui/click! robot "#projectors-add-manual-button")
+      (ui/wait-for! #(window-showing? "Add Projector"))
+      (ui/assert-text! "#add-projector-host-field" "")
+      (ui/assert-disabled! "#add-projector-confirm-button"))))
+
 (deftest create-zone-group-test
   (let [robot (ui/robot)
         group-named (fn [group-name]
@@ -96,6 +116,14 @@
       (ui/fill! robot "#projector-name-field" "Stage right")
       (ui/wait-for! #(= "Stage right" (projector-name)))
       (ui/assert-text! "#projector-config-title" "CONFIGURE: Stage right"))))
+
+(deftest projector-port-label-shows-whole-test
+  (let [robot (ui/robot)]
+    (with-projector!)
+    (ui/click! robot "#projectors-tab")
+    (ui/assert-visible! "#projector-port-label")
+    (ui/wait-for! #(= "Port:" (ui/shown-text (ui/query "#projector-port-label"))))
+    (is (= "Port:" (ui/shown-text (ui/query "#projector-port-label"))) "not \"P…\"")))
 
 (deftest untick-a-discovered-output-disables-it-test
   (let [robot (ui/robot)

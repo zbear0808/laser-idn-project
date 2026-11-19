@@ -6,7 +6,7 @@
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.scene Node]
-           [javafx.scene.control Labeled]
+           [javafx.scene.control Labeled SplitPane]
            [javafx.scene.layout BackgroundFill BorderStroke Region]
            [javafx.scene.paint Color]
            [org.testfx.api FxRobotInterface]))
@@ -160,3 +160,108 @@
       (is (= "#656565" (fill-hex "#effects-cell-0-0")) "off, hovered")
       (move-away! robot "#effects-cell-0-0")
       (is (= "#505050" (fill-hex "#effects-cell-0-0"))))))
+
+
+;; Pads that grow with the window: the Grid tab is the performer's screen
+
+(defn- bounds [selector] (ui/scene-bounds (node selector)))
+
+(defn- size-of [selector]
+  (let [[x0 y0 x1 y1] (bounds selector)] [(- x1 x0) (- y1 y0)]))
+
+(defn- centre [selector]
+  (let [[x0 y0 x1 y1] (bounds selector)] [(/ (+ x0 x1) 2) (/ (+ y0 y1) 2)]))
+
+(defn- font-size [selector]
+  (let [^Labeled label (node selector)]
+    (ui/on-fx-thread #(do (.applyCss label) (.getSize (.getFont label))))))
+
+(defn- cells-span-the-grid?
+  "Do the 8 columns take the grid's width, less its 8 px padding and under
+   a pixel a column? Just after a resize they don't: until the cells are
+   described at the new size, they are too wide or too narrow."
+  []
+  (let [[_ _ area-right _] (bounds "#grid-area")
+        [_ _ cell-right _] (bounds "#grid-cell-7-0")]
+    (<= 7.5 (- area-right cell-right) 16)))
+
+(defn- in-view?
+  "Is the cell inside the window, left of the divider and above the status bar?"
+  [col row]
+  (let [[x0 y0 x1 y1] (bounds (str "#grid-cell-" col "-" row))
+        [divider-x _ _ _] (bounds ".split-pane-divider")
+        [_ status-y _ _] (bounds "#status-bar")]
+    (and (<= 0 x0) (<= x1 divider-x) (<= 0 y0) (<= y1 status-y))))
+
+(defn- at-window-size
+  "Resize the main window, wait for the cells to take the grid's new width,
+   and measure the grid."
+  [w h]
+  (ui/set-size! (ui/main-window) w h)
+  (ui/wait-for! cells-span-the-grid?)
+  {:cell (size-of "#grid-cell-0-0")
+   :font (font-size "#grid-cell-0-0 .grid-cell-label")
+   :in-view? (every? true? (for [col (range 8) row (range 4)] (in-view? col row)))
+   :number-8 (first (centre "#grid-column-number-7"))
+   :column-8 (first (centre "#grid-cell-7-0"))
+   :letter-d (second (centre "#grid-row-letter-3"))
+   :row-d (second (centre "#grid-cell-0-3"))})
+
+(deftest cells-grow-with-the-window-test
+  ;; 1680×990, not 1000: headless, a window can't reach the screen's last row
+  ;; (ui/set-size!)
+  (ui/assert-visible! "#grid-cell-7-3")
+  (let [small (at-window-size 1024 700)
+        default (at-window-size 1200 800)
+        large (at-window-size 1680 990)
+        width (comp first :cell)]
+    (testing "the 8×4 cells show whole from 1024×700 up"
+      (is (:in-view? small))
+      (is (:in-view? default))
+      (is (:in-view? large)))
+    (testing "the cells grow with the window, never under 64×48"
+      (is (< (width small) (width default) (width large)))
+      (is (<= 64 (width small)))
+      (is (<= 48 (second (:cell small)))))
+    (testing "so does their text, 12 to 16 px"
+      (is (<= 12 (:font small) (:font default) (:font large) 16))
+      (is (< (:font small) (:font large))))
+    (testing "the column numbers and row letters stay on their cells"
+      (doseq [at [small default large]]
+        (is (< (Math/abs (- (:number-8 at) (:column-8 at))) 1))
+        (is (< (Math/abs (- (:letter-d at) (:row-d at))) 1))))))
+
+(defn- divider-position []
+  (let [^SplitPane split (node "#main-split")]
+    (ui/on-fx-thread #(first (.getDividerPositions split)))))
+
+(defn- remembered-split []
+  (get-in (state/get-raw-state) [:config :window :grid-split]))
+
+(deftest split-position-is-remembered-test
+  (let [robot (ui/robot)
+        near? (fn [a b] (< (Math/abs (- a b)) 0.002))]
+    (ui/assert-visible! "#grid-cell-0-0")
+    (move-away! robot)
+    (testing "a layout pass that moves the divider is not remembered"
+      (let [before (divider-position)]
+        (at-window-size 1400 900)
+        (is (not (near? before (divider-position))) "the resize moved it")
+        (is (nil? (remembered-split)))))
+    (testing "a drag of the divider is remembered once it is let go"
+      (let [before (divider-position)
+            let-go! (ui/fire-drag! (node ".split-pane-divider") -200 0 :hold? true)]
+        (ui/wait-for! #(< (divider-position) (- before 0.1)))
+        (is (nil? (remembered-split)) "not while the mouse holds it")
+        (let-go!)
+        (ui/wait-for! #(some? (remembered-split)))
+        (is (near? (remembered-split) (divider-position)))
+        (is (empty? (get-in (state/get-raw-state) [:history :undo-stack])) "a preference, not an edit to undo")
+        (ui/wait-for! cells-span-the-grid?)))
+    (testing "the divider is back where it was left after another tab"
+      (ui/click! robot "#projectors-tab")
+      (ui/wait-for! #(nil? (node "#main-split")))
+      (ui/click! robot "#grid-tab")
+      (ui/wait-for! #(some? (node "#main-split")))
+      (ui/wait-for! #(near? (remembered-split) (divider-position)))
+      (is (near? (remembered-split) (divider-position))))))

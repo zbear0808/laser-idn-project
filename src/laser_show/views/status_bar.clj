@@ -12,21 +12,27 @@
 ;; Status Items
 
 
+(def ^:private text-size
+  "The status bar's text size in px: the performer reads it from a step
+   back. The frame times, for developers, keep 11."
+  13)
+
 (defn status-item
   "A single status bar item with label and value. :id and :tooltip (text)
-   go on the value; :value-color replaces its text colour."
-  [{:keys [id label value value-width monospace? alignment value-color tooltip]
-    :or {alignment :center-left}}]
+   go on the value; :value-color replaces its text colour; :size is the text
+   size in px (default text-size)."
+  [{:keys [id label value value-width monospace? alignment value-color tooltip size]
+    :or {alignment :center-left size text-size}}]
   {:fx/type :h-box
    :spacing 4
    :alignment :center-left
    :children [{:fx/type :label
                :text (str label ":")
-               :style (str "-fx-text-fill: " (css/text-muted) "; -fx-font-size: 11;")}
+               :style (str "-fx-text-fill: " (css/text-muted) "; -fx-font-size: " size ";")}
               (cond-> {:fx/type :label
                        :text (str value)
                        :style (str "-fx-text-fill: " (or value-color (css/text-secondary)) "; "
-                                   "-fx-font-size: 11;"
+                                   "-fx-font-size: " size ";"
                                    (when monospace?
                                      " -fx-font-family: 'Consolas', 'Monaco', monospace;"))}
                 id (assoc :id id)
@@ -58,12 +64,12 @@
        :on-mouse-clicked {:event/type :ui/clear-notice :id id}
        :children [{:fx/type fa/icon
                    :name icon
-                   :size 10
+                   :size 12
                    :color (color)}
                   {:fx/type :label
                    :id "status-notice-text"
                    :text text
-                   :style (str "-fx-text-fill: " (color) "; -fx-font-size: 11;")}]})
+                   :style (str "-fx-text-fill: " (color) "; -fx-font-size: " text-size ";")}]})
     {:fx/type :label :text "" :pref-width 0}))
 
 
@@ -117,27 +123,32 @@
                            :label "Base"
                            :value (format-us avg-base-us)
                            :value-width 56
-                           :monospace? true}
+                           :monospace? true
+                           :size 11}
                           {:fx/type status-item
                            :label "Effects"
                            :value (format-us avg-effects-us)
                            :value-width 56
-                           :monospace? true}
+                           :monospace? true
+                           :size 11}
                           {:fx/type status-item
                            :label "Total (avg)"
                            :value (format-us avg-latency-us)
                            :value-width 56
-                           :monospace? true}
+                           :monospace? true
+                           :size 11}
                           {:fx/type status-item
                            :label "p95"
                            :value (format-us p95-latency-us)
                            :value-width 56
-                           :monospace? true}
+                           :monospace? true
+                           :size 11}
                           {:fx/type status-item
                            :label "max"
                            :value (format-us max-latency-us)
                            :value-width 56
-                           :monospace? true}]
+                           :monospace? true
+                           :size 11}]
                   avg-idn-us
                   (conj {:fx/type status-item
                          :label "IDN"
@@ -145,7 +156,8 @@
                                      " (p95: " (format-us p95-idn-us)
                                      ", max: " (format-us max-idn-us) ")")
                          :value-width 245
-                         :monospace? true}))}
+                         :monospace? true
+                         :size 11}))}
       {:fx/type :label :text "" :pref-width 0})))
 
 
@@ -203,13 +215,13 @@
        :alignment :center-left
        :children [{:fx/type fa/icon
                    :name (if dirty? :circle :check)
-                   :size 10
+                   :size 12
                    :style-class [(if dirty? "icon-warning" "icon-success")]}
                   {:fx/type :label
                    :text (if dirty? "Modified" "Saved")
                    :style (str "-fx-text-fill: "
                               (if dirty? (css/accent-warning) (css/accent-success))
-                              "; -fx-font-size: 11;")}]}
+                              "; -fx-font-size: " text-size ";")}]}
       {:fx/type :label :text "" :pref-width 0})))
 
 

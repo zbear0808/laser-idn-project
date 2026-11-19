@@ -94,7 +94,8 @@
 
 (defn- destination-zone-dropdown
   "Dropdown for selecting destination zone group for the entire cue chain.
-   Renders as a horizontal row: 'Default Zone (Chain Fallback):' label + dropdown.
+   Renders as a horizontal row: 'Default zone:' label (the timeline
+   editor's) + dropdown, neither ever narrower than its text.
    
    The destination zone applies to all presets in this cue chain cell.
    
@@ -110,11 +111,13 @@
      :spacing 8
      :alignment :center-left
      :children [{:fx/type :label
-                 :text "Default Zone (Chain Fallback):"
+                 :text "Default zone:"
+                 :min-width :use-pref-size
                  :style-class "zone-picker-label"}
                 {:fx/type :combo-box
                  :value current-group
                  :pref-width 150
+                 :min-width :use-pref-size
                  :items zone-groups
                  :button-cell (fn [group]
                                 {:text (or (:name group) "All")})
@@ -277,7 +280,8 @@
 
 (defn- trigger-mode-dropdown
   "Dropdown for selecting trigger mode for this cue chain.
-   Renders as a horizontal row: 'Trigger Mode:' label + dropdown.
+   Renders as a horizontal row: 'Trigger:' label (the timeline editor's) +
+   dropdown, neither ever narrower than its text.
    
    Trigger modes:
    - :toggle (default) - Click to turn ON, click again to turn OFF
@@ -296,11 +300,13 @@
      :spacing 8
      :alignment :center-left
      :children [{:fx/type :label
-                 :text "Trigger Mode:"
+                 :text "Trigger:"
+                 :min-width :use-pref-size
                  :style-class "zone-picker-label"}
                 {:fx/type :combo-box
                  :value current-option
                  :pref-width 120
+                 :min-width :use-pref-size
                  :items trigger-mode-options
                  :button-cell (fn [mode]
                                 {:text (or (:name mode) "Toggle")})
@@ -472,8 +478,8 @@
     {:fx/type :v-box
      :spacing 0
      :style-class "dialog-content"
-     :pref-width 800
-     :pref-height 700
+     :pref-width 1120
+     :pref-height 760
      :children [;; Header with editable name (double-click to edit)
                 {:fx/type :h-box
                  :alignment :center-left
@@ -593,7 +599,8 @@
                                                     :selected-effect-ids selected-effect-ids
                                                     :dialog-data effect-dialog-data})])}]}
 
-                ;; Footer with destination zone dropdown, trigger mode, and close button
+                ;; Footer with destination zone dropdown, trigger mode, and close button;
+                ;; nothing in it shrinks below its text
                 {:fx/type :h-box
                  :alignment :center-left
                  :spacing 12
@@ -609,6 +616,7 @@
                              :trigger-mode (:trigger-mode cue-chain)}
                             {:fx/type :button
                              :text "⚡ Triggers..."
+                             :min-width :use-pref-size
                              :style-class "button-secondary"
                              :on-action {:event/type :ui/open-dialog
                                          :dialog-id :trigger-editor
@@ -619,6 +627,7 @@
                              :h-box/hgrow :always}
                             {:fx/type :button
                              :text "Open in Timeline Editor"
+                             :min-width :use-pref-size
                              :style-class "button-secondary"
                              :on-action (fn [_]
                                           (events/dispatch! {:event/type :ui/close-dialog
@@ -628,6 +637,7 @@
                                                              :row row}))}
                             {:fx/type :button
                              :text "Close"
+                             :min-width :use-pref-size
                              :style-class "button-primary"
                              :on-action {:event/type :ui/close-dialog
                                          :dialog-id :cue-chain-editor}}]}]}))
@@ -680,6 +690,8 @@
      :showing open?
      :title window-title
      :modality :none
+     :min-width 960
+     :min-height 640
      :on-close-request {:event/type :ui/close-dialog :dialog-id :cue-chain-editor}
      :scene {:fx/type cue-chain-editor-scene
              :stylesheets stylesheets}}))

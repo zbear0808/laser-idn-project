@@ -88,7 +88,8 @@
 
 
 (defn- zone-group-editor-content
-  "Content of the zone group editor dialog."
+  "Content of the zone group editor dialog, in the theme's classes like the
+   Add Projector dialog (views/dialogs/add_projector_manual.clj)."
   [{:keys [fx/context]}]
   (let [dialog-data (fx/sub-ctx context subs/dialog-data :zone-group-editor)
         editing? (:editing? dialog-data)
@@ -99,14 +100,14 @@
     {:fx/type :v-box
      :spacing 16
      :padding 20
-     :style "-fx-background-color: #2D2D2D;"
+     :style-class ["container-primary"]
      :pref-width 400
      :children [{:fx/type :label
                  :text (if editing? "Edit Zone Group" "New Zone Group")
-                 :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}
+                 :style-class ["header-primary"]}
                 {:fx/type :label
                  :text "Zone groups help organize zones into categories for easier routing."
-                 :style "-fx-text-fill: #808080; -fx-font-size: 11;"}
+                 :style-class ["label-secondary"]}
                 {:fx/type :v-box
                  :spacing 12
                  :children [;; Name field
@@ -114,12 +115,12 @@
                              :spacing 4
                              :children [{:fx/type :label
                                          :text "Name"
-                                         :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
+                                         :style-class ["label-secondary"]}
                                         {:fx/type :text-field
                                          :id "zone-group-name-field"
                                          :text name-value
                                          :prompt-text "e.g., Left Side, Audience, Stage"
-                                         :style "-fx-background-color: #404040; -fx-text-fill: white;"
+                                         :style-class ["text-field"]
                                          :on-text-changed {:event/type :ui/update-dialog-data
                                                            :dialog-id :zone-group-editor
                                                            :updates {:name :fx/event}}}]}
@@ -128,12 +129,12 @@
                              :spacing 4
                              :children [{:fx/type :label
                                          :text "Description (optional)"
-                                         :style "-fx-text-fill: #B0B0B0; -fx-font-size: 11;"}
+                                         :style-class ["label-secondary"]}
                                         {:fx/type :text-field
                                          :id "zone-group-description-field"
                                          :text description-value
                                          :prompt-text "Brief description of this zone group"
-                                         :style "-fx-background-color: #404040; -fx-text-fill: white;"
+                                         :style-class ["text-field"]
                                          :on-text-changed {:event/type :ui/update-dialog-data
                                                            :dialog-id :zone-group-editor
                                                            :updates {:description :fx/event}}}]}

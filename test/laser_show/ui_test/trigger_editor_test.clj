@@ -57,6 +57,7 @@
                        (ui/window-titles)))
   (ui/assert-visible! ".dialog-content")
   (ui/assert-visible! "#trigger-editor-done")
+  (ui/assert-text! "#trigger-editor-done" "Close")
   (is (some (fn [title]
               (and title (.startsWith ^String title "Triggers")))
             (ui/window-titles)))

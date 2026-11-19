@@ -420,7 +420,9 @@
                                                    :projector-id id
                                                    :updates {:host new-host}})))}
                                 {:fx/type :label
+                                 :id "projector-port-label"
                                  :text "Port:"
+                                 :min-width :use-pref-size
                                  :style-class ["label-secondary"]}
                                 {:fx/type commit-field
                                  :id "projector-port-field"

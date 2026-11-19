@@ -223,7 +223,8 @@
 
 (defn- handle-projectors-add-manual
   "Add a projector manually (not from discovery).
-   Manual projectors are enabled by default."
+   Manual projectors are enabled by default. The Add Projector dialog
+   closes, and opens blank next time: a second click can't add it twice."
   [{:keys [name host port state]}]
   (let [projector-id (keyword (str "projector-" (System/currentTimeMillis)))
         proj-name (or name host)
@@ -235,7 +236,8 @@
     {:state (-> state
                 (assoc-in [:projectors projector-id] projector-config)
                 (assoc-in [:chains :projector-effects projector-id :items] (mapv #(assoc % :id (random-uuid)) DEFAULT_PROJECTOR_EFFECTS))
-                (assoc-in [:projector-ui :active-projector] projector-id))}))
+                (assoc-in [:projector-ui :active-projector] projector-id)
+                (assoc-in [:ui :dialogs :add-projector-manual] {:open? false}))}))
 
 
 ;; Projector Management

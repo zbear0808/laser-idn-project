@@ -63,6 +63,18 @@
     (is (= "" (preview/frame-stats-label nil)))
     (is (= "" (preview/frame-stats-label {})))))
 
+(deftest canvas-side-test
+  (testing "square canvases, as big as the pane lets every cell be: here the width decides"
+    (is (= 197 (preview/canvas-side 2 2 420 627 20)) "1200×800, 2x2")
+    (is (= 400 (preview/canvas-side 1 1 420 627 20)) "one cell"))
+  (testing "a wide, short pane: the height decides, with the zone label above each canvas"
+    (is (= 117 (preview/canvas-side 2 2 700 300 20)))
+    (is (= 137 (preview/canvas-side 2 2 700 300 0)) "no labels"))
+  (testing "before the pane is laid out, the 400×400 the config used to give"
+    (is (= 175 (preview/canvas-side 2 2 nil nil 20))))
+  (testing "never negative"
+    (is (= 0 (preview/canvas-side 3 2 10 10 20)))))
+
 (deftest frame-stats-only-in-dev-mode-test
   (let [header-ids (fn [dev?]
                      (with-redefs [dev-config/dev-mode? (constantly dev?)]

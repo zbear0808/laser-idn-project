@@ -1,10 +1,16 @@
 (ns laser-show.events.ui-handlers-test
   "Tests for UI event handlers, particularly dialog data updates."
   (:require
+   [cljfx.api :as fx]
    [clojure.test :refer [deftest is testing]]
+   [laser-show.events.core :as events]
    [laser-show.events.handlers.ui :as ui]
    [laser-show.events.helpers :as h]
-   [laser-show.state.domains :refer [build-initial-state]]))
+   [laser-show.state.core :as state]
+   [laser-show.state.domains :refer [build-initial-state]]
+   [laser-show.state.history :as history]
+   [laser-show.state.persistent :as persistent]
+   [laser-show.subs :as subs]))
 
 
 ;; Test Fixtures
@@ -169,3 +175,25 @@
       (let [clicked (:state (clear (:state first-notice) first-id))
             later (h/show-notice clicked "Could not save b.zip" :error)]
         (is (= {} (clear (:state later) first-id)))))))
+
+
+;; The divider between a tab and the preview
+
+(defn- grid-split [state]
+  (subs/grid-split (fx/create-context state state/cache-factory)))
+
+(deftest grid-split-is-a-saved-preference-test
+  (let [clean (history/mark-clean base-state)
+        moved (:state (events/handle-event-pipeline {:event/type :ui/set-grid-split
+                                                     :position 0.42
+                                                     :state clean}))]
+    (testing "a project that never had the divider moved shows it at 0.65"
+      (is (= 0.65 (grid-split clean))))
+    (testing "where the user left it is remembered"
+      (is (= 0.42 (get-in moved [:config :window :grid-split])))
+      (is (= 0.42 (grid-split moved))))
+    (testing "a preference: saved with the project, so a change to save, but nothing to undo"
+      (is (true? (get-in moved [:project :dirty?])))
+      (is (empty? (get-in moved [:history :undo-stack])))
+      (is (= 0.42 (get-in (persistent/project-files moved)
+                          ["project-metadata.edn" :config :window :grid-split]))))))
