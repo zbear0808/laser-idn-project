@@ -1,7 +1,7 @@
 # UX improvements: controls that work, a screen that tells the truth, the Grid tab as the performer's screen
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`)
-**Status:** In progress: Phase 0 done 2026-11-18 (`e2bce92`, as built in §8), Phase 1 done 2026-11-19 (`92c191a`, as built in §9); Phases 2–3 to do. Approved 2026-11-18 ("your plan with the rest of the stuff seems fine"; then "with the rest of the plan I agree with you. Go ahead and implement"). All decisions answered (§5): U1 performers, U2–U5 A   **Last verified against:** `b1da0f2`, by driving the app in test mode (headless, no hardware) through its REPL with plorer, 2026-11-18. The screenshots are in `debug-output/ux-*.png` (gitignored, not committed); Phase 0 as built against `e2bce92` (§8), Phase 1 against `92c191a` (§9)
+**Status:** In progress: Phase 0 done 2026-11-18 (`e2bce92`, as built in §8), Phase 1 done 2026-11-19 (`92c191a`, as built in §9), Phase 2 done 2026-11-19 (`e3d6d1b`, as built in §10); Phase 3 to do. Approved 2026-11-18 ("your plan with the rest of the stuff seems fine"; then "with the rest of the plan I agree with you. Go ahead and implement"). All decisions answered (§5): U1 performers, U2–U5 A   **Last verified against:** `b1da0f2`, by driving the app in test mode (headless, no hardware) through its REPL with plorer, 2026-11-18. The screenshots are in `debug-output/ux-*.png` (gitignored, not committed); Phase 0 as built against `e2bce92` (§8), Phase 1 against `92c191a` (§9), Phase 2 against `e3d6d1b` (§10)
 **Supersedes / Superseded by:** none   **Related findings:** review 01 (views); keyboard plan Phase 2 (dialog shell, menu stubs D4, `cell-label`), Phase 4 (clipboard); vibe plan V8 B (the vibe stuff has its own tabs, nothing on the Grid tab), V2 and output runtime O4 (Stop is the blackout)
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. "Ran" means seen in the running app or a REPL check; "read" means from the code. Anything marked **NEW** does not exist yet.
@@ -12,14 +12,14 @@ The look is coherent, and the timeline editor is the most polished part. The pro
 
 1. **Some controls silently do nothing**, or store junk. Phase 0, about 2 days. **Done** (`e2bce92`, §8).
 2. **The screen contradicts the output** in places. Phase 1, about 3 days. **Done** (`92c191a`, §9).
-3. **The layout doesn't scale**, which matters most on the Grid tab, now that you've said it is the performer's tab. Phase 2, about 3 days.
+3. **The layout doesn't scale**, which matters most on the Grid tab, now that you've said it is the performer's tab. Phase 2, about 3 days. **Done** (`e3d6d1b`, §10).
 4. **Guidance is stale or missing.** Phase 3, about 2 days.
 
 | Phase | Goal | Size | Needs |
 |---|---|---|---|
 | 0 | **Done 2026-11-18** (`e2bce92`, §8). Controls that work: one fix for the `:fx/event` placeholders, the cell colours, the single-output device, the trigger editor | ~2 d | none |
 | 1 | **Done 2026-11-19** (`92c191a`, §9). An honest screen: Stop shows what it did, the status bar names what plays, effects cells show on and off, one notice for failures, the stream state says why | ~3 d | 0 (the colours) |
-| 2 | The Grid tab as a performer's screen: pads that grow, larger text; a Cue Chain Editor that fits; dialogs that match | ~3 d | 1; the keyboard plan's Phase 2 for the dialog parts |
+| 2 | **Done 2026-11-19** (`e3d6d1b`, §10). The Grid tab as a performer's screen: pads that grow, larger text; a Cue Chain Editor that fits; dialogs that match | ~3 d | 1; the keyboard plan's Phase 2 for the dialog parts (not built: the footer kept its dropdowns, §10) |
 | 3 | Guidance: true hints, tooltips, platform shortcut text, Settings tidy-up, QUICKSTART | ~2 d | none |
 
 ## 1. What the app does today
@@ -386,3 +386,89 @@ Committed as `92c191a` on top of `6e26ee4` (built as `e9df4bf` on branch `ux-pha
 | After the merge, on `master` at `c556d71` (with vibe Phase 1): `clj -M:mac-arm:test`, then the full UI suite | 937 tests, 32,925 assertions, 0 failures; UI 79 tests, 311 assertions, 0 failures |
 | Again at `f7ec338` (vibe Phase 2 on top) | 951 tests, 33,040 assertions, 0 failures; UI 89 tests, 376 assertions, 0 failures |
 | `clj -M:kondo --lint` on every touched file | 0 errors, 0 warnings |
+
+## 10. As built: Phase 2 (2026-11-19)
+
+Committed as `e3d6d1b` on top of `f9fc352` (built as `5bb4472` on branch `ux-phase2` from `c556d71`, then cherry-picked past vibe Phase 2 with no conflicts). §1–7 cite `b1da0f2`; the lines below are at `5bb4472`.
+
+**Where it is now**
+- Pads that grow:
+  - NEW `laser-show.views.components.measured`: `measured` (`views/components/measured.clj:28`) describes a desc with the `:width` and `:height` its region is laid out at. The size is view-local state (`fx/ext-state`), kept by width and height listeners (`track-size!` `:10`), as the timeline editor keeps its lanes' size (`views/components/visual_editors/timeline_editor.clj:1039`); never an event. The grid and the preview use it.
+  - `views/components/grid_tab.clj`: NEW pure `cell-size` `:48`: the columns share the area's width, the rows its height, but a cell is never taller than wide nor smaller than 64×48 (`min-cell` `:46`); 80×60 before the first layout. NEW `label-size` `:64`: a sixth of the cell's width (of 4/3 of its height, for a wide cell), from 12 to 16 px. NEW private `grid-area` `:195` (`#grid-area`) is the measured area. Its minimum is what 64×48 cells need (`min-area-size` `:70`, 580×242 for 8×4), so the split pane can't make the tab too narrow for 8 columns. The column numbers (`grid-header` `:134`, `#grid-column-number-<col>`) are as wide as the cells and the row letters (`grid-with-labels` `:162`, `#grid-row-letter-<row>`) as high, in the cells' font size.
+  - `views/components/grid_cell.clj`: `generic-grid-cell` takes NEW `:size` and `:font-size` (`:100-101`), as its min and pref size (`:136-139`) and its label's inline `-fx-font-size` (`:200`). `grid-cell` and `effects-cell` pass them on, so the Effects tab grows too.
+  - `css/grid_cells.clj:104`: `.grid-cell-label` is 12 px (was 10), the size before the grid is measured.
+- The preview (`views/components/preview.clj`): NEW pure `canvas-side` `:281`. Each canvas is square, as the laser's x and y span the same -1..1, and as big as the pane lets every cell be. `preview-grid` `:337` takes the measured size (`preview-grid-panel` `:398`, through `measured` `:406`), centred along the top. It no longer reads `[:config :preview :width/:height]`, which `state/domains.clj:248` drops from the defaults; saved projects still carry them, unread.
+- The split position:
+  - Before this phase, `[:config :window]` was saved with all of `:config` in `project-metadata.edn` (`state/persistent.clj:49`), and loading merges the file's `:config` over the defaults one level deep (`replace-at-path` `:112`, `:126`), so a file's `:window` replaces the default whole. Nothing wrote it at runtime: the window's size is read (`views/root.clj:191-192`), never written. That stays so.
+  - `views/root.clj:127-130`: the split pane (NEW id `#main-split`) takes `:divider-positions` from NEW `subs/grid-split` (`subs.clj:130`; 0.65 when nothing is remembered) and has NEW event filter `remember-split` `:104`. A mouse release on a divider (`on-divider?` `:95`) dispatches NEW `:ui/set-grid-split` with the position. JavaFX sends the release to the node pressed, so a drag dispatches once, when it ends; layout passes (a resize, the stage's first sizing) dispatch nothing. A filter, because the skin's divider consumes its mouse events. Fully qualified classes keep the ns form as it was, for the merge with vibe Phase 2.
+  - `events/handlers/ui.clj:71` (routed `:167`) stores it in `[:config :window :grid-split]`.
+- `views/status_bar.clj`: NEW `text-size` 13 `:15`. `status-item` takes NEW `:size` (`:22-25`); the notice (`:72`) and the project status are 13 px, their icons 12. The frame times keep 11 (`:size 11`, `:127-160`).
+- The Cue Chain Editor (`views/dialogs/cue_chain_editor.clj`): the stage's minimum is 960×640 (`:693-694`) and the default 1120×760 (`:481-482`, was 800×700). The footer says "Default zone:" (`:114`) and "Trigger:" (`:303`), and none of its labels, choices and buttons shrinks below its text (`:min-width :use-pref-size`, `:115, 120, 304, 309, 619, 630, 640`). A preset's parameters keep their rows (`views/components/preset_param_editor.clj:51`, `:min-height :use-pref-size`): what is below them, an effect's parameters, which scroll, gives way first.
+- Dialogs:
+  - `views/tabs/projectors.clj:423-425`: "Port:" (NEW id `#projector-port-label`) never shrinks below its text.
+  - `views/dialogs/zone_group_editor.clj:103-137`: `container-primary`, `header-primary`, `label-secondary` and `text-field`, as in the Add Projector dialog (`views/dialogs/add_projector_manual.clj:22, 26, 29, 44`). No colour of its own is left but the swatches', which are the group's colours.
+  - `views/dialogs/cell_trigger_editor.clj:64`: "Close"; the id `#trigger-editor-done` stays.
+  - `events/handlers/projector.clj:240` (§8, found, not done): Add resets `[:ui :dialogs :add-projector-manual]` to `{:open? false}`, so the dialog closes and opens blank next time. An Add that fails (a blank host: `make-projector-config` asserts) changes nothing, and the dialog stays.
+
+**State**: `[:config :window :grid-split]` (NEW) is a preference (`state/history.clj:39-41`): saved with the project, not undoable, written by `:ui/set-grid-split` only. Like every preference, moving the divider marks the project unsaved. The measured sizes are view-local state, not app state.
+
+**Differences from the plan**
+
+| Plan (§3) | As built | Why |
+|---|---|---|
+| The footer uses the keyboard plan Phase 2's shared dropdowns | The two dropdowns it had, with the timeline editor's short labels | That phase isn't built, and it waits on an open decision |
+| Cells grow with the pane (minimum 64×48) | The columns share the width and the rows the height, and a cell is never taller than wide | At 1680×1000 a cell filling its row would be about 123×180: a column, not a pad |
+| "The preset parameters get the free height instead of the fixed 300 px list (`:503`)" | The preset's parameters never shrink below their rows; the 300 px list stays | In the code the 300 px list (`:509`) is the left column's cue chain list. The preset parameters are in the right column, where the effect's parameters (`:595`, a tall visual editor) squeezed them to one row; the list takes no height from them |
+| The preview sizes from its pane | Its canvases are also square | A stretched canvas would draw a circle as an ellipse |
+| The Zone Group editor takes `dialog-content` and `text-field`, as `add_projector_manual.clj:22, 43` does | `container-primary` and `text-field` | The doc names `dialog-content`, the code it points to uses `container-primary`. `.dialog-content` also sets `-fx-spacing: 0` (`css/cue_chain_editor.clj:33-35`), which a stylesheet applies over a v-box's own spacing, so the editor's sections would touch |
+| `cells-grow-with-the-window-test` at 1200×800 and 1680×1000 | At 1024×700, 1200×800 and 1680×990 | Headless, the screen is 1000×1000 and a window that reaches past its last row can't be drawn: `HeadlessWindow.blit` throws IndexOutOfBounds and the run aborts. `ui/set-size!` puts the window at the top-left corner. 1024×700 is invariant 6's smallest size |
+| `split-position-is-remembered-test`: a drag of the divider | The press, drags and release are fired at the divider (NEW `ui/fire-drag!`) | Headless, the glass robot's drag events carry no button (`HeadlessRobot.mouseMove` passes modifiers 0). Once the mouse leaves the 6 px divider, the drag and the release go to the cell under it, so the divider stays and the release never reaches it |
+| — (§8's Add Projector bug, done here) | Add closes the dialog, which also opens blank next time | The dialog's data is kept between opens: with the host still there, Add Manual… then Add would add it again |
+| The status bar text goes to 12–13 px | 13 px; the frame times keep 11 | They are dev mode only, in monospace in widths (56 and 245 px) made for 11 px |
+| — | No default split in `state/domains.clj` | A loaded file's `:window` replaces the default whole, so the view needs its own fallback anyway: `subs/grid-split` has it |
+
+**Found, not done**
+- The divider doesn't start at 0.65: at 1200 it sits at about 0.640 (it was 0.635, where the preview's fixed 400×400 cells held its pane at 434 px). The split pane first lays out its panes at their preferred widths, then shares the rest equally, and every window resize also shares the change equally, so the fraction follows the window. Neither is remembered, which is the point; a remembered position comes back exactly after another tab.
+- The trigger editor's v-box has `:spacing 12` (`views/dialogs/cell_trigger_editor.clj:27`) but `dialog-content`'s `-fx-spacing: 0` wins (ran: `getSpacing` 0.0), so its header, bank and footer touch.
+- `subs/preview-config` (`subs.clj:136`) has no reader now. It stays: it reads the preview's config map, which is still there.
+- When the Grid or Effects tab mounts, its cells are 80×60 until the area's first layout is measured, a frame later (read, not seen).
+
+**Tests** (UI: `with-toolkit` once, `with-app` each)
+- NEW `laser-show.views.components.grid-tab-test`: `cell-size-test` (80×60 before a layout; 1024×700's area 70×70; 1680×1000's 123×123; a short, wide area 166×62; never under 64×48) and `label-size-test` (12 px at 64×48 and 70×70, 14 at 84, 16 at 123; a wide 166×62 cell 14).
+- `laser-show.views.components.preview-test/canvas-side-test`: 2x2 at 1200×800 197, 1x1 400; a wide, short pane 117 (137 without labels); 175 before a layout; never negative.
+- `laser-show.views.status-bar-test/status-text-is-13-px-test`: a status item's label and value and the notice are 13 px; the five frame times 11.
+- `laser-show.events.ui-handlers-test/grid-split-is-a-saved-preference-test`: 0.65 when nothing is remembered; through the pipeline 0.42 is stored and read back, marks the project unsaved, adds no undo step, and is in `project-metadata.edn`.
+- `laser-show.events.projector-handlers-test/add-manual-closes-and-clears-its-dialog-test`.
+- UI `laser-show.ui-test.grid-test`:
+  - `cells-grow-with-the-window-test`: at 1024×700, 1200×800 and 1680×990 all 32 cells are left of the divider and above the status bar. They grow with the window and never get under 64×48. Their text is 12 to 16 px and larger at the largest. Column 8's number and row D's letter are centred on their cells within 1 px.
+  - `split-position-is-remembered-test`: a resize moves the divider and nothing is remembered. A drag of -200 px moves it; nothing is remembered while it is held, and on release the position is, with no undo step. The cells take the new width. After the Projectors tab and back, the divider is where it was left. `grid-renders-stable-cell-locators` passes unchanged.
+- UI `laser-show.ui-test.preview-test/preview-cells-fill-their-pane-test`: the 2x2 canvases are square, inside the panel and wider than half of it less 20 px; bigger at 1680×990; one cell is more than 1.5 times as big.
+- UI `laser-show.ui-test.main-window-test`:
+  - `cue-chain-editor-footer-fits-test`: the minimum is 960×640 and it opens larger. At 960×640 every label, button and choice in the footer shows its whole text (the skin's text, `ui/shown-text`), "Default zone:" and "Trigger:" among them.
+  - `cue-chain-editor-keeps-preset-params-in-view-test`: at 960×640, with Scale added to the circle and selected, Color, Radius and Point Count are inside the parameters' viewport.
+  - `zone-group-editor-uses-theme-classes-test`: no inline colour but the swatches'; both fields `text-field`; the background and the name field are the Add Projector dialog's (`#121212`, `#3D3D3D`).
+- UI `laser-show.ui-test.setup-dialogs-test`: `add-projector-closes-after-add-test` (one click, one projector, and the dialog goes; Add Manual… opens blank with Add disabled) and `projector-port-label-shows-whole-test`.
+- UI `laser-show.ui-test.trigger-editor-test/cell-trigger-editor-opens-and-closes-modal`: the button says "Close".
+- `laser-show.ui-test.testfx`: NEW `main-window`, `set-size!`, `scene-bounds`, `shown-text` and `fire-drag!`.
+
+**Red first** (at `c556d71`, with the tests and no source change)
+- Unit, one namespace at a time:
+  - `grid-tab-test`: "No such var: grid-tab/cell-size". `preview-test`: "No such var: preview/canvas-side". `ui-handlers-test`: "No such var: subs/grid-split".
+  - `status-bar-test`: 6 tests, 3 failures (the label, the value and the notice at 11 px).
+  - `projector-handlers-test`: 19 tests, 1 failure (after Add the dialog was still `{:open? true :name "Stage left" :host "10.0.0.5" :port "7300"}`).
+- UI, the 9 new or changed tests in one run: 9 tests, 5 failures, 8 errors.
+  - The footer: minimum `[0.0 0.0]`, 800 wide, "Default Zone (Chain Fallback):" and "Trigger Mode:". The preset parameters: Radius and Point Count never came into the viewport. The zone group editor: inline colours on its root, title, subtitle, labels and fields, and `#2D2D2D`/`#404040` against the Add Projector dialog's `#121212`/`#3D3D3D`.
+  - The preview's canvases were 195×175, never square. Add Projector never closed. The trigger editor said "Done".
+  - The grid and split tests found no `#grid-area` or `#main-split`, and the Port test no `#projector-port-label`. With those ids added (and the numbers' and letters'), the cells never took the area's width at 1024×700 (80 px, fixed), and "Port:" showed "P...". That run then aborted on the headless screen's limit at 1400×900, which `ui/set-size!` now avoids.
+  - The split test with `ui/fire-drag!`, against `:divider-positions [0.65]` and no filter: the position was never remembered (`grid_test.clj:257`).
+
+**Verification, 2026-11-19, macOS arm64, JDK 25**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test` at `c556d71`, before any change (the baseline) | 937 tests, 32,925 assertions, 1 failure: `streaming-engine-test/failing-sends-wait-for-the-next-tick-test`, a timing check ("409 ms after the last configuration") on a loaded machine; that namespace alone: 17 tests, 65 assertions, 0 failures |
+| `clj -M:mac-arm:test -n` grid-tab-test, views.components.preview-test, views.status-bar-test, ui-handlers-test, projector-handlers-test | 43 tests, 185 assertions, 0 failures |
+| `clj -M:test-ui:mac-arm:test-ui-headless -n` grid, main-window, setup-dialogs, trigger-editor, preview, status-bar, toolbar, cue-chain-list, menu-bar, streaming-status, in one run | 60 tests, 245 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 943 tests, 32,964 assertions, 0 failures (937 before, 6 new) |
+| `clj -M:test-ui:mac-arm:test-ui-headless` (full UI suite) | Not run here: it runs after the merge onto master. 87 tests now, 79 before |
+| `clj -M:kondo --lint` on every touched file | 0 errors; 3 warnings, all there before (an unused require in `events/handlers/projector.clj`, two "Condition always true" in `views/dialogs/cue_chain_editor.clj`) |
