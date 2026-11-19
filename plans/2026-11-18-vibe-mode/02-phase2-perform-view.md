@@ -1,7 +1,7 @@
 # Phase 2: the Perform tab
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`)
-**Status:** Proposed. Needs Phase 1; V8 answered B (2026-11-18: the vibe stuff gets its own tabs, nothing on the Grid tab)   **Last verified against:** `b1da0f2`
+**Status:** Done in `94f905e` (2026-11-19); V8 answered B (2026-11-18: the vibe stuff gets its own tabs, nothing on the Grid tab). As built: §10   **Last verified against:** `94f905e` (§10)
 **Supersedes / Superseded by:** none   **Related findings:** review 01 T5 (narrow subscriptions); keyboard plan K-15 (learn also fires the old binding) shows up when a role is re-learned
 
 A screen you can read from two metres, five pads you can click, touch or press from any controller, and a way to teach a pad which key it is. With Phase 1 this is the first usable version.
@@ -155,3 +155,70 @@ Run: `clj -M:mac-arm:test subs input vibes`, then `clj -M:test-ui:mac-arm:test-u
 - **A full-screen or pop-out Perform window**: later. The dialog stage shell (keyboard plan Phase 2) is the right base for it.
 - **Keeping pointer state in the view** (a local atom of held pads): rejected: stale closures, and the focus-loss release needs the engine's `:src` anyway.
 - **Showing the cue thumbnail** on the pad: the preview pane already shows the output; names are enough and cheap.
+
+## 10. As built (2026-11-19)
+
+Committed as `94f905e` on top of `c556d71` (built as `3164717` on branch `vibe-phase2` from `6e26ee4`, then cherry-picked past UX Phase 1 with no conflicts; Phase 1 is `9177b1e`). §1–9 cite `b1da0f2`; the lines below are at `3164717`.
+
+**Where it is now** (paths under `src/laser_show/`)
+- `views/tabs/perform.clj` (NEW): `perform-tab` `:116` (banner, header, strip, pads, status line), private `banner` `:18`, `tempo` `:31` (BPM and four beat squares, the only part a beat re-renders), `header` `:55` (name in the vibe's colour, energy, LOCKED, "Press the key for HIT"), `status-line` `:96` (`subs/connection-status`'s text, `subs/midi-connected-devices`). The banner is always in the tree, hidden while it has nothing to say, so showing it never makes new nodes of the pads under it (a held pad keeps getting its release).
+- `views/components/vibe_pads.clj` (NEW): `pad` `:37`, `pad-row` `:107`. A pad is a `:label` with a mouse-transparent graphic (as a grid cell is, for its context menu), so a press and its release always reach the pad node; `:focus-traversable false`; ids `vibe-pad-hit` … and `-now`, `-keys`, `-badge`; the menu's items `-learn`, `-cancel-learn` (disabled unless this pad is learning), `-clear` (disabled without a binding).
+- `views/components/vibe_strip.clj` (NEW): `vibe-strip` `:26`, `energy-dots` `:9`; a chip is a non-focus-traversable button (`vibe-chip-vibe-1` …) whose `:on-action` is `:vibe/select`.
+- `css/vibes.clj` (NEW), in both URL lists (`css/core.clj:57, 82`). State rules have one class more than the base rule, and no two state rules that can apply together set the same property (cljfx.css writes a map of more than eight rules in hash order).
+- `events/handlers/vibes.clj`: public `pointer-action` `:18` (a raw JavaFX event → `:press`, `:release` or nil), private `handle-pointer` `:40` (`:vibe/pointer`), `handle-window-focus` `:53`, `handle-clear-control` `:62`, routed in `handle` `:69`.
+- `subs.clj`: one require (`vibes.library`, `:29`) and the section ";; Vibe mode" at the end, `:862-999`: `vibe-config` `:869`, `vibe-current-id` `:874`, `vibe-next-id` `:883`, `vibe-blackout?` `:890`, `vibe-strip` `:895`, `vibe-header` `:918`, `vibe-role-bindings` `:942`, `vibe-pad` `:977`, and private per-role `sub-val` fns (`vibe-held?`, `vibe-playing-cell`, `vibe-learning?`, `vibe-problem`, `vibes?`, `vibe-locked?`) so a pad's sub depends on booleans and one cell, not on whole maps.
+- `events/handlers/input.clj`: `learn-target` `:225` keeps `:role`; NEW private `action-name` `:267`; `handle-input-learn-captured` `:278` removes the role's other bindings first (`:291-292`) and names what it replaced (`:295-297`). `events/handlers/history.clj:148` `:vibe/clear-control "Clear Control"`. `vibes/library.clj:56` NEW `binds-role?`.
+- `views/components/trigger_bank.clj:37` public `binding-label`, used by the trigger editor (`:104`) and the pads. `views/root.clj`: the tab `:79`, `tab-content` `:64`, the main stage's `:on-focused-changed` `:176`.
+
+**The brief's corrections (a–j)**
+- a. The pads send `:src :pad`, which the engine reads (`engine.clj` `press`); §4's `:source` was wrong.
+- b. Only the primary button presses. A right-click opens the menu and never presses or releases; so does a macOS Ctrl-click, whose press is a popup trigger. And a pad's release is sent only while the pad's own press still holds the role (`[:vibe-runtime :held role :src]` is `:pad`), so neither a Ctrl-click's release nor a release that comes after a focus loss can cut a key's hold.
+- c. Touch: the mouse events JavaFX synthesizes from a touch are left out and a touch counts through its touch events, `TOUCH_PRESSED`/`TOUCH_RELEASED` of the event's own point (`getTouchPoint`). No id bookkeeping is needed: JavaFX fires one event per touch point, at the node that point went down on, typed by that point's state (`Scene.processTouchEvent`), so a second finger on another pad sends that pad its own events and only `TOUCH_STATIONARY` here. The edge is a pure handler, unit-tested with constructed `MouseEvent`, `TouchPoint` and `TouchEvent` objects (no toolkit needed), including a two-point event set (ids 1 and 2). Found on the way: the headless glass robot marks **every** mouse event synthesized and a popup trigger (`HeadlessRobot` calls `notifyMouse(..., true, true)`), so in headless runs a robot click on a pad is (rightly) ignored. NEW `ui/press-node!`, `release-node!`, `mouse-click!` (`test/laser_show/ui_test/testfx.clj:321, 338, 350`) fire a real mouse's events at the node headless, as `fire-modified-click!` already does for modifier clicks, and use the robot in visible runs. Multi-touch on a real touchscreen stays manual and unverified.
+- d. `vibe-header`'s `:banner` (`subs.clj:918-937`) is "BLACKOUT" only while nothing lights the room; with `:blackout?` on and cues playing (`:playing?` true and intents left, as a grid click makes) it is "BLACKOUT · vibe keys off · a grid cue is playing" (or "n grid cues are playing"). It reads the playback only during blackout, so a HIT press leaves the header identical. Tests: `blackout-banner-is-honest-test` and the UI test below.
+- e. `vibe-pad`'s `:playing` is the cell, not a name; the pad names it with `grid-cell/cell-label` of `subs/cell-display-data` (`vibe_pads.clj:28-29`): subs.clj can't call a view namespace's fn (grid_cell requires subs).
+- f. `binding-label` is public; the trigger editor's UI tests pass.
+- g. K-15 stays: re-learning HIT by pressing its current key also fires HIT. The learn then changes nothing, so it makes no undo step (asserted).
+- h. Nothing depends on UX Phase 1. The subs are in their own section at the end of `subs.clj`, with one require between two that both branches keep. UX Phase 1 also appended to `test/laser_show/subs_test.clj` and put a require after `clojure.test`, so the new subs tests sit between `beat-index-sub-test` and `timeline-dialog-subs-ignore-playback-and-other-cells-test`, with their requires after `subs`. `git merge-tree` of this branch with `master` (`c556d71`, UX Phase 1 done) is clean, and that tree, exported, passes the full unit suite and the perform, trigger editor and main window UI tests (table below). An undo label names cells "A1", as UX Phase 1's `views.dialogs.common/cell-label` does; a handler can't use a view fn, so `action-name` has its own line.
+- i. `ui-test.perform-test`'s `with-input-mapper` fixture (`:25`) sets the mapper's dispatch fn to `events/dispatch!`, starts it, and stops it and clears the fn after.
+- j. Headless glass can't move the focus to another window: `HeadlessWindow._requestFocus` only notifies the window that asks, and glass `Window.requestFocus` refuses `FOCUS_LOST` for a top-level window. So `notify-focus!` (`perform_test.clj:92`) calls the main window's glass `notifyFocus(FOCUS_LOST)` by reflection, as the OS would; from there JavaFX's own path runs (`GlassWindowEventHandler` → `WindowStage` → the Stage's `focused` → cljfx's listener → `:vibe/window-focus`), and the test checks `Stage.isFocused` went false.
+
+**Other differences from the plan**
+
+| Plan | As built | Why |
+|---|---|---|
+| — (not said) | `learn-target` keeps `:role` (`input.clj:225-230`) | with `select-keys [:type :target]` every role's learn was `{:type :vibe}`: a capture for any role matched any role's learn, and the LEARN badge couldn't tell the pads apart |
+| the undo label "names" the replaced action | "Learn Trigger (replaces cue A1)", "(replaces effect B3)", "(replaces HIT)", "(replaces tap tempo)"; plain "Learn Trigger" when the key was free or did the same | the existing "Learn Trigger" stays the base |
+| `vibe-pad` `:bindings ["MIDI Ch 1 Note 36"]`, `:playing "Circle"` | `:bindings` are the trigger-map keys, named in the pad by `binding-label`; `:playing` is the cell (e) | subs don't require view namespaces |
+| subs `vibe-order` | not added; NEW `vibe-next-id`, `vibe-role-bindings`; the header also has `:banner` and `:learning`, VIBE's pad `:next` and `:locked?`, BLACKOUT's `:on?` | nothing read `vibe-order` (the pads read a boolean, so reordering vibes doesn't re-render them; the strip reads `vibe-config`) |
+| "No vibes yet. Open the Vibes tab" | "No vibes yet" in the header's name, every pad dim | there is no Vibes tab until Phase 3 |
+| tempo and beat in the header | in their own component inside it | a beat re-renders the tempo only |
+| §1: `press!` and `release!` hold a pad | `press!` pushes a key; NEW `press-node!`/`release-node!` (c) | |
+| `hit-pad-quick-click-leaves-a-decay-test` | sets `:quick-tap-ms` to 2000 first | a busy machine can't stretch the click into a hold; the 149/150 ms edge is pinned by Phase 1's `long-hold-cuts-on-release-test` |
+| pad presses timed by `:time` (01 §6) | as planned | a busy agent can still stretch a pad tap into a hold (probe v12); stamping at the FX edge would need a fn handler instead of an event map |
+
+**Found, not done**
+- A Windows touch press-and-hold (the OS's right-click) presses the pad while it opens the menu: manual, with multi-touch.
+
+**Tests**: 24 new (unit 925 → 939, and 10 UI)
+- `laser-show.subs-test` (+6): `vibe-pad-sub-test`, `vibe-strip-sub-test` (and the header), `hit-press-leaves-the-strip-and-other-pads-alone-test` (invariant 4, also a HIT that restarts ACCENT's cell), `vibe-change-leaves-the-pads-but-vibe-alone-test` (invariant 5), `playing-name-clears-when-the-run-ends-test` (the clock's `:show-clock/cue-ended`, and the grid restarting the cell), `blackout-banner-is-honest-test` (d).
+- `laser-show.events.handlers.vibes-test` (+5): `pointer-presses-with-the-primary-button-only-test`, `one-touch-gives-one-press-and-one-release-test` (one finger with its synthesized mouse events; two fingers on two pads), `pad-release-lets-go-only-of-a-pad-hold-test`, `window-focus-lost-releases-pad-holds-only-test`, `clear-control-removes-only-that-role-test` (undoable, "Clear Control", unsaved).
+- `laser-show.events.handlers.input-test` (+2): `relearning-a-role-moves-its-binding-test` (invariant 6; a capture for HIT while ACCENT learns is ignored; a cell still gets a second key), `learning-over-another-action-names-it-in-the-undo-label-test`.
+- NEW `laser-show.views.components.trigger-bank-test/binding-label-test`.
+- NEW `laser-show.ui-test.perform-test` (10): the nine of §8, and `hit-pad-touch-presses-once-test` (a constructed touch and its synthesized mouse events fired at the pad: one press, one release, one cue picked). `learn-binds-a-role-to-a-note-test` also fires a non-synthesized secondary press and release first (nothing pressed), then learns through the real context menu; `pad-hold-ends-when-the-window-loses-focus-test` also checks that the mouse's late release leaves a key's hold of HIT alone.
+
+**Red first**
+- Before the handlers, subs and `binding-label` (only `binds-role?` written): `subs-test` and `trigger-bank-test` didn't compile (`No such var: subs/vibe-pad`, `trigger-bank/binding-label`); `input-test` with `vibes-test`: 16 tests, 90 assertions, 20 failures (input 7: the role as learning target, the move, a capture while another role learns, the four "replaces" labels; vibes 13: every pointer, focus and clear-control assertion).
+- `perform-test` with the views stashed (handlers and subs in): 10 tests, 10 errors, each timing out waiting for `#perform-tab`. The first run with the views: 10 errors, "No such prop: :v-box/vgrow": a layout constraint goes on the component's desc in the parent (`{:fx/type pad :h-box/hgrow :always}`), not on the node the component returns.
+
+**Verification, 2026-11-19, macOS arm64, JDK 25**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test subs input vibes trigger-bank` | 162 tests, 863 assertions, 0 failures |
+| `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.perform-test` | 10 tests, 65 assertions, 0 failures |
+| the same, `-n` trigger-editor-test, main-window-test, grid-test, setup-dialogs-test, toolbar-test | 27 tests, 102 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 939 tests, 32,981 assertions, 0 failures (30 s; baseline 925) |
+| `clj -M:kondo --lint` on every touched file | 0 errors; 1 warning, there before (a redundant `let` in `input.clj` `handle-input-update-cell-trigger-action`, `:310` before, `:332` now) |
+| this branch merged with `master` `c556d71` (`git merge-tree`, tree exported, no branch touched) | no conflict; full unit suite 951 tests, 33,041 assertions, 0 failures; perform, trigger editor and main window UI 22 tests, 119 assertions, 0 failures |
+| full UI suite | not run here: it runs after the merge onto `master` |
+| manual (unverified) | multi-touch on a real touchscreen, a visible (non-headless) run, the screen at 2 m (Phase 7 hardware check) |
