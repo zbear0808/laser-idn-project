@@ -1,6 +1,10 @@
 (ns laser-show.views.components.preview-test
   "Unit tests for preview.clj helper functions."
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [cljfx.api :as fx]
+            [clojure.test :refer [deftest testing is]]
+            [laser-show.dev-config :as dev-config]
+            [laser-show.state.core :as state]
+            [laser-show.state.domains :as domains]
             [laser-show.views.components.preview :as preview]))
 
 ;; Access the private function via var
@@ -58,3 +62,18 @@
   (testing "blank before any stats exist"
     (is (= "" (preview/frame-stats-label nil)))
     (is (= "" (preview/frame-stats-label {})))))
+
+(deftest frame-stats-only-in-dev-mode-test
+  (let [header-ids (fn [dev?]
+                     (with-redefs [dev-config/dev-mode? (constantly dev?)]
+                       (->> (preview/preview-grid-header
+                             {:fx/context (fx/create-context
+                                           (assoc-in (domains/build-initial-state)
+                                                     [:backend :streaming :frame-stats] {:avg-latency-us 123})
+                                           state/cache-factory)})
+                            :children
+                            (keep :id)
+                            set)))]
+    (is (contains? (header-ids true) "preview-frame-stats"))
+    (is (not (contains? (header-ids false) "preview-frame-stats")) "µs per frame is for developers")
+    (is (contains? (header-ids false) "preview-layout-selector"))))

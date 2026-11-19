@@ -2,7 +2,7 @@
   "Layout and container styles for the laser show UI using cljfx/css.
    
    Provides CSS classes for:
-   - Toolbar with transport controls
+   - Toolbar with transport controls (and the OUTPUT OFF chip, a link)
    - Status indicators (connection states)
    - Panel containers
    
@@ -60,6 +60,24 @@
        
        ".status-indicator-connecting"
        {:-fx-background-color accent-warning}
+       
+       ;; Stop holds the cues: the output is blacked out (views/toolbar.clj)
+       ".output-held-chip"
+       {:-fx-background-color accent-warning
+        :-fx-background-radius 8
+        :-fx-padding ["2px" "8px"]
+        :-fx-text-fill bg-primary
+        :-fx-font-size 11
+        :-fx-font-weight "bold"}
+       
+       ;; A link in the toolbar (its style class replaces .hyperlink's)
+       ".toolbar-link"
+       {:-fx-text-fill accent-info
+        :-fx-font-size 11
+        :-fx-cursor "hand"
+        
+        ":hover"
+        {:-fx-underline true}}
        
        ;; Beat Indicator
        ".beat-indicator"

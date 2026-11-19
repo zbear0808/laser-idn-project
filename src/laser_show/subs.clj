@@ -29,7 +29,6 @@
             [laser-show.css.core :as css]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.chains :as chains]
-            [laser-show.common.util :as u]
             [laser-show.dev-config :as dev-config]))
 
 
@@ -49,9 +48,6 @@
 
 (defn playing? [context]
   (fx/sub-val context ex/playing?))
-
-(defn active-cell [context]
-  (fx/sub-val context ex/active-cell))
 
 (defn beat-index
   "The beat in the bar, 0-3 (0 is the downbeat), from the show clock's
@@ -85,6 +81,11 @@
 
 (defn clipboard [context]
   (fx/sub-val context ex/clipboard))
+
+(defn notice
+  "The status bar's notice, {:id :text :level}, or nil."
+  [context]
+  (fx/sub-val context get-in [:ui :notice]))
 
 
 
@@ -252,26 +253,40 @@
      :timeline? timeline?
      :has-content? has-content?}))
 
-(defn active-cell-preset
-  "Get the preset ID of the currently active cell.
-   
-   Depends on:
-   - active-cell
-   - chains domain (cue-chains)
-   
-   Returns: preset-id keyword of first preset, or nil if no cell is active"
-  [context]
-  (when-let [[col row] (fx/sub-ctx context active-cell)]
-    ;; Get first preset from cue chain
-    (let [chains-data (fx/sub-val context :chains)
-          cue-chain (get-in chains-data [:cue-chains [col row] :items] [])]
-      ;; Return first preset's ID (filter out groups)
-      (:preset-id (u/seek #(= :preset (:type %)) cue-chain)))))
+(defn- held-count [state]
+  (if (ex/playing? state) 0 (count (ex/active-cues state))))
 
-(defn active-preset
-  "Alias for active-cell-preset. Get preset of currently active cell."
+(defn held-cue-count
+  "How many cues Stop holds. Stop is the blackout (handlers/timing.clj): it
+   sets :playing? false and leaves the cues' intents, so they stay in play
+   with nothing drawing them, and Play resumes them. 0 while playing, or with
+   no cue in play."
   [context]
-  (fx/sub-ctx context active-cell-preset))
+  (fx/sub-val context held-count))
+
+(defn output-held?
+  "True while Stop holds cues (held-cue-count above 0): the output is blacked
+   out, and the held cues' cells and the toolbar say so."
+  [context]
+  (pos? (fx/sub-ctx context held-cue-count)))
+
+(defn- cue-cells-in-grid-order
+  "The cells with an intent, row by row as the grid reads: A1, A2 … B1 …"
+  [state]
+  (vec (sort-by (fn [[col row]] [row col]) (keys (ex/active-cues state)))))
+
+(defn playing-cues
+  "The cues that play, in grid order, each as what its cell's label is made
+   from (views/components/grid_cell.clj cell-label):
+   {:col :row :name :first-preset-id :preset-count :timeline?}. None while
+   Stop holds them (output-held?): nothing is drawn then."
+  [context]
+  (if (fx/sub-ctx context playing?)
+    (mapv (fn [[col row]]
+            (select-keys (fx/sub-ctx context cell-display-data col row)
+                         [:col :row :name :first-preset-id :preset-count :timeline?]))
+          (fx/sub-val context cue-cells-in-grid-order))
+    []))
 
 ;; Level 2: Computed Effect Cell Subscriptions
 
@@ -292,6 +307,7 @@
    - :name - custom name for the effect chain (nil if not set)
    - :effect-count - number of actual effects in chain (flattened, excludes groups)
    - :first-effect-id - id of first effect (not group)
+   - :effect-ids - ids of the effects, in chain order (flattened)
    - :active? - is effect chain active?
    - :selected? - is effect chain cell selected?
    - :has-effects? - does cell have any effects?
@@ -310,6 +326,7 @@
      :name (:name cell-data)
      :effect-count effect-count
      :first-effect-id (:effect-id first-effect)
+     :effect-ids (mapv :effect-id flattened-effects)
      :active? (:active? cell-data false)
      :selected? selected?
      :has-effects? (pos? effect-count)
@@ -371,7 +388,8 @@
    - :running? - streaming is on
    - :state - :stopped, :stopping, :starting, :streaming, :error or :idle
      (on, with no enabled projectors)
-   - :status-text - e.g. \"Streaming to 2 of 3 · 1 error\"
+   - :status-text - e.g. \"Streaming to 2 of 3 · 1 error\", or \"No
+     projectors enabled\" (:idle)
    - :errors - [\"<projector name>: <error>\" …]"
   [context]
   (let [running? (boolean (fx/sub-val context get-in [:backend :streaming :running?]))
@@ -394,6 +412,7 @@
                     :stopped "Not streaming"
                     :stopping "Stopping…"
                     :starting "Starting…"
+                    :idle "No projectors enabled"
                     (str "Streaming to " streaming " of " wanted
                          (when (zero? wanted) " (no enabled projectors)")
                          (when (seq errors)

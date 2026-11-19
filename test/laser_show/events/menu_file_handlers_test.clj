@@ -108,6 +108,20 @@
     (is (nil? (get-in result [:state :project :current-file])))
     (is (true? (get-in result [:state :project :dirty?])))))
 
+(deftest failed-save-sets-a-notice-test
+  (let [result (menu/handle {:event/type :file/save-failed
+                             :file-path "test-output/shows/friday.zip"
+                             :previous-project (:project document-state)
+                             :state document-state})
+        {:keys [id] :as notice} (get-in result [:state :ui :notice])]
+    (is (= {:text "Could not save friday.zip" :level :error} (dissoc notice :id)))
+    (is (some? id))
+    (testing "it goes after 6 s, and only that notice"
+      (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000}
+             (:dispatch-later result))))
+    (testing "the project status is still restored"
+      (is (true? (get-in result [:state :project :dirty?]))))))
+
 (deftest save-as-pipeline-test
   (testing "Save As through the wired pipeline writes the zip and keeps the file/clean flag"
     (state/reset-state! document-state)
@@ -204,7 +218,23 @@
 (deftest open-missing-file-keeps-state-test
   (state/reset-state! document-state)
   (events/event-handler {:event/type :file/open-result :file-path "test-output/does-not-exist.zip"})
-  (is (= document-state (state/get-raw-state))))
+  (is (= document-state (assoc-in (state/get-raw-state) [:ui :notice] nil))
+      "only the notice changed"))
+
+(deftest failed-open-sets-a-notice-test
+  (let [result (menu/handle {:event/type :file/project-load-failed
+                             :file-path "test-output/does-not-exist.zip"
+                             :state document-state})
+        {:keys [id] :as notice} (get-in result [:state :ui :notice])]
+    (is (= {:text "Could not open does-not-exist.zip" :level :error} (dissoc notice :id)))
+    (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000}
+           (:dispatch-later result)))
+    (is (= document-state (assoc-in (:state result) [:ui :notice] nil)) "the document is kept"))
+  (testing "through the pipeline, as Open does it"
+    (state/reset-state! document-state)
+    (events/event-handler {:event/type :file/open-result :file-path "test-output/does-not-exist.zip"})
+    (is (= "Could not open does-not-exist.zip"
+           (get-in (state/get-raw-state) [:ui :notice :text])))))
 
 
 ;; New Project

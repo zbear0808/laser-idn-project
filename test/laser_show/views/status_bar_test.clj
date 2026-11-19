@@ -1,6 +1,10 @@
 (ns laser-show.views.status-bar-test
   "Unit tests for status bar view components."
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [cljfx.api :as fx]
+            [clojure.test :refer [deftest testing is]]
+            [laser-show.dev-config :as dev-config]
+            [laser-show.state.core :as state]
+            [laser-show.state.domains :as domains]
             [laser-show.views.status-bar :as status-bar]
             [clojure.string :as str]))
 
@@ -37,3 +41,67 @@
       (is (= :center-left (:alignment val-label)))
       (is (str/includes? (:style val-label) "Consolas")))))
 
+(defn- cue
+  "A playing cue as subs/playing-cues gives it."
+  [col row preset-id preset-count]
+  {:col col :row row :name nil :first-preset-id preset-id :preset-count preset-count :timeline? false})
+
+(deftest playing-list-test
+  (is (nil? (status-bar/playing-list [])) "nothing plays: no item")
+  (is (= "A1 circle" (status-bar/playing-list [(cue 0 0 :circle 1)])))
+  (testing "each cue by its cell and the name on its cell: a custom name, or the first preset and \"+n\""
+    (is (= "A1 Intro · B3 star +2"
+           (status-bar/playing-list [(assoc (cue 0 0 :circle 1) :name "Intro") (cue 2 1 :star 3)]))))
+  (testing "two by name, then how many more"
+    (is (= "A1 circle · A2 square · +2"
+           (status-bar/playing-list [(cue 0 0 :circle 1) (cue 1 0 :square 1)
+                                     (cue 2 0 :triangle 1) (cue 3 0 :star 1)])))
+    (is (= "A1 circle · A2 square · +1"
+           (status-bar/playing-list [(cue 0 0 :circle 1) (cue 1 0 :square 1) (cue 2 0 :triangle 1)])))))
+
+(deftest output-health-text-test
+  (let [on (fn [state errors] {:running? true :state state :errors errors})
+        streaming (fn [fps] {:state :streaming :fps fps})]
+    (testing "nothing while streaming is off, or has nothing to stream: the toolbar says so"
+      (is (nil? (status-bar/output-health-text {:running? false :state :stopped :errors []} nil)))
+      (is (nil? (status-bar/output-health-text {:running? false :state :stopping :errors []} nil)))
+      (is (nil? (status-bar/output-health-text (on :idle []) {}))))
+    (is (= "Starting…" (status-bar/output-health-text (on :starting []) nil)))
+    (is (= "Starting…" (status-bar/output-health-text (on :streaming []) {:a {:state :starting}}))
+        "on, but no projector draws yet")
+    (testing "the frame rate the projectors draw"
+      (is (= "59.8 fps" (status-bar/output-health-text (on :streaming []) {:a (streaming 59.8)})))
+      (is (= "59.8 fps" (status-bar/output-health-text (on :streaming []) {:a (streaming 59.8) :b (streaming 59.8)})))
+      (is (= "25.0–59.8 fps" (status-bar/output-health-text (on :streaming []) {:a (streaming 59.8) :b (streaming 25.0)}))
+          "the slowest and the fastest"))
+    (testing "and how many fail"
+      (is (= "59.8 fps · 1 error"
+             (status-bar/output-health-text (on :error ["B: no host"])
+                                            {:a (streaming 59.8) :b {:state :error :error "no host"}})))
+      (is (= "2 errors"
+             (status-bar/output-health-text (on :error ["A: x" "B: y"])
+                                            {:a {:state :error :error "x"} :b {:state :error :error "y"}}))))))
+
+(defn- status-bar-items
+  "The components the status bar shows, with dev mode on or off."
+  [dev?]
+  (with-redefs [dev-config/dev-mode? (constantly dev?)]
+    (->> (status-bar/status-bar {:fx/context (fx/create-context (domains/build-initial-state) state/cache-factory)})
+         :children
+         (map :fx/type)
+         set)))
+
+(deftest dev-stats-only-in-dev-mode-test
+  (testing "the frame times are for developers"
+    (is (contains? (status-bar-items true) status-bar/frame-stats-status))
+    (is (not (contains? (status-bar-items false) status-bar/frame-stats-status))))
+  (testing "the output's health shows either way"
+    (is (contains? (status-bar-items false) status-bar/output-health))
+    (is (contains? (status-bar-items true) status-bar/output-health)))
+  (testing "the notice is first, then what plays"
+    (with-redefs [dev-config/dev-mode? (constantly false)]
+      (is (= [status-bar/notice-status status-bar/playing-status]
+             (->> (status-bar/status-bar {:fx/context (fx/create-context (domains/build-initial-state) state/cache-factory)})
+                  :children
+                  (take 2)
+                  (map :fx/type)))))))

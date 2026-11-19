@@ -1,11 +1,12 @@
 (ns laser-show.ui-test.toolbar-test
   "Toolbar: transport, BPM input, trigger mode, tap tempo and the beat
    indicator."
-  (:require [clojure.test :refer [deftest is use-fixtures]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui]))
+            [laser-show.ui-test.testfx :as ui])
+  (:import [javafx.scene.control Button]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -27,6 +28,52 @@
     (ui/click! robot "#retrigger-btn")
     (ui/sync-fx!)
     (is (not (get-in (state/get-raw-state) [:playback :playing?])))))
+
+(defn- tooltip-text [selector]
+  (let [^Button button (ui/query selector)]
+    (ui/on-fx-thread #(some-> button .getTooltip .getText))))
+
+(defn- click-then-rest!
+  "Click selector, then rest the mouse on the status bar, so the button's own
+   tooltip doesn't come up over the window (ui/query looks in the top window
+   only)."
+  [robot selector]
+  (ui/click! robot selector)
+  (ui/hover! robot "#status-bar"))
+
+(deftest stop-shows-output-off-and-held-cells-test
+  (let [robot (ui/robot)
+        cells ["#grid-cell-0-0" "#grid-cell-1-0"]
+        all-have? (fn [style-class] (every? #(ui/has-style-class? % style-class) cells))
+        none-has? (fn [style-class] (not-any? #(ui/has-style-class? % style-class) cells))
+        playing? #(get-in (state/get-raw-state) [:playback :playing?])]
+    (ui/click! robot "#grid-cell-0-0")
+    (ui/wait-for! #(ui/has-style-class? "#grid-cell-0-0" "grid-cell-active"))
+    (ui/click! robot "#grid-cell-1-0")
+    (ui/wait-for! #(all-have? "grid-cell-active"))
+    (is (not (ui/visible? "#output-held-chip")))
+    (is (= "Stop (blackout)" (tooltip-text "#stop-btn")))
+    (click-then-rest! robot "#stop-btn")
+    (ui/wait-for! #(false? (playing?)))
+    (testing "Stop is the blackout: the cues stay in play, held, and the toolbar says so"
+      (ui/assert-visible! "#output-held-chip")
+      (ui/assert-text! "#output-held-chip" "OUTPUT OFF · 2 cues held")
+      (ui/wait-for! #(all-have? "grid-cell-held"))
+      (is (none-has? "grid-cell-active") "held cells don't look like they play")
+      (is (= "Resume 2 cues" (tooltip-text "#play-btn"))))
+    (testing "Play brings them back"
+      (click-then-rest! robot "#play-btn")
+      (ui/wait-for! #(true? (playing?)))
+      (ui/wait-for! #(all-have? "grid-cell-active"))
+      (is (none-has? "grid-cell-held"))
+      (ui/wait-for! #(not (ui/visible? "#output-held-chip")))
+      (is (= "Stop (blackout)" (tooltip-text "#stop-btn"))))
+    (testing "with nothing in play, Play is just Play"
+      (ui/click! robot "#grid-cell-0-0")
+      (ui/click! robot "#grid-cell-1-0")
+      (ui/wait-for! #(false? (playing?)))
+      (ui/wait-for! #(= "Play" (tooltip-text "#play-btn")))
+      (is (not (ui/visible? "#output-held-chip"))))))
 
 (deftest bpm-input-commits-valid-value
   (let [robot (ui/robot)]

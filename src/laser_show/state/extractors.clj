@@ -125,13 +125,6 @@
   [state]
   (or (:resync-rate (playback state)) 4.0))
 
-;; DEPRECATED - use active-cues instead
-(defn active-cell
-  "DEPRECATED: Use active-cues for multi-cue support.
-   Returns first active cue cell for backward compatibility."
-  [state]
-  (first (keys (active-cues state))))
-
 (defn grid [state]
   (:grid state))
 

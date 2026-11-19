@@ -3,6 +3,7 @@
   (:require
    [cljfx.api :as fx]
    [clojure.test :refer [deftest is testing]]
+   [laser-show.events.handlers.timing :as timing]
    [laser-show.state.core :as state]
    [laser-show.state.domains :as domains]
    [laser-show.subs :as subs]))
@@ -85,6 +86,7 @@
             :name "FX"
             :effect-count 2
             :first-effect-id :scale
+            :effect-ids [:scale :rotate]
             :active? true
             :selected? false
             :has-effects? true
@@ -119,3 +121,70 @@
                      (fx/swap-context assoc-in [:ui :timeline-editor [1 0] :selection] #{:x}))]
         (is (identical? chain (fx/sub-ctx ctx' subs/cue-cell-chain 0 0)))
         (is (identical? ui (fx/sub-ctx ctx' subs/timeline-ui 0 0)))))))
+
+(def ^:private playing-state
+  "Three cues playing, started in no particular order: [0 1] (B1), [1 0] (A2)
+   and [0 0] (A1)."
+  (-> base-state
+      (assoc-in [:chains :cue-chains [0 1]] {:items [{:type :preset :preset-id :star}]})
+      (assoc-in [:playback :active-cues] {[0 1] {:run #uuid "00000000-0000-0000-0000-000000000003"}
+                                          [1 0] {:run #uuid "00000000-0000-0000-0000-000000000002"}
+                                          [0 0] {:run #uuid "00000000-0000-0000-0000-000000000001"}})
+      (assoc-in [:playback :playing?] true)))
+
+(defn- after [state & event-types]
+  (reduce (fn [s t] (:state (timing/handle {:event/type t :state s}))) state event-types))
+
+(deftest output-held-sub-test
+  (let [held? #(fx/sub-ctx (context %) subs/output-held?)
+        held #(fx/sub-ctx (context %) subs/held-cue-count)]
+    (testing "while cues play, nothing is held"
+      (is (false? (held? playing-state)))
+      (is (zero? (held playing-state))))
+    (testing "Stop is the blackout: it leaves the cues in play, and holds them"
+      (is (true? (held? (after playing-state :transport/stop))))
+      (is (= 3 (held (after playing-state :transport/stop)))))
+    (testing "Play resumes them"
+      (is (false? (held? (after playing-state :transport/stop :transport/play))))
+      (is (zero? (held (after playing-state :transport/stop :transport/play)))))
+    (testing "with no cue left there is nothing to hold, playing or not"
+      (let [none (assoc-in playing-state [:playback :active-cues] {})]
+        (is (false? (held? none)))
+        (is (false? (held? (after none :transport/stop))))
+        (is (zero? (held (after none :transport/stop))))))))
+
+(deftest playing-cues-sub-test
+  (let [ctx (context playing-state)
+        cues (fx/sub-ctx ctx subs/playing-cues)]
+    (testing "row by row, as the grid reads (A1, A2, then B1), with what each cell is named from"
+      (is (= [{:col 0 :row 0 :name "Intro" :first-preset-id :circle :preset-count 3 :timeline? false}
+              {:col 1 :row 0 :name nil :first-preset-id :line :preset-count 1 :timeline? false}
+              {:col 0 :row 1 :name nil :first-preset-id :star :preset-count 1 :timeline? false}]
+             cues)))
+    (testing "unchanged by what changes inside the cues' intents (a pause, a seek) and the show clock's status"
+      (let [ctx' (-> ctx
+                     (fx/swap-context assoc-in [:playback :active-cues [0 0] :paused?] true)
+                     (status-write))]
+        (is (identical? cues (fx/sub-ctx ctx' subs/playing-cues)))))
+    (testing "a cue that stops leaves the list"
+      (is (= [[0 0] [0 1]]
+             (map (juxt :col :row)
+                  (fx/sub-ctx (fx/swap-context ctx update-in [:playback :active-cues] dissoc [1 0])
+                              subs/playing-cues)))))
+    (testing "nothing plays while Stop holds them"
+      (is (= [] (fx/sub-ctx (context (after playing-state :transport/stop)) subs/playing-cues))))))
+
+(deftest connection-status-says-why-nothing-streams-test
+  (let [status-at (fn [running? status]
+                    (select-keys (fx/sub-ctx (context (-> base-state
+                                                          (assoc-in [:backend :streaming :running?] running?)
+                                                          (assoc-in [:backend :streaming :status] status)))
+                                             subs/connection-status)
+                                 [:state :status-text]))]
+    (is (= {:state :idle :status-text "No projectors enabled"}
+           (status-at true {:engines 0 :wanted 0 :pending? false :projectors {}}))
+        "streaming is on, with nothing to stream")
+    (is (= {:state :streaming :status-text "Streaming to 1 of 1"}
+           (status-at true {:engines 1 :wanted 1 :pending? false
+                            :projectors {:a {:state :streaming :fps 59.8}}})))
+    (is (= {:state :stopped :status-text "Not streaming"} (status-at false nil)))))

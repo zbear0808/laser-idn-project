@@ -152,6 +152,8 @@
                :doc "clipboard data for copy/paste"}
    :active-tab {:default :grid
                 :doc "currently active tab (:grid :effects :projectors :settings)"}
+   :notice {:default nil
+            :doc "the notice at the left of the status bar, {:id uuid :text :level (:error :warning :info)}, or nil; set by failure handlers (events/helpers.clj show-notice), cleared by :ui/clear-notice after 6 s or on a click"}
    :drag {:default {:active? false
                     :source-type nil
                     :source-id nil

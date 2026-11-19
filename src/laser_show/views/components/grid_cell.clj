@@ -13,7 +13,8 @@
    
    Styling:
    - All background colors via CSS classes (no inline styles)
-   - State classes: grid-cell-empty, grid-cell-content, grid-cell-active
+   - State classes: grid-cell-empty, grid-cell-content, grid-cell-active,
+     grid-cell-held (a cue Stop holds: the output is off, Play resumes it)
    - Type variants: grid-cell-effects"
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
@@ -33,10 +34,11 @@
    Base class 'grid-cell' is always included.
    Cell type adds 'grid-cell-<type>' (e.g., grid-cell-effects).
    State classes are added based on display-data."
-  [cell-type {:keys [active? has-content? selected? learning? has-trigger?]}]
+  [cell-type {:keys [active? held? has-content? selected? learning? has-trigger?]}]
   (cond-> ["grid-cell" (str "grid-cell-" (name cell-type))]
     selected? (conj "grid-cell-selected")
     active? (conj "grid-cell-active")
+    held? (conj "grid-cell-held")
     has-content? (conj "grid-cell-content")
     (not has-content?) (conj "grid-cell-empty")
     has-trigger? (conj "grid-cell-has-trigger")
@@ -63,17 +65,26 @@
                " +" (dec preset-count))))
 
 
+(defn- effect-text
+  "An effect as a cell names it: its id in words (:hue-shift -> \"hue shift\")."
+  [effect-id]
+  (-> effect-id clojure.core/name (str/replace "-" " ")))
+
 (defn effects-label
-  "Display text for an effects cell.
-   Shows custom name if set, otherwise effect count."
-  [{:keys [name effect-count has-effects?]}]
+  "Display text for an effects cell, as a cue cell's: the custom name if set,
+   otherwise the first effect, plus \"+n\" for the others."
+  [{:keys [name first-effect-id effect-count]}]
   (cond
-    ;; Custom name takes priority
     (seq name) name
-    ;; Effects present - show count
-    has-effects? (str effect-count " fx")
-    ;; Empty
-    :else ""))
+    (nil? first-effect-id) ""
+    (= effect-count 1) (effect-text first-effect-id)
+    :else (str (effect-text first-effect-id) " +" (dec effect-count))))
+
+(defn effects-tooltip
+  "Tooltip for an effects cell: its effects, one per line, or nil for none."
+  [{:keys [effect-ids]}]
+  (when (seq effect-ids)
+    (str/join "\n" (map effect-text effect-ids))))
 
 
 ;; Generic Grid Cell Component
@@ -90,6 +101,8 @@
    - :on-right-click - Event map for right-click (augmented with :col, :row)
    - :drag-config - Map with :drag-type and :on-drop event
    - :label-fn - Function (fn [display-data] -> string)
+   - :tooltip-fn - Optional (fn [display-data] -> string or nil): the cell's
+     tooltip, on the label that carries its context menu
    - :context-menu-items - Optional sequence of menu items for context menu. Displayed only when cell is empty.
    
    Example:
@@ -105,9 +118,10 @@
     :context-menu-items [{:fx/type :menu-item :text \"Create Cue\" ...}]}
     "
   [{:keys [col row cell-type display-data on-click on-right-click
-           drag-config label-fn context-menu-items]}]
+           drag-config label-fn tooltip-fn context-menu-items]}]
   (let [{:keys [active? has-content?]} display-data
         label-text (label-fn display-data)
+        tooltip-text (when tooltip-fn (tooltip-fn display-data))
         style-classes (build-style-classes cell-type display-data)
         ;; Create drag handlers with current values (re-created on each render)
         drag-type (:drag-type drag-config)
@@ -188,12 +202,13 @@
                                                  :text "⚡"
                                                  :style-class "grid-cell-trigger-indicator"})])}]}]
     (if has-context-menu?
-      {:fx/type :label
-       :content-display :graphic-only
-       :padding 0
-       :context-menu {:fx/type :context-menu
-                      :items context-menu-items}
-       :graphic node}
+      (cond-> {:fx/type :label
+               :content-display :graphic-only
+               :padding 0
+               :context-menu {:fx/type :context-menu
+                              :items context-menu-items}
+               :graphic node}
+        tooltip-text (assoc :tooltip {:fx/type :tooltip :text tooltip-text}))
       node)))
 
 
@@ -224,7 +239,11 @@
                                            (= (:target v) [col row])))
                                     trigger-map))
         learning? (= learning-target {:type :trigger-cue :target [col row]})
+        ;; In play while Stop blacks the output out: held, not playing
+        held? (and (:active? display-data) (fx/sub-ctx context subs/output-held?))
         cell-display-data (assoc display-data
+                                 :active? (and (:active? display-data) (not held?))
+                                 :held? held?
                                  :has-trigger? has-trigger?
                                  :learning? learning?)
         open-editor-event (if timeline?
@@ -319,6 +338,8 @@
                       :selected? (:selected? display-data)
                       :has-content? has-effects?
                       :effect-count (:effect-count display-data)
+                      :first-effect-id (:first-effect-id display-data)
+                      :effect-ids (:effect-ids display-data)
                       :has-effects? has-effects?
                       :name (:name display-data)
                       :has-trigger? has-trigger?
@@ -368,4 +389,5 @@
      :drag-config {:drag-type :effects-cell
                    :on-drop {:event/type :effects/move-cell}}
      :label-fn effects-label
+     :tooltip-fn effects-tooltip
      :context-menu-items context-menu-items}))

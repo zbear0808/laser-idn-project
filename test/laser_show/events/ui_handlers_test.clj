@@ -3,6 +3,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [laser-show.events.handlers.ui :as ui]
+   [laser-show.events.helpers :as h]
    [laser-show.state.domains :refer [build-initial-state]]))
 
 
@@ -136,3 +137,35 @@
                  :state base-state}
           result (ui/handle event)]
       (is (= :effects (get-in result [:state :ui :active-tab]))))))
+
+
+;; Notices
+
+
+(defn- clear [state id]
+  (ui/handle {:event/type :ui/clear-notice :id id :state state}))
+
+(deftest notice-goes-after-6-s-or-on-a-click-test
+  (let [{:keys [state dispatch-later]} (h/show-notice base-state "Could not open a.zip" :error)
+        {:keys [id]} (get-in state [:ui :notice])]
+    (is (= {:id id :text "Could not open a.zip" :level :error} (get-in state [:ui :notice])))
+    (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000} dispatch-later))
+    (testing "its timer (or a click on it) clears it"
+      (is (nil? (get-in (clear state id) [:state :ui :notice]))))
+    (testing "once it is gone, nothing is left to clear"
+      (is (= {} (clear (:state (clear state id)) id))))))
+
+(deftest earlier-notice-timer-keeps-a-later-notice-test
+  (let [first-notice (h/show-notice base-state "Could not open a.zip" :error)
+        first-id (get-in first-notice [:state :ui :notice :id])
+        second-notice (h/show-notice (:state first-notice) "Could not save b.zip" :error)
+        second-id (get-in second-notice [:state :ui :notice :id])]
+    (is (not= first-id second-id) "each notice has its own id")
+    (testing "the first notice's timer, 6 s after it, leaves the second on screen"
+      (is (= {} (clear (:state second-notice) first-id))))
+    (testing "the second's own timer clears it"
+      (is (nil? (get-in (clear (:state second-notice) second-id) [:state :ui :notice]))))
+    (testing "even after a click took the first away before the second came"
+      (let [clicked (:state (clear (:state first-notice) first-id))
+            later (h/show-notice clicked "Could not save b.zip" :error)]
+        (is (= {} (clear (:state later) first-id)))))))

@@ -345,29 +345,30 @@
     ""))
 
 (defn preview-grid-header
-  "Header for the preview grid panel with layout selector."
+  "Header for the preview grid panel with layout selector, and in dev mode
+   the frame time."
   [{:keys [fx/context]}]
-  (let [stats (fx/sub-ctx context subs/frame-stats)
+  (let [dev-mode? (fx/sub-ctx context subs/dev-mode?)
         [cols rows] (fx/sub-ctx context subs/preview-grid-layout)]
     {:fx/type :h-box
      :alignment :center-left
      :spacing 8
      :padding {:left 8 :right 8 :top 4 :bottom 4}
-     :children [{:fx/type :label
-                 :text "Preview Grid"
-                 :style "-fx-text-fill: white; -fx-font-size: 12; -fx-font-weight: bold;"}
-                {:fx/type :region :h-box/hgrow :always}
-                {:fx/type :combo-box
-                 :id "preview-layout-selector"
-                 :value (str cols "x" rows)
-                 :items ["1x1" "2x1" "1x2" "2x2" "3x2"]
-                 :on-value-changed {:event/type :preview/set-grid-layout}
-                 :pref-width 80
-                 :style "-fx-font-size: 10;"}
-                {:fx/type :label
-                 :id "preview-frame-stats"
-                 :text (frame-stats-label stats)
-                 :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]}))
+     :children (cond-> [{:fx/type :label
+                         :text "Preview Grid"
+                         :style "-fx-text-fill: white; -fx-font-size: 12; -fx-font-weight: bold;"}
+                        {:fx/type :region :h-box/hgrow :always}
+                        {:fx/type :combo-box
+                         :id "preview-layout-selector"
+                         :value (str cols "x" rows)
+                         :items ["1x1" "2x1" "1x2" "2x2" "3x2"]
+                         :on-value-changed {:event/type :preview/set-grid-layout}
+                         :pref-width 80
+                         :style "-fx-font-size: 10;"}]
+                 dev-mode? (conj {:fx/type :label
+                                  :id "preview-frame-stats"
+                                  :text (frame-stats-label (fx/sub-ctx context subs/frame-stats))
+                                  :style "-fx-text-fill: #808080; -fx-font-size: 10;"}))}))
 
 (defn preview-grid-panel
   "Complete preview panel with grid header and cells."

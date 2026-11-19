@@ -91,10 +91,16 @@
   (log/info "Project loaded:" file-path)
   {:state (persistent/apply-loaded-project state contents file-path)})
 
+(defn- file-name
+  "The file's name without its folders (\"show.zip\"), for a notice."
+  [file-path]
+  (or (some-> file-path java.io.File. .getName) "the project"))
+
 (defn- handle-file-project-load-failed
-  [{:keys [file-path]}]
+  "The project couldn't be read: the document stays, and a notice says so."
+  [{:keys [file-path state]}]
   (log/error "Failed to open project:" file-path)
-  {})
+  (h/show-notice state (str "Could not open " (file-name file-path)) :error))
 
 (defn- save-to
   "Mark the project saved to file-path and request the zip write.
@@ -112,12 +118,15 @@
 
 (defn- handle-file-save-failed
   "Restore the project status from before the failed save, including the
-   previous saved baseline; the pipeline then re-derives :dirty?."
+   previous saved baseline; the pipeline then re-derives :dirty?. A notice
+   says the save failed."
   [{:keys [state file-path previous-project]}]
   (log/error "Failed to save project:" file-path)
-  {:state (update state :project merge
-                  (into {} (map (fn [k] [k (get previous-project k)]))
-                        [:current-file :last-saved :saved-document :dirty?]))})
+  (h/show-notice (update state :project merge
+                         (into {} (map (fn [k] [k (get previous-project k)]))
+                               [:current-file :last-saved :saved-document :dirty?]))
+                 (str "Could not save " (file-name file-path))
+                 :error))
 
 (defn- handle-file-save-as
   "Save the project to a new location using file chooser dialog.

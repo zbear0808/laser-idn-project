@@ -6,7 +6,8 @@
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
             [laser-show.css.core :as css]
-            [laser-show.views.components.trigger-bank :as trigger-bank]))
+            [laser-show.views.components.trigger-bank :as trigger-bank]
+            [laser-show.views.dialogs.common :as common]))
 
 (defn- cell-trigger-editor-content
   "Main content of the trigger editor dialog."
@@ -20,7 +21,6 @@
                        (or (:name display-data) "Effect Chain"))
                      (let [display-data (fx/sub-ctx context subs/cell-display-data col row)]
                        (or (:name display-data) "Cue Chain")))
-        cell-coord-str (str "[" (char (+ 65 (or row 0))) ", " (inc (or col 0)) "]")
         mode-title (if (= cell-mode :effects) "Effect Cell" "Cue Cell")]
     {:fx/type :v-box
      :id "trigger-editor-dialog"
@@ -35,7 +35,7 @@
        :style-class "dialog-header"
        :children
        [{:fx/type :label
-         :text (str mode-title " " cell-coord-str)
+         :text (str mode-title " " (common/cell-label col row))
          :style-class "header-primary"}
         {:fx/type :label
          :text (str "Target: " cell-label)
@@ -73,11 +73,10 @@
         dialog-data (fx/sub-ctx context subs/dialog-data :trigger-editor)
         {:keys [col row cell-mode] :or {cell-mode :cue}} dialog-data
         mode-title (if (= cell-mode :effects) "Effect Cell" "Cue Cell")
-        cell-coord-str (str "[" (char (+ 65 (or row 0))) ", " (inc (or col 0)) "]")
         stylesheets (css/dialog-stylesheet-urls)]
     {:fx/type :stage
      :showing open?
-     :title (str "Triggers — " mode-title " " cell-coord-str)
+     :title (str "Triggers — " mode-title " " (common/cell-label col row))
      :width 440
      :height 410
      :modality :none

@@ -100,3 +100,24 @@
    (e.g. an unchecked checkbox's :fx/event)."
   [& values]
   (reduce (fn [_ v] (when (some? v) (reduced v))) nil values))
+
+
+(def notice-ms
+  "How long a notice stays at the left of the status bar, unless clicked away."
+  6000)
+
+(defn show-notice
+  "Effects that put a notice on screen: state with text at [:ui :notice]
+   (level :error, :warning or :info), and the :dispatch-later that clears it
+   after notice-ms. Each notice gets its own id, so an earlier notice's timer
+   never clears a later one (:ui/clear-notice clears only its id).
+
+   Example:
+   (show-notice state \"Could not open show.zip\" :error)
+   => {:state (assoc-in state [:ui :notice] {:id #uuid \"…\" :text … :level :error})
+       :dispatch-later {:event {:event/type :ui/clear-notice :id #uuid \"…\"} :delay-ms 6000}}"
+  [state text level]
+  (let [id (random-uuid)]
+    {:state (assoc-in state [:ui :notice] {:id id :text text :level level})
+     :dispatch-later {:event {:event/type :ui/clear-notice :id id}
+                      :delay-ms notice-ms}}))

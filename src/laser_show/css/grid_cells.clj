@@ -2,8 +2,8 @@
   "Grid cell styles for the laser show UI using cljfx/css.
    
    Provides CSS classes for:
-   - Cue grid cells with various states (empty, content, active)
-   - Effect grid cells
+   - Cue grid cells with various states (empty, content, active, held)
+   - Effect grid cells (off like a cue cell with content, on like a playing one)
    - Active state (blue)
    - State-based background colors (no inline styles needed!)
    
@@ -22,8 +22,7 @@
   (css/register ::grid-cells
     (let [{:keys [bg-interactive bg-hover text-primary text-muted
                   selection-bg border-default]} theme/semantic-colors
-          {:keys [cell-content cell-content-hover
-                  selection-hover]} theme/computed-colors
+          {:keys [cell-content cell-content-hover]} theme/computed-colors
           {:keys [blue orange]} theme/base-colors]
       
       {;; Base Grid Cell
@@ -40,9 +39,11 @@
        ;; This map is a hash map, so cljfx.css writes the rules in hash order,
        ;; not in the order they are written here, and of two rules with the
        ;; same specificity the one written later wins. So the empty colour has
-       ;; its own class instead of being .grid-cell's (which came after
-       ;; .grid-cell-content), and the playing cell's hover rule has one class
-       ;; more than the content cell's.
+       ;; its own class instead of being .grid-cell's, and a state that comes
+       ;; on top of another (a playing or held cell has content; any cell can
+       ;; be hovered) has a rule with more classes than the one it overrides:
+       ;; empty, content 1; playing, hovered 2; content hovered, held 3;
+       ;; playing hovered 4.
        
        ;; Empty cell (a cell has either this class or grid-cell-content)
        ".grid-cell-empty"
@@ -59,23 +60,21 @@
         :-fx-border-width 2
         :-fx-effect (str "dropshadow(gaussian, " orange ", 8, 0.4, 0, 0)")}
        
-       ;; Cell with content (cues/effects assigned)
+       ;; Cell with content (a cue, or effects), off
        ".grid-cell-content"
        {:-fx-background-color cell-content}
        
-       ;; Active/playing cell (blue)
-       ".grid-cell-active"
+       ;; Playing cue, or an effects cell that is on (blue)
+       ".grid-cell-content.grid-cell-active"
        {:-fx-background-color selection-bg
         :-fx-effect (str "dropshadow(gaussian, " blue ", 10, 0.5, 0, 0)")}
-       
-       
-       ;; Cell Type Variants
-       
-       
-       ;; Effects cells with content also use blue (same as active state, but dimmer)
-       ".grid-cell-effects.grid-cell-content"
-       {:-fx-background-color selection-bg
-        :-fx-opacity 0.7}
+
+       ;; Held cue: in play, but Stop blacked the output out (a dashed blue
+       ;; outline and no blue fill; dashed, so it isn't the selected cell's)
+       ".grid-cell.grid-cell-content.grid-cell-held"
+       {:-fx-border-color blue
+        :-fx-border-width 2
+        :-fx-border-style "dashed"}
        
        
        ;; Hover States
@@ -85,19 +84,14 @@
        {:-fx-background-color bg-hover
         :-fx-border-color text-muted}
        
-       ;; Active cue cells stay blue on hover, just reduce opacity slightly
-       ".grid-cell-grid.grid-cell-active:hover"
+       ;; Playing and on cells stay blue on hover, just reduce opacity slightly
+       ".grid-cell.grid-cell-content.grid-cell-active:hover"
        {:-fx-background-color selection-bg
         :-fx-opacity 0.9}
        
        ;; Content cells get lighter on hover
-       ".grid-cell-content:hover"
+       ".grid-cell.grid-cell-content:hover"
        {:-fx-background-color cell-content-hover}
-       
-       ;; Effects content cells get lighter blue on hover
-       ".grid-cell-effects.grid-cell-content:hover"
-       {:-fx-background-color selection-hover
-        :-fx-opacity 0.85}
        
        
        ;; Grid Cell Labels & Indicators

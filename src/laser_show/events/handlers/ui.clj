@@ -4,6 +4,7 @@
    Handles:
    - Tab switching
    - Dialog management
+   - The status bar's notice (clearing it)
    - Preview zone filtering
    - Preview grid layout"
   (:require [clojure.tools.logging :as log]
@@ -56,6 +57,15 @@
                          (seq extra-updates) extra-updates
                          :else {})]
     {:state (update-in state [:ui :dialogs dialog-id] merge actual-updates)}))
+
+(defn- handle-ui-clear-notice
+  "Clear the notice with :id: its timer's (events/helpers.clj show-notice) or
+   a click on it. A later notice, with another id, stays; with nothing to
+   clear there is no effect."
+  [{:keys [id state]}]
+  (if (and (some? id) (= id (get-in state [:ui :notice :id])))
+    {:state (assoc-in state [:ui :notice] nil)}
+    {}))
 
 (defn- handle-preview-set-zone-filter
   "Set the preview zone group filter.
@@ -142,6 +152,7 @@
     :ui/open-dialog (handle-ui-open-dialog event)
     :ui/close-dialog (handle-ui-close-dialog event)
     :ui/update-dialog-data (handle-ui-update-dialog-data event)
+    :ui/clear-notice (handle-ui-clear-notice event)
     :preview/set-zone-filter (handle-preview-set-zone-filter event)
     :preview/set-grid-layout (handle-preview-set-grid-layout event)
     :preview/set-cell-zone (handle-preview-set-cell-zone event)

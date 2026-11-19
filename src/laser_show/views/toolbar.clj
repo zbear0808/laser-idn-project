@@ -29,16 +29,26 @@
    :tooltip {:fx/type :tooltip :text tooltip}
    :on-action on-action})
 
+(defn- cues-text
+  "\"1 cue\", \"4 cues\"."
+  [n]
+  (str n (if (= 1 n) " cue" " cues")))
+
 (defn transport-controls
-  "Play/Stop/Retrigger controls."
+  "Play/Stop/Retrigger controls. Stop is the blackout: it holds the cues in
+   play (subs/held-cue-count), and Play resumes them."
   [{:keys [fx/context]}]
-  (let [playing? (fx/sub-ctx context subs/playing?)]
+  (let [playing? (fx/sub-ctx context subs/playing?)
+        held (fx/sub-ctx context subs/held-cue-count)]
     {:fx/type :h-box
      :spacing 4
      :alignment :center-left
      :children [{:fx/type transport-button
                  :icon (if playing? :stop :play)
-                 :tooltip (if playing? "Stop" "Play")
+                 :tooltip (cond
+                            playing? "Stop (blackout)"
+                            (pos? held) (str "Resume " (cues-text held))
+                            :else "Play")
                  :on-action {:event/type (if playing? :transport/stop :transport/play)}
                  :active? playing?}
                 {:fx/type transport-button
@@ -215,34 +225,58 @@
                    (:starting :stopping :idle) "status-indicator-connecting"
                    "status-indicator-disconnected")]})
 
+(defn output-held-chip
+  "\"OUTPUT OFF · 4 cues held\" while Stop holds cues: nothing is drawn, and
+   Play resumes them. Out of the layout otherwise."
+  [{:keys [fx/context]}]
+  (let [held (fx/sub-ctx context subs/held-cue-count)]
+    {:fx/type :label
+     :id "output-held-chip"
+     :text (str "OUTPUT OFF · " (cues-text held) " held")
+     :style-class "output-held-chip"
+     :tooltip {:fx/type :tooltip
+               :text "Stop blacks the output out and keeps the cues. Play resumes them."}
+     :visible (pos? held)
+     :managed (pos? held)}))
+
 (defn connection-status
   "Streaming status and the Stream/Stop button.
    
    The button follows the operator's intent ([:backend :streaming :running?]);
-   the label says what the output runtime reports is actually streaming."
+   the label says what the output runtime reports is actually streaming. On
+   with no projector enabled, a link opens the Projectors tab."
   [{:keys [fx/context]}]
   (let [{:keys [running? state status-text errors]} (fx/sub-ctx context subs/connection-status)]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
-     :children [{:fx/type connection-indicator
-                 :state state}
-                (cond-> {:fx/type :label
-                         :id "streaming-status-label"
-                         :text status-text
-                         :style-class "label-secondary"}
-                  (seq errors) (assoc :tooltip {:fx/type :tooltip
-                                                :text (str/join "\n" errors)}))
-                {:fx/type :button
-                 :id "stream-btn"
-                 :text (if running? "Stop" "Stream")
-                 :graphic {:fx/type fa/icon
-                           :name :network-wired
-                           :size 12}
-                 :style-class "btn-sm"
-                 :on-action {:event/type (if running?
-                                           :idn/stop-multi-streaming
-                                           :idn/start-multi-streaming)}}]}))
+     :children (filterv
+                some?
+                [{:fx/type connection-indicator
+                  :state state}
+                 (cond-> {:fx/type :label
+                          :id "streaming-status-label"
+                          :text status-text
+                          :style-class "label-secondary"}
+                   (seq errors) (assoc :tooltip {:fx/type :tooltip
+                                                 :text (str/join "\n" errors)}))
+                 (when (= :idle state)
+                   {:fx/type :hyperlink
+                    :id "streaming-projectors-link"
+                    :text "Projectors…"
+                    :style-class "toolbar-link"
+                    :focus-traversable false
+                    :on-action {:event/type :ui/set-active-tab :tab-id :projectors}})
+                 {:fx/type :button
+                  :id "stream-btn"
+                  :text (if running? "Stop" "Stream")
+                  :graphic {:fx/type fa/icon
+                            :name :network-wired
+                            :size 12}
+                  :style-class "btn-sm"
+                  :on-action {:event/type (if running?
+                                            :idn/stop-multi-streaming
+                                            :idn/start-multi-streaming)}}])}))
 
 
 
@@ -259,4 +293,5 @@
               {:fx/type link-sync-button}
               {:fx/type :separator :orientation :vertical}
               {:fx/type :region :h-box/hgrow :always} ;; Spacer
+              {:fx/type output-held-chip}
               {:fx/type connection-status}]})

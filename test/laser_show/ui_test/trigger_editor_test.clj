@@ -60,6 +60,7 @@
   (is (some (fn [title]
               (and title (.startsWith ^String title "Triggers")))
             (ui/window-titles)))
+  (is (some #{"Triggers — Cue Cell A1"} (ui/window-titles)) "the cell named as everywhere else")
   (ui/click! (ui/robot) "#trigger-editor-done")
   (ui/wait-for! #(false? (get-in (state/get-raw-state)
                                  [:ui :dialogs :trigger-editor :open?])))

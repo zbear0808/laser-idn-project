@@ -144,16 +144,20 @@
       :on-action {:event/type :edit/clear-cell}}]))
 
 (defn- transport-menu-items
-  "Create Transport menu items."
+  "Create Transport menu items. One item plays or stops: Stop is the
+   blackout (Play resumes the cues it holds)."
   [context]
   (let [playing? (fx/sub-ctx context subs/playing?)]
     [{:fx/type :menu-item
-      :text (if playing? "Pause" "Play")
+      :text (if playing? "Stop (blackout)" "Play")
       :accelerator [:space]
       :on-action {:event/type (if playing? :transport/stop :transport/play)}}
      
+     ;; Not shown: Escape stops, as it did. A menu item's shortcut works while
+     ;; the item is enabled, shown or not
      {:fx/type :menu-item
-      :text "Stop"
+      :text "Stop (blackout)"
+      :visible false
       :accelerator [:escape]
       :disable (not playing?)
       :on-action {:event/type :transport/stop}}

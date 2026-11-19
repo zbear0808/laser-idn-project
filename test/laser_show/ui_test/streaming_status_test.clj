@@ -1,13 +1,15 @@
 (ns laser-show.ui-test.streaming-status-test
   "The toolbar's streaming status and the projector dot show what the output
-   runtime reports is actually streaming, against the fake DAC; the Host,
+   runtime reports is actually streaming, against the fake DAC (and with no
+   projector enabled, that, with a link to the Projectors tab); the Host,
    Port and Scan rate fields apply on Enter or focus loss, not per keystroke."
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is use-fixtures]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.backend.multi-engine :as me]
             [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.backend.streaming-engine :as se]
             [laser-show.css.core :as css]
+            [laser-show.events.core :as events]
             [laser-show.idn.fake-dac :as dac]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
@@ -74,6 +76,23 @@
         (ui/assert-text! "#streaming-status-label" "Streaming to 1 of 2 · 1 error")
         (ui/click! robot "#stream-btn")
         (ui/assert-text! "#streaming-status-label" "Not streaming")))))
+
+(deftest no-projectors-enabled-links-to-the-projectors-tab-test
+  (let [robot (ui/robot)]
+    (state/swap-state! assoc :projectors {:b (assoc (projector 2 "127.0.0.1") :enabled? false)})
+    (ui/click! robot "#stream-btn")
+    (ui/assert-text! "#streaming-status-label" "No projectors enabled")
+    (ui/assert-text! "#stream-btn" "Stop")
+    (ui/assert-visible! "#streaming-projectors-link")
+    (ui/click! robot "#streaming-projectors-link")
+    (ui/wait-for! #(= :projectors (get-in (state/get-raw-state) [:ui :active-tab])))
+    (testing "enabling one streams it, and the link goes"
+      (state/swap-state! assoc-in [:projectors :b :enabled?] true)
+      (events/dispatch! {:event/type :idn/start-multi-streaming})
+      (ui/assert-text! "#streaming-status-label" "Streaming to 1 of 1")
+      (ui/wait-for! #(not (ui/visible? "#streaming-projectors-link"))))
+    (ui/click! robot "#stream-btn")
+    (ui/assert-text! "#streaming-status-label" "Not streaming")))
 
 (deftest projector-dot-shows-status-test
   (with-unresolvable "unresolvable.test"
