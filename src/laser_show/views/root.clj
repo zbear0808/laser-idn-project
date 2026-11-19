@@ -12,7 +12,7 @@
    ├── toolbar
    ├── tab-bar
    ├── main-content (split-pane)
-   │   ├── tab-content (grid/effects/projectors/zone-groups/settings)
+   │   ├── tab-content (grid/perform/effects/projectors/zone-groups/settings)
    │   └── preview-panel
    ├── status-bar
    └── dialogs (via refs)"
@@ -34,6 +34,7 @@
    [laser-show.views.status-bar :as status-bar]
    [laser-show.views.tabs.effects :as effects-tab]
    [laser-show.views.tabs.grid :as grid-tab]
+   [laser-show.views.tabs.perform :as perform-tab]
    [laser-show.views.tabs.projectors :as projectors-tab]
    [laser-show.views.tabs.zones :as zones-tab]
    [laser-show.views.tabs.settings :as settings-tab]
@@ -60,6 +61,7 @@
   (let [active-tab (fx/sub-ctx context subs/active-tab)]
     (case active-tab
       :grid {:fx/type grid-tab/grid-tab}
+      :perform {:fx/type perform-tab/perform-tab}
       :effects {:fx/type effects-tab/effects-tab}
       :projectors {:fx/type projectors-tab/projectors-tab}
       :zones {:fx/type zones-tab/zones-tab}
@@ -74,6 +76,7 @@
 (def main-tabs
   "Tab definitions for the main window."
   [{:id :grid :label "Grid"}
+   {:id :perform :label "Perform"}
    {:id :effects :label "Effects"}
    {:id :projectors :label "Projectors"}
    {:id :zones :label "Zone Groups"}
@@ -168,6 +171,9 @@
                      :width (:width window-config 1200)
                      :height (:height window-config 800)
                      :showing true
+                     ;; A pad's release may never come once the window lost
+                     ;; focus: the pads' holds end then (handlers/vibes.clj)
+                     :on-focused-changed {:event/type :vibe/window-focus}
                      :on-close-request (fn [^WindowEvent e]
                                          ;; Consume it: the window only closes through
                                          ;; the exit effect, after the unsaved-changes

@@ -1,0 +1,282 @@
+(ns laser-show.ui-test.perform-test
+  "The Perform tab: five pads played by mouse, touch or a learned control,
+   the vibe strip, the banner, learning a pad's control, and a pointer's
+   hold ending when the window loses focus.
+   
+   The headless robot marks every mouse event synthesized, as JavaFX marks
+   the ones it makes from a touch, and the pads leave those out (a touch
+   counts through its touch events), so the pads are pressed with
+   ui/press-node! and ui/release-node!, which fire a real mouse's events
+   headless."
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.events.core :as events]
+            [laser-show.events.handlers.input-mapper :as input-mapper]
+            [laser-show.input.router :as input-router]
+            [laser-show.state.core :as state]
+            [laser-show.ui-test.fixtures :as fixtures]
+            [laser-show.ui-test.testfx :as ui])
+  (:import [com.sun.javafx.stage WindowHelper]
+           [com.sun.javafx.tk.quantum WindowStage]
+           [javafx.event Event]
+           [javafx.scene Node]
+           [javafx.scene.input MouseButton MouseEvent TouchEvent TouchPoint TouchPoint$State]
+           [javafx.stage Stage]))
+
+(defn- with-input-mapper
+  "start-test! doesn't start the input mapper (app.clj:252), and a learned
+   note reaches the app only through it."
+  [tests]
+  (input-mapper/set-dispatch-fn! events/dispatch!)
+  (input-mapper/start-mapper!)
+  (try
+    (tests)
+    (finally
+      (input-mapper/stop-mapper!)
+      (input-mapper/set-dispatch-fn! nil))))
+
+(use-fixtures :once fixtures/with-toolkit)
+(use-fixtures :each fixtures/with-app with-input-mapper)
+
+(def ^:private starter-names
+  "What the HIT pad says for each of the starter vibe's HIT cells."
+  {[0 0] "circle" [1 0] "square" [2 0] "triangle" [3 0] "star"})
+
+(defn- app-state [] (state/get-raw-state))
+(defn- rt [& ks] (get-in (app-state) (into [:vibe-runtime] ks)))
+(defn- intent [cell] (get-in (app-state) [:playback :active-cues cell]))
+
+(defn- open-perform! [robot]
+  (ui/click! robot "#perform-tab")
+  (ui/wait-for! #(= :perform (get-in (app-state) [:ui :active-tab])))
+  (ui/assert-visible! "#vibe-pad-row"))
+
+(defn- flush-event-queue!
+  "Wait until every event dispatched so far has been handled: they are
+   handled in order, so a marker landing means the rest did."
+  []
+  (ui/sync-fx!)
+  (let [marker (+ 60.25 (rand-int 100))]
+    (events/dispatch! {:event/type :timing/set-bpm :bpm marker})
+    (ui/wait-for! #(= marker (get-in (app-state) [:timing :bpm])))))
+
+(defn- note [type n]
+  {:type type :source :midi :channel 0 :note n :velocity (if (= :note-on type) 1.0 0.0)
+   :timestamp (System/currentTimeMillis)})
+
+(defn- bind! [n role]
+  (state/swap-state! assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note n}] {:type :vibe :role role}))
+
+(defn- fire!
+  "Fire events at the node found by selector, in order, on the FX thread."
+  [selector & evs]
+  (let [^Node node (ui/query selector)]
+    (ui/on-fx-thread #(doseq [e evs] (Event/fireEvent node e))))
+  (ui/sync-fx!))
+
+(defn- mouse
+  "A mouse event of type at a pad: :synthesized? as JavaFX makes them from a
+   touch, :button for another button than the primary."
+  [type & {:keys [button synthesized?] :or {button MouseButton/PRIMARY}}]
+  (MouseEvent. type 60.0 60.0 60.0 60.0 button 1 false false false false
+               (and (= MouseEvent/MOUSE_PRESSED type) (= MouseButton/PRIMARY button)) false
+               (and (= MouseEvent/MOUSE_PRESSED type) (= MouseButton/SECONDARY button))
+               (boolean synthesized?) false true nil))
+
+(defn- touch [type id point-state]
+  (let [point (TouchPoint. (int id) point-state 60.0 60.0 60.0 60.0 nil nil)]
+    (TouchEvent. type point [point] 1 false false false false)))
+
+(defn- main-stage ^Stage []
+  (some-> (first (ui/query-all "#main-layout")) .getScene .getWindow))
+
+(defn- notify-focus!
+  "Tell the main window it gained or lost the focus the way the OS does: the
+   glass window's notifyFocus, from where JavaFX's own path sets the Stage's
+   focused property. Headless glass has no other window to take the focus
+   (requestFocus only ever gains it)."
+  [gained?]
+  (ui/on-fx-thread
+   #(let [glass (.getPlatformWindow ^WindowStage (WindowHelper/getPeer (main-stage)))
+          notify (doto (.getDeclaredMethod com.sun.glass.ui.Window "notifyFocus" (into-array Class [Integer/TYPE]))
+                   (.setAccessible true))]
+      (.invoke notify glass (object-array [(int (if gained?
+                                                  com.sun.glass.events.WindowEvent/FOCUS_GAINED
+                                                  com.sun.glass.events.WindowEvent/FOCUS_LOST))]))))
+  (ui/sync-fx!))
+
+
+(deftest perform-tab-shows-five-pads-test
+  (let [robot (ui/robot)]
+    (open-perform! robot)
+    (ui/assert-count! ".vibe-pad" 5)
+    (doseq [role ["hit" "accent" "flash" "vibe" "blackout"]]
+      (ui/assert-visible! (str "#vibe-pad-" role)))
+    (ui/assert-text! "#vibe-header-name" "SHAPES")
+    (ui/assert-text! "#vibe-header-energy" "energy ●●○○")
+    (is (ui/has-style-class? "#vibe-chip-vibe-1" "vibe-chip-current"))
+    (ui/assert-visible! "#vibe-chip-vibe-2")
+    (ui/assert-text! "#vibe-pad-vibe-now" "→ Lines")
+    (ui/assert-text! "#vibe-pad-hit-now" "–")
+    (ui/assert-text! "#vibe-pad-hit-keys" "Right-click to learn a control")
+    (is (not (ui/visible? "#vibe-banner")))
+    (ui/assert-visible! "#preview-panel")
+    (is (not-any? #(.isFocusTraversable ^Node %) (ui/query-all ".vibe-pad"))
+        "invariant 7: Space or Enter can never press a pad")))
+
+(deftest hit-pad-hold-plays-then-release-cuts-test
+  (let [robot (ui/robot)]
+    (open-perform! robot)
+    (ui/press-node! robot "#vibe-pad-hit")
+    (ui/wait-for! #(some? (rt :voices :hit)))
+    (let [{:keys [cell run]} (rt :voices :hit)]
+      (is (= {:run run :decay-beats 1.0 :hold? true} (intent cell)))
+      (is (= :pad (rt :held :hit :src)))
+      (ui/wait-for! #(ui/has-style-class? "#vibe-pad-hit" "vibe-pad-held"))
+      (ui/assert-text! "#vibe-pad-hit-now" (starter-names cell))
+      (Thread/sleep 400)
+      (ui/release-node! robot "#vibe-pad-hit")
+      (ui/wait-for! #(nil? (intent cell)))
+      (is (nil? (rt :held :hit)) "held past the quick-tap time: cut on release")
+      (ui/wait-for! #(not (ui/has-style-class? "#vibe-pad-hit" "vibe-pad-held")))
+      (ui/assert-text! "#vibe-pad-hit-now" "–"))))
+
+(deftest hit-pad-quick-click-leaves-a-decay-test
+  (let [robot (ui/robot)]
+    ;; A busy machine can't stretch the click into a hold
+    (state/swap-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
+    (open-perform! robot)
+    (ui/mouse-click! robot "#vibe-pad-hit")
+    (ui/wait-for! #(and (some? (rt :voices :hit)) (nil? (rt :held :hit))))
+    (let [{:keys [cell run]} (rt :voices :hit)]
+      (is (= {:run run :decay-beats 1.0 :hold? false} (intent cell))
+          "no show clock runs here, so the decay waits for its ticks")
+      (ui/wait-for! #(not (ui/has-style-class? "#vibe-pad-hit" "vibe-pad-held")))
+      (ui/assert-text! "#vibe-pad-hit-now" (starter-names cell)))))
+
+(deftest hit-pad-touch-presses-once-test
+  (testing "one finger: its touch events press and release, the mouse events JavaFX makes from it don't"
+    (let [robot (ui/robot)]
+      (open-perform! robot)
+      (fire! "#vibe-pad-hit"
+             (touch TouchEvent/TOUCH_PRESSED 1 TouchPoint$State/PRESSED)
+             (mouse MouseEvent/MOUSE_PRESSED :synthesized? true))
+      (ui/wait-for! #(= :pad (rt :held :hit :src)))
+      (fire! "#vibe-pad-hit"
+             (touch TouchEvent/TOUCH_RELEASED 1 TouchPoint$State/RELEASED)
+             (mouse MouseEvent/MOUSE_RELEASED :synthesized? true)
+             (mouse MouseEvent/MOUSE_CLICKED :synthesized? true))
+      (ui/wait-for! #(nil? (rt :held :hit)))
+      (flush-event-queue!)
+      (is (= 1 (rt :started)) "one cue picked"))))
+
+(deftest vibe-pad-tap-switches-and-long-press-locks-test
+  (let [robot (ui/robot)]
+    (open-perform! robot)
+    (ui/mouse-click! robot "#vibe-pad-vibe")
+    (ui/wait-for! #(= :vibe-2 (rt :current)))
+    (ui/assert-text! "#vibe-header-name" "LINES")
+    (ui/wait-for! #(ui/has-style-class? "#vibe-chip-vibe-2" "vibe-chip-current"))
+    (ui/assert-text! "#vibe-pad-vibe-now" "→ Shapes")
+    (testing "a long press locks the rotation and keeps the vibe"
+      (ui/press-node! robot "#vibe-pad-vibe")
+      (ui/wait-for! #(some? (rt :held :vibe)))
+      (Thread/sleep 800)
+      (ui/release-node! robot "#vibe-pad-vibe")
+      (ui/wait-for! #(= :locked (rt :rotation)))
+      (is (= :vibe-2 (rt :current)))
+      (ui/assert-visible! "#vibe-header-locked")
+      (ui/assert-text! "#vibe-pad-vibe-badge" "LOCKED"))))
+
+(deftest blackout-pad-shows-banner-and-dims-the-rest-test
+  (let [robot (ui/robot)]
+    (open-perform! robot)
+    (ui/mouse-click! robot "#vibe-pad-blackout")
+    (ui/wait-for! #(true? (rt :blackout?)))
+    (ui/assert-visible! "#vibe-banner")
+    (ui/assert-text! "#vibe-banner" "BLACKOUT")
+    (ui/wait-for! #(ui/has-style-class? "#vibe-pad-blackout" "vibe-pad-on"))
+    (doseq [role ["hit" "accent" "flash" "vibe"]]
+      (is (ui/has-style-class? (str "#vibe-pad-" role) "vibe-pad-dim") role))
+    (is (not (ui/has-style-class? "#vibe-pad-blackout" "vibe-pad-dim")))
+    (testing "a cue started from the grid during blackout lights the room: the banner says so"
+      (events/dispatch! {:event/type :grid/activate-cell :col 0 :row 0})
+      (ui/assert-text! "#vibe-banner" "BLACKOUT · vibe keys off · a grid cue is playing")
+      (is (true? (rt :blackout?))))
+    (testing "pressed again: the banner goes and the pads come back"
+      (ui/mouse-click! robot "#vibe-pad-blackout")
+      (ui/wait-for! #(false? (rt :blackout?)))
+      (ui/wait-for! #(not (ui/visible? "#vibe-banner")))
+      (ui/wait-for! #(not (ui/has-style-class? "#vibe-pad-hit" "vibe-pad-dim")))
+      (is (not (ui/has-style-class? "#vibe-pad-blackout" "vibe-pad-on"))))))
+
+(deftest learn-binds-a-role-to-a-note-test
+  (let [robot (ui/robot)
+        note-key {:source :midi :channel 0 :note 36}]
+    (open-perform! robot)
+    (testing "a right-click presses nothing"
+      (fire! "#vibe-pad-hit"
+             (mouse MouseEvent/MOUSE_PRESSED :button MouseButton/SECONDARY)
+             (mouse MouseEvent/MOUSE_RELEASED :button MouseButton/SECONDARY))
+      (flush-event-queue!)
+      (is (empty? (rt :held)))
+      (is (zero? (rt :started))))
+    (ui/right-click-node! robot (ui/query "#vibe-pad-hit"))
+    (ui/click! robot "#vibe-pad-hit-learn")
+    (ui/wait-for! #(= {:type :vibe :role :hit} (get-in (app-state) [:backend :input :learning-target])))
+    (ui/assert-text! "#vibe-pad-hit-badge" "LEARN")
+    (ui/assert-text! "#vibe-learn-prompt" "Press the key for HIT")
+    (is (ui/has-style-class? "#vibe-pad-hit" "vibe-pad-learning"))
+    (is (empty? (rt :held)) "the menu pressed nothing")
+    (input-router/dispatch! (note :note-on 36))
+    (ui/wait-for! #(= {:type :vibe :role :hit} (get-in (app-state) [:config :input :trigger-map note-key])))
+    (ui/assert-text! "#vibe-pad-hit-keys" "MIDI Ch 1 Note 36")
+    (ui/wait-for! #(not (ui/visible? "#vibe-pad-hit-badge")))
+    (is (not (ui/visible? "#vibe-learn-prompt")))
+    (input-router/dispatch! (note :note-off 36))))
+
+(deftest a-learned-note-plays-through-the-mapper-test
+  (let [robot (ui/robot)]
+    (bind! 36 :hit)
+    (open-perform! robot)
+    (ui/assert-text! "#vibe-pad-hit-keys" "MIDI Ch 1 Note 36")
+    (input-router/dispatch! (note :note-on 36))
+    (ui/wait-for! #(= :input (rt :held :hit :src)))
+    (is (some? (intent (rt :voices :hit :cell))))
+    (ui/wait-for! #(ui/has-style-class? "#vibe-pad-hit" "vibe-pad-held"))
+    (input-router/dispatch! (note :note-off 36))
+    (ui/wait-for! #(nil? (rt :held :hit)))
+    (ui/wait-for! #(not (ui/has-style-class? "#vibe-pad-hit" "vibe-pad-held")))))
+
+(deftest strip-chip-click-selects-test
+  (let [robot (ui/robot)]
+    (open-perform! robot)
+    (ui/click! robot "#vibe-chip-vibe-2")
+    (ui/wait-for! #(= :vibe-2 (rt :current)))
+    (ui/assert-text! "#vibe-header-name" "LINES")
+    (ui/wait-for! #(ui/has-style-class? "#vibe-chip-vibe-2" "vibe-chip-current"))
+    (is (not (ui/has-style-class? "#vibe-chip-vibe-1" "vibe-chip-current")))))
+
+(deftest pad-hold-ends-when-the-window-loses-focus-test
+  (let [robot (ui/robot)]
+    (bind! 36 :hit)
+    (bind! 37 :accent)
+    (open-perform! robot)
+    (notify-focus! true)
+    (ui/press-node! robot "#vibe-pad-hit")
+    (input-router/dispatch! (note :note-on 37))
+    (ui/wait-for! #(and (= :pad (rt :held :hit :src)) (= :input (rt :held :accent :src))))
+    (notify-focus! false)
+    (is (false? (.isFocused (main-stage))))
+    (ui/wait-for! #(nil? (rt :held :hit)))
+    (is (= :input (rt :held :accent :src)) "invariant 2: a MIDI hold doesn't end on focus loss")
+    (ui/wait-for! #(not (ui/has-style-class? "#vibe-pad-hit" "vibe-pad-held")))
+    (is (ui/has-style-class? "#vibe-pad-accent" "vibe-pad-held"))
+    (testing "the mouse's late release doesn't let go of a key's hold"
+      (input-router/dispatch! (note :note-on 36))
+      (ui/wait-for! #(= :input (rt :held :hit :src)))
+      (ui/release-node! robot "#vibe-pad-hit")
+      (flush-event-queue!)
+      (is (= :input (rt :held :hit :src))))
+    (input-router/dispatch! (note :note-off 36))
+    (input-router/dispatch! (note :note-off 37))
+    (ui/wait-for! #(empty? (rt :held)))))

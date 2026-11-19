@@ -26,6 +26,7 @@
        ...))"
   (:require [cljfx.api :as fx]
             [laser-show.state.extractors :as ex]
+            [laser-show.vibes.library :as library]
             [laser-show.css.core :as css]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.chains :as chains]
@@ -875,3 +876,143 @@
    JVM, so it has no context dependencies."
   [_context]
   (dev-config/dev-mode?))
+
+
+;; Vibe mode
+;;
+;; The Perform tab (views/tabs/perform.clj). The header, the strip and each
+;; pad subscribe to what they show only, so a press re-renders its own pad,
+;; and a vibe change the strip, the header and VIBE's pad.
+
+
+(defn vibe-config
+  "[:config :vibes]: the vibes, their order and settings (vibes.library)."
+  [context]
+  (fx/sub-val context get-in [:config :vibes]))
+
+(defn vibe-current-id
+  "The vibe playing (vibes.library/current-id): the first of :order until a
+   press or a select makes one current; nil without vibes."
+  [context]
+  (fx/sub-val context library/current-id))
+
+(defn- next-vibe-id [state]
+  (library/next-id state (library/current-id state)))
+
+(defn vibe-next-id
+  "The vibe a VIBE tap goes to; nil without vibes or with one."
+  [context]
+  (let [next-id (fx/sub-val context next-vibe-id)]
+    (when (not= next-id (fx/sub-ctx context vibe-current-id))
+      next-id)))
+
+(defn vibe-blackout?
+  "Is BLACKOUT on?"
+  [context]
+  (boolean (fx/sub-val context get-in [:vibe-runtime :blackout?])))
+
+(defn vibe-strip
+  "One chip per vibe, in order: [{:id :name :color :energy :current? :next?}]."
+  [context]
+  (let [{:keys [order library]} (fx/sub-ctx context vibe-config)
+        current (fx/sub-ctx context vibe-current-id)
+        next-id (fx/sub-ctx context vibe-next-id)]
+    (mapv (fn [id]
+            (let [{vibe-name :name :keys [color energy]} (get library id)]
+              {:id id :name vibe-name :color color :energy energy
+               :current? (= id current) :next? (= id next-id)}))
+          order)))
+
+(defn- lit-cue-count
+  "The cues lighting the room: those in active-cues while the transport plays."
+  [state]
+  (if (ex/playing? state) (count (ex/active-cues state)) 0))
+
+(defn- learning-role
+  "The vibe role a learn is for, or nil."
+  [state]
+  (let [{:keys [type role]} (get-in state [:backend :input :learning-target])]
+    (when (= :vibe type) role)))
+
+(defn vibe-header
+  "The Perform tab's header: the current vibe's {:name :color :energy}, and
+   :rotation, :blackout?, :banner and :learning (the role being learned).
+   :banner is nil unless BLACKOUT is on, and it says dark only while nothing
+   plays: a cue started from the grid during blackout lights the room though
+   the vibe keys stay off (V2 A), and then it says that."
+  [context]
+  (let [{:keys [library]} (fx/sub-ctx context vibe-config)
+        {vibe-name :name :keys [color energy]} (get library (fx/sub-ctx context vibe-current-id))
+        blackout? (fx/sub-ctx context vibe-blackout?)
+        lit (when blackout? (fx/sub-val context lit-cue-count))]
+    {:name vibe-name :color color :energy energy
+     :rotation (fx/sub-val context get-in [:vibe-runtime :rotation])
+     :blackout? blackout?
+     :banner (cond
+               (not blackout?) nil
+               (zero? lit) "BLACKOUT"
+               (= 1 lit) "BLACKOUT · vibe keys off · a grid cue is playing"
+               :else (str "BLACKOUT · vibe keys off · " lit " grid cues are playing"))
+     :learning (fx/sub-val context learning-role)}))
+
+(def ^:private vibe-role-labels
+  {:hit "HIT" :accent "ACCENT" :flash "FLASH" :vibe "VIBE" :blackout "BLACKOUT"})
+
+(defn vibe-role-bindings
+  "The trigger-map keys of the controls bound to role, in a stable order."
+  [context role]
+  (->> (fx/sub-ctx context input-trigger-map)
+       (keep (fn [[k action]] (when (library/binds-role? action role) k)))
+       (sort-by pr-str)
+       vec))
+
+(defn- vibe-held? [state role]
+  (some? (get-in state [:vibe-runtime :held role])))
+
+(defn- vibe-playing-cell
+  "The cell role's voice plays, while that cue still plays the voice's run:
+   not once the clock ended it (a decay) or something started it again."
+  [state role]
+  (let [{:keys [cell run]} (get-in state [:vibe-runtime :voices role])]
+    (when (and run (= run (get-in state [:playback :active-cues cell :run])))
+      cell)))
+
+(defn- vibe-learning? [state role]
+  (= role (learning-role state)))
+
+(defn- vibe-problem
+  "Why role's last press had nothing to play (:empty-pool), until the next
+   good one."
+  [state role]
+  (let [{problem-role :role why :why} (get-in state [:vibe-runtime :problem])]
+    (when (= role problem-role) why)))
+
+(defn- vibes? [state]
+  (boolean (seq (get-in state [:config :vibes :order]))))
+
+(defn- vibe-locked? [state]
+  (= :locked (get-in state [:vibe-runtime :rotation])))
+
+(defn vibe-pad
+  "One of the Perform tab's five pads: {:role :label :bindings (trigger-map
+   keys) :held? :playing (the cell its voice plays, while it does)
+   :learning? :problem :dim?}, with :next (the next vibe's name) and
+   :locked? for VIBE, and :on? for BLACKOUT. A pad lights while its role is
+   held, whatever pressed it. Every pad is dim without vibes, and all but
+   BLACKOUT during blackout."
+  [context role]
+  (let [blackout? (fx/sub-ctx context vibe-blackout?)]
+    (cond-> {:role role
+             :label (vibe-role-labels role)
+             :bindings (fx/sub-ctx context vibe-role-bindings role)
+             :held? (fx/sub-val context vibe-held? role)
+             :playing (fx/sub-val context vibe-playing-cell role)
+             :learning? (fx/sub-val context vibe-learning? role)
+             :problem (fx/sub-val context vibe-problem role)
+             :dim? (or (not (fx/sub-val context vibes?))
+                       (and blackout? (not= :blackout role)))}
+      (= :vibe role) (assoc :next (some->> (fx/sub-ctx context vibe-next-id)
+                                           (get (:library (fx/sub-ctx context vibe-config)))
+                                           :name)
+                            :locked? (fx/sub-val context vibe-locked?))
+      (= :blackout role) (assoc :on? blackout?))))

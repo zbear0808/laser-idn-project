@@ -7,11 +7,13 @@
    - Learn modes for MIDI and OSC
    
    State is stored at [:backend :input :midi] and [:backend :input :osc]"
-  (:require [laser-show.input.midi :as midi]
+  (:require [clojure.string :as str]
+            [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc]
             [laser-show.input.router :as router]
             [laser-show.input.events :as input-events]
-            [laser-show.state.core :as state]))
+            [laser-show.state.core :as state]
+            [laser-show.vibes.library :as library]))
 
 
 ;; MIDI State Path Helper
@@ -221,10 +223,11 @@
     (deliver p nil)))
 
 (defn- learn-target
-  "What a learn is for: the target action's :type and :target. The binding it
-   learns is the whole action, its :behavior included."
+  "What a learn is for: the target action's :type and :target (a cell) or
+   :role (a vibe role). The binding it learns is the whole action, its
+   :behavior included."
   [target-action]
-  (select-keys target-action [:type :target]))
+  (select-keys target-action [:type :target :role]))
 
 (defn- handle-input-start-learn
   "Start generic input learn mode for a target action.
@@ -261,18 +264,37 @@
     (input-events/trigger? input-event)
     {:source (:source input-event) :id (:id input-event)}))
 
+(defn- action-name
+  "What a binding did, for an undo label: \"cue A1\", \"effect A1\", \"HIT\",
+   or its type (\"tap tempo\")."
+  [{:keys [type target role]}]
+  (let [cell (fn [[col row]] (str (char (+ 65 row)) (inc col)))]
+    (cond
+      (and (= :trigger-cue type) (vector? target)) (str "cue " (cell target))
+      (and (= :trigger-effect type) (vector? target)) (str "effect " (cell target))
+      (and (= :vibe type) role) (str/upper-case (name role))
+      :else (str/replace (name (or type :binding)) "-" " "))))
+
 (defn- handle-input-learn-captured
   "Bind the captured input to the target action, :behavior included (ignored
-   if learn was cancelled or restarted for another target in the meantime)."
+   if learn was cancelled or restarted for another target in the meantime).
+   A vibe role keeps one control: its other bindings go, so learning it again
+   moves it. The undo label names what the input did before, if anything."
   [{:keys [state input-event target-action]}]
   (let [learning? (= (get-in state [:backend :input :learning-target])
                      (learn-target target-action))
-        lookup-key (learn-lookup-key input-event)]
+        lookup-key (learn-lookup-key input-event)
+        replaced (get-in state [:config :input :trigger-map lookup-key])
+        role (when (= :vibe (:type target-action)) (:role target-action))]
     (if (and lookup-key learning?)
       {:state (-> state
+                  (update-in [:config :input :trigger-map]
+                             #(cond->> % role (into {} (remove (fn [[_ action]] (library/binds-role? action role))))))
                   (assoc-in [:config :input :trigger-map lookup-key] target-action)
                   (update-in [:backend :input] dissoc :learning-target))
-       :history/description "Learn Trigger"}
+       :history/description (if (and replaced (not= (learn-target replaced) (learn-target target-action)))
+                              (str "Learn Trigger (replaces " (action-name replaced) ")")
+                              "Learn Trigger")}
       {:state (cond-> state
                 learning? (update-in [:backend :input] dissoc :learning-target))})))
 

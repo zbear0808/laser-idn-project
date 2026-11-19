@@ -53,6 +53,11 @@
         after (rest (drop-while #(not= id %) order))]
     (or (first after) (first order))))
 
+(defn binds-role?
+  "Is the trigger-map action a binding of role ({:type :vibe :role role})?"
+  [action role]
+  (and (= :vibe (:type action)) (= role (:role action))))
+
 
 ;; Who a cue reaches (V6)
 

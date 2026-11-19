@@ -144,7 +144,8 @@
    :projectors/add-manual "Add Projector"
    :zone-groups/create-new "Add Zone Group"
    :zone-groups/save-edit "Edit Zone Group"
-   :zone-groups/remove "Delete Zone Group"})
+   :zone-groups/remove "Delete Zone Group"
+   :vibe/clear-control "Clear Control"})
 
 (defn format-event-description
   "Generate a human-readable description for an event type."

@@ -6,7 +6,11 @@
    [laser-show.events.handlers.timing :as timing]
    [laser-show.state.core :as state]
    [laser-show.state.domains :as domains]
-   [laser-show.subs :as subs]))
+   [laser-show.subs :as subs]
+   [laser-show.events.handlers :as handlers]
+   [laser-show.state.templates :as templates]
+   [laser-show.vibes.engine :as engine]
+   [laser-show.vibes.library :as library]))
 
 (def cue-chain {:name "Intro"
                 :items [{:type :group
@@ -106,6 +110,172 @@
     (testing "the stats alone don't"
       (let [ctx' (fx/swap-context ctx assoc-in [:backend :streaming :frame-stats] {:avg-latency-us 10})]
         (is (= 0 (fx/sub-ctx ctx' subs/beat-index)))))))
+
+
+;; Vibe mode: the Perform tab's subs
+
+(def ^:private roles [:hit :accent :flash :vibe :blackout])
+
+(def ^:private hit-key {:source :midi :channel 0 :note 36})
+
+(defn- vibe-state
+  "The starter cues and vibes, with a MIDI note learned for HIT."
+  []
+  (-> (domains/build-initial-state)
+      (templates/apply-starter-cue-chains)
+      (templates/apply-starter-vibes)
+      (assoc-in [:timing :bpm] 120.0)
+      (assoc-in [:config :input :trigger-map] {hit-key {:type :vibe :role :hit}})))
+
+(defn- press [ctx role t] (fx/swap-context ctx #(:state (engine/press % {:role role :time t}))))
+(defn- release [ctx role t] (fx/swap-context ctx #(:state (engine/release % {:role role :time t}))))
+(defn- in-state [ctx & ks] (get-in (fx/sub-val ctx identity) ks))
+
+(defn- handle
+  "ctx after event through the handlers, then each event it dispatches."
+  [ctx event]
+  (fx/swap-context ctx (fn [s]
+                         (loop [s s event event]
+                           (let [{s' :state next-event :dispatch} (handlers/handle-event (merge {:time 0} event {:state s}))]
+                             (if next-event
+                               (recur (or s' s) next-event)
+                               (or s' s)))))))
+
+(defn- pads [ctx] (into {} (for [r roles] [r (fx/sub-ctx ctx subs/vibe-pad r)])))
+
+(deftest vibe-pad-sub-test
+  (let [ctx (context (vibe-state))]
+    (is (= {:role :hit :label "HIT" :bindings [hit-key] :held? false :playing nil
+            :learning? false :problem nil :dim? false}
+           (fx/sub-ctx ctx subs/vibe-pad :hit)))
+    (testing "a press holds the pad and names the cell it plays"
+      (let [ctx' (press ctx :hit 1000)
+            cell (in-state ctx' :vibe-runtime :voices :hit :cell)]
+        (is (some? cell))
+        (is (= {:held? true :playing cell} (select-keys (fx/sub-ctx ctx' subs/vibe-pad :hit) [:held? :playing])))
+        (testing "and a quick release lets it decay: still playing, no longer held"
+          (is (= {:held? false :playing cell}
+                 (select-keys (fx/sub-ctx (release ctx' :hit 1050) subs/vibe-pad :hit) [:held? :playing]))))))
+    (testing "VIBE says what comes next, and whether the rotation is locked; BLACKOUT whether it is on"
+      (is (= {:next "Lines" :locked? false} (select-keys (fx/sub-ctx ctx subs/vibe-pad :vibe) [:next :locked?])))
+      (is (= {:next "Shapes" :locked? true}
+             (select-keys (fx/sub-ctx (-> ctx (press :vibe 1000) (release :vibe 1700) (handle {:event/type :vibe/select :vibe :vibe-2 :time 1800}))
+                                      subs/vibe-pad :vibe)
+                          [:next :locked?])))
+      (is (false? (:on? (fx/sub-ctx ctx subs/vibe-pad :blackout)))))
+    (testing "the pad being learned, and only that one"
+      (let [ctx' (fx/swap-context ctx assoc-in [:backend :input :learning-target] {:type :vibe :role :accent})]
+        (is (= {:hit false :accent true :flash false :vibe false :blackout false}
+               (update-vals (pads ctx') :learning?)))))
+    (testing "a press with nothing to play says so on its own pad"
+      (let [ctx' (-> ctx
+                     (fx/swap-context assoc-in [:config :vibes :library :vibe-1 :accent :cells] [])
+                     (press :accent 1000))]
+        (is (= {:hit nil :accent :empty-pool :flash nil :vibe nil :blackout nil} (update-vals (pads ctx') :problem)))))
+    (testing "BLACKOUT dims the other four and shows it is on"
+      (let [ctx' (press ctx :blackout 1000)]
+        (is (= {:hit true :accent true :flash true :vibe true :blackout false} (update-vals (pads ctx') :dim?)))
+        (is (true? (:on? (fx/sub-ctx ctx' subs/vibe-pad :blackout))))))
+    (testing "invariant 8: with no vibes every pad is dim"
+      (let [ctx' (fx/swap-context ctx assoc-in [:config :vibes] library/empty-library)]
+        (is (every? true? (vals (update-vals (pads ctx') :dim?))))
+        (is (nil? (:next (fx/sub-ctx ctx' subs/vibe-pad :vibe))))))
+    (testing "the controls bound to a role, and a cell's left out"
+      (let [ctx' (fx/swap-context ctx update-in [:config :input :trigger-map] assoc
+                                  {:source :keyboard :id :h} {:type :vibe :role :hit}
+                                  {:source :midi :channel 0 :note 40} {:type :trigger-cue :target [0 0]})]
+        (is (= #{hit-key {:source :keyboard :id :h}} (set (:bindings (fx/sub-ctx ctx' subs/vibe-pad :hit)))))
+        (is (= [] (:bindings (fx/sub-ctx ctx' subs/vibe-pad :accent))))))))
+
+(deftest vibe-strip-sub-test
+  (let [ctx (context (vibe-state))]
+    (is (= [{:id :vibe-1 :name "Shapes" :color "#4A90D9" :energy 2 :current? true :next? false}
+            {:id :vibe-2 :name "Lines" :color "#9B59B6" :energy 3 :current? false :next? true}]
+           (fx/sub-ctx ctx subs/vibe-strip))
+        "nothing pressed yet: the first vibe is current")
+    (testing "a select moves both marks (next wraps)"
+      (is (= [[:vibe-1 false true] [:vibe-2 true false]]
+             (mapv (juxt :id :current? :next?)
+                   (fx/sub-ctx (handle ctx {:event/type :vibe/select :vibe :vibe-2 :time 1000}) subs/vibe-strip)))))
+    (testing "one vibe: current, and nothing next"
+      (is (= [[:vibe-1 true false]]
+             (mapv (juxt :id :current? :next?)
+                   (fx/sub-ctx (fx/swap-context ctx update-in [:config :vibes :order] subvec 0 1) subs/vibe-strip)))))
+    (testing "the header"
+      (is (= {:name "Shapes" :color "#4A90D9" :energy 2 :rotation :active :blackout? false :banner nil :learning nil}
+             (fx/sub-ctx ctx subs/vibe-header)))
+      (is (= :hit (:learning (fx/sub-ctx (fx/swap-context ctx assoc-in [:backend :input :learning-target] {:type :vibe :role :hit})
+                                         subs/vibe-header))))
+      (is (nil? (:learning (fx/sub-ctx (fx/swap-context ctx assoc-in [:backend :input :learning-target] {:type :trigger-cue :target [0 0]})
+                                       subs/vibe-header)))
+          "a cell's learn isn't a role's"))))
+
+(deftest hit-press-leaves-the-strip-and-other-pads-alone-test
+  (testing "invariant 4: a HIT press re-renders the HIT pad; the strip, the header and the other pads keep their values"
+    (let [ctx (context (vibe-state))
+          before (pads ctx)
+          strip (fx/sub-ctx ctx subs/vibe-strip)
+          header (fx/sub-ctx ctx subs/vibe-header)]
+      (doseq [ctx' [(press ctx :hit 1000)
+                    (-> ctx (press :hit 1000) (release :hit 1050) (press :hit 1500))
+                    (-> ctx (press :hit 1000) (status-write))]]
+        (is (identical? strip (fx/sub-ctx ctx' subs/vibe-strip)))
+        (is (identical? header (fx/sub-ctx ctx' subs/vibe-header)))
+        (doseq [r [:accent :flash :vibe :blackout]]
+          (is (identical? (before r) (fx/sub-ctx ctx' subs/vibe-pad r)) (str r)))
+        (is (not= (before :hit) (fx/sub-ctx ctx' subs/vibe-pad :hit))))))
+  (testing "the ACCENT pad changes only when its text does: a HIT that restarts the cell ACCENT plays"
+    (let [ctx (-> (vibe-state)
+                  (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[4 0]])
+                  (context)
+                  (press :accent 1000))
+          accent (fx/sub-ctx ctx subs/vibe-pad :accent)]
+      (is (= [4 0] (:playing accent)))
+      (is (nil? (:playing (fx/sub-ctx (press ctx :hit 1100) subs/vibe-pad :accent)))))))
+
+(deftest vibe-change-leaves-the-pads-but-vibe-alone-test
+  (testing "invariant 5: a vibe change re-renders the strip, the header and VIBE's next; nothing else"
+    (let [ctx (-> (context (vibe-state)) (press :hit 1000) (release :hit 1050) (press :accent 1100) (release :accent 1150))
+          before (pads ctx)
+          strip (fx/sub-ctx ctx subs/vibe-strip)
+          header (fx/sub-ctx ctx subs/vibe-header)]
+      (doseq [ctx' [(handle ctx {:event/type :vibe/select :vibe :vibe-2 :time 2000})
+                    (-> ctx (press :vibe 2000) (release :vibe 2100))]]
+        (is (not= strip (fx/sub-ctx ctx' subs/vibe-strip)))
+        (is (= "Lines" (:name (fx/sub-ctx ctx' subs/vibe-header))))
+        (is (not= header (fx/sub-ctx ctx' subs/vibe-header)))
+        (is (= "Shapes" (:next (fx/sub-ctx ctx' subs/vibe-pad :vibe))))
+        (doseq [r [:hit :accent :flash :blackout]]
+          (is (identical? (before r) (fx/sub-ctx ctx' subs/vibe-pad r)) (str r)))))))
+
+(deftest playing-name-clears-when-the-run-ends-test
+  (let [ctx (-> (context (vibe-state)) (press :hit 1000) (release :hit 1050))
+        {:keys [cell run]} (in-state ctx :vibe-runtime :voices :hit)]
+    (is (= cell (:playing (fx/sub-ctx ctx subs/vibe-pad :hit))) "a tap: its cue decays")
+    (testing "the show clock ends the decayed run: the pad shows nothing, though the engine still remembers the voice"
+      (let [ctx' (handle ctx {:event/type :show-clock/cue-ended :cell cell :run run})]
+        (is (some? (in-state ctx' :vibe-runtime :voices :hit)))
+        (is (nil? (:playing (fx/sub-ctx ctx' subs/vibe-pad :hit))))))
+    (testing "the grid starts the cell again: a run that isn't HIT's"
+      (let [ctx' (handle ctx {:event/type :grid/activate-cell :col (first cell) :row (second cell)})]
+        (is (some? (in-state ctx' :playback :active-cues cell)))
+        (is (nil? (:playing (fx/sub-ctx ctx' subs/vibe-pad :hit))))))))
+
+(deftest blackout-banner-is-honest-test
+  (testing "the banner says dark only while nothing plays: a grid cue started during blackout (V2 A) is named"
+    (let [ctx (-> (context (vibe-state))
+                  (handle {:event/type :vibe/press :role :hit :time 1000})
+                  (handle {:event/type :vibe/press :role :blackout :time 1100}))
+          banner #(:banner (fx/sub-ctx % subs/vibe-header))
+          lit (handle ctx {:event/type :grid/activate-cell :col 7 :row 0})
+          lit-twice (handle lit {:event/type :grid/activate-cell :col 5 :row 0})]
+      (is (= "BLACKOUT" (banner ctx)))
+      (is (true? (in-state lit :vibe-runtime :blackout?)) "the vibe keys stay off")
+      (is (true? (in-state lit :playback :playing?)) "and the room is lit")
+      (is (= "BLACKOUT · vibe keys off · a grid cue is playing" (banner lit)))
+      (is (= "BLACKOUT · vibe keys off · 2 grid cues are playing" (banner lit-twice)))
+      (is (= "BLACKOUT" (banner (handle lit-twice {:event/type :transport/stop}))) "Stop: dark again")
+      (is (nil? (banner (handle lit {:event/type :vibe/press :role :blackout :time 2000}))) "BLACKOUT off"))))
 
 (deftest timeline-dialog-subs-ignore-playback-and-other-cells-test
   (let [ctx (context base-state)

@@ -301,6 +301,59 @@
   (wait-for! #(some? (query selector)))
   (modifier-click-node! robot-instance (query selector) modifier))
 
+(defn- fire-mouse!
+  "Fire a primary-button mouse event of event-type at the centre of node, as
+   a real mouse sends it: not synthesized, not a popup trigger."
+  [^Node node event-type]
+  (run-on-fx-thread!
+   (fn []
+     (let [bounds (.localToScreen node (.getBoundsInLocal node))
+           local-x (/ (.getWidth (.getBoundsInLocal node)) 2)
+           local-y (/ (.getHeight (.getBoundsInLocal node)) 2)]
+       (Event/fireEvent
+        node
+        (MouseEvent. event-type local-x local-y (+ (.getMinX bounds) local-x) (+ (.getMinY bounds) local-y)
+                     MouseButton/PRIMARY 1
+                     false false false false
+                     (= event-type MouseEvent/MOUSE_PRESSED) false false
+                     false false true nil))))))
+
+(defn press-node!
+  "Press the primary mouse button on the node found by selector and keep it
+   down (release-node! lets go). Headless, the press is fired at the node as a
+   real mouse's: the headless robot marks every mouse event synthesized, as
+   JavaFX marks the ones it makes from a touch, and a popup trigger, so a
+   control that takes touches as touch events (the Perform tab's pads) leaves
+   the robot's out."
+  [^FxRobot robot-instance ^String selector]
+  (wait-for! #(some? (query selector)))
+  (let [node (query selector)]
+    (if (headless?)
+      (fire-mouse! node MouseEvent/MOUSE_PRESSED)
+      (do (.moveTo ^FxRobotInterface robot-instance node)
+          (.press robot-instance (into-array MouseButton [MouseButton/PRIMARY])))))
+  (sync-fx!)
+  robot-instance)
+
+(defn release-node!
+  "Release the primary mouse button pressed on the node found by selector
+   (press-node!)."
+  [^FxRobot robot-instance ^String selector]
+  (if (headless?)
+    (let [node (query selector)]
+      (fire-mouse! node MouseEvent/MOUSE_RELEASED)
+      (fire-mouse! node MouseEvent/MOUSE_CLICKED))
+    (.release robot-instance (into-array MouseButton [MouseButton/PRIMARY])))
+  (sync-fx!)
+  robot-instance)
+
+(defn mouse-click!
+  "A primary-button click on the node found by selector, through press-node!
+   and release-node!."
+  [robot-instance selector]
+  (press-node! robot-instance selector)
+  (release-node! robot-instance selector))
+
 (defn drag-node!
   "Drag one queried node onto another node using TestFX mouse movement."
   [^FxRobot robot-instance ^Node source ^Node target]

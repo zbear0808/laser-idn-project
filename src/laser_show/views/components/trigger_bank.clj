@@ -34,6 +34,17 @@
       :name "While held (momentary)"
       :description "The cue plays while the input is held down."}]))
 
+(defn binding-label
+  "A trigger-map key as the user knows the control: \"MIDI Ch 1 Note 36\",
+   \"OSC /x\", \"Key :space\", or the key itself."
+  [trigger-key]
+  (case (:source trigger-key)
+    :midi (str "MIDI Ch " (inc (or (:channel trigger-key) 0))
+               " Note " (:note trigger-key))
+    :osc (str "OSC " (:id trigger-key))
+    :keyboard (str "Key " (:id trigger-key))
+    (str trigger-key)))
+
 (defn trigger-bank
   "Configuration UI for resolving generalized triggers.
    
@@ -90,13 +101,7 @@
          :children
          (u/concatv
           (mapv (fn [trigger-key]
-                  (let [source (:source trigger-key)
-                        label (case source
-                                :midi (str "MIDI Ch " (inc (or (:channel trigger-key) 0))
-                                           " Note " (:note trigger-key))
-                                :osc (str "OSC " (:id trigger-key))
-                                :keyboard (str "Key " (:id trigger-key))
-                                (str trigger-key))]
+                  (let [label (binding-label trigger-key)]
                     {:fx/type :h-box
                      :spacing 10
                      :alignment :center-left
