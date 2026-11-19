@@ -3,7 +3,7 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.subs :as subs]
-            [laser-show.events.core :as events]
+            [laser-show.views.components.commit-field :as commit-field]
             [clj-font-awesome.core :as fa]
             [cljfx-svg.core :as svg]
             [laser-show.common.util :as u]))
@@ -100,8 +100,16 @@
 ;; BPM Controls
 
 
+(defn- parse-bpm
+  "The BPM typed into the field: a number above 0, or nil."
+  [text]
+  (when-let [bpm (parse-double (str/trim text))]
+    (when (and (pos? bpm) (Double/isFinite bpm))
+      bpm)))
+
 (defn bpm-display
-  "BPM display with editable value."
+  "BPM display with editable value. It sets the BPM on Enter or when it
+   loses focus; text that is no BPM puts the BPM back."
   [{:keys [fx/context]}]
   (let [bpm (fx/sub-ctx context subs/bpm)]
     {:fx/type :h-box
@@ -110,19 +118,15 @@
      :children [{:fx/type :label
                  :text "BPM:"
                  :style-class "label-secondary"}
-                {:fx/type :text-field
+                {:fx/type commit-field/commit-field
                  :id "bpm-input"
                  :text (format "%.1f" (double bpm))
                  :pref-width 60
                  :style-class "text-field-dark-sm"
-                 :on-action (fn [e]
-                              (let [text (.getText (.getSource e))]
-                                (try
-                                  (let [new-bpm (Double/parseDouble text)]
-                                   (events/dispatch! {:event/type :timing/set-bpm
-                                                      :bpm new-bpm}))
-                                 (catch NumberFormatException _
-                                   nil))))}]}))
+                 :on-commit (fn [typed]
+                              (when-let [new-bpm (parse-bpm typed)]
+                                {:event/type :timing/set-bpm
+                                 :bpm new-bpm}))}]}))
 
 (defn tap-tempo-button
   "Tap tempo button."

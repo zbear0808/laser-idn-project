@@ -265,6 +265,19 @@
                                                         :force? true :state current})
                         [:multi-engine/refresh :projectors]))))))
 
+(deftest new-and-open-take-the-notice-away-test
+  (let [noticed (assoc-in document-state [:ui :notice]
+                          {:id (random-uuid) :text "Could not save friday.zip" :level :error})]
+    (testing "File > New: the notice was about the project that went"
+      (is (nil? (get-in (menu/handle {:event/type :file/new-project :force? true :state noticed})
+                        [:state :ui :notice]))))
+    (testing "File > Open"
+      (is (nil? (get-in (menu/handle {:event/type :file/project-loaded
+                                      :file-path test-file
+                                      :contents (zip-contents-of document-state)
+                                      :state noticed})
+                        [:state :ui :notice]))))))
+
 
 ;; Unsaved-changes guard (New / Open / Exit ask first when the project is dirty)
 

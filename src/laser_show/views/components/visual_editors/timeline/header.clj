@@ -218,6 +218,7 @@
                    :graphic {:fx/type fa/icon
                              :name (if (get-in r [:track :collapsed?]) :chevron-right :chevron-down)
                              :size 10}
+                   :tooltip {:fx/type :tooltip :text (if (get-in r [:track :collapsed?]) "Expand" "Collapse")}
                    :on-action (fn [_]
                                 (apply-op! col row {:op :set-collapsed :track-id track-id
                                                     :collapsed? (not (get-in r [:track :collapsed?]))}))}
@@ -230,6 +231,7 @@
                  :style-class ["toggle-button" "tl-mute"]
                  :focus-traversable false
                  :selected (true? (get-in r [:track :muted?]))
+                 :tooltip {:fx/type :tooltip :text "Mute"}
                  :on-action (fn [_]
                               (apply-op! col row {:op :set-track-muted :track-id track-id
                                                   :muted? (not (true? (get-in r [:track :muted?])))}))}])}}}))

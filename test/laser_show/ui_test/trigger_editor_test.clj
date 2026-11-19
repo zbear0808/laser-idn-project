@@ -8,7 +8,9 @@
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.scene.control ComboBox Labeled]
-           [javafx.scene.control.skin ComboBoxListViewSkin]))
+           [javafx.scene.control.skin ComboBoxListViewSkin]
+           [javafx.scene.layout BackgroundFill Region VBox]
+           [javafx.scene.paint Color]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -55,7 +57,7 @@
   (ui/wait-for! #(some (fn [title]
                          (and title (.startsWith ^String title "Triggers")))
                        (ui/window-titles)))
-  (ui/assert-visible! ".dialog-content")
+  (ui/assert-visible! "#trigger-editor-dialog")
   (ui/assert-visible! "#trigger-editor-done")
   (ui/assert-text! "#trigger-editor-done" "Close")
   (is (some (fn [title]
@@ -65,7 +67,34 @@
   (ui/click! (ui/robot) "#trigger-editor-done")
   (ui/wait-for! #(false? (get-in (state/get-raw-state)
                                  [:ui :dialogs :trigger-editor :open?])))
-  (ui/assert-no-node! ".dialog-content"))
+  (ui/assert-no-node! "#trigger-editor-dialog"))
+
+(defn- fill-hex
+  "A region's background colour as #RRGGBB, with its CSS applied."
+  [^Region region]
+  (ui/on-fx-thread
+   #(do (.applyCss region)
+        (when-let [^Color c (some-> region .getBackground .getFills ^BackgroundFill first .getFill)]
+          (let [byte (fn [v] (Math/round (* 255.0 (double v))))]
+            (format "#%02X%02X%02X" (byte (.getRed c)) (byte (.getGreen c)) (byte (.getBlue c))))))))
+
+(deftest trigger-editor-sections-are-spaced-test
+  (state/swap-state! assoc-in [:config :input :trigger-map {:source :keyboard :id :q}]
+                     {:type :trigger-cue :target [0 0] :behavior :follow})
+  (open-trigger-editor! 0 0 :cue)
+  (ui/assert-visible! "#trigger-editor-done")
+  (let [^VBox dialog (first (ui/query-all "#trigger-editor-dialog"))
+        sections (ui/on-fx-thread #(vec (.getChildren dialog)))
+        gaps (fn [] (map (fn [above below] (- (second (ui/scene-bounds below)) (nth (ui/scene-bounds above) 3)))
+                         sections (rest sections)))]
+    (is (= 3 (count sections)) "the header, the trigger bank and the footer")
+    (is (= 12.0 (ui/on-fx-thread #(do (.applyCss dialog) (.getSpacing dialog)))))
+    (ui/wait-for! #(every? (fn [gap] (<= 11.5 gap)) (gaps)))
+    (is (every? #(<= 11.5 % 12.5) (gaps)) "12 px between them, not touching")
+    (is (= "#121212" (fill-hex dialog)) "the dialog's background, as before")
+    (testing "with a binding, it still fits the window under a macOS title bar (28 px)"
+      (let [window-height (ui/on-fx-thread #(.getHeight (.getWindow (.getScene dialog))))]
+        (is (<= (ui/on-fx-thread #(.prefHeight dialog 420.0)) (- window-height 28)))))))
 
 (deftest trigger-editor-learns-input-and-configures-behavior
   (let [robot (ui/robot)

@@ -1,12 +1,13 @@
 (ns laser-show.ui-test.grid-test
   "Cue grid on the grid tab, and the effects grid."
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.scene Node]
-           [javafx.scene.control Labeled SplitPane]
+           [javafx.scene.control Labeled MenuItem SplitPane]
            [javafx.scene.input KeyCode MouseButton]
            [javafx.scene.layout BackgroundFill BorderStroke Region]
            [javafx.scene.paint Color]
@@ -162,6 +163,55 @@
       (is (= "#656565" (fill-hex "#effects-cell-0-0")) "off, hovered")
       (move-away! robot "#effects-cell-0-0")
       (is (= "#505050" (fill-hex "#effects-cell-0-0"))))))
+
+
+;; What the tabs say about the clicks
+
+(defn- hint [selector]
+  (when-let [^Labeled label (node selector)]
+    (ui/on-fx-thread #(when (and (.isVisible label) (.isManaged label)) (.getText label)))))
+
+(deftest hints-describe-the-clicks-test
+  (let [robot (ui/robot)]
+    (testing "the Grid tab: a click plays, a double-click or the menu edits"
+      (ui/wait-for! #(some? (hint "#grid-hint")))
+      (is (= "Click: play or stop · Double-click or right-click: edit · Drag: move" (hint "#grid-hint")))
+      (is (nil? (hint "#grid-empty-hint"))))
+    (testing "the Effects tab, while no cell has an effect: what they are, and how to start"
+      (ui/click! robot "#effects-tab")
+      (ui/wait-for! #(= "Click: on or off · Double-click or right-click: edit · Drag: move" (hint "#grid-hint")))
+      (is (= "Effect cells change every playing cue. Double-click one to start" (hint "#grid-empty-hint"))))
+    (testing "once a cell has one, the line goes"
+      (state/swap-state! assoc-in [:chains :effect-chains [3 1]]
+                         {:active? false
+                          :items [{:id (random-uuid) :type :effect :effect-id :scale :enabled? true :params {}}]})
+      (ui/wait-for! #(nil? (hint "#grid-empty-hint")))
+      (is (some? (hint "#grid-hint"))))))
+
+(defn- menu-texts
+  "The texts of the items in the menu a cell's right-click opens."
+  [selector]
+  (let [cell (node selector)]
+    (ui/on-fx-thread #(let [^Labeled holder (.getParent cell)]
+                        (into [] (keep (fn [^MenuItem item] (.getText item)))
+                              (.getItems (.getContextMenu holder)))))))
+
+(deftest cell-menus-name-the-platform-shortcut-test
+  (let [robot (ui/robot)
+        mac? (str/includes? (str/lower-case (System/getProperty "os.name")) "mac")
+        [copy paste] (if mac? ["⌘C" "⌘V"] ["Ctrl+C" "Ctrl+V"])]
+    (ui/assert-visible! "#grid-cell-0-0")
+    (testing "a cue cell, and an empty one"
+      (is (= [(str "Copy Cue (" copy ")") (str "Paste Cue (" paste ")")]
+             (take 2 (menu-texts "#grid-cell-0-0"))))
+      (is (some #{(str "Paste Cue (" paste ")")} (menu-texts "#grid-cell-0-1"))))
+    (testing "an effects cell"
+      (ui/click! robot "#effects-tab")
+      (ui/assert-visible! "#effects-cell-0-0")
+      (is (= [(str "Copy Effects (" copy ")") (str "Paste Effects (" paste ")")]
+             (take 2 (menu-texts "#effects-cell-0-0")))))
+    (is (not-any? #(str/includes? % (if mac? "Ctrl+" "⌘"))
+                  (concat (menu-texts "#effects-cell-0-0") (menu-texts "#effects-cell-1-1"))))))
 
 
 ;; Pads that grow with the window: the Grid tab is the performer's screen

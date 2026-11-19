@@ -7,6 +7,7 @@
    - Channel filter configuration
    - MIDI learn mode"
   (:require [cljfx.api :as fx]
+            [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.css.core :as css]
             [clojure.string :as str]))
@@ -159,6 +160,7 @@
                    :spacing 8
                    :alignment :center-left
                    :children [{:fx/type :text-field
+                               :id "midi-channel-filter-field"
                                :prompt-text "All channels (leave empty)"
                                :text (format-channel-filter channel-filter)
                                :pref-width 200
@@ -166,8 +168,8 @@
                                :on-action (fn [evt]
                                             (let [text (.getText (.getSource evt))
                                                   channels (parse-channel-filter text)]
-                                              {:event/type :input/midi-set-channel-filter
-                                               :channels channels}))}
+                                              (events/dispatch! {:event/type :input/midi-set-channel-filter
+                                                                 :channels channels})))}
                               {:fx/type :label
                                :text "(comma-separated, 0-15)"
                                :style (str "-fx-text-fill: " (css/text-muted) "; "
@@ -208,7 +210,8 @@
                    :style-class ["button-secondary"]
                    :on-action {:event/type :input/midi-auto-connect}}
                   {:fx/type :button
+                   :id "midi-disconnect-all-button"
                    :text "Disconnect All"
-                   :style-class ["button-warning"]
+                   :style-class ["button-secondary"]
                    :disable (empty? connected-devices)
                    :on-action {:event/type :input/midi-disconnect-all}}]}]}))

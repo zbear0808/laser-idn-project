@@ -3,12 +3,12 @@
    
    SIMPLIFIED ARCHITECTURE (v2):
    - Projectors are directly assigned to zone groups (no intermediate 'zone' abstraction)
-   - This tab manages zone groups and shows which projectors/VPs are assigned
-   - Projector corner-pin and zone group assignment is done in the Projectors tab
+   - This tab manages zone groups and which projectors/VPs are in them
+   - Projector corner-pin is done in the Projectors tab, which can assign zone groups too
    
    Features:
    - View and edit zone groups (left panel)
-   - View projectors and VPs in selected group (center panel)
+   - Add projectors and VPs to the selected group, or take them out (center panel)
    - Zone group details (right panel)"
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
@@ -106,6 +106,7 @@
                              :id "zone-groups-add-button"
                              :text "+"
                              :style-class ["button-primary"]
+                             :tooltip {:fx/type :tooltip :text "New zone group"}
                              :on-action {:event/type :zone-groups/add}}]}
                 {:fx/type :scroll-pane
                  :fit-to-width true
@@ -156,6 +157,7 @@
                                                       :fx/key tag
                                                       :tag tag}))})])]
     {:fx/type :h-box
+     :id (str "zone-output-" (if (keyword? id) (clojure.core/name id) id))
      :spacing 8
      :alignment :center-left
      :padding 8
@@ -323,8 +325,8 @@
 
 
 (defn zones-tab
-  "Zone Groups management tab.
-   Simplified: just manages zone groups, projector assignment is in Projectors tab."
+  "Zone Groups management tab: the groups, the projectors in the selected one
+   (a click adds one or takes it out), and its details."
   [{:keys [fx/context]}]
   {:fx/type :v-box
    :style-class ["container-primary"]
@@ -334,7 +336,8 @@
                :text "Zone Groups"
                :style-class ["header-primary"]}
               {:fx/type :label
-               :text "Routing targets for cues • Assign projectors to groups in the Projectors tab"
+               :id "zones-subtitle"
+               :text "Routing targets for cues • Click a projector to add it to the group, or use the Projectors tab"
                :style-class ["label-secondary"]}
               {:fx/type :h-box
                :spacing 16

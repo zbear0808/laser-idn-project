@@ -8,7 +8,6 @@
    - Enable/disable individual projectors"
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
-            [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.animation.chains :as chains]
             [laser-show.animation.effects :as effects]
@@ -19,6 +18,7 @@
             [laser-show.views.components.visual-editors.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.list :as list]
+            [laser-show.views.components.commit-field :as commit-field]
             [laser-show.views.components.zone-chips :as zone-chips]
             [clj-font-awesome.core :as fa]))
 
@@ -43,36 +43,8 @@
       id (assoc :id id))))
 
 
-;; Text fields that commit on Enter or focus loss
+;; What the text fields take (they commit on Enter or focus loss)
 
-
-(defn- commit-field
-  "A text field that applies its text on Enter or when it loses focus, not on
-   every keystroke. (on-commit text) returns the event to dispatch, or nil to
-   reject the text, which puts the stored value back."
-  [{:keys [id text on-commit pref-width]}]
-  (let [commit! (fn [^javafx.scene.control.TextField field]
-                  (let [typed (.getText field)]
-                    (when (not= typed text)
-                      (if-let [event (on-commit typed)]
-                        (events/dispatch! event)
-                        (.setText field text)))))]
-    {:fx/type fx/ext-on-instance-lifecycle
-     :on-created (fn [^javafx.scene.control.TextField field]
-                   (.addListener (.focusedProperty field)
-                                 (reify javafx.beans.value.ChangeListener
-                                   (changed [_ _ _ focused?]
-                                     (when-not focused?
-                                       (when-let [f (.getUserData field)]
-                                         (f field)))))))
-     :desc {:fx/type :text-field
-            :id id
-            :text text
-            :pref-width pref-width
-            :style-class ["text-field-dark"]
-            :user-data commit!
-            :on-action (fn [^javafx.event.ActionEvent e]
-                         (commit! (.getSource e)))}}))
 
 (defn- parse-port
   "The port typed into the Port field, or nil unless it is 1-65535."
@@ -409,7 +381,7 @@
                                  :text "Host:"
                                  :pref-width 50
                                  :style-class ["label-secondary"]}
-                                {:fx/type commit-field
+                                {:fx/type commit-field/commit-field
                                  :id "projector-host-field"
                                  :text (or host "")
                                  :pref-width 150
@@ -424,7 +396,7 @@
                                  :text "Port:"
                                  :min-width :use-pref-size
                                  :style-class ["label-secondary"]}
-                                {:fx/type commit-field
+                                {:fx/type commit-field/commit-field
                                  :id "projector-port-field"
                                  :text (str (or port 7255))
                                  :pref-width 60
@@ -440,7 +412,7 @@
                      :children [{:fx/type :label
                                  :text "Scan rate:"
                                  :style-class ["label-secondary"]}
-                                {:fx/type commit-field
+                                {:fx/type commit-field/commit-field
                                  :id "projector-scan-rate-field"
                                  :text (str stored-rate)
                                  :pref-width 80

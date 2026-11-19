@@ -80,7 +80,9 @@
         (shot! "03-playing")
         (state/swap-state! update-in [:playback :active-cues] dissoc [2 2])
         (show-time/publish! {:at-ns (System/nanoTime) :playing? false :cues [] :positions {}})
-        (ui/click! (ui/robot) "#timeline-add-content")
+        ;; The browser opened with the empty timeline; open it if it was closed since
+        (when-not (get-in (state/get-raw-state) [:ui :timeline-prefs :add-panel :open?])
+          (ui/click! (ui/robot) "#timeline-add-content"))
         (shot! "04-drawer")
         ;; No loop: the timeline stops at its end, shown by the end marker
         (events/dispatch! {:event/type :timeline/toggle-loop :col 2 :row 2})

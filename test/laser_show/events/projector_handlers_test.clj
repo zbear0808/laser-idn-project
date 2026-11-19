@@ -166,6 +166,23 @@
     (is (= {:open? false} (get-in result [:state :ui :dialogs :add-projector-manual]))
         "closed, so a second click can't add it again, and blank when it opens next")))
 
+(deftest failed-scan-shows-a-notice-test
+  (let [scanning (assoc-in sample-state [:projector-ui :scanning?] true)
+        result (projectors/handle {:event/type :projectors/scan-failed
+                                   :error "Network is unreachable"
+                                   :state scanning})
+        {:keys [id] :as notice} (get-in result [:state :ui :notice])]
+    (is (false? (get-in result [:state :projector-ui :scanning?])) "Scan Network is back")
+    (is (= {:text "Could not scan the network: Network is unreachable" :level :error}
+           (dissoc notice :id)))
+    (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000}
+           (:dispatch-later result))
+        "it goes after 6 s, as an open or save failure's")
+    (testing "without a reason"
+      (is (= "Could not scan the network"
+             (get-in (projectors/handle {:event/type :projectors/scan-failed :error nil :state scanning})
+                     [:state :ui :notice :text]))))))
+
 (deftest handle-projectors-add-manual-with-nil-host-throws-test
   (testing "Manual projector with nil host throws exception"
     (let [event {:event/type :projectors/add-manual

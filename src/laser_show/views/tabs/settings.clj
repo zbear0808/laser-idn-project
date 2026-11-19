@@ -4,37 +4,12 @@
    Includes:
    - Ableton Link configuration
    - MIDI input configuration
-   - OSC input configuration
-   - (Future: Keyboard shortcuts, general preferences, etc.)"
+   - OSC input configuration"
   (:require
    [laser-show.css.core :as css]
    [laser-show.views.components.link-settings :as link-settings]
    [laser-show.views.components.midi-settings :as midi-settings]
    [laser-show.views.components.osc-settings :as osc-settings]))
-
-
-;; Placeholder for future keyboard settings
-
-
-(defn- keyboard-settings-section
-  "Keyboard configuration section (placeholder for future implementation)."
-  [{:keys [_fx/context]}]
-  {:fx/type :v-box
-   :spacing 12
-   :style (str "-fx-background-color: " (css/bg-elevated) "; "
-               "-fx-padding: 16; "
-               "-fx-background-radius: 8;")
-   :children [{:fx/type :h-box
-               :spacing 8
-               :alignment :center-left
-               :children [{:fx/type :label
-                           :text "Keyboard Configuration"
-                           :style (str "-fx-font-size: 16; -fx-font-weight: bold; "
-                                       "-fx-text-fill: " (css/text-primary) ";")}]}
-              {:fx/type :label
-               :text "Keyboard shortcuts and hotkey configuration coming soon..."
-               :style (str "-fx-text-fill: " (css/text-muted) "; "
-                           "-fx-font-style: italic;")}]})
 
 
 ;; Main Settings Tab
@@ -85,9 +60,6 @@
                         
                         ;; OSC Configuration Section
                         {:fx/type osc-settings/osc-settings-section}
-                        
-                        ;; Keyboard Configuration Section (placeholder)
-                        {:fx/type keyboard-settings-section}
                         
                         ;; Spacer
                         {:fx/type :region

@@ -343,6 +343,13 @@
                           (when (> effect-count 1)
                             (str " +" (dec effect-count)))))}))
 
+(defn effects-grid-empty?
+  "True while no effects cell has an effect in it (groups don't count), as
+   effect-cell-display-data's :has-effects? would say for every cell."
+  [context]
+  (not-any? #(seq (chains/flatten-chain (:items % [])))
+            (vals (fx/sub-val context get-in [:chains :effect-chains]))))
+
 
 ;; Level 2: Computed Project Subscriptions
 

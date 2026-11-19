@@ -478,6 +478,8 @@
                                       :style-class [(if is-modulated?
                                                       "modulator-toggle-active"
                                                       "modulator-toggle")]
+                                      :tooltip {:fx/type :tooltip
+                                                :text (if is-modulated? "Stop modulating" "Modulate")}
                                       :on-selected-changed toggle-event}
 
                                      ;; Value display (static) or type selector (modulated)

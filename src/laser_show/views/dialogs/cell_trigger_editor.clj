@@ -26,7 +26,8 @@
      :id "trigger-editor-dialog"
      :spacing 12
      :padding 16
-     :style-class ["dialog-content"]
+     ;; Not dialog-content: its -fx-spacing 0 would win over the 12
+     :style-class ["container-primary"]
      :pref-width 420
      :children
      [;; Header
@@ -78,7 +79,7 @@
      :showing open?
      :title (str "Triggers — " mode-title " " (common/cell-label col row))
      :width 440
-     :height 410
+     :height 434
      :modality :none
      :on-close-request {:event/type :ui/close-dialog :dialog-id :trigger-editor}
      :scene {:fx/type :scene

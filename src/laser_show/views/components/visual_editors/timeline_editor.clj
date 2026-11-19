@@ -743,6 +743,7 @@
                 :id "timeline-add-menu"
                 :style-class ["menu-button" "tl-icon-button"]
                 :focus-traversable false
+                :tooltip {:fx/type :tooltip :text "Add a folder"}
                 :items [{:fx/type :menu-item
                          :id "timeline-add-folder"
                          :text "Folder"

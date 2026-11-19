@@ -8,6 +8,7 @@
    
    State is stored at [:backend :input :midi] and [:backend :input :osc]"
   (:require [clojure.string :as str]
+            [laser-show.events.helpers :as h]
             [laser-show.input.midi :as midi]
             [laser-show.input.osc :as osc]
             [laser-show.input.router :as router]
@@ -138,7 +139,9 @@
   {:state (update-in state (osc-path) osc/disable)})
 
 (defn- handle-osc-start-server
-  "Start the OSC server."
+  "Start the OSC server, and let its messages in: one switch, as the
+   server without :enabled? drops every message (osc/create-osc-handler).
+   A port that won't open leaves OSC off, and a notice says so."
   [{:keys [state port]}]
   (let [osc-state (get-osc-state state)
         server-port (or port (:port osc-state 9000))
@@ -147,13 +150,17 @@
                      server-port
                      router/dispatch!
                      #(get-osc-state (state/get-raw-state)))]
-    {:state (assoc-in state (osc-path) updated-osc)}))
+    (if (:server-running? updated-osc)
+      {:state (assoc-in state (osc-path) (osc/enable updated-osc))}
+      (h/show-notice (assoc-in state (osc-path) updated-osc)
+                     (str "Could not listen for OSC on port " server-port)
+                     :error))))
 
 (defn- handle-osc-stop-server
-  "Stop the OSC server."
+  "Stop the OSC server, and stop letting messages in."
   [{:keys [state]}]
   (let [osc-state (get-osc-state state)
-        updated-osc (osc/stop-server osc-state)]
+        updated-osc (osc/disable (osc/stop-server osc-state))]
     {:state (assoc-in state (osc-path) updated-osc)}))
 
 (defn- handle-osc-set-port

@@ -103,6 +103,34 @@
       (ui/wait-for! #(some? (group-named "Gallery")))
       (is (nil? (group-named "Balcony"))))))
 
+(deftest click-a-projector-to-add-it-to-the-group-test
+  (let [robot (ui/robot)
+        groups #(set (get-in (app-state) [:projectors :a :zone-groups]))
+        settle! (fn []
+                  ;; Each toggle is an event: one landing is the last of them
+                  (ui/sync-fx!)
+                  (events/dispatch! {:event/type :timing/set-bpm :bpm 121.0})
+                  (ui/wait-for! #(= 121.0 (get-in (app-state) [:timing :bpm])))
+                  (events/dispatch! {:event/type :timing/set-bpm :bpm 120.0})
+                  (ui/wait-for! #(= 120.0 (get-in (app-state) [:timing :bpm]))))]
+    (with-projector!)
+    (ui/click! robot "#zones-tab")
+    (ui/assert-text! "#zones-subtitle"
+                     "Routing targets for cues • Click a projector to add it to the group, or use the Projectors tab")
+    (events/dispatch! {:event/type :zone-groups/select :group-id :left})
+    (ui/assert-visible! "#zone-output-a")
+    (testing "a click on the projector adds it"
+      (ui/click! robot "#zone-output-a .label-bold")
+      (ui/wait-for! #(contains? (groups) :left))
+      (settle!)
+      (is (= #{:all :left} (groups))))
+    (testing "a click on its checkbox takes it out again, once"
+      (ui/click! robot "#zone-output-a .check-box")
+      (ui/wait-for! #(not (contains? (groups) :left)))
+      (settle!)
+      (is (= #{:all} (groups)))
+      (is (not (ui/selected? "#zone-output-a .check-box")) "and the box says so"))))
+
 (deftest rename-projector-test
   (let [robot (ui/robot)
         projector-name #(get-in (app-state) [:projectors :a :name])]

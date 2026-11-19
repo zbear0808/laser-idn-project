@@ -20,6 +20,21 @@
     (is (some? (ui/query ".menu-item")))
     (ui/press! robot javafx.scene.input.KeyCode/ESCAPE)))
 
+(defn- file-item
+  "The File menu's item with this text."
+  ^MenuItem [text]
+  (let [^MenuButton menu (first (ui/query-all "#file-menu"))]
+    (ui/on-fx-thread #(some (fn [^MenuItem item] (when (= text (.getText item)) item))
+                            (.getItems menu)))))
+
+(deftest save-as-is-always-enabled-test
+  (is (nil? (get-in (state/get-raw-state) [:project :current-file])) "a new project, never saved")
+  (is (false? (ui/on-fx-thread #(.isDisable (file-item "Save As...")))) "it can be saved under a name")
+  (testing "and once it has a file"
+    (state/swap-state! assoc-in [:project :current-file] "test-output/shows/friday.zip")
+    (ui/sync-fx!)
+    (is (false? (ui/on-fx-thread #(.isDisable (file-item "Save As...")))))))
+
 (defn- transport-items
   "The texts of the Transport menu's items that show."
   []

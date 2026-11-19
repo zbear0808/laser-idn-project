@@ -2,12 +2,13 @@
   "OSC configuration UI component for the settings tab.
    
    Provides:
-   - Enable/disable OSC input
-   - Server start/stop controls
+   - Server start/stop: one switch, as OSC input needs the server and its
+     messages let in (:input/osc-start-server does both)
    - Port configuration
    - Address mappings display
    - OSC learn mode"
   (:require [cljfx.api :as fx]
+            [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.css.core :as css]))
 
@@ -68,6 +69,7 @@
                :text "✕"
                :style-class ["button-close"]
                :style "-fx-font-size: 10; -fx-padding: 2 6;"
+               :tooltip {:fx/type :tooltip :text "Remove this mapping"}
                :on-action {:event/type :input/osc-remove-address-mapping
                            :address address}}]})
 
@@ -79,12 +81,12 @@
   "OSC configuration section for settings tab."
   [{:keys [fx/context]}]
   (let [osc-config (fx/sub-ctx context subs/osc-config)
-        enabled? (:enabled? osc-config)
         server-running? (:server-running? osc-config false)
         port (:port osc-config 9000)
         address-mappings (:address-mappings osc-config {})
         learning? (fx/sub-ctx context subs/osc-learning?)]
     {:fx/type :v-box
+     :id "osc-settings"
      :spacing 12
      :style (str "-fx-background-color: " (css/bg-primary) "; "
                  "-fx-padding: 16; "
@@ -100,15 +102,7 @@
        :children [{:fx/type :label
                    :text "OSC Configuration"
                    :style (str "-fx-font-size: 16; -fx-font-weight: bold; "
-                               "-fx-text-fill: " (css/text-primary) ";")}
-                  {:fx/type :region :h-box/hgrow :always}
-                  {:fx/type :check-box
-                   :text "Enabled"
-                   :selected enabled?
-                   :style (str "-fx-text-fill: " (css/text-secondary) ";")
-                   :on-selected-changed {:event/type (if enabled?
-                                                       :input/osc-disable
-                                                       :input/osc-enable)}}]}
+                               "-fx-text-fill: " (css/text-primary) ";")}]}
       
       ;; Server Status and Controls
       {:fx/type :v-box
@@ -123,20 +117,25 @@
                                :text "Port:"
                                :style (str "-fx-text-fill: " (css/text-secondary) ";")}
                               {:fx/type :text-field
+                               :id "osc-port-field"
                                :text (str port)
                                :pref-width 80
                                :style-class ["text-field-dark"]
                                :disable server-running?
                                :on-action (fn [evt]
                                             (let [text (.getText (.getSource evt))]
-                                              (try
-                                                {:event/type :input/osc-set-port
-                                                 :port (Integer/parseInt text)}
-                                                (catch Exception _
-                                                  nil))))}
+                                              (when-let [new-port (try (Integer/parseInt text)
+                                                                       (catch Exception _ nil))]
+                                                (events/dispatch! {:event/type :input/osc-set-port
+                                                                   :port new-port}))))}
                               {:fx/type :button
+                               :id "osc-server-button"
                                :text (if server-running? "Stop Server" "Start Server")
                                :style-class [(if server-running? "button-warning" "button-primary")]
+                               :tooltip {:fx/type :tooltip
+                                         :text (if server-running?
+                                                 "Stop listening for OSC messages"
+                                                 "Listen for OSC messages on this port")}
                                :on-action {:event/type (if server-running?
                                                          :input/osc-stop-server
                                                          :input/osc-start-server)

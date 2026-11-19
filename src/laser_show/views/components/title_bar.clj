@@ -84,7 +84,6 @@
      {:fx/type :menu-item
       :text "Save As..."
       :accelerator [:shortcut :shift :s]
-      :disable (not has-project?)
       :on-action {:event/type :file/save-as}}
      
      {:fx/type :separator-menu-item}

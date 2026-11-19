@@ -441,6 +441,7 @@
      normalization is normalized here as a backfill: no undo step, not unsaved.)
    - Any other cue (or an empty cell): converted with model/convert-to-timeline,
      which keeps what it renders. That's an undoable \"Convert to Timeline Cue\".
+   A timeline with no clips opens with the browser too, where its presets are.
    Then chains into :ui/open-dialog."
   [{:keys [col row state]}]
   (let [chain-path [:chains :cue-chains [col row]]
@@ -453,7 +454,8 @@
                       (model/convert-to-timeline cue-chain (get state :zone-groups {})))
         changed? (not (identical? final-chain cue-chain))
         effects {:state (cond-> state
-                          changed? (assoc-in chain-path final-chain))
+                          changed? (assoc-in chain-path final-chain)
+                          (empty? (:items final-chain)) (prefs-assoc [:add-panel :open?] true))
                  :dispatch {:event/type :ui/open-dialog
                             :dialog-id :timeline-cue-editor
                             :data {:col col :row row}}}]

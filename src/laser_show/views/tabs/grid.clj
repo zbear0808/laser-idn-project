@@ -20,4 +20,4 @@
   {:fx/type grid-tab/generic-grid-tab
    :cell-component grid-cell/grid-cell
    :header-text "Cue Grid"
-   :hint-text "Click to trigger • Right-click to select • Drag to move"})
+   :hint-text "Click: play or stop · Double-click or right-click: edit · Drag: move"})

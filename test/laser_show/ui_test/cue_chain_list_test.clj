@@ -2,11 +2,13 @@
   "Grouped list behaviour (click, Ctrl/Shift and right-click selection,
    grouping, drag and drop), exercised through the cue chain editor for
    cell [0 0]."
-  (:require [clojure.test :refer [deftest is use-fixtures]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
-            [laser-show.ui-test.testfx :as ui]))
+            [laser-show.ui-test.testfx :as ui])
+  (:import [javafx.scene.control Control Labeled]))
 
 (use-fixtures :once fixtures/with-toolkit)
 (use-fixtures :each fixtures/with-app)
@@ -93,6 +95,44 @@
                                         [:list-ui [:cue-chain 0 0] :selected-ids]))))
     (ui/click! robot "#list-editor-cue-chain-0-0 #chain-group-selection")
     (is (ui/enabled? "#list-editor-cue-chain-0-0 #chain-delete-selection"))))
+
+(defn- in-list [selector] (str "#list-editor-cue-chain-0-0 " selector))
+
+(defn- tooltip-of [selector]
+  (ui/on-fx-thread #(some-> ^Control (first (ui/query-all (in-list selector))) .getTooltip .getText)))
+
+(defn- text-of [selector]
+  (ui/on-fx-thread #(.getText ^Labeled (first (ui/query-all (in-list selector))))))
+
+(deftest list-buttons-say-what-they-do-test
+  (let [robot (ui/robot)
+        mac? (str/includes? (str/lower-case (System/getProperty "os.name")) "mac")
+        key (fn [k] (if mac? (str "⌘" k) (str "Ctrl+" k)))]
+    (open-cue-chain-editor!)
+    (testing "the toolbar's buttons: Delete in full, and a tooltip each with its shortcut"
+      (is (= "Delete" (text-of "#chain-delete-selection")))
+      (let [^Control delete (first (ui/query-all (in-list "#chain-delete-selection")))]
+        (ui/wait-for! #(ui/on-fx-thread (fn [] (pos? (.getWidth delete)))))
+        (is (ui/on-fx-thread #(<= (.prefWidth delete -1) (+ 0.5 (.getWidth delete))))
+            "as wide as its text needs: not cut to \"Del…\""))
+      (is (= {"#chain-new-group" "New empty group"
+              "#chain-group-selection" (str "Group the selected items (" (key "G") ")")
+              "#chain-copy-selection" (str "Copy the selected items (" (key "C") ")")
+              "#chain-paste-items" (str "Paste after the selection (" (key "V") ")")
+              "#chain-delete-selection" "Delete the selected items (Delete)"}
+             (into {} (map (juxt identity tooltip-of))
+                   ["#chain-new-group" "#chain-group-selection" "#chain-copy-selection"
+                    "#chain-paste-items" "#chain-delete-selection"]))))
+    (testing "the hint names this platform's keys"
+      (is (= (str (key "Click") " multi-select • Drag to reorder • " (key "G") " group")
+             (text-of ".chain-hint-text"))))
+    (testing "a group's two icon buttons"
+      (ui/click! robot (in-list "#chain-new-group"))
+      (ui/wait-for! #(seq (ui/query-all (in-list ".group-ungroup-btn"))))
+      (is (= "Ungroup: keep the items, lose the group" (tooltip-of ".group-ungroup-btn")))
+      (is (= "Collapse" (tooltip-of ".group-collapse-btn")))
+      (ui/click-node! robot (first (ui/query-all (in-list ".group-collapse-btn"))))
+      (ui/wait-for! #(= "Expand" (tooltip-of ".group-collapse-btn"))))))
 
 (deftest grouped-list-drag-and-drop-reorders-items
   (let [robot (ui/robot)]

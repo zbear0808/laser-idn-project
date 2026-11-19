@@ -3,13 +3,14 @@
    
    Provides CSS classes for:
    - Transport buttons (play, stop, etc.)
-   - Action buttons (primary, secondary, danger)
+   - Action buttons (primary, secondary, danger, warning)
    - Icon buttons
    - Small utility buttons
    
    Usage:
    Include (::css/url buttons) in your scene's :stylesheets vector."
   (:require [cljfx.css :as css]
+            [laser-show.css.colors :as colors]
             [laser-show.css.theme :as theme]))
 
 (def buttons
@@ -18,7 +19,7 @@
     (let [;; Use semantic colors from theme
           {:keys [bg-primary bg-interactive bg-hover bg-active
                   text-primary text-muted border-default
-                  accent-success accent-info accent-danger]} theme/semantic-colors
+                  accent-success accent-info accent-warning accent-danger]} theme/semantic-colors
           {:keys [accent-success-hover accent-danger-hover]} theme/computed-colors
           {:keys [border]} theme/base-colors
           
@@ -243,6 +244,23 @@
         
         ":hover"
         {:-fx-background-color accent-danger-hover}
+        
+        ":disabled"
+        {:-fx-background-color "#404040"
+         :-fx-text-fill "#606060"
+         :-fx-cursor "default"}}
+       
+       ;; Warning button (dark orange, for stopping or leaving something:
+       ;; Stop Server, Disconnect, Cancel Learn, Disable Link)
+       ".button-warning"
+       {:-fx-background-color (colors/darken accent-warning 0.5)
+        :-fx-text-fill text-primary
+        :-fx-padding ["6px" "16px"]
+        :-fx-cursor "hand"
+        :-fx-background-radius radius-standard
+        
+        ":hover"
+        {:-fx-background-color (colors/darken accent-warning 0.3)}
         
         ":disabled"
         {:-fx-background-color "#404040"

@@ -11,7 +11,7 @@
    {:fx/type generic-grid-tab
     :cell-component grid-cell/grid-cell
     :header-text \"Cue Grid\"
-    :hint-text \"Click to trigger • Right-click to select\"}
+    :hint-text \"Click: play or stop · Double-click or right-click: edit\"}
    ```"
   (:require [cljfx.api :as fx]
             [laser-show.subs :as subs]
@@ -222,8 +222,10 @@
    Props:
    - :cell-component - Component to render for each cell
    - :header-text - Header text for the tab
-   - :hint-text - Hint text below the header"
-  [{:keys [fx/context cell-component header-text hint-text]}]
+   - :hint-text - Hint text below the header
+   - :empty-hint - Optional line under the hint (nil: none), e.g. for an
+     empty grid"
+  [{:keys [fx/context cell-component header-text hint-text empty-hint]}]
   {:fx/type :v-box
    :style (str "-fx-background-color: " (css/bg-primary) ";")
    :padding 16
@@ -232,8 +234,16 @@
                :text header-text
                :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}
               {:fx/type :label
+               :id "grid-hint"
                :text hint-text
                :style (str "-fx-text-fill: " (css/text-muted) "; -fx-font-size: 11;")}
+              ;; Always there, shown or not: the measured area keeps its place
+              {:fx/type :label
+               :id "grid-empty-hint"
+               :text (or empty-hint "")
+               :visible (some? empty-hint)
+               :managed (some? empty-hint)
+               :style (str "-fx-text-fill: " (css/text-secondary) "; -fx-font-size: 11;")}
               {:fx/type measured/measured
                :v-box/vgrow :always
                :desc {:fx/type grid-area

@@ -22,6 +22,7 @@
             [laser-show.subs :as subs]
             [laser-show.events.core :as events]
             [laser-show.vibes.reactions :as reactions]
+            [laser-show.views.components.shortcuts :as shortcuts]
             [laser-show.views.components.drag-drop-cell :as drag-drop])
   (:import [javafx.scene.input MouseEvent MouseButton]))
 
@@ -259,10 +260,10 @@
                             {:event/type :cue-chain/open-editor})
         base-menu-items (if has-content?
                           [{:fx/type :menu-item
-                            :text "Copy Cue (Ctrl+C)"
+                            :text (str "Copy Cue (" (shortcuts/shortcut-text :c) ")")
                             :on-action {:event/type :grid/copy-cell :col col :row row}}
                            {:fx/type :menu-item
-                            :text "Paste Cue (Ctrl+V)"
+                            :text (str "Paste Cue (" (shortcuts/shortcut-text :v) ")")
                             :on-action {:event/type :grid/paste-cell :col col :row row}}
                            {:fx/type :menu-item
                             :text "Edit Cue..."
@@ -278,7 +279,7 @@
                             :text "Create Timeline Cue"
                             :on-action {:event/type :timeline-cue-editor/open :col col :row row}}
                            {:fx/type :menu-item
-                            :text "Paste Cue (Ctrl+V)"
+                            :text (str "Paste Cue (" (shortcuts/shortcut-text :v) ")")
                             :on-action {:event/type :grid/paste-cell :col col :row row}}])
         trigger-menu-items (filterv some?
                                     [{:fx/type :separator-menu-item}
@@ -383,10 +384,10 @@
                       :learning? learning?}
         context-menu-items (filterv some?
                                     [{:fx/type :menu-item
-                                      :text "Copy Effects (Ctrl+C)"
+                                      :text (str "Copy Effects (" (shortcuts/shortcut-text :c) ")")
                                       :on-action {:event/type :effects/copy-cell :col col :row row}}
                                      {:fx/type :menu-item
-                                      :text "Paste Effects (Ctrl+V)"
+                                      :text (str "Paste Effects (" (shortcuts/shortcut-text :v) ")")
                                       :on-action {:event/type :effects/paste-cell :col col :row row}}
                                      {:fx/type :menu-item
                                       :text "Edit Effect Chain..."

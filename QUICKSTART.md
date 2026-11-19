@@ -40,11 +40,12 @@ clj -M:linux:laser-show
 This launches a graphical interface.
 
 **Usage:**
-1. Click a preset from the palette (right side)
-2. Click a grid cell to assign the preset
-3. Click the cell again to play the animation
-4. Right-click a cell to clear it
-5. Use "Connect IDN" to connect to laser hardware
+1. The **Grid** tab is the performer's screen: 8 × 4 pads, one cue each (a new project starts with a row of shapes). Click a pad to play it and again to stop it; the preview beside the grid shows what goes out.
+2. Double-click a pad, or right-click it and choose Edit Cue... (Create Cue on an empty pad), to pick its presets and effects. Drag a pad onto another to move it.
+3. In **Projectors**, click **Scan Network** to find the IDN projectors on your network and tick the outputs to use (found ones start off), or **Add Manual...** to type one's address.
+4. Click **Stream** in the toolbar to send the show to the enabled projectors. Stop (Space) blacks the output out and keeps the cues; Play brings them back.
+
+The **Perform** tab has five big pads for playing vibe mode from across the room.
 
 If you use VS Code with Calva, starting a REPL should automatically launch the app and give you a REPL in the `user.clj` namespace.
 

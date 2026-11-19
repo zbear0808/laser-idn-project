@@ -116,6 +116,22 @@
       (open-timeline!)
       (is (= after-first (get-in (state/get-raw-state) cue-path))))))
 
+(deftest empty-timeline-opens-the-browser-test
+  (let [browser-open? #(get-in (state/get-raw-state) [:ui :timeline-prefs :add-panel :open?])]
+    (testing "a cue with clips: the browser stays closed, as it starts"
+      (open-timeline!)
+      (is (false? (browser-open?)))
+      (is (not (ui/visible? "#timeline-browser")))
+      (events/dispatch! {:event/type :ui/close-dialog :dialog-id :timeline-cue-editor})
+      (ui/wait-for! #(not (get-in (state/get-raw-state) [:ui :dialogs :timeline-cue-editor :open?]))))
+    (testing "an empty cell's timeline has no clips: the browser opens, so the hint's browser is there"
+      (events/dispatch! {:event/type :timeline-cue-editor/open :col 2 :row 2})
+      (ui/wait-for! #(some (fn [title] (and title (.startsWith ^String title "Timeline Editor")))
+                           (ui/window-titles)))
+      (ui/wait-for! #(ui/visible? "#timeline-browser"))
+      (is (empty? (get-in (state/get-raw-state) [:chains :cue-chains [2 2] :items])))
+      (is (true? (browser-open?))))))
+
 (deftest timeline-inspector-shows-folder-properties
   (let [robot (ui/robot)]
     (open-timeline!)

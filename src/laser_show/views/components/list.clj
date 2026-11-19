@@ -36,7 +36,8 @@
    [laser-show.events.core :as events]
    [laser-show.state.core :as state]
    [laser-show.subs :as subs]
-   [laser-show.views.components.list-dnd :as dnd])
+   [laser-show.views.components.list-dnd :as dnd]
+   [laser-show.views.components.shortcuts :as shortcuts])
   (:import [javafx.scene.input MouseButton]))
 
 ;; State Access Helpers
@@ -407,6 +408,7 @@
                                                   :size 14
                                                   :style-class "group-collapse-icon"}
                                         :style-class "group-collapse-btn"
+                                        :tooltip {:fx/type :tooltip :text (if collapsed? "Expand" "Collapse")}
                                         :on-action (fn [_] (dispatch-toggle-collapse! props group-id))}
 
                                        (when (:show-enable-toggle? props true)
@@ -437,6 +439,7 @@
                                        {:fx/type :button
                                         :text "⊗"
                                         :style-class "group-ungroup-btn"
+                                        :tooltip {:fx/type :tooltip :text "Ungroup: keep the items, lose the group"}
                                         :on-action (fn [_] (dispatch-ungroup! props group-id))}])}}
         cm-fn (or (:get-group-context-menu props)
                   (:get-context-menu props))
@@ -568,6 +571,7 @@
     :text "New"
                :graphic {:fx/type fa/icon :name :folder-open :size 8}
                :style-class "chain-toolbar-btn"
+               :tooltip {:fx/type :tooltip :text "New empty group"}
                :on-action (fn [_] (dispatch-create-empty-group! props))}
               {:fx/type :button
                :id "chain-group-selection"
@@ -575,6 +579,8 @@
                :graphic {:fx/type fa/icon :name :folder-tree :size 8}
                :disable (or (zero? selection-count) (not can-create-group?))
                :style-class "chain-toolbar-btn"
+               :tooltip {:fx/type :tooltip
+                         :text (str "Group the selected items (" (shortcuts/shortcut-text :g) ")")}
                :on-action (fn [_] (dispatch-group-selected! props))}]})
 
 
@@ -665,7 +671,8 @@
                                 :text (str selection-count " selected")
                                 :style-class "chain-selection-count"})])}
         {:fx/type :label
-         :text "Ctrl+Click multi-select • Drag to reorder • Ctrl+G group"
+         :text (str (shortcuts/shortcut-text "Click") " multi-select • Drag to reorder • "
+                    (shortcuts/shortcut-text :g) " group")
          :style-class "chain-hint-text"}
 
         (when allow-groups?
@@ -677,23 +684,30 @@
         {:fx/type :h-box
          :spacing 4
          :children [{:fx/type :button
+                     :id "chain-copy-selection"
                      :text "Copy"
                      :graphic {:fx/type fa/icon :name :copy :style :regular :size 8}
                      :disable (zero? selection-count)
                      :style-class "chain-toolbar-btn"
+                     :tooltip {:fx/type :tooltip
+                               :text (str "Copy the selected items (" (shortcuts/shortcut-text :c) ")")}
                      :on-action (fn [_] (dispatch-copy-selected! sidebar-props))}
                     {:fx/type :button
+                     :id "chain-paste-items"
                      :text "Paste"
                      :graphic {:fx/type fa/icon :name :clipboard :size 8}
                      :disable (not can-paste?)
                      :style-class "chain-toolbar-btn"
+                     :tooltip {:fx/type :tooltip
+                               :text (str "Paste after the selection (" (shortcuts/shortcut-text :v) ")")}
                      :on-action (fn [_] (dispatch-paste-items! sidebar-props))}
                     {:fx/type :button
                                 :id "chain-delete-selection"
-                                :text "Del"
+                                :text "Delete"
                      :graphic {:fx/type fa/icon :name :trash-can :size 8}
                      :disable (zero? selection-count)
                      :style-class "chain-toolbar-btn-danger"
+                     :tooltip {:fx/type :tooltip :text "Delete the selected items (Delete)"}
                      :on-action (fn [_] (dispatch-delete-selected! sidebar-props))}]}
         items-content])}))
 

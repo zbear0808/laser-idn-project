@@ -1,8 +1,9 @@
 (ns laser-show.ui-test.main-window-test
   "Main window: default layout, top-level tabs, typing into the toolbar and the
    unsaved-changes check when the window is closed. The Cue Chain Editor fits
-   its smallest size (its footer, a preset's parameters), and the zone group
-   editor looks like the other setup dialogs."
+   its smallest size (its footer, a preset's parameters) and its footer's
+   controls have tooltips, and the zone group editor looks like the other
+   setup dialogs."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
@@ -12,7 +13,7 @@
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.event Event]
            [javafx.scene Node Parent]
-           [javafx.scene.control Labeled]
+           [javafx.scene.control ComboBox Control Labeled]
            [javafx.scene.layout BackgroundFill Region]
            [javafx.scene.paint Color]
            [javafx.stage Stage Window WindowEvent]))
@@ -196,6 +197,22 @@
         (ui/wait-for! #(every? (fn [l] (= (text-of l) (ui/shown-text l))) labeled))
         (doseq [l labeled]
           (is (= (text-of l) (ui/shown-text l))))))))
+
+(deftest cue-chain-editor-footer-says-what-it-does-test
+  (events/dispatch! {:event/type :cue-chain/open-editor :col 0 :row 0})
+  (ui/wait-for! #(some? (stage-titled "Cue Chain Editor")))
+  (let [footer (ui/on-fx-thread #(.lookup (scene-root (stage-titled "Cue Chain Editor")) ".dialog-footer"))
+        controls (filterv #(instance? Control %) (all-nodes footer))
+        tip (fn [^Control c] (ui/on-fx-thread #(some-> c .getTooltip .getText)))
+        by-text (into {} (keep (fn [c] (when (instance? Labeled c) [(text-of c) (tip c)]))) controls)
+        combos (filterv #(instance? ComboBox %) controls)]
+    (testing "the two choices say what they choose"
+      (is (= 2 (count combos)))
+      (is (every? #(seq (tip %)) combos)))
+    (testing "and the buttons what they do; Close says it"
+      (is (seq (by-text "⚡ Triggers...")))
+      (is (seq (by-text "Open in Timeline Editor")))
+      (is (contains? by-text "Close")))))
 
 (defn- labeled-with-text
   "The first label or button under root whose text is text."

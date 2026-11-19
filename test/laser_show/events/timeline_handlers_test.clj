@@ -58,6 +58,26 @@
     (is (not (contains? again :history/backfill)))
     (is (not (contains? again :history/description)))))
 
+(deftest open-editor-with-no-clips-opens-the-browser-test
+  (let [browser-open? #(get-in % [:state :ui :timeline-prefs :add-panel :open?])
+        open #(timeline/handle {:event/type :timeline-cue-editor/open :col %2 :row %3 :state %1})
+        with-a-cue (assoc-in base-state [:chains :cue-chains [0 0]]
+                             {:items [{:id :a :type :preset :preset-id :circle}]})]
+    (testing "an empty cell: a timeline with no clips, and the browser to add them from"
+      (let [result (open base-state 2 2)]
+        (is (empty? (get-in result [:state :chains :cue-chains [2 2] :items])))
+        (is (true? (browser-open? result)))
+        (is (= "Convert to Timeline Cue" (:history/description result)) "the same one undo step")))
+    (testing "a timeline still without clips, opened again with the browser closed"
+      (let [made (-> (:state (open base-state 2 2))
+                     (assoc-in [:ui :timeline-prefs :add-panel :open?] false))
+            result (open made 2 2)]
+        (is (true? (browser-open? result)))
+        (is (identical? (get-in made [:chains :cue-chains]) (get-in result [:state :chains :cue-chains]))
+            "the document is untouched")))
+    (testing "a cue with clips: the browser stays as it was"
+      (is (false? (browser-open? (open with-a-cue 0 0)))))))
+
 (deftest open-editor-converts-without-changing-output-test
   (let [plain {:destination-zone {:zone-group-id :all}
                :items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true :effects []}

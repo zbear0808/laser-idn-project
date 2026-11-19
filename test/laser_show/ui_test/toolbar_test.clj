@@ -2,6 +2,7 @@
   "Toolbar: transport, BPM input, trigger mode, tap tempo and the beat
    indicator."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.events.core :as events]
             [laser-show.services.show-clock :as show-clock]
             [laser-show.state.core :as state]
             [laser-show.ui-test.fixtures :as fixtures]
@@ -81,6 +82,31 @@
     (ui/submit! robot "#bpm-input")
     (ui/wait-for! #(= 140.0 (get-in (state/get-raw-state) [:timing :bpm])))
     (ui/assert-text! "#bpm-input" "140.0")))
+
+(deftest bpm-commits-on-focus-loss-test
+  (let [robot (ui/robot)
+        bpm #(get-in (state/get-raw-state) [:timing :bpm])
+        leave! #(ui/focus! robot "#trigger-mode-selector")]
+    (testing "typing alone changes nothing; leaving the field sets it, as Enter does"
+      (ui/fill! robot "#bpm-input" "128")
+      (ui/sync-fx!)
+      (is (= 120.0 (bpm)))
+      (leave!)
+      (ui/wait-for! #(= 128.0 (bpm)))
+      (ui/assert-text! "#bpm-input" "128.0"))
+    (testing "text that is no BPM puts the BPM back"
+      (doseq [text ["fast" "0" "-90"]]
+        (ui/fill! robot "#bpm-input" text)
+        (leave!)
+        (ui/assert-text! "#bpm-input" "128.0")
+        (is (= 128.0 (bpm)) text)))
+    (testing "passing through the field without typing leaves the BPM as it is, not as it shows"
+      (events/dispatch! {:event/type :timing/set-bpm :bpm 123.456})
+      (ui/assert-text! "#bpm-input" "123.5")
+      (ui/focus! robot "#bpm-input")
+      (leave!)
+      (ui/sync-fx!)
+      (is (= 123.456 (bpm))))))
 
 (deftest trigger-mode-selection-updates-state
   (let [robot (ui/robot)]

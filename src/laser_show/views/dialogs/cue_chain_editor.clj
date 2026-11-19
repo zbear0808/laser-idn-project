@@ -119,6 +119,8 @@
                  :pref-width 150
                  :min-width :use-pref-size
                  :items zone-groups
+                 :tooltip {:fx/type :tooltip
+                           :text "Where the cue's presets go, unless one names its own zone"}
                  :button-cell (fn [group]
                                 {:text (or (:name group) "All")})
                  :cell-factory {:fx/cell-type :list-cell
@@ -308,6 +310,10 @@
                  :pref-width 120
                  :min-width :use-pref-size
                  :items trigger-mode-options
+                 :tooltip {:fx/type :tooltip
+                           :text (str "Toggle: a click starts the cue, the next one stops it\n"
+                                      "Retrigger: every click starts it again\n"
+                                      "The toolbar's Trigger can set it for every cue")}
                  :button-cell (fn [mode]
                                 {:text (or (:name mode) "Toggle")})
                  :cell-factory {:fx/cell-type :list-cell
@@ -618,6 +624,8 @@
                              :text "⚡ Triggers..."
                              :min-width :use-pref-size
                              :style-class "button-secondary"
+                             :tooltip {:fx/type :tooltip
+                                       :text "The keys, MIDI and OSC messages that play this cue"}
                              :on-action {:event/type :ui/open-dialog
                                          :dialog-id :trigger-editor
                                          :data {:col col
@@ -629,6 +637,8 @@
                              :text "Open in Timeline Editor"
                              :min-width :use-pref-size
                              :style-class "button-secondary"
+                             :tooltip {:fx/type :tooltip
+                                       :text "Make this a timeline cue, its presets clips on tracks (Undo turns it back)"}
                              :on-action (fn [_]
                                           (events/dispatch! {:event/type :ui/close-dialog
                                                              :dialog-id :cue-chain-editor})

@@ -42,6 +42,31 @@
     (handler {:path "/btn" :args [(float 1.0)]})
     (is (= 1 (count @sent)))))
 
+(deftest osc-server-is-the-one-switch-test
+  ;; osc/start-server opens a socket: these tests stand in for it
+  (let [osc-of #(get-in % [:state :backend :input :osc])]
+    (with-redefs [osc/start-server (fn [osc-state port _dispatch _get-state]
+                                     (assoc osc-state :port port :server-running? true))]
+      (let [started (input/handle {:event/type :input/osc-start-server :port 9001 :state (initial-state)})
+            stopped (input/handle {:event/type :input/osc-stop-server :state (:state started)})]
+        (testing "Start Server listens and lets the messages in: there is no second switch to find"
+          (is (= {:port 9001 :server-running? true :enabled? true}
+                 (select-keys (osc-of started) [:port :server-running? :enabled?])))
+          (is (nil? (get-in started [:state :ui :notice]))))
+        (testing "Stop Server does both the other way"
+          (is (= {:server-running? false :enabled? false}
+                 (select-keys (osc-of stopped) [:server-running? :enabled?]))))))
+    (testing "a port that won't open: still off, and a notice says so"
+      (with-redefs [osc/start-server (fn [osc-state _port _dispatch _get-state]
+                                       (assoc osc-state :server-running? false))]
+        (let [result (input/handle {:event/type :input/osc-start-server :port 9001 :state (initial-state)})
+              {:keys [id] :as notice} (get-in result [:state :ui :notice])]
+          (is (= {:server-running? false :enabled? false}
+                 (select-keys (osc-of result) [:server-running? :enabled?])))
+          (is (= {:text "Could not listen for OSC on port 9001" :level :error} (dissoc notice :id)))
+          (is (= {:event {:event/type :ui/clear-notice :id id} :delay-ms 6000}
+                 (:dispatch-later result))))))))
+
 (def ^:private registered-effects
   "Effect keys registered in laser-show.events.core/event-handler that these
    handlers may return."

@@ -187,10 +187,12 @@
 
 
 (defn- handle-projectors-scan-failed
-  "Handle scan failure."
+  "Handle scan failure: Scan Network is back, and a notice says why."
   [{:keys [error state]}]
   (log/warn "Network scan failed:" error)
-  {:state (assoc-in state [:projector-ui :scanning?] false)})
+  (h/show-notice (assoc-in state [:projector-ui :scanning?] false)
+                 (str "Could not scan the network" (when-not (str/blank? error) (str ": " error)))
+                 :error))
 
 
 ;; Enable/Disable by IP Address (New auto-discovery flow)

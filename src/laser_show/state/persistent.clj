@@ -150,8 +150,8 @@
 
 (defn- reset-session
   "Reset state that refers to the previous document (playback, what vibe
-   mode is doing, selection, list UI, dialogs, undo history, project
-   metadata).
+   mode is doing, selection, list UI, dialogs, the status bar's notice, undo
+   history, project metadata).
    Backend/runtime state (streaming, Link, MIDI/OSC, discovered devices) is kept."
   [state initial]
   (-> state
@@ -162,6 +162,7 @@
       (assoc :project (:project initial))
       (assoc :zone-group-ui (:zone-group-ui initial))
       (assoc-in [:ui :dialogs] (get-in initial [:ui :dialogs]))
+      (assoc-in [:ui :notice] (get-in initial [:ui :notice]))
       (assoc-in [:grid :selected-cell] nil)
       (update :projector-ui merge (select-keys (:projector-ui initial)
                                                [:active-projector :active-virtual-projector]))

@@ -103,6 +103,20 @@
                      (status-write))]
         (is (identical? before (fx/sub-ctx ctx' subs/effect-cell-display-data 0 0)))))))
 
+(deftest effects-grid-empty-sub-test
+  (testing "no effects cell, or none with an effect in it"
+    (is (true? (fx/sub-ctx (context (domains/build-initial-state)) subs/effects-grid-empty?)))
+    (is (true? (fx/sub-ctx (context (assoc-in base-state [:chains :effect-chains] {[2 1] {:active? true :items []}}))
+                           subs/effects-grid-empty?)))
+    (is (true? (fx/sub-ctx (context (assoc-in base-state [:chains :effect-chains]
+                                              {[2 1] {:items [{:type :group :items []}]}}))
+                           subs/effects-grid-empty?))
+        "an empty group is no effect"))
+  (testing "one effect, on or off, anywhere"
+    (is (false? (fx/sub-ctx (context base-state) subs/effects-grid-empty?)))
+    (is (false? (fx/sub-ctx (context (assoc-in base-state [:chains :effect-chains [0 0] :active?] false))
+                            subs/effects-grid-empty?)))))
+
 (deftest beat-index-sub-test
   (let [ctx (context base-state)]
     (is (= 0 (fx/sub-ctx ctx subs/beat-index)) "the downbeat before any status")
