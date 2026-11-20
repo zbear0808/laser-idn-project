@@ -3,10 +3,11 @@
    left the vibes, to choose the one to edit, add one, make one per grid
    row, reorder, duplicate or delete, and the Controls panel. On the right
    the vibe edited: its name, colour and energy, whether it may play cues
-   that reach the audience, its slots, the options of the slot shown, and
-   the picker that fills it; then what to fix before the show (the lint)
-   and the rules of thumb. No preview beside it (views/root.clj): the
-   picker needs the width.
+   that reach the audience, its slots, the options of the slot shown and,
+   for a role, its tap reactions (VIBE's beside the name), and the picker
+   that fills it; then what to fix before the show (the lint) and the rules
+   of thumb. No preview beside it (views/root.clj): the picker needs the
+   width.
 
    Every control dispatches an event (handlers/vibes.clj, which keeps what
    plays in step with the edits). The view keeps nothing of its own but
@@ -17,6 +18,7 @@
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
             [laser-show.vibes.library :as library]
+            [laser-show.vibes.reactions :as reactions]
             [laser-show.views.components.vibe-controls :as vibe-controls]
             [laser-show.views.components.vibe-picker :as vibe-picker]
             [laser-show.views.components.vibe-strip :as vibe-strip]
@@ -169,6 +171,49 @@
                            :on-action {:event/type :vibe/set-energy :vibe vibe :energy n}}))
                    (range 1 5))})
 
+
+;; Tap reactions (plans/2026-11-18-vibe-mode/04-phase4-tap-reactions.md)
+
+(def ^:private role-names
+  {:hit "HIT" :accent "ACCENT" :flash "FLASH" :vibe "VIBE" :any "HIT, ACCENT or FLASH"})
+
+(defn- tap-menu
+  "Tap reactions ▾: the templates (vibes.reactions) that follow roles, under
+   a heading per role. A choice makes one for the vibe (:vibe/add-reaction)."
+  [vibe menu-id roles]
+  {:fx/type :menu-button
+   :id menu-id
+   :style-class ["menu-button" "vibe-option"]
+   :focus-traversable false
+   :text "Tap reactions"
+   :items (into []
+                (comp (map-indexed (fn [i role]
+                                     (concat (when (pos? i) [{:fx/type :separator-menu-item}])
+                                             [{:fx/type :menu-item :text (role-names role) :disable true}]
+                                             (for [{:keys [kind menu] :as template} reactions/templates
+                                                   :when (= role (:role template))]
+                                               {:fx/type :menu-item
+                                                :id (str "vibe-tap-" (name kind))
+                                                :text menu
+                                                :on-action {:event/type :vibe/add-reaction :vibe vibe :kind kind}}))))
+                      cat)
+                roles)})
+
+(defn- role-reactions
+  "A role's tap reactions in the vibe edited: the menu that makes one (of
+   the templates that follow roles), and the names of its cells that move
+   on the role's press (subs/vibe-edited-reactions)."
+  [{:keys [fx/context vibe role roles]}]
+  (let [moves (get (fx/sub-ctx context subs/vibe-edited-reactions) role)]
+    {:fx/type :h-box
+     :spacing 8
+     :alignment :center-left
+     :children [(tap-menu vibe (str "vibe-tap-menu-" (name role)) roles)
+                {:fx/type :label
+                 :id (str "vibe-reactions-" (name role))
+                 :style-class (if (seq moves) "label-secondary" "label-hint")
+                 :text (if (seq moves) (str/join " · " (map :name moves)) "none yet")}]}))
+
 (defn- editor-header [{:keys [fx/context]}]
   (let [{:keys [id color energy allow-audience? current?] vibe-name :name} (fx/sub-ctx context subs/vibe-editor)]
     {:fx/type :v-box
@@ -179,6 +224,7 @@
                  :children [{:fx/type name-field :fx/key id :vibe id :text vibe-name}
                             {:fx/type color-swatches :vibe id :color color}
                             {:fx/type energy-buttons :vibe id :energy energy}
+                            {:fx/type role-reactions :vibe id :role :vibe :roles [:vibe]}
                             {:fx/type :label
                              :id "vibe-editor-now"
                              :style-class "vibe-editor-now"
@@ -254,19 +300,25 @@
 
 (defn- slot-options [{:keys [fx/context]}]
   (let [{:keys [id slot] :as vibe} (fx/sub-ctx context subs/vibe-editor)
-        note (fn [text] {:fx/type :label :id "vibe-options" :style-class "label-secondary" :text text})]
+        note (fn [text] {:fx/type :label :id "vibe-options" :style-class "label-secondary" :text text})
+        with-reactions (fn [options role]
+                         {:fx/type :v-box
+                          :spacing 8
+                          :children [options {:fx/type role-reactions :vibe id :role role :roles [role :any]}]})]
     (case slot
-      (:hit :accent) (assoc (get vibe slot) :fx/type pool-options :id id :role slot)
-      (:flash-cue :flash-fx) {:fx/type :h-box
-                              ;; Keyed by the vibe, so its listener is never a vibe late
-                              :children [{:fx/type :check-box
-                                          :fx/key id
-                                          :id "vibe-solo"
-                                          :style-class ["check-box" "vibe-check-box"]
-                                          :text "Solo: HIT, ACCENT and the bed step aside while FLASH is held"
-                                          :selected (boolean (get-in vibe [:flash :solo?]))
-                                          :on-selected-changed {:event/type :vibe/set-option :vibe id :role :flash
-                                                                :key :solo? :value :fx/event}}]}
+      (:hit :accent) (with-reactions (assoc (get vibe slot) :fx/type pool-options :id id :role slot) slot)
+      (:flash-cue :flash-fx) (with-reactions
+                               {:fx/type :h-box
+                                ;; Keyed by the vibe, so its listener is never a vibe late
+                                :children [{:fx/type :check-box
+                                            :fx/key id
+                                            :id "vibe-solo"
+                                            :style-class ["check-box" "vibe-check-box"]
+                                            :text "Solo: HIT, ACCENT and the bed step aside while FLASH is held"
+                                            :selected (boolean (get-in vibe [:flash :solo?]))
+                                            :on-selected-changed {:event/type :vibe/set-option :vibe id :role :flash
+                                                                  :key :solo? :value :fx/event}}]}
+                               :flash)
       :bed (note "The bed plays all through the vibe, under the hits")
       :fx (note "The FX set is on while the vibe plays")
       (note ""))))
@@ -292,13 +344,16 @@
                        [{:fx/type :label :style-class "label-hint" :text "Nothing to fix"}]))}))
 
 (def ^:private rules
-  "plans/2026-11-18-vibe-mode/00-overview.md §4; Phase 4 adds the tap reactions'."
+  "plans/2026-11-18-vibe-mode/00-overview.md §4."
   ["One feel per vibe: the same colours and energy; the shapes may differ."
    "3 to 6 cues in HIT. Two repeat too visibly, and ten hide what you could cut."
    "ACCENT: one to three bigger or rarer cues."
    "FLASH: one dramatic cue, or a set of effects, not both."
    "Keep cues that reach the audience out of the pools."
-   "4 to 6 vibes in a set, from low energy to high. Name them by feel, not by shape."])
+   "4 to 6 vibes in a set, from low energy to high. Name them by feel, not by shape."
+   (str "One or two tap reactions per role: a Punch or a Step on HIT, a Flip or a Scatter on ACCENT, a Swell or a "
+        "Strobe on FLASH, a Fade in on VIBE. More blur together. To combine two on one parameter, stack two effects "
+        "(two Scales multiply).")])
 
 (defn- rules-of-thumb [_]
   {:fx/type :titled-pane

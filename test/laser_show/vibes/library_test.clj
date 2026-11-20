@@ -3,7 +3,8 @@
             [laser-show.state.domains :as domains]
             [laser-show.state.templates :as templates]
             [laser-show.vibes.engine :as engine]
-            [laser-show.vibes.library :as library]))
+            [laser-show.vibes.library :as library]
+            [laser-show.vibes.reactions :as reactions]))
 
 (def ^:private shape {:items [{:type :preset :preset-id :circle}]
                       :destination-zone {:zone-group-id :all}})
@@ -257,8 +258,8 @@
   (let [s0 (learned-all (starter))
         with-vibe (fn [state id m] (update-in state [:config :vibes :library id] merge m))]
     (is (= [] (library/lint s0)) "the starter show with its five controls: nothing to fix")
-    (testing "error: HIT has no playable cell"
-      (is (has-row? (with-vibe s0 :vibe-1 {:hit {:cells []}}) :error "Shapes: HIT has no cues to play")))
+    (testing "error: HIT has no playable cell, and no tap reaction"
+      (is (has-row? (with-vibe s0 :vibe-1 {:hit {:cells []}}) :error "Shapes: HIT does nothing (no cues, no tap reactions)")))
     (testing "error: a pool cell with no cue, or one that follows timecode"
       (is (has-row? (update-in s0 [:chains :cue-chains] dissoc [2 0]) :error "Shapes: A3 can't be played (empty)"))
       (is (has-row? (assoc-in s0 [:chains :cue-chains [2 0]] chasing) :error "Shapes: A3 can't be played (follows timecode)")))
@@ -293,3 +294,77 @@
       (let [rows (library/lint (-> (starter) (with-vibe :vibe-2 {:hit {:cells []}}) (with-vibe :vibe-1 {:hit {:cells [[0 0]]}})))]
         (is (= [:error :warn :info] (mapv :level rows)))
         (is (= [:vibe-2 :vibe-1 nil] (mapv :vibe rows)))))))
+
+
+;; Lint of the tap reactions (04 §7)
+
+(defn- react
+  "state with tap reactions of kinds made for the vibe with id."
+  [state id & kinds]
+  (reduce #(reactions/add-to-vibe %1 id %2) state kinds))
+
+(defn- rows-about [state id]
+  (into [] (comp (filter #(= id (:vibe %))) (map (juxt :level :text))) (library/lint state)))
+
+(defn- unbind
+  "state without the keys of roles."
+  [state & roles]
+  (update-in state [:config :input :trigger-map]
+             #(into {} (remove (fn [[_ action]] (some (partial library/binds-role? action) roles))) %)))
+
+(deftest lint-effects-only-role-is-info-test
+  (let [s0 (learned-all (starter))
+        with-vibe (fn [state id m] (update-in state [:config :vibes :library id] merge m))
+        no-hits (with-vibe s0 :vibe-1 {:hit {:cells []}})
+        does-nothing [:error "Shapes: HIT does nothing (no cues, no tap reactions)"]]
+    (testing "HIT with no cue to play but reactions: it moves effects only, an info row instead of the error"
+      (is (= [does-nothing] (rows-about no-hits :vibe-1)))
+      (is (= [[:info "Shapes: HIT moves effects only (Punch size)"]] (rows-about (react no-hits :vibe-1 :punch-size) :vibe-1)))
+      (is (= [[:info "Shapes: HIT moves effects only (Punch size, Step colour)"]]
+             (rows-about (react no-hits :vibe-1 :punch-size :step-colour) :vibe-1)))
+      (is (= [[:info "Shapes: HIT moves effects only (Energy size)"]] (rows-about (react no-hits :vibe-1 :energy-size) :vibe-1))
+          "one that follows HIT, ACCENT or FLASH")
+      (is (= [does-nothing] (rows-about (react no-hits :vibe-2 :punch-size) :vibe-1)) "Lines' reaction isn't Shapes'")
+      (is (= [does-nothing] (rows-about (assoc-in no-hits [:chains :effect-chains [7 3]]
+                                                  (assoc (reactions/reaction-cell :punch-size nil) :active? true))
+                                        :vibe-1))
+          "nor is a cell switched on on the Effects tab: it is in no vibe, and can be switched off"))
+    (testing "ACCENT: an info row when only reactions follow it; nothing at all is no row, as before"
+      (let [no-accents (with-vibe s0 :vibe-1 {:accent {:cells []}})]
+        (is (= [] (rows-about no-accents :vibe-1)))
+        (is (= [[:info "Shapes: ACCENT moves effects only (Flip)"]] (rows-about (react no-accents :vibe-1 :flip) :vibe-1)))))
+    (testing "FLASH with no cue and no effects does nothing, unless a reaction follows it"
+      (let [no-flash (with-vibe s0 :vibe-1 {:flash {:cue nil :fx [] :solo? true}})]
+        (is (= [[:warn "Shapes: FLASH does nothing in this vibe"]] (rows-about no-flash :vibe-1)))
+        (is (= [[:info "Shapes: FLASH moves effects only (Swell)"]] (rows-about (react no-flash :vibe-1 :swell) :vibe-1)))
+        (is (= [[:info "Shapes: FLASH moves effects only (Strobe)"]] (rows-about (react no-flash :vibe-1 :strobe) :vibe-1))
+            "the Strobe, in its flash effects")
+        (is (= [] (rows-about (with-vibe no-flash :vibe-1 {:flash {:cue nil :fx [[0 3]] :solo? true}}) :vibe-1))
+            "flash effects that follow no press: no row, as before")))
+    (is (= [] (rows-about (react s0 :vibe-1 :punch-size :flip :swell) :vibe-1)) "roles that play cues: no row")))
+
+(deftest lint-reaction-on-an-unbound-role-test
+  (let [s0 (learned-all (starter))
+        warns (fn [state] (into [] (comp (filter #(= :warn (:level %))) (map (juxt :vibe :text))) (library/lint state)))]
+    (is (= [[:vibe-1 "Shapes · Scatter listens to ACCENT, which has no key yet"]]
+           (warns (-> s0 (unbind :accent) (react :vibe-1 :scatter)))))
+    (is (= [] (warns (react s0 :vibe-1 :scatter))) "ACCENT has its key")
+    (is (= [[:vibe-2 "Lines · Fade in listens to VIBE, which has no key yet"]]
+           (warns (-> s0 (unbind :vibe) (react :vibe-2 :fade-in)))))
+    (testing "one that follows HIT, ACCENT or FLASH is heard while one of them has a key"
+      (is (= [] (warns (-> s0 (unbind :accent :flash) (react :vibe-1 :energy-size)))))
+      (is (= [[:vibe-1 "Shapes · Energy size listens to HIT, ACCENT or FLASH, none of which has a key yet"]]
+             (warns (-> s0 (unbind :hit :accent :flash) (react :vibe-1 :energy-size))))))
+    (testing "a cue of its pools whose effect follows a role"
+      (is (= [[:vibe-1 "Shapes · square listens to ACCENT, which has no key yet"]]
+             (warns (-> (unbind s0 :accent)
+                        (assoc-in [:chains :cue-chains [1 0] :items 0 :effects]
+                                  [{:effect-id :rotation :enabled? true
+                                    :params {:angle {:type :step :source :accent :min 0.0 :max 90.0}}}]))))))
+    (testing "a cell switched on on the Effects tab is no vibe's reaction"
+      (is (= [] (warns (-> (unbind s0 :accent)
+                           (assoc-in [:chains :effect-chains [7 3]] (assoc (reactions/reaction-cell :scatter nil) :active? true)))))))
+    (testing "while no key is bound at all, the controls' row says so, not one row a reaction"
+      (let [s (react (starter) :vibe-1 :scatter :punch-size)]
+        (is (= [] (warns s)))
+        (is (has-row? s :info "0 of 5 controls learned"))))))

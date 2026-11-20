@@ -6,14 +6,13 @@
    vibe's FX set (add-to-vibe, :vibe/add-reaction) or straight onto the
    effects grid (:effects/new-reaction).
 
-   Also which cells react to which role, for the Perform pads and the Vibes
-   tab (listens-to, reactions). They live here rather than in
-   laser-show.vibes.library, which Phase 3 rewrites."
+   Also which cells react to which role, for the Perform pads, the Vibes
+   tab and its lint (listens-to, reactions; laser-show.vibes.library's lint
+   reads them, so this namespace reads the vibes without it)."
   (:require [clojure.string :as str]
             [laser-show.animation.modulator-registry :as reg]
             [laser-show.animation.modulators]
-            [laser-show.events.helpers :as h]
-            [laser-show.vibes.library :as library]))
+            [laser-show.events.helpers :as h]))
 
 
 ;; The templates
@@ -95,27 +94,21 @@
 
 (defn add-to-vibe
   "state with the reaction kind made for the vibe: in the first empty effect
-   cell, named after it, in its FX set (the Strobe in its flash FX), and on
-   now if the vibe is playing and blackout is off, as entering it would have
-   switched it on (recorded in [:vibe-runtime :fx-on], so leaving the vibe
-   switches it off). Unchanged without the vibe, the kind or a free cell."
+   cell, named after it, off, and last in its FX set (the Strobe in its
+   flash FX). :vibe/add-reaction then switches it on as every edit of the
+   vibes does a cell new in the FX set of the vibe that plays
+   (engine/reconcile). Unchanged without the vibe, the kind or a free cell."
   [state vibe-id kind]
-  (let [vibe (library/vibe state vibe-id)
+  (let [vibe (get-in state [:config :vibes :library vibe-id])
         cell (first-empty-effect-cell state)
         made (when vibe (reaction-cell kind (:name vibe)))]
     (if (and made cell)
-      (let [flash? (= :flash-fx (:into (template kind)))
-            on? (and (not flash?)
-                     (= vibe-id (get-in state [:vibe-runtime :current]))
-                     (not (get-in state [:vibe-runtime :blackout?])))]
-        (cond-> (-> state
-                    (assoc-in [:chains :effect-chains cell]
-                              (-> made (update :items #(mapv h/ensure-item-fields %)) (assoc :active? on?)))
-                    (update-in [:config :vibes :library vibe-id]
-                               #(if flash?
-                                  (update-in % [:flash :fx] (fnil conj []) cell)
-                                  (update % :fx (fnil conj []) cell))))
-          on? (update-in [:vibe-runtime :fx-on] (fnil conj []) cell)))
+      (-> state
+          (assoc-in [:chains :effect-chains cell] (update made :items #(mapv h/ensure-item-fields %)))
+          (update-in [:config :vibes :library vibe-id]
+                     #(if (= :flash-fx (:into (template kind)))
+                        (update-in % [:flash :fx] (fnil conj []) cell)
+                        (update % :fx (fnil conj []) cell))))
       state)))
 
 
@@ -160,7 +153,7 @@
   [chain]
   (into #{} (mapcat effect-sources) (effects-in chain)))
 
-(def ^:private roles-of
+(def roles-of
   "The roles whose press a source follows: :any is all three, a cue start
    (:cue) is no role's."
   {:hit [:hit] :accent [:accent] :flash [:flash] :vibe [:vibe] :any [:hit :accent :flash]})
@@ -183,13 +176,16 @@
 (defn reactions
   "The cells that react to each role while vibe-id plays: {role [{:grid
    :effects|:cues :cell :name}]}, roles with none left out. In order: its FX
-   set, its flash FX, the effects grid's cells that are on, then the cues of
-   its pools, flash and bed, each cell once per role. {} for no such vibe."
-  [state vibe-id]
-  (if-let [vibe (library/vibe state vibe-id)]
+   set, its flash FX, the effects grid's cells that are on (but with :own?
+   true, the vibe's own cells only, as the Vibes tab and its lint show
+   them), then the cues of its pools, flash and bed, each cell once per
+   role. {} for no such vibe."
+  [state vibe-id & {:keys [own?]}]
+  (if-let [vibe (get-in state [:config :vibes :library vibe-id])]
     (let [effect-chains (get-in state [:chains :effect-chains])
           cue-chains (get-in state [:chains :cue-chains])
-          on-grid (sort-by (fn [[col row]] [row col]) (keep (fn [[cell c]] (when (:active? c) cell)) effect-chains))
+          on-grid (when-not own?
+                    (sort-by (fn [[col row]] [row col]) (keep (fn [[cell c]] (when (:active? c) cell)) effect-chains)))
           cells (distinct (concat (for [cell (concat (:fx vibe) (get-in vibe [:flash :fx]) on-grid)] [:effects cell])
                                   (for [cell (concat (get-in vibe [:hit :cells]) (get-in vibe [:accent :cells])
                                                      [(get-in vibe [:flash :cue]) (:bed vibe)])

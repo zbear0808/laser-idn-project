@@ -1196,11 +1196,12 @@
   (fx/sub-ctx context pick-fx-label col row))
 
 (defn- lint-world
-  "What the lint and the checklist read (vibes.library/lint)."
+  "What the lint, the checklist and the Vibes tab's tap reactions read
+   (vibes.library/lint)."
   [state]
   {:config {:vibes (get-in state [:config :vibes])
             :input {:trigger-map (get-in state [:config :input :trigger-map])}}
-   :chains {:cue-chains (get-in state [:chains :cue-chains])}
+   :chains (select-keys (:chains state) [:cue-chains :effect-chains])
    :projectors (:projectors state)
    :virtual-projectors (:virtual-projectors state)
    :zone-groups (:zone-groups state)})
@@ -1209,6 +1210,12 @@
   "What to fix before the show, worst first (vibes.library/lint)."
   [context]
   (library/lint (fx/sub-val context lint-world)))
+
+(defn vibe-edited-reactions
+  "The tap reactions of the vibe the Vibes tab edits, by role: its own cells
+   (vibes.reactions/reactions :own?), as its lint counts them."
+  [context]
+  (reactions/reactions (fx/sub-val context lint-world) (fx/sub-ctx context vibe-edited-id) :own? true))
 
 (defn vibe-checklist
   "What is left to set up (vibes.library/checklist)."

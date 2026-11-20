@@ -1,8 +1,8 @@
 (ns laser-show.ui-test.vibes-test
   "The Vibes tab: the vibes, the editor and its picker, Make from rows,
-   Learn all, deleting the vibe that plays and undoing a delete. And the
-   Grid and Effects tabs stay as they were (V8 B: the vibe stuff has its own
-   tabs), with cells that are in vibes.
+   Learn all, deleting the vibe that plays and undoing a delete, and the tap
+   reaction menus. And the Grid and Effects tabs stay as they were (V8 B:
+   the vibe stuff has its own tabs), with cells that are in vibes.
 
    The picker's cells are grid cells (views/components/grid_cell.clj
    generic-grid-cell), whose plain click handler takes the robot's clicks."
@@ -15,7 +15,7 @@
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
   (:import [javafx.scene Node Parent]
-           [javafx.scene.control Labeled MenuItem]))
+           [javafx.scene.control Labeled MenuButton MenuItem]))
 
 (defn- with-input-mapper
   "start-test! doesn't start the input mapper (app.clj:252); Learn all's
@@ -253,6 +253,52 @@
     (ui/wait-for! #(= before (vibes)))
     (ui/assert-visible! "#vibe-card-vibe-2")
     (is (false? (get-in (app-state) [:project :dirty?])) "deleted and put back: as saved")))
+
+(defn- menu-button-texts
+  "The texts of the items of the menu button found by selector, separators
+   left out."
+  [selector]
+  (let [^MenuButton menu (first (ui/query-all selector))]
+    (ui/on-fx-thread #(into [] (keep (fn [^MenuItem item] (.getText item))) (.getItems menu)))))
+
+(deftest tap-reaction-menu-adds-a-cell-to-the-vibe-test
+  (let [robot (ui/robot)
+        fx #(vibes :library :vibe-1 :fx)]
+    (state/swap-state! assoc-in [:config :input :trigger-map (note-key 37)] {:type :vibe :role :accent})
+    (events/dispatch! {:event/type :vibe/select :vibe :vibe-1})
+    (ui/wait-for! #(= :vibe-1 (rt :current)))
+    (open-vibes! robot)
+    (ui/assert-text! "#vibe-reactions-hit" "none yet")
+    (is (= ["HIT" "Punch: size" "Pump: brightness (35 % between hits)" "Step: colour" "Step: spin"
+            "HIT, ACCENT or FLASH" "Energy: size"]
+           (menu-button-texts "#vibe-tap-menu-hit"))
+        "HIT's templates, and the one that follows any of the three")
+    (ui/click! robot "#vibe-tap-menu-hit")
+    (ui/click! robot "#vibe-tap-punch-size")
+    (ui/wait-for! #(= [[0 3]] (fx)))
+    (is (= "Shapes · Punch size" (get-in (app-state) [:chains :effect-chains [0 3] :name])) "the first empty effect cell")
+    (ui/wait-for! #(fx-on? [0 3]))
+    (is (fx-on? [0 3]) "Shapes plays: on at once")
+    (is (= "Add Tap Reaction" (undo-label)))
+    (ui/assert-text! "#vibe-reactions-hit" "Punch size")
+    (ui/assert-text! "#vibe-slot-fx" "FX set  1")
+    (testing "FLASH's: the Strobe goes into the flash effects, off until FLASH is held"
+      (ui/click! robot "#vibe-slot-flash-cue")
+      (ui/wait-for! #(ui/has-style-class? "#vibe-slot-flash-cue" "vibe-slot-active"))
+      (ui/assert-text! "#vibe-reactions-flash" "none yet")
+      (ui/click! robot "#vibe-tap-menu-flash")
+      (ui/click! robot "#vibe-tap-strobe")
+      (ui/wait-for! #(= [[1 3]] (vibes :library :vibe-1 :flash :fx)))
+      (is (not (fx-on? [1 3])))
+      (ui/assert-text! "#vibe-reactions-flash" "Strobe"))
+    (testing "VIBE's, beside the name"
+      (is (= ["VIBE" "Fade in"] (menu-button-texts "#vibe-tap-menu-vibe")))
+      (ui/click! robot "#vibe-tap-menu-vibe")
+      (ui/click! robot "#vibe-tap-fade-in")
+      (ui/wait-for! #(= [[0 3] [2 3]] (fx)))
+      (ui/assert-text! "#vibe-reactions-vibe" "Fade in"))
+    (testing "the lint names a reaction whose control has no key yet (ACCENT has one)"
+      (ui/wait-for! #(some #{"Shapes · Punch size listens to HIT, which has no key yet"} (texts ".vibe-lint-row"))))))
 
 
 ;; V8 B: nothing vibe-related on the Grid tab or the Effects tab

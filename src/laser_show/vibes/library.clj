@@ -19,7 +19,8 @@
    them."
   (:require [clojure.string :as str]
             [laser-show.state.domains :as domains]
-            [laser-show.timeline.playback :as playback]))
+            [laser-show.timeline.playback :as playback]
+            [laser-show.vibes.reactions :as reactions]))
 
 (def empty-library
   "A project's vibes before there are any (state.domains config :vibes)."
@@ -390,11 +391,16 @@
   [[col row]]
   (str (char (+ 65 row)) (inc col)))
 
+(defn- heard-roles
+  "The controls a key is bound to."
+  [state]
+  (let [actions (vals (get-in state [:config :input :trigger-map]))]
+    (into #{} (filter (fn [role] (some #(binds-role? % role) actions))) roles)))
+
 (defn- learned
   "How many of the five controls have a binding."
   [state]
-  (let [actions (vals (get-in state [:config :input :trigger-map]))]
-    (count (filter (fn [role] (some #(binds-role? % role) actions)) roles))))
+  (count (heard-roles state)))
 
 (defn- audience-text
   "Why vibe-name never plays the cue at cell: the audience group it reaches,
@@ -419,44 +425,82 @@
       :crowd [{:level :warn :text (audience-text state vibe-name cell cue groups)}]
       nil)))
 
+(defn- moves-only
+  "The info row for a role (role-name, \"HIT\") whose press plays no cue but
+   moves effects, its reactions (moves); none without any."
+  [vibe-name role-name moves]
+  (when-let [names (seq (distinct (map :name moves)))]
+    [{:level :info :text (str vibe-name ": " role-name " moves effects only (" (str/join ", " names) ")")}]))
+
+(def ^:private source-names
+  {:hit "HIT" :accent "ACCENT" :flash "FLASH" :vibe "VIBE" :any "HIT, ACCENT or FLASH"})
+
+(defn- unheard
+  "Warn rows for the reactions of a vibe (moves, by role) that follow a
+   control no key is bound to (heard: those a key is): one that follows
+   HIT, ACCENT or FLASH only when none of them has one. None while no key
+   is bound at all: the controls' own row says so."
+  [state vibe-name moves heard]
+  (when (seq heard)
+    (for [{:keys [grid cell] reaction :name} (distinct (mapcat val moves))
+          :let [sources (reactions/listens-to (get-in state [:chains (if (= :effects grid) :effect-chains :cue-chains) cell]))]
+          source [:hit :accent :flash :vibe :any]
+          :when (and (contains? sources source) (not-any? heard (reactions/roles-of source)))]
+      {:level :warn
+       :text (str vibe-name " · " reaction " listens to " (source-names source)
+                  (if (= :any source) ", none of which has a key yet" ", which has no key yet"))})))
+
 (defn- vibe-problems
-  "Lint rows for one vibe; groups: the audience groups, nil if it allows them."
-  [state vibe groups]
+  "Lint rows for one vibe; groups: the audience groups, nil if it allows
+   them; heard: the controls a key is bound to. Its tap reactions are its
+   own cells' (vibes.reactions/reactions :own?), not an effect cell's that
+   was switched on by hand: that one is no vibe's, and can go off at any
+   time."
+  [state vibe groups heard]
   (let [vibe-name (or (not-empty (:name vibe)) (name (:id vibe)))
         hit (vec (distinct (get-in vibe [:hit :cells])))
         accent (vec (distinct (get-in vibe [:accent :cells])))
         {:keys [cue fx]} (:flash vibe)
-        cells (fn [label cs] (mapcat #(cell-problems state vibe-name label % groups) cs))]
+        cells (fn [label cs] (mapcat #(cell-problems state vibe-name label % groups) cs))
+        moves (reactions/reactions state (:id vibe) :own? true)
+        quiet? (fn [cs] (empty? (playable-cells state vibe cs)))]
     (concat
      (cells "" hit)
      (cells "" accent)
      (case (count (playable-cells state vibe hit))
-       0 [{:level :error :text (str vibe-name ": HIT has no cues to play")}]
+       0 (or (moves-only vibe-name "HIT" (:hit moves))
+             [{:level :error :text (str vibe-name ": HIT does nothing (no cues, no tap reactions)")}])
        1 [{:level :warn :text (str vibe-name ": one cue in HIT repeats on every press")}]
        nil)
+     (when (quiet? accent) (moves-only vibe-name "ACCENT" (:accent moves)))
      (when cue (cells "FLASH cue " [cue]))
-     (when (and (nil? cue) (empty? fx))
-       [{:level :warn :text (str vibe-name ": FLASH does nothing in this vibe")}])
+     (cond
+       (and (nil? cue) (empty? fx) (empty? (:flash moves)))
+       [{:level :warn :text (str vibe-name ": FLASH does nothing in this vibe")}]
+       (quiet? (when cue [cue])) (moves-only vibe-name "FLASH" (:flash moves)))
      (when (:bed vibe) (cells "BED " [(:bed vibe)]))
      (for [cell hit :when (some #{cell} accent)]
-       {:level :warn :text (str vibe-name ": " (cell-name cell) " is in both HIT and ACCENT")}))))
+       {:level :warn :text (str vibe-name ": " (cell-name cell) " is in both HIT and ACCENT")})
+     (unheard state vibe-name moves heard))))
 
 (defn lint
   "What to fix before the show, worst first: [{:level :error|:warn|:info
    :vibe (the vibe it is about, or nil) :text}]. state needs the vibes, the
-   cue grid, the projectors, the zone groups and the trigger map."
+   cue and effects grids, the projectors, the zone groups and the trigger
+   map."
   [state]
   (let [{:keys [order library]} (get-in state [:config :vibes])
         groups (audience-groups state)
         vibes (keep library (distinct order))
         names (frequencies (map :name vibes))
-        n (learned state)]
+        n (learned state)
+        heard (heard-roles state)]
     (->> (concat
           (when (or (not= (count order) (count (distinct order))) (not= (set order) (set (keys library))))
             [{:level :error :text "Order and library disagree"}])
           (mapcat (fn [vibe]
                     (map #(assoc % :vibe (:id vibe))
-                         (vibe-problems state vibe (when-not (:allow-audience? vibe) groups))))
+                         (vibe-problems state vibe (when-not (:allow-audience? vibe) groups) heard)))
                   vibes)
           (for [vibe-name (distinct (map :name vibes))
                 :let [k (names vibe-name)]

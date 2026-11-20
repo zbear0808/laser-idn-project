@@ -356,3 +356,18 @@
     (let [undone (run s1 {:event/type :history/undo})]
       (is (nil? (get-in undone [:chains :effect-chains [1 3]])))
       (is (= [] (get-in undone [:config :vibes :library :vibe-2 :fx]))))))
+
+(deftest add-reaction-is-an-edit-like-the-others-test
+  (testing "what plays follows it through engine/reconcile, as it follows every edit of the vibes: after an undo
+            took the vibe that played away (an undo runs no handler), its look is left, the first vibe's entered,
+            and the new reaction is on in it"
+    (let [s0 (-> (starter)
+                 (run {:event/type :vibe/add})
+                 (run {:event/type :vibe/select :vibe :vibe-3 :input-time 1000})
+                 (run {:event/type :edit/undo}))
+          s1 (run s0 {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :punch-size})]
+      (is (= :vibe-3 (get-in s0 [:vibe-runtime :current])))
+      (is (nil? (get-in s0 [:config :vibes :library :vibe-3])))
+      (is (= :vibe-1 (get-in s1 [:vibe-runtime :current])))
+      (is (true? (get-in s1 [:chains :effect-chains [1 3] :active?])))
+      (is (= [[1 3]] (get-in s1 [:vibe-runtime :fx-on])) "the FX set's, so leaving Shapes switches it off"))))

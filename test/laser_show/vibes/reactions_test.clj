@@ -219,3 +219,15 @@
       (is (= #{:accent} (reactions/listens-to {:items [{:type :group :enabled? true
                                                         :items [{:effect-id :scale :params {:x-scale (env :accent)}}]}]}))
           "through a group"))))
+
+(deftest own-reactions-leave-the-grid-out-test
+  (let [s (-> (starter)
+              (reactions/add-to-vibe :vibe-1 :punch-size)
+              (assoc-in [:chains :effect-chains [7 3]] (assoc (reactions/reaction-cell :flip nil) :active? true)))]
+    (is (= {:hit [{:grid :effects :cell [0 3] :name "Punch size"}]
+            :accent [{:grid :effects :cell [7 3] :name "Flip"}]}
+           (reactions/reactions s :vibe-1))
+        "while it plays, the effects grid's cells that are on move too (the Perform pads)")
+    (is (= {:hit [{:grid :effects :cell [0 3] :name "Punch size"}]}
+           (reactions/reactions s :vibe-1 {:own? true}))
+        "its own cells only: its FX set, its flash effects and its cues (the Vibes tab and its lint)")))

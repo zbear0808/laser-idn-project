@@ -396,13 +396,36 @@
     (is (= [{:level :info :text "1 of 5 controls learned"}] lint))
     (is (identical? lint (fx/sub-ctx (-> ctx (press :hit 1000) (status-write)) subs/vibe-lint))
         "a press and the show clock's status leave it alone")
-    (is (= [{:level :error :vibe :vibe-2 :text "Lines: HIT has no cues to play"}]
+    (is (= [{:level :error :vibe :vibe-2 :text "Lines: HIT does nothing (no cues, no tap reactions)"}]
            (filterv #(= :error (:level %))
                     (fx/sub-ctx (-> ctx
                                     (handle {:event/type :grid/clear-cell :col 5 :row 0})
                                     (handle {:event/type :grid/clear-cell :col 7 :row 0}))
                                 subs/vibe-lint)))
-        "a cleared cell leaves its pools (vibes.refs): both of Lines' HIT cues cleared, it has nothing to play")))
+        "a cleared cell leaves its pools (vibes.refs): both of Lines' HIT cues cleared, it has nothing to play")
+    (is (= [{:level :info :vibe :vibe-2 :text "Lines: HIT moves effects only (Punch size)"}]
+           (filterv #(= :vibe-2 (:vibe %))
+                    (fx/sub-ctx (-> ctx
+                                    (fx/swap-context assoc-in [:config :vibes :library :vibe-2 :hit :cells] [])
+                                    (fx/swap-context reactions/add-to-vibe :vibe-2 :punch-size))
+                                subs/vibe-lint)))
+        "the lint reads the effect cells too")))
+
+(deftest vibe-edited-reactions-sub-test
+  (let [ctx (context (-> (vibe-state)
+                         (reactions/add-to-vibe :vibe-1 :punch-size)
+                         (reactions/add-to-vibe :vibe-2 :flip)
+                         (assoc-in [:chains :effect-chains [7 3]] (assoc (reactions/reaction-cell :swell nil) :active? true))))
+        playing (-> ctx (press :hit 1000) (release :hit 1050))
+        moves (fx/sub-ctx playing subs/vibe-edited-reactions)]
+    (is (= {:hit [{:grid :effects :cell [0 3] :name "Punch size"}]} moves)
+        "the vibe edited (the first): its own cells, not one switched on on the Effects tab")
+    (is (true? (in-state playing :chains :effect-chains [0 3] :active?)) "Shapes plays, its Punch on")
+    (is (= {:accent [{:grid :effects :cell [1 3] :name "Flip"}]}
+           (fx/sub-ctx (handle playing {:event/type :vibe/select-for-edit :vibe :vibe-2}) subs/vibe-edited-reactions))
+        "it follows the selection")
+    (is (identical? moves (fx/sub-ctx (-> playing (press :hit 2000) (status-write)) subs/vibe-edited-reactions))
+        "a press and the show clock's status leave it alone")))
 
 (deftest vibe-controls-sub-test
   (let [ctx (context (vibe-state))

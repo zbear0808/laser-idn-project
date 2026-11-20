@@ -4,8 +4,8 @@
    Listens to all global input events from the generic router and:
    1. Continuous events (MIDI CC, OSC floats) -> updates fast input store (`laser-show.input.store`)
    2. Discrete events (Note ON, Key pressed) -> performs O(1) lookup in `[:config :input :trigger-map]`
-      and invokes the mapped action, unless a learn is waiting for an input
-      ([:backend :input :learning-target]): that one is the learn's.
+      and invokes the mapped action, unless it is a press and a learn is
+      waiting for one ([:backend :input :learning-target]): that one is the learn's.
    
    State updates bypass cljfx's event queue to ensure the lowest possible latency
    and avoid blocking the UI."
@@ -34,7 +34,9 @@
 (defn- learning?
   "Is a learn waiting for an input? It catches the press itself
    (handlers/input.clj), so the press mustn't also fire the key's old
-   binding (keyboard plan K-15), nor its release."
+   binding (keyboard plan K-15). A release still goes through, so a key
+   held when the learn started lets go of what it holds; a role's release
+   with nothing held changes nothing (vibes.engine/release)."
   []
   (some? (get-in (state/get-raw-state) [:backend :input :learning-target])))
 
@@ -79,7 +81,8 @@
       (when (and (= :osc (:source event)) (:path event) (number? (:value event)))
         (update-input-value! [:osc (:path event)]
                              (max 0.0 (min 1.0 (double (:value event))))))
-      (when-not (learning?)
+      (when-not (and (or (input-events/note-on? event) (input-events/trigger? event))
+                     (learning?))
         (if-let [dispatch @*dispatch-fn]
           (dispatch {:event/type :trigger/input
                      :input-event event
