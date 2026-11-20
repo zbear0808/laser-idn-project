@@ -30,6 +30,7 @@
   (:require [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.animation.pulses :as pulses]
             [laser-show.common.util :as u]
+            [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.state.extractors :as ex]
             [laser-show.timeline.playback :as playback])
   (:import [java.util.concurrent ConcurrentHashMap]
@@ -208,11 +209,17 @@
 
 (defn- pending-reports
   "What app state needs to hear now: runs that ended (a timeline at its end,
-   a decay after its beats) while their intent is still there, and chasing
-   cells where app state and the chase disagree."
+   a decay after its beats) while their intent is still there, chasing
+   cells where app state and the chase disagree, and a zone map switch whose
+   beat the global clock has reached (zones plan Z4: the tick routes by it
+   already, and the report lands it in app state)."
   [runtime state]
-  (let [intents (or (get-in state [:playback :active-cues]) {})]
+  (let [intents (or (get-in state [:playback :active-cues]) {})
+        pending (get-in state [:zone-map :pending])]
     (concat
+     (when (and pending (number? (:at-beat pending))
+                (zone-maps/due? (:at-beat pending) (effective-beats (:global runtime))))
+       [{:event/type :show-clock/zone-map-due :id (:id pending) :map (:map pending)}])
      (for [[run-id run] (:runs runtime)
            :when (and (:ended? run) (= run-id (get-in intents [(:cell run) :run])))]
        {:event/type :show-clock/cue-ended :cell (:cell run) :run run-id})

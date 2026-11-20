@@ -20,6 +20,7 @@
             [laser-show.events.helpers :as h]
             [laser-show.input.link :as link]
             [laser-show.routing.zone-effects :as ze]
+            [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.timeline.playback :as playback]
             [laser-show.triggers.tap-tempo :as tap]
             [clojure.tools.logging :as log]))
@@ -70,18 +71,32 @@
   (ze/reset-zone-debug!)
   {:state (assoc-in state [:playback :playing?] true)})
 
+(defn- commit-pending-switch
+  "state with a pending zone map switch landed now (zones plan Z4, 06
+   SQ-2): a restart puts the global clock back to beat 0, and the beat it
+   waits for belongs to the old count."
+  [state]
+  (if-let [pending (get-in state [:zone-map :pending])]
+    (zone-maps/commit state (:map pending))
+    state))
+
 (defn- handle-transport-stop
-  "Stop playback and restart every clock (the global one and each cue's)."
+  "Stop playback and restart every clock (the global one and each cue's); a
+   pending zone map switch lands now."
   [{:keys [state]}]
   {:state (-> state
               (assoc-in [:playback :playing?] false)
               (assoc-in [:playback :active-cue] nil)
-              (request :restart))})
+              (request :restart)
+              (commit-pending-switch))})
 
 (defn- handle-transport-retrigger
-  "Retrigger the current animation: restart every clock."
+  "Retrigger the current animation: restart every clock; a pending zone map
+   switch lands now."
   [{:keys [state]}]
-  {:state (request state :restart)})
+  {:state (-> state
+              (request :restart)
+              (commit-pending-switch))})
 
 
 ;; Link Events
@@ -144,6 +159,15 @@
               (update state :playback cue-timing/deactivate-cue cell)
 
               :else state)}))
+
+(defn- handle-show-clock-zone-map-due
+  "The show clock reached the beat a zone map switch waits for (zones plan
+   Z4): it lands, if :id is still the pending one (another press may have
+   replaced it since). The clock already routed by it from that beat."
+  [{:keys [id state]}]
+  {:state (if (and (some? id) (= id (get-in state [:zone-map :pending :id])))
+            (zone-maps/commit state (get-in state [:zone-map :pending :map]))
+            state)})
 
 (defn- handle-show-clock-status
   "What views show a few times a second, from the show clock: the beat in the
@@ -250,6 +274,7 @@
     :show-clock/cue-ended (handle-show-clock-cue-ended event)
     :show-clock/chase (handle-show-clock-chase event)
     :show-clock/status (handle-show-clock-status event)
+    :show-clock/zone-map-due (handle-show-clock-zone-map-due event)
     
     ;; Link sync events
     :timing/toggle-link-sync (handle-timing-toggle-link-sync event)

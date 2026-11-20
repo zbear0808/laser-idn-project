@@ -145,6 +145,20 @@
     (is (nil? (get-in (input :note-off 1400) [:playback :active-cues cell]))
         "held 400 ms by the input's clock (a few by the handler's): a hold, so it is cut")))
 
+(deftest zone-map-action-presses-the-map-test
+  (let [state (pad-state {:type :zone-map :target :map/odd-even})
+        press (pad state :note-on 1000)]
+    (is (= {:event/type :zone-map/press :map :map/odd-even :src :input}
+           (select-keys (:dispatch press) [:event/type :map :src]))
+        "zones plan Z4: a learned key presses the map's pad")
+    (is (nil? (:dispatch (pad state :note-off 1090))) "its release does nothing")
+    (is (identical? state (:state press)) "no bookkeeping, as for a vibe key")
+    (is (identical? state (:state (pad state :note-off 1090))))))
+
+(deftest zone-map-action-carries-the-input-time-test
+  (is (= 1000 (get-in (pad (pad-state {:type :zone-map :target :map/unison}) :note-on 1000) [:dispatch :input-time]))
+      "handled at 99999: the press counts from when it was played"))
+
 (deftest tap-tempo-binding-taps-at-the-input-time-test
   (let [state (pad-state {:type :tap-tempo})
         tap (:dispatch (pad state :note-on 1000))]

@@ -274,6 +274,8 @@
            :doc "Map of generic input triggers (MIDI/OSC/Key -> actions), and :macro-map {input store key -> :slider-1 or :slider-2}: the control learned for each fader (plans/2026-11-18-vibe-mode/05), from which the render takes each fader's value at every tick (vibes.faders/fader-values). A project saved before it has no :macro-map ([:config] merges shallowly on load): read nil as {}"}
    :cue {:default {:trigger-mode :default}
          :doc "Cue playback settings. :trigger-mode can be :default (use per-cue setting), :toggle (click ON/OFF), or :retrigger (always restart)"}
+   :zone-map-pads {:default {}
+                   :doc "{map-id {:bar? true}}: a zone map pad's setting (zones plan Z4): with :bar?, its presses (and its learned keys') wait for the next bar. Show content"}
    :default-target {:default nil
                     :doc "The show's default target (zones plan Z4, routing.targets): what a cue without one of its own, in a column without one, draws to; nil is All. Show content"}
    :vibes {:default {:order []

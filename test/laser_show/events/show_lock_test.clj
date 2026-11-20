@@ -83,7 +83,10 @@
    ;; A column's default target and the show's re-route every cue that
    ;; inherits them, and can change which reach the audience (zones plan Z4)
    {:event/type :grid/set-column-target :col 2 :target :graphics}
-   {:event/type :zones/set-default-target :target :graphics}])
+   {:event/type :zones/set-default-target :target :graphics}
+   ;; A zone map pad's setting and its keys, as a vibe's
+   {:event/type :zone-map/set-pad-bar :map :map/odd-even :bar? true}
+   {:event/type :zone-map/clear-control :map :map/odd-even}])
 
 (def ^:private opened-show
   "What Open kept of friday.zip's rig (zones plan ZR): P1 with its own
@@ -101,6 +104,7 @@
                ;; a laser in Graphics, and a cue pinned to a laser that isn't here
                (assoc-in [:projectors :p1 :zone-groups] [:graphics])
                (assoc-in [:chains :cue-chains [7 3]] {:items [] :destination-zone {:zone-group-id :auto.laser/p9}})
+               (assoc-in [:config :input :trigger-map {:source :midi :channel 0 :note 50}] {:type :zone-map :target :map/odd-even})
                (history/mark-clean))]
     (doseq [event structure-edits]
       (testing (str (:event/type event))
@@ -149,7 +153,11 @@
                    {:event/type :timing/tap-tempo}
                    {:event/type :effects/toggle-cell :col 0 :row 3}
                    {:event/type :vibe/select-for-edit :vibe :vibe-2}
-                   {:event/type :ui/set-active-tab :tab-id :grid}]]
+                   {:event/type :ui/set-active-tab :tab-id :grid}
+                   ;; A zone map switch is a performer's (zones plan Z4)
+                   {:event/type :zone-map/press :map :map/odd-even}
+                   {:event/type :zone-map/schedule :map :map/unison :clock {:beats 3.0 :running? false :now-ms 0}}
+                   {:event/type :zone-maps/use-now :map :map/unison}]]
       (is (same? event) (str (:event/type event) " is the same locked or not")))
     (testing "a grid click starts its cue (its run id is random)"
       (is (some? (get-in (run (lock s0) {:event/type :grid/trigger-cell :col 0 :row 0}) [:playback :active-cues [0 0]]))))

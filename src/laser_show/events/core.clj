@@ -278,6 +278,20 @@
   [_ dispatch]
   (link/sync-to-downbeat! #(run-inline % dispatch) (show-time/global-beats)))
 
+;; Show Clock Effects
+
+(defn- effect-show-clock-read
+  "Effect that continues :on-read with :clock, what the show clock has now:
+   {:beats (the global clock's) :running? (a clock thread runs) :now-ms
+   (the wall clock, the one an input's :timestamp is on)}, so a handler that
+   times something on the beat stays pure (zones plan Z4 SQ-3)."
+  [{:keys [on-read]} dispatch]
+  (when on-read
+    (run-inline (assoc on-read :clock {:beats (show-time/global-beats)
+                                       :running? ((:running? show-time/frame-signal))
+                                       :now-ms (System/currentTimeMillis)})
+                dispatch)))
+
 ;; Input Learn Effects
 
 (defn- effect-input-await-learn
@@ -510,6 +524,7 @@
    - :dispatch - continue with another event (inline)
    - :dispatch-later - dispatch event after delay (later, future)
    - :link/sync-to-downbeat - align phase to Link's downbeat (inline)
+   - :show-clock/read - continue :on-read with the show clock's beats (inline)
    - :input/await-learn - wait for a learn capture, then dispatch the binding (later, future)
    - :multi-engine/start, :multi-engine/refresh - queue a sync of the engines
      with {:projectors …} on the output thread; :output/status comes back
@@ -531,6 +546,7 @@
    :dispatch effect-dispatch
    :dispatch-later effect-dispatch-later
    :link/sync-to-downbeat effect-link-sync-to-downbeat
+   :show-clock/read effect-show-clock-read
    :input/await-learn effect-input-await-learn
    ;; Streaming engines (queued on the output runtime)
    :multi-engine/start effect-output-sync

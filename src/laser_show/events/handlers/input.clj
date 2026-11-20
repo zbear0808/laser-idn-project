@@ -14,6 +14,7 @@
             [laser-show.input.osc :as osc]
             [laser-show.input.router :as router]
             [laser-show.input.events :as input-events]
+            [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.state.core :as state]
             [laser-show.vibes.engine :as engine]
             [laser-show.vibes.library :as library]))
@@ -322,20 +323,28 @@
 
 (defn- action-name
   "What a binding did, for an undo label: \"cue A1\", \"effect A1\", \"HIT\",
-   or its type (\"tap tempo\")."
-  [{:keys [type target role]}]
+   \"zone map Odd / Even\" (a custom map by its name in state), or its type
+   (\"tap tempo\")."
+  [state {:keys [type target role]}]
   (let [cell (fn [[col row]] (str (char (+ 65 row)) (inc col)))]
     (cond
       (and (= :trigger-cue type) (vector? target)) (str "cue " (cell target))
       (and (= :trigger-effect type) (vector? target)) (str "effect " (cell target))
       (and (= :vibe type) role) (str/upper-case (name role))
+      (= :zone-map type) (str "zone map " (or (:name (zone-maps/map-by-id state target)) (some-> target name)))
       :else (str/replace (name (or type :binding)) "-" " "))))
+
+(def ^:private one-key-types
+  "The targets that keep one key, so learning one again moves it: a vibe
+   role (vibe Phase 2) and a zone map pad (zones plan Z4-Q2 A). A cell keeps
+   every key it is given."
+  #{:vibe :zone-map})
 
 (defn- handle-input-learn-captured
   "Bind the captured input to the target action, :behavior included (ignored
    if learn was cancelled or restarted for another target in the meantime).
-   A vibe role keeps one control: its other bindings go, so learning it again
-   moves it. The undo label names what the input did before, if anything.
+   A vibe role and a zone map pad keep one control (one-key-types): its other
+   bindings go, so learning it again moves it. The undo label names what the input did before, if anything.
    A role whose key lost its binding so lets go now, if that key holds it
    (engine/release-unbound): its release would reach nothing.
    During Learn all the next role's learn follows, and a key already learned
@@ -347,6 +356,7 @@
         lookup-key (learn-lookup-key input-event)
         replaced (get-in state [:config :input :trigger-map lookup-key])
         role (when (= :vibe (:type target-action)) (:role target-action))
+        one-key? (contains? one-key-types (:type target))
         {:keys [queue done] :as wizard} (when (= target (wizard-target state))
                                           (get-in state [:ui :vibes :wizard]))
         taken (some #(when (library/binds-role? replaced %) %) done)]
@@ -363,14 +373,14 @@
       (let [queue (vec (rest queue))]
         (cond-> {:state (-> state
                             (update-in [:config :input :trigger-map]
-                                       #(cond->> % role (into {} (remove (fn [[_ action]] (library/binds-role? action role))))))
+                                       #(cond->> % one-key? (into {} (remove (fn [[_ action]] (= target (learn-target action)))))))
                             (assoc-in [:config :input :trigger-map lookup-key] target-action)
                             (update-in [:backend :input] dissoc :learning-target)
                             (cond-> wizard (assoc-in [:ui :vibes :wizard]
                                                      (when (seq queue) {:queue queue :done (conj (vec done) role)})))
                             (engine/release-unbound (get-in state [:config :input :trigger-map]) (h/current-time-ms event)))
                  :history/description (if (and replaced (not= (learn-target replaced) target))
-                                        (str "Learn Trigger (replaces " (action-name replaced) ")")
+                                        (str "Learn Trigger (replaces " (action-name state replaced) ")")
                                         "Learn Trigger")}
           (and wizard (seq queue))
           (assoc :dispatch {:event/type :input/start-learn :target-action {:type :vibe :role (first queue)}}))))))

@@ -304,6 +304,31 @@
         (is (= :map/unison (get-in (show-clock/tick! 750000000) [:routing :map])) "and stays, until the commit")
         (is (= :map/left-right (get-in (state/get-raw-state) [:zone-map :active])) "app state is the commit's to change")))))
 
+(deftest due-switch-is-reported-test
+  (testing "06 SQ-4: once due, the switch is reported with the status, again 250 ms on while app state still has it pending"
+    (init! {[0 0] (cue :circle)})
+    (trigger! 0 0)
+    (state/assoc-in-state! [:zone-map :pending] {:id :p1 :map :map/unison :at-beat 1.0 :bar? false})
+    (let [sent (atom [])
+          due #(filterv (comp #{:show-clock/zone-map-due} :event/type) @sent)]
+      (with-redefs [events/dispatch! #(swap! sent conj %)]
+        (show-clock/tick! 0)
+        (show-clock/tick! 450000000)
+        (is (= [] (due)) "not due yet")
+        (show-clock/tick! 500000000)
+        (is (= [{:event/type :show-clock/zone-map-due :id :p1 :map :map/unison}] (due)) "on the beat")
+        (show-clock/tick! 600000000)
+        (is (= 1 (count (due))) "100 ms on: not again")
+        (show-clock/tick! 760000000)
+        (is (= 2 (count (due))) "260 ms on, still pending in app state: again"))
+      (testing "handled: the map is in use, and nothing more is due"
+        (run! events/event-handler (due))
+        (is (= {:active :map/unison :pending nil} (:zone-map (state/get-raw-state))))
+        (reset! sent [])
+        (with-redefs [events/dispatch! #(swap! sent conj %)]
+          (show-clock/tick! 900000000))
+        (is (= [] (due)))))))
+
 (deftest clock-writes-no-zone-map-test
   (testing "06 invariant 6: the show clock never writes [:zone-map]"
     (init! {[0 0] (cue :circle)})

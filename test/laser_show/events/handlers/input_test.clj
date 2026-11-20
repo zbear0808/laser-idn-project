@@ -426,6 +426,47 @@
       (stop-learning!))))
 
 
+(deftest relearning-a-map-pad-moves-its-key-test
+  (try
+    (let [odd-even {:type :zone-map :target :map/odd-even}
+          unison {:type :zone-map :target :map/unison}
+          s0 (assoc-in (initial-state) [:config :input :trigger-map]
+                       {(note-key 36) odd-even (note-key 37) unison})
+          learning-it (learning s0 odd-even)]
+      (is (= odd-even (get-in learning-it [:backend :input :learning-target])) "learn aims at the pad")
+      (is (= {(note-key 50) odd-even (note-key 37) unison} (trigger-map (captured learning-it odd-even (note 50))))
+          "Z4-Q2 A: one key a pad, so learning it again moves it; another pad keeps its own")
+      (testing "learned over HIT's key: the key is the pad's now, and the label says so"
+        (let [s (-> (initial-state)
+                    (assoc-in [:config :input :trigger-map] {(note-key 36) {:type :vibe :role :hit}})
+                    (history/mark-clean)
+                    (learning odd-even))
+              s' (:state (events/handle-event-pipeline
+                          {:event/type :input/learn-captured :target-action odd-even :input-event (note 36) :state s :time 1}))]
+          (is (= {(note-key 36) odd-even} (trigger-map s')))
+          (is (= "Learn Trigger (replaces HIT)" (history/undo-label (:history s'))))))
+      (testing "the label names a pad over another pad's key"
+        (let [s (-> (assoc-in (initial-state) [:config :input :trigger-map] {(note-key 37) unison})
+                    (history/mark-clean)
+                    (learning odd-even))
+              s' (:state (events/handle-event-pipeline
+                          {:event/type :input/learn-captured :target-action odd-even :input-event (note 37) :state s :time 1}))]
+          (is (= "Learn Trigger (replaces zone map Unison)" (history/undo-label (:history s')))))))
+    (finally
+      (stop-learning!))))
+
+(deftest map-pad-learn-ignores-a-cc-test
+  (try
+    (let [odd-even {:type :zone-map :target :map/odd-even}
+          effects (input/handle {:event/type :input/start-learn :target-action odd-even :state (initial-state)})
+          p (get-in effects [:input/await-learn :promise])]
+      (move! 0 1 0.1 0.9 0.0 1.0)
+      (is (nil? (caught p)) "moving a control is how a fader learns: a pad never takes it")
+      (router/dispatch! (input-events/note-on :midi 0 36 1.0))
+      (is (= :note-on (:type (caught p))) "a note does"))
+    (finally
+      (stop-learning!))))
+
 ;; What a key holds lets go when the key can't let go itself
 ;; (plans/2026-11-18-vibe-mode/07)
 

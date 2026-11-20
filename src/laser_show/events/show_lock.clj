@@ -8,8 +8,8 @@
    changes nothing but the notice that says so ([:ui :show-lock-notice],
    shown under the switch, and the status bar's). What a performer plays is
    never refused: the vibe keys, BLACKOUT, the grid's clicks, the transport,
-   the tempo, streaming, learning a key, and Exit, which still asks about
-   unsaved changes. A safety zone edit goes through while it makes no zone
+   the tempo, streaming, learning a key, switching the zone map (a pad, its
+   key, Use now), and Exit, which still asks about unsaved changes. A safety zone edit goes through while it makes no zone
    larger, so the lock never stands between you and a safer show, and is
    refused when it would let light somewhere new (zones plan Q-Z1-5 A).
 
@@ -54,7 +54,11 @@
     ;; A grid column's default target and the show's (zones plan Z4): they
     ;; re-route every cue that inherits them, and can change which cues
     ;; reach the audience
-    :grid/set-column-target :zones/set-default-target})
+    :grid/set-column-target :zones/set-default-target
+    ;; A zone map pad's setting and its keys, as a vibe's options and keys
+    ;; (a press, a key's, a due switch and Use now are a performer's, and go
+    ;; through)
+    :zone-map/set-pad-bar :zone-map/clear-control})
 
 (def safety-edits
   "The safety zone edits (zones plan Z1). The lock refuses one only when it

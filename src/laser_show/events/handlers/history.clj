@@ -191,6 +191,8 @@
    :zone-groups/save-edit "Edit Zone Group"
    :zone-groups/remove "Delete Zone Group"
    :zones/set-default-target "Change Show Target"
+   :zone-map/set-pad-bar "Change Pad Timing"
+   :zone-map/clear-control "Clear Control"
    :vibe/clear-control "Clear Control"
    :vibe/add-master "Add Master Intensity"
    :vibe/add-morph "Add Morph"

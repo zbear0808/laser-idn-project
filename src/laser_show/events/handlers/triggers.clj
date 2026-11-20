@@ -3,7 +3,8 @@
 
    Trigger inputs are resolved here and then translated into the existing
    domain events so all input sources share the same playback behavior.
-   Vibe mode's role bindings become :vibe/* events (handlers/vibes.clj)."
+   Vibe mode's role bindings become :vibe/* events (handlers/vibes.clj), a
+   zone map pad's a :zone-map/press (handlers/zone_maps.clj)."
   (:require [clojure.tools.logging :as log]
             [laser-show.input.events :as input-events]
             [laser-show.triggers.matcher :as matcher]))
@@ -61,6 +62,11 @@
   "Vibe mode's bindings: {:type :vibe :role r} and {:type :vibe-select :vibe id}."
   #{:vibe :vibe-select})
 
+(def ^:private quiet-action?
+  "The bindings that leave the trigger runtime alone: vibe mode's, which
+   keep their own holds, and a zone map pad's (zones plan Z4)."
+  #{:vibe :vibe-select :zone-map})
+
 (defn- vibe-event
   "A role hears its press and its release, timed by the input (the
    pipeline's :time is when the event was handled); a vibe-select binding
@@ -82,6 +88,12 @@
     (cond
       (vibe-action? type)
       (vibe-event action input-event)
+
+      ;; A zone map pad's key presses the pad, timed by the input; its
+      ;; release does nothing (zones plan Z4)
+      (= :zone-map type)
+      (when (pressed? input-event)
+        {:event/type :zone-map/press :map target :src :input :input-time (:timestamp input-event)})
 
       (and (= :momentary (:behavior action))
            (#{:trigger-cue :trigger-effect} type))
@@ -138,8 +150,8 @@
   (let [action (or (definition-action state input-event)
                    (legacy-action state input-event))
         ;; A vibe binding leaves the bookkeeping alone: nothing reads it
-        ;; (probe v8), and the engine keeps its own holds
-        next-state (if (vibe-action? (:type action))
+        ;; (probe v8), and the engine keeps its own holds; so does a map pad's
+        next-state (if (quiet-action? (:type action))
                      state
                      (update-runtime state input-event (or action {}) time))]
     (if-let [event (and action (action-event action input-event))]
