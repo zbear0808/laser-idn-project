@@ -127,6 +127,16 @@ Either way, Escape during a drag puts the old zone back without asking.
 - **A ★** Its card notes the cut ("−28% pts"), and there is no toolbar chip.
 - **B** The toolbar also shows a THINNED chip.
 
+**Raised while building Z3** (2026-11-20; 05 §12 has the context; built as ★ A):
+
+**Q-Z3-6 · The show lock and a laser's fit guard settings.**
+- **A ★ (built)** The lock lets them through: a fit edit restarts and re-routes nothing, lets no light anywhere new, and lowering a laser's minimum is what a cue's ⚠ asks you to do mid-show.
+- **B** The lock refuses them, as it refuses the rig's order, middle laser and split width.
+
+**Q-Z3-7 · The fit guard costs about twice its estimate** (about 190 µs per 2,000 points, against 50–100).
+- **A ★ (built)** Leave it: it runs on the laser's own thread, only for a frame over budget.
+- **B** Make it faster now, with primitive arrays.
+
 ## Z4 · Zones, maps and targets (`06-phase-z4-zones-maps-targets.md`)
 
 **Z4-Q1 · When the map pads show.**

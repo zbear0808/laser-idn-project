@@ -1,7 +1,7 @@
 # Phase Z3: routing core (routing in the snapshot, each picture once, split lasers, fit guard, per-laser preview, low-fps warnings)
 
 **Written:** 2026-11-19   **Written for commit:** `6aaad7d` (`master`; first written at `90e35c7`, then re-verified here: `src/` is as vibe Phase 6 left it in `4a4a10a`, after vibe Phases 3 (`38f92ad`), 4a (`6715fb4`), 4b (`f5a4f84`) and 5 (`9f5d78a`, with the fader fix `0faa18c`) and UX Phase 3 (`b9b9d55`); every line below is at that source). Z1 and Z2 edit several of these files first, so **re-check every path and line at HEAD before starting.**
-**Status:** Built on branch `zones-z3`, not merged (`5b756a2`..`6063b46`, off `6bedf25`). The as-built note is §13. The check on a real projector (00 R-1) is not done.   **Needs:** Z1 (`03-phase-z1-safety.md`: the safety limit and stage) and Z2 (`04-phase-z2-rig-strip-and-groups.md`: rig order, automatic groups, the rig card). The Z2 names below are taken from doc 04. Doc 03 now exists (re-checked at `70f7db8`), and the Z1 row of the table below follows it. Doc 06 (Z4) calls this phase's accessor `rig/resolve-ref`, and this doc uses that name.
+**Status:** **Done in code, on `master`** (`cb28966`..`298c253`). The as-built note is §13. **Still owed: the check on a real projector** (00 R-1, §9).   **Needs:** Z1 (`03-phase-z1-safety.md`: the safety limit and stage) and Z2 (`04-phase-z2-rig-strip-and-groups.md`: rig order, automatic groups, the rig card). The Z2 names below are taken from doc 04. Doc 03 now exists (re-checked at `70f7db8`), and the Z1 row of the table below follows it. Doc 06 (Z4) calls this phase's accessor `rig/resolve-ref`, and this doc uses that name.
 **Implements spec** (`01-model-and-routing-spec.md`): §1 (frame keys in normal form), §5 with its order within a tick (the routing before the render, Z5 S-3), §6 with §6.1 and §6.2 a–h (i and j are Z4), §7, §8, invariants 4, 5, 6, 8 and 9, and needs C-10 (a per-laser preview).   **Size:** ~6 d
 **Merge risk:** vibe Phase 6 (auto-advance and one tap tempo) landed while this was being re-verified (`4a4a10a`), and the lines below are after it. It added a `rotation-step` to `tick!`, after `publish!` and `status-step`, and made `show-time/due-reports` public, taking the sent map. Z3 leaves both where they are. Vibe Phase 7 (safety and hardening, proposed) also edits `services/show_clock.clj`, `animation/show_time.clj`, `views/toolbar.clj` (where the LOW FPS chip goes), `state/domains.clj` and `subs.clj`, so whichever of Phase 7 and Z3 lands second merges those by hand (00 §6).
 
@@ -527,28 +527,28 @@ Raised while building (§13), each built as A:
 - **A ★ Leave it.** It runs on the laser's own thread and only for a frame over budget, which then takes at least 50 ms to draw (25 kpps, a minimum of 20).
 - **B Make it faster now,** with primitive arrays in `keep-mask` and `thin-with` (2–3× is a guess), before a rig of many heavy lasers needs it.
 
-## 13. As built (2026-11-20, `5b756a2`..`6063b46`, on branch `zones-z3`, not merged)
+## 13. As built (2026-11-20, `cb28966`..`298c253`, on `master`)
 
-Built in worktree `zones-z3` off `6bedf25` (Z0, Z1 and Z2 on `master`), while ZR was built in its own worktree. ZR has since landed on `master` (`e38576f`), and "For the merge" below is a trial merge onto it. Not merged. The ★ answers are built: Q-Z3-1 A to Q-Z3-5 A. **The check on a real projector (00 R-1, §9) is not done,** so by 00 R-1 Z3 isn't done yet.
+Built in worktree `zones-z3` off `6bedf25` (Z0, Z1 and Z2 on `master`), while ZR was built in its own worktree. ZR has since landed on `master` (`e38576f`), and "For the merge" below is a trial merge onto it. Rebased onto `e38576f` with no conflicts and fast-forwarded onto `master`. The ★ answers are built: Q-Z3-1 A to Q-Z3-5 A. **The check on a real projector (00 R-1, §9) is not done,** so by 00 R-1 Z3 isn't done yet.
 
 ### Where it landed
 
 | # | Commit | Step (§10) |
 |---|---|---|
-| – | `5b756a2` | NEW `plans/2026-11-19-zones/probes/zones_probes_test.clj` (z1–z4), run at `6bedf25` before any change |
-| 1 | `e2a3918` | NEW `animation/frames.clj`, the blanking join; `frame-service/concatenate-frames` is its alias |
-| 2 | `3000de9` | `routing/rig.clj`: `normalize-target`, `key-refs`, `zone-index`, `region-fits`, `routing-inputs`, `routing`, `resolve-ref`, `cached-routing`; NEW `animation/fit_guard.clj` with `defaults` and `settings` |
-| 3 | `dbd26f8` | NEW `routing/compose.clj`: `key-order`, `contributions`, `merge-pictures`, `split-sides?`, `cue-plan`, `plan-points`, `fit-region`, `build`, `projector-frame`, `cue-points` |
-| 4 | `b392420` | the clock's `routing-step`, before the render (a resolver that throws keeps the last routing and is reported under `[:routing]`); `:routing` in the snapshot; `multi-engine` composes from it, and `extract-frames-for-zones`, `combine-zone-frames` and `get-projector-zone-groups` are gone |
-| 5 | `ddb12a2` | `frame-service/apply-global-effects-once` (an `IdentityHashMap`); `zone-effects` makes frame keys in normal form |
-| 6 | `52373ed` | `fit-guard`: `budget`, `target-points`, `keep-mask`, `thin`, `dim`, `guard`, `smooth`; the engine guards each composed frame before the projector effects, and the frame's meta carries `:fit` |
-| 7 | `af0fd6c` | the engine's stats keep the smoothed `:fit`; `output-runtime/engine-status` adds `:low?` and the rounded `:load`; `show-time/record-output!` and `output-frame` |
-| 8 | `1335090` | `compose/cue-warnings`; the clock's status writes `[:backend :streaming :cue-warnings]`; `:item-points?` on the render of a cue whose editor is open |
-| 9 | `29a676c` | the card's thumbnail (`preview/output-thumbnail`), meter, note and amber state; the toolbar's `low-fps-chip`; the inspector's `fit-guard-section`; `:projectors/set-fit`, `:ui/reveal-projector`; subs `projector-load`, `low-fps-projectors`; NEW `views/components/load_warning.clj`; `clock-view`'s `:every-ms` |
-| + | `65362f6` | fix: a card keeps one height, with the guard's note on one line under the thumbnail; tooltips on the note and the status line; the cards top-aligned |
-| 10 | `9ea2b80` | `subs/cue-warning`; `load-warning/cue-warning-text`, `cue-line-text` and `cue-load-warning`; ⚠ and its tooltip on the cell; the line above both editors' footers |
-| 11 | `3ab8d94` | `frame-service/preview-data [cues routing]` with `:ref-frames` and `:projector-frames`; `preview/cell-points`; cells are `{:target …}`, and `:preview/set-cell-zone` takes `:target`; `subs/preview-cell-config` reads an old cell |
-| + | `6063b46` | fix: every ref a preview cell holds is re-pointed; the fit test's unsaved check holds with ZR too (both found by the trial merge, below) |
+| – | `cb28966` | NEW `plans/2026-11-19-zones/probes/zones_probes_test.clj` (z1–z4), run at `6bedf25` before any change |
+| 1 | `cf5ddf6` | NEW `animation/frames.clj`, the blanking join; `frame-service/concatenate-frames` is its alias |
+| 2 | `84e6518` | `routing/rig.clj`: `normalize-target`, `key-refs`, `zone-index`, `region-fits`, `routing-inputs`, `routing`, `resolve-ref`, `cached-routing`; NEW `animation/fit_guard.clj` with `defaults` and `settings` |
+| 3 | `5ac7fcd` | NEW `routing/compose.clj`: `key-order`, `contributions`, `merge-pictures`, `split-sides?`, `cue-plan`, `plan-points`, `fit-region`, `build`, `projector-frame`, `cue-points` |
+| 4 | `7efb841` | the clock's `routing-step`, before the render (a resolver that throws keeps the last routing and is reported under `[:routing]`); `:routing` in the snapshot; `multi-engine` composes from it, and `extract-frames-for-zones`, `combine-zone-frames` and `get-projector-zone-groups` are gone |
+| 5 | `b7f1c0b` | `frame-service/apply-global-effects-once` (an `IdentityHashMap`); `zone-effects` makes frame keys in normal form |
+| 6 | `8a0fcc9` | `fit-guard`: `budget`, `target-points`, `keep-mask`, `thin`, `dim`, `guard`, `smooth`; the engine guards each composed frame before the projector effects, and the frame's meta carries `:fit` |
+| 7 | `b9c008d` | the engine's stats keep the smoothed `:fit`; `output-runtime/engine-status` adds `:low?` and the rounded `:load`; `show-time/record-output!` and `output-frame` |
+| 8 | `a82dc83` | `compose/cue-warnings`; the clock's status writes `[:backend :streaming :cue-warnings]`; `:item-points?` on the render of a cue whose editor is open |
+| 9 | `fa9239c` | the card's thumbnail (`preview/output-thumbnail`), meter, note and amber state; the toolbar's `low-fps-chip`; the inspector's `fit-guard-section`; `:projectors/set-fit`, `:ui/reveal-projector`; subs `projector-load`, `low-fps-projectors`; NEW `views/components/load_warning.clj`; `clock-view`'s `:every-ms` |
+| + | `9d2fdcb` | fix: a card keeps one height, with the guard's note on one line under the thumbnail; tooltips on the note and the status line; the cards top-aligned |
+| 10 | `3b25127` | `subs/cue-warning`; `load-warning/cue-warning-text`, `cue-line-text` and `cue-load-warning`; ⚠ and its tooltip on the cell; the line above both editors' footers |
+| 11 | `f1a52ba` | `frame-service/preview-data [cues routing]` with `:ref-frames` and `:projector-frames`; `preview/cell-points`; cells are `{:target …}`, and `:preview/set-cell-zone` takes `:target`; `subs/preview-cell-config` reads an old cell |
+| + | `298c253` | fix: every ref a preview cell holds is re-pointed; the fit test's unsaved check holds with ZR too (both found by the trial merge, below) |
 | 12 | this commit | this note |
 
 ### Deviations from the plan
@@ -566,7 +566,7 @@ Built in worktree `zones-z3` off `6bedf25` (Z0, Z1 and Z2 on `master`), while ZR
   - A new project's default cells are written `{:target …}`, with Z2's refs, so the docstring holds for them.
   - When the show has no groups, `set-grid-layout` fills new cells from `:all :auto/left :auto/right :auto/center`. It used `:left :right :center`, ids that Z0's migration renames.
   - The picker's Master option is `#preview-zone-option-<i>-master`. It was `…-all`, the same id as All's. `preview-layout-selector-and-zone-picker-are-clickable` checks "Master (everything)" and clicks Master.
-  - Z0's ref table (`routing/refs.clj`) re-points a cell's `:target`. Without it, a `{:target …}` cell kept a deleted group. Since `6063b46` it re-points both `:target` and `:zone-group-id` when a cell has both.
+  - Z0's ref table (`routing/refs.clj`) re-points a cell's `:target`. Without it, a `{:target …}` cell kept a deleted group. Since `298c253` it re-points both `:target` and `:zone-group-id` when a cell has both.
   - The projectors docstring's `:fit` (§4) went in with step 11, not step 6.
 - **Tests:**
   - `projector-receives-only-zone-specific-frames-test` checks the first and last points in the spec's key order (Center before Left, S-4), with one more assertion.
@@ -614,24 +614,25 @@ Where the new code didn't exist yet, the run was first made to compile with stub
 | 7 | couldn't compile (no `show-time/output-frame`). Against stubs, all 3: 13 failures |
 | 8 | against a nil `compose/cue-warnings`, all 5 new tests: 18 failures |
 | 9 | unit: couldn't compile. Against stubs, 7 tests: 36 failures. `name-or-zone-change-requests-nothing-test` passes either way (an unknown event requests nothing too): **not seen red**. UI: the views were written **before** their tests. Run with the step's handlers and subs and `HEAD`'s views, 6 of the 7 failed (6 errors). `light-laser-shows-no-chip-test` passed (there was no chip at all): **not seen red** |
-| + `65362f6` | a layout fix with no new test. Z2's `audience-tag-offers-exclude-from-all-test` failed after the strip grew, and passes scrolling to the tags |
+| + `9d2fdcb` | a layout fix with no new test. Z2's `audience-tag-offers-exclude-from-all-test` failed after the strip grew, and passes scrolling to the tags |
 | 10 | couldn't compile. Against stubs: 8 failures (`cue-warning-text-test` 6, `cue-warning-sub-test` 2). `cue-load-test` against the old views: all 4, 4 errors. The first run with the code found a bug in step 9's fixture: called without a start time, `with-clock`'s show time never moved unless a test moved it, so the status (every 250 ms of show time) stopped coming (3 errors) |
 | 11 | couldn't compile. Against a stub `preview/cell-points`: 12 tests, 20 failures and 3 errors (`cell-points-test` 9, `set-cell-zone-writes-a-target-test` 4, `old-preview-cell-reads-as-a-target-test` 2, the three changed `test-zone-frames-*` 5; errors in `preview-ref-frames-follow-ref-membership-test`, `preview-projector-frames-are-what-the-engine-composes-test` and `preview-zones-have-blanking-between-cues-test`). `replace-refs-rewrites-a-cells-target-test`: 2 failures. UI: `laser-cell-shows-both-halves-of-a-split-laser-test` 1 failure, 1 error. `group-cell-shows-what-is-sent-to-it-test` and `old-cell-still-shows-its-group-test` passed against the old code (a group cell and an old cell already worked that way, and they keep it so): **not seen red** |
-| + `6063b46` | the refs test's cell with both keys: 2 failures. The changed fit test can't fail on this branch (both edits mark the show unsaved here); it was checked on the trial merge, where the old assertion failed |
+| + `298c253` | the refs test's cell with both keys: 2 failures. The changed fit test can't fail on this branch (both edits mark the show unsaved here); it was checked on the trial merge, where the old assertion failed |
 
 ### Verification
 
 | Where | Unit suite (`clj -M:mac-arm:test`) | UI suite (`clj -M:test-ui:mac-arm:test-ui-headless`) |
 |---|---|---|
 | `6bedf25` (the base) | 1,306 tests, 463,805 assertions, 0 failures | 173 tests, 806 assertions, 0 failures (04 §13's run at `8c30108`; `6bedf25` changes only plans) |
-| step 8, `1335090` | 1,364 tests, 541,190 assertions, 0 failures | – |
-| step 11, `3ab8d94` | 1,377 tests, 541,274 assertions, 0 failures | 187 tests, 848 assertions, 0 failures |
-| **`6063b46`, the branch's last code** | **1,377 tests, 541,277 assertions, 0 failures** | **187 tests, 848 assertions, 0 failures** |
+| step 8, `a82dc83` | 1,364 tests, 541,190 assertions, 0 failures | – |
+| step 11, `f1a52ba` | 1,377 tests, 541,274 assertions, 0 failures | 187 tests, 848 assertions, 0 failures |
+| **`298c253`, the branch's last code** | **1,377 tests, 541,277 assertions, 0 failures** | **187 tests, 848 assertions, 0 failures** |
 | the trial merge onto `master` `e38576f` (tree `e83a727`, below) | 1,437 tests, 541,737 assertions, 0 failures | 194 tests, 879 assertions, 0 failures |
+| **rebased onto `e38576f`, as landed** | **the same `src/`, `test/`, `deps.edn` and QUICKSTART trees as the trial merge (`e83a727`), so its run above stands** | **the same** |
 
 Each step also ran its targeted namespaces (§9's run list) and the UI namespaces whose views it changed. `streaming-engine-test/new-tick-goes-out-without-the-minimum-gap-test` passed in every full run.
 
-**Probes z1–z4** (`plans/2026-11-19-zones/probes/zones_probes_test.clj`). Other agents' test suites ran on this machine at the same time, and the first run after was slower everywhere. So "before" was run twice more from `git archive 5b756a2` (the base with the probes), alternating with "after" (`3ab8d94`). The ranges are the three runs of each. Medians, except where it says avg:
+**Probes z1–z4** (`plans/2026-11-19-zones/probes/zones_probes_test.clj`). Other agents' test suites ran on this machine at the same time, and the first run after was slower everywhere. So "before" was run twice more from `git archive cb28966` (the base with the probes), alternating with "after" (`f1a52ba`). The ranges are the three runs of each. Medians, except where it says avg:
 
 | Probe | Before | After |
 |---|---|---|
@@ -656,10 +657,10 @@ Against invariant 12's estimates: composing is within them (11–12 µs plus 10�
 Trial merges with `git merge-tree`, which writes no branch and no worktree. Each merged tree was unpacked with `git archive` into a temporary directory, and its suites were run there.
 
 - **Into `master` at `e38576f`** (Q-Z1-5 and ZR in): no conflicts, in code or plans (`master` hasn't edited this doc).
-- At `3ab8d94`, the merged unit suite had 2 failures, both fixed on the branch by `6063b46`:
+- At `f1a52ba`, the merged unit suite had 2 failures, both fixed on the branch by `298c253`:
   - `set-fit-clamps-and-is-undoable-test` expected a fit edit to mark the show unsaved. ZR saves the projectors with the rig, and a rig edit no longer marks the show unsaved (`d55f24a`). The test now asks that a fit edit leaves the flag as a tag edit does, which holds on both sides.
   - ZR's `rig-file-test/rename-pins-by-stable-id-test` writes `:zone-group-id` into a default cell, which Z3 makes `{:target :auto/left}`. Z3's ref table re-pointed only that cell's `:target`. It now re-points both keys.
-- At `6063b46` (merged tree `e83a727`): unit 1,437 tests, 541,737 assertions, 0 failures; UI 194 tests, 879 assertions, 0 failures. The merged UI suite at `3ab8d94` was the same.
+- At `298c253` (merged tree `e83a727`): unit 1,437 tests, 541,737 assertions, 0 failures; UI 194 tests, 879 assertions, 0 failures. The merged UI suite at `f1a52ba` was the same.
 - Files both sides edit, all merging cleanly:
   - `events/handlers/history.clj`: Z3's `:projectors/set-fit "Change Fit Guard"` after `:projectors/set-tag`, ZR's seven `:rig/*` labels after `:rig/set-split-width`;
   - `state/domains.clj`: Z3's `:fit` in the projectors docstring, the preview's `{:target …}` cells and docstring, and `[:backend :streaming :cue-warnings]`; ZR's NEW `rig-file` defstate;
@@ -677,5 +678,5 @@ Trial merges with `git merge-tree`, which writes no branch and no worktree. Each
 
 - **The guard costs about twice its estimate,** 188–206 µs per 2,000 points. It wasn't profiled; `keep-mask` and `thin-with` read each point through `nth` with boxed arithmetic, the likely cost. It runs only for a frame over budget, on that laser's thread: Q-Z3-7.
 - **A split laser draws less than before, on purpose.** z1's split laser drew both 1,000-point pictures whole, overlaid: 2,002 points at 12.5 fps. It now draws them fitted into its halves, and the guard thins them to 1,250 points, which reach 20 fps.
-- **Z0's ref table didn't know `{:target …}` cells** (fixed in step 11 and `6063b46`, above).
+- **Z0's ref table didn't know `{:target …}` cells** (fixed in step 11 and `298c253`, above).
 - **Layout to look at:** at the default 1200 × 800 the inspector starts about 60 px lower than in Z2, and one line lower again with ZR's status line. Its Fit guard section is at the bottom of the left column, so it needs a scroll, as Z1's safety editor already did.
