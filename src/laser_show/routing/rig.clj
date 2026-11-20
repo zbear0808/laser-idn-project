@@ -28,7 +28,8 @@
   (:require [clojure.string :as str]
             [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.animation.safety :as safety]
-            [laser-show.idn.stream :as stream]))
+            [laser-show.idn.stream :as stream]
+            [laser-show.routing.targets :as targets]))
 
 
 ;; Enabled, excluded, the stored groups
@@ -73,39 +74,23 @@
     (not (excluded? output)) (into [:all])))
 
 
-;; Targets and frame keys (spec 01 §1)
+;; Targets and frame keys (spec 01 §1): routing.targets' (zones plan Z4),
+;; named here too, so Z3's callers read them where they did
 
-(defn normalize-target
-  "A target in normal form: nil stays nil and a keyword stays itself; a
-   collection becomes its distinct keywords sorted by namespace and name (the
-   refs with no namespace first): one keyword when one is left, nil when none
-   is. Frame keys are targets in normal form, so two items with the same refs
-   in another order share a key."
-  [t]
-  (if (or (sequential? t) (set? t))
-    (let [refs (sort-by (juxt namespace name) (into [] (comp (filter keyword?) (distinct)) t))]
-      (case (count refs)
-        0 nil
-        1 (first refs)
-        (vec refs)))
-    t))
+(def ^{:arglists '([t])
+       :doc "routing.targets/normalize-target: a target in normal form."}
+  normalize-target
+  targets/normalize-target)
 
-(defn key-refs
-  "The refs a frame key names: [k] for a keyword, k itself for a vector."
-  [k]
-  (cond
-    (vector? k) k
-    (nil? k) []
-    :else [k]))
+(def ^{:arglists '([k])
+       :doc "routing.targets/key-refs: the refs a frame key names."}
+  key-refs
+  targets/key-refs)
 
-(defn zone-index
-  "A zone ref's index: :zone/a 0 … :zone/z 25, :zone/aa 26 …; nil for any
-   other ref. It orders frame keys, and picks a zone's lane in Z4."
-  [ref]
-  (when (and (keyword? ref) (= "zone" (namespace ref)))
-    (let [letters (name ref)]
-      (when (re-matches #"[a-z]{1,12}" letters)
-        (dec (reduce (fn [acc c] (+ (* 26 acc) (- (int c) 96))) 0 letters))))))
+(def ^{:arglists '([ref])
+       :doc "routing.targets/zone-index: a zone ref's index (:zone/a 0), nil for any other ref."}
+  zone-index
+  targets/zone-index)
 
 
 ;; Display data for the derived refs
