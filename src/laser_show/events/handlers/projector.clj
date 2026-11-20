@@ -331,6 +331,20 @@
     {:state (assoc-in state [:projectors projector-id :exclude-from-all?] exclude?)}
     {:state state}))
 
+(defn- handle-projectors-set-tag
+  "Tag a projector (:graphics, :crowd-scanning) or untag it (:on? true or
+   false). :tags is kept a set (an old file may have a vector). The vibes
+   read :crowd-scanning (vibes.library/audience-groups). An unknown
+   projector, any other value, or the tag as it is changes nothing."
+  [{:keys [projector-id tag on? state]}]
+  (let [tags (set (get-in state [:projectors projector-id :tags]))]
+    (if (and (contains? (:projectors state) projector-id)
+             (keyword? tag)
+             (boolean? on?)
+             (not= on? (contains? tags tag)))
+      {:state (assoc-in state [:projectors projector-id :tags] ((if on? conj disj) tags tag))}
+      {:state state})))
+
 
 
 
@@ -665,6 +679,7 @@
     ;; The rig strip and its inspector (Z2)
     :projectors/set-enabled (handle-projectors-set-enabled event)
     :projectors/set-exclude-from-all (handle-projectors-set-exclude-from-all event)
+    :projectors/set-tag (handle-projectors-set-tag event)
     
     ;; Configuration
     :projectors/toggle-device-expand (handle-projectors-toggle-device-expand event)

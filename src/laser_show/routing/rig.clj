@@ -136,14 +136,16 @@
 
 (defn identity-label
   "\"Unit 0A 1B 2C 3D … · output 1\", or \"IP 10.0.0.5 · output 1 (the device
-   sends no unit id)\"."
-  [p]
-  (let [[kind v s] (or (:stable-id p) (stable-id p))]
-    (if (= :unit kind)
-      (let [tokens (str/split v #" ")]
-        (str "Unit " (if (> (count tokens) 4) (str (str/join " " (take 4 tokens)) " …") v)
-             " · output " s))
-      (str "IP " v " · output " s " (the device sends no unit id)"))))
+   sends no unit id)\"; why (\", so a new address …\") is added inside the
+   parentheses."
+  ([p] (identity-label p nil))
+  ([p why]
+   (let [[kind v s] (or (:stable-id p) (stable-id p))]
+     (if (= :unit kind)
+       (let [tokens (str/split v #" ")]
+         (str "Unit " (if (> (count tokens) 4) (str (str/join " " (take 4 tokens)) " …") v)
+              " · output " s))
+       (str "IP " v " · output " s " (the device sends no unit id" why ")")))))
 
 
 ;; The order

@@ -15,6 +15,7 @@
             [laser-show.common.util :as u]
             [laser-show.css.core :as css]
             [laser-show.idn.stream :as stream]
+            [laser-show.routing.rig :as rig]
             [laser-show.views.components.visual-editors.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.parameter-controls :as param-controls]
             [laser-show.views.components.safety-editor :as safety-editor]
@@ -138,6 +139,68 @@
                                    :text (str "Service #" service-id
                                              (when service-name (str " - " service-name)))
                              :style (str "-fx-text-fill: " (css/selection-bg) "; -fx-font-size: 11;")}]}])))}))
+
+
+;; The rig: identity, tags and Exclude from All (plans/2026-11-19-zones/04 §7)
+
+
+(defn- projector-rig-settings
+  "How the rig knows the selected projector (its identity), its tags
+   (Graphics; Scans the audience, which vibes read) and Exclude from All,
+   with an offer to exclude an audience laser that's still in All (Q-Z2-2:
+   nothing happens by itself)."
+  [{:keys [projector]}]
+  (let [{:keys [id tags]} projector
+        tags (set tags)
+        excluded? (true? (:exclude-from-all? projector))
+        tag-box (fn [tag text tip]
+                  {:fx/type :check-box
+                   :id (str "projector-tag-" (name tag))
+                   :text text
+                   :selected (contains? tags tag)
+                   :tooltip {:fx/type :tooltip :text tip :wrap-text true :max-width 320}
+                   :on-selected-changed {:event/type :projectors/set-tag :projector-id id :tag tag :on? :fx/event}})]
+    {:fx/type :v-box
+     :spacing 6
+     :children (cond-> [{:fx/type :label
+                         :id "projector-identity-label"
+                         :text (str "Identity: " (rig/identity-label projector ", so a new address makes it a new laser"))
+                         :wrap-text true
+                         :max-width 300
+                         :min-height :use-pref-size
+                         :style-class ["text-small" "label-secondary"]}
+                        {:fx/type :h-box
+                         :spacing 12
+                         :children [(tag-box :graphics "Graphics" "Graphics: a label for lasers that draw text and logos")
+                                    (tag-box :crowd-scanning "Scans the audience"
+                                             "Vibes treat every cue that can reach this laser as an audience cue, and only play it when the vibe allows the audience.")]}]
+                 (and (contains? tags :crowd-scanning) (not excluded?))
+                 (conj {:fx/type :h-box
+                        :spacing 8
+                        :alignment :center-left
+                        :children [{:fx/type :label
+                                    :id "projector-audience-in-all"
+                                    :text "This laser is in All, so that's every cue that plays on All."
+                                    :wrap-text true
+                                    :max-width 180
+                                    :min-height :use-pref-size
+                                    :style (str "-fx-text-fill: " (css/orange) "; -fx-font-size: 11;")}
+                                   {:fx/type :button
+                                    :id "projector-audience-exclude-button"
+                                    :text "Exclude from All"
+                                    :min-width :use-pref-size
+                                    :style-class ["button-secondary"]
+                                    :on-action {:event/type :projectors/set-exclude-from-all :projector-id id :exclude? true}}]})
+                 true
+                 (conj {:fx/type :check-box
+                        :id "projector-exclude-from-all"
+                        :text "Exclude from All"
+                        :selected excluded?
+                        :tooltip {:fx/type :tooltip
+                                  :text "Cues that go to All won't play here, and neither will Left, Right, Center, Odd or Even. It still plays its own group and your groups."
+                                  :wrap-text true
+                                  :max-width 320}
+                        :on-selected-changed {:event/type :projectors/set-exclude-from-all :projector-id id :exclude? :fx/event}}))}))
 
 
 ;; Calibration effect helpers
@@ -417,8 +480,6 @@
         clipboard-items (clipboard/get-effects-to-paste)]
     (if projector
       {:fx/type :v-box
-       ;; Below the rig strip, which scrolls when the window is short
-       :min-height 230
        :children [{:fx/type :scroll-pane
                    :v-box/vgrow :always
                    :fit-to-width true
@@ -437,6 +498,9 @@
                                                      :text (str "CONFIGURE: " (:name projector))
                                                      :style "-fx-text-fill: white; -fx-font-size: 14; -fx-font-weight: bold;"}
                                                     {:fx/type projector-basic-settings
+                                                     :projector projector}
+                                                    {:fx/type :separator}
+                                                    {:fx/type projector-rig-settings
                                                      :projector projector}]}
                                         ;; Middle: the calibration chain, and Remove...
                                         {:fx/type :v-box
@@ -512,13 +576,16 @@
    :style (str "-fx-background-color: " (css/bg-primary) ";")
    :padding 16
    :spacing 6
-   :children [{:fx/type :label
-               :text "Projectors"
-               :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}
-              {:fx/type :label
-               :id "projectors-subtitle"
-               :text "Put your lasers in order, left to right. The groups follow the order."
-               :style "-fx-text-fill: #808080; -fx-font-size: 11;"}
+   :children [{:fx/type :h-box
+               :spacing 12
+               :alignment :baseline-left
+               :children [{:fx/type :label
+                           :text "Projectors"
+                           :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}
+                          {:fx/type :label
+                           :id "projectors-subtitle"
+                           :text "Put your lasers in order, left to right. The groups follow the order."
+                           :style "-fx-text-fill: #808080; -fx-font-size: 11;"}]}
               {:fx/type rig-strip/rig-header}
               {:fx/type rig-strip/rig-strip}
               {:fx/type projector-config-panel

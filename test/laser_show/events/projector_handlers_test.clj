@@ -17,6 +17,7 @@
    [laser-show.events.safety-guard :as guard]
    [laser-show.routing.refs :as refs]
    [laser-show.routing.rig :as rig]
+   [laser-show.vibes.library :as library]
    [laser-show.state.domains :refer [build-initial-state]]))
 
 
@@ -102,6 +103,23 @@
         (is (identical? vp-state (:state (projectors/handle {:event/type :projectors/vp-toggle-zone-group
                                                              :vp-id :vp1 :zone-group-id ref :state vp-state})))
             "nor in a virtual projector's list")))))
+
+(deftest set-tag-keeps-a-set-test
+  (let [tag (fn [state t on?] (:state (projectors/handle {:event/type :projectors/set-tag :projector-id test-projector-id
+                                                          :tag t :on? on? :state state})))
+        tags #(get-in % [:projectors test-projector-id :tags])
+        old (assoc-in state-with-projector [:projectors test-projector-id :tags] [:graphics])
+        both (tag old :crowd-scanning true)]
+    (is (= #{:graphics :crowd-scanning} (tags both)))
+    (is (set? (tags both)) "an old file's vector is kept as a set")
+    (is (= #{:crowd-scanning} (tags (tag both :graphics false))))
+    (is (identical? both (tag both :graphics true)) "it sets, never toggles")
+    (is (identical? both (tag both :graphics "yes")))
+    (is (identical? both (:state (projectors/handle {:event/type :projectors/set-tag :projector-id :nope
+                                                     :tag :graphics :on? true :state both}))))
+    (testing "the vibes read it"
+      (is (contains? (library/audience-groups (tag state-with-projector :crowd-scanning true)) :all)
+          "a scanner in All makes every All cue an audience cue"))))
 
 (deftest set-exclude-from-all-test
   (let [excluded (fn [state on?] (:state (projectors/handle {:event/type :projectors/set-exclude-from-all

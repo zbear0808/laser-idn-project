@@ -131,10 +131,24 @@
                :max-width (- card-width 40)
                :style-class ["label-bold"]}]})
 
-(defn- card-host [{:keys [host-label]}]
-  {:fx/type :label
-   :text host-label
-   :style-class ["text-small" "label-secondary"]})
+(defn- card-host
+  "The address, and the On box at the right."
+  [{:keys [id host-label enabled?]}]
+  {:fx/type :h-box
+   :spacing 4
+   :alignment :center-left
+   :children [{:fx/type :label
+               :text host-label
+               :style-class ["text-small" "label-secondary"]}
+              {:fx/type :region :h-box/hgrow :always}
+              {:fx/type :check-box
+               :id (str "rig-card-enable-" (id-text id))
+               :text "On"
+               :min-width :use-pref-size
+               :selected (boolean enabled?)
+               :on-selected-changed {:event/type :projectors/set-enabled
+                                     :projector-id id
+                                     :enabled? :fx/event}}]})
 
 (defn- card-status
   "The dot and the status line: the output's while it streams, \"Not found
@@ -169,23 +183,13 @@
   [_card]
   nil)
 
-(defn- card-on [{:keys [id enabled?]}]
-  {:fx/type :check-box
-   :id (str "rig-card-enable-" (id-text id))
-   :text "On"
-   :selected (boolean enabled?)
-   :on-selected-changed {:event/type :projectors/set-enabled
-                         :projector-id id
-                         :enabled? :fx/event}})
-
 (defn- card-sections
   "A card, top to bottom: its sections (nil ones are left out)."
   [card]
   [(card-title card)
    (card-host card)
    {:fx/type card-status :id (:id card) :found? (:found? card)}
-   (card-thumbnail card)
-   (card-on card)])
+   (card-thumbnail card)])
 
 
 ;; A card's menu
@@ -330,6 +334,13 @@
    :grid-pane/valignment :center
    :on-action {:event/type :rig/nudge-projector :projector-id selected :delta delta}})
 
+(defn- strip-height
+  "About the height the cards and rows need (a card, a row each, + Group):
+   the strip takes it, up to a limit past which it scrolls, and the
+   inspector below gets the rest."
+  [rows]
+  (min 400 (+ 72 (* 17 rows) 38)))
+
 (defn rig-strip
   "The cards between ◀ and ▶, and under them the group rows
    (group-matrix/rows), in one scroll pane, so more than about 8 lasers
@@ -347,8 +358,7 @@
      :id "rig-strip-scroll"
      :vbar-policy :as-needed
      :hbar-policy :as-needed
-     ;; It scrolls rather than push the inspector off a short window
-     :min-height 170
+     :min-height (strip-height (count (:rows matrix)))
      :style-class ["scroll-pane-dark"]
      :content {:fx/type :grid-pane
                :id "rig-strip"
