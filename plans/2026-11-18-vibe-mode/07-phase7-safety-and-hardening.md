@@ -262,4 +262,5 @@ U1's first version (the filter before the reduce) survived: it was equivalent, t
 | `clj -M:kondo --lint src test` | 0 errors, 21 warnings, the same 21 as at `989c315` |
 | layout | a headless screenshot at 1200×800: the header's two rows hold AUDIENCE ALLOWED, AUTO and its countdown, the refused notice and SHOW LOCK, with the NO OUTPUT banner above and "Vibes ⚠ 1" on the tab |
 | full UI suite | not run here: it runs after the merge |
+| after the merge, on `master` at `18f6c00` (the branch's own commits, fast-forwarded): `clj -M:mac-arm:test`, then the full UI suite | 1,179 tests, 34,887 assertions, 0 failures; UI 148 tests, 736 assertions, 0 failures |
 | manual (unverified) | the hardware check above; a visible (non-headless) run; the header's layout at 2 m |
