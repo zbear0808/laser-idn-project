@@ -106,8 +106,15 @@
         :-fx-border-radius 8
         :-fx-border-color border
         :-fx-border-width 1
-        :-fx-padding [6 10 6 10]
+        :-fx-text-fill text-primary
         :-fx-cursor "hand"}
+       ".zone-map-pad.zone-map-pad-large"
+       {:-fx-padding [6 10 6 10]}
+       ".zone-map-pad.zone-map-pad-small"
+       {:-fx-padding [2 10 2 10]
+        :-fx-background-radius 11
+        :-fx-border-radius 11
+        :-fx-font-size 11}
        ".zone-map-pad .zone-map-pad-name"
        {:-fx-text-fill text-primary
         :-fx-font-weight "bold"
@@ -122,10 +129,10 @@
        {:-fx-background-color (colors/with-alpha blue 0.55)
         :-fx-border-color blue}
        ".zone-map-pad.zone-map-pad-pending"
-       {:-fx-border-color orange
-        :-fx-border-width 2}
+       {:-fx-background-color (colors/with-alpha orange 0.45)
+        :-fx-border-color orange}
        ".zone-map-pad.zone-map-pad-pending:blink"
-       {:-fx-background-color (colors/with-alpha orange 0.45)}
+       {:-fx-background-color bg-interactive}
        ".zone-map-pad.zone-map-pad-learning"
        {:-fx-border-color red
         :-fx-border-width 2}

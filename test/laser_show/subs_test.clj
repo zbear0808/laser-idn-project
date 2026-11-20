@@ -914,3 +914,34 @@
       (is (identical? (get-in before [[1 0] :tip]) (get-in after [[1 0] :tip])) "pinned: it doesn't read the map")
       (is (= "A · Beams → Odd · B → Even (map: Odd / Even)" (get-in after [[0 0] :tip])))
       (is (= "A + B → Odd + Even (map: Odd / Even)" (get-in after [[4 0] :tip]))))))
+
+
+;; Zone map pads (zones plan Z4, 06 §7.4)
+
+(deftest map-pad-sub-test
+  (let [key48 {:source :midi :channel 0 :note 48}
+        s (-> (domains/build-initial-state)
+              (assoc-in [:zone-maps :map/custom-1] {:name "Crowd sweep" :lanes [:auto/left :crowd] :overrides {}})
+              (assoc-in [:zone-map :active] :map/odd-even)
+              (assoc-in [:zone-map :pending] {:id 3 :map :map/unison :at-beat 8.0 :bar? true})
+              (assoc-in [:config :zone-map-pads :map/custom-1 :bar?] true)
+              (assoc-in [:config :input :trigger-map key48] {:type :zone-map :target :map/left-right})
+              (assoc-in [:backend :input :learning-target] {:type :zone-map :target :map/custom-1}))
+        ctx (context s)
+        pad #(fx/sub-ctx ctx subs/map-pad %)]
+    (is (= [:map/left-right :map/odd-even :map/unison :map/custom-1] (fx/sub-ctx ctx subs/map-pad-ids))
+        "the built-ins, then yours")
+    (is (= {:id :map/left-right :name "Left / Right" :active? false :pending nil :bar? false :learning? false
+            :bindings [key48]}
+           (pad :map/left-right)))
+    (is (= {:id :map/odd-even :name "Odd / Even" :active? true :pending nil :bar? false :learning? false :bindings []}
+           (pad :map/odd-even)))
+    (is (= :bar (:pending (pad :map/unison))) "waiting for the bar")
+    (is (= {:name "Crowd sweep" :bar? true :learning? true} (select-keys (pad :map/custom-1) [:name :bar? :learning?])))
+    (testing "an active id that is no map: the pads show Left / Right"
+      (is (:active? (fx/sub-ctx (context (assoc-in s [:zone-map :active] :map/gone)) subs/map-pad :map/left-right))))
+    (testing "a pending switch to the beat: :beat"
+      (is (= :beat (:pending (fx/sub-ctx (context (assoc-in s [:zone-map :pending :bar?] false)) subs/map-pad :map/unison)))))
+    (testing "booleans and keys only: where the pending switch lands isn't in it"
+      (let [ctx' (fx/swap-context ctx assoc-in [:zone-map :pending :at-beat] 12.0)]
+        (is (= (pad :map/unison) (fx/sub-ctx ctx' subs/map-pad :map/unison)))))))

@@ -236,15 +236,22 @@
    - :empty-hint - Optional line under the hint (nil: none), e.g. for an
      empty grid
    - :column-component - Optional component for the column numbers
-     (grid-header)"
-  [{:keys [fx/context cell-component column-component header-text hint-text empty-hint]}]
+     (grid-header)
+   - :header-extra - Optional node right of the header text"
+  [{:keys [fx/context cell-component column-component header-text hint-text empty-hint header-extra]}]
   {:fx/type :v-box
    :style (str "-fx-background-color: " (css/bg-primary) ";")
    :padding 16
    :spacing 8
-   :children [{:fx/type :label
-               :text header-text
-               :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}
+   :children [(cond-> {:fx/type :label
+                       :text header-text
+                       :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}
+                header-extra (as-> title {:fx/type :h-box
+                                          :alignment :center-left
+                                          :spacing 12
+                                          :children [title
+                                                     {:fx/type :region :h-box/hgrow :always}
+                                                     header-extra]}))
               {:fx/type :label
                :id "grid-hint"
                :text hint-text

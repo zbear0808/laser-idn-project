@@ -18,7 +18,8 @@
             [laser-show.views.components.slider-meters :as slider-meters]
             [laser-show.views.components.vibe-pads :as vibe-pads]
             [laser-show.views.components.vibe-rotation :as vibe-rotation]
-            [laser-show.views.components.vibe-strip :as vibe-strip]))
+            [laser-show.views.components.vibe-strip :as vibe-strip]
+            [laser-show.views.components.zone-map-pads :as zone-map-pads]))
 
 (defn- banner
   "BLACKOUT, full width, and whether a cue lights the room anyway."
@@ -178,7 +179,8 @@
 
 (defn perform-tab
   "The Perform tab: the BLACKOUT and NO OUTPUT banners, header, vibe strip,
-   pads, the faders' meters and status line."
+   pads, the faders' meters, the zone map pads (zones plan Z4) and status
+   line."
   [_]
   {:fx/type :v-box
    :id "perform-content"
@@ -190,4 +192,5 @@
               {:fx/type vibe-strip/vibe-strip}
               {:fx/type vibe-pads/pad-row :v-box/vgrow :always}
               {:fx/type slider-meters/meter-row}
+              {:fx/type zone-map-pads/map-pad-row}
               {:fx/type status-line}]})

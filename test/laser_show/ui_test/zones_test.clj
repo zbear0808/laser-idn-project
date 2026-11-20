@@ -5,11 +5,15 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.events.core :as events]
+            [laser-show.events.handlers.input-mapper :as input-mapper]
+            [laser-show.input.router :as input-router]
             [laser-show.state.core :as state]
             [laser-show.state.history :as history]
             [laser-show.ui-test.fixtures :as fixtures]
             [laser-show.ui-test.testfx :as ui])
-  (:import [javafx.scene.control CheckBox Control CustomMenuItem Labeled Menu MenuButton MenuItem]
+  (:import [javafx.css PseudoClass]
+           [javafx.scene Node]
+           [javafx.scene.control CheckBox Control CustomMenuItem Labeled Menu MenuButton MenuItem]
            [javafx.stage Window]))
 
 (use-fixtures :once fixtures/with-toolkit)
@@ -292,3 +296,121 @@
     (ui/wait-for! #(not (contains? (get-in (app-state) [:grid :column-targets]) 1)))
     (ui/assert-text! "#grid-column-number-1" "2")
     (ui/wait-for! #(nil? (ui/query "#grid-cell-badge-1-0")))))
+
+
+
+;; Zone map pads (06 §7.4)
+
+(defn- uses-zone-a! []
+  (state/swap-state! assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a))
+
+(defn- active-map [] (get-in (app-state) [:zone-map :active]))
+
+(defn- blink? [selector]
+  (ui/on-fx-thread #(boolean (some-> ^Node (ui/query selector) .getPseudoClassStates
+                                     (.contains (PseudoClass/getPseudoClass "blink"))))))
+
+(defn- open-perform! []
+  (events/dispatch! {:event/type :ui/set-active-tab :tab-id :perform})
+  (ui/wait-for! #(ui/visible? "#vibe-pad-row")))
+
+(defn- with-input-mapper
+  "(f) with the input mapper running: start-test! doesn't start it, and a
+   learned note reaches the app only through it (perform-test's fixture)."
+  [f]
+  (input-mapper/set-dispatch-fn! events/dispatch!)
+  (input-mapper/start-mapper!)
+  (try
+    (f)
+    (finally
+      (input-mapper/stop-mapper!)
+      (input-mapper/set-dispatch-fn! nil))))
+
+(defn- note [type n]
+  {:type type :source :midi :channel 0 :note n :velocity (if (= :note-on type) 1.0 0.0)
+   :timestamp (System/currentTimeMillis)})
+
+(deftest map-pad-switches-the-map-test
+  (let [robot (ui/robot)]
+    (testing "no zone anywhere: no strip"
+      (is (not (ui/visible? "#zone-map-strip"))))
+    (uses-zone-a!)
+    (ui/wait-for! #(ui/visible? "#zone-map-chip-odd-even"))
+    (ui/assert-text! "#zone-map-chip-left-right" "● Left / Right")
+    (ui/assert-text! "#zone-map-chip-odd-even" "Odd / Even")
+    (is (has-class? "#zone-map-chip-left-right" "zone-map-pad-active"))
+    (let [undo-depth (count (get-in (app-state) [:history :undo-stack]))]
+      (ui/press-node! robot "#zone-map-chip-odd-even")
+      (ui/release-node! robot "#zone-map-chip-odd-even")
+      (testing "no clock thread: at once"
+        (ui/wait-for! #(= :map/odd-even (active-map)))
+        (is (nil? (get-in (app-state) [:zone-map :pending]))))
+      (ui/assert-text! "#zone-map-chip-odd-even" "● Odd / Even")
+      (is (has-class? "#zone-map-chip-odd-even" "zone-map-pad-active"))
+      (is (not (has-class? "#zone-map-chip-left-right" "zone-map-pad-active")))
+      (is (= undo-depth (count (get-in (app-state) [:history :undo-stack]))) "a switch is live: no undo step"))
+    (testing "the cells name the new lanes"
+      (ui/wait-for! #(= "A → Odd (map: Odd / Even)" (cell-tooltip 0 0))))
+    (testing "on Perform, the pads say so"
+      (open-perform!)
+      (ui/wait-for! #(ui/visible? "#zone-map-pad-odd-even"))
+      (ui/assert-text! "#zone-map-pad-odd-even-state" "now")
+      (is (has-class? "#zone-map-pad-odd-even" "zone-map-pad-active"))
+      (is (not-any? #(.isFocusTraversable ^Node %) (ui/query-all ".zone-map-pad")) "Space or Enter never presses one")
+      (ui/press-node! robot "#zone-map-pad-unison")
+      (ui/release-node! robot "#zone-map-pad-unison")
+      (ui/wait-for! #(= :map/unison (active-map)))
+      (ui/assert-text! "#zone-map-pad-unison-state" "now"))))
+
+(deftest pending-pad-blinks-test
+  (uses-zone-a!)
+  (state/swap-state! assoc-in [:zone-map :pending] {:id 7 :map :map/odd-even :at-beat 1.0e6 :bar? false})
+  (ui/wait-for! #(ui/visible? "#zone-map-chip-odd-even"))
+  (testing "pending: amber, and it says so"
+    (is (has-class? "#zone-map-chip-odd-even" "zone-map-pad-pending"))
+    (ui/assert-text! "#zone-map-chip-odd-even" "Odd / Even ◌"))
+  (testing "no clock: it stays lit"
+    (is (not (blink? "#zone-map-chip-odd-even"))))
+  (testing "while the clock runs it blinks, and only it"
+    (fixtures/with-clock
+     (fn [_]
+       (ui/wait-for! #(blink? "#zone-map-chip-odd-even"))
+       (ui/wait-for! #(not (blink? "#zone-map-chip-odd-even")))
+       (ui/wait-for! #(blink? "#zone-map-chip-odd-even"))
+       (is (not (blink? "#zone-map-chip-left-right"))))))
+  (testing "on Perform: next beat, or next bar"
+    (open-perform!)
+    (ui/wait-for! #(ui/visible? "#zone-map-pad-odd-even"))
+    (ui/assert-text! "#zone-map-pad-odd-even-state" "next beat")
+    (is (has-class? "#zone-map-pad-odd-even" "zone-map-pad-pending"))
+    (state/swap-state! assoc-in [:zone-map :pending :bar?] true)
+    (ui/assert-text! "#zone-map-pad-odd-even-state" "next bar")))
+
+(deftest map-pad-learns-a-note-test
+  (with-input-mapper
+    (fn []
+      (let [robot (ui/robot)
+            k36 {:source :midi :channel 0 :note 36}]
+        (uses-zone-a!)
+        (open-perform!)
+        (ui/wait-for! #(ui/visible? "#zone-map-pad-odd-even"))
+        (ui/assert-text! "#zone-map-pad-odd-even-keys" "Right-click to learn a control")
+        (ui/right-click-node! robot (ui/query "#zone-map-pad-odd-even"))
+        (ui/click! robot "#zone-map-pad-odd-even-learn")
+        (ui/wait-for! #(= {:type :zone-map :target :map/odd-even} (get-in (app-state) [:backend :input :learning-target])))
+        (is (has-class? "#zone-map-pad-odd-even" "zone-map-pad-learning"))
+        (is (= :map/left-right (active-map)) "the menu pressed nothing")
+        (input-router/dispatch! (note :note-on 36))
+        (ui/wait-for! #(= {:type :zone-map :target :map/odd-even} (get-in (app-state) [:config :input :trigger-map k36])))
+        (ui/assert-text! "#zone-map-pad-odd-even-keys" "MIDI Ch 1 Note 36")
+        (ui/wait-for! #(not (has-class? "#zone-map-pad-odd-even" "zone-map-pad-learning")))
+        (input-router/dispatch! (note :note-off 36))
+        (testing "the key presses the pad"
+          (input-router/dispatch! (note :note-on 36))
+          (ui/wait-for! #(= :map/odd-even (active-map)))
+          (input-router/dispatch! (note :note-off 36)))
+        (testing "Clear control"
+          (ui/right-click-node! robot (ui/query "#zone-map-pad-odd-even"))
+          (ui/click! robot "#zone-map-pad-odd-even-clear")
+          (ui/wait-for! #(nil? (get-in (app-state) [:config :input :trigger-map k36])))
+          (ui/assert-text! "#zone-map-pad-odd-even-keys" "Right-click to learn a control"))))))

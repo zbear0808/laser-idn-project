@@ -907,6 +907,35 @@
     (let [zone-map (when (:zones badge) (fx/sub-ctx context active-zone-map))]
       (targets/cell-badge-tooltip (fx/sub-ctx context names-ctx) zone-map (:name zone-map) badge))))
 
+(defn map-pad-ids
+  "The maps the pads show, in order (zone-maps-list): the built-ins, then
+   yours."
+  [context]
+  (mapv :id (fx/sub-ctx context zone-maps-list)))
+
+(defn map-pad-bindings
+  "The trigger-map keys learned for map id's pad, in a stable order."
+  [context id]
+  (->> (fx/sub-val context get-in [:config :input :trigger-map])
+       (keep (fn [[k action]] (when (and (= :zone-map (:type action)) (= id (:target action))) k)))
+       (sort-by pr-str)
+       vec))
+
+(defn map-pad
+  "One zone map pad, its booleans and keys only (06 §4.5): {:id :name
+   :active? (the map in use, as the UI shows it) :pending (nil, or :beat or
+   :bar while a switch to it waits) :bar? (its Switch on the bar)
+   :learning? :bindings}."
+  [context id]
+  (let [pending (fx/sub-val context get-in [:zone-map :pending])]
+    {:id id
+     :name (:name (fx/sub-ctx context zone-map id))
+     :active? (= id (:id (fx/sub-ctx context active-zone-map)))
+     :pending (when (= id (:map pending)) (if (:bar? pending) :bar :beat))
+     :bar? (true? (fx/sub-val context get-in [:config :zone-map-pads id :bar?]))
+     :learning? (= {:type :zone-map :target id} (fx/sub-val context get-in [:backend :input :learning-target]))
+     :bindings (fx/sub-ctx context map-pad-bindings id)}))
+
 (defn cue-target-explain
   "How each level of the cue at [col row] resolves, its column's and the
    show's defaults included (routing.targets/explain-cue)."

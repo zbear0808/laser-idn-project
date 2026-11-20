@@ -589,3 +589,30 @@
       (ui/mouse-click! robot "#vibe-pad-hit")
       (ui/wait-for! #(nil? (rt :problem)))
       (ui/wait-for! #(not= "Stuck key released" (ui/node-text "#vibe-pad-hit-now"))))))
+
+
+;; The ZONE MAP row (zones plan Z4, 06 §7.4, Z4-Q1 A)
+
+(defn- scene-y [selector]
+  (let [^Node n (ui/query selector)]
+    (ui/on-fx-thread #(.getMinY (.localToScene n (.getBoundsInLocal n))))))
+
+(deftest map-row-shows-when-zones-are-used-test
+  (let [robot (ui/robot)]
+    (open-perform! robot)
+    (testing "no zone anywhere: no ZONE MAP row"
+      (is (not (ui/visible? "#zone-map-row"))))
+    (testing "a cue draws into a zone: the row, one pad per map"
+      (state/swap-state! assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
+      (ui/wait-for! #(ui/visible? "#zone-map-row"))
+      (ui/assert-count! "#zone-map-row .zone-map-pad" 3)
+      (is (< (scene-y "#vibe-meter-row") (scene-y "#zone-map-row") (scene-y "#vibe-status"))
+          "under the faders' meters, over the status line"))
+    (testing "a column's default counts too"
+      (state/swap-state! #(-> %
+                              (update-in [:chains :cue-chains [0 0] :items 0] dissoc :target)
+                              (assoc-in [:grid :column-targets] {3 :zone/b})))
+      (ui/wait-for! #(ui/visible? "#zone-map-row")))
+    (testing "no zone again: gone"
+      (state/swap-state! assoc-in [:grid :column-targets] {})
+      (ui/wait-for! #(not (ui/visible? "#zone-map-row"))))))
