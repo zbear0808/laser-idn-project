@@ -50,7 +50,7 @@ The precise rules are in **`01-model-and-routing-spec.md`**. Every phase doc imp
 | `09-phase-zr-rig-file.md` | ZR: the rig in its own file (physical setup outside the show) |
 | `10-questions.md` | **Every open question in one place**, each with its context, the options and a recommendation, grouped by phase |
 
-The phase docs were written against slightly different commits, then re-checked: 04, 05, 06 and 09 at `90e35c7`; 07 and 08 re-checked at `f178f56`; 02 and 03 re-checked at `70f7db8` by an independent review. Vibe Phases 3–5 and UX Phase 3 landed in between, so **re-check each doc's citations at HEAD when its phase starts.**
+The phase docs were written against slightly different commits, then re-checked: 04 and 09 at `4fa9eee`, 05 and 06 at `6aaad7d` (both after vibe Phase 6); 07 and 08 at `f178f56`; 02 and 03 at `70f7db8` by an independent review. **02 (Z0) is built**, and its as-built note records where it landed. Vibe Phases 3–6 and UX Phase 3 landed in between, so **re-check each doc's citations at HEAD when its phase starts.**
 
 ## 2. Decisions
 
@@ -97,11 +97,12 @@ D-1 to D-13 were made on 2026-11-19 (round 1, recorded in `07-plan.md`). D-14 to
 
 ```
 show clock, each tick
+  step the clock → pulse view → Map cycle pick → effective map       (01 §4, §5)
+  routing = resolver(rig, groups, effective map)                    (01 §5, pure, memoised; made BEFORE the render)
   for each cue:  render once → {target-key → frame}                 (01 §1: keys are targets)
                  cue zone pattern (Z5)          → re-key             (cuts between zones)
                  effects grid: zone effects (Phase 8 / Z5)  → re-key  (reading order)
                                point effects    → once per distinct frame object (01 §6.1)
-  routing = resolver(rig, groups, effective map)                    (01 §5, pure, memoised)
   snapshot {:cues [{:cell :run :zone-frames}] :routing … :projector-ctx …}
 
 each projector engine (multi_engine)
@@ -156,13 +157,13 @@ Z1 ─────────┘           │
 - **Vibe Phase 4a's reactions** (`vibes/reactions.clj` `listens-to`, `effect-sources`; landed in `6715fb4`): today they only see the sources named inside modulators. **Z5 extends `effect-sources`** so a zone pattern's Step on and Restart on count, which makes a pattern that steps on HIT one of HIT's reactions (named on its pad, and covered by 4b's lint). The vibe plan's owner should agree, since it changes 4a's code (07 S-10).
 - **Vibe Phase 5's faders** (`9f5d78a`): the Fader modulator can drive a pattern's rate, offset or style, and the Morph fader can scrub a step grid (07 §8, 08 §8). A new project's Master cell sits at `[0 3]` on the effects grid, outside the zone stage, so UI tests for pattern cells must use other cells.
 
-### Running alongside vibe Phases 6 and 7 (checked 2026-11-19, 18:20)
+### Running alongside vibe Phases 6 and 7 (checked 2026-11-19, 18:20; updated after Phase 6 merged)
 
-Vibe Phase 6 (auto-advance and tap tempo) is in progress in its own worktree, and Phase 7 (safety and hardening) comes after it. Here are the files each side edits:
+**Vibe Phase 6 (auto-advance and tap tempo) has merged** (`4a4a10a`, verified in `6aaad7d`). **Phase 7 (safety and hardening) is in progress** in its own worktree. Here are the files each side edits:
 
 | File | Vibe 6 | Vibe 7 | Z0 | Z1 | Risk |
 |---|---|---|---|---|---|
-| `events/core.clj` | ✓ | ✓ | ✓ (removes the dead `:clipboard/paste-projector-effects` effect, `:228-237`) | | low: separate parts. **Do Z0's removal last, or after both vibe phases merge** |
+| `events/core.clj` | ✓ | ✓ | – (the dead `:clipboard/paste-projector-effects` effect, now `:212-221`, was **left in place** by Z0 to avoid Phase 7's edits; remove it after Phase 7 merges) | | none |
 | `state/domains.clj` | ✓ | ✓ | ✓ (one `:confirm` dialog default) | ✓ (`projector-ui :identify`) | low: one-line additions in separate maps |
 | `subs.clj` | | ✓ | ✓ (`zone-group-usage`) | ✓ | low: separate subs |
 | `state/persistent.clj` | ✓ | | | ✓ (`reset-session` clears the test pattern and Identify) | low |
@@ -170,8 +171,9 @@ Vibe Phase 6 (auto-advance and tap tempo) is in progress in its own worktree, an
 | `services/show_clock.clj`, `animation/show_time.clj` | ✓ | ✓ | | (docstring only) | none for Z0 and Z1. **High for Z3 and Z4**, which change the tick |
 | everything else Z0/Z1 edit (zone groups, projector handlers, the Projectors and Zone Groups tabs, the engine's `projector-frame`, the output runtime, the clipboard, list paste) | | | ✓ | ✓ | none |
 
-- **Z0 and Z1 can run alongside vibe Phases 6 and 7** in their own worktree, as the vibe phases do. The overlaps are small additions in different parts of shared files, so merging is mechanical.
-- **Z3 and Z4 should wait until vibe Phase 6 is merged.** Both change the show clock's tick (the routing before the render, the effective map, the switch timing), and so does Phase 6.
+- **Z0 and Z1 can run alongside vibe Phase 7** in their own worktree, as the vibe phases do. The overlaps are small additions in different parts of shared files, so merging is mechanical. (Z0 was built this way.)
+- **Z3 and Z4 no longer wait for Phase 6**, which has merged, but **Phase 7 also edits the show clock, the show time, the toolbar, `state/domains.clj` and `subs.clj`.** Start Z3 after Phase 7 merges, or expect a real merge in the tick.
+- **Phase 7's show lock** (it blocks some events during a show) must also cover the new zones events that re-route lasers or change their safety: Z0's remove, Z1's safety edits, Z2's order and membership events, Z4's map switches (maybe allowed: they are performer actions), ZR's rig events. Tell the vibe plan's owner. Whether a show lock should block a safety edit is open (Z1 and Phase 7 to agree).
 - **UX plan** (`plans/2026-11-18-ux-improvements/`, finished and deleted in `2d1f813`; it is in git history): all four of its phases are done. Z2 builds on what they left in the Projectors and Zone Groups tabs, for example the status line and "No projectors enabled" link from `92c191a` and the subtitle and row ids from `b9b9d55`.
 
 ## 7. Risks

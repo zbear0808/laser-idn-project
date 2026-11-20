@@ -105,9 +105,10 @@ The general rule:
 ```clojure
 {:map     effective-map-id                      ; nil until Z4
  :refs    {ref → [[projector-id region side] …]}  ; every non-zone ref the rig knows (Z2's ref-entries)
- :outputs {projector-id {:index :scan-rate :fit {…} :regions {:L box :R box}}}}  ; so nothing is read live (Z3 S-2)
+ :outputs {projector-id {:index :scan-rate :fit {…} :regions {:L [cx cy s] :R [cx cy s]}}}}  ; so nothing is read live (Z3 S-2)
 ```
 
+- In `:outputs`, every **enabled** laser has an entry, excluded ones too (their own group still reaches them, D-33). `:index` is the laser's 0-based position in E (§3), and nil for an excluded laser. `:regions` holds §7's fit for each half as `[cx cy s]` (centre and scale), worked out from the normalised safety limit; a laser whose zone can't be read has no halves (Z3 S-9).
 - **Read it only through `rig/resolve-ref [routing ref]`.** In Z3 that is a plain lookup. In Z4 it also resolves a zone through the effective map's lanes and overrides, so nothing that calls it has to change (Z3 S-3, Z4 SQ-10).
 - **Order within a tick (Z5 S-3):** step the clock → zone context → the Map cycle's pick → the effective map → the routing → render. The routing never depends on the frames, so it can come first, and the zone stage can use it (the lanes, the known refs, Every laser).
 - It comes from a pure resolver (`routing/rig.clj`, **NEW**), memoised on its inputs: the rig order, the enabled set, the excluded set, `:middle`, `w`, custom group membership, the maps and the effective map id.
@@ -272,3 +273,16 @@ Old data is converted on load in `state/persistent.clj` (`apply-loaded-project`,
 8. **One render per cue per tick.** There is no render per projector. Fitting, guarding and safety are per-projector transforms of frames already rendered.
 9. **The resolver is pure.** The same inputs give the same output. The preview simulator (later) is this function with an invented rig.
 10. **Unison is every zone → All.**
+
+## 14. Rules added by the re-checks (2026-11-19)
+
+These came from the phase docs' spec questions after they were re-checked at HEAD. They are part of the contract now.
+
+| # | Rule | From |
+|---|---|---|
+| R1 | **Removing a laser that cues are pinned to** (`:auto.laser/<id>`) asks where those cues go, All by default, as deleting a group does (Z0's confirm). The laser also leaves `[:rig :order]` | Z2 S-13 |
+| R2 | **A show's safety zone comes in only through `safety/normalize`** (ZR's import, "use the show's setup"). A zone that can't be read leaves that laser dark, never at the full area | ZR S-ZR-8, Z1 S-Z1-7 |
+| R3 | **A dark frame** (a Master at 0, a strobe's dark half: no lit point) **leaves the LOW flag as it was.** The fit guard can't thin it, and its fps says nothing about the content | Z3 S-14 |
+| R4 | **A zone map switch is not a pulse.** BLACKOUT doesn't hold a map pad back. BLACKOUT stops the transport, so a pad pressed then switches at once (§9) | Z4 SQ-12 |
+| R5 | **Deleting a group that a map lane names:** the lane takes the delete's re-target (All by default). With "Nothing", the lane is left **empty**, not removed, so the zones after it keep their lanes mid-show. An override naming the group is dropped | Z4 SQ-13 (it replaces the "lane is removed" wording first written in 06) |
+

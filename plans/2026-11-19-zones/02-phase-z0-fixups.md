@@ -259,7 +259,7 @@ Write the failing tests first in each step.
 ## 12. Spec questions and open questions
 
 **Spec questions**
-- **S-Z0-1 · Where the walker lives.** The spec has no name for it. Z2 (04 §4) calls it "Z0's walker" with `replace-refs [state {old new}]`, ZR (09 §4) calls `migration/replace-refs`, and Z4 (06 §4) extends "its places". **Chosen:** `laser-show.routing.refs` with `ref-places`, `cue-refs`, `cues-using` and `replace-refs`. Z2's `migration/replace-refs` is an alias of it, so 04 and 09 work as written.
+- **S-Z0-1 · Where the walker lives.** The spec has no name for it. Z2 (04 §4) calls it "Z0's walker" with `replace-refs [state {old new}]`, ZR (09 §4) calls `migration/replace-refs`, and Z4 (06 §4) extends "its places". **Chosen:** `laser-show.routing.refs` with `ref-places`, `cue-refs`, `cues-using` and `replace-refs`. 04 and 09 now call `routing.refs/replace-refs` directly (re-checked 2026-11-19), so no alias is needed.
 - **S-Z0-2 · What "nothing" means for each place.** The spec doesn't say what a cleared reference becomes. **Chosen:** items, groups, clips and tracks inherit; a cue falls back to All; a Zone Selector says All; a preview cell shows the master view.
 - **S-Z0-3 · B-6.** 04 needs Z0 for "one toggle per click" and reuses the toggle "with Z0's one-toggle fix". There is nothing to fix (§1), so Z2 can use `:projectors/toggle-zone-group` as it is.
 - **S-Z0-4 · ZR's Forget.** 09 §6 names a NEW `:rig/forget-projector`, on a disabled card. **Chosen:** Z0's `:projectors/remove` does the removing, and ZR's menu item can dispatch it (or wrap it with its own label).
