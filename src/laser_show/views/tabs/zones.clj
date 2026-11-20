@@ -238,6 +238,14 @@
 ;; Details Panel (Right)
 
 
+(defn cue-usage-text
+  "\"Used by 3 cues\", \"Used by 1 cue\" or \"Used by no cues\"."
+  [n]
+  (case (long n)
+    0 "Used by no cues"
+    1 "Used by 1 cue"
+    (str "Used by " n " cues")))
+
 (defn- zone-group-details-panel
   "Details panel for the selected zone group."
   [{:keys [fx/context]}]
@@ -269,7 +277,8 @@
                                :text (str "Virtual Projectors: " (:vp-count usage 0))
                                :style-class ["label-secondary"]}
                               {:fx/type :label
-                               :text (str "Cues targeting: " (:cue-count usage 0))
+                               :id "zone-group-cue-usage"
+                               :text (cue-usage-text (:cue-count usage 0))
                                :style-class ["label-secondary"]}]}
                   {:fx/type :separator}
                   ;; Info about assignment

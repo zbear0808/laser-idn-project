@@ -589,3 +589,17 @@
            (status-at true {:engines 1 :wanted 1 :pending? false
                             :projectors {:a {:state :streaming :fps 59.8}}})))
     (is (= {:state :stopped :status-text "Not streaming"} (status-at false nil)))))
+
+(deftest zone-group-usage-counts-cues-test
+  (let [s (-> base-state
+              (assoc-in [:chains :cue-chains [2 0]] {:destination-zone {:zone-group-id :left}
+                                                     :items [{:type :preset :preset-id :line}]})
+              (assoc-in [:chains :cue-chains [3 1]] {:items [{:type :preset :preset-id :line :zone-group-id :left}]})
+              (assoc-in [:chains :effect-chains [5 5]] {:items [{:effect-id :zone-selector :params {:target-zone :left}}]})
+              (assoc-in [:projectors :p1] {:name "P1" :zone-groups [:all :left]}))
+        usage (fx/sub-ctx (context s) subs/zone-group-usage :left)]
+    (is (= 2 (:cue-count usage)) "two cues name Left; the effects grid isn't a cue")
+    (is (= [[2 0] [3 1]] (vec (:cues usage))))
+    (is (= 1 (:projector-count usage)))
+    (testing "a cue with no destination counts for All"
+      (is (= 2 (:cue-count (fx/sub-ctx (context base-state) subs/zone-group-usage :all)))))))

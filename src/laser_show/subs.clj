@@ -33,6 +33,7 @@
             [laser-show.css.core :as css]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.chains :as chains]
+            [laser-show.routing.refs :as refs]
             [laser-show.dev-config :as dev-config]))
 
 
@@ -714,14 +715,18 @@
            (fx/sub-ctx context virtual-projectors-list)))
 
 (defn zone-group-usage
-  "Get usage info for a zone group: which projectors and VPs use it.
-   Returns: {:projector-count n :vp-count n :cue-count n :projectors [...] :virtual-projectors [...]}"
+  "Usage info for a zone group: the projectors and VPs in it, and the cues
+   that name it anywhere (routing.refs/cues-using: a cue with no destination
+   counts for :all; effect cells and the preview aren't cues).
+   Returns: {:projector-count n :vp-count n :cue-count n :cues #{cell} :projectors [...] :virtual-projectors [...]}"
   [context group-id]
   (let [projectors (fx/sub-ctx context projectors-in-zone-group group-id)
-        vps (fx/sub-ctx context virtual-projectors-in-zone-group group-id)]
+        vps (fx/sub-ctx context virtual-projectors-in-zone-group group-id)
+        cues (refs/cues-using (fx/sub-val context get-in [:chains :cue-chains]) group-id)]
     {:projector-count (count projectors)
      :vp-count (count vps)
-     :cue-count 0 ;; TODO: Count cues targeting this group
+     :cue-count (count cues)
+     :cues cues
      :projectors projectors
      :virtual-projectors vps}))
 
