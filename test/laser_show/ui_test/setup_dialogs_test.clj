@@ -309,8 +309,8 @@
       (ui/wait-for! #(nil? (get-in (app-state) [:projectors :a])))
       (ui/wait-for! #(not (window-showing? "Remove Fake 1?"))))))
 
-(deftest subtitle-promises-no-safety-zones-test
+(deftest subtitle-mentions-safety-zones-test
   (let [robot (ui/robot)]
     (ui/click! robot "#projectors-tab")
-    (ui/assert-text! "#projectors-subtitle" "Scan for IDN devices • Configure color calibration")))
+    (ui/assert-text! "#projectors-subtitle" "Scan for IDN devices • Configure color calibration and safety zones")))
 
