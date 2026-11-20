@@ -171,6 +171,7 @@
    :projectors/remove-blocked-area "Remove Blocked Area"
    :projectors/copy-safety "Copy Safety Zone"
    :projectors/set-enabled "Turn Projector On or Off"
+   :projectors/set-exclude-from-all "Exclude From All"
    :rig/move-projector "Move Projector"
    :rig/nudge-projector "Move Projector"
    :rig/set-middle "Change Middle Laser"

@@ -16,7 +16,8 @@
             [laser-show.css.core :as css]
             [laser-show.events.core :as events]
             [laser-show.subs :as subs]
-            [laser-show.views.components.drag-drop-cell :as dnd])
+            [laser-show.views.components.drag-drop-cell :as dnd]
+            [laser-show.views.components.group-matrix :as group-matrix])
   (:import [javafx.scene Node]
            [javafx.scene.input DragEvent KeyCode KeyEvent MouseButton MouseEvent TransferMode]))
 
@@ -82,9 +83,9 @@
       :else (str n (if (= 1 n) " output" " outputs") " · " on " on"))))
 
 (defn rig-header
-  "Scan Network, Add Manual... and what the cards hold; then whatever the
-   tab puts at the right (:right, a vector of descriptions)."
-  [{:keys [fx/context right]}]
+  "Scan Network, Add Manual... and what the cards hold; at the right, the
+   middle laser and the split width (group-matrix/rig-settings)."
+  [{:keys [fx/context]}]
   (let [cards (fx/sub-ctx context subs/rig-cards)
         scanning? (fx/sub-ctx context subs/projector-scanning?)]
     {:fx/type :h-box
@@ -106,8 +107,9 @@
                        :id "rig-header-count"
                        :text (header-text cards)
                        :style-class ["label-secondary"]}
-                      {:fx/type :region :h-box/hgrow :always}]
-                     right)}))
+                      {:fx/type :region :h-box/hgrow :always}
+                      {:fx/type group-matrix/rig-settings
+                       :settings (fx/sub-ctx context subs/rig-settings)}])}))
 
 
 ;; A card's sections
@@ -250,8 +252,8 @@
                            :min-width card-width
                            :pref-width card-width
                            :max-width card-width
-                           :spacing 4
-                           :padding 8
+                           :spacing 2
+                           :padding 6
                            :opacity (if enabled? 1.0 0.55)
                            :style (str "-fx-background-color: #2D2D2D; -fx-background-radius: 6; -fx-border-radius: 6; -fx-cursor: hand; "
                                        (if selected?
@@ -329,11 +331,12 @@
    :on-action {:event/type :rig/nudge-projector :projector-id selected :delta delta}})
 
 (defn rig-strip
-  "The cards between ◀ and ▶, and under them rows (a vector of
-   descriptions, each with :grid-pane/row 1 on, card i in :grid-pane/column
-   i + 1), in one scroll pane, so more than about 8 lasers scroll together."
-  [{:keys [fx/context rows]}]
+  "The cards between ◀ and ▶, and under them the group rows
+   (group-matrix/rows), in one scroll pane, so more than about 8 lasers
+   scroll together."
+  [{:keys [fx/context]}]
   (let [cards (fx/sub-ctx context subs/rig-cards)
+        matrix (fx/sub-ctx context subs/rig-matrix)
         drop-mark (fx/sub-val context get-in [:rig-ui :drop])
         outputting? (boolean (fx/sub-val context get-in [:backend :streaming :running?]))
         ids (mapv :id cards)
@@ -342,17 +345,17 @@
         n (count ids)]
     {:fx/type :scroll-pane
      :id "rig-strip-scroll"
-     :fit-to-height true
-     :vbar-policy :never
+     :vbar-policy :as-needed
      :hbar-policy :as-needed
-     :min-height :use-pref-size
+     ;; It scrolls rather than push the inspector off a short window
+     :min-height 170
      :style-class ["scroll-pane-dark"]
      :content {:fx/type :grid-pane
                :id "rig-strip"
                :focus-traversable true
                :hgap 4
-               :vgap 4
-               :padding 6
+               :vgap 0
+               :padding 4
                :on-key-pressed (key-handler ids selected)
                :children (-> [(move-button {:id "rig-move-left-button" :text "◀" :tooltip "Move left (Alt+←)"
                                             :disable (not (pos? i)) :selected selected :delta -1 :column 0})]
@@ -368,4 +371,4 @@
                              (conj (move-button {:id "rig-move-right-button" :text "▶" :tooltip "Move right (Alt+→)"
                                                  :disable (not (and (>= i 0) (< i (dec n)))) :selected selected :delta 1
                                                  :column (inc n)}))
-                             (into rows))}}))
+                             (into (group-matrix/rows matrix cards)))}}))

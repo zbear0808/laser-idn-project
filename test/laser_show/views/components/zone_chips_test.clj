@@ -12,6 +12,11 @@
       "a show without an All group still offers All, first")
   (is (= [:all] (mapv :id (zone-chips/zone-options [])))))
 
+(deftest member-mark-test
+  (is (= ["■" "◧" "◨" "■" "□" "×" "–" "·"]
+         (mapv zone-chips/member-mark [:whole :left-half :right-half :member :not-member :excluded :off :not-in])))
+  (is (= "" (zone-chips/member-mark nil))))
+
 (deftest built-in-groups-show-a-lock-test
   (is (every? zone-chips/locked? [{:kind :all} {:kind :auto} {:kind :laser}]))
   (is (not-any? zone-chips/locked? [{:kind :custom} {:id :inherit :name "Inherit"} nil]))

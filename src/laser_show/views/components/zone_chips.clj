@@ -35,6 +35,16 @@
     (assoc desc :graphic lock)
     desc))
 
+(def ^:private mark-glyphs
+  {:whole "■" :left-half "◧" :right-half "◨" :member "■" :not-member "□" :excluded "×" :off "–" :not-in "·"})
+
+(defn member-mark
+  "How a laser is in a group, as both tabs show it (subs/rig-matrix): ■ whole
+   (or a member of your group), ◧ its left half, ◨ its right half, □ not in
+   your group, × excluded from All, – off, · not in an automatic group."
+  [mark]
+  (get mark-glyphs mark ""))
+
 
 (defn zone-options
   "The zone groups a zone picker offers (the Zone Selector, its keyframes):

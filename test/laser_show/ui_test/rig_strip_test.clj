@@ -155,3 +155,98 @@
     (events/dispatch! {:event/type :projectors/select-projector :projector-id :c})
     (ui/wait-for! #(not (ui/enabled? "#rig-move-right-button")))
     (ui/assert-enabled! "#rig-move-left-button")))
+
+
+;; The group rows under the cards
+
+(defn- mark [row id] (ui/node-text (str "#rig-cell-" row "-" (name id))))
+
+(deftest rows-follow-the-order-test
+  (let [robot (ui/robot)]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(= "◧" (mark "auto-left" :b)))
+    (is (= ["■" "◧" "·"] (mapv #(mark "auto-left" %) [:a :b :c])) "three lasers: the middle one is split")
+    (is (= ["·" "◨" "■"] (mapv #(mark "auto-right" %) [:a :b :c])))
+    (is (= ["·" "■" "·"] (mapv #(mark "auto-center" %) [:a :b :c])))
+    (is (= ["■" "·" "■"] (mapv #(mark "auto-odd" %) [:a :b :c])))
+    (is (= ["■" "■" "■"] (mapv #(mark "all" %) [:a :b :c])))
+    (is (= ["■" "■" "■"] (mapv #(mark "each-laser" %) [:a :b :c])))
+    (testing "a card moved: the rows follow"
+      (events/dispatch! {:event/type :rig/move-projector :projector-id :c :target :a :side :before})
+      (ui/wait-for! #(= [:c :a :b] (shown-order)))
+      (ui/wait-for! #(= ["■" "◧" "·"] (mapv (fn [id] (mark "auto-left" id)) [:c :a :b]))))
+    (testing "a laser turned off: – in its column, and the others fold without it"
+      (ui/uncheck! robot "#rig-card-enable-a")
+      (ui/wait-for! #(= "–" (mark "auto-left" :a)))
+      (is (= ["■" "–" "·"] (mapv #(mark "auto-left" %) [:c :a :b])) "two lasers: no middle")
+      (is (= "–" (ui/node-text "#rig-card-number-a"))))))
+
+(deftest middle-laser-choice-changes-the-rows-test
+  (let [robot (ui/robot)
+        rig #(get-in (app-state) [:rig %])]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(= "◧" (mark "auto-left" :b)))
+    (ui/assert-enabled! "#rig-middle-choice")
+    (ui/select! robot "#rig-middle-choice" ":both")
+    (ui/wait-for! #(= :both (rig :middle)))
+    (ui/wait-for! #(= ["■" "■"] [(mark "auto-left" :b) (mark "auto-right" :b)]))
+    (ui/select! robot "#rig-middle-choice" ":left")
+    (ui/wait-for! #(= ["■" "·"] [(mark "auto-left" :b) (mark "auto-right" :b)]))
+    (testing "the split width is on while the middle is split or in both"
+      (ui/assert-disabled! "#rig-split-width-slider")
+      (ui/select! robot "#rig-middle-choice" ":split")
+      (ui/wait-for! #(ui/enabled? "#rig-split-width-slider"))
+      (ui/slide! robot "#rig-split-width-slider" 0.6)
+      (ui/wait-for! #(= 0.6 (rig :split-width)))
+      (ui/assert-text! "#rig-split-width-label" "60%"))
+    (testing "with an even count there is no middle laser"
+      (ui/uncheck! robot "#rig-card-enable-c")
+      (ui/wait-for! #(not (ui/enabled? "#rig-middle-choice")))
+      (ui/assert-text! "#rig-middle-hint" "Used with 3, 5, 7… lasers")
+      (ui/assert-disabled! "#rig-split-width-slider"))))
+
+(deftest custom-row-toggles-membership-test
+  (let [robot (ui/robot)
+        groups #(get-in (app-state) [:projectors % :zone-groups])]
+    (with-lasers!)
+    (state/swap-state! assoc-in [:projectors :c :enabled?] false)
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(= "□" (mark "graphics" :a)))
+    (ui/click! robot "#rig-cell-graphics-a")
+    (ui/wait-for! #(= [:graphics] (groups :a)))
+    (ui/wait-for! #(= "■" (mark "graphics" :a)))
+    (testing "a laser that is off can be put in a group too"
+      (ui/click! robot "#rig-cell-graphics-c")
+      (ui/wait-for! #(= [:graphics] (groups :c))))
+    (ui/click! robot "#rig-cell-graphics-a")
+    (ui/wait-for! #(= [] (groups :a)))
+    (ui/wait-for! #(= "□" (mark "graphics" :a)))
+    (testing "+ Group opens the New Zone Group dialog"
+      (ui/click! robot "#rig-add-group-button")
+      (ui/wait-for! #(some #{"New Zone Group"} (ui/window-titles))))))
+
+(deftest all-row-click-excludes-test
+  (let [robot (ui/robot)
+        excluded? #(get-in (app-state) [:projectors % :exclude-from-all?])]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (ui/wait-for! #(= "■" (mark "all" :b)))
+    (ui/click! robot "#rig-cell-all-b")
+    (ui/wait-for! #(true? (excluded? :b)))
+    (ui/wait-for! #(= "×" (mark "all" :b)))
+    (is (= "–" (ui/node-text "#rig-card-number-b")) "no place among the lasers in All")
+    (is (= ["■" "×" "·"] (mapv #(mark "auto-left" %) [:a :b :c])) "the other two fold without it (D-33)")
+    (is (= "■" (mark "each-laser" :b)) "it keeps its own group")
+    (ui/click! robot "#rig-cell-all-b")
+    (ui/wait-for! #(false? (excluded? :b)))
+    (ui/wait-for! #(= "◧" (mark "auto-left" :b)))))
+
+(deftest row-name-opens-the-group-test
+  (let [robot (ui/robot)]
+    (with-lasers!)
+    (ui/click! robot "#projectors-tab")
+    (ui/click! robot "#rig-row-auto-left")
+    (ui/wait-for! #(= :zones (get-in (app-state) [:ui :active-tab])))
+    (is (= :auto/left (get-in (app-state) [:zone-group-ui :selected-group])))))

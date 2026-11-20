@@ -51,6 +51,15 @@
       (is (nil? (get-in result [:state :projector-ui :active-virtual-projector]))))))
 
 
+(deftest show-opens-the-group-in-its-tab-test
+  (let [selected (assoc-in base-state [:projector-ui :active-projector] test-projector-id)
+        state (:state (zone-groups/handle {:event/type :zone-groups/show :group-id :auto/left :state selected}))]
+    (is (= :auto/left (get-in state [:zone-group-ui :selected-group])) "All and the automatic groups too")
+    (is (= :zones (get-in state [:ui :active-tab])))
+    (is (= test-projector-id (get-in state [:projector-ui :active-projector])) "the card stays selected"))
+  (is (some? (:state (zone-groups/handle {:event/type :zone-groups/show :state base-state}))) "called bare"))
+
+
 ;; Add/Create Tests
 
 

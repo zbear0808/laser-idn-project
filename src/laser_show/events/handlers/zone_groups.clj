@@ -21,6 +21,15 @@
               (assoc-in [:projector-ui :active-projector] nil)
               (assoc-in [:projector-ui :active-virtual-projector] nil))})
 
+(defn- handle-zone-groups-show
+  "Open a group (All, an automatic group, a laser's or yours) in the Zone
+   Groups tab, as a click on a row's name under the cards does. The card
+   stays selected."
+  [{:keys [group-id state]}]
+  {:state (-> state
+              (assoc-in [:zone-group-ui :selected-group] group-id)
+              (assoc-in [:ui :active-tab] :zones))})
+
 
 (defn- handle-zone-groups-add
   "Open dialog to add a new zone group."
@@ -216,6 +225,7 @@
   [{:keys [event/type] :as event}]
   (case type
     :zone-groups/select (handle-zone-groups-select event)
+    :zone-groups/show (handle-zone-groups-show event)
     :zone-groups/add (handle-zone-groups-add event)
     :zone-groups/create-new (handle-zone-groups-create-new event)
     :zone-groups/request-remove (handle-zone-groups-request-remove event)

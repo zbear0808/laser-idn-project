@@ -719,6 +719,51 @@
                (into {} (keep #(when (#{:l :l2 :r} (:id %)) [(:id %) (:multi-output? %)]))
                      (fx/sub-ctx (context two) subs/rig-cards))))))))
 
+(defn- matrix [projectors & {:keys [middle zone-groups]}]
+  (fx/sub-ctx (context (cond-> (assoc base-state :projectors projectors)
+                         middle (assoc-in [:rig :middle] middle)
+                         zone-groups (assoc :zone-groups zone-groups)))
+              subs/rig-matrix))
+
+(defn- column [m id]
+  (into {} (map (fn [row] [(:id row) (get-in row [:cells id])])) (:rows m)))
+
+(deftest rig-matrix-marks-test
+  (testing "one laser: Left and Odd are its left half, Right and Even its right half"
+    (let [m (matrix {:p {:name "P" :host "10.0.0.1" :zone-groups []}})]
+      (is (= [:p] (:columns m)))
+      (is (= [:all :auto/left :auto/right :auto/center :auto/odd :auto/even :each-laser :crowd :graphics]
+             (mapv :id (:rows m)))
+          "All, the automatic groups, each laser, then your groups by name")
+      (is (= {:all :whole :auto/left :left-half :auto/right :right-half :auto/center :whole :auto/odd :left-half
+              :auto/even :right-half :each-laser :whole :crowd :not-member :graphics :not-member}
+             (column m :p)))
+      (is (= [:all :auto :auto :auto :auto :auto :laser :custom :custom] (mapv :kind (:rows m))))
+      (is (= ["All" "Left" "Right" "Center" "Odd" "Even" "Each laser" "Crowd Scanning" "Graphics"] (mapv :name (:rows m))))))
+  (testing "three lasers, the middle one split; one off and one excluded from All"
+    (let [m (matrix {:a {:name "A" :host "10.0.0.1"} :b {:name "B" :host "10.0.0.2"} :c {:name "C" :host "10.0.0.3"}
+                     :off {:name "Off" :host "10.0.0.4" :enabled? false :zone-groups [:graphics]}
+                     :aud {:name "Aud" :host "10.0.0.5" :exclude-from-all? true :zone-groups [:crowd]}})]
+      (is (= [:a :b :c :off :aud] (:columns m)))
+      (is (= {:all :whole :auto/left :whole :auto/right :not-in :auto/center :not-in :auto/odd :whole :auto/even :not-in
+              :each-laser :whole :crowd :not-member :graphics :not-member}
+             (column m :a)))
+      (is (= {:all :whole :auto/left :left-half :auto/right :right-half :auto/center :whole :auto/odd :not-in
+              :auto/even :whole :each-laser :whole :crowd :not-member :graphics :not-member}
+             (column m :b))
+          "the middle laser: ◧ in Left, ◨ in Right")
+      (is (= {:all :off :auto/left :off :auto/right :off :auto/center :off :auto/odd :off :auto/even :off
+              :each-laser :off :crowd :not-member :graphics :member}
+             (column m :off))
+          "a laser that is off: – in All and the automatic rows; its own groups still say what it's in")
+      (is (= {:all :excluded :auto/left :excluded :auto/right :excluded :auto/center :excluded :auto/odd :excluded
+              :auto/even :excluded :each-laser :whole :crowd :member :graphics :not-member}
+             (column m :aud))
+          "excluded: × in All and the automatic rows (D-33), but it has its own group")))
+  (testing "the middle in both: whole in both"
+    (let [m (matrix {:a {:host "10.0.0.1"} :b {:host "10.0.0.2"} :c {:host "10.0.0.3"}} :middle :both)]
+      (is (= [:whole :whole] ((juxt :auto/left :auto/right) (column m :b)))))))
+
 (deftest vibe-audience-groups-follow-the-order-test
   (let [s (-> base-state
               (templates/apply-starter-vibes)

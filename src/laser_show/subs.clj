@@ -801,6 +801,29 @@
                :multi-output? (< 1 (get hosts host 0))}))
           (:order inputs))))
 
+(defn rig-matrix
+  "The group rows under the cards (routing.rig/matrix): {:columns [id …]
+   :rows [{:id :name :color :kind :cells {id mark}}]}."
+  [context]
+  (rig/matrix {:projectors (fx/sub-val context :projectors)
+               :rig (fx/sub-val context :rig)
+               :zone-groups (fx/sub-val context :zone-groups)}))
+
+(defn rig-settings
+  "The middle laser and the split width as the strip offers them: {:middle
+   :split-width :n (lasers in E) :middle-on? (n is 3, 5, 7…) :split-on? (one
+   laser, or the middle split or in both)}."
+  [context]
+  (let [inputs (rig/rig-inputs {:projectors (fx/sub-val context :projectors) :rig (fx/sub-val context :rig)})
+        n (count (rig/e-order inputs))
+        middle (:middle inputs)
+        middle-on? (and (odd? n) (<= 3 n))]
+    {:middle middle
+     :split-width (:split-width inputs)
+     :n n
+     :middle-on? middle-on?
+     :split-on? (or (= 1 n) (and middle-on? (contains? #{:split :both} middle)))}))
+
 
 ;; Level 2: Input Device Subscriptions (MIDI, OSC)
 

@@ -103,6 +103,23 @@
                                                              :vp-id :vp1 :zone-group-id ref :state vp-state})))
             "nor in a virtual projector's list")))))
 
+(deftest set-exclude-from-all-test
+  (let [excluded (fn [state on?] (:state (projectors/handle {:event/type :projectors/set-exclude-from-all
+                                                             :projector-id test-projector-id :exclude? on?
+                                                             :state state})))
+        out (excluded state-with-projector true)]
+    (is (true? (get-in out [:projectors test-projector-id :exclude-from-all?])))
+    (is (= [:auto.laser/proj-1]
+           (rig/refs-for (excluded (assoc-in state-with-projector [:projectors test-projector-id :zone-groups] []) true)
+                         test-projector-id))
+        "out of All and the automatic groups: only its own group reaches it")
+    (is (false? (get-in (excluded out false) [:projectors test-projector-id :exclude-from-all?])) "and back in")
+    (is (identical? out (excluded out true)) "it sets, never toggles")
+    (is (identical? out (excluded out "yes")))
+    (is (identical? state-with-projector
+                    (:state (projectors/handle {:event/type :projectors/set-exclude-from-all :projector-id :nope :exclude? true
+                                                :state state-with-projector}))))))
+
 (deftest set-enabled-turns-an-output-on-or-off-test
   (let [off (assoc-in state-with-projector [:projectors test-projector-id :enabled?] false)
         set-enabled (fn [state id on?] (:state (projectors/handle {:event/type :projectors/set-enabled :projector-id id

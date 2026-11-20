@@ -377,6 +377,58 @@
     (vec (concat derived lasers custom))))
 
 
+;; How each laser is in a group (the rows under the cards, and the Zone
+;; Groups tab)
+
+(defn- entry-mark [[_ region]]
+  (case region :L :left-half :R :right-half :whole))
+
+(defn ref-marks
+  "{projector-id mark} for ref (or :each-laser, every laser's own group at
+   once) over the rig's projectors (inputs, and groups: their auto-groups),
+   as zone-chips/member-mark shows them: :whole :left-half :right-half for
+   All and the automatic groups (:not-in when not in one, :excluded for a
+   laser excluded from All, :off for one that is off); :member :not-member
+   for your groups, whatever the laser's state."
+  [inputs groups ref]
+  (let [{:keys [order enabled excluded member-of]} inputs
+        lacking (fn [id] (cond (not (contains? enabled id)) :off
+                               (contains? excluded id) :excluded))
+        auto? (set auto-refs)]
+    (into {}
+          (map (fn [id]
+                 [id (cond
+                       (= :all ref) (or (lacking id) :whole)
+                       (auto? ref) (or (lacking id)
+                                       (if-let [entry (some #(when (= id (first %)) %) (get groups ref))]
+                                         (entry-mark entry)
+                                         :not-in))
+                       (= :each-laser ref) (if (contains? enabled id) :whole :off)
+                       (laser-of ref) (cond (not= id (laser-of ref)) :not-in
+                                            (contains? enabled id) :whole
+                                            :else :off)
+                       :else (if (some #{ref} (get member-of id)) :member :not-member))]))
+          order)))
+
+(defn matrix
+  "The rows under the rig strip's cards: {:columns [projector-id …] (rig
+   order) :rows [{:id :name :color :kind :cells {projector-id mark}}]}, the
+   rows All, Left, Right, Center, Odd, Even, Each laser (:each-laser), then
+   your groups by name. state needs :projectors, :rig and :zone-groups."
+  [state]
+  (let [inputs (rig-inputs state)
+        groups (auto-groups inputs)
+        rows (concat (for [ref (cons :all auto-refs)]
+                       (assoc (group-defs ref) :id ref :kind (if (= :all ref) :all :auto)))
+                     [{:id :each-laser :name "Each laser" :color laser-color :kind :laser}]
+                     (filter #(= :custom (:kind %)) (target-groups state)))]
+    {:columns (:order inputs)
+     :rows (mapv (fn [row]
+                   (assoc (select-keys row [:id :name :color :kind])
+                          :cells (ref-marks inputs groups (:id row))))
+                 rows)}))
+
+
 ;; The scan's matching (04 §4)
 
 (defn projector-id

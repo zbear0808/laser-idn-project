@@ -417,6 +417,8 @@
         clipboard-items (clipboard/get-effects-to-paste)]
     (if projector
       {:fx/type :v-box
+       ;; Below the rig strip, which scrolls when the window is short
+       :min-height 230
        :children [{:fx/type :scroll-pane
                    :v-box/vgrow :always
                    :fit-to-width true
@@ -509,7 +511,7 @@
   {:fx/type :v-box
    :style (str "-fx-background-color: " (css/bg-primary) ";")
    :padding 16
-   :spacing 8
+   :spacing 6
    :children [{:fx/type :label
                :text "Projectors"
                :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}

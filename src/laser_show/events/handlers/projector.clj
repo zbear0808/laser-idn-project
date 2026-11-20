@@ -319,6 +319,18 @@
     {:state (assoc-in state [:projectors projector-id :enabled?] enabled?)}
     {:state state}))
 
+(defn- handle-projectors-set-exclude-from-all
+  "Keep a projector out of All, and so out of Left, Right, Center, Odd and
+   Even (D-33), or put it back (:exclude? true or false), from the All row
+   or the inspector. It still plays its own group and its groups. An unknown
+   projector, any other value, or the value it has changes nothing."
+  [{:keys [projector-id exclude? state]}]
+  (if (and (contains? (:projectors state) projector-id)
+           (boolean? exclude?)
+           (not= exclude? (boolean (get-in state [:projectors projector-id :exclude-from-all?]))))
+    {:state (assoc-in state [:projectors projector-id :exclude-from-all?] exclude?)}
+    {:state state}))
+
 
 
 
@@ -652,6 +664,7 @@
     
     ;; The rig strip and its inspector (Z2)
     :projectors/set-enabled (handle-projectors-set-enabled event)
+    :projectors/set-exclude-from-all (handle-projectors-set-exclude-from-all event)
     
     ;; Configuration
     :projectors/toggle-device-expand (handle-projectors-toggle-device-expand event)
