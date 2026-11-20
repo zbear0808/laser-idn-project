@@ -11,6 +11,7 @@
             [laser-show.animation.effects.calibration]
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
+            [laser-show.animation.effects.points]
             [laser-show.animation.effects.shape]
             [laser-show.animation.effects.zone]
             [laser-show.animation.types :as t]))
@@ -23,7 +24,11 @@
    ;; Editor-only constraint: the scale editor uses it to keep x/y scale locked
    ;; together and writes both :x-scale and :y-scale. Applying it in scale-xf
    ;; (forcing y = x) would break uniform mirroring (e.g. x -1.2, y 1.2).
-   [:scale :uniform?] "UI aspect-lock flag, scale-xf reads :x-scale/:y-scale only"})
+   [:scale :uniform?] "UI aspect-lock flag, scale-xf reads :x-scale/:y-scale only"
+   ;; The 6-point test frame is under every budget the limits allow (1 kpps at
+   ;; 120 fps is 8 points), so Decimate leaves it whole; points-test varies them.
+   [:decimate :kpps] "the test frame is under every budget"
+   [:decimate :fps] "the test frame is under every budget"})
 
 (def ^:private expected-effect-ids
   "Guard so this test fails loudly if an effect namespace stops loading."
@@ -31,6 +36,7 @@
     :hue-shift :saturation :color-filter :set-hue :set-color :oklab-hue-shift
     :intensity :blackout :threshold :trace-fade
     :rgb-curves :axis-transform
+    :decimate
     :zone-selector})
 
 (def ^:private test-frame

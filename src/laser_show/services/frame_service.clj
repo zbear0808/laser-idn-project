@@ -53,6 +53,7 @@
             [laser-show.animation.effects.color]
             [laser-show.animation.effects.intensity]
             [laser-show.animation.effects.calibration]
+            [laser-show.animation.effects.points]
             [laser-show.animation.effects.zone]))
 
 
