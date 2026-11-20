@@ -243,3 +243,52 @@
     (ui/wait-for! #(= :graphics (clip-target :c1)))
     (ui/assert-text! "#target-chip-clip" "Graphics")
     (is (= "Change Clip Target" (history/undo-label (:history (app-state)))))))
+
+
+;; The grid: badges and column targets (06 §7.3)
+
+(defn- cell-tooltip
+  "The tooltip of the cue cell at [col row]: the label around it holds it."
+  [col row]
+  (ui/on-fx-thread #(let [parent (some-> ^javafx.scene.Node (ui/query (format "#grid-cell-%d-%d" col row)) .getParent)]
+                      (when (instance? Control parent)
+                        (some-> ^Control parent .getTooltip .getText)))))
+
+(defn- has-class? [selector cls]
+  (ui/on-fx-thread #(boolean (some-> ^javafx.scene.Node (ui/query selector) .getStyleClass (.contains cls)))))
+
+(deftest grid-badge-and-column-target-test
+  (state/swap-state! #(-> %
+                          (assoc-in [:chains :cue-chains [0 0] :items 0 :target] :zone/a)
+                          (assoc-in [:chains :cue-chains [1 0]] {:items [{:type :preset :id :b1 :preset-id :wave
+                                                                          :params {} :effects []}]})))
+  (testing "a cue's badge, top right, and its line in the cell's tooltip"
+    (ui/wait-for! #(some? (ui/query "#grid-cell-badge-0-0")))
+    (is (= ["A"] (texts "#grid-cell-badge-0-0 .label")))
+    (is (not (has-class? "#grid-cell-badge-0-0" "grid-cell-target-badge-inherited")))
+    (is (= "A → Left (map: Left / Right)" (cell-tooltip 0 0)))
+    (is (nil? (ui/query "#grid-cell-badge-1-0")) "All: no badge"))
+  (testing "a column's number sets its default"
+    (ui/assert-text! "#grid-column-number-1" "2")
+    (is (= "Column 2: no default (cues use the show default: All)" (tooltip-of "#grid-column-number-1")))
+    (fire-item! "#grid-column-number-1" "B → Right")
+    (ui/wait-for! #(= :zone/b (get-in (app-state) [:grid :column-targets 1])))
+    (ui/assert-text! "#grid-column-number-1" "2 · B")
+    (is (= "Column 2: cues here without a target of their own use B → Right" (tooltip-of "#grid-column-number-1")))
+    (is (= "Change Column Target" (history/undo-label (:history (app-state))))))
+  (testing "the cue there inherits it: its badge is dim, and its tooltip says from where"
+    (ui/wait-for! #(some? (ui/query "#grid-cell-badge-1-0")))
+    (is (= ["B"] (texts "#grid-cell-badge-1-0 .label")))
+    (is (has-class? "#grid-cell-badge-1-0" "grid-cell-target-badge-inherited"))
+    (is (= "B → Right (map: Left / Right) · from column 2" (cell-tooltip 1 0))))
+  (testing "a group: pinned"
+    (fire-item! "#grid-column-number-1" "Left")
+    (ui/wait-for! #(= :auto/left (get-in (app-state) [:grid :column-targets 1])))
+    (ui/assert-text! "#grid-column-number-1" "2 · pinned L")
+    (ui/wait-for! #(= ["L"] (texts "#grid-cell-badge-1-0 .label")))
+    (is (= "Pinned: ignores the zone map · from column 2" (cell-tooltip 1 0))))
+  (testing "Inherit takes it away"
+    (fire-item! "#grid-column-number-1" "Inherit (All)")
+    (ui/wait-for! #(not (contains? (get-in (app-state) [:grid :column-targets]) 1)))
+    (ui/assert-text! "#grid-column-number-1" "2")
+    (ui/wait-for! #(nil? (ui/query "#grid-cell-badge-1-0")))))

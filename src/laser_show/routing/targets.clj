@@ -462,8 +462,8 @@
 (defn badge-tooltip
   "The badge's line in its cell's tooltip (§8.5): each zone and where
    zone-map (named map-name) sends it, \"A → Left · B → Right (map: Left /
-   Right)\", a union \"A + B → Left + Right\", a target naming no zone
-   \"Graphics (pinned)\", or for those alone \"Pinned: ignores the zone
+   Right)\", a union \"A + B → Left + Right\", then each target naming no
+   zone, \"Graphics (pinned)\"; for those alone \"Pinned: ignores the zone
    map\". nil when there's no badge."
   [names zone-map map-name targets]
   (let [[singles unions pinned] (grouped targets)
@@ -471,7 +471,54 @@
                            (map #(target-text names zone-map %) unions))
         pin-parts (map #(str (target-text names zone-map %) " (pinned)") pinned)]
     (cond
-      (seq zone-parts) (str (str/join " · " (concat zone-parts pin-parts))
-                            (when map-name (str " (map: " map-name ")")))
+      (seq zone-parts) (str/join " · " (cons (str (str/join " · " zone-parts)
+                                                  (when map-name (str " (map: " map-name ")")))
+                                             pin-parts))
       (seq pinned) "Pinned: ignores the zone map"
       :else nil)))
+
+(defn content-resolutions
+  "The resolution (resolve-item) of each of cue's presets that can play: on,
+   in groups that are on, at any depth (§8.5: a badge shows those), its
+   column's default col-target and the show's show-target included."
+  ([cue col-target show-target]
+   (content-resolutions cue col-target show-target nil))
+  ([cue col-target show-target col]
+   (let [fallback (cue-fallback (:target cue) col-target show-target col)
+         by-track (track-targets (:tracks cue))]
+     (letfn [(walk [parent nodes]
+               (mapcat (fn [node]
+                         (when (and (map? node) (not (false? (:enabled? node))))
+                           (let [res (resolve-item (:target node) (get by-track (:track-id node)) parent fallback)]
+                             (if (= :group (:type node))
+                               (walk (inherited res (:id node)) (:items node))
+                               [res]))))
+                       nodes))]
+       (vec (walk nil (:items cue)))))))
+
+(def ^:private from-outside
+  "Where a resolution comes from when nothing in the cue sets it."
+  #{:column :show :default})
+
+(defn cell-badge
+  "The badge of cue, in grid column col (§8.5): badge's {:zones :pins} for
+   what its content resolves to (content-resolutions), with :targets (those)
+   and :inherited? (every one of them comes from the column's default or the
+   show's: the badge is dim), then also :from (\"from column 3\"). nil when
+   all of it goes to All."
+  [names cue col-target show-target col]
+  (let [res (content-resolutions cue col-target show-target col)
+        ts (into #{} (map :target) res)]
+    (when-let [b (badge names ts)]
+      (let [inherited? (every? #(contains? from-outside (:from %)) res)]
+        (cond-> (assoc b :targets ts :inherited? inherited?)
+          inherited? (assoc :from (from-text (first res))))))))
+
+(defn cell-badge-tooltip
+  "A cell badge's line in its cell's tooltip: badge-tooltip, then where it
+   comes from when it is inherited (\"… · from column 3\"); nil without a
+   badge."
+  [names zone-map map-name {:keys [targets from] :as cell-badge}]
+  (when cell-badge
+    (when-let [line (badge-tooltip names zone-map map-name targets)]
+      (cond-> line from (str " · " from)))))

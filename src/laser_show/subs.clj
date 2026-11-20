@@ -888,6 +888,25 @@
   [context]
   (boolean (seq (fx/sub-ctx context zones-in-use))))
 
+(defn cell-target-badge
+  "The badge of the cue at [col row] (routing.targets/cell-badge), or nil.
+   It never reads the zone map: a switch leaves it as it is (06 invariant
+   14)."
+  [context col row]
+  (when-let [cue (fx/sub-val context get-in [:chains :cue-chains [col row]])]
+    (targets/cell-badge (fx/sub-ctx context names-ctx) cue
+                        (fx/sub-ctx context column-target col)
+                        (fx/sub-ctx context default-target)
+                        col)))
+
+(defn cell-target-tooltip
+  "The badge's line in its cell's tooltip, or nil. Only a badge with a zone
+   reads the map in use: its line names their lanes."
+  [context col row]
+  (when-let [badge (fx/sub-ctx context cell-target-badge col row)]
+    (let [zone-map (when (:zones badge) (fx/sub-ctx context active-zone-map))]
+      (targets/cell-badge-tooltip (fx/sub-ctx context names-ctx) zone-map (:name zone-map) badge))))
+
 (defn cue-target-explain
   "How each level of the cue at [col row] resolves, its column's and the
    show's defaults included (routing.targets/explain-cue)."

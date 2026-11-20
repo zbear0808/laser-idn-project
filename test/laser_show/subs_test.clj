@@ -845,3 +845,72 @@
                                     subs/cue-warning 2 0)
                         :item-name))
         "no item counts (its editor is closed): no item")))
+
+
+;; Grid badges (zones plan Z4, 06 §8.5)
+
+(def ^:private badge-state
+  (-> (domains/build-initial-state)
+      (assoc-in [:chains :cue-chains]
+                {[0 0] {:items [{:type :preset :id :p1 :preset-id :circle :target :zone/a}
+                                {:type :preset :id :p2 :preset-id :wave :target :zone/b}]}
+                 [1 0] {:items [{:type :preset :id :p3 :preset-id :circle :target :auto/left}
+                                {:type :preset :id :p4 :preset-id :star :target :auto/right}]}
+                 [2 0] {:items [{:type :preset :id :p5 :preset-id :circle}]}
+                 [3 0] {:items [{:type :preset :id :p6 :preset-id :circle}
+                                {:type :preset :id :p7 :preset-id :wave :target :zone/c :enabled? false}]}
+                 [4 0] {:items [{:type :group :id :g :target [:zone/a :zone/b]
+                                 :items [{:type :preset :id :p8 :preset-id :circle}]}]}
+                 [5 0] {:items [{:type :group :id :off :enabled? false :target :zone/d
+                                 :items [{:type :preset :id :p9 :preset-id :circle}]}
+                                {:type :preset :id :p10 :preset-id :wave :target :zone/a}
+                                {:type :preset :id :p11 :preset-id :star :target :graphics}]}})
+      (assoc-in [:grid :column-targets] {2 :zone/a})
+      (assoc-in [:zones :labels :zone/a] "Beams")))
+
+(defn- badge-of [ctx col row]
+  (some-> (fx/sub-ctx ctx subs/cell-target-badge col row) (select-keys [:zones :pins :inherited? :from])))
+
+(deftest cell-badge-sub-test
+  (let [ctx (context badge-state)
+        tip #(fx/sub-ctx ctx subs/cell-target-tooltip %1 %2)]
+    (testing "zones by letter; the tooltip names their lanes in the map in use"
+      (is (= {:zones "A B" :pins nil :inherited? false} (badge-of ctx 0 0)))
+      (is (= "A · Beams → Left · B → Right (map: Left / Right)" (tip 0 0))))
+    (testing "pinned"
+      (is (= {:zones nil :pins "L/R" :inherited? false} (badge-of ctx 1 0)))
+      (is (= "Pinned: ignores the zone map" (tip 1 0))))
+    (testing "all of it inherited from its column: dim, and the tooltip says from where"
+      (is (= {:zones "A" :pins nil :inherited? true :from "from column 3"} (badge-of ctx 2 0)))
+      (is (= "A · Beams → Left (map: Left / Right) · from column 3" (tip 2 0))))
+    (testing "All: no badge; a switched-off item doesn't count"
+      (is (nil? (badge-of ctx 3 0)))
+      (is (nil? (tip 3 0))))
+    (testing "a union"
+      (is (= {:zones "A+B" :pins nil :inherited? false} (badge-of ctx 4 0)))
+      (is (= "A + B → Left + Right (map: Left / Right)" (tip 4 0))))
+    (testing "a zone and a group; a switched-off group's content doesn't count"
+      (is (= {:zones "A" :pins "Graph…" :inherited? false} (badge-of ctx 5 0)))
+      (is (= "A · Beams → Left (map: Left / Right) · Graphics (pinned)" (tip 5 0))))
+    (testing "an empty cell"
+      (is (nil? (badge-of ctx 6 0)))
+      (is (nil? (tip 6 0))))))
+
+(deftest map-switch-rerenders-only-zone-badges-test
+  (let [ctx (context badge-state)
+        cells [[0 0] [1 0] [2 0] [3 0] [4 0] [5 0] [6 0]]
+        read (fn [ctx]
+               (into {} (for [[c r] cells]
+                          [[c r] {:badge (fx/sub-ctx ctx subs/cell-target-badge c r)
+                                  :tip (fx/sub-ctx ctx subs/cell-target-tooltip c r)
+                                  :display (fx/sub-ctx ctx subs/cell-display-data c r)}])))
+        before (read ctx)
+        after (read (fx/swap-context ctx assoc-in [:zone-map :active] :map/odd-even))]
+    (testing "a switch leaves every badge and every cell's display data as it was (identical?)"
+      (doseq [cell cells]
+        (is (identical? (get-in before [cell :badge]) (get-in after [cell :badge])) (str cell))
+        (is (identical? (get-in before [cell :display]) (get-in after [cell :display])) (str cell))))
+    (testing "only the tooltips of badges with a zone change"
+      (is (identical? (get-in before [[1 0] :tip]) (get-in after [[1 0] :tip])) "pinned: it doesn't read the map")
+      (is (= "A · Beams → Odd · B → Even (map: Odd / Even)" (get-in after [[0 0] :tip])))
+      (is (= "A + B → Odd + Even (map: Odd / Even)" (get-in after [[4 0] :tip]))))))

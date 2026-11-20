@@ -66,21 +66,38 @@
        ".grid-cell-target-badge"
        {:-fx-background-color (colors/with-alpha "#000000" 0.45)
         :-fx-background-radius 6
-        :-fx-padding [0 4 0 4]
-        :-fx-font-size 10
+        :-fx-padding [0 4 0 4]}
+       ".grid-cell-target-badge .grid-cell-target-badge-text"
+       {:-fx-font-size 10
         :-fx-font-weight "bold"
         :-fx-text-fill text-primary}
        ".grid-cell-target-badge.grid-cell-target-badge-inherited"
-       {:-fx-opacity 0.6
-        :-fx-font-weight "normal"}
+       {:-fx-opacity 0.55}
+       ".grid-cell-target-badge-inherited .grid-cell-target-badge-text"
+       {:-fx-font-weight "normal"}
 
-       ;; A column's number, which sets the column's target
+       ;; A column's number, which sets the column's target: a label, until
+       ;; it is clicked
        ".grid-column-header"
-       {:-fx-text-fill text-secondary
-        :-fx-font-size 11
+       {:-fx-background-color "transparent"
+        :-fx-background-insets 0
+        :-fx-background-radius 4
+        :-fx-border-width 0
+        :-fx-padding 0
+        :-fx-text-fill text-secondary
         :-fx-cursor "hand"}
-       ".grid-column-header.grid-column-header-set"
+       ".grid-column-header:hover"
+       {:-fx-background-color bg-interactive}
+       ".grid-column-header .grid-column-header-text"
+       {:-fx-text-fill text-secondary}
+       ".grid-column-header.grid-column-header-set .grid-column-header-text"
        {:-fx-text-fill blue}
+       ".grid-column-header .arrow-button"
+       {:-fx-padding 0
+        :-fx-background-color "transparent"}
+       ".grid-column-header .arrow"
+       {:-fx-padding 0
+        :-fx-background-color "transparent"}
 
        ;; The zone map pads
        ".zone-map-pad"

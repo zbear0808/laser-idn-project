@@ -9,11 +9,13 @@
    zones swapped for their lanes). menu-items makes it menu items, a click
    continuing an event template with the row's :target; target-chip is the
    chip that opens it, and target-field the chip with \"Target:\" before
-   it and where an inherited target comes from after it."
+   it and where an inherited target comes from after it. A grid column's
+   number is one too (column-target-header)."
   (:require [cljfx.api :as fx]
             [clj-font-awesome.core :as fa]
             [clj-font-awesome.fonts :as fa-fonts]
             [clojure.string :as str]
+            [laser-show.css.theme :as theme]
             [laser-show.routing.targets :as targets]
             [laser-show.subs :as subs]))
 
@@ -109,13 +111,15 @@
 
 ;; The menu as menu items
 
-(defn- pin-graphic
-  "FontAwesome's thumbtack, never an emoji (06 §7.1)."
-  []
-  {:fx/type :text
-   :text (fa/unicode! :thumbtack :solid)
-   :font (fa-fonts/font :solid 9)
-   :fill "#B0B0B0"})
+(defn pin-icon
+  "FontAwesome's thumbtack, never an emoji (06 §7.1): in chips, menus and
+   badges."
+  ([] (pin-icon 9 "#B0B0B0"))
+  ([size fill]
+   {:fx/type :text
+    :text (fa/unicode! :thumbtack :solid)
+    :font (fa-fonts/font :solid size)
+    :fill fill}))
 
 (defn- check [checked? text]
   (str (if checked? "✓ " "   ") text))
@@ -142,11 +146,11 @@
                                          rows)}
                   :pin {:fx/type :menu-item
                         :text text
-                        :graphic (pin-graphic)
+                        :graphic (pin-icon)
                         :on-action (assoc on-set :target target)}
                   :group (cond-> {:fx/type :menu-item
                                   :text (check checked? (cond-> text audience? (str " · audience")))
-                                  :graphic (pin-graphic)
+                                  :graphic (pin-icon)
                                   :on-action (assoc on-set :target target)}
                            audience? (assoc :style-class ["menu-item" "target-menu-audience"]))
                   {:fx/type :menu-item
@@ -216,3 +220,48 @@
                         (assoc props :fx/type target-chip)]
                  from (conj (cond-> {:fx/type :label :text from :min-width :use-pref-size :style-class ["label" "target-from"]}
                               from-id (assoc :id from-id))))}))
+
+
+;; A grid column's number
+
+(defn- column-tooltip [names zone-map col own show-target]
+  (if own
+    (str "Column " (inc col) ": cues here without a target of their own use "
+         (targets/target-text names zone-map own))
+    (str "Column " (inc col) ": no default (cues use the show default: "
+         (or (targets/target-text names zone-map show-target) "All") ")")))
+
+(defn column-target-header
+  "A grid column's number, which sets the column's default target (06
+   §7.3): \"3\", \"3 · A\", \"3 · 📌 L\" (its :text says \"3 · pinned
+   L\"); a click opens the Target menu in the :column scope. Props: :col
+   :id :width :height :font-size (grid-tab's column number's)."
+  [{:keys [fx/context col id width height font-size]}]
+  (let [{:keys [names zone-map] :as ctx} (menu-context context)
+        own (targets/normalize-target (fx/sub-ctx context subs/column-target col))
+        show-target (targets/normalize-target (fx/sub-ctx context subs/default-target))
+        {:keys [zones pins]} (when own (or (targets/badge names #{own}) {:zones "All"}))
+        number (str (inc col))
+        part (fn [text] {:fx/type :label :text text :style-class ["label" "grid-column-header-text"]})]
+    {:fx/type :menu-button
+     :id id
+     :text (str/join " · " (remove nil? [number zones (when pins (str "pinned " pins))]))
+     :content-display :graphic-only
+     :graphic {:fx/type :h-box
+               :alignment :center
+               :spacing 3
+               :children (cond-> [(part (if (or zones pins) (str number " ·") number))]
+                           zones (conj (part zones))
+                           pins (conj (pin-icon (max 8 (- font-size 3)) (:blue theme/base-colors)) (part pins)))}
+     :style-class (cond-> ["menu-button" "grid-column-header"] own (conj "grid-column-header-set"))
+     :style (str "-fx-font-size: " font-size "px;")
+     :focus-traversable false
+     :alignment :center
+     :min-width width :pref-width width :max-width width
+     :min-height height :pref-height height :max-height height
+     :tooltip {:fx/type :tooltip :text (column-tooltip names zone-map col own show-target)}
+     :items (menu-items (menu-model (assoc ctx
+                                           :scope :column
+                                           :own own
+                                           :inherited (targets/cue-fallback nil nil show-target)))
+                        {:event/type :grid/set-column-target :col col})}))

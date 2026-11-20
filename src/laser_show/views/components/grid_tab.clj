@@ -135,8 +135,10 @@
   "Header above the grid with column numbers, each as wide as its column.
    
    Props:
-   - :size, :font-size - The cells' [width height], and their labels' size"
-  [{:keys [fx/context size font-size]}]
+   - :size, :font-size - The cells' [width height], and their labels' size
+   - :column-component - Optional component in each number's place, with the
+     same id and size (props :col :id :width :height :font-size)"
+  [{:keys [fx/context size font-size column-component]}]
   (let [[cols _] (fx/sub-ctx context subs/grid-size)
         [w _] size]
     {:fx/type :h-box
@@ -144,16 +146,23 @@
      :padding {:left (+ letters-width padding) :right padding}
      :children (vec
                  (for [col (range cols)]
-                   {:fx/type :label
-                    :id (str "grid-column-number-" col)
-                    :text (str (inc col))
-                    :min-width w
-                    :pref-width w
-                    :min-height numbers-height
-                    :pref-height numbers-height
-                    :alignment :center
-                    :style-class ["label-secondary"]
-                    :style (font-style font-size)}))}))
+                   (if column-component
+                     {:fx/type column-component
+                      :col col
+                      :id (str "grid-column-number-" col)
+                      :width w
+                      :height numbers-height
+                      :font-size font-size}
+                     {:fx/type :label
+                      :id (str "grid-column-number-" col)
+                      :text (str (inc col))
+                      :min-width w
+                      :pref-width w
+                      :min-height numbers-height
+                      :pref-height numbers-height
+                      :alignment :center
+                      :style-class ["label-secondary"]
+                      :style (font-style font-size)})))}))
 
 
 ;; Grid with Row Labels
@@ -195,7 +204,7 @@
 (defn- grid-area
   "The column numbers, the row letters and the cells, sized for the area
    the tab gives them (:width and :height, from measured/measured)."
-  [{:keys [fx/context cell-component width height]}]
+  [{:keys [fx/context cell-component column-component width height]}]
   (let [[cols rows] (fx/sub-ctx context subs/grid-size)
         [w h :as size] (cell-size cols rows width height)
         font-size (label-size w h)
@@ -206,7 +215,8 @@
      :min-height min-height
      :children [{:fx/type grid-header
                  :size size
-                 :font-size font-size}
+                 :font-size font-size
+                 :column-component column-component}
                 {:fx/type grid-with-labels
                  :cell-component cell-component
                  :size size
@@ -224,8 +234,10 @@
    - :header-text - Header text for the tab
    - :hint-text - Hint text below the header
    - :empty-hint - Optional line under the hint (nil: none), e.g. for an
-     empty grid"
-  [{:keys [fx/context cell-component header-text hint-text empty-hint]}]
+     empty grid
+   - :column-component - Optional component for the column numbers
+     (grid-header)"
+  [{:keys [fx/context cell-component column-component header-text hint-text empty-hint]}]
   {:fx/type :v-box
    :style (str "-fx-background-color: " (css/bg-primary) ";")
    :padding 16
@@ -247,4 +259,5 @@
               {:fx/type measured/measured
                :v-box/vgrow :always
                :desc {:fx/type grid-area
-                      :cell-component cell-component}}]})
+                      :cell-component cell-component
+                      :column-component column-component}}]})

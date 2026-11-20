@@ -24,6 +24,7 @@
             [laser-show.vibes.reactions :as reactions]
             [laser-show.views.components.load-warning :as load-warning]
             [laser-show.views.components.shortcuts :as shortcuts]
+            [laser-show.views.components.target-control :as target-control]
             [laser-show.views.components.drag-drop-cell :as drag-drop])
   (:import [javafx.scene.input MouseEvent MouseButton]))
 
@@ -108,6 +109,7 @@
    - :label-fn - Function (fn [display-data] -> string)
    - :tooltip-fn - Optional (fn [display-data] -> string or nil): the cell's
      tooltip, on the label that carries its context menu
+   - :badge - Optional node shown top right (a cue's target badge)
    - :context-menu-items - Optional sequence of menu items for context menu. Displayed only when cell is empty.
    
    Example:
@@ -123,7 +125,7 @@
     :context-menu-items [{:fx/type :menu-item :text \"Create Cue\" ...}]}
     "
   [{:keys [col row cell-type display-data on-click on-right-click
-           drag-config label-fn tooltip-fn context-menu-items size font-size]}]
+           drag-config label-fn tooltip-fn context-menu-items size font-size badge]}]
   (let [{:keys [active? has-content?]} display-data
         [width height] (or size [80 60])
         label-text (label-fn display-data)
@@ -189,38 +191,40 @@
                                    :row row
                                    :on-drop on-drop}))
 
-              :children [{:fx/type :v-box
-                          :alignment :center
-                          :spacing 2
-                          :children (filterv some?
-                                             [(when (:learning? display-data)
-                                                {:fx/type :label
-                                                 :text "LEARN"
-                                                 :style-class "grid-cell-learning-badge"})
-                                              (cond-> {:fx/type :label
-                                                       :text label-text
-                                                       :style-class "grid-cell-label"}
-                                                font-size (assoc :style (str "-fx-font-size: " font-size "px;")))
-                                              (when active?
-                                                {:fx/type :region
-                                                 :pref-width 8
-                                                 :pref-height 8
-                                                 :style-class "grid-cell-active-indicator"})
-                                              (when (or (:has-trigger? display-data) (:warning display-data))
-                                                {:fx/type :h-box
-                                                 :alignment :center
-                                                 :spacing 3
-                                                 :children (filterv some?
-                                                                    [(when (:has-trigger? display-data)
-                                                                       {:fx/type :label
-                                                                        :text "⚡"
-                                                                        :style-class "grid-cell-trigger-indicator"})
-                                                                     ;; too heavy for a laser (zones plan Z3)
-                                                                     (when (:warning display-data)
-                                                                       {:fx/type :label
-                                                                        :id (format "%s-cell-warning-%d-%d" (name cell-type) col row)
-                                                                        :text "⚠"
-                                                                        :style-class "grid-cell-warning-indicator"})])})])}]}]
+              :children (filterv some?
+                                 [{:fx/type :v-box
+                                   :alignment :center
+                                   :spacing 2
+                                   :children (filterv some?
+                                                      [(when (:learning? display-data)
+                                                         {:fx/type :label
+                                                          :text "LEARN"
+                                                          :style-class "grid-cell-learning-badge"})
+                                                       (cond-> {:fx/type :label
+                                                                :text label-text
+                                                                :style-class "grid-cell-label"}
+                                                         font-size (assoc :style (str "-fx-font-size: " font-size "px;")))
+                                                       (when active?
+                                                         {:fx/type :region
+                                                          :pref-width 8
+                                                          :pref-height 8
+                                                          :style-class "grid-cell-active-indicator"})
+                                                       (when (or (:has-trigger? display-data) (:warning display-data))
+                                                         {:fx/type :h-box
+                                                          :alignment :center
+                                                          :spacing 3
+                                                          :children (filterv some?
+                                                                             [(when (:has-trigger? display-data)
+                                                                                {:fx/type :label
+                                                                                 :text "⚡"
+                                                                                 :style-class "grid-cell-trigger-indicator"})
+                                                                              ;; too heavy for a laser (zones plan Z3)
+                                                                              (when (:warning display-data)
+                                                                                {:fx/type :label
+                                                                                 :id (format "%s-cell-warning-%d-%d" (name cell-type) col row)
+                                                                                 :text "⚠"
+                                                                                 :style-class "grid-cell-warning-indicator"})])})])}
+                                  badge])}]
     (if has-context-menu?
       (cond-> {:fx/type :label
                :content-display :graphic-only
@@ -234,6 +238,35 @@
 
 ;; Cue Grid Cell
 
+
+(defn- cue-tooltip
+  "A cue cell's tooltip: its warning (zones plan Z3), then where it goes
+   (its badge's line, Z4)."
+  [{:keys [warning badge-line]}]
+  (some->> [(load-warning/cue-warning-text warning) badge-line]
+           (remove str/blank?)
+           seq
+           (str/join "\n")))
+
+(defn- target-badge
+  "Where the cue goes, top right (zones plan Z4, 06 §8.5): its zones, then
+   📌 and what it pins; dim when all of it is inherited. Mouse-transparent,
+   so its words are in the cell's tooltip."
+  [col row {:keys [zones pins inherited?]}]
+  {:fx/type :h-box
+   :id (format "grid-cell-badge-%d-%d" col row)
+   :stack-pane/alignment :top-right
+   :stack-pane/margin 3
+   :max-width :use-pref-size
+   :max-height :use-pref-size
+   :mouse-transparent true
+   :alignment :center
+   :spacing 2
+   :style-class (cond-> ["grid-cell-target-badge"] inherited? (conj "grid-cell-target-badge-inherited"))
+   :children (cond-> []
+               zones (conj {:fx/type :label :text zones :style-class ["label" "grid-cell-target-badge-text"]})
+               pins (conj (target-control/pin-icon 8 "#E0E0E0")
+                          {:fx/type :label :text pins :style-class ["label" "grid-cell-target-badge-text"]}))})
 
 (defn grid-cell
   "Cue grid cell - wrapper around generic-grid-cell.
@@ -264,12 +297,16 @@
         held? (and (:active? display-data) (fx/sub-ctx context subs/output-held?))
         ;; Too heavy for a laser, while it plays (zones plan Z3)
         warning (fx/sub-ctx context subs/cue-warning col row)
+        ;; Where it goes (zones plan Z4): only a badge with a zone reads the
+        ;; map in use, for its tooltip
+        badge (fx/sub-ctx context subs/cell-target-badge col row)
         cell-display-data (assoc display-data
                                  :active? (and (:active? display-data) (not held?))
                                  :held? held?
                                  :has-trigger? has-trigger?
                                  :learning? learning?
-                                 :warning warning)
+                                 :warning warning
+                                 :badge-line (when badge (fx/sub-ctx context subs/cell-target-tooltip col row)))
         open-editor-event (if timeline?
                             {:event/type :timeline-cue-editor/open}
                             {:event/type :cue-chain/open-editor})
@@ -331,7 +368,8 @@
      :drag-config {:drag-type :grid-cell
                    :on-drop {:event/type :grid/move-cell}}
      :label-fn cell-label
-     :tooltip-fn (comp load-warning/cue-warning-text :warning)
+     :tooltip-fn cue-tooltip
+     :badge (when badge (target-badge col row badge))
      :context-menu-items (into base-menu-items trigger-menu-items)}))
 
 
