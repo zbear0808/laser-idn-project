@@ -241,3 +241,38 @@
         (is (= :projectors (get-in out [:ui :active-tab])))
         (is (nil? (get-in out [:projector-ui :active-projector])))))
     (is (not= {} (ui/handle {:event/type :ui/reveal-projector :state base-state})) "no id: still a handler's answer")))
+
+
+;; A preview cell names a target (zones plan Z3)
+
+(deftest set-cell-zone-writes-a-target-test
+  (let [state (-> base-state
+                  (assoc-in [:config :preview :grid-cells] [{:target nil} {:zone-group-id :graphics}])
+                  (assoc-in [:ui :preview-zone-selector-open] 1))
+        out (:state (ui/handle {:event/type :preview/set-cell-zone :cell-index 1 :target :auto.laser/p1 :state state}))]
+    (is (= {:target :auto.laser/p1} (get-in out [:config :preview :grid-cells 1])) "the old key goes")
+    (is (nil? (get-in out [:ui :preview-zone-selector-open])) "and the picker closes")
+    (is (= {:target :all}
+           (get-in (ui/handle {:event/type :preview/set-cell-zone :cell-index 0 :zone-group-id :all :state state})
+                   [:state :config :preview :grid-cells 0]))
+        ":zone-group-id still works")
+    (is (= {:target nil}
+           (get-in (ui/handle {:event/type :preview/set-cell-zone :cell-index 1 :target nil :state state})
+                   [:state :config :preview :grid-cells 1]))
+        "the master view")
+    (testing "a bigger layout fills its new cells with targets"
+      (let [cells (get-in (ui/handle {:event/type :preview/set-grid-layout :fx/event "3x2" :state state})
+                          [:state :config :preview :grid-cells])]
+        (is (= 6 (count cells)))
+        (is (= [{:target nil} {:zone-group-id :graphics}] (subvec cells 0 2)) "the cells it had stay as they were")
+        (is (every? #(contains? % :target) (subvec cells 2)))))))
+
+(deftest old-preview-cell-reads-as-a-target-test
+  (let [ctx (fx/create-context (assoc-in base-state [:config :preview :grid-cells]
+                                         [{:zone-group-id nil} {:zone-group-id :graphics} {:target :auto/left}
+                                          {:target :auto.laser/p1 :zone-group-id :graphics}])
+                               state/cache-factory)]
+    (is (= [{:target nil} {:target :graphics} {:target :auto/left} {:target :auto.laser/p1}]
+           (mapv #(fx/sub-ctx ctx subs/preview-cell-config %) (range 4)))
+        "{:zone-group-id x} reads as {:target x}; a cell with both is its target")
+    (is (= {:target nil} (fx/sub-ctx ctx subs/preview-cell-config 9)) "a cell past the end: the master view")))

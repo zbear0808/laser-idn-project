@@ -1,8 +1,11 @@
 (ns laser-show.views.components.preview
   "Preview panel: a grid of cells, each drawing the show clock's newest tick
-   on each screen refresh (clock-view), for one zone group or for all of them.
-   A cell shows what an engine on its zone sends, before projector effects.
-   The cells' canvases are square and as big as the pane lets them be.
+   on each screen refresh (clock-view), for one target or for everything. A
+   group's cell shows what is sent to that group, as drawn; a laser's cell
+   (:auto.laser/<id>) what that laser draws, its halves fitted, before its
+   calibration (zones plan Z3). The cells' canvases are square and as big as
+   the pane lets them be. Also the rig cards' thumbnails of what each laser
+   really sent (output-thumbnail).
 
    Features:
    - Zone group filtering per cell (the label opens a zone picker)
@@ -13,6 +16,7 @@
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.animation.show-time :as show-time]
+            [laser-show.routing.rig :as rig]
             [laser-show.subs :as subs]
             [laser-show.common.util :as u]
             [laser-show.views.components.clock-view :as clock-view]
@@ -133,26 +137,31 @@
          (draw-dots! gc points width height))
        (draw-message gc width height message)))))
 
-(defn- get-zone-filtered-points
-  "The points a cell for zone-id shows from a tick's preview
-   ({:points :zone-frames}, frame-service/preview-data):
-   - nil zone-id: every cue and zone (the master view)
-   - a zone-id: that zone's frame, looked up directly ([] when none)"
-  [preview zone-id]
-  (if (nil? zone-id)
-    (:points preview)
-    (get (:zone-frames preview) zone-id [])))
+(defn cell-points
+  "The points a cell shows of a tick's preview ({:points :ref-frames
+   :projector-frames}, frame-service/preview-data), for its config
+   ({:target ref}; an old {:zone-group-id ref} reads the same):
+   - no target: every cue and zone (the master view);
+   - a laser's own ref (:auto.laser/<id>): what that laser draws, composed
+     as its engine composes it, before its calibration;
+   - any other ref: what is sent to it ([] when nothing is)."
+  [preview cell]
+  (let [target (if (contains? cell :target) (:target cell) (:zone-group-id cell))]
+    (cond
+      (nil? target) (:points preview)
+      (rig/laser-of target) (or (some-> (get-in preview [:projector-frames (rig/laser-of target)]) deref :frame) [])
+      :else (get-in preview [:ref-frames target] []))))
 
 (defn- redraw-cell!
-  "A preview cell's canvas from the tick in snapshot (clock-view): its zone's
-   frame, or every zone's for the master view (zone-id nil). It draws only
-   when that differs from what it drew last: while nothing plays, or a cue's
-   frame doesn't change, the canvas isn't touched. The canvas's accessible
-   text says what it shows."
-  [^Canvas canvas snapshot {:keys [zone-id width height]}]
+  "A preview cell's canvas from the tick in snapshot (clock-view): what its
+   target shows (cell-points), or every zone for the master view (target
+   nil). It draws only when that differs from what it drew last: while
+   nothing plays, or a cue's frame doesn't change, the canvas isn't touched.
+   The canvas's accessible text says what it shows."
+  [^Canvas canvas snapshot {:keys [target width height]}]
   (let [stale? (boolean (and snapshot (show-time/stale? snapshot (System/nanoTime))))
         preview (when-not stale? (some-> snapshot :preview deref))
-        points (get-zone-filtered-points preview zone-id)
+        points (cell-points preview {:target target})
         message (if stale? "Show clock stalled" "No Preview")
         drawn [(not-empty points) message width height]
         props (.getProperties canvas)]
@@ -258,11 +267,12 @@
 (defn- zone-id-text
   "A ref as part of a node id: its namespace and name, dots and slashes as
    dashes (:auto/left is auto-left, :auto.laser/p1 auto-laser-p1), so the
-   automatic Left and a kept \"Left (manual)\" (:left) don't share one."
+   automatic Left and a kept \"Left (manual)\" (:left) don't share one;
+   master for the master view, so it isn't All's."
   [zone-id]
   (if zone-id
     (str/replace (str (when-let [space (namespace zone-id)] (str space "-")) (name zone-id)) "." "-")
-    "all"))
+    "master"))
 
 (defn zone-selector-popup-item
   "Single item in the zone selector popup menu; a built-in group (locked?)
@@ -277,7 +287,7 @@
                (when selected? " -fx-background-color: #404040;"))
    :on-mouse-clicked {:event/type :preview/set-cell-zone
                       :cell-index cell-index
-                      :zone-group-id zone-id}
+                      :target zone-id}
    :children (filterv some?
                       [{:fx/type :circle
                         :radius 5
@@ -293,14 +303,16 @@
                           :style "-fx-text-fill: #4AD94A; -fx-font-size: 11;"})])})
 
 (defn zone-selector-popup
-  "Popup menu for selecting zone group for a preview cell.
-   Positioned below the label in a stack-pane."
+  "Popup menu for what a preview cell shows: the master view, then
+   everything a cue can be sent to (subs/target-groups: All, the automatic
+   groups, each laser, your groups); a laser's cell shows what that laser
+   draws. Positioned below the label in a stack-pane."
   [{:keys [fx/context cell-index]}]
   (let [zone-groups (fx/sub-ctx context subs/target-groups)
         cell-config (fx/sub-ctx context subs/preview-cell-config cell-index)
-        current-zone-id (:zone-group-id cell-config)
+        current-zone-id (:target cell-config)
         ;; Build items: Master (nil) first, then all zone groups
-        items (into [{:id nil :name "Master (All)" :color "#808080"}]
+        items (into [{:id nil :name "Master (everything)" :color "#808080"}]
                     zone-groups)]
     {:fx/type :v-box
      ;; Use translate-y to position below the label
@@ -363,11 +375,12 @@
                                           (- cell-h label-height (* 2 cell-border)))))))))
 
 (defn preview-cell
-  "Single preview cell in the grid: the show clock's tick for the cell's zone
-   (or every zone), and a clickable zone label that opens the zone picker."
+  "Single preview cell in the grid: the show clock's tick for the cell's
+   target (cell-points: what is sent to a group, what a laser draws, or
+   everything), and a clickable label that opens the picker."
   [{:keys [fx/context cell-index width height]}]
   (let [cell-config (fx/sub-ctx context subs/preview-cell-config cell-index)
-        zone-id (:zone-group-id cell-config)
+        zone-id (:target cell-config)
         zone-groups (fx/sub-ctx context subs/target-groups)
         zone-group (u/seek #(= (:id %) zone-id) zone-groups)
         zone-name (or (:name zone-group)
@@ -402,7 +415,7 @@
                                  :id (str "preview-canvas-" cell-index)
                                  :width canvas-width
                                  :height canvas-height
-                                 :user-data {:zone-id zone-id :width canvas-width :height canvas-height}}}])}))
+                                 :user-data {:target zone-id :width canvas-width :height canvas-height}}}])}))
 
 (defn preview-grid
   "Grid of preview cells, as big as the pane under the header lets them be

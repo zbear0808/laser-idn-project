@@ -544,9 +544,11 @@
   (get-in (fx/sub-val context :config) [:preview :grid-cells] []))
 
 (defn preview-cell-config
-  "Get config for a specific grid cell by index."
+  "A grid cell's config by index: {:target ref} (nil: the master view).
+   An old cell, {:zone-group-id x}, reads as {:target x} (zones plan Z3)."
   [context cell-index]
-  (get (fx/sub-ctx context preview-grid-cells) cell-index {:zone-group-id nil}))
+  (let [cell (get (fx/sub-ctx context preview-grid-cells) cell-index)]
+    {:target (if (contains? cell :target) (:target cell) (:zone-group-id cell))}))
 
 (defn preview-show-labels?
   "Get whether to show zone labels on preview cells."

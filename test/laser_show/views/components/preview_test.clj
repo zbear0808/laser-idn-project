@@ -7,53 +7,20 @@
             [laser-show.state.domains :as domains]
             [laser-show.views.components.preview :as preview]))
 
-;; Access the private function via var
-(def get-zone-filtered-points
-  #'laser-show.views.components.preview/get-zone-filtered-points)
-
-(deftest get-zone-filtered-points-test
-  
-  (testing "nil zone-id returns all combined points (master view)"
-    (let [frame-data {:points [1 2 3]}
-          result (get-zone-filtered-points frame-data nil)]
-      (is (= [1 2 3] result))))
-  
-  (testing "specific zone-id returns points for that zone"
-    (let [frame-data {:zone-frames {:left [:a :b]
-                                    :right [:c :d]}}
-          result (get-zone-filtered-points frame-data :left)]
-      (is (= [:a :b] result)
-          "Should return points for :left zone directly")))
-  
-  (testing "zone not in zone-frames returns empty"
-    (let [frame-data {:zone-frames {:all [:points]}}
-          result (get-zone-filtered-points frame-data :left)]
-      (is (= [] result)
-          "Zone :left not present in zone-frames returns empty")))
-  
-  (testing "zone :all is looked up directly (not a wildcard)"
-    (let [frame-data {:zone-frames {:all [:all-points]
-                                    :left [:left-points]}}
-          result (get-zone-filtered-points frame-data :all)]
-      (is (= [:all-points] result)
-          ":all is a regular zone-id, looked up directly")))
-  
-  (testing "empty zone-frames handles gracefully"
-    (let [frame-data {:zone-frames {}}
-          result (get-zone-filtered-points frame-data :left)]
-      (is (= [] result))))
-  
-  (testing "missing :zone-frames key handles gracefully"
-    (let [frame-data {:points [1 2 3]}
-          result (get-zone-filtered-points frame-data :left)]
-      (is (= [] result)
-          "Returns empty vector when :zone-frames key is missing")))
-  
-  (testing "zone with points from multiple cues (pre-aggregated)"
-    (let [frame-data {:zone-frames {:left [:a :b :c :d]}}  ;; Already aggregated
-          result (get-zone-filtered-points frame-data :left)]
-      (is (= [:a :b :c :d] result)
-          "zone-frames already contains aggregated points from all cues"))))
+(deftest cell-points-test
+  (let [preview {:points [:every-point]
+                 :ref-frames {:auto/left [:left] :graphics [:graphics]}
+                 :projector-frames {:p1 (delay {:frame [:p1-draws]}) :p2 (delay nil)}}]
+    (is (= [:every-point] (preview/cell-points preview {:target nil})) "the master cell: everything")
+    (is (= [:every-point] (preview/cell-points preview {})))
+    (is (= [:left] (preview/cell-points preview {:target :auto/left})) "a group: what is sent to it")
+    (is (= [] (preview/cell-points preview {:target :auto/right})) "nothing sent to it")
+    (is (= [:p1-draws] (preview/cell-points preview {:target :auto.laser/p1}))
+        "a laser: what it draws, as its engine composes it")
+    (is (= [] (preview/cell-points preview {:target :auto.laser/p2})) "a laser nothing reaches")
+    (is (= [] (preview/cell-points preview {:target :auto.laser/p9})) "or that isn't in the routing")
+    (is (= [:graphics] (preview/cell-points preview {:zone-group-id :graphics})) "an old cell reads as its target")
+    (is (= [] (preview/cell-points nil {:target :auto/left})) "no preview yet")))
 
 (deftest frame-stats-label-test
   (testing "shows average frame latency from the stats the frame service provides"

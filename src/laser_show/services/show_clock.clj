@@ -253,7 +253,7 @@
                                             :pulses pulses
                                             :faders (faders/fader-values input-values (get-in state [:config :input :macro-map]))
                                             :routing routing
-                                            :preview (delay (frame-service/preview-data cues))))
+                                            :preview (delay (frame-service/preview-data cues routing))))
         ;; After publish!, so the engines never wait for them
         [runtime status] (status-step runtime state snapshot mtc-pos now-ms)
         [runtime vibe-reports] (vibe-step runtime state pulses now-ms)]

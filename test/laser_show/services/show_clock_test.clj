@@ -356,7 +356,7 @@
     (trigger! 1 0)
     (let [s (ticks! 2)
           [a b] (map #(get-in % [:zone-frames :all]) (:cues s))
-          zone (get-in @(:preview s) [:zone-frames :all])
+          zone (get-in @(:preview s) [:ref-frames :all])
           jump (subvec zone (count a) (+ 2 (count a)))]
       (is (= (+ (count a) 2 (count b)) (count zone)))
       (is (every? (fn [[_ _ r g b]] (= 0.0 r g b)) jump) "dark from the end of one to the start of the next")

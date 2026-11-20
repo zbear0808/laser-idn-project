@@ -22,7 +22,8 @@
     (ui/wait-for! #(= 0 (get-in (state/get-raw-state)
                                 [:ui :preview-zone-selector-open])))
     (ui/assert-visible! "#preview-zone-option-0-all")
-    (ui/click! robot "#preview-zone-option-0-all")
+    (ui/assert-text! "#preview-zone-option-0-master .label" "Master (everything)")
+    (ui/click! robot "#preview-zone-option-0-master")
     (ui/wait-for! #(nil? (get-in (state/get-raw-state)
                                  [:ui :preview-zone-selector-open])))))
 
@@ -163,3 +164,65 @@
         (ui/wait-for! #(nil? (ui/query (canvas 1))))
         (ui/wait-for! #(< two-by-two (first (canvas-size 0))))
         (is (< (* 1.5 two-by-two) (square-side 1)))))))
+
+
+;; A cell names a group or a laser (zones plan Z3, 05 §7)
+
+(defn- ring
+  "A small lit circle (radius r) on target."
+  [target r]
+  {:id (random-uuid) :type :preset :preset-id :circle :enabled? true :effects []
+   :params {:radius r :num-points 64} :zone-group-id target})
+
+(defn- lit-in-band
+  "Lit pixels of cell i's canvas whose column is within lo-hi of its width
+   (0 the left edge, 1 the right)."
+  [i lo hi]
+  (let [^Node node (ui/query (canvas i))
+        width (long (ui/on-fx-thread #(.getWidth (.getLayoutBounds node))))]
+    (count (filter true? (map-indexed (fn [k argb]
+                                        (let [x (/ (double (mod k width)) width)]
+                                          (and (<= lo x hi)
+                                               (or (> (bit-and (bit-shift-right argb 16) 0xFF) 100)
+                                                   (> (bit-and (bit-shift-right argb 8) 0xFF) 100)
+                                                   (> (bit-and argb 0xFF) 100)))))
+                                      (ui/node-pixels (canvas i)))))))
+
+(defn- play-left-and-right!
+  "One laser, and a cue with a circle on Left and another on Right, playing."
+  []
+  (state/swap-state! #(-> %
+                          (assoc :projectors {:p1 {:name "Laser A" :host "10.0.0.1" :enabled? true :zone-groups []}})
+                          (assoc-in [:chains :cue-chains [7 3]] {:destination-zone {:zone-group-id :all}
+                                                                  :items [(ring :auto/left 0.2) (ring :auto/right 0.2)]})))
+  (events/dispatch! {:event/type :grid/trigger-cell :col 7 :row 3})
+  (ui/wait-for! #(some? (get-in (state/get-raw-state) [:playback :active-cues [7 3]]))))
+
+(deftest laser-cell-shows-both-halves-of-a-split-laser-test
+  (play-left-and-right!)
+  (events/dispatch! {:event/type :preview/set-cell-zone :cell-index 3 :target :auto.laser/p1})
+  (with-clock (System/nanoTime)
+    (fn [_]
+      (ui/wait-for! #(pos? (lit-in-band 3 0.0 0.46)))
+      (is (pos? (lit-in-band 3 0.54 1.0)) "the circle in its left half, the other in its right")
+      (is (zero? (lit-in-band 3 0.47 0.53)) "each fitted into its half: nothing in the middle")
+      (is (= "Laser preview" (message 3)))
+      (ui/assert-text! "#preview-zone-label-3 .label" "Laser A"))))
+
+(deftest group-cell-shows-what-is-sent-to-it-test
+  (play-left-and-right!)
+  (with-clock (System/nanoTime)
+    (fn [_]
+      (testing "cell 1 is Left: the circle sent there, as drawn, in the middle"
+        (ui/wait-for! #(pos? (lit-in-band 1 0.4 0.6)))
+        (is (zero? (lit-in-band 1 0.0 0.3))))
+      (testing "Center: nothing is sent to it, though the laser draws both"
+        (is (= "No Preview" (message 3)))))))
+
+(deftest old-cell-still-shows-its-group-test
+  (play-square!)
+  (state/assoc-in-state! [:config :preview :grid-cells 2] {:zone-group-id :all})
+  (with-clock (System/nanoTime)
+    (fn [_]
+      (ui/wait-for! #(pos? (lit-in 2)))
+      (ui/assert-text! "#preview-zone-label-2 .label" "All"))))

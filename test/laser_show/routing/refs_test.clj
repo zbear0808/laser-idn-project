@@ -127,3 +127,12 @@
     (is (not (contains? (refs/cues-using cues :balcony) [0 0])))
     (is (= #{} (refs/cues-using {[9 9] (get-in state [:chains :cue-chains [9 9]])} :balcony))
         "the effects grid and the preview name :balcony, but no cue does")))
+
+(deftest replace-refs-rewrites-a-cells-target-test
+  (testing "a preview cell written since zones Z3 names its group under :target"
+    (let [state (assoc-in (show-state) [:config :preview :grid-cells]
+                          [{:target nil} {:target :balcony} {:zone-group-id :balcony} {:target :right}])]
+      (is (= [{:target nil} {:target :left} {:zone-group-id :left} {:target :right}]
+             (get-in (refs/replace-refs state {:balcony :left}) [:config :preview :grid-cells])))
+      (is (= {:target nil} (get-in (refs/replace-refs state {:balcony nil}) [:config :preview :grid-cells 1]))
+          "cleared: the master view"))))

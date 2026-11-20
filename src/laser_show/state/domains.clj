@@ -256,12 +256,12 @@
             :doc "window dimensions, and :grid-split (0-1), where the user left the divider between a tab and the preview (absent until it is moved: subs/grid-split gives 0.65)"}
    :preview {:default {:zone-group-filter :all
                        :grid-layout [2 2]
-                       :grid-cells [{:zone-group-id nil}    ;; nil = master view (show all)
-                                    {:zone-group-id :auto/left}
-                                    {:zone-group-id :auto/right}
-                                    {:zone-group-id :auto/center}]
+                       :grid-cells [{:target nil}    ;; nil = master view (show all)
+                                    {:target :auto/left}
+                                    {:target :auto/right}
+                                    {:target :auto/center}]
                        :show-labels? true}
-             :doc "Preview grid configuration. grid-layout is [cols rows], grid-cells is vector of cell configs with :zone-group-id (nil = show all/master view). The cells take their size from the preview's pane (views/components/preview.clj canvas-side)"}
+             :doc "Preview grid configuration. grid-layout is [cols rows], grid-cells is a vector of cells {:target ref}: nil is the master view (everything); a group shows what is sent to it; a laser's own ref (:auto.laser/<id>) shows what that laser draws, its halves fitted, before its calibration (zones plan Z3). An old cell {:zone-group-id x} reads as {:target x} (subs/preview-cell-config). The cells take their size from the preview's pane (views/components/preview.clj canvas-side)"}
    :idn {:default {:host nil :port 7255}
          :doc "default IDN connection settings"}
    :osc {:default {:enabled? false :port default-osc-port}
@@ -304,6 +304,10 @@
    - :output-config - Bit depth settings
    - :scan-rate - Points per second (pps) this projector draws: 25 000 for new
      projectors, 1 000-100 000. It sets each frame's duration on the wire
+   - :fit - Its fit guard (zones plan Z3), {:min-fps :reduce-points?
+     :point-floor :dim? :dim-floor}, each optional (animation.fit-guard
+     defaults and settings): below :min-fps it draws fewer points, never
+     under :point-floor of them, then dims if :dim?, never under :dim-floor
    - :zone-groups - Vector of custom zone group IDs this projector belongs to
      (e.g., [:graphics]); All and the automatic groups are never listed
    - :exclude-from-all? - true keeps it out of All and the automatic groups

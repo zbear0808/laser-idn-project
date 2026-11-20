@@ -35,11 +35,14 @@
             [laser-show.animation.presets :as presets]
             [laser-show.animation.effects :as effects]
             [laser-show.animation.chains :as chains]
+            [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.animation.frames :as frames]
             [laser-show.animation.show-time :as show-time]
             [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.backend.output-errors :as output-errors]
             [laser-show.common.util :as u]
+            [laser-show.routing.compose :as compose]
+            [laser-show.routing.rig :as rig]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.input.store :as input-store]
             [laser-show.animation.cue-chains :as cue-chains]
@@ -407,25 +410,51 @@
                                                              [(:id item) (update-vals by-zone count)])))
                                                    (map vector items item-zone-maps))})))))
 
+(defn- ref-frames
+  "{ref frame} for every ref the tick's keys name: the frames of each key
+   that names it, joined in key order (routing.compose/key-order), then
+   across the cues. A key with two refs counts for each."
+  [cues]
+  (reduce (fn [acc {:keys [zone-frames]}]
+            (let [by-ref (reduce (fn [m k]
+                                   (reduce (fn [m ref] (update m ref (fnil conj []) (get zone-frames k)))
+                                           m
+                                           (rig/key-refs k)))
+                                 {}
+                                 (sort-by compose/key-order (keys zone-frames)))]
+              (reduce-kv (fn [acc ref frames]
+                           (let [frame (concatenate-frames frames)]
+                             (update acc ref #(if % (concatenate-frames [% frame]) frame))))
+                         acc
+                         by-ref)))
+          {}
+          cues))
+
 (defn preview-data
   "What the preview shows for one tick, from its rendered cues
-   [{:cell :zone-frames} …] in order (show-time's snapshot :cues):
+   [{:cell :zone-frames} …] in order (show-time's snapshot :cues) and its
+   routing (nil: no laser cells):
    - :points: every cue's zones joined, blanked between them (the master view);
-   - :zone-frames: each zone's frames joined across cues, blanked between them
-     as an engine on that zone joins them (multi-engine/projector-frame);
+   - :ref-frames: {ref frame}, what is sent to each ref the tick's keys name
+     (a group cell);
+   - :projector-frames: {projector-id (delay {:frame :fit})}, for each laser
+     of the routing, what it draws before its calibration: the composition
+     and fit guard its engine runs (routing.compose, animation.fit-guard),
+     worked out only when a cell shows it (a laser's cell);
    - :cue-destinations: {cell #{zone-id}} for each cue that rendered something.
    Nil when nothing rendered."
-  [cues]
-  (when-let [points (concatenate-frames (u/keepv #(concatenate-frames (vec (vals (:zone-frames %)))) cues))]
-    {:points points
-     :zone-frames (reduce (fn [acc {:keys [zone-frames]}]
-                            (reduce-kv (fn [m zone-id frame]
-                                         (update m zone-id #(if % (concatenate-frames [% frame]) frame)))
-                                       acc zone-frames))
-                          {}
-                          cues)
-     :cue-destinations (into {}
-                             (keep (fn [{:keys [cell zone-frames]}]
-                                     (when (seq zone-frames)
-                                       [cell (set (keys zone-frames))])))
-                             cues)}))
+  ([cues] (preview-data cues nil))
+  ([cues routing]
+   (when-let [points (concatenate-frames (u/keepv #(concatenate-frames (vec (vals (:zone-frames %)))) cues))]
+     {:points points
+      :ref-frames (ref-frames cues)
+      :projector-frames (into {}
+                              (map (fn [[pid {:keys [scan-rate fit]}]]
+                                     [pid (delay (when-let [{:keys [frame]} (compose/projector-frame cues routing pid)]
+                                                   (fit-guard/guard frame scan-rate fit)))]))
+                              (:outputs routing))
+      :cue-destinations (into {}
+                              (keep (fn [{:keys [cell zone-frames]}]
+                                      (when (seq zone-frames)
+                                        [cell (set (keys zone-frames))])))
+                              cues)})))

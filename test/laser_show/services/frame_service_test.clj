@@ -8,6 +8,9 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [laser-show.animation.cue-timing :as ct]
             [laser-show.animation.effects :as effects]
+            [laser-show.animation.fit-guard :as fit-guard]
+            [laser-show.routing.compose :as compose]
+            [laser-show.routing.rig :as rig]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
@@ -163,16 +166,16 @@
 (deftest test-zone-frames-single-active-cue
   (testing "Single active cue produces zone-frames entry for its destination zone"
     (let [[cue] (rendered [5 0] (chain-to :all :circle track-1))
-          zone-frames (:zone-frames (frame-service/preview-data [cue]))]
-      (is (= #{:all} (set (keys zone-frames))))
-      (is (= (get-in cue [:zone-frames :all]) (get zone-frames :all))))))
+          ref-frames (:ref-frames (frame-service/preview-data [cue]))]
+      (is (= #{:all} (set (keys ref-frames))))
+      (is (= (get-in cue [:zone-frames :all]) (get ref-frames :all))))))
 
 (deftest test-zone-frames-multiple-cues-same-zone
   (testing "Cues to the same zone are joined there with a blanking jump, as the engine joins them"
     (let [cues (rendered [5 0] (chain-to :all :circle track-1)
                          [6 0] (chain-to :all :square track-2))
           [a b] (map #(get-in % [:zone-frames :all]) cues)
-          zone (get-in (frame-service/preview-data cues) [:zone-frames :all])]
+          zone (get-in (frame-service/preview-data cues) [:ref-frames :all])]
       (is (= (frame-service/concatenate-frames [a b]) zone))
       (is (= (+ (count a) 2 (count b)) (count zone)) "two blanking points between the cues"))))
 
@@ -183,8 +186,8 @@
 
 (deftest test-zone-frames-zones-match-cue-destinations
   (testing "zone-frames keys match union of all cue destination zones"
-    (let [{:keys [zone-frames cue-destinations]} (frame-service/preview-data (two-cues))]
-      (is (= (set (keys zone-frames)) (into #{} cat (vals cue-destinations)))))))
+    (let [{:keys [ref-frames cue-destinations]} (frame-service/preview-data (two-cues))]
+      (is (= (set (keys ref-frames)) (into #{} cat (vals cue-destinations)))))))
 
 
 (defn- render-with-tracks [tracks]
@@ -392,3 +395,41 @@
     (is (= [[:ring {:all 100}] [:box {:auto/left (count (:auto/left plain))}] [:grp {:auto/right (count (:auto/right plain))}]]
            (:item-points (meta asked)))
         "each top-level item's points by key, in order: the circle's 99 and its dark first point; none for one that is off")))
+
+
+;; The preview of a tick (zones plan Z3): what is sent to each group, and
+;; what each laser draws
+
+(deftest preview-ref-frames-follow-ref-membership-test
+  (let [a (square 0.0) b (square 0.4) c (square -0.4)
+        cues [{:cell [0 0] :zone-frames {[:auto/left :graphics] b :auto/left a}}
+              {:cell [1 0] :zone-frames {:auto/left c}}]
+        {:keys [ref-frames]} (frame-service/preview-data cues nil)]
+    (is (= (frame-service/concatenate-frames [a b c]) (:auto/left ref-frames))
+        "every key that names Left, in key order (the single key first), then the next cue's")
+    (is (= b (:graphics ref-frames)) "a key that names two refs counts for each")
+    (is (= #{:auto/left :graphics} (set (keys ref-frames))))
+    (testing "with keyword keys, today's zone frames"
+      (let [cues (two-cues)]
+        (is (= {:all (get-in cues [0 :zone-frames :all]) :left (get-in cues [1 :zone-frames :left])}
+               (:ref-frames (frame-service/preview-data cues))))))))
+
+(deftest preview-projector-frames-are-what-the-engine-composes-test
+  (let [state {:projectors {:p1 {:name "Laser A" :host "10.0.0.1" :zone-groups []}
+                            :p2 {:name "Laser B" :host "10.0.0.2" :zone-groups [] :enabled? false}}}
+        routing (rig/routing (rig/routing-inputs state nil))
+        a (square 0.0)
+        heavy (vec (for [i (range 3000)] [(* 0.5 (Math/cos (* i 0.002))) (* 0.5 (Math/sin (* i 0.002))) 1.0 1.0 1.0]))
+        cues [{:cell [0 0] :zone-frames {:auto/left a :auto/right heavy}}]
+        {:keys [projector-frames]} (frame-service/preview-data cues routing)
+        frame (get projector-frames :p1)]
+    (is (= #{:p1} (set (keys projector-frames))) "each laser the routing has: not one that is off")
+    (is (not (realized? frame)) "composed only when a cell shows it")
+    (is (= (fit-guard/guard (:frame (compose/projector-frame cues routing :p1)) 25000 fit-guard/defaults) @frame)
+        "the engine's composition and fit guard: its halves, fitted, then thinned")
+    (is (= 1804 (count (:frame @frame))) "4 + 2 + 3,000 points, cut to 60%")
+    (testing "a laser nothing reaches: nil"
+      (is (nil? @(get (:projector-frames (frame-service/preview-data [{:cell [0 0] :zone-frames {:graphics a}}] routing))
+                     :p1))))
+    (testing "without routing: none"
+      (is (= {} (:projector-frames (frame-service/preview-data cues)))))))

@@ -10,8 +10,8 @@
      [:keyframe-modulator :keyframes i :params :target-zone], on or off, in the
      :effects of items, groups, clips, tracks and folders, inside effect
      groups too, in cue chains and effect chains;
-   - the preview's [:config :preview :grid-cells i :zone-group-id] and
-     [:config :preview :zone-group-filter].
+   - the preview's [:config :preview :grid-cells i :target] (an old cell's
+     :zone-group-id) and [:config :preview :zone-group-filter].
 
    Membership lists (a projector's or virtual projector's :zone-groups) are
    not places: they say which lasers are in a group, not where content goes.
@@ -206,8 +206,10 @@
                (update-in-same state [:config :preview :grid-cells]
                                (fn [cells]
                                  (mapv-same (fn [cell]
-                                              (let [[found? new] (replaced smap (:zone-group-id cell))]
-                                                (if found? (assoc cell :zone-group-id new) cell)))
+                                              ;; :target since zones Z3, :zone-group-id before
+                                              (let [k (if (contains? cell :target) :target :zone-group-id)
+                                                    [found? new] (replaced smap (get cell k))]
+                                                (if found? (assoc cell k new) cell)))
                                             cells))))}
    {:kind :preview-filter
     :replace (fn [state smap]

@@ -139,13 +139,13 @@
         ;; Build defaults: nil (master) first, then cycle through zone groups
         default-zone-ids (cons nil (cycle (if (seq zone-group-ids)
                                             zone-group-ids
-                                            [:all :left :right :center])))
+                                            [:all :auto/left :auto/right :auto/center])))
         total-cells (* cols rows)
         ;; Resize cells - keep existing, fill new ones from defaults
         new-cells (vec (map-indexed
                         (fn [idx _]
                           (or (get current-cells idx)
-                              {:zone-group-id (nth default-zone-ids idx nil)}))
+                              {:target (nth default-zone-ids idx nil)}))
                         (range total-cells)))]
     (log/debug "Setting preview grid layout:" [cols rows] "cells:" (count new-cells))
     {:state (-> state
@@ -153,13 +153,17 @@
                 (assoc-in [:config :preview :grid-cells] new-cells))}))
 
 (defn- handle-preview-set-cell-zone
-  "Set the zone filter for a specific grid cell.
-   Also closes the zone selector popup after selection."
-  [{:keys [cell-index zone-group-id state]}]
-  (log/debug "Setting preview cell" cell-index "zone to:" zone-group-id)
-  {:state (-> state
-              (assoc-in [:config :preview :grid-cells cell-index :zone-group-id] zone-group-id)
-              (assoc-in [:ui :preview-zone-selector-open] nil))})
+  "Set what a preview cell shows: :target, a ref (a group: what is sent to
+   it; a laser's :auto.laser/<id>: what that laser draws) or nil (the master
+   view, everything); :zone-group-id, the old key, still works. The cell is
+   written {:target …} (zones plan Z3; Z4 renames this event
+   :preview/set-cell-target), and the zone selector popup closes."
+  [{:keys [cell-index state] :as event}]
+  (let [target (if (contains? event :target) (:target event) (:zone-group-id event))]
+    (log/debug "Setting preview cell" cell-index "target to:" target)
+    {:state (-> state
+                (assoc-in [:config :preview :grid-cells cell-index] {:target target})
+                (assoc-in [:ui :preview-zone-selector-open] nil))}))
 
 (defn- handle-preview-open-zone-selector
   "Open the zone selector popup for a specific cell."
