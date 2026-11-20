@@ -504,3 +504,70 @@
     (is (= "Remove Projector" (get-in result [:state :history :undo-stack 0 :description]))
         "one undo step")))
 
+
+;; Identify (zones plan Z1)
+
+
+(def ^:private outputting-state
+  "Streaming on, projector :p1 enabled with a host (so the engines are built for it)."
+  (-> base-state
+      (assoc-in [:projectors :p1] {:name "Laser L" :host "10.0.0.5" :port 7255 :service-id 1 :enabled? true
+                                   :zone-groups [:all]})
+      (assoc-in [:projectors :p2] {:name "Laser R" :host "10.0.0.6" :port 7255 :service-id 1 :enabled? false
+                                   :zone-groups [:all]})
+      (assoc-in [:backend :streaming :running?] true)))
+
+(deftest outputting-is-streaming-and-wanted-test
+  (is (projectors/outputting? outputting-state :p1))
+  (is (not (projectors/outputting? outputting-state :p2)) "turned off")
+  (is (not (projectors/outputting? (assoc-in outputting-state [:backend :streaming :running?] false) :p1))
+      "streaming is off")
+  (is (not (projectors/outputting? outputting-state :nope))))
+
+(deftest identify-sets-its-end-time-test
+  (let [result (projectors/handle {:event/type :projectors/identify :projector-id :p1 :time 1000
+                                   :state outputting-state})]
+    (is (= 4000 (get-in result [:state :projector-ui :identify :p1])))
+    (is (= {:event {:event/type :projectors/identify-ended :projector-id :p1 :until 4000} :delay-ms 3000}
+           (:dispatch-later result)))
+    (testing "pressing it again restarts the 3 seconds"
+      (is (= 6000 (get-in (projectors/handle {:event/type :projectors/identify :projector-id :p1 :time 3000
+                                              :state (:state result)})
+                          [:state :projector-ui :identify :p1]))))))
+
+(deftest identify-ended-clears-only-its-own-test
+  (let [s (assoc-in outputting-state [:projector-ui :identify :p1] 6000)]
+    (is (= 6000 (get-in (projectors/handle {:event/type :projectors/identify-ended :projector-id :p1 :until 4000
+                                            :state s})
+                        [:state :projector-ui :identify :p1]))
+        "an older flash's end leaves a newer flash alone")
+    (is (not (contains? (get-in (projectors/handle {:event/type :projectors/identify-ended :projector-id :p1
+                                                    :until 6000 :state s})
+                                [:state :projector-ui :identify])
+                        :p1)))))
+
+(deftest identify-needs-an-outputting-laser-test
+  (doseq [[label s id] [["turned off" outputting-state :p2]
+                        ["not streaming" (assoc-in outputting-state [:backend :streaming :running?] false) :p1]
+                        ["unknown" outputting-state :nope]]]
+    (let [result (projectors/handle {:event/type :projectors/identify :projector-id id :time 1000 :state s})]
+      (is (identical? s (:state result)) label)
+      (is (nil? (:dispatch-later result)) label))))
+
+(deftest identify-asks-while-a-cue-plays-test
+  (let [playing (-> outputting-state
+                    (assoc-in [:playback :playing?] true)
+                    (assoc-in [:playback :active-cues] {[0 0] {:run 1}}))
+        asked (projectors/handle {:event/type :projectors/identify :projector-id :p1 :time 1000 :state playing})]
+    (is (nil? (get-in asked [:state :projector-ui :identify :p1])) "nothing flashes yet")
+    (is (= "Identify Laser L?" (get-in asked [:state :ui :dialogs :confirm :title])))
+    (is (= "It shows the test pattern for 3 seconds instead of the show."
+           (get-in asked [:state :ui :dialogs :confirm :message])))
+    (is (= {:event/type :projectors/identify :projector-id :p1 :confirmed? true}
+           (get-in asked [:state :ui :dialogs :confirm :confirm-event]))
+        "the parked event carries no state or time")
+    (is (= 4000 (get-in (projectors/handle {:event/type :projectors/identify :projector-id :p1 :time 1000
+                                            :confirmed? true :state playing})
+                        [:state :projector-ui :identify :p1]))
+        "confirmed, it flashes")))
+

@@ -24,7 +24,9 @@
             [clojure.string :as str]
             [laser-show.events.helpers :as h]
             [laser-show.common.util :as u]
-            [laser-show.idn.stream :as stream]))
+            [laser-show.idn.stream :as stream]
+            [laser-show.animation.test-pattern :as test-pattern]
+            [laser-show.backend.output-runtime :as output-runtime]))
 
 
 (def DEFAULT_PROJECTOR_EFFECTS
@@ -395,7 +397,60 @@
                           #(into {} (remove (fn [[_ vp]] (= projector-id (:parent-projector-id vp)))) %))
                   (clear-if [:projector-ui :active-projector])
                   (clear-if [:projector-ui :calibrating-projector-id])
+                  (update-in [:projector-ui :identify] dissoc projector-id)
                   (update-in [:projector-ui :discovered-devices] drop-discovered-output host service-id))})
+    {:state state}))
+
+
+;; Identify and outputting (zones plan Z1)
+
+
+(defn outputting?
+  "Is projector-id's light going out: streaming on, and the projector one the
+   engines are built for (enabled, with a host: output-runtime/wanted)? The
+   operator's intent, not the engine's status, which lags and can recover."
+  [state projector-id]
+  (boolean (and (get-in state [:backend :streaming :running?])
+                (contains? (output-runtime/wanted {projector-id (get-in state [:projectors projector-id])})
+                           projector-id))))
+
+(defn- show-playing? [state]
+  (boolean (and (get-in state [:playback :playing?])
+                (seq (get-in state [:playback :active-cues])))))
+
+(defn- parked
+  "event as plain data, to continue after a confirm: without the co-effects."
+  [event]
+  (dissoc event :state :time :fx/event))
+
+(defn- handle-projectors-identify
+  "Flash projector-id's test pattern for 3 s (multi-engine shows it while
+   [:projector-ui :identify id] is in the future). Only for a projector that is
+   outputting; while a cue plays, it asks first. Pressing it again restarts
+   the 3 s."
+  [{:keys [projector-id time confirmed? state] :as event}]
+  (cond
+    (not (outputting? state projector-id)) {:state state}
+
+    (and (show-playing? state) (not confirmed?))
+    {:state (assoc-in state [:ui :dialogs :confirm]
+                      {:open? true
+                       :title (str "Identify " (projector-label state projector-id) "?")
+                       :message "It shows the test pattern for 3 seconds instead of the show."
+                       :confirm-label "Identify"
+                       :confirm-event (assoc (parked event) :confirmed? true)})}
+
+    :else
+    (let [until (+ (long (or time 0)) test-pattern/identify-ms)]
+      {:state (assoc-in state [:projector-ui :identify projector-id] until)
+       :dispatch-later {:event {:event/type :projectors/identify-ended :projector-id projector-id :until until}
+                        :delay-ms test-pattern/identify-ms}})))
+
+(defn- handle-projectors-identify-ended
+  "Identify's flash is over: clear it, unless a newer press restarted it."
+  [{:keys [projector-id until state]}]
+  (if (= until (get-in state [:projector-ui :identify projector-id]))
+    {:state (update-in state [:projector-ui :identify] dissoc projector-id)}
     {:state state}))
 
 
@@ -464,6 +519,8 @@
     :projectors/add-effect (handle-projectors-add-effect event)
     :projectors/request-remove (handle-projectors-request-remove event)
     :projectors/remove (handle-projectors-remove event)
+    :projectors/identify (handle-projectors-identify event)
+    :projectors/identify-ended (handle-projectors-identify-ended event)
     
     ;; Calibration mode
     :projectors/toggle-calibration (handle-projectors-toggle-calibration event)

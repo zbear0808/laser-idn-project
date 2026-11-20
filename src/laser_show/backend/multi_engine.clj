@@ -161,6 +161,11 @@
       (output-errors/report! [:safety projector-id] e)
       (stamp snapshot []))))
 
+(defn now-ms
+  "The wall clock Identify's flash is timed by (a var, so tests can set it)."
+  []
+  (System/currentTimeMillis))
+
 (defn- test-pattern-mode
   "Is projector-id showing the test pattern at now-ms: :identify-on or
    :identify-off while Identify flashes ([:projector-ui :identify id], until
@@ -208,7 +213,7 @@
       (when (show-time/stale? snapshot now)
         (throw (stalled snapshot now))))
     (let [raw-state (state/get-raw-state)
-          pattern (test-pattern-mode raw-state projector-id (System/currentTimeMillis))]
+          pattern (test-pattern-mode raw-state projector-id (now-ms))]
       (cond
         ;; BLACKOUT darkens the test pattern, and only the pattern
         (and pattern (get-in raw-state [:vibe-runtime :blackout?])) (stamp snapshot [])

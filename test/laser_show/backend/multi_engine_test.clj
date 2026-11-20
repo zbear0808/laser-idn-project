@@ -620,3 +620,15 @@
   (is (= lit-line (#'me/projector-frame :p (snapshot [{:cell [0 0] :zone-frames {:all lit-line}}])))
       "BLACKOUT changes only the test pattern; a grid cue started by hand plays as today"))
 
+(deftest identify-flashes-then-stops-test
+  (state/swap-state! #(assoc-in % [:projectors :p] {:zone-groups [:all]}))
+  (let [cues [{:cell [0 0] :zone-frames {:all lit-line}}]
+        frame-at (fn [now-ms]
+                   (with-redefs [me/now-ms (constantly now-ms)]
+                     (#'me/projector-frame :p (snapshot cues))))]
+    (state/swap-state! #(assoc-in % [:projector-ui :identify :p] 10000))
+    (is (< 300 (count (frame-at 7000))) "lit: the pattern instead of the show")
+    (is (= [] (frame-at 7300)) "dark for the next 250 ms")
+    (is (< 300 (count (frame-at 7500))) "lit again")
+    (is (= lit-line (frame-at 10000)) "at its end time the show comes back, even before it is cleared")))
+
