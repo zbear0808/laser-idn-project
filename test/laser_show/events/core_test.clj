@@ -42,7 +42,9 @@
                :output/write-status
                :project/save :project/load :fx/show-file-chooser :system/exit :system/open-url
                :dev/reload :clipboard/copy-effects :clipboard/paste-effects
-               :clipboard/paste-projector-effects :projectors/scan]))
+               :projectors/scan]))
+  (is (not (contains? events/effects :clipboard/paste-projector-effects))
+      "a projector chain pastes through the list editor's own clipboard (zones Z0)")
   (is (not (contains? events/effects :timing/calculate-bpm)) "a tap sets the BPM in its own handler's state"))
 
 (deftest dispatch-continues-inline-test

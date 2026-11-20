@@ -210,17 +210,6 @@
                  :effects effects}
                 dispatch)))
 
-(defn- effect-clipboard-paste-projector-effects
-  "Effect that pastes effects from clipboard into a projector chain.
-   Continues with :projectors/insert-pasted-effects with the effects to insert."
-  [{:keys [projector-id insert-pos]} dispatch]
-  (when-let [effects (clipboard/get-effects-to-paste)]
-    (run-inline {:event/type :projectors/insert-pasted-effects
-                 :projector-id projector-id
-                 :insert-pos insert-pos
-                 :effects effects}
-                dispatch)))
-
 ;; Projector Scanning Effects
 
 (defn- effect-projectors-scan
@@ -514,7 +503,6 @@
    - :dev/reload - reload :styles or :app code (dev only)
    - :clipboard/copy-effects - copy effects to clipboard
    - :clipboard/paste-effects - paste effects from clipboard (effects grid) (inline)
-   - :clipboard/paste-projector-effects - paste effects from clipboard (projector chain) (inline)
    - :projectors/scan - scan network for IDN devices (later, future)"
   {:state effect-state
    :dispatch effect-dispatch
@@ -538,7 +526,6 @@
    ;; Clipboard effects for effect chain editor
    :clipboard/copy-effects effect-clipboard-copy-effects
    :clipboard/paste-effects effect-clipboard-paste-effects
-   :clipboard/paste-projector-effects effect-clipboard-paste-projector-effects
    ;; Projector scanning effects
    :projectors/scan effect-projectors-scan})
 
