@@ -17,6 +17,7 @@
             [laser-show.idn.stream :as stream]
             [laser-show.views.components.visual-editors.custom-param-renderers :as custom-renderers]
             [laser-show.views.components.parameter-controls :as param-controls]
+            [laser-show.views.components.safety-editor :as safety-editor]
             [laser-show.views.components.list :as list]
             [laser-show.views.components.commit-field :as commit-field]
             [laser-show.views.components.zone-chips :as zone-chips]
@@ -649,29 +650,66 @@
      :items menu-items}))
 
 (defn- calibration-controls
-  "Calibration mode toggle for the selected projector.
-   Displays a boundary box test pattern for corner pin calibration."
+  "The TEST PATTERN section for the selected projector: show or hide its test
+   pattern (a grid through its calibration and its safety outline, zones plan
+   Z1), Identify (a 3 s flash), and the pattern's brightness. A short note
+   says why Identify is off, or why the pattern can't be seen (a disabled
+   button shows no tooltip)."
   [{:keys [fx/context projector-id]}]
   (let [calibrating-id (fx/sub-ctx context subs/calibrating-projector-id)
         calibrating? (= calibrating-id projector-id)
-        brightness (fx/sub-ctx context subs/calibration-brightness)]
+        brightness (fx/sub-ctx context subs/calibration-brightness)
+        projector (fx/sub-val context get-in [:projectors projector-id])
+        streaming? (boolean (fx/sub-val context get-in [:backend :streaming :running?]))
+        blackout? (boolean (fx/sub-val context get-in [:vibe-runtime :blackout?]))
+        enabled? (:enabled? projector true)
+        projector-name (or (when (and (string? (:name projector)) (not (str/blank? (:name projector))))
+                             (:name projector))
+                           (name projector-id))
+        note (fn [id text] {:fx/type :label :id id :text text :style-class ["label-hint"] :wrap-text true})
+        ;; One reason at a time: with the pattern on and streaming off, the
+        ;; pattern's note says it for Identify too
+        notes (cond
+                (and (not streaming?) calibrating?)
+                [(note "projector-pattern-note" "Not streaming: turn on Stream to see it on the laser")]
+
+                (not streaming?)
+                [(note "projector-identify-note" "Turn on Stream to see it on the laser")]
+
+                (not enabled?)
+                [(note "projector-identify-note" (str projector-name " is turned off"))]
+
+                (and calibrating? blackout?)
+                [(note "projector-pattern-note" "BLACKOUT is on (Perform), so the pattern stays dark")])]
     {:fx/type :v-box
-     :spacing 8
-     :children (filterv some?
-                 [{:fx/type :h-box
+     :spacing 6
+     :children (vec
+                (concat
+                 [{:fx/type :label
+                   :text "TEST PATTERN"
+                   :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
+                  {:fx/type :h-box
                    :spacing 8
                    :alignment :center-left
-                   :children [{:fx/type :label
-                               :text "CALIBRATION:"
-                               :style "-fx-text-fill: #808080; -fx-font-size: 11; -fx-font-weight: bold;"}
-                              {:fx/type :button
+                   :children [{:fx/type :button
                                :id "projector-calibration-button"
-                               :text (if calibrating? "Stop Calibration" "Start Calibration")
+                               :text (if calibrating? "Hide test pattern" "Show test pattern")
+                               :min-width :use-pref-size
                                :style-class [(if calibrating? "button-danger" "button-primary")]
                                :on-action {:event/type :projectors/toggle-calibration
-                                           :projector-id projector-id}}]}
-                  (when calibrating?
-                    {:fx/type :h-box
+                                           :projector-id projector-id}}
+                              {:fx/type :button
+                               :id "projector-identify-button"
+                               :text "Identify"
+                               :min-width :use-pref-size
+                               :disable (or (not streaming?) (not enabled?))
+                               :style-class ["button-secondary"]
+                               :tooltip {:fx/type :tooltip :text "Flash this projector's test pattern for 3 seconds"}
+                               :on-action {:event/type :projectors/identify
+                                           :projector-id projector-id}}]}]
+                 notes
+                 (when calibrating?
+                   [{:fx/type :h-box
                      :spacing 8
                      :alignment :center-left
                      :children [{:fx/type :label
@@ -689,7 +727,7 @@
                                  :id "calibration-brightness-label"
                                  :text (format "%.0f%%" (* brightness 100))
                                  :pref-width 40
-                                 :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]})])}))
+                                 :style "-fx-text-fill: #808080; -fx-font-size: 10;"}]}])))}))
 
 (defn- projector-config-panel
   "Configuration panel for the selected projector.
@@ -781,6 +819,10 @@
                                                              :effect selected-effect
                                                              :ui-state effect-ui-state}])
                                                        [{:fx/type :region :v-box/vgrow :always}
+                                                        ;; Safety zone above the test pattern (zones plan Z1)
+                                                        {:fx/type safety-editor/safety-section
+                                                         :fx/context context
+                                                         :projector-id projector-id}
                                                         {:fx/type calibration-controls
                                                          :fx/context context
                                                          :projector-id projector-id}]))}]}}]}
