@@ -181,8 +181,9 @@
                                      :text text
                                      :wrap-text true
                                      :max-width (- card-width 30)
+                                     ;; its row keeps it to one line: the tooltip has all of it
+                                     :tooltip {:fx/type :tooltip :text (or (:detail status) text)}
                                      :style-class ["text-small" "label-secondary"]}
-                              (:detail status) (assoc :tooltip {:fx/type :tooltip :text (:detail status)})
                               (= :error state) (assoc :style (str "-fx-text-fill: " (css/red) ";"))
                               (or (and (= :streaming state) warning) (nil? streaming-text))
                               (assoc :style (str "-fx-text-fill: " (css/orange) ";"))
@@ -232,29 +233,35 @@
         streaming? (= :streaming (:state (fx/sub-ctx context subs/projector-output-status id)))
         pct (when load (load-warning/load-percent load))
         note (load-warning/load-note-text l)]
-    {:fx/type :h-box
-     :spacing 6
-     :alignment :top-left
-     :children [{:fx/type preview/output-thumbnail
-                 :projector-id id
-                 :limit limit
-                 :size thumbnail-size}
-                {:fx/type :v-box
-                 :spacing 3
-                 :children (cond-> []
-                             (not streaming?)
-                             (conj {:fx/type :label
-                                    :id (str "rig-card-not-streaming-" (id-text id))
-                                    :text "Not streaming"
-                                    :style-class ["text-small" "label-hint"]})
-                             pct (conj {:fx/type load-meter :id id :load load :pct pct})
-                             (seq note) (conj {:fx/type :label
-                                               :id (str "rig-card-load-note-" (id-text id))
-                                               :text note
-                                               :wrap-text true
-                                               :max-width (- card-width thumbnail-size 18)
-                                               :style "-fx-font-size: 10;"
-                                               :style-class ["label-secondary"]}))}]}))
+    {:fx/type :v-box
+     :spacing 2
+     :children (cond-> [{:fx/type :h-box
+                         :spacing 6
+                         :alignment :top-left
+                         :children [{:fx/type preview/output-thumbnail
+                                     :projector-id id
+                                     :limit limit
+                                     :size thumbnail-size}
+                                    {:fx/type :v-box
+                                     :spacing 3
+                                     :children (cond-> []
+                                                 (not streaming?)
+                                                 (conj {:fx/type :label
+                                                        :id (str "rig-card-not-streaming-" (id-text id))
+                                                        :text "Not streaming"
+                                                        :style-class ["text-small" "label-hint"]})
+                                                 pct (conj {:fx/type load-meter :id id :load load :pct pct}))}]}]
+                 ;; One line under the thumbnail, there even when empty so the card
+                 ;; keeps its height; the tooltip has all of it
+                 true (conj (cond-> {:fx/type :label
+                                     :id (str "rig-card-load-note-" (id-text id))
+                                     :text (or note "")
+                                     :min-height 13
+                                     :pref-height 13
+                                     :max-width (- card-width 12)
+                                     :style "-fx-font-size: 10;"
+                                     :style-class ["label-secondary"]}
+                              (seq note) (assoc :tooltip {:fx/type :tooltip :text note}))))}))
 
 (defn- card-sections
   "A card, top to bottom: its sections (nil ones are left out)."
@@ -421,7 +428,7 @@
    row each, + Group): the strip takes it, up to a limit past which it
    scrolls, and the inspector below gets the rest."
   [rows]
-  (min 400 (+ 72 (+ thumbnail-size 2) (* 17 rows) 38)))
+  (min 400 (+ 72 (+ thumbnail-size 2) 14 (* 17 rows) 38)))
 
 (defn rig-strip
   "The cards between ◀ and ▶, and under them the group rows
@@ -456,6 +463,7 @@
                                                    :fx/key (:id card)
                                                    :grid-pane/column (inc k)
                                                    :grid-pane/row 0
+                                                   :grid-pane/valignment :top
                                                    :card card
                                                    :drop-mark drop-mark
                                                    :outputting? outputting?}))
