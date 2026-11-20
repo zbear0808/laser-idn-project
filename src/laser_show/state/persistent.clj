@@ -38,6 +38,10 @@
    
    - :paths - Vector of path specs to save/load for this file
    - :path - Path into the unified state map
+   - :owner - :show (the show: its cues, effects, groups and settings) or
+              :rig (the machine's rig: the projectors, their order and
+              calibration, D-30; the same paths state.rig-file/rig-paths
+              names)
    - :keys - nil means save whole domain, vector means select-keys for partial save
    - :merge-defaults? - when loading, merge the file data over the domain defaults
                         (for settings maps, so keys added after the file was saved
@@ -47,20 +51,20 @@
                  missing from the file are reset to their initial value.
    When saving: if :keys is nil, save full domain; if :keys is a vector, save (select-keys)"
   {:project-metadata
-   {:paths [{:path [:config] :merge-defaults? true}
-            {:path [:timing] :keys [:bpm]}
-            {:path [:grid] :keys [:size]}]}
+   {:paths [{:path [:config] :owner :show :merge-defaults? true}
+            {:path [:timing] :owner :show :keys [:bpm]}
+            {:path [:grid] :owner :show :keys [:size]}]}
    
    :hardware
-   {:paths [{:path [:projectors]}
-            {:path [:virtual-projectors]}
-            {:path [:zone-groups]}
-            {:path [:rig] :merge-defaults? true}]}
+   {:paths [{:path [:projectors] :owner :rig}
+            {:path [:virtual-projectors] :owner :rig}
+            {:path [:zone-groups] :owner :show}
+            {:path [:rig] :owner :rig :merge-defaults? true}]}
    
    :content
-   {:paths [{:path [:chains :cue-chains]}
-            {:path [:chains :effect-chains]}
-            {:path [:chains :projector-effects]}]}})
+   {:paths [{:path [:chains :cue-chains] :owner :show}
+            {:path [:chains :effect-chains] :owner :show}
+            {:path [:chains :projector-effects] :owner :rig}]}})
 
 
 ;; Pure Document Functions
@@ -71,6 +75,11 @@
 
 (def ^:private all-path-specs
   (vec (mapcat :paths (vals persistent-state-mapping))))
+
+(defn owned-paths
+  "The saved paths owner (:show or :rig) owns."
+  [owner]
+  (into [] (comp (filter #(= owner (:owner %))) (map :path)) all-path-specs))
 
 (defn- collect-data-for-paths
   "Collect data from state for multiple paths into a single map.
@@ -145,10 +154,13 @@
                   :else loaded)))))
 
 (defn- replace-document
-  "Replace every persisted path in state with file-data (a map shaped like state).
-   Paths missing from file-data are reset to their initial value."
-  [state initial file-data]
-  (reduce #(replace-at-path %1 initial file-data %2) state all-path-specs))
+  "Replace every persisted path of owners (a set of :show and :rig) in state
+   with file-data (a map shaped like state). Paths missing from file-data
+   are reset to their initial value."
+  [state initial file-data owners]
+  (reduce #(replace-at-path %1 initial file-data %2)
+          state
+          (filter #(contains? owners (:owner %)) all-path-specs)))
 
 (defn- reset-session
   "Reset state that refers to the previous document (playback, what vibe
@@ -190,7 +202,7 @@
   [state zip-contents zip-path]
   (let [initial (domains/build-initial-state)]
     (-> state
-        (replace-document initial (zip-contents->file-data zip-contents))
+        (replace-document initial (zip-contents->file-data zip-contents) #{:show :rig})
         (reset-session initial)
         ;; Before mark-clean, so an old project isn't "unsaved" right after loading
         (update-in [:chains :cue-chains] model/normalize-timeline-cues)
@@ -203,7 +215,7 @@
   [state]
   (let [initial (domains/build-initial-state)]
     (-> state
-        (replace-document initial {})
+        (replace-document initial {} #{:show :rig})
         (templates/apply-starter-cue-chains)
         (templates/apply-starter-vibes)
         (templates/apply-starter-effects)
