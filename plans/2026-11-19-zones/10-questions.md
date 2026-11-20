@@ -4,11 +4,12 @@
 - Each question has a recommendation (★), and the phase docs are written assuming it.
 - **You only need to answer the ones where you disagree.** "All ★ except Q-Z3-1 B" is a complete answer.
 - The questions are grouped by the phase they block. The earlier a phase comes, the sooner its questions matter.
-- Already decided: D-1 to D-32 (`00-overview.md` §2), and Q-Z2-1 B, which is already applied to the spec (§3).
+- Already decided: D-1 to D-34 (`00-overview.md` §2).
+- **Round 3 (2026-11-19):** Q-Z2-1 **B** and Q-Z1-1 **A** are confirmed (D-33, D-34). Q1 is still open.
 
 ## Before anything starts
 
-**Q1 · How many lasers do you usually run, and how are they laid out?**
+**Q1 · How many lasers do you usually run, and how are they laid out?** (Still open. Until it's answered, the plan assumes a strip that scrolls past about 8 cards.)
 This sizes the rig strip (it scrolls past about 8 cards; more than 12 calls for compact cards), the test fixtures, and which layouts the defaults are tuned for.
 - **A** 1–2
 - **B** 3–4
@@ -57,8 +58,8 @@ Also tell me the layout: a line on a truss, sides + center, front and back, or w
 
 ## Z1 · Safety (`03-phase-z1-safety.md`)
 
-**Q-Z1-1 · Until ZR, opening a show replaces this machine's safety zones with the show's**, as it already does for every projector setting.
-- **A ★** Accept it until ZR, and say so after Open: "Safety zones and calibration come from friday.zip".
+**Q-Z1-1 · Until ZR, opening a show replaces this machine's safety zones with the show's**, as it already does for every projector setting. **Answered A (D-34).**
+- **A ★ (chosen)** Accept it until ZR, and say so after Open: "Safety zones and calibration come from friday.zip".
 - **B** Pull ZR's "never overwrite safety" rule forward into Z1.
 
 **Q-Z1-2 · Identify while streaming is off.**
@@ -71,7 +72,7 @@ Also tell me the layout: a line on a truss, sides + center, front and back, or w
 
 ## Z2 · Rig strip and groups (`04-phase-z2-rig-strip-and-groups.md`)
 
-**Q-Z2-1 · Exclude from All also takes a laser out of Left/Right/Center/Odd/Even.** ★ B is **already applied** to the spec and to Z2. Say if you want **A** instead (Exclude only means "not in All") or **C** (a second switch).
+**Q-Z2-1 · Exclude from All also takes a laser out of Left/Right/Center/Odd/Even.** **Answered B (D-33)**, and already applied to the spec and to Z2. The other options were **A** (Exclude only means "not in All") and **C** (a second switch).
 
 **Q-Z2-2 · Ticking "Scans the audience" on a laser that is in All** makes every All cue an audience cue for vibes.
 - **A ★** Offer to exclude it, with an amber line and a button. Nothing happens by itself.

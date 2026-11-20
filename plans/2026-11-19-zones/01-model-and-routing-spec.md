@@ -47,7 +47,7 @@ The routing reads **resolved** parameter values. In Z4 the Zone Selector effect 
 ## 3. Automatic groups (D-17, D-20, D-21)
 
 Inputs:
-- `E`: the **enabled** projectors in rig order, **without** the ones marked **`:exclude-from-all? true`**. Excluded projectors are left out of All *and* out of the folded groups below (Q-Z2-1 B, waiting on your confirmation). They are still reachable through custom groups and through their own `:auto.laser/*` group, which exists for **every enabled projector**. An enabled projector that is **offline keeps its place**, so a laser that dies doesn't shift Odd/Even on the others (D-21).
+- `E`: the **enabled** projectors in rig order, **without** the ones marked **`:exclude-from-all? true`**. Excluded projectors are left out of All *and* out of the folded groups below (Q-Z2-1 B, confirmed as D-33). They are still reachable through custom groups and through their own `:auto.laser/*` group, which exists for **every enabled projector**. An enabled projector that is **offline keeps its place**, so a laser that dies doesn't shift Odd/Even on the others (D-21).
 - "Enabled" follows the engines' rule: a missing `:enabled?` key counts as on (`backend/multi_engine.clj:220`).
 - `n = |E|`, with `pk` the k-th projector of `E`.
 - `[:rig :middle]`: one of `:split` (the **default**), `:both`, `:left`, `:right`, `:none`.

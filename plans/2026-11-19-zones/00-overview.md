@@ -54,7 +54,7 @@ The phase docs were written against slightly different commits: 04, 05, 06 and 0
 
 ## 2. Decisions
 
-D-1 to D-13 were made on 2026-11-19 (round 1, recorded in `07-plan.md`). D-14 to D-32 were made the same day (round 2: your answers, plus your "the recommendations are fine" for the rest). The plan's own design calls are marked *plan*, and §9 asks you to confirm them.
+D-1 to D-13 were made on 2026-11-19 (round 1, recorded in `07-plan.md`). D-14 to D-32 were made the same day (round 2: your answers, plus your "the recommendations are fine" for the rest). D-33 and D-34 are round 3. The plan's own design calls are marked *plan*, and §9 asks you to confirm them.
 
 | # | Decision | From |
 |---|---|---|
@@ -90,6 +90,8 @@ D-1 to D-13 were made on 2026-11-19 (round 1, recorded in `07-plan.md`). D-14 to
 | D-30 | **The rig gets its own file** (physical setup: identity, order, safety, calibration, fit, group membership). The show keeps targets, maps and group definitions. **Opening a show never overwrites safety or calibration** (ZR) | Q8 |
 | D-31 | Audience limits beyond the rectangles (a brightness cap, scan speed) come later | Q5 |
 | D-32 | Permanent zones on one laser (for example a fixed graphics half) come later | Q4 |
+| D-33 | **Exclude from All also takes a laser out of Left/Right/Center/Odd/Even.** It is reached only by its own `:auto.laser/*` group and by custom groups (spec §3) | Q-Z2-1 B, confirmed 2026-11-19 |
+| D-34 | **Until ZR, opening a show still replaces this machine's safety zones and calibration with the show's**, and Z1 says so in a notice after Open | Q-Z1-1 A, confirmed 2026-11-19 |
 
 ## 3. The pipeline after Z3
 
@@ -151,7 +153,9 @@ Z1 ─────────┘           │
   - Its audience rule is kept and extended: a map whose lane is an audience group counts.
   - **Either can land first.** If 8a lands first, Z5 extends it; if Z4 lands first, 8a takes refs from the start.
 - **Vibe audience rule** (`vibes/library.clj` `audience-groups`): Z2's tag editor finally sets `:crowd-scanning`, and Z4 gives zones and maps to the audience checks.
-- **UX plan** (`plans/2026-11-18-ux-improvements/`): the Projectors tab is being reworked there as well. Before Z2, check what it has landed (for example the status line and "No projectors enabled" link from `92c191a`).
+- **Vibe Phase 4a's reactions** (`vibes/reactions.clj` `listens-to`, `effect-sources`; landed in `6715fb4`): today they only see the sources named inside modulators. **Z5 extends `effect-sources`** so a zone pattern's Step on and Restart on count, which makes a pattern that steps on HIT one of HIT's reactions (named on its pad, and covered by 4b's lint). The vibe plan's owner should agree, since it changes 4a's code (07 S-10).
+- **Vibe Phase 5's faders** (`9f5d78a`): the Fader modulator can drive a pattern's rate, offset or style, and the Morph fader can scrub a step grid (07 §8, 08 §8). A new project's Master cell sits at `[0 3]` on the effects grid, outside the zone stage, so UI tests for pattern cells must use other cells.
+- **UX plan** (`plans/2026-11-18-ux-improvements/`, finished and deleted in `2d1f813`; it is in git history): all four of its phases are done. Z2 builds on what they left in the Projectors and Zone Groups tabs, for example the status line and "No projectors enabled" link from `92c191a` and the subtitle and row ids from `b9b9d55`.
 
 ## 7. Risks
 

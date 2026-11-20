@@ -467,9 +467,9 @@ Each step is one commit: the named tests first (run them and record them red), t
 
 ### Open questions for the user (★ = recommendation)
 
-**Q-Z2-1 · Does Exclude from All also take a laser out of the automatic groups?** An audience scanner or a graphics-only laser placed on the strip still counts in Left, Right, Odd and Even (S-4, and needs/08 P-2). In §8's example it even makes Laser R the "middle" laser.
-- **A** No, as the spec says. Exclude only means "not in All".
-- **B ★** Yes. An excluded laser is reached only by its own group and your groups, and the others fold without it. Z2 changes one line in `rig-inputs`. Since this changes spec §3, it needs your yes.
+**Q-Z2-1 · Does Exclude from All also take a laser out of the automatic groups?** **Answered B on 2026-11-19 (D-33).** The spec (§3) and this doc (§4, §8) follow it. An audience scanner or a graphics-only laser placed on the strip used to still count in Left, Right, Odd and Even (S-4, and needs/08 P-2).
+- **A** No, as the spec first said. Exclude only means "not in All".
+- **B ★ (chosen)** Yes. An excluded laser is reached only by its own group and your groups, and the others fold without it.
 - **C** A second switch, "Not in the automatic groups".
 
 **Q-Z2-2 · Ticking "Scans the audience" on a laser that is in All** makes every All cue an audience cue for vibes (as today, when it lists `:all`). needs/08 Q-R5.
