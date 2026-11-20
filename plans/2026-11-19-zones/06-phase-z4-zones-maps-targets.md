@@ -1,0 +1,501 @@
+# Phase Z4: zones, zone maps and one Target control
+
+**Written:** 2026-11-19   **Written for commit:** `90e35c7` (`master`; `src/` is as UX Phase 2 left it in `e3d6d1b`, which landed while this was written, and the lines below are after it). Z2 and Z3 edit several of these files first, so **re-check every path and line at HEAD before starting.**
+**Status:** Proposed   **Needs:** Z3 (`05`), and through it Z2's automatic groups (`04`). Vibe Phase 2's Perform tab is in (`94f905e`)   **Size:** ~6 d
+**Implements spec** (`01-model-and-routing-spec.md`): §1 (zone refs, the normal form of a target, zone labels), §2 (inheritance, with `:from`), §4 (built-in and custom maps, wrap, overrides, active, pending, effective), §9 (switch timing), §11 (the rows for item and track zones, `:destination-zone`, the Zone Selector and preview cells), §12 (the show-side rows and `[:zone-map]`). Overview questions planned with ★: Q-Z1 A (wrap), Q-Z4 A (grid column and show default), Q-Z5 A (direct and through the current map), Q-Z6 A (letters, optional labels).
+
+Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks what doesn't exist yet. "Z3's" marks a name the Z3 doc introduces; this doc writes it as `rig/routing` and `rig/resolve-ref`, whatever Z3 calls them.
+
+After this phase you can:
+- set where content goes with **one Target chip**, the same everywhere: an item, a group, a track or folder, a clip, the cue, a grid column, the whole show. It says what the target ends up as and where that came from: "A → Left · from column 3";
+- draw into **zones A, B, C…** (with optional labels, "A · Beams"), into All, **pin** a group, or combine several;
+- pick a **zone map** (Left / Right, Odd / Even, Unison, or your own) and **switch it live** from pads on the Grid tab and on Perform: on the next beat, or on the next bar with Shift. A pad blinks while it waits, and any MIDI key can be taught to press it;
+- see on each grid cell where its cue goes (A, A B, A+B, pinned L/R);
+- open an old show: its routing becomes targets, silently, and **routes exactly as before**;
+- trust that a vibe never picks a cue that **any** zone map can send to the crowd.
+
+## 1. Current behaviour (file:line)
+
+| What | Where | Behaviour |
+|---|---|---|
+| Four ways to route an item | `routing/zone_effects.clj:127-156` | the item's `:zone-group-id`, else its first enabled Zone Selector's `[:params :target-zone]`, else its track's (walking folders), else the parent group's resolved zone, else the cue's `[:destination-zone :zone-group-id]`, else `:all`. One keyword |
+| The track walk | `routing/zone_effects.clj:78-125` | rebuilds the whole track index on every call (`:117`), so once per item per tick |
+| The render | `services/frame_service.clj:219-286` (`render-item-tree-by-zone`), `:338-405` (`generate-frames-by-zone`; the cue default is read at `:373`) | frame keys are the resolved zone ids; items under one key are concatenated |
+| The Zone Selector | `animation/effects/zone.clj:43-53`; its renderer `views/components/visual_editors/custom_param_renderers.clj:494-539`, `views/components/effect_param_ui.clj:120-129` | an identity transducer whose stored param routing reads raw. Offered by the Zone tab (`views/components/effect_bank.clj:26-31, 103-107`) in the cue editor (`views/dialogs/cue_chain_editor.clj:49`), the effects grid (`views/dialogs/effect_chain_editor.clj:44`, where it does nothing: vibe Phase 8, probe v20) and the timeline browser for clips (`views/components/visual_editors/timeline/browser.clj:61-63`) |
+| Setting a zone | `events/handlers/cue_chain.clj:180-193` (cue), `:196-209` (item or group); `timeline/model.clj:615-619, 680-681` (`:set-clip-zone`, `:set-track-zone`), `:593-607` (`add-track` takes `:zone-group-id`) | one keyword or nothing |
+| Cue Chain Editor | `views/dialogs/cue_chain_editor.clj:95-129` (footer, "Default zone:"), `:131-141` (parent group's zone), `:143-186` (labels, "Circle [Left (Group)]"), `:188-229` (context menu, "Assign Zone"), `:231-270` ("Zone Destination:"), `:324-408` (inherit labels), `:602-643` (footer) | four widgets, each working out "inherit" its own way; the labels skip the track level |
+| Timeline editor | `views/dialogs/timeline_cue_editor.clj:25-46, 147-151` (a copy of the footer dropdown); `views/components/visual_editors/timeline/header.clj:38-57, 121-128` (zone menu, chip); `.../timeline/inspector.clj:27-42, 90-131, 141-168` (zone combos) | the clip's "Inherit from Track (…)" ignores the cue default: `inspector.clj:93` passes `:all` |
+| Timeline model | `timeline/model.clj:150-174` (`flatten-visible-tracks`, rooted at `:all`, `:174`), `:298-365` (`auto-initialize-tracks` reads Zone Selectors), `timeline/layout.clj:50-88` (rows carry `:zone-id`) | |
+| Preview cells | `state/domains.clj:248-255` (`{:zone-group-id …}`), `events/handlers/ui.clj:103-138`, `views/components/preview.clj:134-142, 200-266, 295-335` | a cell shows the frames under one exact key |
+| Grid | `views/components/grid_cell.clj:93-218` (no badge), `views/components/grid_tab.clj:134-156` (column numbers), `:219-240` (title and hint); `views/tabs/grid.clj:16-23` | the generic tab is shared with the effects grid |
+| Perform | `views/tabs/perform.clj:116-127`; `views/components/vibe_pads.clj:37-113`; `events/handlers/vibes.clj:18-38` (`pointer-action`) | five pads: primary press or touch, a menu to learn |
+| Trigger map, learn | `events/handlers/triggers.clj:60-113` (vibe actions carry `:input-time`, `:146-148` skip the bookkeeping); `events/handlers/input.clj:225-230` (`learn-target` keeps `:type :target :role`), `:267-276` (`action-name`), `:278-299` (re-learning a role moves it) | |
+| The show clock | `services/show_clock.clj:48-60` (`render-cue`), `:71-92` (`render`), `:137-162` (`tick!`, reports and status dispatched at `:161`); `animation/show_time.clj:190-205` (`pending-reports`), `:207-218` (`due-reports`: again at most every 250 ms), `:285-288` (`global-beats`), `:382-390` (`frame-signal`); `animation/cue_timing.clj:78-122` (the global clock advances every tick, playing or not) | it writes app state only through events |
+| Reading the clock in an event | `events/core.clj:283-287` | `:link/sync-to-downbeat` reads `show-time/global-beats` inline; no handler sees the beats |
+| Stop, Retrigger | `events/handlers/timing.clj:81-92`; `animation/show_time.clj:95-98` | a `:restart` request: the global clock goes back to beat 0 |
+| Live and saved | `state/history.clj:14-22, 48-64, 153-159, 262-278`; `state/persistent.clj:48-61, 112-127, 135-152, 162-174` | BPM and effect cells' `:active?` are live. `[:grid]` keeps only `:size`, in the document (`history.clj:60`) and in the file (`persistent.clj:51`) |
+| Audience | `vibes/library.clj:64-116` | group names: `:crowd` and every group of a crowd-scanning projector; `zone-group-ids` reads the four places above |
+| Used by | `subs.clj:703-713` (`:cue-count 0 ;; TODO`), shown at `views/tabs/zones.clj:269-271` | Z0 makes the direct count real |
+| Starter cues | `state/templates.clj:30-46` | each says `:destination-zone {:zone-group-id :all}` |
+| Undo labels | `events/handlers/history.clj:125-148`; `timeline/model.clj:735-752` | |
+
+## 2. Why / root cause
+
+- **Routing names the venue.** All four places hold a group id, so a cue says "Left", never "zone A". Nothing between an item and a projector can change what a name means while the show runs, and that is what a map switch is.
+- **Each place has its own widget and its own idea of "inherit"** (`cue_chain_editor.clj:131-186, 324-343`, `header.clj:38-57`, `inspector.clj:90-168`), so they drift: the clip inspector's label is wrong (`inspector.clj:93`), and the cue editor's skips tracks.
+- **One of the four is an effect** whose parameter routing reads raw (`zone_effects.clj:143-145`): it can't be modulated, and it is offered where it does nothing.
+- **Nothing above the cue.** A column of "left" cues is set cue by cue.
+- **The audience rule matches group names**, so it can't see a zone that a map sends to the crowd.
+
+## 3. Reuse / extend
+
+| Existing (file:line) | Reused for |
+|---|---|
+| Z3's resolver (`routing/rig.clj`): `routing-inputs [state map-id]` with its `:zone-maps` slot (nil until Z4), `routing`, `ref-entries [routing ref]` ("in Z4 it resolves a zone through the effective map's lanes"), `normalize-target`, `zone-index`, `key-refs`; the snapshot's `:routing {:map nil …}` (05 §4) | zone → lane → entries, behind the one reader every engine and the preview already use; `:routing :map` becomes the effective map |
+| Z2's `state/migration.clj` ("Z4 adds its rows here"), whose `zones-z2` has already rewritten references to the removed built-ins, in the old keys, by Z0's walker (04 §4) | Z4's rows: `zones-z4` |
+| Z2's `subs/target-groups` (All, Left … Even, the lasers in order, then custom groups by name) and `rig/group-defs` (04 §4) | the Groups section of the Target menu and of the map lanes |
+| Z2's `audience-groups` = `(into #{:crowd} (rig/refs-reaching state crowd?))` (04 §4) | the non-zone half of the audience rule |
+| Z3's preview cells `{:target ref}` or `{:projector id}`, its `:ref-frames` and `:preview/set-cell-zone` with a `:target` payload (05 §4) | a zone cell counts for its lane's ref |
+| `render-context` (`services/frame_service.clj:102-114`), `render-cue` (`services/show_clock.clj:48-60`) | the column and show defaults reach each cue's render, read once per tick |
+| The reports (`animation/show_time.clj:190-218`) | "the pending switch is due", sent at once, again every 250 ms while app state differs |
+| `:link/sync-to-downbeat` (`events/core.clj:283-287`) | an inline effect that reads the beats and continues the event |
+| BPM, ignored by both comparisons (`state/history.clj:153-173`) | the live policy of the active map: a domain outside the document roots |
+| `persistent-state-mapping`'s `:keys` specs (`state/persistent.clj:48-61, 112-127`) | saving `[:zone-map :active]` and `[:grid :column-targets]`; a file without them loads the defaults |
+| Z2's `migration/zones-z2` call in `apply-loaded-project` (after `normalize-timeline-cues`, `state/persistent.clj:172`) | where Z4's rows run: after Z2's, before `mark-clean` |
+| The timeline header chip (`header.clj:121-128`, `.tl-zone-chip`) | the Target chip's shape |
+| Vibe pads (`vibe_pads.clj:37-105`), `pointer-action` (`vibes.clj:18-38`), `binding-label` (`views/components/trigger_bank.clj:37`) | map pads: press, touch, the learn menu, the key text |
+| `learn-target`, `handle-input-learn-captured` (`input.clj:225-230, 278-299`) | learning a map pad and moving its key |
+| `ext-clock-redraw` (`views/components/clock_view.clj:58-71`) | blinking a pending pad from the clock, without app state |
+| The routing test cues (`test/laser_show/routing/zone_routing_integration_test.clj:26-116, 488-533`) and the probe v19 rig (vibe Phase 8 §7) | the legacy fixture shows |
+
+## 4. Changes per namespace
+
+### 4.1 The pure model
+
+- `laser-show.routing.targets` (NEW, pure; it requires nothing else, so `rig`, `zone-maps`, the timeline model and the vibes can all use it):
+  - Z3's `normalize-target`, `zone-index` and `key-refs` move here from `routing/rig.clj`, which keeps them as aliases so Z3's callers don't change. Normal form (spec §1): nil, a keyword, or a vector of 2+ distinct keywords sorted by `(juxt namespace name)`.
+  - NEW: `zone-ref?`; `zone-ref` (index → keyword, the inverse of `zone-index`); `zone-letter` ("A", "AA"); `next-zone [used]`; `toggle [t ref]` (adds or removes one ref, normalised).
+  - `cue-fallback [cue-target column-target show-target]` → `{:target :from}`, `:from` one of `:cue :column :show :default` (All). Made once per cue render.
+  - `resolve-item [own track parent fallback]` → `{:target :from :via}`, spec §2: the item's own (`:item`), else its track's (`:track`, `:via` the track or folder that set it), else the parent group's resolution (a group's own target becomes `{:from :group :via group-id}`, anything else passes through), else the fallback. The one function routing uses.
+  - `track-targets [tracks]` → `{track-id {:target :via}}` for every track with its own or a folder's `:target`. It replaces `index-tracks` and the per-item walk; built once per cue render and kept while `tracks` is `identical?` (a one-entry cache).
+  - `explain-cue [cue column-target show-target]` → `{:cue res :items {id res} :tracks {id res}}` for the editors. `cue-refs [cue column-target show-target]` → every ref any item can draw to, disabled and muted ones too (for "used by" and the audience rule).
+  - Text, from a names context `{:groups :labels :lasers}`: `ref-name` ("A · Beams", "Left", "Laser 2", "Front (missing)"), `target-text [names zone-map t]` ("A + B → Left + Right"), `from-text` ("from column 3"), `badge` (§8.5).
+- `laser-show.routing.zone-maps` (NEW, pure; requires `targets` only):
+  - `built-ins`: `:map/left-right` "Left / Right" `[:auto/left :auto/right]` (the default), `:map/odd-even` "Odd / Even" `[:auto/odd :auto/even]`, `:map/unison` "Unison" `[:all]`. `all-maps [state]` (built-ins, then `[:zone-maps]` by name); `map-by-id`.
+  - `zone-lane [m zone]` = `(get overrides zone (nth lanes (mod i n)))`; nil with no lanes or a nil lane (spec §4). `pin [m t]` replaces each zone by its lane.
+  - `effective-map-id [state beats cycle]`: the pending map once `due?`, else `cycle` (Z5's Map cycle; always nil in Z4), else `[:zone-map :active]`; an id that is no map falls back to `:map/left-right`. `due? [at-beat beats]` is `beats + 1e-9 ≥ at-beat`.
+  - `switch-at [{:keys [beats bpm bar? clock?]}]` → the beat a press applies at, or nil for at once (§8.4); `clock?` is false while the clock thread is off, the transport is stopped or the BPM isn't positive (SQ-2). `window-s` 0.05, `beats-per-bar` 4, bars counted from global beat 0 as the beat squares are (`services/show_clock.clj:121`).
+  - `schedule [state map-id bar? clock]` (the whole press, pure; the BPM is `[:timing :bpm]`, the beats come in `clock`): commits a pending switch that is already due, then: the active map pressed clears the pending one; at once writes `:active`; otherwise writes `:pending {:id :map :at-beat :bar?}`, replacing any other. `commit [state id]`. `map-warnings [state m names]` (§7.5). `next-custom-id` (`:map/custom-1`, the first unused).
+- `laser-show.state.migration` (Z2's, existing by then): NEW `zones-z4 [state]` and `cue-z4 [cue]` (§8.3), run after Z2's `zones-z2`, so references to the removed built-ins are already `:auto/*`. They look at the data, not at a flag: a migrated show comes back `identical?`.
+
+### 4.2 Render, routing, the clock
+
+- `services/frame_service.clj` (existing): `render-context` adds `:column-targets` and `:show-target`. `generate-frames-by-zone` builds `cue-fallback` from `(:target cue)`, the context's `:column-target` and `:show-target`, and `track-targets`, once; `:373` goes. `render-item-tree-by-zone` takes the parent's resolution instead of `parent-zone-id` and `default-zone-id`, and keys each frame by `(:target (targets/resolve-item …))`. The keys never depend on the map (invariant 2).
+- `services/show_clock.clj` (existing): `render-cue` puts the cell's `:column-target` on the context. `tick!` takes `(zone-maps/effective-map-id state (show-time/global-beats runtime) nil)` after `step` and passes it to `rig/routing-inputs` where Z3 passes nil, so the snapshot carries `:routing {:map id :lanes … :overrides … :refs … :outputs …}`.
+- `routing/rig.clj` (Z2's, extended by Z3): `routing-inputs [state map-id]` fills the `:zone-maps` slot Z3 left nil; `routing` adds the effective map's `:lanes` and `:overrides` beside `:map` (from `zone-maps/map-by-id`), and `ref-entries [routing ref]` resolves `:zone/*` with `zone-maps/zone-lane` over them, then the lane's entries (`[]` for nil). Every caller (engines, preview, cue warnings) is unchanged. `rig` requires `zone-maps`, never the reverse.
+- `animation/show_time.clj` (existing): `pending-reports` adds `{:event/type :show-clock/zone-map-due :id :map}` while `[:zone-map :pending]` is due at the global beats, so that tick's snapshot and the report agree.
+- `frame-service/preview-data` (Z3's `:ref-frames`): a zone counts for its lane's ref, so a cell on Zone A shows what Zone A's lane draws (05 §11).
+- `routing/zone_effects.clj` (existing): `:58-187` goes. The debug logging (`:16-53`) stays: `frame_service`, `events/handlers/menu.clj:356-357` and `timing.clj:78` use it.
+- `animation/effects/zone.clj` (existing): `:hidden? true`. The id stays registered (old files load; `test/laser_show/animation/effects_coverage_test.clj:22, 34` passes) and nothing offers it. `register-effect!`'s docstring (`animation/effects.clj:77-92`) lists `:hidden?`. If vibe Phase 8 landed first, its `:scope #{:item}` on the selector is replaced by `:hidden? true`.
+
+### 4.3 State, history, loading
+
+- `state/domains.clj`: NEW domains `zones` (`:labels {}`), `zone-maps` (`{}`: custom maps), `zone-map` (`:active :map/left-right`, `:pending nil`). `grid` (`:136-145`) gains `:column-targets {}`; `config` (`:242-272`) gains `:default-target nil` and `:zone-map-pads {}`; `ui` gains `:zone-maps {:selected nil}`; the preview cells' default (`:250-253`) becomes `[{:target nil} {:target :auto/left} {:target :auto/right} {:target :auto/center}]`.
+- `state/history.clj`: `document-roots` (`:48-50`) and `extract-document-state` (`:52-64`) gain `:zone-maps` and `:zones`, and `:grid` keeps `:column-targets` beside `:size`; `content-changed?` (`:153-159`) compares the two new roots; `restore-document` (`:262-278`) restores them and `[:grid :column-targets]`. `[:zone-map]` stays out of all four (§5).
+- `state/persistent.clj`: `:project-metadata` gets `{:path [:grid] :keys [:size :column-targets]}` and `{:path [:zone-map] :keys [:active]}`; `:content` gets `{:path [:zone-maps]}` and `{:path [:zones]}`. `apply-loaded-project` runs `migration/zones-z4` right after Z2's `zones-z2`, before `mark-clean`; `reset-session` clears `[:zone-map :pending]`.
+- `state/templates.clj` (`:30-46`): the starter cues lose `:destination-zone`; they inherit All.
+- `timeline/model.clj`: `create-track` and `add-track` take `:target`; `set-zone` becomes `set-target` (normalised; nil clears); ops `:set-clip-target`, `:set-track-target` replace the zone ops (`:680-681`, `op-types` `:709-716`, `op-label` `:751-752`); `flatten-visible-tracks` carries `:target`, rooted at nil instead of `:all`; `auto-initialize-tracks` makes a folder per distinct item `:target` and a "Default" folder with none for the rest, so a converted cue still follows its cue, column and show default.
+- `timeline/layout.clj` (`:50-88`): rows carry `:target` and `:target-inherited?` instead of `:zone-id` and `:zone-inherited?`.
+
+### 4.4 Events
+
+- `events/handlers/cue_chain.clj`: `:cue-chain/set-target` and `:cue-chain/set-item-target` replace `:180-209` (normalised; nil removes the key). `events/handlers/timeline.clj` (`:263-284`): `:timeline/set-track-target`, `:timeline/set-clip-target`; `:add-track` and `:add-folder` take `:target`.
+- `events/handlers/grid.clj`: NEW `:grid/set-column-target`. `paste-cell` (`:161-166`) runs `migration/cue-z4`, so a cue copied from an older build routes the same.
+- `events/handlers/zone_maps.clj` (NEW), routed by `events/handlers.clj:38-67` for `"zones"`, `"zone-maps"` and `"zone-map"`: the events of §6.
+- `events/handlers/timing.clj`: NEW `:show-clock/zone-map-due`. `:transport/stop` and `:transport/retrigger` commit a pending switch at once: their restart puts the global clock back to 0, and the pending beat belongs to the old count.
+- `events/handlers/triggers.clj`: action `{:type :zone-map :target map-id}`. A press dispatches `{:event/type :zone-map/press :map id :src :input :input-time ts}`; a release nothing. It skips the bookkeeping, as vibe actions do.
+- `events/handlers/input.clj`: re-learning a map pad moves its key, as a role's does (`:291-292`, generalised to the actions of type `:vibe` and `:zone-map`, compared by `learn-target`); `action-name` says "zone map Odd / Even".
+- `events/handlers/ui.clj`: Z3's `:preview/set-cell-zone` already writes `{:target …}`; Z4 only lets the picker offer zones.
+- Z0's reference walker (the one its delete and Z2's migration use) learns the new places: every `:target` (inside a union too), `[:grid :column-targets]`, `[:config :default-target]`, map lanes and overrides. So deleting a group re-targets cues and empties the lanes that named it, and `:zone-groups/remove` needs nothing of its own.
+- `events/handlers/history.clj` (`:125-148`): the labels of §6; `:cue-chain/set-destination-zone-group` goes, because the labels test wants routed events only.
+- `events/core.clj`: NEW inline effect `:show-clock/read {:on-read e}`, beside `:link/sync-to-downbeat`: it continues `e` with `:clock {:beats (show-time/global-beats) :running? ((:running? show-time/frame-signal)) :now-ms (System/currentTimeMillis)}` through `run-inline`.
+
+### 4.5 Views
+
+- `views/components/target_control.clj` (NEW): `menu-model [ctx]` (pure: the rows of §7.1 as data, unit-tested; groups from Z2's `subs/target-groups`); `menu-items` (the rows as `:menu-item`s, plus a "Combine" submenu of `:custom-menu-item`s holding a check box, `:hide-on-click false`); `target-chip` (a `:menu-button` shaped like `.tl-zone-chip`; props `:target :explain :on-set :scope`); `target-field` ("Target:", the chip, the dim "from …"). `:on-set` is an event template that gets `:target`. Scopes: `:item :group :track :clip :cue :column :show` (every row; `:show` has no Inherit), `:lane` (All and groups only), `:preview` ("Master (all content)" instead of Inherit; no Combine, no Pin). `column-target-header` for the grid.
+- `views/dialogs/cue_chain_editor.clj`: the pickers (`:95-129`, `:231-270`) become `target-field`s; "Assign Zone" (`:188-229`) becomes "Target ▸" with `menu-items`; the labels (`:143-186`) come from `explain-cue`; `:131-141` goes; `:49` loses `:include-zone?`. `views/dialogs/timeline_cue_editor.clj`: its footer copy (`:25-46`) becomes a `target-field`.
+- Timeline: `timeline_editor.clj` passes `:explain` (`subs/cue-target-explain`) instead of `:destination-zone-id` (`:869`, `:921`, `:1021-1031`). `header.clj` `zone-chip` and `zone-menu-items` become a compact `target-chip` ("A", "(A)" inherited) and "Target ▸". `inspector.clj` gets `target-field`s for clips and tracks, explained by the resolver. `browser.clj:61-63` loses `:include-zone?`.
+- `views/components/grid_cell.clj`: the cue cell gets a badge (`subs/cell-target-badge`), top-right in the stack pane (`:189`), mouse-transparent, `#grid-cell-badge-<col>-<row>`. Only cells whose badge has a zone subscribe to the active map (their tooltip names lanes).
+- `views/components/grid_tab.clj`: `generic-grid-tab` takes optional `:header-extra` (right of the title) and `:column-component` (replaces the number label in `grid-header`, same size and id). `views/tabs/grid.clj` passes the map strip and `column-target-header`; the effects grid passes neither.
+- `views/components/zone_map_pads.clj` (NEW): `map-pad` (props `:map-id :size`), `map-strip` (Grid tab), `map-pad-row` (Perform), `redraw-blink!` for `ext-clock-redraw`. Pads aren't focus-traversable; ids `zone-map-pad-<n>`, `-state`, `-keys`. `views/tabs/perform.clj`: a "ZONE MAP" row between the vibe pads and the status line.
+- `views/components/zone_maps_panel.clj` (NEW): §7.5, under Z2's three columns of the Zone Groups tab (GROUPS, LASERS IN …, DETAILS; 04 §7). Z2's details line "Used by n cues" (Z0's count) gains the count through the active map (§8.7) from `subs/ref-usage`.
+- `views/components/preview.clj`: Z3's picker (Master, Groups, Lasers) gains a Zones section, the zones the show uses, named with `ref-name`.
+- `views/components/effect_bank.clj`: `build-effects-by-category` (`:37-55`) skips `:hidden?` effects, and the Zone tab shows only while its category has an effect left (`:103-107`).
+- `css/zones.clj` (NEW), in both lists of `css/core.clj:36-82`: `.target-chip` (`-inherited`, `-missing`), `.target-from`, `.grid-cell-target-badge` (`-inherited`), `.grid-column-header`, `.zone-map-pad` (`-active`, `-pending`, `-learning`, pseudo-class `:blink`), `.zone-map-warning`.
+- `subs.clj`: NEW `zone-map-state`, `zone-maps-list`, `zone-map [id]`, `zone-labels`, `column-target [col]`, `default-target`, `names-ctx` (Z2's `target-groups-by-id` and the labels), `cue-target-explain [col row]`, `cell-target-badge [col row]`, `zones-in-use`, `zones-in-use?`, `map-pad [id]` (booleans and bindings only), `map-pad-ids`, `ref-usage [ref]`, `map-warnings [id]`.
+- `vibes/library.clj`: NEW `audience-ref? [state groups ref]`: `ref` is in Z2's `audience-groups`, or is a zone whose lane in some map is (§8.6). `audience-cell?` (`:95-100`) asks it of `targets/cue-refs`; `zone-group-ids` (`:77-93`) goes.
+
+## 5. State placement
+
+| Path | Lives in | Written by | Undo / unsaved? |
+|---|---|---|---|
+| `:target` on items, groups, tracks, folders, clips and cues | `[:chains :cue-chains]` (document) | the Target events, timeline ops, the migration (before `mark-clean`) | yes / yes |
+| `[:grid :column-targets] {col target}` | `grid` domain, document | `:grid/set-column-target` | yes / yes |
+| `[:config :default-target]` | `config`, document | `:zones/set-default-target` | yes / yes |
+| `[:zones :labels] {zone "text"}` | NEW `zones` domain, NEW document root | `:zones/set-label` | yes / yes |
+| `[:zone-maps id] {:id :name :lanes [ref …] :overrides {zone ref}}` | NEW `zone-maps` domain, NEW document root | `:zone-maps/*` | yes / yes |
+| `[:config :zone-map-pads id] {:bar? true}` (a pad's setting) | `config`, document | `:zone-map/set-pad-bar` | yes / yes |
+| trigger-map `{:type :zone-map :target id}` | `[:config :input :trigger-map]` | learn, `:zone-map/clear-control` | yes / yes |
+| `[:zone-map :active]` | NEW `zone-map` domain, **not a document root**; saved | `zone-maps/schedule` (at once), `:show-clock/zone-map-due`, Stop, Retrigger, "Use now", deleting the active map | **no / no**: live, saved with the show (D-14) |
+| `[:zone-map :pending] {:id :map :at-beat :bar?}` | the same domain; not saved | `zone-maps/schedule`, the commit, `reset-session` | no / no |
+| `[:config :preview :grid-cells i :target]` | a pref (as today) | Z3's `:preview/set-cell-zone`; the migration | no / yes |
+| `[:ui :zone-maps :selected]` | UI | `:zone-maps/select` | no / no |
+| snapshot `:routing :map` | per tick | the show clock | – |
+
+**The live policy of `[:zone-map :active]`, exactly.** An effect cell's `:active?` sits inside a document root, so it needs `entry-equiv?` to ignore it (`state/history.clj:118-126`) and `restore-document` to graft it back (`:235-260`). The active map gets the same three properties more simply, as BPM does by being ignored:
+1. `state/domains.clj`: `(defstate zone-map … {:active {:default :map/left-right} :pending {:default nil}})`.
+2. `state/history.clj`: **not** added to `document-roots` (`:48-50`), `extract-document-state` (`:52-64`) or `restore-document` (`:262-278`). So a switch is never an undo step (`wrap-history` takes the `document-roots-identical?` fast path, `events/handlers/history.clj:203-206`), never unsaved (`next-dirty`, `:256-257`), and an undo never moves it. The policy table at `:14-22` gains the row "live, own domain: `[:zone-map :active]` (saved by `persistent-state-mapping`)".
+3. `state/persistent.clj:48-51`: `{:path [:zone-map] :keys [:active]}` in `:project-metadata`, so it is saved, and a file without it loads `:map/left-right` (`replace-at-path`, `:112-127`). New Project gets the default.
+4. `reset-session` (`:135-152`): `(assoc-in [:zone-map :pending] nil)`.
+5. Tests: `zone-map-active-is-live-test` beside `undoable-changed?-policy-test` and `persisted-changed?-policy-test` (`test/laser_show/state/history_test.clj:54-80`).
+
+## 6. Events and effects
+
+| Event / effect | Exists? | Dispatched from | Pure? / undo label |
+|---|---|---|---|
+| `:cue-chain/set-item-target {:col :row :item-path :target}` | NEW (replaces `:cue-chain/set-item-zone`) | item and group chips, "Target ▸" | yes / "Change Target" |
+| `:cue-chain/set-target {:col :row :target}` | NEW (replaces `:set-destination-zone-group`) | both editors' footers | yes / "Change Cue Target" |
+| timeline ops `:set-clip-target`, `:set-track-target {:id :target}`; `:add-track`/`:add-folder` `:target` | NEW (replace `:set-clip-zone`, `:set-track-zone`) | header chip, inspector | yes / "Change Clip Target", "Change Track Target" |
+| `:grid/set-column-target {:col :target}` | NEW | column header | yes / "Change Column Target" |
+| `:zones/set-default-target {:target}`, `:zones/set-label {:zone :label}` | NEW | Zones and maps | yes / "Change Show Target", "Rename Zone" |
+| `:zone-maps/create`, `/duplicate {:map}`, `/rename`, `/set-lane {:map :index :ref}`, `/add-lane`, `/remove-lane`, `/set-override {:map :zone :ref}` (nil removes), `/delete` | NEW | Zones and maps | yes / "New Zone Map", "Duplicate Zone Map", "Edit Zone Map", "Delete Zone Map". Delete also drops the map's bindings and pad setting, and if it was active, `:active` becomes Left / Right |
+| `:zone-maps/select`, `:zone-maps/use-now {:map}` | NEW | the map list, "Use now" (an edit, not a performance: at once, spec §9) | yes / live, no label |
+| `:zone-map/pointer {:map :fx/event}` | NEW | a pad's mouse and touch press | yes: `vibes/pointer-action` `:press` → `:zone-map/press` with `:bar?` from Shift |
+| `:zone-map/press {:map :bar? :src :input-time}` | NEW | `:zone-map/pointer`, the trigger action | yes: returns `{:show-clock/read {:on-read {:event/type :zone-map/schedule …}}}` |
+| `:show-clock/read` | NEW effect (inline) | `:zone-map/press` (Z5's pattern pads too) | effect |
+| `:zone-map/schedule {:map :bar? :input-time :clock}` | NEW | `:show-clock/read` | yes: `zone-maps/schedule`; `:bar?` is Shift or the pad's setting |
+| `:show-clock/zone-map-due {:id :map}` | NEW | the clock's reports | yes: commits only if `:id` is still the pending one |
+| `:transport/stop`, `:transport/retrigger` | yes (`timing.clj:81-92`) | toolbar, menu, keys | yes: also commit a pending switch |
+| `:zone-map/set-pad-bar {:map :bar?}`, `:zone-map/clear-control {:map}` | NEW | the pad menu | yes / "Change Pad Timing", "Clear Control" |
+| `:input/start-learn {:target-action {:type :zone-map :target id}}`, `:input/cancel-learn`, `:input/learn-captured` | yes (`input.clj:232-307`) | the pad menu, learn | yes |
+| `:preview/set-cell-zone {:cell-index :target}` | Z3's (`events/handlers/ui.clj:131-138` today) | the preview picker, now with zones | yes / pref |
+| `:ui/set-active-tab :zones` | yes | the pad menu's "Edit maps…" | yes |
+
+No handler reads the clock: `:show-clock/read` hands it the beats. The clock writes no app state: the commit is `:show-clock/zone-map-due`.
+
+## 7. UX
+
+### 7.1 The Target chip and its menu
+
+```
+ Target: [ (A · Beams → Left) ▾ ]  from column 3            ← dim and in brackets: inherited
+          ┌──────────────────────────────────────────────┐
+          │ ✓ Inherit (A · Beams → Left · from column 3)  │
+          │   All                                         │
+          │ ── ZONES · map: Left / Right ──────────────── │
+          │   A · Beams → Left                            │
+          │   B → Right                                   │
+          │   New zone (C → Left)                         │
+          │ ── GROUPS ─────────────────────────────────── │
+          │   📌 Left  📌 Right  📌 Center  📌 Odd  📌 Even  │
+          │   📌 Laser 1 · 10.0.0.5     📌 Laser 2 · …      │
+          │   📌 Graphics   📌 Crowd Scanning · audience    │
+          │ ──────────────────────────────────────────── │
+          │   Combine ▸        ☑ A → Left  ☐ B → Right  … │
+          │   Pin: A → 📌 Left                             │
+          └──────────────────────────────────────────────┘
+```
+- A click on a row sets that one target; **Inherit** removes the level's own. **Combine ▸** ticks several (it stays open): they draw as one key.
+- "→ Left" is the zone's lane in the **active** map (SQ-7). A lane that reaches nothing reads "→ nothing ⚠".
+- Zones listed: A and B, every zone the show uses, then "New zone" with the next letter (Z4-Q3).
+- Groups: the automatic ones in Z2's order, one per laser in rig order, then custom groups by name; "· audience" in orange marks a group that reaches the crowd. A missing group the target still names comes first, ticked: "⚠ Front (missing)".
+- **Pin** (only when the target has a zone) swaps each zone for its lane now, so the content stops following the map.
+- 📌 is FontAwesome `:thumbtack` in chips and badges, never an emoji; plain-text places say "pinned".
+
+### 7.2 Cue Chain Editor and timeline
+
+```
+ CUE CHAIN                                   │ PRESET   Target: [ B → Right ▾ ]
+   Circle  [A · Beams → Left · column 3]     │ GROUP    Target: [ A + B → Left + Right ▾ ]
+   Wave    [B → Right]                       │          Items inside inherit this target unless they have their own.
+ ▾ Pair    [A + B → Left + Right]            │
+     Square [A + B → Left + Right · group Pair]
+   Star    [Graphics, pinned]
+ Footer:  Target: [ (A · Beams → Left) ▾ ] from column 3   Trigger: [Toggle ▾]   ⚡ Triggers...   …   Close
+
+ Timeline header rows:   ▌ BEAT   (A)  M        ▌  Kick   B   M        (inherited targets in brackets, dim)
+ Inspector:              TRACK PROPERTIES  Target [ B → Right ▾ ]      CLIP  Target [ (C → Left) ▾ ] from folder Beat
+```
+Both footers say "Target:" where they said "Default zone:", and their two dropdown copies become one `target-field`.
+
+### 7.3 The grid: badges and column targets
+
+```
+ Cue Grid                                 Zone map: [● Left / Right] [Odd / Even ◌] [Unison] [Crowd sweep]
+ Click to trigger • Right-click to select • Drag to move
+        1 · A          2            3 · 📌 L         4
+  A  ┌────────── A┐ ┌──────────┐ ┌──────── 📌L/R┐ ┌─────── A+B┐
+     │  circle    │ │  square  │ │  wave        │ │  star      │
+```
+- The badge sits top-right, dim when everything in the cue is inherited; its tooltip names the lanes ("A → Left · B → Right (map: Left / Right)", "Pinned: ignores the zone map").
+- A column number opens the menu in the `:column` scope; its tooltip says "Column 3: cues here without a target of their own use A → Left", or "Column 3: no default (cues use the show default: All)". The default is positional: a cue moved to another column follows the new column.
+
+### 7.4 Map pads
+
+```
+ Perform:  ZONE MAP
+           ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+           │ LEFT / RIGHT │ │ ODD / EVEN   │ │ UNISON       │ │ CROWD SWEEP  │
+           │ now          │ │ next beat    │ │              │ │              │
+           │ C2           │ │ C#2          │ │ Right-click to learn a control │
+           └──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
+```
+- A press (mouse down or touch) switches on the next beat, at once within 50 ms of a beat; Shift, or the pad's "Switch on the bar", waits for the bar. With the clock thread off or the transport stopped it switches at once. Pressing the active pad cancels a pending switch; another pad replaces it.
+- The active pad is lit blue; the pending one blinks amber at 4 Hz (`ext-clock-redraw`, from the snapshot's time) and says "next beat" or "next bar". Without a clock it stays amber.
+- The row (Perform) and the strip (Grid tab) show while the show uses a zone anywhere (Z4-Q1).
+- Right-click: "Switch on the bar" (tick), "Learn control…", "Cancel learning", "Clear control", "Edit maps…". A learned key presses the pad, with the pad's bar setting; learning it again moves the key (Z4-Q2).
+
+### 7.5 Zones and maps (Zone Groups tab)
+
+```
+┌ ZONES AND MAPS ───────────────────────────────────────────────────────────────────┐
+│ Show default target: [ All ▾ ]                                                     │
+│ Zone labels:  A [Beams      ]   B [           ]   C [           ]   (label)        │
+│ MAPS                         │ Crowd sweep                [Use now] [Duplicate] [Delete] │
+│ ● Left / Right   built-in    │ Name   [Crowd sweep       ]                        │
+│   Odd / Even     built-in    │ Lanes  1 [ 📌 Left ▾ ] ×   2 [ 📌 Crowd Scanning ▾ ] ×   [+ Lane] │
+│   Unison         built-in    │ Zones  A → Left · B → Crowd Scanning · C → Center (override)  │
+│   Crowd sweep                │ Overrides  [ C ▾ ] → [ 📌 Center ▾ ] ×   [+ Override] │
+│ [New map]                    │ ⚠ Lane 2 (Crowd Scanning) reaches the audience.   │
+└───────────────────────────────────────────────────────────────────────────────────┘
+```
+- A built-in map shows its lanes read-only: "Built-in maps follow the rig. Duplicate one to change it."
+- Lanes use the chip in the `:lane` scope: All or a group, never a zone. The zones line lists the show's zones, "(wraps)" where the lane index repeats.
+- Warnings (`map-warnings`): "Lane 2 is empty: zones B, D go nowhere." · "Lane 2 (Graphics) has no projector: zones B, D go nowhere." · "Lane 2 (Crowd Scanning) reaches the audience." · "No lanes: every zone goes nowhere." · "Override C → Front: Front no longer exists."
+- A group's details extend Z0's line: "Used by 3 cues", "Used by 3 cues · 9 more through Zone A", "Used by 3 cues · 11 more through Zones A, C", "Used by 9 cues through Zone A", or "Used by no cues".
+
+## 8. Data examples and invariants
+
+### 8.1 Shapes
+
+```clojure
+[:chains :cue-chains [2 0]]                      ; column 3
+{:name "Beams"                                   ; no :target: inherits the column's
+ :items [{:type :preset :id #uuid "…01" :preset-id :beam-fan}
+         {:type :preset :id #uuid "…02" :preset-id :wave :target :zone/b}
+         {:type :group  :id #uuid "…03" :name "Pair" :target [:zone/a :zone/b]
+          :items [{:type :preset :id #uuid "…04" :preset-id :square}]}
+         {:type :preset :id #uuid "…05" :preset-id :star :target :graphics}]}
+[:grid :column-targets]   {2 :zone/a}
+[:config :default-target] nil
+[:zones :labels]          {:zone/a "Beams"}
+[:zone-maps]              {:map/custom-1 {:id :map/custom-1 :name "Crowd sweep"
+                                          :lanes [:auto/left :crowd] :overrides {:zone/c :auto/center}}}
+[:config :zone-map-pads]  {:map/unison {:bar? true}}
+[:config :input :trigger-map {:source :midi :channel 0 :note 37}] {:type :zone-map :target :map/odd-even}
+[:zone-map]               {:active :map/left-right                                  ; live, saved
+                           :pending {:id #uuid "…" :map :map/odd-even :at-beat 17.0 :bar? false}} ; runtime
+```
+The cue's frame keys: `{:zone/a beam-fan, :zone/b wave, [:zone/a :zone/b] square, :graphics star}`. With p1–p4 in rig order and p5 only in Graphics (out of All and, with Q-Z2-1 B ★, of the automatic groups), under Left / Right the snapshot has `:routing {:map :map/left-right :lanes [:auto/left :auto/right] :overrides {} :refs {:auto/left [[:p1 nil nil] [:p2 nil nil]] :auto/right [[:p3 nil nil] [:p4 nil nil]] :graphics [[:p5 nil nil]] …}}`, so `(rig/ref-entries routing :zone/a)` is p1 and p2. From the tick where beat 17 is reached, `:map :map/odd-even`, `:lanes [:auto/odd :auto/even]`, and `:zone/a` is p1 and p3: **the same frame objects**, re-routed, no new render.
+
+### 8.2 Resolving a target
+
+| Item | Own | Track | Parent | Fallback | `{:target :from}` | Shown |
+|---|---|---|---|---|---|---|
+| beam-fan | – | – | – | column 3: `:zone/a` | `:zone/a`, `:column` | A · Beams → Left · from column 3 |
+| wave | `:zone/b` | | | | `:zone/b`, `:item` | B → Right |
+| Pair (group) | `[:zone/a :zone/b]` | | | | union, `:item` | A + B → Left + Right |
+| square, in Pair | – | – | Pair's | | union, `:group` `:via` Pair | … · from group Pair |
+| star | `:graphics` | | | | `:graphics`, `:item` | 📌 Graphics |
+| a clip on track Kick in folder Beat (folder `:zone/c`) | – | `:zone/c` `:via` Beat | | | `:zone/c`, `:track` | C → Left · from folder Beat |
+| anything, with nothing set anywhere | | | | | `:all`, `:default` | All |
+
+### 8.3 Migration (silent, idempotent)
+
+| Old | New | Routes the same because |
+|---|---|---|
+| a cue's `[:destination-zone :zone-group-id] g` | the cue's `:target g`; `:all` and nil → no `:target`; `:destination-zone` goes | on an old show levels 5 and 6 are empty, so nil still ends at All |
+| an item's, group's, track's or folder's `:zone-group-id g` | `:target g` | levels 1–3 are as before |
+| the first enabled top-level Zone Selector with `:target-zone g`, on an item without `:zone-group-id` | `:target g` | that one is all routing read (`zone_effects.clj:66-76, 143-145`) |
+| every other Zone Selector: disabled, without `:target-zone`, a second one, inside an effect group, on a track, in an effects-grid cell | removed | routing never read them (probe v20 for the grid) |
+| preview cell `{:zone-group-id x}` | `{:target x}` | the same key |
+| a reference to a built-in group Z2 removed | already `:auto/left` etc. when `zones-z4` runs (Z2's `zones-z2`) | not the same, by Z2's choice: content aimed at an empty built-in now reaches the automatic group (04 §12 S-2); its fixture checks the new routing |
+
+```clojure
+;; before: an old file
+{:destination-zone {:zone-group-id :all}
+ :items [{:type :preset :id 1
+          :effects [{:effect-id :zone-selector :enabled? true :params {:target-zone :left}}
+                    {:effect-id :scale :enabled? true}]}
+         {:type :group :id 2 :zone-group-id :center
+          :items [{:type :preset :id 3 :zone-group-id :right
+                   :effects [{:effect-id :zone-selector :enabled? true :params {:target-zone :crowd}}]}]}
+         {:type :preset :id 4
+          :effects [{:effect-id :zone-selector :enabled? false :params {:target-zone :crowd}}]}]}
+;; after: loaded, not unsaved
+{:items [{:type :preset :id 1 :target :left :effects [{:effect-id :scale :enabled? true}]}
+         {:type :group :id 2 :target :center
+          :items [{:type :preset :id 3 :target :right :effects []}]}   ; its own zone beat its selector, as in routing
+         {:type :preset :id 4 :effects []}]}                           ; a disabled selector never routed
+```
+
+### 8.4 When a switch lands (spec §9)
+
+At 120 BPM the window is 0.050 s × 120 / 60 = 0.1 beat; in bar mode 0.025 bar.
+
+| Global beats at the press | Mode | Fraction | Applies at | Wait |
+|---|---|---|---|---|
+| 16.04 | beat | 0.04 ≤ 0.1 | 16: now | 0 |
+| 16.50 | beat | 0.50 | 17 | 250 ms |
+| 16.93 | beat | 1 − 0.93 = 0.07 ≤ 0.1 | 17 | 35 ms |
+| 16.04 | bar | 4.01 bars: 0.01 ≤ 0.025 | 16: now | 0 |
+| 17.00 | bar | 4.25 bars | 20 | 1.5 s |
+| 19.95 | bar | 4.9875 bars: 0.0125 left ≤ 0.025 | 20 | 25 ms |
+| any | the clock thread off, the transport stopped, or no tempo | – | at once | 0 |
+
+A press from a learned key is dated by its input: the beats are backed off by `bpm × (now − input-time) / 60000`, at most 250 ms, so a press the event agent took late (vibe probe v10: up to 180 ms) still counts from when it was played. A pad press has no input time and counts from when it is handled.
+
+### 8.5 Grid badges
+
+| The cue's resolved targets (enabled items) | Badge | Tooltip |
+|---|---|---|
+| All only | none | – |
+| `:zone/a` | A | A · Beams → Left |
+| `:zone/a`, `:zone/b` | A B | A → Left · B → Right |
+| `[:zone/a :zone/b]` | A+B | A + B → Left + Right |
+| `:zone/a` … `:zone/d` | A–D | A → Left · B → Right · C → Left · D → Right |
+| `:auto/left`, `:auto/right` | 📌 L/R | Pinned: ignores the zone map |
+| `:zone/a`, `:graphics` | A 📌 Graph… | A → Left · Graphics (pinned) |
+| all inherited from column 3 | the same, dim | … · from column 3 |
+
+Short names: Left "L", Right "R", Center "Ctr", "Odd", "Even", a laser by its place ("#2"), a custom group by its name cut to 5 letters.
+
+### 8.6 The audience rule
+
+A cue is audience-capable when one of its refs (`targets/cue-refs`, column and show default included) passes `audience-ref?`:
+- a group, All or a laser's own group: it is in Z2's `audience-groups`, `(into #{:crowd} (rig/refs-reaching state crowd?))`, every ref that reaches a projector tagged `:crowd-scanning` (or a virtual projector of one). For a disabled laser that is All unless excluded, its own groups and its laser ref, as carefully as today (`library.clj:64-75`); automatic groups follow the rig as it is;
+- a zone: its lane, in **every map that exists in the show** (the three built-ins and every custom map, overrides included), is one of the above.
+
+**Why every map, not the active one.** A vibe checks a cue once, when it picks it (`playable-cells`, `library.clj:102-116`), but the map changes while the cue plays: a pad, a learned key, a pending switch landing a beat later, Z5's Map cycle. Only a check over every map holds for the whole time the cue plays. It costs maps × the zones a cue uses.
+
+Rig: p1–p4; p5 tagged `:crowd-scanning`, with `:exclude-from-all?` (and so, with Q-Z2-1 B ★, in no automatic group); custom `:crowd` = p5; custom map "Crowd sweep" `[:auto/left :crowd]` with `{:zone/c :auto/center}`.
+
+| Cue | Why | Audience-capable? |
+|---|---|---|
+| A only | Left / Right: Left; Odd / Even: Odd; Unison: All (p5 excluded); Crowd sweep: Left | no |
+| B only | Crowd sweep sends B to Crowd | **yes** |
+| C only | it would wrap to Left, but the override sends it to Center | no |
+| pinned `:auto.laser/p5` | p5 | **yes** |
+| All, with p5 not excluded from All | All reaches p5 (as `test/laser_show/vibes/library_test.clj:63-64` pins today), and every zone does too, through Unison | **yes** |
+| B, once "Crowd sweep" is deleted | no map sends B to p5 | no |
+
+This is also the predicate vibe Phase 8b's `audience-fx?` and Z5's zone lists use for refs.
+
+### 8.7 "Used by" (Q-Z5 ★ A)
+
+Twelve cues: 3 name Left directly, 9 draw into A, 2 into C. Under Left / Right, A and C go to Left: "Used by 3 cues · 11 more through Zones A, C". Under Odd / Even: "Used by 3 cues". A cue that does both counts once, as direct, so the two numbers add up to every cue that reaches the group. Counted from `cue-refs` (column and show defaults included), through the **active** map only (Q-Z5 A: not every map).
+
+### 8.8 Invariants
+
+1. Every stored `:target`, column and show default, and every frame key is in normal form; `normalize-target` is idempotent.
+2. **One render per cue per tick**, and frame keys never depend on the zone map: a switch re-routes the same frame objects.
+3. **Old shows route as before**: every fixture of §9 sends each projector the same points at each beat as before the phase, except content aimed at an empty built-in group (04 S-2).
+4. The migration is idempotent and silent: twice is once (`identical?`), no undo step, not unsaved, no notice.
+5. The resolver is pure and total: one target per item, and `:from` names the level that set it.
+6. The show clock never writes `[:zone-map]`; a switch reaches `:active` through `:zone-map/schedule`, `:show-clock/zone-map-due`, Stop, Retrigger or "Use now".
+7. A pending switch is effective from the first tick whose global beats reach `:at-beat` until the commit lands, so the output switches on the beat however late the agent is.
+8. A switch is live: no undo step, not unsaved; saved, and the show reopens on it (D-14); New Project is Left / Right.
+9. A zone never resolves to a zone; an unknown map id is Left / Right; an empty lane resolves to nothing.
+10. Unison sends every zone to All (spec invariant 10).
+11. A vibe never picks a cue that any zone map in the show can send to an audience projector, unless the vibe allows the audience (V6).
+12. Every place that sets a target uses `target-control`: one menu, one copy.
+13. The Zone Selector is offered nowhere and read by no routing; its id stays registered.
+14. A switch re-renders the pads, the badges with zones and open Target chips; no other cell or pad.
+
+## 9. Tests (named test vars, fixtures)
+
+Pure first. Fixtures: the cues of `test/laser_show/routing/zone_routing_integration_test.clj:26-116, 488-533` and its setup (`:124-135`); the probe v19 rig (vibe Phase 8 §7); Z3's `projector-frame` tests (`test/laser_show/backend/multi_engine_test.clj:272-309` today); `show-clock/tick!` by hand (`test/laser_show/services/show_clock_test.clj:190-212`).
+
+- **Legacy shows, first** (NEW `laser-show.routing.legacy-shows-test`; EDN under `test/laser_show/routing/legacy_shows/`: `destination.edn`, `item-zones.edn`, `selectors.edn`, `timeline.edn`, `preview.edn`, `starter.edn`, and `golden.edn` recorded by `legacy-shows/record-golden!` before any Z4 change): `old-shows-route-as-before-test` (load through `apply-loaded-project`, tick at beats 0, 1.5 and 7.25, compare every projector's frame), `legacy-loads-are-clean-test`.
+- `laser-show.routing.targets-test` (NEW): `normal-form-test`, `zone-index-round-trip-test` (a, z, aa, az, ba), `resolve-levels-test` (§8.2, a row each), `group-passes-through-what-it-inherits-test`, `track-targets-walk-folders-test` (a cycle stops), `toggle-builds-unions-test`, `cue-refs-include-disabled-items-test`, `badge-text-test` (§8.5), `ref-name-test`.
+- `laser-show.routing.zone-maps-test` (NEW): `built-in-maps-test`, `zones-wrap-over-lanes-test`, `overrides-beat-the-wrap-test`, `empty-lanes-go-nowhere-test`, `effective-map-order-test` (pending due, cycle hook, active, unknown id), `switch-at-table-test` (§8.4), `schedule-test` (now, pending, replace, cancel, due-first commit), `pin-test`, `map-warnings-test`.
+- `laser-show.state.migration-test` (Z2's): `destination-becomes-the-cue-target-test`, `zone-groups-become-targets-test`, `enabled-selector-becomes-the-target-test`, `own-zone-beats-the-selector-test`, `first-enabled-selector-wins-test`, `every-selector-goes-test`, `preview-cells-take-targets-test`, `z4-runs-after-z2-test` (an empty built-in Left ends as `:target :auto/left`), `migration-is-idempotent-test`, `pasted-old-cue-is-migrated-test`.
+- `laser-show.services.frame-service-test` (existing): `frame-keys-are-normal-targets-test`, `union-target-is-one-key-test`, `column-and-show-defaults-reach-items-test`, `frame-keys-ignore-the-map-test`. `test-generate-frames-by-zone-inherits-default` (`:69`) moves to `:target`.
+- `laser-show.routing.rig-test` (Z2's file, Z3's tests): `zone-resolves-through-the-effective-map-test`, `unison-sends-every-zone-to-all-test`, `wrapped-zones-share-a-lane-test`, `ref-entries-callers-see-zones-test`. `laser-show.routing.compose-test` (Z3's): the two tests Z3 names for Z4, `example-i-unison-draws-every-zone-everywhere-test` and `example-j-zones-wrap-over-two-lanes-test` (spec §6.2 i and j).
+- `laser-show.services.show-clock-test` (existing): `snapshot-names-the-effective-map-test`, `pending-map-is-effective-once-due-test`, `due-switch-is-reported-test` (once, again after 250 ms), `clock-writes-no-zone-map-test`. `one-state-and-input-read-per-tick-test` (`:341`) still passes.
+- `laser-show.events.zone-maps-handlers-test` (NEW): `press-reads-the-clock-then-schedules-test`, `press-within-50-ms-switches-now-test`, `shift-and-pad-setting-wait-for-the-bar-test`, `no-clock-switches-at-once-test`, `input-time-backs-the-beats-off-test`, `due-commit-matches-the-id-test`, `stop-and-retrigger-commit-the-pending-switch-test`, `switch-is-live-test`, `delete-active-map-falls-back-test`, `map-editing-is-undoable-test`.
+- `laser-show.events.handlers.triggers-test` (existing, after `:109-130`): `zone-map-action-presses-the-map-test`, `zone-map-action-carries-the-input-time-test`. `laser-show.events.handlers.input-test` (after `:120`): `relearning-a-map-pad-moves-its-key-test`.
+- `laser-show.events.cue-chain-handlers-test` (existing, the four zone tests `:385-456` rewritten): `set-item-target-test`, `inherit-removes-the-target-test`, `set-cue-target-test`. `laser-show.events.timeline-handlers-test`: `add-track-does-not-stamp-zone-test` (`:102-109`) becomes `…-target-test`; `open-editor-converts-without-changing-output-test` (`:61-80`) uses `:target`. `laser-show.timeline.model-test`: `auto-initialize-tracks-test` (`:82`) reads targets; NEW `target-ops-test`.
+- `laser-show.state.history-test`: `zone-map-active-is-live-test`, `zone-maps-and-labels-are-undoable-test`, `column-targets-are-undoable-test`. `laser-show.state.persistent-test` (after `:240-273`): `zone-data-survives-save-and-load-test`, `show-reopens-on-its-map-test`, `pending-switch-is-not-saved-test`, `session-reset-clears-the-pending-switch-test`. `laser-show.state.templates-test`: `starter-cues-inherit-test`.
+- `laser-show.vibes.library-test` (existing, `audience-cell-test` `:51` moves to targets): `zone-in-any-map-reaches-the-crowd-test` (§8.6), `override-counts-test`, `unison-counts-when-all-reaches-the-crowd-test`.
+- `laser-show.subs-test`: `ref-usage-direct-and-through-test` (§8.7), `cell-badge-sub-test`, `map-switch-rerenders-only-zone-badges-test` (invariant 14, the pattern of `cell-display-data-ignores-unrelated-changes-test`, `:67`), `map-pad-sub-test`. NEW `laser-show.views.components.target-control-test`: `menu-model-sections-test`, `menu-model-scopes-test`, `combine-rows-toggle-test`.
+- UI, NEW `laser-show.ui-test.zones-test` (`with-toolkit` once, `with-app` each; `with-input-mapper` as `test/laser_show/ui_test/perform_test.clj:25-34`; `with-clock`, which Z3 moves to `test/laser_show/ui_test/fixtures.clj` from `preview_test.clj:70`): `item-chip-sets-a-zone-test`, `chip-says-where-an-inherited-target-comes-from-test`, `combine-makes-a-union-test`, `new-zone-takes-the-next-letter-test`, `pin-freezes-the-lane-test`, `footer-says-target-test`, `timeline-chip-and-inspector-set-targets-test`, `grid-badge-and-column-target-test`, `map-pad-switches-the-map-test` (no clock thread in `start-test!`: at once), `pending-pad-blinks-test`, `map-pad-learns-a-note-test`, `zone-maps-section-edits-a-map-test`, `bank-offers-no-zone-selector-test`. Updated: `main-window-test/cue-chain-editor-footer-fits-test` (`:178-198`, "Target:" for "Default zone:"), `preview-test` (`:17-28`, `:105-116`, `:target`), `perform-test` NEW `map-row-shows-when-zones-are-used-test`.
+
+Run: `clj -M:mac-arm:test legacy-shows targets zone-maps migration frame-service routing.rig-test compose show-clock triggers handlers.input cue-chain-handlers timeline-handlers model-test history persistent templates library subs target-control`, then `clj -M:test-ui:mac-arm:test-ui-headless -n laser-show.ui-test.zones-test`, then `-n` main-window-test, preview-test, grid-test, perform-test, timeline-editor-test, then both full suites (the `targeted-ui-testing` skill).
+
+## 10. Commit plan
+
+Each step is one commit: its failing tests first (run them red), then the code, then the named tests green. The `legacy-shows` test runs in every step from 1 on.
+
+| # | Commit (message) | Tests | ~d |
+|---|---|---|---|
+| 1 | `test(zones): old shows' routing pinned before targets arrive: six fixture shows and the frames every projector got from them` | `legacy-shows` (green: it records today) | 0.25 |
+| 2 | `feat(zones): one normal form for targets, and the inheritance that says where each one came from` | `targets`, `target-control` (`menu-model` only) | 0.5 |
+| 3 | `feat(zones): zone maps: Left / Right, Odd / Even and Unison, custom lanes that wrap and overrides, and the beat a switch lands on` | `zone-maps` | 0.25 |
+| 4 | `feat(zones): cues, items, tracks and clips carry one :target; old shows convert on load, silently, and route as before` (render, handlers, timeline ops, `zones-z4`, paste, templates; the old dropdowns send the new events) | `migration`, `frame-service`, `cue-chain-handlers`, `timeline-handlers`, `model-test`, `templates`, `legacy-shows` | 1 |
+| 5 | `feat(zones): a grid column and the show can give a default target` | `history`, `persistent`, `frame-service` | 0.25 |
+| 6 | `feat(zones): zones reach lasers through the map the snapshot names; the active map is live and saved with the show` | `routing.rig-test`, `compose` (i, j), `show-clock`, `history`, `persistent` | 0.5 |
+| 7 | `feat(zones): a map switch lands on the beat, or the bar, from a pad press or any learned key` | `zone-maps-handlers`, `triggers`, `handlers.input`, `show-clock` | 0.5 |
+| 8 | `feat(ui): one Target chip in the Cue Chain Editor (items, groups, the cue) that says where an inherited target comes from` | UI `zones-test` (chip tests), `main-window-test` | 0.75 |
+| 9 | `feat(ui): the timeline's tracks and clips use the Target chip` | UI `timeline-chip…`, `timeline-editor-test` | 0.25 |
+| 10 | `feat(ui): grid cells show where their cues go, and a column's number sets its default` | `subs`, UI `grid-badge…`, `grid-test` | 0.5 |
+| 11 | `feat(ui): zone map pads on the Grid tab and on Perform, blinking while a switch waits` | UI pads tests, `perform-test` | 0.5 |
+| 12 | `feat(ui): zones and maps on the Zone Groups tab: labels, the show default, custom maps with warnings, and who uses each group` | `subs`, UI `zone-maps-section…`, `preview-test` | 0.5 |
+| 13 | `feat(vibes): a cue that any zone map can send to the crowd is audience-capable` | `library` | 0.25 |
+| 14 | `refactor(zones): the Zone Selector leaves the bank, and the old zone readers go` | UI `bank-offers…`, `effects_coverage`, both full suites | 0.25 |
+
+About 6.25 days; if it runs long, map overrides (UI only) and the through-the-map count can move to Z5. Then write the "as built" note into this doc, as the vibe and UX plans do.
+
+## 11. Out of scope / alternatives considered
+
+- **Zone patterns, the Map cycle, pattern pads, Phase 8's pickers taking refs**: Z5 (`07`). Z4 leaves the `cycle` argument of `effective-map-id` nil. **The step grid**: Z6. **The rig file**: ZR.
+- **A target per vibe** (Q-Z4 B): no; a vibe uses the cues' targets.
+- **Show data under `:config`**, as `[:config :vibes]` is: fewer edits to `state/history.clj`, but the spec names `[:zone-maps]` and `[:zones :labels]` and other phases cite them (SQ-1).
+- **Keeping `:zone-group-id` or the Zone Selector as aliases**: rejected. Two keys meaning one thing is the bug; routing reads no raw parameter (spec §2).
+- **Letting the clock compute `:at-beat`** (pending without a beat): rejected. The clock would keep scheduling state in its runtime and the UI couldn't say "next bar".
+- **Blinking from `[:timing :beat-index]`**: rejected; it changes once a beat, so a pending switch would never blink.
+- **Shift-click to combine**: rejected for the Combine submenu. A menu item's action carries no modifier, and touch has none.
+- **Checking only the active map for the audience**: rejected (§8.6).
+- **Setting several items' targets at once, a "Map: …" chip in the main toolbar, a colour per zone, renaming the Zone Groups tab**: later.
+- **Fades between maps**: a switch is a cut (overview §8).
+
+## 12. Spec questions and open questions
+
+**Spec questions** (the code against `01`, or `01` silent; what this doc chose)
+- **SQ-1 · Paths.** §12 names `[:zone-maps id]`, `[:zones :labels]` and `[:grid :column-targets]`; the history policy only sees `[:grid :size]` (`state/history.clj:60`) and the file only saves it (`persistent.clj:51`). *Chose:* the spec's paths, with the edits of §4.3 and §5.
+- **SQ-2 · "No clock running".** The clock thread always runs in the app and the global clock advances whether anything plays (`cue_timing.clj:78-122`), and Stop and Retrigger restart it at 0 (`show_time.clj:95-98`), which §9 doesn't cover. *Chose:* "no clock" is the thread not running, the transport stopped or a BPM ≤ 0: at once. Stop and Retrigger commit a pending switch at once.
+- **SQ-3 · The beats at the press.** Handlers are pure and none sees the beats. *Chose:* a NEW inline effect `:show-clock/read`, as `:link/sync-to-downbeat` does, plus the input-time correction of §8.4.
+- **SQ-4 · "An event the clock sends with its status".** `:show-clock/status` is only sent when the beat, stats or MTC text change (`show_clock.clj:108-132`). *Chose:* a report in `pending-reports`, deduplicated by `due-reports`, dispatched with the status at `show_clock.clj:161`.
+- **SQ-5 · Which Zone Selectors convert.** §11 names enabled ones only. *Chose:* the first enabled top-level one with a `:target-zone` becomes the target (only it routed); every selector is removed, because one left behind would do nothing when switched on.
+- **SQ-6 · `:from` through a group.** §2 says the parent group's resolved target is level 3. *Chose:* a child shows `:group` only when the group's own target set it; otherwise the group's `:from` passes through ("from column 3", not "from group Pair").
+- **SQ-7 · "→ Left from the effective map".** The effective map is per tick and only the snapshot has it. *Chose:* the UI shows the active map; a pending switch shows on its pad; Z5 marks a cycling map.
+- **SQ-8 · Beats per bar.** "From the clock, 4 by default", but there is no setting. *Chose:* 4, bars counted from global beat 0, as the beat squares (`show_clock.clj:121`) and the timeline (`timeline/layout.clj:224`) count.
+- **SQ-9 · Bar mode from MIDI.** "Shift or the pad's setting", with no path for the setting. *Chose:* `[:config :zone-map-pads id :bar?]`, read for a pad press and for its learned keys alike.
+- **SQ-10 · Where a zone resolves.** §5 puts zones in the resolver; Z3 left `routing-inputs`' `:zone-maps` nil and made `rig/ref-entries` the only reader (05 §4, S-3). *Chose:* the routing carries the effective map's `:lanes` and `:overrides`, `ref-entries` resolves zones from them, and `rig` requires `zone-maps` (never the reverse); Z3's target helpers move to `routing.targets` so nothing needs `rig` to read a target.
+- **SQ-11 · Two choices made elsewhere that Z4 relies on.** Content aimed at an empty built-in now reaches the automatic group (04 S-2, chosen there): Z4's fixtures expect that. And whether Exclude from All also takes a laser out of the automatic groups is Q-Z2-1 (B ★ there): Z4 plans with B, because with A every zone under Left / Right could reach an audience scanner placed on the strip, and §8.6 would mark nearly every zone cue as audience-capable.
+
+**Open questions for you** (★ = recommendation)
+
+> **Z4-Q1 · When the map pads show.** Overview R-5 says "only when a playing cue uses zones".
+> - **A ★** Whenever the show uses a zone anywhere (a cue, a column, the show default): you can pick the map before the drop, and a show without zones never sees them.
+> - **B** Only while a playing cue uses zones (R-5 as written): nothing to pick until it plays.
+> - **C** Always.
+
+> **Z4-Q2 · Learning a key for a map pad again.**
+> - **A ★** It moves: one key per pad, as the vibe pads (vibe Phase 2, invariant 6).
+> - **B** It adds a second key, as a grid cell does.
+
+> **Z4-Q3 · Which zones the Target menu lists.**
+> - **A ★** A and B, every zone the show uses, and "New zone" with the next letter.
+> - **B** Always A to D.
+> - **C** As many as the active map has lanes (2 for Left / Right), plus "New zone".
