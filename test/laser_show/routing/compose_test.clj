@@ -318,3 +318,50 @@
                     "no colour changed")
                 (is (= result (compose/projector-frame (mapv #(reordered rng %) cues) r p))
                     "the same frame whatever the order of each cue's keys")))))))))
+
+
+;; Cue warnings (spec §8): a playing cue too heavy for a laser
+
+(deftest cue-warnings-name-the-worst-laser-test
+  (let [heavy (circle 2000)
+        r (routing (-> (rig-state 3)
+                       (assoc-in [:projectors :p2 :fit] {:min-fps 10})
+                       (assoc-in [:projectors :p3 :scan-rate] 30000)))]
+    (is (= {[0 0] {:projector :p1 :points 2000 :fps 12.5 :min-fps 20 :scan-rate 25000}}
+           (compose/cue-warnings [(cue [0 0] {:all heavy}) (cue [1 0] {:all (circle 100)})] r))
+        "12.5 fps on p1 and 15 on p3, both under 20, and p2's minimum is 10; the light cue: nothing")
+    (is (= {:projector :p3 :points 2000 :fps 15.0 :min-fps 20 :scan-rate 30000}
+           (get (compose/cue-warnings [(cue [2 0] {:auto/right heavy})] r) [2 0]))
+        "Right: p2's half (fine at its 10) and p3 (15 fps)")
+    (testing "ties go to the lower index, an excluded laser's last"
+      (let [r (routing (rig-state 3 :excluded #{1}))]
+        (is (= :p2 (get-in (compose/cue-warnings [(cue {:all heavy :auto.laser/p1 heavy})] r) [[0 0] :projector])))
+        (is (= :p1 (get-in (compose/cue-warnings [(cue {:auto.laser/p1 heavy})] r) [[0 0] :projector])))))
+    (testing "a cue nothing reaches, or that rendered nothing, has none"
+      (is (= {} (compose/cue-warnings [(cue {:nowhere heavy}) (cue [1 0] {})] r)))
+      (is (= {} (compose/cue-warnings [(cue {:all heavy})] nil))))
+    (testing "what the laser draws counts: each picture once, both halves of a split laser"
+      (let [r1 (routing (rig-state 1))]
+        (let [c (circle 1300)]
+          (is (= 1300 (get-in (compose/cue-warnings [(cue {:auto/left c :auto/right c})] r1) [[0 0] :points]))
+              "one object in both halves: drawn once"))
+        (is (= 1502 (get-in (compose/cue-warnings [(cue {:auto/left (circle 750) :auto/right (circle 750)})] r1)
+                            [[0 0] :points])))))))
+
+(deftest cue-warnings-name-the-heaviest-item-test
+  (let [r (routing (rig-state 2))
+        frames (with-meta {:all (circle 1500) :auto/left (circle 600) :auto/right (circle 900)}
+                 {:item-points [[:ring {:all 1500}] [:left-ring {:auto/left 600}] [:right-ring {:auto/right 900}]]})]
+    (is (= {:id :ring :points 1500} (get-in (compose/cue-warnings [(cue frames)] r) [[0 0] :item])))
+    (testing "only the items that reach that laser count"
+      (let [frames (with-meta {:auto/left (circle 1300) :auto/right (circle 1300)}
+                     {:item-points [[:a {:auto/left 1300}] [:b {:auto/right 1300}]]})
+            warnings (compose/cue-warnings [(cue frames)] r)]
+        (is (= :p1 (get-in warnings [[0 0] :projector])) "both at 19 fps; p1 has the lower index")
+        (is (= {:id :a :points 1300} (get-in warnings [[0 0] :item])) "p1 draws only Left")))
+    (testing "an item under two keys counts on both"
+      (let [frames (with-meta {:all (circle 700) :auto/left (circle 700)}
+                     {:item-points [[:a {:all 700 :auto/left 700}] [:b {:all 100}]]})]
+        (is (= {:id :a :points 1400} (get-in (compose/cue-warnings [(cue frames)] r) [[0 0] :item])))))
+    (testing "without the counts (the cue's editor is closed), no item"
+      (is (not (contains? (get (compose/cue-warnings [(cue (with-meta frames nil))] r) [0 0]) :item))))))

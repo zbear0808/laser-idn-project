@@ -349,6 +349,10 @@
      cue's tempo.
    - render-ctx: What the tick's cues share (render-context). Without it, it
      is made from app state, the input store and the show clock as they are.
+     With :item-points? true (the show clock sets it for a cue whose editor
+     is open), the result's metadata has :item-points [[item-id {key
+     points}] …]: each top-level item's (or clip's) points by key, before
+     track and global effects, for the cue warnings (routing.compose).
    
    Returns:
    Map of zone-group-id → frame, where each frame is a vector of points.
@@ -359,7 +363,7 @@
                             (render-context (state/get-raw-state)
                                             (input-store/get-all-continuous-values)
                                             (show-time/global-clock))))
-  ([cue-chain timing-ctx {:keys [global-effects global-ctx]}]
+  ([cue-chain timing-ctx {:keys [global-effects global-ctx item-points?]}]
    (ze/log-once :frame-service-generate
                 (format "[zone-debug] generate-frames-by-zone: destination-zone=%s effective-beats=%.2f item-count=%d"
                         (pr-str (:destination-zone cue-chain))
@@ -396,7 +400,12 @@
                             (merge-zone-maps item-zone-maps))
          ;; The global effects run at the cue's tempo
          global-ctx (when global-effects (assoc global-ctx :bpm bpm))]
-     (apply-global-effects-once combined-by-zone global-effects global-ctx))))
+     (cond-> (apply-global-effects-once combined-by-zone global-effects global-ctx)
+       item-points? (with-meta {:item-points (into []
+                                                   (keep (fn [[item by-zone]]
+                                                           (when (seq by-zone)
+                                                             [(:id item) (update-vals by-zone count)])))
+                                                   (map vector items item-zone-maps))})))))
 
 (defn preview-data
   "What the preview shows for one tick, from its rendered cues

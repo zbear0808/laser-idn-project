@@ -205,3 +205,45 @@
   (if-let [out (get-in routing [:outputs pid])]
     (plan-points (plan-of (pictures zone-frames routing pid) (:regions out) false))
     0))
+
+
+;; Cue warnings (spec §8)
+
+(defn- heaviest-item
+  "{:id :points} of the top-level item of zone-frames' :item-points
+   metadata ([[item-id {key points}] …], an edited cue's) with the most
+   points on pid, counting the keys that reach it; nil without the counts."
+  [zone-frames routing pid]
+  (let [reaches? (memoize (fn [k] (some #(= pid (nth % 0)) (mapcat #(rig/resolve-ref routing %) (rig/key-refs k)))))]
+    (reduce (fn [best [id by-key]]
+              (let [points (reduce-kv (fn [n k p] (if (reaches? k) (+ n (long p)) n)) 0 by-key)]
+                (if (and (pos? points) (or (nil? best) (> points (:points best))))
+                  {:id id :points points}
+                  best)))
+            nil
+            (:item-points (meta zone-frames)))))
+
+(defn cue-warnings
+  "Spec §8's cue warnings: {cell {:projector :points :fps :min-fps :scan-rate
+   :item}} for each cue of the tick that a laser it reaches would draw below
+   that laser's :min-fps (its scan rate over the cue's points on it,
+   cue-points), at its worst laser: the lowest fps, ties to the lower
+   :index, an excluded laser's (nil) last. :item {:id :points} is the
+   top-level item with the most points on that laser, when the cue's frames
+   carry :item-points (an edited cue's, frame-service)."
+  [cues routing]
+  (into {}
+        (keep (fn [{:keys [cell zone-frames]}]
+                (when-let [worst (->> (:outputs routing)
+                                      (keep (fn [[pid {:keys [index scan-rate fit]}]]
+                                              (let [points (cue-points zone-frames routing pid)
+                                                    fps (when (pos? points) (/ (double scan-rate) points))]
+                                                (when (and fps (< fps (double (:min-fps fit))))
+                                                  {:projector pid :points points :fps fps :min-fps (:min-fps fit)
+                                                   :scan-rate scan-rate :index index}))))
+                                      (sort-by (juxt :fps #(or (:index %) Long/MAX_VALUE) (comp str :projector)))
+                                      first)]
+                  [cell (let [item (heaviest-item zone-frames routing (:projector worst))]
+                          (cond-> (dissoc worst :index)
+                            item (assoc :item item)))])))
+        cues))

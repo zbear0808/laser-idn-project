@@ -29,9 +29,9 @@
       advance (:vibe/arm, :vibe/advance: laser-show.vibes.rotation/due, on
       the tick's read of app state), a key held too long (:vibe/release
       :reason :watchdog: laser-show.vibes.watchdog/due), and the status views
-      show a few times a second, the beat square, the frame stats and the MTC
-      text (:show-clock/status), when app state doesn't have it yet. It
-      writes app state no other way.
+      show a few times a second, the beat square, the frame stats, the MTC
+      text and the cues too heavy for a laser (:show-clock/status), when app
+      state doesn't have it yet. It writes app state no other way.
 
    Only app requires this namespace; tests call tick! by hand."
   (:require [clojure.tools.logging :as log]
@@ -44,6 +44,7 @@
             [laser-show.input.store :as input-store]
             [laser-show.profiling.frame-profiler :as profiler]
             [laser-show.profiling.jfr-profiler :as jfr]
+            [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
@@ -88,13 +89,25 @@
     (jfr/emit-frame-event! {:base-time-us base-time-us :effects-time-us 0 :effect-count effect-count
                             :point-count (transduce (comp (mapcat (comp vals :zone-frames)) (map count)) + cues)})))
 
+(defn- edited-cells
+  "#{[col row]} of the cues whose editor is open (the cue chain editor's or
+   the timeline editor's): their renders count each item's points, for the
+   cue warnings."
+  [state]
+  (into #{}
+        (keep (fn [dialog]
+                (let [{:keys [open? col row]} (get-in state [:ui :dialogs dialog])]
+                  (when (and open? (some? col) (some? row)) [col row]))))
+        [:cue-chain-editor :timeline-cue-editor]))
+
 (defn- render
   "The snapshot fields for runs (show-time/active-runs), or none while not
    playing: {:cues [{:cell :run :zone-frames}] :projector-ctx :render-us}.
    Every cue shares one render context (frame-service/render-context): the
    tick's input values with the faders' slots derived from their bindings,
    its presses (pulses, show-time/pulse-view), its global effects and
-   global-clock's timing. Calibration gets the same input values and no
+   global-clock's timing; a cue whose editor is open also counts its items'
+   points (:item-points?). Calibration gets the same input values and no
    presses."
   [state input-values global-clock runs pulses]
   (if (empty? runs)
@@ -102,8 +115,11 @@
     (let [bpm (double (or (ex/bpm state) 120.0))
           t0 (System/nanoTime)
           render-ctx (frame-service/render-context state input-values global-clock pulses)
+          edited (edited-cells state)
           cues (mapv (fn [run]
-                       {:cell (:cell run) :run (:run run) :zone-frames (render-cue run bpm render-ctx)})
+                       {:cell (:cell run) :run (:run run)
+                        :zone-frames (render-cue run bpm (cond-> render-ctx
+                                                           (contains? edited (:cell run)) (assoc :item-points? true)))})
                      runs)
           render-ns (- (System/nanoTime) t0)]
       (record-render! cues render-ns (:global-effects render-ctx))
@@ -127,22 +143,42 @@
              :avg-effects-us (:avg-effects-us recent)}
       (:avg-idn-us recent) (merge (select-keys recent [:avg-idn-us :p95-idn-us :max-idn-us])))))
 
+(defn- whole [x] (Math/round (double x)))
+
+(defn- tens [x] (* 10 (Math/round (/ (double x) 10.0))))
+
+(defn- cue-warnings
+  "The tick's cue warnings (routing.compose/cue-warnings on the snapshot's
+   cues and routing), rounded so they change only with the load: whole fps,
+   points to the nearest 10. nil when there are none."
+  [snapshot]
+  (not-empty
+   (update-vals (compose/cue-warnings (:cues snapshot) (:routing snapshot))
+                (fn [w] (cond-> (-> w
+                                    (update :points tens)
+                                    (update :fps whole)
+                                    (update :min-fps whole))
+                          (:item w) (update-in [:item :points] tens))))))
+
 (defn- status-step
   "[runtime event]: the runtime's :status one tick on, and the
    :show-clock/status event to send, or nil. The status is the beat in the
-   bar, the frame stats (recomputed every stats-interval-ms, kept while the
-   profiler has none) and the MTC text (mtc/mirror-status's 100 ms limit), all
-   on the step's now-ms. It goes when app state doesn't hold it, and again at
-   most every report-interval-ms while app state still differs. The first
-   tick after a reset starts from what app state holds."
-  [runtime state mtc-pos now-ms]
+   bar, the frame stats and the cue warnings (both recomputed every
+   stats-interval-ms, the stats kept while the profiler has none; the
+   warnings from snapshot, the tick just published) and the MTC text
+   (mtc/mirror-status's 100 ms limit), all on the step's now-ms. It goes when
+   app state doesn't hold it, and again at most every report-interval-ms
+   while app state still differs. The first tick after a reset starts from
+   what app state holds."
+  [runtime state snapshot mtc-pos now-ms]
   (let [now-ms (double now-ms)
         held (show-time/app-status state)
         {:keys [value stats-at-ms sent sent-at-ms]} (or (:status runtime) {:value held})
         stats-due? (or (nil? stats-at-ms) (>= (- now-ms (double stats-at-ms)) stats-interval-ms))
         value' {:beat-index (int (mod (show-time/global-beats runtime) 4.0))
                 :frame-stats (or (when stats-due? (frame-stats)) (:frame-stats value))
-                :mtc (mtc/mirror-status (:mtc value) mtc-pos now-ms)}
+                :mtc (mtc/mirror-status (:mtc value) mtc-pos now-ms)
+                :cue-warnings (if stats-due? (cue-warnings snapshot) (:cue-warnings value))}
         send? (and (not= value' held)
                    (or (not= value' sent)
                        (>= (- now-ms (double sent-at-ms)) show-time/report-interval-ms)))]
@@ -219,7 +255,7 @@
                                             :routing routing
                                             :preview (delay (frame-service/preview-data cues))))
         ;; After publish!, so the engines never wait for them
-        [runtime status] (status-step runtime state mtc-pos now-ms)
+        [runtime status] (status-step runtime state snapshot mtc-pos now-ms)
         [runtime vibe-reports] (vibe-step runtime state pulses now-ms)]
     (reset! show-time/!runtime runtime)
     (run! events/dispatch! (cond-> (into reports vibe-reports) status (conj status)))

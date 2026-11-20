@@ -447,8 +447,9 @@
   "Backend services state - streaming, input, logging."
   {:streaming {:default {:running? false
                          :status nil
-                         :frame-stats {}}
-               :doc "IDN output. :running? is the operator's intent (Stream/Stop); :status is what actually streams, pure data from backend/output_runtime.clj (the engines live there)"}
+                         :frame-stats {}
+                         :cue-warnings nil}
+               :doc "IDN output. :running? is the operator's intent (Stream/Stop); :status is what actually streams, pure data from backend/output_runtime.clj (the engines live there), each laser's fit-guard :load and :low? too; :cue-warnings {cell {:projector :points :fps :min-fps :scan-rate :item}}, the playing cues too heavy for a laser (the show clock's status, zones plan Z3), nil when none"}
    :input {:default {:midi {:enabled? true
                             :devices {}                ; Map of device-name -> device instance
                             :connected-devices #{}     ; Set of connected device names

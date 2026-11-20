@@ -23,8 +23,8 @@
    chase (:show-clock/cue-ended, :show-clock/chase), auto-advance's arm and
    advance and a stuck key's release (laser-show.vibes.rotation and
    .watchdog, with their own memory, :vibe-sent),
-   and what views show a few times a second, the beat square, the stats and
-   the MTC text (:show-clock/status, on status-paths). Positions never reach
+   and what views show a few times a second, the beat square, the stats, the
+   MTC text and the cue warnings (:show-clock/status, on status-paths). Positions never reach
    app state: views that move every frame draw the newest snapshot
    (views/components/clock_view.clj)."
   (:require [laser-show.animation.cue-timing :as cue-timing]
@@ -66,10 +66,12 @@
 
 (def status-paths
   "Where app state holds the show clock's status, which :show-clock/status
-   writes: what views show a few times a second."
+   writes: what views show a few times a second. :cue-warnings are the
+   playing cues too heavy for a laser (routing.compose/cue-warnings)."
   {:beat-index [:timing :beat-index]
    :frame-stats [:backend :streaming :frame-stats]
-   :mtc [:backend :input :mtc]})
+   :mtc [:backend :input :mtc]
+   :cue-warnings [:backend :streaming :cue-warnings]})
 
 (defn app-status
   "The show clock's status as app state holds it."

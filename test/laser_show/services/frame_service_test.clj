@@ -377,3 +377,18 @@
           "and their frames joined, as two items on one zone are"))
     (is (= [:auto/left :zone/a] (ze/resolve-item-zone-destination {:zone-group-id [:zone/a :auto/left]} {} {})))
     (is (= :all (ze/resolve-item-zone-destination {} {} {})) "a keyword, or the fallback, as before")))
+
+(deftest item-points-only-when-asked-test
+  (let [cue {:destination-zone {:zone-group-id :all}
+             :items [{:id :ring :type :preset :preset-id :circle :enabled? true :effects [] :params {:num-points 99}}
+                     {:id :box :type :preset :preset-id :square :enabled? true :effects [] :zone-group-id :auto/left}
+                     {:id :grp :type :group :enabled? true :zone-group-id :auto/right
+                      :items [{:id :inner :type :preset :preset-id :circle :enabled? true :effects []}]}
+                     {:id :off :type :preset :preset-id :circle :enabled? false :effects []}]}
+        asked (frame-service/generate-frames-by-zone cue test-timing-ctx {:item-points? true})
+        plain (frame-service/generate-frames-by-zone cue test-timing-ctx {})]
+    (is (= asked plain) "the same frames")
+    (is (nil? (meta plain)) "not asked: no counts (only an open editor needs them)")
+    (is (= [[:ring {:all 100}] [:box {:auto/left (count (:auto/left plain))}] [:grp {:auto/right (count (:auto/right plain))}]]
+           (:item-points (meta asked)))
+        "each top-level item's points by key, in order: the circle's 99 and its dark first point; none for one that is off")))

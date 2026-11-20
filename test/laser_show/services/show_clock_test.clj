@@ -22,6 +22,7 @@
             [laser-show.input.router :as router]
             [laser-show.input.store :as input-store]
             [laser-show.profiling.frame-profiler :as profiler]
+            [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]
             [laser-show.services.frame-service :as fs]
             [laser-show.services.show-clock :as show-clock]
@@ -392,7 +393,7 @@
 ;; Phase 3: app state only hears what changes a few times a second
 
 (def ^:private status-paths
-  [[:timing :beat-index] [:backend :streaming :frame-stats] [:backend :input :mtc]])
+  [[:timing :beat-index] [:backend :streaming :frame-stats] [:backend :input :mtc] [:backend :streaming :cue-warnings]])
 
 (defn- watch-writes
   "Run (f) and return its app-state writes: each the set of status paths it
@@ -452,6 +453,58 @@
         (is (= [] (status-at 950)) "computed at 850, so not due; and still beat 1 (1.9 beats)")
         (is (= [{:avg-latency-us 100 :p95-latency-us 120 :max-latency-us 150 :avg-base-us 90 :avg-effects-us 10}]
                (map :frame-stats (status-at 1100))))))))
+
+(defn- heavy-cue
+  "A 2,000-point circle (99 + 1 dark × 20) and a square: at 25,000 pts/s,
+   about 12 fps."
+  []
+  {:destination-zone {:zone-group-id :all}
+   :items [{:id :big :type :preset :preset-id :circle :enabled? true :effects [] :params {:num-points 1999}}
+           {:id :small :type :preset :preset-id :square :enabled? true :effects []}]})
+
+(defn- cue-warnings [] (get-in (state/get-raw-state) [:backend :streaming :cue-warnings]))
+
+(deftest cue-warnings-reach-app-state-test
+  (testing "zones plan Z3: a playing cue too heavy for a laser, at most 4 times a second, rounded"
+    (init! {[0 0] (heavy-cue) [1 0] (cue :circle)})
+    (two-lasers!)
+    (trigger! 0 0)
+    (trigger! 1 0)
+    (with-redefs [mtc/current (constantly {:state :stopped})]
+      (let [s (ticks! 2)
+            points (compose/cue-points (get-in s [:cues 0 :zone-frames]) (:routing s) :p1)]
+        (is (< 1990 points 2200))
+        (is (= {[0 0] {:projector :p1 :points (* 10 (Math/round (/ points 10.0))) :fps (Math/round (/ 25000.0 points))
+                       :min-fps 20 :scan-rate 25000}}
+               (cue-warnings))
+            "the heavy cue at its worst laser (both draw it; p1 has the lower index), the light one not at all")
+        (testing "gone once the cue stops (Q-Z3-3 A: while it plays)"
+          (trigger! 0 0)
+          (ticks! 20 50000000)
+          (is (nil? (cue-warnings))))))))
+
+(deftest edited-cue-names-its-heaviest-item-test
+  (init! {[0 0] (heavy-cue)})
+  (two-lasers!)
+  (trigger! 0 0)
+  (with-redefs [mtc/current (constantly {:state :stopped})]
+    (ticks! 2)
+    (is (some? (cue-warnings)))
+    (is (not (contains? (get (cue-warnings) [0 0]) :item)) "its editor is closed: no item counts")
+    (state/assoc-in-state! [:ui :dialogs :cue-chain-editor] {:open? true :col 0 :row 0})
+    (ticks! 20 50000000)
+    (is (= {:id :big :points 2000} (get-in (cue-warnings) [[0 0] :item])) "open: the circle's 2,000 points")
+    (testing "the timeline editor's cue too"
+      (state/swap-state! #(-> %
+                              (assoc-in [:ui :dialogs :cue-chain-editor] {:open? false})
+                              (assoc-in [:ui :dialogs :timeline-cue-editor] {:open? true :col 0 :row 0})))
+      (ticks! 20 400000000)
+      (is (= :big (get-in (cue-warnings) [[0 0] :item :id]))))
+    (testing "another cell's editor: not this cue's"
+      (state/assoc-in-state! [:ui :dialogs :timeline-cue-editor] {:open? true :col 1 :row 0})
+      (ticks! 20 750000000)
+      (is (some? (get (cue-warnings) [0 0])))
+      (is (not (contains? (get (cue-warnings) [0 0]) :item))))))
 
 (deftest timecode-status-reaches-app-state-test
   (with-redefs [mtc/current (constantly {:state :running :seconds 3599.0 :fps 25
