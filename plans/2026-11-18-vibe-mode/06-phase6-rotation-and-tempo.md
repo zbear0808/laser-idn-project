@@ -1,7 +1,7 @@
 # Phase 6: auto-advance on phrase gaps, and one tap tempo
 
 **Written:** 2026-11-18   **Written for commit:** `b1da0f2` (`master`)
-**Status:** Proposed. Needs Phases 1 and 2; V3 (HIT taps the tempo) and V4 (auto-advance default)   **Last verified against:** `b1da0f2`
+**Status:** Done in `4a4a10a` (2026-11-19), built as `443e4b3` on branch `vibe-phase6` from `2d1f813`; V3 and V4 answered A. As built: §10   **Last verified against:** `4a4a10a` (§10)
 **Supersedes / Superseded by:** supersedes the rotation scaffolding in `events/handlers/triggers.clj:134-155` (deleted in Phase 1, V7 A); implements review 05 M6 (one tap-tempo algorithm)   **Related findings:** review 05 F14, M6; review 02 #10 (input timestamps, for the taps only)
 
 Two things that take decisions off the performer's hands: the feel changes by itself at a musical moment (off unless you turn it on), and the hits set the tempo with the algorithm `beyond-vibe` proved.
@@ -149,3 +149,92 @@ Run: `clj -M:mac-arm:test rotation tap-tempo timing show-clock show-time vibes c
 - **Pausing the countdown during a break in the music**: the 2-beat gap rule already waits for a pause before it switches.
 - **Quantizing the switch to a bar line**: rejected in `00-overview.md` §9 for presses; for an automatic switch it would be fine and is a later option.
 - **Keeping the tap vector for compatibility**: the only readers of `[:timing :tap-times]` are the tap handler, the `:timing/calculate-bpm` effect (both replaced), three docstring examples (`state/core.clj:107, 235, 243`, updated) and the tests above (grep). It isn't saved (`state/persistent.clj:50`), so there is no migration.
+
+## 10. As built (2026-11-19)
+
+Committed as `4a4a10a` on top of `3d82fe7` (built as `443e4b3` on branch `vibe-phase6` from `2d1f813`, vibe Phases 1–4b in it; the cherry-pick conflicted in the two require lists the merge-tree row below names, both resolved by keeping both requires). §1–9 cite `b1da0f2`; the lines below are at `443e4b3`: the same in `4a4a10a` except in the files Phase 5 also changed (animation/show_time.clj, css/vibes.clj, events/handlers/vibes.clj, services/show_clock.clj, state/domains.clj, subs.clj, views/tabs/perform.clj, events/handlers/vibes_test.clj, services/show_clock_test.clj, ui_test/perform_test.clj), where they are shifted by its lines. Vibe Phase 5 was built at the same time and is on `master` (`9f5d78a`, `0faa18c`); the merge is below.
+
+**Where it is now** (paths under `src/laser_show/`)
+- `vibes/rotation.clj` (NEW, pure): `settings` `:18`, `auto?` `:25` (the switch, else the saved `:mode`), private `setting` `:34` (a number, or the default), `seconds` `:40`, `key-down?` `:45`, private `turning?` `:55`, `may-advance?` `:69`, `due` `:77`.
+- `vibes/engine.clj`: private `restart-rotation` `:203` (used by `switch-to` `:210`, `toggle-lock` `:419`, BLACKOUT off in `toggle-blackout` `:439` and `set-auto`), `change-vibe` `:219` (the pulse); `with-tap` `:264` carries `:input-time`; `let-go-of-flash-key` `:364` (`release-flash` `:371` restores on top of it); `press` `:466` sets `:last-hit-at` on every HIT press; `release` `:484` dispatches the FLASH advance; NEW public `arm` `:540`, `advance` `:550`, `set-auto` `:568` (private `bpm-of` `:538`).
+- `events/handlers/vibes.clj:186-188`: `:vibe/arm`, `:vibe/advance`, `:vibe/set-auto`, in one block after `:vibe/release-all`.
+- `animation/show_time.clj`: `initial-runtime` `:39` has `:vibe-sent {}`; `due-reports` `:220` is public and takes the memory map; `step` `:243` passes `(:sent rt)`. `services/show_clock.clj`: NEW private `rotation-step` `:146`; `tick!` `:155` runs it after `publish!`, beside the status, on the tick's one read of app state and the wall clock, and sends its reports after the step's.
+- `triggers/tap_tempo.clj`: `default-options` `:11`, `make` `:13`, private `median` `:18`, `tap` `:25` (a 3-arity takes the options), `beats-per-minute` `:49`. `events/handlers/timing.clj`: `handle-timing-tap-tempo` `:43`. `events/core.clj`: `effect-timing-calculate-bpm`, its entry and its docstring line are gone. `events/handlers/triggers.clj`: `update-runtime` `:115` writes no `:tap-history`; a `:tap-tempo` binding carries `:input-time` (`:102`).
+- `state/domains.clj`: `timing` `:tap` `:41` (was `:tap-times`); `trigger-runtime` without `:tap-history`; `vibe-runtime` `:rotation` `:115` (with `:armed`), NEW `:auto?` `:117`, and the docs of `:entered-at` and `:last-hit-at`; `[:config :vibes :settings :rotation]` `:276`. `state/core.clj`: the three docstring examples name other paths.
+- `views/components/vibe_rotation.clj` (NEW): `countdown-text` `:21`, `armed-opacity` `:32`, `redraw-countdown!` `:38` (through `clock-view/ext-clock-redraw`), `rotation-controls` `:47`: the label `#vibe-countdown` and the toggle button `#vibe-auto`. `views/tabs/perform.clj:103`: in the header's second row, after a spacer. `subs.clj`: NEW `vibe-rotation` `:973`, after `vibe-header`, and one require. `css/vibes.clj:60-85`: `.vibe-countdown`, `-armed`, `.toggle-button.vibe-auto` and `:selected`.
+
+**The brief's corrections**
+1. `switch-to` doesn't pulse `:vibe` (4a); `advance` goes through `change-vibe`, which pulses it as a VIBE tap does, for a gap and for a FLASH release. Test `auto-advance-pulses-vibe-as-a-tap-does-test`; the fuzz checks one `:vibe` pulse per automatic change.
+2. `[:timing :tap]` keeps at most `:max-taps` 5 taps; `tap-history-keeps-the-last-8-test` is now `tap-history-keeps-the-last-5-test` (20 taps: never more than 5 kept, the last 5, and the handler's BPM is the estimator's for steady and drifting taps).
+3. The tap is at `(or (:input-time event) (:time event))`. HIT's tap carries its press's own time, so a press and its tap share one time (the input's, or a pad press's handling time); a bound tap-tempo key carries its input's `:timestamp`; the TAP button has no input time. Test `input-time-wins-over-time-test`, `tap-tempo-binding-taps-at-the-input-time-test`.
+4. The show clock stays the only writer of show time: the rotation's reports go out from `tick!` through `due-reports` with the runtime's `:vibe-sent`. `one-state-and-input-read-per-tick-test` and `snapshot-shape-test` pass unchanged.
+5. The fuzz walks AUTO on and off, arms and advances that come late or for another vibe, the clock's own reports (each handled twice: the second must change nothing), and quiet spells (every key let go of, then 2 s of the clock; or FLASH held through 3 s and let go of, also with HIT pressed first). Its checks: 06 invariants 1–4 worked out without `vibes.rotation`, and that every switch, an unlock, AUTO on and BLACKOUT off start the vibe's time again.
+6. The countdown and the switch are their own component; the Perform tab gains two lines in the header. Phase 5's files are touched only locally: one block in `events/handlers/vibes.clj`, one require and one sub after `vibe-header` in `subs.clj`, and in `state/domains.clj` the `:tap` key, the vibe runtime's keys and one line of the `:vibes` settings default.
+7. The new UI tests click no pad: AUTO is a toggle button, which takes the robot's clicks, and the clock is ticked by hand; the opacity is read with `ui/query-all`.
+
+**Other differences from the plan**
+
+| Plan | As built | Why |
+|---|---|---|
+| the BPM is written "in the same state" on every tap | only once the series has an interval; a tap after a pause starts a new series and leaves `[:timing :bpm]` as it is | "keeps the last tempo": a lone tap mustn't put back a tempo the BPM box or Link set since |
+| a key down: HIT, ACCENT or FLASH | any role the engine holds, VIBE too, and any HIT, ACCENT or FLASH pulse held by a press that played nothing | a VIBE tap while the clock switches would switch twice; an effects-only press is a key down |
+| the gap from `:last-hit-at` | as planned, and every HIT press outside blackout sets it, also one that plays nothing | Phase 1 set it only when a cue started: an effects-only HIT never held the gap off (test `a-hit-that-plays-nothing-holds-the-gap-off-test`; `empty-pool-reports-a-problem-test` and the fuzz's empty-pool check allow the key) |
+| `:vibe/advance` ignored if `:from` is stale or no longer `:armed` | the handlers ask the rotation again: `:gap` and `:vibe/arm` only when `rotation/due` still gives that report, `:flash` when `rotation/may-advance?` still holds, and `:from` plays | invariant 1 against the agent's queue: a key pressed after the clock's report and handled before it |
+| a FLASH release advances | the inline `:vibe/advance :flash` carries the release's time, and the release doesn't start what the solo flash stepped aside | the 200-seed run (7 seeds): a `:sustain` voice the flash kept waiting was picked and then stopped by leaving the look in the same turn (a bag turn lost, 01 inv 3), or took a grid cue's cell over and stopped it (inv 4). They end with the look anyway |
+| `:vibe/set-auto {:auto?}` | turning it on (with a vibe current) starts the vibe's time; off, an armed change is called off | else AUTO turned on after ten minutes in a vibe changes it at the next gap, and a FLASH release still advances with AUTO off |
+| `:mode :off` | `:auto` is on, anything else off; `:seconds` or `:pause-beats` that are no number are 45 and 2.0 | the doc names no on value; a bad hand-edited file mustn't throw on the clock's thread |
+| the settings written by "the Vibes tab (Phase 3 editor)" (§5) | no editor: §4 and §8 list none | the saved `:mode` comes from a file; the switch is the session's |
+| the countdown | hidden while AUTO is off, locked (the header says LOCKED), in blackout or with one vibe; "ACTIVE 0:00 / 0:45" before a vibe plays; never past its period; boxed in orange while armed | |
+| the VIBE pad shows "LOCKED" | there since Phase 2 (its badge) | |
+| `due-allocates-nothing-when-idle-test`: "a call count" | the bytes the thread allocated over 10,000 calls (`ThreadMXBean`), under 4 KB, for nine idle states | deterministic, and the mutants below show it catches a merge (664 bytes a call) and a boxed subtraction (24) |
+
+**Found, not done**
+- ACCENT presses and releases don't count toward the gap, as in §7; beyond-vibe counts both rhythm keys' presses and releases (`last_rhythm_activity`), so there a long HIT hold's release starts the gap, and here the change can come at the next tick after it.
+- `[:timing :tap]` survives New and Open, as `:tap-times` did; harmless, a pause starts a new series.
+- Invariant 5's time per tick is not measured with the clock's probes: `due` allocates nothing (tested), and its idle path is a handful of map lookups.
+
+**Tests**: 34 new unit tests (1,054 → 1,088) and 2 UI tests
+- `triggers.tap-tempo-test` (+6, two migrated): `calculates-bpm`, `timeout-starts-new-series` (the tempo stays); NEW `steady-taps-test` (5 kept, clamped 40–300), `bounce-is-ignored-test` (state identical; 100 ms counts; a tap from before the last is ignored), `pause-keeps-the-last-tempo-test` (and the 1.5 s boundary), `missed-beat-test` (and 160 BPM for an extra tap), `one-tap-changes-nothing-test`, `beats-per-minute-test`.
+- `events.timing-handlers-test` (+2): `timing-tap-tempo-test` and `timing-tap-tempo-phase-alignment-test` rewritten (the 1.5 s boundary both ways, the BPM in the same state, no other effect), `tap-history-keeps-the-last-5-test`, NEW `bounced-tap-requests-no-align-test`, `input-time-wins-over-time-test`. `events.core-test`: `tap-tempo-sets-bpm-in-one-state-test`, and `:timing/calculate-bpm` is no effect. `events.handlers.triggers-test` (+1): `tap-tempo-binding-taps-at-the-input-time-test`.
+- NEW `vibes.rotation-test` (8): the eight of §8.
+- `events.handlers.vibes-test` (+11): the eight of §8, `auto-advance-pulses-vibe-as-a-tap-does-test`, `a-hit-that-plays-nothing-holds-the-gap-off-test`, `hit-taps-the-tempo-as-the-tap-button-does-test` (invariant 6). `stale-advance-is-ignored-test` also sends a FLASH advance for another vibe, with three vibes; `flash-release-while-armed-advances-test` also holds HIT or ACCENT, AUTO off, `release-all`, and a `:sustain` HIT waiting for the solo flash.
+- `vibes.engine-test` (+2): `hit-skips-the-tap-while-link-sync-is-on-test` (the TAP button still taps), `hit-skips-the-tap-when-the-setting-is-off-test`; six tap assertions carry `:input-time`.
+- `animation.show-time-test` (+1) `due-reports-keeps-separate-memories-test`; `services.show-clock-test` (+1) `vibe-report-is-sent-once-per-interval-test` (two vibes inline, so the file's requires stay as they are). NEW `views.components.vibe-rotation-test` (2): `countdown-text-test`, `armed-countdown-pulses-twice-a-second-test`. `vibes.engine-fuzz-test` extended (5 above): its three seeds see 31 arms, 11 changes at a gap and 4 at a FLASH release, and 288 arms and advances that change nothing.
+- UI `perform-test` (+2): `auto-switch-and-countdown-test` (off in a new project; the switch writes `[:vibe-runtime :auto?]`, no undo step, nothing unsaved; "ACTIVE 0:00 / 0:45", then 0:31 of 0:45; hidden while locked), `armed-state-shows-the-next-vibe-test` (a hand-ticked clock arms, "ARMED → next: Lines", pulsing; at a gap the clock's advance makes Lines current and the countdown starts again). `toolbar-test/tap-tempo-button-records-taps` reads `[:timing :tap :taps]`, clicks 150 ms apart, and checks the kept taps are 100 ms to 1.5 s apart.
+
+**Red first**
+- `tap-tempo-test` against the old estimator: 8 tests, 14 failures, 1 error (it averages: 96 BPM for the missed beat, 120.4 with the bounce; a 2 s gap dropped the tempo; 6 taps kept; no options argument).
+- `timing-handlers-test` with `core-test` against the old handler and effect: 19 failures (`[:timing :tap-times]`, `:timing/calculate-bpm`, and 300 BPM for three taps 400 ms apart by their input time: the old handler timed them when handled). `triggers-test`'s new test against the old `triggers.clj`: 2 failures.
+- `rotation-test`: the namespace didn't load. `events.handlers.vibes-test` against the old engine and router: 30 tests, 21 failures. `show-time-test`: `due-reports` was private (compile error); `vibe-report-is-sent-once-per-interval-test` against the old `show_clock.clj`: 4 failures. The two `hit-skips-…` tests passed at once: Phase 1 built the skip; they pin it.
+- UI: the two perform tests and the toolbar test against the old `perform.clj`, `timing.clj` and `events/core.clj` (stashed): 3 errors, each timing out.
+
+**Mutants**: each against the fuzz's three seeds and the engine, handler and rotation tests (77 tests).
+
+| # | Mutant | Fuzz | Unit tests failing |
+|---|---|---|---|
+| M1 | `advance` without the `:from` check | 0 of 3 | `stale-advance-is-ignored-test` (1), after its three-vibe case was added: with two vibes a stale FLASH advance lands on the vibe that plays, and the mutant survived |
+| M2 | the gap ignores the keys down | 3 of 3 | 13 (`held-key-defers-the-switch-test`, the allocation test, two handler tests) |
+| M3 | a FLASH release advances whatever is held | 3 of 3 (0 of 3 before the "FLASH over HIT" spell) | 2 |
+| M4 | a switch doesn't start the vibe's time again | 3 of 3 | 6 tests or more |
+| M5 | `advance` through `switch-to`, no pulse | 3 of 3 | 2 |
+| M6 | the gap ignores the last HIT | 1 of 3 | 7 |
+| M7 | a HIT that plays nothing isn't a hit (Phase 1's `:last-hit-at`) | 2 of 3 | 3 |
+| M8 | AUTO off leaves an armed change | 0 of 3 | 1 |
+| M9 | the FLASH release restores what it ducked before it advances (the code before the stress-run fix) | seed 180 | 1 |
+
+And two in `due` against `due-allocates-nothing-when-idle-test`: a settings merge in `auto?` (6.6 MB per 10,000 calls) and a boxed subtraction (240 KB). All killed.
+
+**Verification, 2026-11-19, macOS arm64, JDK 25**
+
+| Check | Result |
+|---|---|
+| `clj -M:mac-arm:test tap-tempo timing triggers show-time show-clock vibes rotation engine core` | 313 tests, 1,858 assertions, 0 failures |
+| `VIBE_FUZZ_SEEDS=200 clj -M:mac-arm:test -n laser-show.vibes.engine-fuzz-test` | seeds 1–200, 2,000 steps each: 0 failures (71 s); 7 seeds failed before the FLASH release fix above |
+| `clj -M:test-ui:mac-arm:test-ui-headless -n` perform-test, toolbar-test, vibes-test | 33 tests, 227 assertions, 0 failures |
+| `clj -M:mac-arm:test` (full unit suite) | 1,088 tests, 34,168 assertions, 0 failures (baseline at `2d1f813`: 1,054, 33,972) |
+| `clj -M:kondo --lint` on the 28 touched files and `testfx.clj` | 0 errors; 1 warning, there before (the redundant `let` in `triggers.clj` `update-runtime`, `:119`) |
+| `git merge-tree --write-tree master 443e4b3` (master `3d82fe7`) | 2 conflicts, both in require lists. `services/show_clock.clj`: master adds `vibes.faders` (the faders derived each tick), this branch `vibes.rotation`; keep both, `tick!` merges cleanly (master's input read and `:faders`, this branch's `rotation-step`). `events/handlers/vibes_test.clj`: both add `state.persistent`, this branch also `vibes.rotation`; keep both |
+| that tree exported, the two resolved by keeping both (no branch touched) | full unit suite 1,123 tests, 34,467 assertions; perform, toolbar and vibes UI 37 tests, 273 assertions; 0 failures |
+| layout | headless screenshots at 1200×800 of the merged tree: the countdown and AUTO fit in the header's second row, with Phase 5's meters under the pads |
+| full UI suite | not run here: it runs after the merge |
+| manual (unverified) | a real pad's taps against a click track; one auto-advance during a real set (Phase 7 hardware check) |
