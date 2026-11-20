@@ -310,3 +310,26 @@
     (is (= :all (get-in after [:chains :cue-chains [0 0] :items 0 :zone-group-id])))
     (is (= (inc (undo-depth balcony-state)) (undo-depth after)) "one undo step")))
 \n
+
+;; Group ids from names
+
+
+(deftest create-new-ids-are-unique-test
+  (let [create (fn [s n] (:state (zone-groups/handle {:event/type :zone-groups/create-new :name n :state s})))
+        once (create base-state "Balcony")
+        twice (create once "Balcony")]
+    (is (= {:id :group-balcony :name "Balcony"} (select-keys (get-in once [:zone-groups :group-balcony]) [:id :name])))
+    (is (= "Balcony" (get-in twice [:zone-groups :group-balcony-2 :name]))
+        "the same name twice, in the same millisecond, gives two groups")
+    (is (= 2 (count (filter #(= "Balcony" (:name %)) (vals (:zone-groups twice))))))
+    (is (= :group-balcony-2 (get-in twice [:zone-group-ui :selected-group])))))
+
+(deftest create-new-never-takes-a-built-in-id-test
+  (is (= :group-all (zone-groups/unique-group-id base-state "All")))
+  (is (= :group-left (zone-groups/unique-group-id base-state "Left")))
+  (is (= :group-stage-left-2 (zone-groups/unique-group-id
+                              (assoc-in base-state [:zone-groups :group-stage-left] {:name "Stage left"})
+                              "Stage  Left!")))
+  (is (= :group (zone-groups/unique-group-id base-state "")))
+  (is (= :group (zone-groups/unique-group-id base-state "  ")))
+  (is (= :group-2 (zone-groups/unique-group-id (assoc-in base-state [:zone-groups :group] {}) "!!"))))

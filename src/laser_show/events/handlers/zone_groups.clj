@@ -32,11 +32,28 @@
                           :description ""
                           :color "#808080"}))})
 
+(defn unique-group-id
+  "A new zone group's id from its name: :group- and the name in lower case,
+   with every run of characters other than a-z and 0-9 made one -
+   (\"Stage Left\" → :group-stage-left), or :group for a name with none.
+   When that id is taken, -2, -3 … is added. The group- prefix keeps it clear
+   of the built-in ids (:all :left :right :center :graphics :crowd), and it
+   doesn't depend on the time, so two creates in one millisecond differ."
+  [state group-name]
+  (let [slug (-> (str/lower-case (or group-name ""))
+                 (str/replace #"[^a-z0-9]+" "-")
+                 (str/replace #"^-+|-+$" ""))
+        base (if (str/blank? slug) "group" (str "group-" slug))
+        taken? #(contains? (:zone-groups state) %)]
+    (->> (cons (keyword base) (map #(keyword (str base "-" %)) (iterate inc 2)))
+         (remove taken?)
+         first)))
+
 (defn- handle-zone-groups-create-new
   "Create a new zone group from dialog data."
   [{:keys [name description color state]
     :or {description "" color "#808080"}}]
-  (let [group-id (keyword (str "group-" (System/currentTimeMillis)))
+  (let [group-id (unique-group-id state name)
         new-group {:id group-id
                    :name (or name "New Group")
                    :description description
