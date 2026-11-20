@@ -10,6 +10,8 @@
    - --skip-dir: never load the namespaces in a directory. The unit aliases
      skip test/laser_show/ui_test, which needs the :test-ui classpath (TestFX).
    - selecting no tests is an error instead of a silent \"Ran 0 tests\"
+   - the rig file (state.persistent/default-rig-file) is a temp folder's,
+     unless -Dlaser-show.rig-file says otherwise
 
    Directories are skipped here rather than with a default -r because
    cognitect.test-runner ORs -n with -r, so a fixed -r would stop `-n <ns>`
@@ -18,7 +20,9 @@
             [clojure.string :as str]
             [clojure.tools.cli :as cli]
             [clojure.tools.namespace.find :as find]
-            [cognitect.test-runner :as runner]))
+            [cognitect.test-runner :as runner])
+  (:import [java.nio.file Files]
+           [java.nio.file.attribute FileAttribute]))
 
 (defn- accumulate [m k v]
   (update m k (fnil conj #{}) v))
@@ -140,7 +144,18 @@
   (println "\nAll options may be repeated for a logical OR effect.")
   (println "If neither -n nor -r is supplied, namespaces ending in '-test' are used."))
 
+(defn- isolate-rig-file!
+  "Point the JVM property laser-show.rig-file (state.persistent/default-rig-file)
+   at a fresh temp folder unless it is set, so no test can reach the user's
+   own rig file (~/LaserShowProjects/rig.edn)."
+  []
+  (when (str/blank? (System/getProperty "laser-show.rig-file"))
+    (let [dir (.toFile (Files/createTempDirectory "laser-show-test-rig" (make-array FileAttribute 0)))]
+      (.deleteOnExit dir)
+      (System/setProperty "laser-show.rig-file" (str (io/file dir "rig.edn"))))))
+
 (defn -main [& args]
+  (isolate-rig-file!)
   (let [{:keys [options arguments errors summary]} (cli/parse-opts args cli-options)]
     (cond
       errors (do (run! println errors)

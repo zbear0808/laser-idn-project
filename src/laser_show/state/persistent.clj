@@ -8,7 +8,8 @@
    
    The state.core namespace is agnostic about persistence - it just holds state.
    This namespace decides what gets saved and loaded."
-  (:require [clojure.tools.logging :as log]
+  (:require [clojure.string :as str]
+            [clojure.tools.logging :as log]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
@@ -21,6 +22,17 @@
 (def default-projects-dir
   "Default directory for saving projects."
   (str (System/getProperty "user.home") "/LaserShowProjects"))
+
+(defn default-rig-file
+  "Where this machine's rig file lives (Q-ZR-1): the JVM property
+   laser-show.rig-file when it is set, else rig.edn beside the shows in
+   default-projects-dir. The test runner sets the property to a temp folder,
+   so no test reaches the user's rig."
+  []
+  (let [property (System/getProperty "laser-show.rig-file")]
+    (if (str/blank? property)
+      (str default-projects-dir "/rig.edn")
+      property)))
 
 
 (def zip-filenames
