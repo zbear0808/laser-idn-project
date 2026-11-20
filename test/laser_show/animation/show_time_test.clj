@@ -258,6 +258,27 @@
       (events/event-handler {:event/type :show-clock/cue-ended :cell [0 0] :run r2})
       (is (= (:playback before) (:playback (state/get-raw-state)))))))
 
+(deftest due-reports-keeps-separate-memories-test
+  (testing "a report goes at most every 250 ms by the memory it is given"
+    (let [r {:event/type :vibe/arm :from :vibe-1}
+          [sent reports] (show-time/due-reports {} [r] 0.0)]
+      (is (= [{r 0.0} [r]] [sent reports]))
+      (is (= [{r 0.0} []] (show-time/due-reports sent [r] 100.0)) "100 ms later: not again")
+      (is (= [{r 300.0} [r]] (show-time/due-reports sent [r] 300.0)) "300 ms later: again")
+      (is (= [{} []] (show-time/due-reports sent [] 100.0)) "no longer pending: forgotten, so it goes at once if it comes back")))
+  (testing "the step keeps its own (:sent) and leaves the rotation's (:vibe-sent, show-clock/tick!) alone"
+    (init! {[0 0] (timeline {})})
+    (handle! {:event/type :timeline/play :col 0 :row 0 :from 15.9})
+    (let [ended {:event/type :show-clock/cue-ended :cell [0 0] :run (run-id [0 0])}
+          vibe-sent {{:event/type :vibe/arm :from :vibe-1} 50.0}
+          {rt1 :runtime r1 :reports} (step (assoc (run-at (:runtime start) 0.0) :vibe-sent vibe-sent) 100.0)
+          {rt2 :runtime r2 :reports} (step rt1 200.0)]
+      (is (= [ended] r1))
+      (is (empty? r2) "its own report waits its 250 ms")
+      (is (= {ended 100.0} (:sent rt2)))
+      (is (= vibe-sent (:vibe-sent rt1) (:vibe-sent rt2)))))
+  (is (= [{} {}] ((juxt :sent :vibe-sent) show-time/initial-runtime)) "a reset runtime has both, empty"))
+
 
 ;; Vibe mode's decay (plans/2026-11-18-vibe-mode/01 §7 "The clock's side")
 

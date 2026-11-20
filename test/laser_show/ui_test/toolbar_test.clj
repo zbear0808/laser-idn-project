@@ -116,18 +116,21 @@
     (is (= :toggle (get-in (state/get-raw-state) [:config :cue :trigger-mode])))))
 
 (deftest tap-tempo-button-records-taps
-  ;; Every click records a tap. Whether taps add up depends on the gaps between
-  ;; them (a gap over 2 s starts over; timing-tap-tempo-test covers that with
+  ;; Every click records a tap: the clicks are more than 100 ms apart, as a
+  ;; faster one is a bounce, which changes nothing (and the wait below would
+  ;; never end). Whether taps add up depends on the gaps between them (a gap
+  ;; over 1.5 s starts a new series; timing-tap-tempo-test covers that with
   ;; fixed times), and a slow CI machine can take that long between clicks.
   (let [robot (ui/robot)
-        tap-times #(get-in (state/get-raw-state) [:timing :tap-times])]
+        taps #(get-in (state/get-raw-state) [:timing :tap :taps])]
     (dotimes [_ 3]
-      (let [before (tap-times)]
+      (let [before (taps)]
+        (Thread/sleep 150)
         (ui/click! robot "#tap-tempo-btn")
-        (ui/wait-for! #(not= before (tap-times)))))
-    (let [taps (tap-times)]
-      (is (<= 1 (count taps) 3))
-      (is (every? #(<= % 2000) (map - (rest taps) taps)) "kept taps are at most 2 s apart"))))
+        (ui/wait-for! #(not= before (taps)))))
+    (let [kept (taps)]
+      (is (<= 1 (count kept) 3))
+      (is (every? #(<= 100 % 1500) (map - (rest kept) kept)) "kept taps are 100 ms to 1.5 s apart"))))
 
 (deftest beat-indicator-moves-on-each-beat-test
   ;; app/start-test! runs no show clock: tick it by hand, on a fake clock

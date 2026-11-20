@@ -37,12 +37,13 @@
 (deftest effects-and-co-effects-are-shared-maps-test
   (is (= #{:state :time} (set (keys events/co-effects))))
   (is (every? #(contains? events/effects %)
-              [:state :dispatch :dispatch-later :timing/calculate-bpm :link/sync-to-downbeat
+              [:state :dispatch :dispatch-later :link/sync-to-downbeat
                :input/await-learn :multi-engine/start :multi-engine/stop :multi-engine/refresh
                :output/write-status
                :project/save :project/load :fx/show-file-chooser :system/exit :system/open-url
                :dev/reload :clipboard/copy-effects :clipboard/paste-effects
-               :clipboard/paste-projector-effects :projectors/scan])))
+               :clipboard/paste-projector-effects :projectors/scan]))
+  (is (not (contains? events/effects :timing/calculate-bpm)) "a tap sets the BPM in its own handler's state"))
 
 (deftest dispatch-continues-inline-test
   (testing "a :dispatch follow-up runs now, in the same call, not through the dispatcher"
@@ -56,14 +57,17 @@
       (is (= [] @later))
       (is (false? (get-in (state/get-raw-state) [:ui :dialogs :unsaved-confirm :open?]))))))
 
-(deftest tap-tempo-bpm-continues-inline-test
+(deftest tap-tempo-sets-bpm-in-one-state-test
   (let [later (atom [])]
-    (let [now (System/currentTimeMillis)]
-      (state/swap-state! assoc-in [:timing :tap-times] [(- now 800) (- now 400)]))
-    (events/event-handler {:event/type :timing/tap-tempo} #(swap! later conj %))
+    (doseq [t [1000 1400 1800]]
+      (events/event-handler {:event/type :timing/tap-tempo :input-time t} #(swap! later conj %)))
     (is (= [] @later))
-    (is (< 140.0 (get-in (state/get-raw-state) [:timing :bpm]) 160.0)
-        "taps 400 ms apart")))
+    (is (= 150.0 (get-in (state/get-raw-state) [:timing :bpm])) "taps 400 ms apart")
+    (testing "the handler's state has the BPM, and nothing follows it"
+      (let [result (timing/handle {:event/type :timing/tap-tempo :time 2200
+                                   :state (assoc-in (state/get-raw-state) [:timing :bpm] 90.0)})]
+        (is (= [:state] (keys result)))
+        (is (= 150.0 (get-in result [:state :timing :bpm])))))))
 
 (deftest dispatch-later-calls-back-through-the-dispatcher-test
   (let [got (promise)]

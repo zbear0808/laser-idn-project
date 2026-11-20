@@ -22,7 +22,7 @@
   "Perform and Vibes tab styles."
   (css/register ::vibes
     (let [{:keys [bg-interactive text-primary text-secondary text-muted border-default]} theme/semantic-colors
-          {:keys [blue orange red]} theme/base-colors]
+          {:keys [blue orange red green]} theme/base-colors]
       {".vibe-header"
        {:-fx-background-color bg-interactive
         :-fx-background-radius 10
@@ -55,6 +55,35 @@
        {:-fx-text-fill orange
         :-fx-font-size 18
         :-fx-font-weight "bold"}
+
+       ;; Auto-advance in the header (views/components/vibe_rotation.clj): the
+       ;; countdown, boxed while armed, and the AUTO switch
+       ".vibe-countdown"
+       {:-fx-text-fill text-primary
+        :-fx-font-size 18
+        :-fx-font-weight "bold"
+        :-fx-border-color "transparent"
+        :-fx-border-radius 6
+        :-fx-border-width 2
+        :-fx-padding "2 8"}
+
+       ".vibe-countdown.vibe-countdown-armed"
+       {:-fx-border-color orange}
+
+       ".toggle-button.vibe-auto"
+       {:-fx-background-color bg-interactive
+        :-fx-background-radius 6
+        :-fx-border-color text-primary
+        :-fx-border-radius 6
+        :-fx-border-width 2
+        :-fx-text-fill text-primary
+        :-fx-font-size 16
+        :-fx-font-weight "bold"
+        :-fx-padding "2 10"
+        :-fx-cursor "hand"}
+
+       ".toggle-button.vibe-auto:selected"
+       {:-fx-background-color green}
 
        ".vibe-banner"
        {:-fx-background-color red

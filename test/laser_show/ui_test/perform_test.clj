@@ -286,6 +286,67 @@
     (ui/wait-for! #(empty? (rt :held)))))
 
 
+;; Auto-advance (plans/2026-11-18-vibe-mode/06 §4)
+
+(defn- vibe-runtime! [m]
+  (state/swap-state! update :vibe-runtime merge m))
+
+(defn- countdown-opacity []
+  (let [^Node n (first (ui/query-all "#vibe-countdown"))]
+    (ui/on-fx-thread #(.getOpacity n))))
+
+(deftest auto-switch-and-countdown-test
+  (let [robot (ui/robot)]
+    (open-perform! robot)
+    (is (not (ui/selected? "#vibe-auto")) "off in a new project (V4 A)")
+    (is (not (ui/visible? "#vibe-countdown")))
+    (ui/click! robot "#vibe-auto")
+    (ui/wait-for! #(true? (rt :auto?)))
+    (ui/assert-selected! "#vibe-auto")
+    (ui/assert-visible! "#vibe-countdown")
+    (ui/assert-text! "#vibe-countdown" "ACTIVE 0:00 / 0:45")
+    (testing "it counts the vibe's time"
+      (vibe-runtime! {:current :vibe-1 :entered-at (- (System/currentTimeMillis) 31500)})
+      (ui/wait-for! #(re-matches #"ACTIVE 0:3[12] / 0:45" (str (ui/node-text "#vibe-countdown")))))
+    (testing "a session's choice: no undo step, nothing unsaved"
+      (is (empty? (get-in (app-state) [:history :undo-stack])))
+      (is (false? (get-in (app-state) [:project :dirty?]))))
+    (testing "locked, there is nothing to count"
+      (vibe-runtime! {:rotation :locked})
+      (ui/wait-for! #(not (ui/visible? "#vibe-countdown")))
+      (vibe-runtime! {:rotation :active})
+      (ui/assert-visible! "#vibe-countdown"))
+    (ui/click! robot "#vibe-auto")
+    (ui/wait-for! #(false? (rt :auto?)))
+    (ui/wait-for! #(not (ui/visible? "#vibe-countdown")))
+    (is (not (ui/selected? "#vibe-auto")))))
+
+(deftest armed-state-shows-the-next-vibe-test
+  (let [robot (ui/robot)
+        t0 (System/nanoTime)
+        tick! #(show-clock/tick! (+ t0 (* % 1000000)))
+        now #(System/currentTimeMillis)]
+    (open-perform! robot)
+    (ui/click! robot "#vibe-auto")
+    (ui/wait-for! #(true? (rt :auto?)))
+    (testing "Shapes has played its 45 s: the show clock arms it, and the countdown says what comes next"
+      (vibe-runtime! {:current :vibe-1 :entered-at (- (now) 46000) :last-hit-at (now)})
+      (tick! 0)
+      (ui/wait-for! #(= :armed (rt :rotation)))
+      (ui/assert-text! "#vibe-countdown" "ARMED → next: Lines")
+      (is (ui/has-style-class? "#vibe-countdown" "vibe-countdown-armed"))
+      (is (<= 0.35 (countdown-opacity) 1.0) "it pulses")
+      (is (= :vibe-1 (rt :current)) "a HIT a moment ago: no gap yet"))
+    (testing "at a phrase gap the vibe changes, and its time starts again"
+      (vibe-runtime! {:last-hit-at (- (now) 5000)})
+      (tick! 17)
+      (ui/wait-for! #(= :vibe-2 (rt :current)))
+      (ui/assert-text! "#vibe-header-name" "LINES")
+      (ui/wait-for! #(= "ACTIVE 0:00 / 0:45" (ui/node-text "#vibe-countdown")))
+      (is (not (ui/has-style-class? "#vibe-countdown" "vibe-countdown-armed")))
+      (is (= 1.0 (countdown-opacity))))))
+
+
 ;; Tap reactions (plans/2026-11-18-vibe-mode/04 §4)
 
 (defn- opacity [selector]

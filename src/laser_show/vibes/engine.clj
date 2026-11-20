@@ -6,9 +6,10 @@
 
    Pure: press, release, select and release-all take state and the event
    ({:role :input-time :time :src}, {:vibe}, {:only}) and return {:state}
-   plus a :dispatch for HIT's tap of the tempo and blackout's transport stop
-   and play; reconcile brings what plays up to date after an edit of the
-   vibes. The engine keeps [:vibe-runtime] (state.domains), starts and
+   plus a :dispatch for HIT's tap of the tempo, blackout's transport stop
+   and play, and the change a FLASH release makes while armed; reconcile
+   brings what plays up to date after an edit of the vibes. The engine keeps
+   [:vibe-runtime] (state.domains), starts and
    stops cues through their intents (cue-timing/activate-cue,
    deactivate-cue; the show clock ends a decay) and switches effect cells'
    :active?. Times are the event's own: the input's when it has one, else the
@@ -24,13 +25,18 @@
    Every press of HIT, ACCENT and FLASH is also a pulse, held until its
    release, and every vibe change one of :vibe ([:playback :pulses], which
    the show clock stamps for tap reactions, laser-show.animation.pulses),
-   whether or not the press plays anything. Nothing pulses during blackout."
+   whether or not the press plays anything. Nothing pulses during blackout.
+
+   With auto-advance on (laser-show.vibes.rotation), the vibe also changes
+   by itself: arm and advance follow the show clock's reports, a FLASH
+   release while armed advances, and set-auto is the Perform tab's switch."
   (:require [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.events.handlers.grid :as grid]
             [laser-show.events.helpers :as h]
             [laser-show.state.extractors :as ex]
             [laser-show.triggers.shuffle-bag :as bag]
-            [laser-show.vibes.library :as library])
+            [laser-show.vibes.library :as library]
+            [laser-show.vibes.rotation :as rotation])
   (:import [java.util UUID]))
 
 
@@ -194,19 +200,27 @@
     (-> (take-fx state (:fx vibe))
         (start-bed vibe t))))
 
+(defn- restart-rotation
+  "The vibe runtime with the vibe's time (the rotation's :seconds) counted
+   from t: an armed change is called off, a lock stays."
+  [vibe-runtime t]
+  (cond-> (assoc vibe-runtime :entered-at t)
+    (= :armed (:rotation vibe-runtime)) (assoc :rotation :active)))
+
 (defn- switch-to
   "state with vibe id current from t: the old look left, the new one entered."
   [state id t]
   (if (= id (get-in state [:vibe-runtime :current]))
     state
     (-> (leave-look state)
-        (update :vibe-runtime assoc :current id :entered-at t :problem nil)
+        (update :vibe-runtime #(-> % (assoc :current id :problem nil) (restart-rotation t)))
         (enter-look (library/vibe state id) t))))
 
 (defn- change-vibe
-  "switch-to for the performer's change (a VIBE tap, :vibe/select), which
-   pulses :vibe when the vibe does change, outside blackout. A press making
-   the first vibe current (ensure-current) isn't one."
+  "switch-to for a change of the vibe (a VIBE tap, :vibe/select, an
+   auto-advance), which pulses :vibe when the vibe does change, outside
+   blackout. A press making the first vibe current (ensure-current) isn't
+   one."
   [state id t]
   (cond-> (switch-to state id t)
     (and (not= id (get-in state [:vibe-runtime :current]))
@@ -248,14 +262,15 @@
     (assoc-in state [:vibe-runtime :voices role] {:cell cell :run run :mode mode})))
 
 (defn- with-tap
-  "effects with HIT's tap of the tempo (V3), on every HIT press, whatever it
-   plays, unless the setting is off or Link sync is on."
-  [effects state role]
+  "effects with HIT's tap of the tempo (V3) at the press's time t, on every
+   HIT press, whatever it plays, unless the setting is off or Link sync is
+   on."
+  [effects state role t]
   (cond-> effects
     (and (= :hit role)
          (:hit-taps-tempo? (library/settings state))
          (not (ex/link-sync-enabled? state)))
-    (assoc :dispatch {:event/type :timing/tap-tempo})))
+    (assoc :dispatch {:event/type :timing/tap-tempo :input-time t})))
 
 (defn- press-pool
   "{:state :dispatch?} for a HIT or ACCENT press: the role's last cue stops
@@ -271,8 +286,8 @@
         {:keys [cells select mode beats]} (get vibe role)
         pool (when vibe (library/playable-cells state vibe cells))]
     (cond
-      (nil? vibe) (with-tap {:state (problem state {:why :no-vibes})} state role)
-      (empty? pool) (with-tap {:state (problem state {:role role :why :empty-pool})} state role)
+      (nil? vibe) (with-tap {:state (problem state {:why :no-vibes})} state role t)
+      (empty? pool) (with-tap {:state (problem state {:role role :why :empty-pool})} state role t)
       :else
       (let [mode (or mode :decay)
             state (forget-stale state)
@@ -283,12 +298,10 @@
                     (not (solo-flash? state)) (play-next state id role pool select mode beats t)
                     (= :decay mode) state
                     :else (assoc-in state [:vibe-runtime :duck role] {:mode mode}))]
-        (with-tap {:state (update state :vibe-runtime
-                                  #(cond-> (-> %
-                                               (assoc-in [:held role] {:at t :src src})
-                                               (assoc :problem nil))
-                                     (= :hit role) (assoc :last-hit-at t)))}
-                  state role)))))
+        (with-tap {:state (update state :vibe-runtime #(-> %
+                                                           (assoc-in [:held role] {:at t :src src})
+                                                           (assoc :problem nil)))}
+                  state role t)))))
 
 (defn- release-pool
   "A HIT or ACCENT release (cut? for release-all): a :decay voice let go
@@ -348,14 +361,18 @@
         (switch-off (:fx-on voice))
         (update-in [:vibe-runtime :voices] dissoc :flash))))
 
+(defn- let-go-of-flash-key
+  "FLASH's hold over: the flash let go of."
+  [state]
+  (-> (forget-stale state)
+      (let-go-of-flash)
+      (update-in [:vibe-runtime :held] dissoc :flash)))
+
 (defn- release-flash
   "A FLASH release: the flash let go of, and what it stepped aside started
    again."
   [state t]
-  (-> (forget-stale state)
-      (let-go-of-flash)
-      (update-in [:vibe-runtime :held] dissoc :flash)
-      (restore-ducked t)))
+  (restore-ducked (let-go-of-flash-key state) t))
 
 (defn- duck
   "A solo flash's press: the other voices stop; :decay ones are done, the
@@ -399,6 +416,14 @@
 
 ;; VIBE and BLACKOUT
 
+(defn- toggle-lock
+  "A VIBE hold: the rotation locked, or unlocked with the vibe's time
+   counted from t."
+  [state t]
+  (if (= :locked (get-in state [:vibe-runtime :rotation]))
+    (update state :vibe-runtime #(-> % (assoc :rotation :active) (restart-rotation t)))
+    (assoc-in state [:vibe-runtime :rotation] :locked)))
+
 (defn- release-vibe
   "A VIBE tap switches to the next vibe; a hold of :lock-hold-ms or more
    locks or unlocks the rotation."
@@ -409,19 +434,20 @@
       (if-let [id (library/next-id state (library/current-id state))]
         (change-vibe (forget-stale state) id t)
         (problem state {:why :no-vibes}))
-      (update-in state [:vibe-runtime :rotation] #(if (= :locked %) :active :locked)))))
+      (toggle-lock state t))))
 
 (defn- toggle-blackout
   "On: every voice stops, holds clear (the pulses' too, though nothing
    pulses), effect cells off, and the transport stops. Off: the current
-   vibe's bed and FX set come back, and it plays."
+   vibe's bed and FX set come back, its time counts from t, and it plays."
   [state t]
   (if (get-in state [:vibe-runtime :blackout?])
     (let [state (assoc-in state [:vibe-runtime :blackout?] false)
           current (get-in state [:vibe-runtime :current])]
       {:state (cond
                 (nil? current) state
-                (library/vibe state current) (enter-look state (library/vibe state current) t)
+                (library/vibe state current) (-> (enter-look state (library/vibe state current) t)
+                                                 (update :vibe-runtime restart-rotation t))
                 :else (ensure-current state t))
        :dispatch {:event/type :transport/play}})
     (let [{:keys [voices fx-on]} (:vibe-runtime state)]
@@ -439,7 +465,8 @@
 
 (defn press
   "A role's press (:vibe/press). During blackout only BLACKOUT does anything.
-   HIT, ACCENT and FLASH pulse, whatever they play."
+   HIT, ACCENT and FLASH pulse, whatever they play, and every HIT press is
+   :last-hit-at, where the rotation's phrase gap counts from."
   [state {:keys [role] :as event}]
   (let [t (event-time event)
         src (or (:src event) :input)]
@@ -447,23 +474,34 @@
       (= :blackout role) (toggle-blackout state t)
       (get-in state [:vibe-runtime :blackout?]) {:state state}
       :else (case role
-              (:hit :accent) (update (press-pool state role t src) :state pulse-press role src)
+              (:hit :accent) (update (press-pool state role t src) :state
+                                     #(cond-> (pulse-press % role src)
+                                        (= :hit role) (assoc-in [:vibe-runtime :last-hit-at] t)))
               :flash {:state (pulse-press (press-flash state t src) :flash src)}
               :vibe {:state (assoc-in state [:vibe-runtime :held :vibe] {:at t :src src})}
               {:state state}))))
 
 (defn release
   "A role's release (:vibe/release). One that isn't held changes nothing,
-   but for its pulse: a press that played nothing holds that alone."
+   but for its pulse: a press that played nothing holds that alone. FLASH
+   let go of while the rotation is armed and no other key is down goes on to
+   the next vibe (:vibe/advance :flash, inline: beyond-vibe's flash mask),
+   and what a solo flash stepped aside doesn't start again: it would end with
+   the look it belongs to."
   [state {:keys [role] :as event}]
   (let [state (pulse-release state role)]
     (if (get-in state [:vibe-runtime :held role])
       (let [t (event-time event)]
-        {:state (case role
-                  (:hit :accent) (release-pool state role t false)
-                  :flash (release-flash state t)
-                  :vibe (release-vibe state t)
-                  state)})
+        (case role
+          (:hit :accent) {:state (release-pool state role t false)}
+          :flash (let [state (let-go-of-flash-key state)]
+                   (if (rotation/may-advance? state)
+                     {:state state
+                      :dispatch {:event/type :vibe/advance :reason :flash :input-time t
+                                 :from (get-in state [:vibe-runtime :current])}}
+                     {:state (restore-ducked state t)}))
+          :vibe {:state (release-vibe state t)}
+          {:state state}))
       {:state state})))
 
 (defn select
@@ -492,6 +530,54 @@
                         (update-in s [:vibe-runtime :held] dissoc role)))
                     (release-pulses state only)
                     roles)}))
+
+
+;; Auto-advance (laser-show.vibes.rotation): the show clock's reports and
+;; the Perform tab's switch
+
+(defn- bpm-of [state] (double (or (ex/bpm state) 120.0)))
+
+(defn arm
+  "The show clock's :vibe/arm {:from}: the vibe that plays has had its time,
+   so the rotation waits for a phrase gap or a FLASH release (:armed), if
+   the rotation still says so (rotation/due) and :from still plays. Again, it
+   changes nothing."
+  [state {:keys [from] :as event}]
+  {:state (if (= {:event/type :vibe/arm :from from} (rotation/due state (event-time event) (bpm-of state)))
+            (assoc-in state [:vibe-runtime :rotation] :armed)
+            state)})
+
+(defn advance
+  "A change to the next vibe that nobody pressed (:vibe/advance {:reason
+   :from}): the show clock's at a phrase gap (:gap), or a FLASH release's
+   (:flash), while :from still plays and the rotation still says so
+   (rotation/due, rotation/may-advance?), so that of every report sent for
+   one armed vibe one takes effect. It pulses :vibe, as a VIBE tap does."
+  [state {:keys [reason from] :as event}]
+  (let [t (event-time event)
+        go? (and (some? from)
+                 (= from (get-in state [:vibe-runtime :current]))
+                 (case reason
+                   :gap (= {:event/type :vibe/advance :reason :gap :from from} (rotation/due state t (bpm-of state)))
+                   :flash (rotation/may-advance? state)
+                   false))]
+    {:state (if go?
+              (change-vibe (forget-stale state) (library/next-id state from) t)
+              state)}))
+
+(defn set-auto
+  "The Perform tab's AUTO switch (:vibe/set-auto {:auto?}), for the session:
+   it overrides the saved :mode until New or Open. Turned on, the vibe's
+   time counts from now; turned off, an armed change is called off."
+  [state {:keys [auto?] :as event}]
+  (let [on? (boolean auto?)
+        was (rotation/auto? state)
+        state (assoc-in state [:vibe-runtime :auto?] on?)]
+    {:state (cond
+              (= was on?) state
+              (not on?) (update-in state [:vibe-runtime :rotation] #(if (= :armed %) :active %))
+              (get-in state [:vibe-runtime :current]) (update state :vibe-runtime restart-rotation (event-time event))
+              :else state)}))
 
 
 ;; Edits (the Vibes tab, events/handlers/vibes.clj)

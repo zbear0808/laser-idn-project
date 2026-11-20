@@ -20,10 +20,12 @@
       that the screen forces (views/components/clock_view.clj draws it on
       each screen refresh);
    4. sends what it learned back as events: a timeline's end and a timecode
-      chase (:show-clock/cue-ended, :show-clock/chase), and the status views
-      show a few times a second, the beat square, the frame stats and the MTC
-      text (:show-clock/status), when app state doesn't have it yet. It writes
-      app state no other way.
+      chase (:show-clock/cue-ended, :show-clock/chase), auto-advance's arm and
+      advance (:vibe/arm, :vibe/advance: laser-show.vibes.rotation/due, on
+      the tick's read of app state), and the status views show a few times a
+      second, the beat square, the frame stats and the MTC text
+      (:show-clock/status), when app state doesn't have it yet. It writes app
+      state no other way.
 
    Only app requires this namespace; tests call tick! by hand."
   (:require [clojure.tools.logging :as log]
@@ -40,7 +42,8 @@
             [laser-show.state.core :as state]
             [laser-show.state.extractors :as ex]
             [laser-show.timeline.playback :as playback]
-            [laser-show.vibes.faders :as faders]))
+            [laser-show.vibes.faders :as faders]
+            [laser-show.vibes.rotation :as rotation]))
 
 (def ^:const TICK_HZ 60)
 
@@ -145,10 +148,19 @@
 
 ;; A tick
 
+(defn- rotation-step
+  "[runtime reports]: auto-advance's report (vibes.rotation/due, on app
+   state's time base, the wall clock), at most every report-interval-ms by
+   the runtime's :vibe-sent."
+  [runtime state now-ms]
+  (let [report (rotation/due state (System/currentTimeMillis) (double (or (ex/bpm state) 120.0)))
+        [vibe-sent reports] (show-time/due-reports (:vibe-sent runtime) (when report [report]) now-ms)]
+    [(assoc runtime :vibe-sent vibe-sent) reports]))
+
 (defn tick!
   "One tick at now-ns (System/nanoTime): step show time, render every playing
-   cue, publish, then send the step's reports and the status as events
-   (events/dispatch!). now-ms, the step's time base, is fractional
+   cue, publish, then send the step's reports, auto-advance's and the status
+   as events (events/dispatch!). now-ms, the step's time base, is fractional
    milliseconds since the first tick after a reset. Returns the snapshot."
   [now-ns]
   (let [state (state/get-raw-state)
@@ -171,10 +183,11 @@
                                             :pulses pulses
                                             :faders (faders/fader-values input-values (get-in state [:config :input :macro-map]))
                                             :preview (delay (frame-service/preview-data cues))))
-        ;; After publish!, so the engines never wait for it
-        [runtime status] (status-step runtime state mtc-pos now-ms)]
+        ;; After publish!, so the engines never wait for them
+        [runtime status] (status-step runtime state mtc-pos now-ms)
+        [runtime vibe-reports] (rotation-step runtime state now-ms)]
     (reset! show-time/!runtime runtime)
-    (run! events/dispatch! (cond-> reports status (conj status)))
+    (run! events/dispatch! (cond-> (into reports vibe-reports) status (conj status)))
     snapshot))
 
 

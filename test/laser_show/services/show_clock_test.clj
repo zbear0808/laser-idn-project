@@ -143,6 +143,36 @@
     (is (nil? (get-in (state/get-raw-state) [:playback :active-cues [0 0]])))
     (is (false? (get-in (state/get-raw-state) [:playback :playing?])))))
 
+(deftest vibe-report-is-sent-once-per-interval-test
+  (testing "auto-advance's reports go out with the others (vibe 06 §4): armed with the gap
+            past, a tick sends :vibe/advance, at most every 250 ms"
+    (state/init-state! (-> (domains/build-initial-state)
+                           (assoc-in [:timing :bpm] 120.0)
+                           (assoc-in [:config :vibes :order] [:vibe-1 :vibe-2])
+                           (assoc-in [:config :vibes :library] {:vibe-1 {:id :vibe-1 :name "Shapes"}
+                                                                :vibe-2 {:id :vibe-2 :name "Lines"}})
+                           (update :vibe-runtime merge {:current :vibe-1 :rotation :armed :auto? true
+                                                        :entered-at (- (System/currentTimeMillis) 60000)})))
+    (show-time/reset-runtime!)
+    (let [sent (atom [])
+          advance {:event/type :vibe/advance :reason :gap :from :vibe-1}
+          vibe-reports #(filterv (comp #{"vibe"} namespace :event/type) @sent)]
+      (with-redefs [events/dispatch! #(swap! sent conj %)]
+        (show-clock/tick! 0)
+        (show-clock/tick! 100000000)
+        (is (= [advance] (vibe-reports)) "two ticks 100 ms apart: one")
+        (show-clock/tick! 300000000)
+        (is (= [advance advance] (vibe-reports)) "300 ms after the first: again"))
+      (testing "the handler's guard makes the second harmless"
+        (run! events/event-handler (vibe-reports))
+        (is (= :vibe-2 (get-in (state/get-raw-state) [:vibe-runtime :current])))
+        (is (= {:id 1} (get-in (state/get-raw-state) [:playback :pulses :vibe])) "one change"))
+      (testing "and then nothing is due: the new vibe has 45 s to go"
+        (reset! sent [])
+        (with-redefs [events/dispatch! #(swap! sent conj %)]
+          (show-clock/tick! 400000000))
+        (is (empty? (vibe-reports)))))))
+
 (deftest reload-keeps-the-clock-running-test
   (testing "a dev code reload doesn't stop or freeze show time (c6)"
     (init! {[0 0] (cue :circle)})

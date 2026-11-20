@@ -6,7 +6,8 @@
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.persistent :as persistent]
-            [laser-show.state.templates :as templates])
+            [laser-show.state.templates :as templates]
+            [laser-show.vibes.rotation :as rotation])
   (:import [javafx.scene.input MouseButton MouseEvent TouchEvent TouchPoint TouchPoint$State]))
 
 (defn- starter []
@@ -55,7 +56,7 @@
   (testing "a tap of the tempo changes the taps, not the document"
     (let [s0 (history/mark-clean (starter))
           s1 (run s0 {:event/type :vibe/press :role :hit :input-time 1000})]
-      (is (= 1 (count (get-in s1 [:timing :tap-times]))))
+      (is (= [1000] (get-in s1 [:timing :tap :taps])) "at the press's own time")
       (is (= 0 (undo-count s1)))
       (is (false? (get-in s1 [:project :dirty?]))))))
 
@@ -76,6 +77,196 @@
           (is (false? (history/persisted-changed? (doc s0) (doc s))) "not an unsaved change")
           (is (= 0 (undo-count s)))
           (is (false? (get-in s [:project :dirty?]))))))))
+
+
+;; Auto-advance (Phase 6, plans/2026-11-18-vibe-mode/06 §7, "What the handlers
+;; do"): 45 s, then a gap of 2 beats at 120 BPM
+
+(defn- rt [state & ks] (get-in state (into [:vibe-runtime] ks)))
+
+(defn- press-release
+  "state after role's press at t and its release 50 ms later."
+  [state role t]
+  (-> state
+      (run {:event/type :vibe/press :role role :input-time t})
+      (run {:event/type :vibe/release :role role :input-time (+ t 50)})))
+
+(defn- auto-on
+  "The starter vibes with AUTO on, and Shapes entered by a HIT at 1000."
+  []
+  (-> (starter)
+      (run {:event/type :vibe/set-auto :auto? true})
+      (press-release :hit 1000)))
+
+(def ^:private arm {:event/type :vibe/arm :from :vibe-1})
+(def ^:private gap {:event/type :vibe/advance :reason :gap :from :vibe-1})
+
+(defn- armed
+  "auto-on, armed by the show clock's report 46 s in."
+  []
+  (run (auto-on) (assoc arm :time 46000)))
+
+(deftest arm-is-idempotent-test
+  (let [s0 (auto-on)
+        s1 (armed)]
+    (is (= [:vibe-1 :active 1000] [(rt s0 :current) (rt s0 :rotation) (rt s0 :entered-at)]))
+    (is (= :armed (rt s1 :rotation)) "Shapes has had its 45 s")
+    (is (= s1 (run s1 (assoc arm :time 46100))) "the same again: unchanged")
+    (testing "a report that no longer holds changes nothing"
+      (is (= s0 (run s0 (assoc arm :time 45999))) "early")
+      (is (= s0 (run s0 (assoc arm :from :vibe-2 :time 46000))) "for a vibe that doesn't play")
+      (is (= :active (rt (-> s0 (run {:event/type :vibe/set-auto :auto? false}) (run (assoc arm :time 46000))) :rotation))
+          "with AUTO off"))))
+
+(deftest stale-advance-is-ignored-test
+  (let [s0 (armed)
+        s1 (run s0 (assoc gap :time 50000))]
+    (is (= [:vibe-2 :active 50000] [(rt s1 :current) (rt s1 :rotation) (rt s1 :entered-at)])
+        "the next vibe, its 45 s from now")
+    (is (= s1 (run s1 (assoc gap :time 50250))) "invariant 2: the report again, its :from is stale")
+    (let [three (-> s0
+                    (assoc-in [:config :vibes :library :vibe-3]
+                              (assoc (get-in s0 [:config :vibes :library :vibe-2]) :id :vibe-3 :name "Build"))
+                    (update-in [:config :vibes :order] conj :vibe-3))]
+      (is (= three (run three {:event/type :vibe/advance :reason :flash :from :vibe-2 :time 50000}))
+          "a FLASH release's change for a vibe that no longer plays (with three vibes, its next isn't this one)"))
+    (testing "the performer tapped VIBE first"
+      (let [tapped (press-release s0 :vibe 49000)]
+        (is (= :vibe-2 (rt tapped :current)))
+        (is (= tapped (run tapped (assoc gap :time 50000))))))
+    (testing "no longer armed for a gap: a key went down, a HIT came, AUTO went off"
+      (let [held (run s0 {:event/type :vibe/press :role :accent :input-time 49000})]
+        (is (= held (run held (assoc gap :time 50000))) "ACCENT held"))
+      (let [hit (press-release s0 :hit 49500)]
+        (is (= hit (run hit (assoc gap :time 50000))) "half a second after a HIT"))
+      (let [off (run s0 {:event/type :vibe/set-auto :auto? false})]
+        (is (= :active (rt off :rotation)) "AUTO off calls the armed change off")
+        (is (= off (run off (assoc gap :time 50000))))))))
+
+(deftest flash-release-while-armed-advances-test
+  (let [s1 (run (armed) {:event/type :vibe/press :role :flash :input-time 47000})]
+    (testing "beyond-vibe phrase_gap_waits_for_flash_release: FLASH held defers the gap"
+      (is (some? (get-in s1 [:playback :active-cues [6 0]])))
+      (is (nil? (rotation/due s1 60000 120.0))))
+    (let [s2 (run s1 {:event/type :vibe/release :role :flash :input-time 60000})]
+      (is (= [:vibe-2 :active 60000] [(rt s2 :current) (rt s2 :rotation) (rt s2 :entered-at)])
+          "and its release changes the vibe")
+      (is (nil? (get-in s2 [:playback :active-cues [6 0]])) "the flash let go of"))
+    (testing "not while HIT or ACCENT is held"
+      (doseq [role [:hit :accent]]
+        (let [s (-> s1
+                    (run {:event/type :vibe/press :role role :input-time 59000})
+                    (run {:event/type :vibe/release :role :flash :input-time 60000}))]
+          (is (= [:vibe-1 :armed] [(rt s :current) (rt s :rotation)]) (str (name role) " held")))))
+    (testing "nor before the vibe is armed, nor with AUTO off"
+      (is (= [:vibe-1 :active] ((juxt :current :rotation) (:vibe-runtime (press-release (auto-on) :flash 5000)))))
+      (is (= :vibe-1 (rt (-> s1
+                             (run {:event/type :vibe/set-auto :auto? false})
+                             (run {:event/type :vibe/release :role :flash :input-time 60000}))
+                         :current))))
+    (testing "nor when release-all lets go of it: a stuck key mustn't change the look"
+      (is (= :vibe-1 (rt (run s1 {:event/type :vibe/release-all :input-time 60000}) :current))))
+    (testing "what the solo flash kept waiting doesn't start: it would end with Shapes' look at once"
+      (let [s (-> (starter)
+                  (assoc-in [:config :vibes :library :vibe-1 :hit] {:cells [[0 0] [1 0]] :select :sequence :mode :sustain})
+                  (run {:event/type :vibe/set-auto :auto? true})
+                  (press-release :accent 1000)
+                  (run (assoc arm :time 46000))
+                  (run {:event/type :vibe/press :role :flash :input-time 47000})
+                  (press-release :hit 48000))
+            s' (run s {:event/type :vibe/release :role :flash :input-time 60000})]
+        (is (= {:hit {:mode :sustain}} (rt s :duck)) "a :sustain HIT pressed during the solo flash")
+        (is (= :vibe-2 (rt s' :current)))
+        (is (nil? (rt s' :bags [:vibe-1 :hit])) "no cell of Shapes' HIT picked, to be stopped at once")
+        (is (empty? (rt s' :duck)))))))
+
+(deftest manual-next-restarts-the-timer-test
+  (let [s0 (armed)
+        tapped (press-release s0 :vibe 47000)]
+    (is (= [:vibe-2 :active 47050] [(rt tapped :current) (rt tapped :rotation) (rt tapped :entered-at)])
+        "a VIBE tap while armed: the next vibe, its 45 s from the tap")
+    (is (nil? (rotation/due tapped 92049 120.0)))
+    (is (= {:event/type :vibe/arm :from :vibe-2} (rotation/due tapped 92050 120.0)))
+    (testing "the strip's select too"
+      (let [s (run s0 {:event/type :vibe/select :vibe :vibe-2 :input-time 48000})]
+        (is (= [:vibe-2 :active 48000] [(rt s :current) (rt s :rotation) (rt s :entered-at)]))))))
+
+(deftest unlock-restarts-the-timer-test
+  (let [hold (fn [s t] (-> s
+                           (run {:event/type :vibe/press :role :vibe :input-time t})
+                           (run {:event/type :vibe/release :role :vibe :input-time (+ t 700)})))
+        locked (hold (armed) 47000)]
+    (is (= [:vibe-1 :locked] [(rt locked :current) (rt locked :rotation)]) "a hold while armed locks")
+    (is (nil? (rotation/due locked 1000000 120.0)))
+    (let [s (hold locked 100000)]
+      (is (= [:vibe-1 :active 100700] [(rt s :current) (rt s :rotation) (rt s :entered-at)]) "unlocked: its 45 s from now")
+      (is (nil? (rotation/due s 145699 120.0)))
+      (is (= arm (rotation/due s 145700 120.0))))))
+
+(deftest auto-switch-is-session-only-test
+  (let [s0 (history/mark-clean (starter))
+        s1 (run s0 {:event/type :vibe/set-auto :auto? true})
+        s2 (run s1 {:event/type :vibe/set-auto :auto? false})]
+    (is (= [true false] [(rt s1 :auto?) (rt s2 :auto?)]))
+    (doseq [s [s1 s2]]
+      (is (history/document-roots-identical? s0 s) "invariant 4: no document root changes")
+      (is (= 0 (undo-count s)) "and there is no undo step")
+      (is (false? (get-in s [:project :dirty?]))))
+    (testing "New and Open forget it: the saved :mode again"
+      (is (nil? (rt (persistent/new-project-state s1) :auto?)))
+      (is (nil? (rt (persistent/apply-loaded-project s1 (persistent/project-files s1) "x.zip") :auto?))))))
+
+(deftest auto-defaults-from-the-saved-setting-test
+  (let [saved (fn [mode] (-> (starter)
+                             (assoc-in [:config :vibes :settings :rotation :mode] mode)
+                             (press-release :hit 1000)))
+        armed? #(= :armed (rt (run % (assoc arm :time 46000)) :rotation))]
+    (is (= {:mode :off :seconds 45 :pause-beats 2.0} (get-in (starter) [:config :vibes :settings :rotation]))
+        "a new project's: off (V4 A)")
+    (is (nil? (rt (saved :off) :auto?)) "nil until the switch is used")
+    (is (not (armed? (saved :off))))
+    (is (armed? (saved :auto)) "a project saved with :auto")
+    (is (not (armed? (run (saved :auto) {:event/type :vibe/set-auto :auto? false}))) "the switch wins")
+    (testing "turned on, the vibe's time counts from then"
+      (let [on (run (saved :off) {:event/type :vibe/set-auto :auto? true :time 20000})]
+        (is (= 20000 (rt on :entered-at)))
+        (is (not (armed? on)))
+        (is (= :armed (rt (run on (assoc arm :time 65000)) :rotation)))))))
+
+(deftest unblackout-restarts-the-timer-test
+  (let [dark (run (armed) {:event/type :vibe/press :role :blackout :input-time 47000})
+        back (run dark {:event/type :vibe/press :role :blackout :input-time 60000})]
+    (is (nil? (rotation/due dark 1000000 120.0)) "nothing changes by itself during blackout")
+    (is (= [:vibe-1 :active 60000] [(rt back :current) (rt back :rotation) (rt back :entered-at)]))
+    (is (nil? (rotation/due back 104999 120.0)))
+    (is (= arm (rotation/due back 105000 120.0)))))
+
+(deftest auto-advance-pulses-vibe-as-a-tap-does-test
+  (let [s0 (armed)]
+    (is (nil? (get-in s0 [:playback :pulses :vibe])) "the first HIT made Shapes current: no change, no pulse")
+    (is (= {:id 1} (get-in (run s0 (assoc gap :time 50000)) [:playback :pulses :vibe]))
+        "a phrase gap's change, so a Fade in fades the new look in")
+    (is (= {:id 1} (get-in (press-release s0 :flash 47000) [:playback :pulses :vibe])) "and a FLASH release's")))
+
+(deftest a-hit-that-plays-nothing-holds-the-gap-off-test
+  (let [s0 (assoc-in (armed) [:config :vibes :library :vibe-1 :hit :cells] [])
+        s1 (press-release s0 :hit 49500)]
+    (is (= {:role :hit :why :empty-pool} (rt s1 :problem)) "it plays no cue (it moves effects only, say)")
+    (is (= 49500 (rt s1 :last-hit-at)) "but it is a HIT")
+    (is (nil? (rotation/due s1 50000 120.0)) "so the gap starts again")
+    (is (= gap (rotation/due s1 50500 120.0)))))
+
+(deftest hit-taps-the-tempo-as-the-tap-button-does-test
+  (let [times [1000 1500 1505 2000 2500 3000]
+        s0 (assoc-in (starter) [:timing :bpm] 90.0)
+        by-hit (reduce (fn [s t] (-> s
+                                     (run {:event/type :vibe/press :role :hit :input-time t})
+                                     (run {:event/type :vibe/release :role :hit :input-time (+ t 2)})))
+                       s0 times)
+        by-button (reduce #(run %1 {:event/type :timing/tap-tempo :time %2}) s0 times)]
+    (is (= 120.0 (get-in by-hit [:timing :bpm]) (get-in by-button [:timing :bpm]))
+        "invariant 6: one algorithm, which leaves out the bounce at 1505 for both")
+    (is (= (get-in by-button [:timing :tap]) (get-in by-hit [:timing :tap])))))
 
 
 ;; The Perform tab's pads (Phase 2)

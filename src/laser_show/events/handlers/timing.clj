@@ -21,6 +21,7 @@
             [laser-show.input.link :as link]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.timeline.playback :as playback]
+            [laser-show.triggers.tap-tempo :as tap]
             [clojure.tools.logging :as log]))
 
 
@@ -39,32 +40,23 @@
   [{:keys [bpm state]}]
   {:state (assoc-in state [:timing :bpm] (double bpm))})
 
-(def ^:private tap-history
-  "Taps kept: all that the :timing/calculate-bpm effect reads
-   (events/core.clj, the last 8). HIT taps on every press, so without a cap
-   the history grows for as long as the presses come under 2 s apart."
-  8)
-
 (defn- handle-timing-tap-tempo
-  "Record a tap for tap-tempo calculation and smoothly align beat phase.
-   Clears old taps if the last tap was more than 2 seconds ago,
-   preventing stale tap data from affecting BPM calculation, and keeps the
-   last tap-history taps."
+  "A tap of the tempo (the TAP button, a tap-tempo key, HIT), at the input's
+   own time when it has one (:input-time), else when it is handled. The taps
+   are the one algorithm's, triggers.tap-tempo, in [:timing :tap]: once the
+   series has an interval the BPM is its tempo, in the same state, and every
+   tap counted asks the show clock to align the beat phase to the nearest
+   whole beat. A bounce changes nothing."
   [{:keys [state] :as event}]
-  (let [now (h/current-time-ms event)
-        old-tap-times (get-in state [:timing :tap-times] [])
-        last-tap (peek old-tap-times)
-        ;; Clear tap times if last tap was more than 2000ms ago (30 BPM threshold)
-        new-tap-times (if (or (nil? last-tap)
-                              (> (- now last-tap) 2000))
-                        [now]
-                        (let [taps (conj old-tap-times now)]
-                          ;; A fresh vector: a subvec would hold the old one
-                          (cond-> taps (> (count taps) tap-history) (->> (take-last tap-history) vec))))]
-    {:state (-> state
-                (assoc-in [:timing :tap-times] new-tap-times)
-                (request :align))
-     :timing/calculate-bpm true}))
+  (let [now (or (:input-time event) (h/current-time-ms event))
+        taps (get-in state [:timing :tap] (tap/make))
+        taps' (tap/tap taps now)]
+    {:state (if (identical? taps taps')
+              state
+              (cond-> (-> state
+                          (assoc-in [:timing :tap] taps')
+                          (request :align))
+                (and (next (:taps taps')) (:bpm taps')) (assoc-in [:timing :bpm] (:bpm taps'))))}))
 
 
 

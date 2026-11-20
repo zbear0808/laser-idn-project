@@ -197,6 +197,13 @@
     :vibe/release (engine/release state event)
     :vibe/select (engine/select state event)
     :vibe/release-all (engine/release-all state event)
+
+    ;; Auto-advance (vibes.rotation): the show clock's reports, the Perform
+    ;; tab's AUTO switch
+    :vibe/arm (engine/arm state event)
+    :vibe/advance (engine/advance state event)
+    :vibe/set-auto (engine/set-auto state event)
+
     :vibe/pointer (handle-pointer event)
     :vibe/window-focus (handle-window-focus event)
     :vibe/clear-control (handle-clear-control event)

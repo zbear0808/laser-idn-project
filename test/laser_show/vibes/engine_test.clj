@@ -58,7 +58,7 @@
       (is (= pool-1 (set (:items bag))) "made from the 4 playable cells")
       (is (= (disj pool-1 cell) (set (:remaining bag))))
       (is (= [cell 1000 1] ((juxt :last :seed :n) bag)) "seeded by the press's time; one refill so far"))
-    (is (= {:event/type :timing/tap-tempo} dispatch))
+    (is (= {:event/type :timing/tap-tempo :input-time 1000} dispatch) "the tap, at the press's own time")
     (testing "no tap without the setting, nor while Link sync is on (V3)"
       (is (nil? (:dispatch (engine/press (assoc-in (starter) [:config :vibes :settings :hit-taps-tempo?] false)
                                          {:role :hit :time 1000}))))
@@ -243,10 +243,11 @@
       (is (= {:role :hit :why :empty-pool} (rt s2 :problem)))
       (is (= (-> empty
                  (assoc-in [:vibe-runtime :problem] {:role :hit :why :empty-pool})
+                 (assoc-in [:vibe-runtime :last-hit-at] 1000)
                  (assoc-in [:playback :pulses :hit] {:id 1 :held? true :src :input}))
              s2)
-          "nothing changes but :problem and HIT's pulse (Phase 4): nothing plays, the engine holds nothing")
-      (is (= {:event/type :timing/tap-tempo} (:dispatch (engine/press empty {:role :hit :time 1000})))
+          "nothing changes but :problem, HIT's pulse (Phase 4) and :last-hit-at (Phase 6: the phrase gap): nothing plays, the engine holds nothing")
+      (is (= {:event/type :timing/tap-tempo :input-time 1000} (:dispatch (engine/press empty {:role :hit :time 1000})))
           "and HIT still taps the tempo (Phase 4, V3)")
       (is (nil? (rt (press s2 :accent 1100) :problem)) "until the next good press"))
     (testing "a flash with neither a cue nor effect cells"
@@ -401,7 +402,7 @@
     (is (= {:hit {:mode :sustain}} (rt state :duck)) "a :sustain press waits for the flash")
     (is (= (rt s0 :bags) (rt state :bags)) "and picks nothing yet: no cell loses its turn")
     (is (= {:at 1100 :src :input} (rt state :held :hit)))
-    (is (= {:event/type :timing/tap-tempo} dispatch) "the press still taps")
+    (is (= {:event/type :timing/tap-tempo :input-time 1100} dispatch) "the press still taps")
     (is (= {[0 0] [:sustain]} (let [s (release state :flash 1200)]
                                 {(rt s :voices :hit :cell) [(rt s :voices :hit :mode)]}))
         "it picks and starts when the flash lets go")
@@ -411,7 +412,7 @@
             s (-> state (release :hit 1150) (release :flash 1200))]
         (is (= (rt s1 :bags) (rt state :bags)))
         (is (= {:at 1100 :src :input} (rt state :held :hit)))
-        (is (= {:event/type :timing/tap-tempo} dispatch))
+        (is (= {:event/type :timing/tap-tempo :input-time 1100} dispatch))
         (is (empty? (playing s)))
         (is (= (rt s1 :bags) (rt s :bags)))))
     (testing "a :gate press let go of before the flash plays nothing"
@@ -658,7 +659,7 @@
       (is (= {:role :hit :why :empty-pool} (rt state :problem)))
       (is (nil? (rt state :held :hit)) "the engine holds nothing")
       (is (= {:id 1 :held? true :src :input} (pulse state :hit)))
-      (is (= {:event/type :timing/tap-tempo} dispatch) "and HIT taps the tempo (V3)")
+      (is (= {:event/type :timing/tap-tempo :input-time 1000} dispatch) "and HIT taps the tempo (V3)")
       (is (= {:id 1 :held? false} (pulse (release state :hit 1050) :hit)))
       (let [s (press s0 :flash 1000)]
         (is (= {:role :flash :why :empty-pool} (rt s :problem)))
@@ -670,6 +671,27 @@
           {:keys [state dispatch]} (engine/press none {:role :hit :time 1000 :src :pad})]
       (is (= {:why :no-vibes} (rt state :problem)))
       (is (= {:id 1 :held? true :src :pad} (pulse state :hit)))
-      (is (= {:event/type :timing/tap-tempo} dispatch))
+      (is (= {:event/type :timing/tap-tempo :input-time 1000} dispatch))
       (is (= {:id 1 :held? false} (pulse (release state :hit 1100) :hit)))
       (is (= {:id 1 :held? false} (pulse (release (press none :accent 1000) :accent 1100) :accent))))))
+
+
+;; One tap tempo (plans/2026-11-18-vibe-mode/06, V3 A)
+
+(deftest hit-skips-the-tap-while-link-sync-is-on-test
+  (let [linked (assoc-in (starter) [:backend :link :sync-enabled?] true)
+        {:keys [state dispatch]} (engine/press linked {:role :hit :time 1000})
+        button (fn [s t] (:state (handlers/handle-event {:event/type :timing/tap-tempo :time t :state s})))]
+    (is (nil? dispatch) "invariant 8: with Link sync on the tempo is Link's, not the hits'")
+    (is (some? (rt state :voices :hit)) "the press plays as ever")
+    (is (= {:id 1 :held? true :src :input} (pulse state :hit)))
+    (is (= [1000 1500] (get-in (-> linked (button 1000) (button 1500)) [:timing :tap :taps]))
+        "the TAP button still taps, as before")))
+
+(deftest hit-skips-the-tap-when-the-setting-is-off-test
+  (let [{:keys [state dispatch]} (engine/press (assoc-in (starter) [:config :vibes :settings :hit-taps-tempo?] false)
+                                               {:role :hit :time 1000})]
+    (is (nil? dispatch))
+    (is (some? (rt state :voices :hit)) "the press plays as ever")
+    (is (= {:event/type :timing/tap-tempo :input-time 1000} (:dispatch (engine/press (starter) {:role :hit :time 1000})))
+        "on, the default, it taps")))

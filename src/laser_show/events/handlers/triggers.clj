@@ -99,7 +99,7 @@
                            :row (second target)})
         :stop-all {:event/type :transport/stop}
         :blackout {:event/type :transport/stop}
-        :tap-tempo {:event/type :timing/tap-tempo}
+        :tap-tempo {:event/type :timing/tap-tempo :input-time (:timestamp input-event)}
         :start-timeline (if (cell? target)
                           {:event/type :timeline/play :col (first target) :row (second target)}
                           (log/debug "start-timeline needs a [col row] target, got" (pr-str target)))
@@ -116,11 +116,7 @@
   (let [key (lookup-key input-event)
         press? (pressed? input-event)
         trigger-id (or (:trigger-id action) key)]
-    (let [state' (-> state
-                     (assoc-in [:trigger-runtime :last-input-time] time)
-                     (update-in [:trigger-runtime :tap-history]
-                                (fn [history]
-                                  (vec (take-last 8 (conj (or history []) time))))))
+    (let [state' (assoc-in state [:trigger-runtime :last-input-time] time)
           state'' (if key
                     (update-in state' [:trigger-runtime :held-inputs]
                                (if press?

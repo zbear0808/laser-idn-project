@@ -98,7 +98,7 @@
 
 (defn- pad-state [action]
   {:config {:input {:trigger-map {pad-key action}}}
-   :trigger-runtime {:held-inputs #{} :active-triggers {} :tap-history []}})
+   :trigger-runtime {:held-inputs #{} :active-triggers {}}})
 
 (defn- pad [state type timestamp]
   (triggers/handle {:event/type :trigger/input
@@ -144,3 +144,12 @@
         "probe v2: the pipeline's :time is when the event was handled; the press is timed by the input")
     (is (nil? (get-in (input :note-off 1400) [:playback :active-cues cell]))
         "held 400 ms by the input's clock (a few by the handler's): a hold, so it is cut")))
+
+(deftest tap-tempo-binding-taps-at-the-input-time-test
+  (let [state (pad-state {:type :tap-tempo})
+        tap (:dispatch (pad state :note-on 1000))]
+    (is (= {:event/type :timing/tap-tempo :input-time 1000} (select-keys tap [:event/type :input-time]))
+        "handled at 99999: a bound key taps at its input's time, as HIT does (06 §4)")
+    (is (nil? (:dispatch (pad state :note-off 1090))) "its release taps nothing")
+    (is (not (contains? (:trigger-runtime (:state (pad state :note-on 1000))) :tap-history))
+        "the trigger runtime keeps no taps of its own")))

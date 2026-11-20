@@ -29,6 +29,7 @@
             [laser-show.vibes.faders :as faders]
             [laser-show.vibes.library :as library]
             [laser-show.vibes.reactions :as reactions]
+            [laser-show.vibes.rotation :as rotation]
             [laser-show.css.core :as css]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.animation.chains :as chains]
@@ -972,6 +973,19 @@
                (= 1 lit) "BLACKOUT · vibe keys off · a grid cue is playing"
                :else (str "BLACKOUT · vibe keys off · " lit " grid cues are playing"))
      :learning (fx/sub-val context learning-role)}))
+
+(defn vibe-rotation
+  "The Perform tab's auto-advance (vibes.rotation): {:auto? (the switch, or
+   the saved :mode) :rotation (:active, :armed or :locked) :entered-at (ms,
+   when the vibe's time began; nil before a vibe plays) :seconds :next (the
+   name of the vibe it goes to; nil with one vibe) :blackout?}."
+  [context]
+  {:auto? (fx/sub-val context rotation/auto?)
+   :rotation (fx/sub-val context get-in [:vibe-runtime :rotation])
+   :entered-at (fx/sub-val context get-in [:vibe-runtime :entered-at])
+   :seconds (fx/sub-val context rotation/seconds)
+   :next (some->> (fx/sub-ctx context vibe-next-id) (get (:library (fx/sub-ctx context vibe-config))) :name)
+   :blackout? (fx/sub-ctx context vibe-blackout?)})
 
 (def ^:private vibe-role-labels
   {:hit "HIT" :accent "ACCENT" :flash "FLASH" :vibe "VIBE" :blackout "BLACKOUT"})

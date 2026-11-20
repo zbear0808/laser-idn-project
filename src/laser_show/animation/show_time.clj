@@ -20,10 +20,11 @@
      no request moves.
    step reads them once per tick. What the clock learns goes back to app state
    as events: a run's end (a timeline's, or a vibe cue's decay) and a timecode
-   chase (:show-clock/cue-ended, :show-clock/chase), and what views show a few
-   times a second, the beat square, the stats and the MTC text
-   (:show-clock/status, on status-paths). Positions never reach app state:
-   views that move every frame draw the newest snapshot
+   chase (:show-clock/cue-ended, :show-clock/chase), auto-advance's arm and
+   advance (laser-show.vibes.rotation, with their own memory, :vibe-sent),
+   and what views show a few times a second, the beat square, the stats and
+   the MTC text (:show-clock/status, on status-paths). Positions never reach
+   app state: views that move every frame draw the newest snapshot
    (views/components/clock_view.clj)."
   (:require [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.animation.pulses :as pulses]
@@ -37,8 +38,8 @@
 
 (def initial-runtime
   "The runtime after a reset: no runs, the global clock and the pulse clock
-   at 0, no press stamped, waiting for the first tick (which sets :t0-ns and
-   the clocks' :last-frame-time)."
+   at 0, no press stamped, no report sent, waiting for the first tick (which
+   sets :t0-ns and the clocks' :last-frame-time)."
   {:tick 0
    :t0-ns nil
    :global {:accumulated-beats 0.0 :accumulated-ms 0.0 :phase-offset 0.0
@@ -49,12 +50,13 @@
    :runs {}
    :chase {}
    :applied {}
-   :sent {}})
+   :sent {}
+   :vibe-sent {}})
 
 (defonce ^{:doc "Show time ({:tick :t0-ns :global :pulse-clock :pulses {source stamp}
                  :runs {run-id timing} :chase {cell timing} :applied {kind request-id}
-                 :sent {report now-ms} :status {…}}). Only the show clock thread writes it
-                 (show-clock/tick! in tests)."}
+                 :sent {report now-ms} :vibe-sent {report now-ms} :status {…}}). Only
+                 the show clock thread writes it (show-clock/tick! in tests)."}
   !runtime
   (atom initial-runtime))
 
@@ -215,16 +217,18 @@
            :when (if active? (not (:chasing? intent)) (some? intent))]
        {:event/type :show-clock/chase :cell cell :active? active?}))))
 
-(defn- due-reports
-  "[sent reports]: each pending report goes out unless the same report went
-   out less than report-interval-ms ago. Reports that no longer hold are
-   forgotten, so they go out at once if they come back."
-  [runtime pending now-ms]
-  (reduce (fn [[sent reports] report]
-            (let [last-ms (get (:sent runtime) report)]
+(defn due-reports
+  "[sent' reports]: each of pending goes out unless the same report went out
+   less than report-interval-ms ago, by sent ({report now-ms}, the memory of
+   the reports of one kind: the step's :sent, the show clock's :vibe-sent).
+   Reports that no longer hold are forgotten, so they go out at once if they
+   come back."
+  [sent pending now-ms]
+  (reduce (fn [[sent' reports] report]
+            (let [last-ms (get sent report)]
               (if (or (nil? last-ms) (>= (- (double now-ms) (double last-ms)) report-interval-ms))
-                [(assoc sent report now-ms) (conj reports report)]
-                [(assoc sent report last-ms) reports])))
+                [(assoc sent' report now-ms) (conj reports report)]
+                [(assoc sent' report last-ms) reports])))
           [{} []]
           pending))
 
@@ -257,7 +261,7 @@
                (stamp-pulses state)
                (chase state mtc-pos bpm now-ms)
                (update :tick inc))
-        [sent reports] (due-reports rt (pending-reports rt state) now-ms)]
+        [sent reports] (due-reports (:sent rt) (pending-reports rt state) now-ms)]
     {:runtime (assoc rt :sent sent)
      :reports reports}))
 

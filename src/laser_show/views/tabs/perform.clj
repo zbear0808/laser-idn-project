@@ -16,6 +16,7 @@
             [laser-show.views.components.clock-view :as clock-view]
             [laser-show.views.components.slider-meters :as slider-meters]
             [laser-show.views.components.vibe-pads :as vibe-pads]
+            [laser-show.views.components.vibe-rotation :as vibe-rotation]
             [laser-show.views.components.vibe-strip :as vibe-strip]))
 
 (defn- banner
@@ -56,8 +57,9 @@
                      (range 4))}))
 
 (defn- header
-  "The current vibe in its colour, its energy, the lock, the tempo, and what
-   a learn waits for; a flash over it on each vibe change."
+  "The current vibe in its colour, its energy, the lock, the tempo, what a
+   learn waits for, and auto-advance (its AUTO switch and countdown); a
+   flash over it on each vibe change."
   [{:keys [fx/context]}]
   (let [{vibe-name :name :keys [color energy rotation learning]} (fx/sub-ctx context subs/vibe-header)
         locked? (= :locked rotation)]
@@ -96,7 +98,10 @@
                                :style-class "vibe-learn-prompt"
                                :text (if learning (str "Press the key for " (str/upper-case (name learning))) "")
                                :visible (some? learning)
-                               :managed (some? learning)}]}]}
+                               :managed (some? learning)}
+                              {:fx/type :region
+                               :h-box/hgrow :always}
+                              {:fx/type vibe-rotation/rotation-controls}]}]}
       {:fx/type clock-view/ext-clock-redraw
        :redraw! #'vibe-pads/redraw-pulse!
        :desc {:fx/type :region

@@ -167,22 +167,6 @@
     (Thread/sleep delay-ms)
     (dispatch event)))
 
-(defn- effect-timing-calculate-bpm
-  "Effect that calculates BPM from tap times and continues with the result."
-  [_ dispatch]
-  (let [state (state/get-raw-state)
-        tap-times (get-in state [:timing :tap-times] [])
-        tap-count (count tap-times)]
-    (when (>= tap-count 2)
-      ;; Calculate average interval between taps
-      (let [recent-taps (take-last 8 tap-times)  ;; Use last 8 taps max
-            intervals (mapv - (rest recent-taps) recent-taps)
-            avg-interval (/ (reduce + intervals) (count intervals))
-            bpm (/ 60000.0 avg-interval)
-            ;; Clamp to reasonable range
-            clamped-bpm (u/clamp bpm 40.0 300.0)]
-        (run-inline {:event/type :timing/set-bpm :bpm clamped-bpm} dispatch)))))
-
 (defn- effect-save-project
   "Effect that writes a project zip.
    Args: {:file-path path :files {filename data} :on-saved event :on-failed event}
@@ -511,7 +495,6 @@
    - :state - update application state
    - :dispatch - continue with another event (inline)
    - :dispatch-later - dispatch event after delay (later, future)
-   - :timing/calculate-bpm - calculate BPM from taps (inline)
    - :link/sync-to-downbeat - align phase to Link's downbeat (inline)
    - :input/await-learn - wait for a learn capture, then dispatch the binding (later, future)
    - :multi-engine/start, :multi-engine/refresh - queue a sync of the engines
@@ -532,7 +515,6 @@
   {:state effect-state
    :dispatch effect-dispatch
    :dispatch-later effect-dispatch-later
-   :timing/calculate-bpm effect-timing-calculate-bpm
    :link/sync-to-downbeat effect-link-sync-to-downbeat
    :input/await-learn effect-input-await-learn
    ;; Streaming engines (queued on the output runtime)

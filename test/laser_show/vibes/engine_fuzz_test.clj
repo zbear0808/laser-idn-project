@@ -4,12 +4,16 @@
    vibe switches, blackouts, clock ticks and their reports, clicks on the grid
    (some on a cell a voice plays, which takes its cue over), moves and clears
    of cue and effect cells, vibes deleted, put back and reordered as an undo
-   would (no handler), and the Vibes tab's edits of FX sets, beds, pools,
-   the audience rule and deletes through their handlers (engine/reconcile).
-   After every step it checks invariants 1-12
-   of plans/2026-11-18-vibe-mode/01-phase1-engine-core.md §7, and the pulses
-   presses write for tap reactions (04 §7, check-pulses); what may play
-   (invariant 1) is worked out here, not with laser-show.vibes.library.
+   would (no handler), the Vibes tab's edits of FX sets, beds, pools,
+   the audience rule and deletes through their handlers (engine/reconcile),
+   and auto-advance: AUTO switched on and off, the clock's arms and advances
+   as show-clock/tick! sends them (each twice), and arms and advances that
+   come late. After every step it checks invariants 1-12
+   of plans/2026-11-18-vibe-mode/01-phase1-engine-core.md §7, the pulses
+   presses write for tap reactions (04 §7, check-pulses), and auto-advance's
+   invariants 1-4 (06 §7, check-auto, check-rotation); what may play
+   (invariant 1) and what may change the vibe by itself are worked out here,
+   not with laser-show.vibes.library or laser-show.vibes.rotation.
    A failure prints the seed and the events up to the failing step, the
    shortest failing prefix. To run one seed: VIBE_FUZZ_SEED=<seed>; seeds 1
    to n: VIBE_FUZZ_SEEDS=<n>."
@@ -22,7 +26,8 @@
             [laser-show.state.templates :as templates]
             [laser-show.timeline.playback :as playback]
             [laser-show.triggers.shuffle-bag :as bag]
-            [laser-show.vibes.library :as library])
+            [laser-show.vibes.library :as library]
+            [laser-show.vibes.rotation :as rotation])
   (:import [java.util SplittableRandom]))
 
 (def ^:private steps 2000)
@@ -84,14 +89,18 @@
       (update-in [:config :vibes :library] merge extra-vibes)
       (assoc-in [:config :vibes :order] [:vibe-1 :vibe-2 :vibe-3 :vibe-4])
       (assoc-in [:config :vibes :next-id] 5)
-      ;; The pipeline here runs no effects, so a tap could never move the BPM;
-      ;; off, HIT's events keep every document root as it was (invariant 7)
+      ;; A tap writes [:timing] (a document root; its :bpm is live). Off,
+      ;; HIT's events keep every document root as it was (invariant 7), and
+      ;; the tempo stays at 120 BPM, a beat of 500 ms, as check-rotation takes it
       (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)
+      ;; Auto-advance on, and soon: 3 s, then a gap of 2 beats
+      (assoc-in [:config :vibes :settings :rotation] {:mode :auto :seconds 3 :pause-beats 2.0})
       (history/mark-clean)))
 
 (def ^:private cue-cells (vec (sort (keys (get-in (world-state) [:chains :cue-chains])))))
 (def ^:private fx-cells [[0 3] [1 3] [2 3]])
 (def ^:private tick-ms (/ 1000.0 60))
+(def ^:private rotation-ms {:seconds 3000 :gap 1000})
 
 
 ;; Running events and the clock
@@ -113,14 +122,34 @@
   [state event t]
   (events/handle-event-pipeline (assoc event :state state :time t)))
 
+(declare bad check-auto)
+
 (defn- tick
-  "The world k ticks of the show clock on, its reports handled."
+  "The world k ticks of the show clock on, its reports handled, and
+   auto-advance's as show-clock/tick! sends them (rotation/due on the tick's
+   app state, at most every 250 ms by the runtime's :vibe-sent). Each of
+   those is handled twice: the second must change nothing (06 invariant 2);
+   check-auto checks the first. Problems go in :tick-problems."
   [{:keys [state rt now] :as world} k]
   (reduce (fn [{:keys [state rt now] :as w} _]
             (let [now (+ now tick-ms)
-                  {:keys [runtime reports]} (show-time/step rt state nil now)]
-              (assoc w :rt runtime :now now
-                     :state (reduce #(run %1 %2 (long now)) state reports))))
+                  t (long now)
+                  {:keys [runtime reports]} (show-time/step rt state nil now)
+                  [vibe-sent vibe-reports] (show-time/due-reports (:vibe-sent runtime)
+                                                                  (keep identity [(rotation/due state now 120.0)])
+                                                                  now)
+                  [state problems] (reduce (fn [[s problems] report]
+                                             (let [s' (run s report t)]
+                                               [s' (cond-> (into problems (check-auto s report s' t))
+                                                     (= s s')
+                                                     (conj (bad "06: the clock's " (pr-str report) " changed nothing"))
+                                                     (not= s' (run s' report t))
+                                                     (conj (bad "06 inv 2: " (pr-str report) " again changed the state")))]))
+                                           [(reduce #(run %1 %2 t) state reports) []]
+                                           vibe-reports)]
+              (-> w
+                  (assoc :rt (assoc runtime :vibe-sent vibe-sent) :now now :state state)
+                  (update :tick-problems into problems))))
           (assoc world :state state :rt rt :now now)
           (range k)))
 
@@ -129,6 +158,29 @@
 
 (defn- one-of [^SplittableRandom rng xs] (nth xs (.nextInt rng (count xs))))
 
+(defn- quiet
+  "Steps that let go of every key down in state, then 2 s of the clock: a
+   phrase gap, for the rotation to find. With hold :flash, FLASH is held
+   through 3 s of it and let go of after (beyond-vibe
+   phrase_gap_waits_for_flash_release); with :flash-over-hit, HIT is pressed
+   before that release and let go of after it."
+  [state hold]
+  (let [ticks {:kind :tick :ticks 60 :next {:kind :tick :ticks 60}}
+        release (fn [role after] (cond-> {:kind :vibe :event {:event/type :vibe/release :role role}} after (assoc :next after)))
+        flash-up (case hold
+                   :flash (release :flash nil)
+                   :flash-over-hit {:kind :vibe :event {:event/type :vibe/press :role :hit}
+                                    :next (release :flash (release :hit nil))}
+                   nil)
+        gap (if flash-up
+              {:kind :vibe :event {:event/type :vibe/press :role :flash}
+               :next (assoc-in ticks [:next :next] {:kind :tick :ticks 60 :next flash-up})}
+              ticks)]
+    (reduce #(release %2 %1)
+            gap
+            (distinct (concat (keys (get-in state [:vibe-runtime :held]))
+                              (filter #(get-in state [:playback :pulses % :held?]) [:hit :accent :flash]))))))
+
 (defn- next-step
   "A random step for world: {:kind :event? :next?}, kinds :vibe, :tick, :grid,
    :fx, :edit and :vibe-edit; a step's :next is the step after it. Blackout is pressed
@@ -136,7 +188,10 @@
    taps: the release follows within 140 ms. Half the grid's clicks start a
    cell a voice plays again (its cue is someone else's now), and half of those
    are followed by BLACKOUT, which stops every voice: the one event that stops
-   voices without forgetting stale ones first."
+   voices without forgetting stale ones first. Now and then the AUTO switch,
+   an arm or an advance that may be late (another vibe's) or have no reason,
+   as the clock's reports could arrive, or a quiet spell: every key let go
+   of, then 2 s of the clock."
   [^SplittableRandom rng {:keys [state next]}]
   (or next
       (let [blackout? (get-in state [:vibe-runtime :blackout?])
@@ -144,8 +199,19 @@
             cell #(one-of rng cue-cells)
             vibe #(one-of rng [:vibe-1 :vibe-2 :vibe-3 :vibe-4])
             voice-cells (vec (distinct (keep :cell (vals (get-in state [:vibe-runtime :voices])))))]
-        (if (< (.nextInt rng 100) (if blackout? 20 1))
+        (cond
+          (< (.nextInt rng 100) (if blackout? 20 1))
           {:kind :vibe :event {:event/type :vibe/press :role :blackout}}
+
+          (< (.nextInt rng 100) 5)
+          (let [from (if (.nextBoolean rng) (get-in state [:vibe-runtime :current]) (vibe))]
+            (case (.nextInt rng 5)
+              0 {:kind :vibe :event {:event/type :vibe/set-auto :auto? (.nextBoolean rng)}}
+              1 {:kind :vibe :event {:event/type :vibe/arm :from from}}
+              2 {:kind :vibe :event {:event/type :vibe/advance :reason (one-of rng [:gap :gap :flash nil]) :from from}}
+              (quiet state (one-of rng [nil :flash :flash-over-hit]))))
+
+          :else
           (let [r (.nextInt rng 100)]
             (cond
               (< r 30) (let [role (role)]
@@ -266,8 +332,9 @@
           (bad "04 inv 9: during blackout " r "'s pulse is held")))))))
 
 (defn- check-press
-  "Invariants 1, 2, 6 and 9 for a press."
-  [before after role]
+  "Invariants 1, 2, 6 and 9 for a press, and every HIT press outside
+   blackout is :last-hit-at (06: the phrase gap counts from it)."
+  [before after role t]
   (let [blackout? (vr before :blackout?)
         vibe (library/current-vibe after)
         pool (when vibe (pool-of after vibe role))
@@ -287,6 +354,8 @@
 
       :else
       (concat
+       (when (and (= :hit role) (not= t (vr after :last-hit-at)))
+         [(bad "06: a HIT press at " t " left :last-hit-at " (vr after :last-hit-at))])
        (when-not (library/vibe after (vr after :current))
          [(bad "inv 9: :current " (vr after :current) " is no vibe after a press")])
        (when (#{:hit :accent} role)
@@ -303,11 +372,12 @@
               (concat (when (not= {:role role :why :empty-pool} (vr after :problem))
                         [(bad "inv 1: an empty " role " pool and no problem")])
                       (when (and (= (vr before :current) (vr after :current))
-                                 (not= (-> before
-                                           (assoc-in [:vibe-runtime :problem] (vr after :problem))
-                                           (assoc-in [:playback :pulses role] (pulse after role)))
+                                 (not= (cond-> (-> before
+                                                   (assoc-in [:vibe-runtime :problem] (vr after :problem))
+                                                   (assoc-in [:playback :pulses role] (pulse after role)))
+                                         (= :hit role) (assoc-in [:vibe-runtime :last-hit-at] t))
                                        after))
-                        [(bad "inv 1: an empty " role " pool changed more than :problem and its pulse")]))
+                        [(bad "inv 1: an empty " role " pool changed more than :problem, its pulse and :last-hit-at")]))
               (concat
                (when (and started? (not (some #{(:cell v1)} pool)))
                  [(bad "inv 1: " role " started " (:cell v1) ", not one of the cells that may play " pool)])
@@ -360,12 +430,13 @@
   "Phase 4's pulses (plans/2026-11-18-vibe-mode/04 §7): a HIT, ACCENT or
    FLASH press outside blackout pulses, held, whatever it plays; every
    release lets its pulse go, and release-all those its source held;
-   BLACKOUT never pulses; :vibe pulses once per change a VIBE tap or a
-   select makes, never during blackout, and for nothing else."
+   BLACKOUT never pulses; :vibe pulses once per change a VIBE tap, a select
+   or an auto-advance makes (06: a gap, or a FLASH release while armed),
+   never during blackout, and for nothing else."
   [before {:keys [event/type role only src]} after]
   (let [blackout? (vr before :blackout?)
         id (fn [s r] (:id (pulse s r) 0))
-        vibe-change? (and (or (= :vibe/select type) (and (= :vibe/release type) (= :vibe role)))
+        vibe-change? (and (or (#{:vibe/select :vibe/advance} type) (and (= :vibe/release type) (#{:vibe :flash} role)))
                           (not= (vr before :current) (vr after :current))
                           (not blackout?))]
     (concat
@@ -384,6 +455,113 @@
      (when (not= (id after :vibe) (cond-> (id before :vibe) vibe-change? inc))
        [(bad "04: " type " " role " moved :vibe's pulse from " (id before :vibe) " to " (id after :vibe)
              (when vibe-change? ", for a change"))]))))
+
+
+;; Auto-advance (plans/2026-11-18-vibe-mode/06 §7): what may change the vibe
+;; by itself is worked out here, not with laser-show.vibes.rotation
+
+(defn- blockers
+  "Why the vibe of state can't change by itself now: a set of :auto-off
+   :locked :blackout :one-vibe :nothing-entered :key-down :not-armed."
+  [state]
+  (let [switch (vr state :auto?)
+        auto? (if (some? switch) switch (= :auto (get-in state [:config :vibes :settings :rotation :mode])))]
+    (cond-> #{}
+      (not auto?) (conj :auto-off)
+      (= :locked (vr state :rotation)) (conj :locked)
+      (vr state :blackout?) (conj :blackout)
+      (< (count (get-in state [:config :vibes :order])) 2) (conj :one-vibe)
+      (not (and (vr state :entered-at) (get-in state [:config :vibes :library (vr state :current)]))) (conj :nothing-entered)
+      (or (seq (vr state :held)) (some #(:held? (pulse state %)) [:hit :accent :flash])) (conj :key-down)
+      (not= :armed (vr state :rotation)) (conj :not-armed))))
+
+(defn- next-of [state id]
+  (let [order (get-in state [:config :vibes :order])]
+    (or (second (drop-while #(not= id %) order)) (first order))))
+
+(defn- check-auto
+  "06 invariants 1-3 for what nobody pressed: an arm, an advance (the
+   clock's or the walk's), and the change a FLASH release makes (type
+   ::flash-release, with before the state the release left: FLASH no longer
+   down). A change of the vibe needs nothing to block it, :from current and,
+   for a gap, 2 beats without a HIT; it goes to the next vibe, which is
+   :active from t, with one more :vibe pulse. Arming needs the same but for
+   the keys, and 3 s since the vibe was entered. An arm or an advance that
+   does neither changes nothing."
+  [before {:keys [event/type reason from]} after t]
+  (let [old (vr before :current)
+        changed? (not= old (vr after :current))
+        armed? (and (= :armed (vr after :rotation)) (not= :armed (vr before :rotation)))
+        last-hit (vr before :last-hit-at)
+        entered (vr before :entered-at)]
+    (concat
+     (when changed?
+       (concat
+        (when-let [why (seq (blockers before))]
+          [(bad "06 inv 1: " type " " reason " changed " old " though " (vec why))])
+        (when (not= from old)
+          [(bad "06 inv 2: an advance from " from " changed " old)])
+        (when (and (= :gap reason) last-hit (< (- t last-hit) (:gap rotation-ms)))
+          [(bad "06 inv 1: a gap change " (- t last-hit) " ms after a HIT")])
+        (when (not= (next-of before old) (vr after :current))
+          [(bad "06: " old " changed to " (vr after :current) ", not to the next of " (get-in before [:config :vibes :order]))])
+        (when (not= [t :active] [(vr after :entered-at) (vr after :rotation)])
+          [(bad "06 inv 3: the new vibe is " (vr after :rotation) " from " (vr after :entered-at) ", not :active from " t)])
+        (when (not= (inc (:id (pulse before :vibe) 0)) (:id (pulse after :vibe) 0))
+          [(bad "06: an automatic change didn't pulse :vibe once")])))
+     (when armed?
+       (concat
+        (when-not (= :vibe/arm type) [(bad "06: " type " armed the rotation")])
+        (when-let [why (seq (disj (blockers before) :key-down :not-armed))]
+          [(bad "06 inv 1: armed " old " though " (vec why))])
+        (when (or (nil? entered) (< (- t entered) (:seconds rotation-ms)))
+          [(bad "06: armed " old " at " t ", entered at " entered)])
+        (when changed? ["06: arming changed the vibe"])))
+     (when (and (= :vibe/arm type) (not armed?) (not= before after))
+       ["06: an arm that didn't arm changed the state"])
+     (when (and (= :vibe/advance type) (not changed?) (not= before after))
+       ["06 inv 2: an advance that didn't change the vibe changed the state"])
+     (when (and (= ::flash-release type) (not changed?) (empty? (blockers before)))
+       ["06: FLASH was let go of while armed and nothing else was down, and the vibe stayed"]))))
+
+(defn- check-rotation
+  "06 invariants 1-4 for a vibe event of the walk: the arms and advances
+   (check-auto), a FLASH release's change, AUTO's switch (it changes no
+   document root), and that every change of the vibe starts its time again,
+   as unlocking and BLACKOUT going off do."
+  [before {:keys [event/type role] :as event} after t]
+  (let [changed? (not= (vr before :current) (vr after :current))
+        restarted (fn [what]
+                    (when (or (not= t (vr after :entered-at)) (= :armed (vr after :rotation)))
+                      [(bad "06 inv 3: " what " left the vibe's time from " (vr after :entered-at)
+                            " (" (vr after :rotation) "), not from " t)]))]
+    (concat
+     (case type
+       (:vibe/arm :vibe/advance) (check-auto before event after t)
+       :vibe/release (if (= :flash role)
+                       (when (vr before :held :flash)
+                         (check-auto (-> before (update-in [:vibe-runtime :held] dissoc :flash) (let-go :flash))
+                                     {:event/type ::flash-release :reason :flash :from (vr before :current)}
+                                     after t))
+                       (when (and changed? (not= :vibe role))
+                         [(bad "06 inv 1: releasing " role " changed the vibe")]))
+       :vibe/set-auto (concat
+                       (when changed? ["06: AUTO's switch changed the vibe"])
+                       (when-not (history/document-roots-identical? before after)
+                         ["06 inv 4: AUTO's switch changed a document root"])
+                       (when (and (not (:auto? event)) (= :armed (vr after :rotation)))
+                         ["06: AUTO off left the rotation armed"])
+                       (when (and (:auto? event) (contains? (blockers before) :auto-off) (vr before :current))
+                         (restarted "AUTO turned on")))
+       :vibe/release-all (when changed? ["06 inv 1: release-all changed the vibe"])
+       nil)
+     (when (and changed? (vr after :current) (not (#{:vibe/arm :vibe/advance} type)) (not= [:vibe/release :flash] [type role]))
+       (restarted (str type " " role "'s change of the vibe")))
+     (when (and (= [:vibe/release :vibe] [type role]) (= [:locked :active] [(vr before :rotation) (vr after :rotation)]))
+       (restarted "unlocking"))
+     (when (and (= [:vibe/press :blackout] [type role]) (vr before :blackout?)
+                (get-in after [:config :vibes :library (vr after :current)]))
+       (restarted "BLACKOUT going off")))))
 
 (defn- check-vibe-event
   "Invariants 4, 5, 7, 11 and 12 for any vibe event, and 1, 2, 6, 9 for presses."
@@ -427,7 +605,7 @@
      (when (not= (handled before event t) (handled before event t))
        ["inv 11: the same state, event and time gave another result"])
      (case type
-       :vibe/press (check-press before after role)
+       :vibe/press (check-press before after role t)
        :vibe/release (check-release before after role t false)
        :vibe/release-all (let [roles (for [[r {:keys [src]}] (vr before :held)
                                            :when (or (nil? only) (= only src))]
@@ -569,12 +747,18 @@
                 (assoc world :state (run before event t)))
         after (:state world)
         [cycles cycle-problems] (track-cycles (:cycles world) before after step)]
-    [(assoc world :cycles cycles :next (:next step))
+    [(assoc world :cycles cycles :next (:next step) :tick-problems [])
      (concat (check-always after)
              cycle-problems
+             (:tick-problems world)
              (case kind
-               :vibe (check-vibe-event before event after t)
-               :tick (check-clock (:rt world))
+               :vibe (concat (check-vibe-event before event after t)
+                             (check-rotation before event after t))
+               :tick (concat (check-clock (:rt world))
+                             (when (and (not= (vr before :current) (vr after :current)) (empty? (:tick-problems world)))
+                               (let [changes (- (:id (pulse after :vibe) 0) (:id (pulse before :vibe) 0))]
+                                 (when (not= 1 changes)
+                                   [(bad "06: a tick step changed the vibe with " changes " :vibe pulses")]))))
                :vibe-edit (check-vibe-edit before after)
                :grid (when (#{:grid/move-cell :grid/clear-cell} (:event/type event)) (check-moved before after event true))
                :fx (check-moved before after event false)

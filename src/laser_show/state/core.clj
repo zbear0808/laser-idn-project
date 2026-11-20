@@ -104,7 +104,7 @@
    
    Example:
    (swap-state! assoc-in [:timing :bpm] 140.0)
-   (swap-state! update-in [:timing :tap-times] conj timestamp)"
+   (swap-state! update-in [:playback :active-cues] dissoc [0 0])"
   [f & args]
   (swap! *context
          (fn [ctx]
@@ -232,7 +232,7 @@
    (defstate timing
      \"Timing and BPM management.\"
      {:bpm {:default 120.0 :doc \"Beats per minute\"}
-      :tap-times {:default [] :doc \"Tap tempo timestamps\"}})
+      :beat-index {:default 0 :doc \"The beat in the bar\"}})
    
    Generates:
    - timing-initial (var with initial state map)
@@ -240,7 +240,7 @@
    
    Usage:
    (assoc-in-state! [:timing :bpm] 140.0)
-   (update-in-state! [:timing :tap-times] conj timestamp)"
+   (update-in-state! [:timing :bpm] + 1.0)"
   [domain-name docstring field-specs]
   (let [domain-kw (keyword domain-name)
         initial-var-name (symbol (str domain-name "-initial"))

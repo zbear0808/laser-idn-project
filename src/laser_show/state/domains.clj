@@ -38,8 +38,8 @@
   "Timing and BPM management for animation synchronization."
   {:bpm {:default default-bpm
          :doc "Beats per minute"}
-   :tap-times {:default []
-               :doc "The last 8 tap-tempo timestamps (fewer after a 2 s gap), for the BPM calculation"}
+   :tap {:default {:taps [] :bpm nil :last-tap nil}
+         :doc "Tap tempo (laser-show.triggers.tap-tempo): the last 5 taps of the series (ms), the tempo they give and the last tap's time. Session only: not saved, and the BPM it sets is [:timing :bpm]"}
    :beat-position {:default 0.0
                    :doc "Position within current beat (0.0-1.0)"}
    :bar-position {:default 0.0
@@ -99,8 +99,6 @@
   "Transient runtime state for active internal triggers."
   {:active-triggers {:default {}
                      :doc "Map of trigger ID to runtime timing state"}
-   :tap-history {:default []
-                 :doc "Recent internal trigger timestamps"}
    :held-inputs {:default #{}
                  :doc "Input identities currently held"}
    :last-input-time {:default nil
@@ -113,9 +111,11 @@
   {:current {:default nil
              :doc "Id of the vibe playing, nil until the first press or :vibe/select"}
    :entered-at {:default nil
-                :doc "Event time (ms) the current vibe began"}
+                :doc "Event time (ms) the current vibe began, or its time began again (an unlock, AUTO on, BLACKOUT off): the rotation's :seconds count from it"}
    :rotation {:default :active
-              :doc ":active or :locked (VIBE held)"}
+              :doc ":active, :armed (auto-advance waits for a phrase gap or a FLASH release, laser-show.vibes.rotation) or :locked (VIBE held)"}
+   :auto? {:default nil
+           :doc "The Perform tab's AUTO switch, for the session; nil until it is used, which means the saved [:config :vibes :settings :rotation :mode]"}
    :blackout? {:default false
                :doc "BLACKOUT is on: every other press is ignored until it is pressed again"}
    :held {:default {}
@@ -131,7 +131,7 @@
    :started {:default 0
              :doc "Cues the engine has started this session: names each run, so the same press gives the same state"}
    :last-hit-at {:default nil
-                 :doc "Event time (ms) of the last HIT press"}
+                 :doc "Event time (ms) of the last HIT press, whatever it played: the rotation's phrase gap counts from it"}
    :problem {:default nil
              :doc "{:role :why} of the last press that had nothing to play ({:why :no-vibes} without vibes), until the next good one"}})
 
@@ -272,8 +272,9 @@
                      :library {}
                      :settings {:quick-tap-ms 150
                                 :lock-hold-ms 600
-                                :hit-taps-tempo? true}}
-           :doc "Vibe mode: cues grouped by feel (laser-show.vibes.library). :library {vibe-id vibe} in :order; new ids count from :next-id. :settings: a press shorter than :quick-tap-ms is a tap, a VIBE press of :lock-hold-ms or more locks, :hit-taps-tempo? (not while Link sync is on). Saved, undoable content"}})
+                                :hit-taps-tempo? true
+                                :rotation {:mode :off :seconds 45 :pause-beats 2.0}}}
+           :doc "Vibe mode: cues grouped by feel (laser-show.vibes.library). :library {vibe-id vibe} in :order; new ids count from :next-id. :settings: a press shorter than :quick-tap-ms is a tap, a VIBE press of :lock-hold-ms or more locks, :hit-taps-tempo? (not while Link sync is on); :rotation, auto-advance (laser-show.vibes.rotation): :mode :auto or :off (the Perform tab's switch overrides it for the session), a vibe armed after :seconds, changing at a gap of :pause-beats. Saved, undoable content"}})
 
 (defstate projectors
   "Projector configurations for color calibration and routing.
