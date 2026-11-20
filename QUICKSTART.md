@@ -42,7 +42,7 @@ This launches a graphical interface.
 **Usage:**
 1. The **Grid** tab is the performer's screen: 8 × 4 pads, one cue each (a new project starts with a row of shapes). Click a pad to play it and again to stop it; the preview beside the grid shows what goes out.
 2. Double-click a pad, or right-click it and choose Edit Cue... (Create Cue on an empty pad), to pick its presets and effects. Drag a pad onto another to move it.
-3. In **Projectors**, click **Scan Network** to find the IDN projectors on your network and tick the outputs to use (found ones start off), or **Add Manual...** to type one's address. Then select a projector and draw its **Safety Zone**: drag the green limit and add red blocked areas where the light must never go; with Stream on, **Show test pattern** draws the zone on the laser so you can check it.
+3. In **Projectors**, click **Scan Network** to find the IDN projectors on your network and tick **On** on the cards of the outputs to use (found ones start off), or **Add Manual...** to type one's address. Drag the cards into the order the lasers stand in, left to right: Left, Right, Center and the other automatic groups follow that order. Then select a card and draw its **Safety Zone**: drag the green limit and add red blocked areas where the light must never go; with Stream on, **Show test pattern** draws the zone on the laser so you can check it.
 4. Click **Stream** in the toolbar to send the show to the enabled projectors. Stop (Space) blacks the output out and keeps the cues; Play brings them back.
 
 The **Perform** tab has five big pads for playing vibe mode from across the room.
