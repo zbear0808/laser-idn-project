@@ -721,16 +721,29 @@
   (filterv #(some #{group-id} (:zone-groups %))
            (fx/sub-ctx context virtual-projectors-list)))
 
+(defn ref-reach
+  "{ref n}: how many lasers each ref the rig knows reaches (routing.rig/
+   ref-entries: All, the automatic groups, each laser's that is on, your
+   groups' members that are on)."
+  [context]
+  (let [entries (rig/ref-entries (rig/rig-inputs {:projectors (fx/sub-val context :projectors)
+                                                  :rig (fx/sub-val context :rig)
+                                                  :zone-groups (fx/sub-val context :zone-groups)}))]
+    (into {} (map (fn [[ref es]] [ref (count (distinct (map first es)))])) entries)))
+
 (defn zone-group-usage
   "Usage info for a zone group: the projectors and VPs in it, and the cues
    that name it anywhere (routing.refs/cues-using: a cue with no destination
-   counts for :all; effect cells and the preview aren't cues).
+   counts for :all; effect cells and the preview aren't cues). For All and
+   the automatic groups, :projector-count is how many lasers they reach.
    Returns: {:projector-count n :vp-count n :cue-count n :cues #{cell} :projectors [...] :virtual-projectors [...]}"
   [context group-id]
   (let [projectors (fx/sub-ctx context projectors-in-zone-group group-id)
         vps (fx/sub-ctx context virtual-projectors-in-zone-group group-id)
         cues (refs/cues-using (fx/sub-val context get-in [:chains :cue-chains]) group-id)]
-    {:projector-count (count projectors)
+    {:projector-count (if (rig/derived-ref? group-id)
+                        (get (fx/sub-ctx context ref-reach) group-id 0)
+                        (count projectors))
      :vp-count (count vps)
      :cue-count (count cues)
      :cues cues
@@ -822,7 +835,49 @@
      :split-width (:split-width inputs)
      :n n
      :middle-on? middle-on?
-     :split-on? (or (= 1 n) (and middle-on? (contains? #{:split :both} middle)))}))
+     :split-on? (or (= 1 n) (and middle-on? (contains? #{:split :both} middle)))
+     :middle-name (when middle-on?
+                    (rig/projector-name {:projectors (fx/sub-val context :projectors)}
+                                        (nth (rig/e-order inputs) (quot n 2))))}))
+
+
+;; Level 2: The Zone Groups tab (views/tabs/zones.clj), group first
+
+
+(defn zone-groups-tab-list
+  "The tab's list: target-groups (All, the automatic groups, each laser,
+   yours), each with :count, how many lasers it reaches (ref-reach)."
+  [context]
+  (let [reach (fx/sub-ctx context ref-reach)]
+    (mapv #(assoc % :count (get reach (:id %) 0)) (fx/sub-ctx context target-groups))))
+
+(defn selected-target-group
+  "The group the Zone Groups tab shows (target-groups' entry), or nil."
+  [context]
+  (when-let [id (fx/sub-ctx context selected-zone-group-id)]
+    (get (fx/sub-ctx context target-groups-by-id) id)))
+
+(defn group-members
+  "The lasers of ref in rig order, as the tab's middle shows them:
+   {:lasers [{:id :name :position :mark :enabled? :excluded?}] :vps [{:id
+   :name :member?}]}, the marks as the rows under the cards have them
+   (routing.rig/ref-marks)."
+  [context ref]
+  (let [projectors (fx/sub-val context :projectors)
+        inputs (rig/rig-inputs {:projectors projectors :rig (fx/sub-val context :rig)})
+        marks (rig/ref-marks inputs (rig/auto-groups inputs) ref)
+        position (zipmap (rig/e-order inputs) (iterate inc 1))]
+    {:lasers (mapv (fn [id]
+                     {:id id
+                      :name (rig/projector-name {:projectors projectors} id)
+                      :position (position id)
+                      :mark (get marks id)
+                      :enabled? (contains? (:enabled inputs) id)
+                      :excluded? (contains? (:excluded inputs) id)})
+                   (:order inputs))
+     :vps (mapv (fn [{:keys [id] vp-name :name :as vp}]
+                  {:id id :name (or vp-name (str id)) :member? (boolean (some #{ref} (:zone-groups vp)))})
+                (fx/sub-ctx context virtual-projectors-list))}))
 
 
 ;; Level 2: Input Device Subscriptions (MIDI, OSC)

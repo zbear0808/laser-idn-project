@@ -26,7 +26,7 @@
   []
   (state/swap-state! #(-> %
                           (assoc :projectors {:a {:name "Fake 1" :host "127.0.0.1" :port 7255 :service-id 1
-                                                  :enabled? true :zone-groups [:all]
+                                                  :enabled? true :zone-groups [] :exclude-from-all? false
                                                   :output-config {:color-bit-depth 8 :xy-bit-depth 16}}})
                           (assoc-in [:projector-ui :active-projector] :a))))
 
@@ -117,19 +117,19 @@
     (with-projector!)
     (ui/click! robot "#zones-tab")
     (ui/assert-text! "#zones-subtitle"
-                     "Routing targets for cues • Click a projector to add it to the group, or use the Projectors tab")
-    (events/dispatch! {:event/type :zone-groups/select :group-id :left})
+                     "Groups are where cues draw. All and the automatic groups follow the order on the Projectors tab.")
+    (events/dispatch! {:event/type :zone-groups/select :group-id :graphics})
     (ui/assert-visible! "#zone-output-a")
     (testing "a click on the projector adds it"
       (ui/click! robot "#zone-output-a .label-bold")
-      (ui/wait-for! #(contains? (groups) :left))
+      (ui/wait-for! #(contains? (groups) :graphics))
       (settle!)
-      (is (= #{:all :left} (groups))))
+      (is (= #{:graphics} (groups))))
     (testing "a click on its checkbox takes it out again, once"
       (ui/click! robot "#zone-output-a .check-box")
-      (ui/wait-for! #(not (contains? (groups) :left)))
+      (ui/wait-for! #(not (contains? (groups) :graphics)))
       (settle!)
-      (is (= #{:all} (groups)))
+      (is (= #{} (groups)))
       (is (not (ui/selected? "#zone-output-a .check-box")) "and the box says so"))))
 
 (deftest rename-projector-test
@@ -225,7 +225,7 @@
     (ui/click! robot "#zones-tab")
     (events/dispatch! {:event/type :zone-groups/select :group-id :all})
     (ui/wait-for! #(some? (ui/query "#zone-group-cannot-delete")))
-    (ui/assert-text! "#zone-group-cannot-delete" "All can't be deleted.")
+    (ui/assert-text! "#zone-group-cannot-delete" "Automatic: can't be renamed or deleted.")
     (is (nil? (ui/query "#zone-group-delete-button")))
     (testing "another group has its Delete... button"
       (events/dispatch! {:event/type :zone-groups/select :group-id :graphics})

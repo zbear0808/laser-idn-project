@@ -764,6 +764,30 @@
     (let [m (matrix {:a {:host "10.0.0.1"} :b {:host "10.0.0.2"} :c {:host "10.0.0.3"}} :middle :both)]
       (is (= [:whole :whole] ((juxt :auto/left :auto/right) (column m :b)))))))
 
+(deftest zone-group-usage-counts-derived-refs-test
+  (let [s (-> base-state
+              (assoc :projectors {:a {:name "A" :host "10.0.0.1"} :b {:name "B" :host "10.0.0.2"}
+                                  :off {:name "Off" :host "10.0.0.3" :enabled? false :zone-groups [:graphics]}})
+              (assoc-in [:chains :cue-chains [2 0]] {:destination-zone {:zone-group-id :auto/left}
+                                                     :items [{:type :preset :preset-id :line}]})
+              (assoc-in [:chains :cue-chains [3 0]] {:destination-zone {:zone-group-id :graphics}
+                                                     :items [{:type :preset :preset-id :line :zone-group-id :auto.laser/b}]}))
+        usage #(fx/sub-ctx (context s) subs/zone-group-usage %)]
+    (is (= [1 1] ((juxt :cue-count :projector-count) (usage :auto/left))) "a cue names Left; Left reaches the left laser")
+    (is (= 2 (:projector-count (usage :all))) "All reaches the lasers that are on")
+    (is (= [1 1] ((juxt :cue-count :projector-count) (usage :auto.laser/b))) "pinned to one laser")
+    (is (= [1 1] ((juxt :cue-count :projector-count) (usage :graphics))) "your groups count their members, as before")
+    (testing "the tab's list counts the lasers each group reaches"
+      (is (= {:all 2 :auto/left 1 :auto/center 2 :auto.laser/a 1 :auto.laser/off 0 :graphics 0 :crowd 0}
+             (select-keys (into {} (map (juxt :id :count)) (fx/sub-ctx (context s) subs/zone-groups-tab-list))
+                          [:all :auto/left :auto/center :auto.laser/a :auto.laser/off :graphics :crowd]))
+          "Graphics' one member is off"))
+    (testing "the lasers of a group, in rig order, with their marks"
+      (is (= [[:a 1 :whole] [:b 2 :not-in] [:off nil :off]]
+             (mapv (juxt :id :position :mark) (:lasers (fx/sub-ctx (context s) subs/group-members :auto/left)))))
+      (is (= [:not-member :not-member :member]
+             (mapv :mark (:lasers (fx/sub-ctx (context s) subs/group-members :graphics))))))))
+
 (deftest vibe-audience-groups-follow-the-order-test
   (let [s (-> base-state
               (templates/apply-starter-vibes)

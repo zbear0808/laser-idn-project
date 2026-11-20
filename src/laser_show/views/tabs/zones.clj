@@ -1,105 +1,88 @@
 (ns laser-show.views.tabs.zones
-  "Zone Groups tab - for managing zone groups (routing targets).
+  "Zone Groups tab, group first (plans/2026-11-19-zones/04 §7).
    
-   SIMPLIFIED ARCHITECTURE (v2):
-   - Projectors are directly assigned to zone groups (no intermediate 'zone' abstraction)
-   - This tab manages zone groups and which projectors/VPs are in them
-   - Projector corner-pin is done in the Projectors tab, which can assign zone groups too
-   
-   Features:
-   - View and edit zone groups (left panel)
-   - Add projectors and VPs to the selected group, or take them out (center panel)
-   - Zone group details (right panel)"
+   - The list (left): All, the automatic groups (Left, Right, Center, Odd,
+     Even), each laser's own group in rig order, then your groups by name,
+     each with how many lasers it reaches. All and the automatic groups
+     follow the order on the Projectors tab (laser-show.routing.rig).
+   - The middle: the selected group's lasers in rig order, with the marks
+     the rows under the cards have; for your groups each has a box (the same
+     membership those rows show, and the same event), for All a click keeps
+     a laser out of All or puts it back, and the automatic groups are read
+     only, with a sentence that says why. Virtual projectors are listed
+     under, with boxes for your groups.
+   - The details (right): its colour, name and description, how many cues
+     use it, and for your groups Edit... and Delete...; the others can't be
+     renamed or deleted."
   (:require [cljfx.api :as fx]
+            [laser-show.css.core :as css]
+            [laser-show.events.core :as events]
             [laser-show.subs :as subs]
-            [laser-show.css.core :as css]))
+            [laser-show.views.components.group-matrix :as group-matrix]
+            [laser-show.views.components.zone-chips :as zone-chips]))
 
 
-;; Output Type Badge
+(defn- id-text [id]
+  (if (keyword? id) (name id) (str id)))
 
 
-(defn- output-type-badge
-  "Badge showing output type (projector vs virtual projector)."
-  [{:keys [type]}]
-  (let [color (case type
-                :projector "#4A6FA5"
-                :virtual-projector "#9B59B6"
-                "#808080")
-        label (case type
-                :projector "Projector"
-                :virtual-projector "Virtual"
-                "Unknown")]
-    {:fx/type :label
-     :text label
-     :style-class ["badge"]
-     :style (str "-fx-background-color: " color ";")}))
+;; The list (left)
 
 
-;; Tag Chips
-
-
-(defn- tag-chip
-  "Small chip showing a tag."
-  [{:keys [tag]}]
-  (let [color (case tag
-                :graphics "#9B59B6"
-                :crowd-scanning "#E67E22"
-                "#808080")]
-    {:fx/type :label
-     :text (name tag)
-     :style-class ["chip"]
-     :style (str "-fx-background-color: " color "50; "
-                "-fx-border-color: " color "; "
-                "-fx-border-width: 1px; "
-                "-fx-border-radius: 3px; "
-                "-fx-background-radius: 3px; "
-                "-fx-padding: 1px 4px; "
-                "-fx-font-size: 9px;")}))
-
-
-;; Zone Groups Panel (Left)
-
-
-(defn- zone-group-item
-  "Single zone group in the list."
-  [{:keys [group selected? output-count]}]
-  (let [{:keys [id name description color]} group]
+(defn- group-item
+  "A group in the list: its colour, name (a lock on the built-in ones),
+   description, and how many lasers it reaches."
+  [{:keys [group selected?]}]
+  (let [{:keys [id color description] reach :count} group
+        text-id (group-matrix/ref-text id)]
     {:fx/type :h-box
+     :id (str "zone-group-item-" text-id)
+     :style-class ["zone-group-item" (if selected? "list-item-selected" "list-item")]
      :spacing 8
      :alignment :center-left
      :padding 8
-     :style-class [(if selected? "list-item-selected" "list-item")]
-     :on-mouse-clicked {:event/type :zone-groups/select
-                        :group-id id}
-     :children [{:fx/type :circle
-                 :radius 6
-                 :fill color}
+     :on-mouse-clicked {:event/type :zone-groups/select :group-id id}
+     :children [{:fx/type :circle :radius 6 :fill (or color "#808080")}
                 {:fx/type :v-box
                  :h-box/hgrow :always
-                 :children [{:fx/type :label
-                             :text name
-                             :style-class ["label-bold"]}
-                            {:fx/type :label
-                             :text (or description "")
-                             :style-class ["text-description"]}]}
+                 :children (cond-> [{:fx/type :h-box
+                                     :spacing 4
+                                     :alignment :center-left
+                                     :children (cond-> [{:fx/type :label
+                                                         :text (:name group)
+                                                         :style-class ["label-bold"]}]
+                                                 (zone-chips/locked? group) (conj (zone-chips/lock-graphic group)))}]
+                             (and description (= :custom (:kind group)))
+                             (conj {:fx/type :label :text description :style-class ["text-description"]}))}
                 {:fx/type :label
-                 :text (str output-count)
+                 :id (str "zone-group-count-" text-id)
+                 :text (str reach)
                  :style-class ["text-count"]}]}))
 
+(defn- section-header [text]
+  {:fx/type :label
+   :text text
+   :style-class ["header-section"]
+   :style "-fx-font-size: 10; -fx-padding: 6 0 0 4;"})
+
 (defn- zone-groups-panel
-  "Panel listing all zone groups."
+  "The groups: All and the automatic ones, LASERS, YOUR GROUPS."
   [{:keys [fx/context]}]
-  (let [groups (fx/sub-ctx context subs/zone-groups-list)
-        selected-id (fx/sub-ctx context subs/selected-zone-group-id)]
+  (let [groups (fx/sub-ctx context subs/zone-groups-tab-list)
+        selected-id (fx/sub-ctx context subs/selected-zone-group-id)
+        item (fn [g] {:fx/type group-item :fx/key (:id g) :group g :selected? (= (:id g) selected-id)})
+        of-kind (fn [& kinds] (filterv #((set kinds) (:kind %)) groups))
+        lasers (of-kind :laser)
+        yours (of-kind :custom)]
     {:fx/type :v-box
      :spacing 8
-     :pref-width 220
+     :pref-width 230
      :style (str "-fx-border-color: " (css/border-default) "; -fx-border-width: 0 1px 0 0;")
      :children [{:fx/type :h-box
                  :alignment :center-left
                  :padding {:right 8}
                  :children [{:fx/type :label
-                             :text "ZONE GROUPS"
+                             :text "GROUPS"
                              :style-class ["header-section"]}
                             {:fx/type :region :h-box/hgrow :always}
                             {:fx/type :button
@@ -115,124 +98,182 @@
                  :content {:fx/type :v-box
                            :spacing 4
                            :padding 4
-                           :children (if (seq groups)
-                                       (vec (for [group groups]
-                                              (let [usage (fx/sub-ctx context subs/zone-group-usage (:id group))]
-                                                {:fx/type zone-group-item
-                                                 :fx/key (:id group)
-                                                 :group group
-                                                 :selected? (= (:id group) selected-id)
-                                                 :output-count (+ (:projector-count usage 0)
-                                                                  (:vp-count usage 0))})))
-                                       [{:fx/type :label
-                                         :text "No zone groups defined"
-                                         :style-class ["label-hint"]
-                                         :style "-fx-padding: 16;"}])}}]}))
+                           :children (vec (concat (map item (of-kind :all :auto))
+                                                  (when (seq lasers) (cons (section-header "LASERS") (map item lasers)))
+                                                  [(section-header "YOUR GROUPS")]
+                                                  (if (seq yours)
+                                                    (map item yours)
+                                                    [{:fx/type :label
+                                                      :text "None yet: + makes one"
+                                                      :style-class ["label-hint"]}])))}}]}))
 
 
-;; Outputs Panel (Center) - Shows projectors and VPs in selected group
+;; The middle: the group's lasers
 
 
-(defn- output-item
-  "Single projector or virtual projector in the list.
-   Can toggle zone group membership."
-  [{:keys [output group-id]}]
-  (let [{:keys [id name output-type enabled? tags zone-groups]} output
-        in-group? (some #{group-id} zone-groups)
-        ;; Build children, filtering out nil values
-        v-box-children (filterv some?
-                                [{:fx/type :h-box
-                                  :spacing 6
-                                  :alignment :center-left
-                                  :children [{:fx/type :label
-                                              :text (or name (str id))
-                                              :style-class ["label-bold"]}
-                                             {:fx/type output-type-badge
-                                              :type output-type}]}
-                                 (when (seq tags)
-                                   {:fx/type :h-box
-                                    :spacing 4
-                                    :children (vec (for [tag tags]
-                                                     {:fx/type tag-chip
-                                                      :fx/key tag
-                                                      :tag tag}))})])]
+(defn group-explanation
+  "The sentence under a group's lasers, saying why they are in it (04 §7).
+   rig is subs/rig-settings ({:n :middle :split-width}); middle-name the
+   middle laser's name when there is one."
+  [{:keys [id kind description] group-name :name} {:keys [n middle split-width]} middle-name]
+  (let [middle? (and (odd? n) (<= 3 n))
+        half (fn [side group]
+               (cond
+                 (= 1 n) (str "With one laser, " group " is its " side " " (Math/round (* 100.0 (double split-width))) "%.")
+                 middle? (str "The " side " half of the rig. The middle laser, " middle-name ", "
+                              (case middle
+                                :both "is in both, whole."
+                                :left "is in Left only."
+                                :right "is in Right only."
+                                :none "is in neither."
+                                (str "is split: its " side " half is in " group ".")))
+                 :else (str "The " side " half of the rig.")))]
+    (case kind
+      :all "Every laser that's on, except those set to Exclude from All."
+      :laser description
+      :custom (str "Click a laser to add it to " group-name " or take it out. The boxes under the cards on the Projectors tab are the same ones.")
+      (case id
+        :auto/left (half "left" "Left")
+        :auto/right (half "right" "Right")
+        :auto/center "The middle laser, or the middle two."
+        :auto/odd (if (= 1 n)
+                    "With one laser, Odd is its left half and Even its right half."
+                    "Every other laser from the left: 1st, 3rd, 5th…")
+        :auto/even (if (= 1 n)
+                     "With one laser, Odd is its left half and Even its right half."
+                     "Every other laser from the left: 2nd, 4th…")
+        ""))))
+
+(defn- member-event
+  "What a click on a laser does in group: your groups toggle it, All keeps
+   it out or puts it back; the automatic groups are read only."
+  [group {:keys [id mark]}]
+  (case (:kind group)
+    :custom {:event/type :projectors/toggle-zone-group :projector-id id :zone-group-id (:id group)}
+    :all (when (#{:whole :excluded} mark)
+           {:event/type :projectors/set-exclude-from-all :projector-id id :exclude? (= :whole mark)})
+    nil))
+
+(defn- laser-item
+  "One laser of the group, in rig order: its place, its name, its mark, and
+   a box where a click changes something."
+  [{:keys [group laser]}]
+  (let [{:keys [id position mark]} laser
+        event (member-event group laser)]
+    (cond-> {:fx/type :v-box
+             :id (str "zone-output-" (id-text id))
+             :style-class ["zone-output" "list-item"]
+             :spacing 4
+             :padding 8
+             :min-width 110
+             :alignment :top-center
+             :style (if event "-fx-cursor: hand;" "")
+             :children (cond-> [{:fx/type :h-box
+                                 :spacing 4
+                                 :alignment :center
+                                 :children [{:fx/type :label
+                                             :text (if position (str position) "–")
+                                             :style "-fx-text-fill: #A0A0A0; -fx-font-weight: bold;"}
+                                            {:fx/type :label
+                                             :text (:name laser)
+                                             :style-class ["label-bold"]}]}
+                                {:fx/type :label
+                                 :id (str "zone-mark-" (id-text id))
+                                 :text (zone-chips/member-mark mark)
+                                 :style (str "-fx-font-size: 15; -fx-text-fill: "
+                                             (if (#{:whole :left-half :right-half :member} mark) (:color group) "#808080") ";")}]
+                         event (conj (if (= :all (:kind group))
+                                       {:fx/type :check-box
+                                        :selected (= :whole mark)
+                                        :on-selected-changed (fn [in-all?]
+                                                               (events/dispatch! {:event/type :projectors/set-exclude-from-all
+                                                                                  :projector-id id :exclude? (not in-all?)}))}
+                                       {:fx/type :check-box
+                                        :selected (= :member mark)
+                                        :on-selected-changed event})))}
+      event (assoc :on-mouse-clicked event))))
+
+(defn- vp-item
+  "A virtual projector in your group: a box, as before."
+  [{:keys [group vp]}]
+  (let [event {:event/type :projectors/vp-toggle-zone-group :vp-id (:id vp) :zone-group-id (:id group)}]
     {:fx/type :h-box
-     :id (str "zone-output-" (if (keyword? id) (clojure.core/name id) id))
+     :id (str "zone-output-" (id-text (:id vp)))
+     :style-class ["list-item"]
      :spacing 8
      :alignment :center-left
-     :padding 8
-     :style-class [(if in-group? "list-item-selected" "list-item")]
+     :padding 6
      :style "-fx-cursor: hand;"
-     :on-mouse-clicked (if (= output-type :projector)
-                         {:event/type :projectors/toggle-zone-group
-                          :projector-id id
-                          :zone-group-id group-id}
-                         {:event/type :projectors/vp-toggle-zone-group
-                          :vp-id id
-                          :zone-group-id group-id})
-     :children [{:fx/type :check-box
-                 :selected (boolean in-group?)
-                 :on-selected-changed (if (= output-type :projector)
-                                        {:event/type :projectors/toggle-zone-group
-                                         :projector-id id
-                                         :zone-group-id group-id}
-                                        {:event/type :projectors/vp-toggle-zone-group
-                                         :vp-id id
-                                         :zone-group-id group-id})}
-                {:fx/type :v-box
-                 :h-box/hgrow :always
-                 :spacing 2
-                 :children v-box-children}
-                {:fx/type :label
-                 :text (if enabled? "" "(disabled)")
-                 :style "-fx-text-fill: #606060; -fx-font-size: 9;"}]}))
+     :on-mouse-clicked event
+     :children [{:fx/type :check-box :selected (:member? vp) :on-selected-changed event}
+                {:fx/type :label :text (:name vp) :style-class ["label-bold"]}]}))
 
-
-(defn- all-outputs-list
-  "List of ALL projectors and VPs with toggle for zone group membership."
-  [{:keys [fx/context group-id]}]
-  (let [all-projectors (fx/sub-ctx context subs/projectors-list)
-        all-vps (fx/sub-ctx context subs/virtual-projectors-list)
-        all-outputs (into (mapv #(assoc % :output-type :projector) all-projectors)
-                          (mapv #(assoc % :output-type :virtual-projector) all-vps))]
-    {:fx/type :v-box
-     :spacing 4
-     :children (if (seq all-outputs)
-                 (vec (for [output all-outputs]
-                        {:fx/type output-item
-                         :fx/key (:id output)
-                         :output output
-                         :group-id group-id}))
-                 [{:fx/type :label
-                   :text "No projectors configured.\nAdd projectors in the Projectors tab."
-                   :style-class ["label-hint"]
-                   :style "-fx-padding: 16;"}])}))
+(defn- members-panel
+  "The selected group's lasers in rig order, and why they are in it."
+  [{:keys [fx/context]}]
+  (let [group (fx/sub-ctx context subs/selected-target-group)]
+    (if-not group
+      {:fx/type :v-box
+       :padding 16
+       :children [{:fx/type :label
+                   :text "Select a group to see its lasers"
+                   :style-class ["label-hint"]}]}
+      (let [{:keys [lasers vps]} (fx/sub-ctx context subs/group-members (:id group))
+            settings (fx/sub-ctx context subs/rig-settings)]
+        {:fx/type :v-box
+         :spacing 8
+         :padding 8
+         :children (cond-> [{:fx/type :label
+                             :id "zone-group-members-title"
+                             :text (str "LASERS IN " (.toUpperCase ^String (str (:name group))))
+                             :style-class ["header-section"]}
+                            (if (seq lasers)
+                              {:fx/type :scroll-pane
+                               :fit-to-height true
+                               :vbar-policy :never
+                               :style-class ["scroll-pane-dark"]
+                               :content {:fx/type :h-box
+                                         :spacing 8
+                                         :padding 4
+                                         :children (mapv (fn [laser] {:fx/type laser-item :fx/key (:id laser) :group group :laser laser})
+                                                         lasers)}}
+                              {:fx/type :label
+                               :text "No lasers yet: Scan Network on the Projectors tab finds them."
+                               :style-class ["label-hint"]})
+                            {:fx/type :label
+                             :id "zone-group-explanation"
+                             :text (group-explanation group settings (:middle-name settings))
+                             :wrap-text true
+                             :style-class ["label-secondary"]}]
+                     (not= :custom (:kind group))
+                     (conj {:fx/type :h-box
+                            :spacing 6
+                            :alignment :center-left
+                            :children [{:fx/type :button
+                                        :id "zone-group-projectors-link"
+                                        :text "Projectors tab"
+                                        :style-class ["button-secondary"]
+                                        :on-action {:event/type :ui/set-active-tab :tab-id :projectors}}
+                                       {:fx/type :label
+                                        :text "to change the order or the middle laser."
+                                        :style-class ["label-hint"]}]})
+                     (and (= :custom (:kind group)) (seq vps))
+                     (into (cons {:fx/type :label
+                                  :text "Virtual projectors (not sent to any laser yet)"
+                                  :style-class ["header-section"]
+                                  :style "-fx-font-size: 10;"}
+                                 (map (fn [vp] {:fx/type vp-item :fx/key (:id vp) :group group :vp vp}) vps))))}))))
 
 (defn- outputs-panel
-  "Panel showing ALL projectors and VPs with toggles for zone group membership."
   [{:keys [fx/context]}]
-  (let [selected-group-id (fx/sub-ctx context subs/selected-zone-group-id)]
-    {:fx/type :v-box
-     :spacing 8
-     :style (str "-fx-border-color: " (css/border-default) "; -fx-border-width: 0 1px 0 0;")
-     :children [{:fx/type :label
-                 :text "ASSIGN PROJECTORS"
-                 :style-class ["header-section"]}
-                {:fx/type :scroll-pane
-                 :fit-to-width true
-                 :v-box/vgrow :always
-                 :style-class ["scroll-pane-dark"]
-                 :content (if selected-group-id
-                            {:fx/type all-outputs-list
-                             :fx/context context
-                             :group-id selected-group-id}
-                            {:fx/type :v-box
-                             :spacing 4
-                             :padding 8
-                             :children [{:fx/type :label
-                                         :text "Select a zone group to assign projectors"
-                                         :style-class ["label-hint"]
-                                         :style "-fx-padding: 16;"}]})}]}))
+  {:fx/type :v-box
+   :spacing 8
+   :style (str "-fx-border-color: " (css/border-default) "; -fx-border-width: 0 1px 0 0;")
+   :children [{:fx/type :scroll-pane
+               :fit-to-width true
+               :v-box/vgrow :always
+               :style-class ["scroll-pane-dark"]
+               :content {:fx/type members-panel}}]})
 
 
 ;; Details Panel (Right)
@@ -246,10 +287,13 @@
     1 "Used by 1 cue"
     (str "Used by " n " cues")))
 
+(def ^:private kind-texts
+  {:all "built in" :auto "automatic" :laser "one laser" :custom "your group"})
+
 (defn- zone-group-details-panel
   "Details panel for the selected zone group."
   [{:keys [fx/context]}]
-  (let [group (fx/sub-ctx context subs/selected-zone-group)
+  (let [group (fx/sub-ctx context subs/selected-target-group)
         usage (when group (fx/sub-ctx context subs/zone-group-usage (:id group)))]
     (if group
       {:fx/type :v-box
@@ -259,61 +303,44 @@
                    :alignment :center-left
                    :children [{:fx/type :circle
                                :radius 8
-                               :fill (:color group)}
+                               :fill (or (:color group) "#808080")}
                               {:fx/type :label
                                :text (:name group)
                                :style-class ["header-primary"]}]}
                   {:fx/type :label
-                   :text (or (:description group) "No description")
+                   :text (kind-texts (:kind group) "")
+                   :style-class ["label-hint"]}
+                  {:fx/type :label
+                   :text (if (= :custom (:kind group)) (or (not-empty (:description group)) "No description") (str (:description group)))
+                   :wrap-text true
                    :style-class ["label-hint"]}
                   {:fx/type :separator}
-                  ;; Usage stats
-                  {:fx/type :v-box
-                   :spacing 4
-                   :children [{:fx/type :label
-                               :text (str "Projectors: " (:projector-count usage 0))
-                               :style-class ["label-secondary"]}
-                              {:fx/type :label
-                               :text (str "Virtual Projectors: " (:vp-count usage 0))
-                               :style-class ["label-secondary"]}
-                              {:fx/type :label
-                               :id "zone-group-cue-usage"
-                               :text (cue-usage-text (:cue-count usage 0))
-                               :style-class ["label-secondary"]}]}
-                  {:fx/type :separator}
-                  ;; Info about assignment
-                  {:fx/type :v-box
-                   :spacing 4
-                   :children [{:fx/type :label
-                               :text "HOW TO ASSIGN"
-                               :style-class ["header-section"]
-                               :style "-fx-font-size: 10;"}
-                              {:fx/type :label
-                               :text "Use the checkboxes in the center panel\nto toggle projector membership."
-                               :style-class ["label-hint"]
-                               :wrap-text true}]}
+                  {:fx/type :label
+                   :id "zone-group-cue-usage"
+                   :text (cue-usage-text (:cue-count usage 0))
+                   :style-class ["label-secondary"]}
                   {:fx/type :region :v-box/vgrow :always}
-                  ;; Edit/Delete buttons (All can't be deleted)
-                  {:fx/type :h-box
-                   :spacing 8
-                   :alignment :center-left
-                   :children [{:fx/type :button
-                               :id "zone-group-edit-button"
-                               :text "Edit..."
-                               :style-class ["button-secondary"]
-                               :on-action {:event/type :zone-groups/edit
-                                           :group-id (:id group)}}
-                              (if (= :all (:id group))
-                                {:fx/type :label
-                                 :id "zone-group-cannot-delete"
-                                 :text "All can't be deleted."
-                                 :style-class ["label-hint"]}
+                  (if (= :custom (:kind group))
+                    {:fx/type :h-box
+                     :spacing 8
+                     :alignment :center-left
+                     :children [{:fx/type :button
+                                 :id "zone-group-edit-button"
+                                 :text "Edit..."
+                                 :style-class ["button-secondary"]
+                                 :on-action {:event/type :zone-groups/edit
+                                             :group-id (:id group)}}
                                 {:fx/type :button
                                  :id "zone-group-delete-button"
                                  :text "Delete..."
                                  :style-class ["button-danger"]
                                  :on-action {:event/type :zone-groups/request-remove
-                                             :group-id (:id group)}})]}]}
+                                             :group-id (:id group)}}]}
+                    {:fx/type :label
+                     :id "zone-group-cannot-delete"
+                     :text "Automatic: can't be renamed or deleted."
+                     :wrap-text true
+                     :style-class ["label-hint"]})]}
       ;; No group selected
       {:fx/type :v-box
        :children [{:fx/type :label
@@ -331,6 +358,7 @@
                :style-class ["header-section"]}
               {:fx/type :scroll-pane
                :fit-to-width true
+               :fit-to-height true
                :v-box/vgrow :always
                :style-class ["scroll-pane-dark"]
                :content {:fx/type :v-box
@@ -342,8 +370,8 @@
 
 
 (defn zones-tab
-  "Zone Groups management tab: the groups, the projectors in the selected one
-   (a click adds one or takes it out), and its details."
+  "Zone Groups tab: the groups, the selected one's lasers in rig order, and
+   its details."
   [{:keys [fx/context]}]
   {:fx/type :v-box
    :style-class ["container-primary"]
@@ -354,7 +382,7 @@
                :style-class ["header-primary"]}
               {:fx/type :label
                :id "zones-subtitle"
-               :text "Routing targets for cues • Click a projector to add it to the group, or use the Projectors tab"
+               :text "Groups are where cues draw. All and the automatic groups follow the order on the Projectors tab."
                :style-class ["label-secondary"]}
               {:fx/type :h-box
                :spacing 16
@@ -362,5 +390,6 @@
                :children [{:fx/type zone-groups-panel}
                           {:fx/type :v-box
                            :h-box/hgrow :always
-                           :children [{:fx/type outputs-panel}]}
+                           :children [{:fx/type outputs-panel
+                                       :v-box/vgrow :always}]}
                           {:fx/type details-panel}]}]})
