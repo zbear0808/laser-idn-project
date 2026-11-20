@@ -1,7 +1,7 @@
 # Phase Z1: safety zones, the test pattern and Identify
 
 **Written:** 2026-11-19 at `d298801`. **Reviewed and re-checked at `70f7db8`** (`master`, after vibe Phases 4b and 5 and the fader fix `0faa18c`): every line below is at `70f7db8`. **Re-check every path and line at HEAD before starting.**
-**Status:** **Done in code, on `master`** (`fa15044`..`1424955`; built in worktree `zones-z1` alongside Z2 and vibe Phase 7). **Still owed: the real-projector check in §9**, which decides `edge-dwell` (1 until then). The as-built note is §13. Q-Z1-1 is answered (D-34); Q-Z1-2, -3 and -4 were built as ★ A; Q-Z1-5 (the show lock) is open.   **Needs:** nothing. It goes well with Z0, whose confirm dialog it reuses (02 §4); without Z0 it brings that dialog itself. It can be built alongside Z2.   **Size:** ~4–5 d.
+**Status:** **Done in code, on `master`** (`fa15044`..`1424955`; built in worktree `zones-z1` alongside Z2 and vibe Phase 7). **Still owed: the real-projector check in §9**, which decides `edge-dwell` (1 until then). The as-built note is §13. Q-Z1-1 is answered (D-34); Q-Z1-2, -3 and -4 were built as ★ A, and so was Q-Z1-5 (the show lock), in `0002052` after the phase.   **Needs:** nothing. It goes well with Z0, whose confirm dialog it reuses (02 §4); without Z0 it brings that dialog itself. It can be built alongside Z2.   **Size:** ~4–5 d.
 **Implements:** spec §10 (`01-model-and-routing-spec.md`), D-28 (edits on a live laser), D-29 (fail closed) and D-34 (a notice after Open). It also gives Z3 what its doc assumes (05 §1, "Z1 row"): `[:projectors id :safety :limit]`, a stage after the projector effects that reports under `[:safety id]`, and a test-pattern branch that replaces a laser's content before its projector effects, with no composition and no fit guard (05 S-13).
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks anything that doesn't exist yet.
@@ -455,3 +455,7 @@ Built in worktree `zones-z1` off `989c315` (Z0 on `master`), at the same time as
 - Z2's `handle-projectors-remove` also clears `[:projector-ui :identify id]`; the requires and the undo labels keep both sides.
 - The subtitle is Z2's ("Put your lasers in order, left to right. The groups follow the order.", 04 §7), so `subtitle-mentions-safety-zones-test` is `subtitle-says-to-put-the-lasers-in-order-test`. QUICKSTART keeps Z1's sentence.
 - The SAFETY ZONE and TEST PATTERN sections sit in the inspector's right column, below the rig strip. At the default 1200 × 800 the inspector shows only its top, so they need a scroll; `safety-editor-test` and `calibration-brightness-slider-test` scroll to them first (`ui/scroll-into-view!`).
+
+### After the phase
+
+- **`0002052`, Q-Z1-5 A:** while the show lock is on, a safety zone edit that makes no zone larger goes through (shrinking the limit, adding a blocked area, a copy that only shrinks), and one that would make a zone larger is refused with "Larger safety zone refused" under the switch and "Show lock is on: Larger safety zone refused. Unlock it on the Perform tab" on the status bar. The lock asks the handler what the edit would do, answered yes, so Allow on a question asked before the lock went on is refused too. `show-lock-test/locked-safety-zones-only-get-smaller-test`; red first: 14 failures.

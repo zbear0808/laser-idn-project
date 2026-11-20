@@ -173,7 +173,7 @@ Z1 ─────────┘           │
 
 - **Z0 and Z1 can run alongside vibe Phase 7** in their own worktree, as the vibe phases do. The overlaps are small additions in different parts of shared files, so merging is mechanical. (Z0 was built this way.)
 - **Z3 and Z4 no longer wait for Phase 6 or Phase 7**: both have merged, so Z3 can start from `master`.
-- **Phase 7's show lock** (it refuses some events during a show) covers the zones events that re-route lasers: Z0's removes (Phase 7 added them) and Z2's order and membership events (`fee90ce`). Z4's map switches (maybe allowed: they are performer actions) and ZR's rig events join when they land. **Z1's safety edits aren't in it yet: Q-Z1-5** (10-questions).
+- **Phase 7's show lock** (it refuses some events during a show) covers the zones events that re-route lasers: Z0's removes (Phase 7 added them) and Z2's order and membership events (`fee90ce`). Z4's map switches (maybe allowed: they are performer actions) and ZR's rig events join when they land. **Z1's safety edits go through while they make no zone larger, and are refused when they would (Q-Z1-5 A, `0002052`).**
 - **UX plan** (`plans/2026-11-18-ux-improvements/`, finished and deleted in `2d1f813`; it is in git history): all four of its phases are done. Z2 builds on what they left in the Projectors and Zone Groups tabs, for example the status line and "No projectors enabled" link from `92c191a` and the subtitle and row ids from `b9b9d55`.
 
 ## 7. Risks
