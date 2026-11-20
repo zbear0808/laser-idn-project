@@ -85,16 +85,22 @@
                       :on-failed {:event/type :file/project-load-failed}}})
     {}))
 
-(defn- handle-file-project-loaded
-  "Replace the document with the loaded project contents."
-  [{:keys [state file-path contents]}]
-  (log/info "Project loaded:" file-path)
-  {:state (persistent/apply-loaded-project state contents file-path)})
-
 (defn- file-name
   "The file's name without its folders (\"show.zip\"), for a notice."
   [file-path]
   (or (some-> file-path java.io.File. .getName) "the project"))
+
+(defn- handle-file-project-loaded
+  "Replace the document with the loaded project contents. Until the rig gets
+   its own file (zones plan ZR), the show's projectors, with their safety
+   zones and calibration, replace this machine's, so a notice says so (D-34),
+   unless neither had a projector."
+  [{:keys [state file-path contents]}]
+  (log/info "Project loaded:" file-path)
+  (let [loaded (persistent/apply-loaded-project state contents file-path)]
+    (if (or (seq (:projectors state)) (seq (:projectors loaded)))
+      (h/show-notice loaded (str "Safety zones and calibration come from " (file-name file-path)) :info)
+      {:state loaded})))
 
 (defn- handle-file-project-load-failed
   "The project couldn't be read: the document stays, and a notice says so."

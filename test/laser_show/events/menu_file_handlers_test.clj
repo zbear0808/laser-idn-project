@@ -272,12 +272,28 @@
     (testing "File > New: the notice was about the project that went"
       (is (nil? (get-in (menu/handle {:event/type :file/new-project :force? true :state noticed})
                         [:state :ui :notice]))))
-    (testing "File > Open"
-      (is (nil? (get-in (menu/handle {:event/type :file/project-loaded
-                                      :file-path test-file
-                                      :contents (zip-contents-of document-state)
-                                      :state noticed})
-                        [:state :ui :notice]))))))
+    (testing "File > Open: the old notice goes, and the new one says where the safety zones come from"
+      (is (= "Safety zones and calibration come from menu-file-handlers-test.zip"
+             (get-in (menu/handle {:event/type :file/project-loaded
+                                   :file-path test-file
+                                   :contents (zip-contents-of document-state)
+                                   :state noticed})
+                     [:state :ui :notice :text]))))))
+
+(deftest open-says-where-safety-comes-from-test
+  (let [open (fn [before show]
+               (menu/handle {:event/type :file/project-loaded :file-path "shows/friday.zip"
+                             :contents (zip-contents-of show) :state before}))
+        no-projectors (assoc document-state :projectors {})]
+    (testing "the show has projectors"
+      (let [result (open no-projectors document-state)]
+        (is (= "Safety zones and calibration come from friday.zip" (get-in result [:state :ui :notice :text])))
+        (is (= :info (get-in result [:state :ui :notice :level])))
+        (is (= :ui/clear-notice (get-in result [:dispatch-later :event :event/type])) "it goes after a while")))
+    (testing "only this machine had projectors: they were replaced too"
+      (is (some? (get-in (open document-state no-projectors) [:state :ui :notice]))))
+    (testing "neither has a projector: no notice"
+      (is (nil? (get-in (open no-projectors no-projectors) [:state :ui :notice]))))))
 
 
 ;; Unsaved-changes guard (New / Open / Exit ask first when the project is dirty)
