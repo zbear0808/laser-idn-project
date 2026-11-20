@@ -19,6 +19,7 @@
    modulator toggle to enable animation without switching to numeric mode."
   (:require [cljfx.api :as fx] 
             [laser-show.subs :as subs]
+            [laser-show.views.components.zone-chips :as zone-chips]
             [laser-show.events.core :as events]
             [laser-show.animation.modulator-registry :as reg]
             [laser-show.views.components.visual-editors.spatial-canvas :as spatial-canvas]
@@ -502,10 +503,9 @@
   (let [{:keys [domain entity-key effect-path]} event-template
         zone-groups (fx/sub-ctx context subs/zone-groups-list)
         target-zone (get current-params :target-zone :all)
-        all-option {:id :all :name "All" :color "#888888"}
-        items (into [all-option] zone-groups)
+        items (zone-chips/zone-options zone-groups)
         selected-item (or (u/seek #(= (:id %) target-zone) items)
-                          all-option)]
+                          (first items))]
     {:fx/type :v-box
      :spacing 8
      :padding 12

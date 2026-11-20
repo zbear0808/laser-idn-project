@@ -37,6 +37,7 @@
    [cljfx.api :as fx]
    [laser-show.animation.modulators :as modulators]
    [laser-show.subs :as subs]
+   [laser-show.views.components.zone-chips :as zone-chips]
    [laser-show.common.util :as u]
    [laser-show.views.components.visual-editors.keyframe-timeline :as timeline]))
 
@@ -418,9 +419,8 @@
                    (if (= param-type :zone-group-id)
                      ;; Zone Group Value Editor
                      (let [current-val (get-in selected-kf [:params param-key] :all)
-                           all-option {:id :all :name "All"}
-                           items (into [all-option] zone-groups)
-                           selected-item (or (u/seek #(= (:id %) current-val) items) all-option)]
+                           items (zone-chips/zone-options zone-groups)
+                           selected-item (or (u/seek #(= (:id %) current-val) items) (first items))]
                        {:fx/type :h-box
                         :alignment :center-left
                         :spacing 5

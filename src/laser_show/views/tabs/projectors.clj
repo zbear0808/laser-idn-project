@@ -812,7 +812,8 @@
                :text "Projector Configuration"
                :style "-fx-text-fill: white; -fx-font-size: 16; -fx-font-weight: bold;"}
               {:fx/type :label
-               :text "Scan for IDN devices • Configure color calibration and safety zones"
+               :id "projectors-subtitle"
+               :text "Scan for IDN devices • Configure color calibration"
                :style "-fx-text-fill: #808080; -fx-font-size: 11;"}
               {:fx/type :h-box
                :spacing 16

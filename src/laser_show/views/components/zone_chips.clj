@@ -6,6 +6,16 @@
    - Zone reroute effect editor (custom param renderers)")
 
 
+(defn zone-options
+  "The zone groups a zone picker offers (the Zone Selector, its keyframes):
+   the groups as they are, with All first, listed once. A show whose groups
+   have no :all still offers it."
+  [zone-groups]
+  (let [all (or (some #(when (= :all (:id %)) %) zone-groups)
+                {:id :all :name "All" :color "#888888"})]
+    (into [all] (remove #(= :all (:id %))) zone-groups)))
+
+
 (defn zone-group-chip
   "A chip showing a zone group with toggle functionality.
    
