@@ -51,6 +51,23 @@
       (is (nil? (:ui d)))
       (is (nil? (get-in d [:timing :beat-index]))))))
 
+(deftest rig-is-undoable-content-test
+  (let [with-rig (assoc sample-state :rig {:order [:proj-1] :middle :split :split-width 0.75})
+        edits [#(assoc-in % [:rig :order] [:proj-2 :proj-1])
+               #(assoc-in % [:rig :middle] :both)
+               #(assoc-in % [:rig :split-width] 0.6)]]
+    (is (= {:order [:proj-1] :middle :split :split-width 0.75} (:rig (doc with-rig))) "part of the document")
+    (doseq [edit edits]
+      (is (false? (history/document-roots-identical? with-rig (edit with-rig))))
+      (is (true? (history/undoable-changed? (doc with-rig) (doc (edit with-rig)))) "undoable")
+      (is (true? (history/persisted-changed? (doc with-rig) (doc (edit with-rig)))) "and an unsaved change"))))
+
+(deftest restore-document-restores-the-rig-test
+  (let [before (assoc sample-state :rig {:order [:proj-1] :middle :split :split-width 0.75})
+        snapshot (history/make-snapshot {:state before :description "Move Projector"})
+        after (assoc before :rig {:order [:proj-2 :proj-1] :middle :both :split-width 0.6})]
+    (is (= (:rig before) (:rig (history/restore-document after (:document-state snapshot)))))))
+
 (deftest undoable-changed?-policy-test
   (let [changed? #(history/undoable-changed? (doc sample-state) (doc (% sample-state)))]
     (testing "live and preference changes are not undoable"

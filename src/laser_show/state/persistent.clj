@@ -53,7 +53,8 @@
    :hardware
    {:paths [{:path [:projectors]}
             {:path [:virtual-projectors]}
-            {:path [:zone-groups]}]}
+            {:path [:zone-groups]}
+            {:path [:rig] :merge-defaults? true}]}
    
    :content
    {:paths [{:path [:chains :cue-chains]}

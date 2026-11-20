@@ -208,6 +208,26 @@
       (is (= original-effects (state/get-in-state [:chains :effect-chains [0 0] :items])))
       (is (= original-projector (state/get-in-state [:projectors :test-proj]))))))
 
+(deftest rig-is-saved-with-the-hardware-test
+  (let [rig {:order [:p2 :p1] :middle :both :split-width 0.6}
+        defaults {:order [] :middle :split :split-width 0.75}
+        saved (assoc (domains/build-initial-state) :rig rig)
+        files (persistent/project-files saved)]
+    (is (= rig (get-in files ["hardware.edn" :rig])) "in hardware.edn, beside the projectors")
+    (is (persistent/write-project! test-project-file files))
+    (let [loaded (persistent/apply-loaded-project (domains/build-initial-state)
+                                                  (persistent/read-project test-project-file)
+                                                  test-project-file)]
+      (is (= rig (:rig loaded)))
+      (is (false? (get-in loaded [:project :dirty?]))))
+    (testing "a file from before the rig gets the defaults"
+      (is (= defaults (:rig (persistent/apply-loaded-project saved (update files "hardware.edn" dissoc :rig) "old.zip")))))
+    (testing "a key the file doesn't have gets its default"
+      (is (= (assoc defaults :order [:p1])
+             (:rig (persistent/apply-loaded-project saved (assoc-in files ["hardware.edn" :rig] {:order [:p1]}) "x.zip")))))
+    (testing "File > New starts with the defaults"
+      (is (= defaults (:rig (persistent/new-project-state saved)))))))
+
 (deftest test-obsolete-domains-removed
   (testing "Obsolete domains are not in registered domains"
     (let [domains (state/get-registered-domains)]

@@ -497,6 +497,19 @@
                   (:state (projectors/handle {:event/type :projectors/remove :projector-id :nope
                                               :state removable-state})))))
 
+(deftest remove-takes-the-laser-out-of-the-order-test
+  (let [placed (assoc-in removable-state [:rig :order] [:p2 :p1])]
+    (is (= [:p2] (get-in (projectors/handle {:event/type :projectors/remove :projector-id :p1 :state placed})
+                         [:state :rig :order]))
+        "so a scan that finds it again puts it after the placed ones")
+    (testing "one undo step, which puts it back in its place"
+      (let [removed (:state (events/handle-event-pipeline {:event/type :projectors/remove :projector-id :p1
+                                                           :state placed}))
+            undone (:state (events/handle-event-pipeline {:event/type :history/undo :state removed}))]
+        (is (= [:p2] (get-in removed [:rig :order])))
+        (is (= [:p2 :p1] (get-in undone [:rig :order])))
+        (is (some? (get-in undone [:projectors :p1])))))))
+
 (deftest remove-projector-stops-its-engine-test
   (let [result (events/handle-event-pipeline {:event/type :projectors/remove :projector-id :p1
                                               :state (assoc-in removable-state [:backend :streaming :running?] true)})]

@@ -382,10 +382,10 @@
         devices))
 
 (defn- handle-projectors-remove
-  "Remove a projector, its calibration chain, its editor and list state and its
-   virtual projectors, and clear the selection and calibration mode that point
-   at it. While streaming, the output-sync middleware stops its engine. An
-   unknown id changes nothing."
+  "Remove a projector, its calibration chain, its editor and list state, its
+   virtual projectors and its place in the rig order, and clear the selection
+   and calibration mode that point at it. While streaming, the output-sync
+   middleware stops its engine. An unknown id changes nothing."
   [{:keys [projector-id state]}]
   (if-let [{:keys [host service-id]} (get-in state [:projectors projector-id])]
     (let [clear-if (fn [s path] (if (= projector-id (get-in s path)) (assoc-in s path nil) s))]
@@ -396,6 +396,7 @@
                   (update :list-ui dissoc [:projector-effects projector-id])
                   (update :virtual-projectors
                           #(into {} (remove (fn [[_ vp]] (= projector-id (:parent-projector-id vp)))) %))
+                  (update-in [:rig :order] #(filterv (complement #{projector-id}) %))
                   (clear-if [:projector-ui :active-projector])
                   (clear-if [:projector-ui :calibrating-projector-id])
                   (update-in [:projector-ui :identify] dissoc projector-id)

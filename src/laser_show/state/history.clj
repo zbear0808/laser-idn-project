@@ -14,8 +14,8 @@
    Document policy (see plans/2026-11-08-undo-history-boundary.md):
    | Data                                              | Undo? | Unsaved? |
    |---------------------------------------------------|-------|----------|
-   | content (chains, projectors, zone groups, grid,   | yes   | yes      |
-   |   [:config :grid/:input])                         |       |          |
+   | content (chains, projectors, zone groups, the     | yes   | yes      |
+   |   rig, grid, [:config :grid/:input])              |       |          |
    | prefs ([:config <prefs-config-keys>])             | no    | yes      |
    | live: [:timing :bpm], effect cell :active?,       | no    | no       |
    |   item fields in live-item-paths                  |       |          |
@@ -47,20 +47,21 @@
 
 (def ^:private document-roots
   "Top-level state keys that extract-document-state reads from."
-  [:config :timing :grid :projectors :virtual-projectors :zone-groups :chains])
+  [:config :timing :grid :projectors :virtual-projectors :zone-groups :rig :chains])
 
 (defn extract-document-state
   "Extract document configuration from state.
-   Only captures persistent project fields (cues, effects, projectors, zones, config, bpm, grid size).
+   Only captures persistent project fields (cues, effects, projectors, zones, the rig, config, bpm, grid size).
    Excludes all runtime data (playback, streaming engines, IDN discovery, transient UI, history)."
   [state]
-  (let [{:keys [config timing grid projectors virtual-projectors zone-groups chains]} state]
+  (let [{:keys [config timing grid projectors virtual-projectors zone-groups rig chains]} state]
     {:config config
      :timing {:bpm (:bpm timing)}
      :grid {:size (:size grid)}
      :projectors (or projectors {})
      :virtual-projectors (or virtual-projectors {})
      :zone-groups (or zone-groups {})
+     :rig (or rig {})
      :chains (or chains {})}))
 
 (defn document-roots-identical?
@@ -154,7 +155,7 @@
   [old-doc new-doc]
   (boolean
    (or (some #(differs? (get old-doc %) (get new-doc %))
-             [:grid :projectors :virtual-projectors :zone-groups])
+             [:grid :projectors :virtual-projectors :zone-groups :rig])
        (config-changed? (:config old-doc) (:config new-doc) (complement prefs-config-keys))
        (chains-changed? (:chains old-doc) (:chains new-doc)))))
 
@@ -265,7 +266,7 @@
    config prefs. Runtime systems are untouched. Does not set :dirty?; that is
    derived by the event pipeline."
   [state document-state]
-  (let [{:keys [config grid projectors virtual-projectors zone-groups chains]} document-state
+  (let [{:keys [config grid projectors virtual-projectors zone-groups rig chains]} document-state
         current-config (:config state)
         restored-config (merge (apply dissoc config prefs-config-keys)
                                (select-keys current-config prefs-config-keys))]
@@ -275,6 +276,7 @@
         (assoc :projectors (or projectors {}))
         (assoc :virtual-projectors (or virtual-projectors {}))
         (assoc :zone-groups (or zone-groups {}))
+        (assoc :rig (or rig {}))
         (assoc :chains (graft-live-chains (:chains state) (or chains {}))))))
 
 

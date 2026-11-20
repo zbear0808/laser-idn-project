@@ -408,6 +408,18 @@
   {:selected-group {:default nil
                     :doc "Currently selected zone group ID for editing"}})
 
+(defstate rig
+  "The rig: the projectors from left to right and how the automatic groups
+   fold over them (laser-show.routing.rig, plans/2026-11-19-zones/01 §3).
+   Saved in hardware.edn, undoable content. All and the automatic groups
+   are derived from it, never stored."
+  {:order {:default []
+           :doc "[projector-id …] left to right, as the user placed them; projectors not in it follow, by IP then name (rig/effective-order). Written whole by the first move"}
+   :middle {:default :split
+            :doc "How the middle laser of 3, 5, 7… joins Left and Right: :split (its halves), :both (whole in both), :left, :right or :none"}
+   :split-width {:default 0.75
+                 :doc "How wide each half is, 0.5-1.0 of the safe width, when one laser draws Left and Right"}})
+
 ;; Unified Chain Storage Domain
 
 
