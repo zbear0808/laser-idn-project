@@ -197,3 +197,29 @@
       (is (empty? (get-in moved [:history :undo-stack])))
       (is (= 0.42 (get-in (persistent/project-files moved)
                           ["project-metadata.edn" :config :window :grid-split]))))))
+
+
+;; The shared confirm dialog
+
+
+(deftest ui-confirm-continues-with-its-event-test
+  (let [asking (update-in base-state [:ui :dialogs :confirm] merge
+                          {:open? true
+                           :title "Delete \"Balcony\"?"
+                           :confirm-event {:event/type :zone-groups/remove :group-id :group-balcony}
+                           :choice {:key :retarget-to :label "Send its cues to:"
+                                    :options [{:value :all :text "All"} {:value :left :text "Left"}]}
+                           :choice-value :left})
+        result (ui/handle {:event/type :ui/confirm :state asking})]
+    (is (false? (get-in result [:state :ui :dialogs :confirm :open?])) "it closes")
+    (is (= {:event/type :zone-groups/remove :group-id :group-balcony :retarget-to :left}
+           (:dispatch result))
+        "and continues with its event and the choice")
+    (testing "without a choice, the event as it is"
+      (is (= {:event/type :projectors/remove :projector-id :p1}
+             (:dispatch (ui/handle {:event/type :ui/confirm
+                                    :state (update-in base-state [:ui :dialogs :confirm] merge
+                                                      {:open? true
+                                                       :confirm-event {:event/type :projectors/remove :projector-id :p1}})})))))
+    (testing "a closed dialog continues with nothing"
+      (is (nil? (:dispatch (ui/handle {:event/type :ui/confirm :state base-state})))))))

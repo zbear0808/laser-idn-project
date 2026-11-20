@@ -68,6 +68,20 @@
     {:state (assoc-in state [:ui :notice] nil)}
     {}))
 
+(defn- handle-ui-confirm
+  "The shared confirm dialog's confirm button (views/dialogs/confirm.clj):
+   close it, and continue with its :confirm-event, plus the picked option
+   under its choice's :key when it has a choice. A closed dialog continues
+   with nothing."
+  [{:keys [state]}]
+  (let [{:keys [open? confirm-event choice choice-value]} (get-in state [:ui :dialogs :confirm])
+        closed (assoc-in state [:ui :dialogs :confirm] {:open? false})]
+    (if (and open? confirm-event)
+      {:state closed
+       :dispatch (cond-> confirm-event
+                   (:key choice) (assoc (:key choice) choice-value))}
+      {:state closed})))
+
 (defn- handle-ui-set-grid-split
   "Remember where the user left the divider between a tab and the preview
    (the split pane dispatches it when the mouse lets go of the divider,
@@ -164,6 +178,7 @@
     :ui/close-dialog (handle-ui-close-dialog event)
     :ui/update-dialog-data (handle-ui-update-dialog-data event)
     :ui/clear-notice (handle-ui-clear-notice event)
+    :ui/confirm (handle-ui-confirm event)
     :ui/set-grid-split (handle-ui-set-grid-split event)
     :preview/set-zone-filter (handle-preview-set-zone-filter event)
     :preview/set-grid-layout (handle-preview-set-grid-layout event)

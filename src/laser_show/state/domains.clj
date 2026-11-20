@@ -184,6 +184,7 @@
                                            :color "#808080"}
                        :unsaved-confirm {:open? false
                                          :pending nil}
+                       :confirm {:open? false}
                        :about {:open? false}
                        :settings {:open? false}}
              :doc "dialog visibility and data states (fields alongside :open?, no nested :data key)"}

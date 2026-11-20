@@ -31,6 +31,7 @@
    [laser-show.views.dialogs.zone-group-editor :as zone-group-editor]
    [laser-show.views.dialogs.cell-trigger-editor :as cell-trigger-editor]
    [laser-show.views.dialogs.unsaved-confirm :as unsaved-confirm]
+   [laser-show.views.dialogs.confirm :as confirm]
    [laser-show.views.status-bar :as status-bar]
    [laser-show.views.tabs.effects :as effects-tab]
    [laser-show.views.tabs.grid :as grid-tab]
@@ -181,7 +182,8 @@
         add-projector-open? (fx/sub-ctx context subs/dialog-open? :add-projector-manual)
         zone-group-editor-open? (fx/sub-ctx context subs/dialog-open? :zone-group-editor)
         trigger-editor-open? (fx/sub-ctx context subs/dialog-open? :trigger-editor)
-        unsaved-confirm-open? (fx/sub-ctx context subs/dialog-open? :unsaved-confirm)]
+        unsaved-confirm-open? (fx/sub-ctx context subs/dialog-open? :unsaved-confirm)
+        confirm-open? (fx/sub-ctx context subs/dialog-open? :confirm)]
     {:fx/type fx/ext-set-env
      :env {::layout-config layout-config}  ; For any components that need spacing/fonts
      :desc {:fx/type fx/ext-many
@@ -237,4 +239,8 @@
                     ;; Unsaved-changes question (New / Open / Exit)
                     (when unsaved-confirm-open?
                       {:fx/type unsaved-confirm/unsaved-confirm-dialog
-                       :fx/key :unsaved-confirm-dialog})])}}))
+                       :fx/key :unsaved-confirm-dialog})
+                    ;; The setup screens' shared confirm dialog
+                    (when confirm-open?
+                      {:fx/type confirm/confirm-dialog
+                       :fx/key :confirm-dialog})])}}))

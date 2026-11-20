@@ -290,3 +290,35 @@
         (ui/wait-for! #(some? (stage-titled "Add Projector")))
         (is (= (dialog-look (stage-titled "Add Projector") "#add-projector-name-field")
                zone-group-look))))))
+
+(deftest confirm-dialog-uses-theme-classes-test
+  (events/dispatch! {:event/type :ui/open-dialog
+                     :dialog-id :confirm
+                     :data {:title "Delete \"Balcony\"?"
+                            :message "3 cues and 2 projectors use it."
+                            :details "A1 Intro · B4 Tunnel · C2 Drop"
+                            :choice {:key :retarget-to :label "Send its cues to:"
+                                     :options [{:value :all :text "All"} {:value :left :text "Left"}]}
+                            :choice-value :all
+                            :confirm-label "Delete group"
+                            :danger? true
+                            :confirm-event {:event/type :ui/close-dialog :dialog-id :confirm}}})
+  (ui/wait-for! #(some? (stage-titled "Delete \"Balcony\"?")))
+  (let [dialog (stage-titled "Delete \"Balcony\"?")
+        root (scene-root dialog)]
+    (testing "its text takes the theme's classes, not colours of its own"
+      (is (empty? (inline-colours root))))
+    (testing "it shows the question, the details, the choice and both buttons"
+      (is (some? (labeled-with-text root "3 cues and 2 projectors use it.")))
+      (is (some? (labeled-with-text root "A1 Intro · B4 Tunnel · C2 Drop")))
+      (is (some? (ui/on-fx-thread #(.lookup root "#confirm-choice"))))
+      (is (= "Delete group" (ui/on-fx-thread #(.getText ^Labeled (.lookup root "#confirm-ok")))))
+      (is (some? (ui/on-fx-thread #(.lookup root "#confirm-cancel")))))
+    (testing "it has the setup dialogs' background"
+      (let [background (fill-hex root)]
+        (events/dispatch! {:event/type :ui/close-dialog :dialog-id :confirm})
+        (ui/wait-for! #(nil? (stage-titled "Delete \"Balcony\"?")))
+        (events/dispatch! {:event/type :ui/open-dialog :dialog-id :add-projector-manual})
+        (ui/wait-for! #(some? (stage-titled "Add Projector")))
+        (is (= (fill-hex (scene-root (stage-titled "Add Projector"))) background))))))
+
