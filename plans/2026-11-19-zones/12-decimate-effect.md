@@ -1,6 +1,6 @@
 # Decimate: an effect that thins a frame to a target fps
 
-**Written:** 2026-11-20 at `c067030` (`master`, Z0–Z3 and ZR in).   **Status:** Built on branch `decimate`, not merged (`e7b93e4`..`d6fbb15`, off `3229c95`). The as-built note is §6. Asked for by the user on 2026-11-20 ("a decimate effect that will reduce point counts by a factor to target a certain fps at a given kpps… default to 25 kpps and 30 fps… try to never mess with anchor blanking points").   **Needs:** Z3's fit guard (`animation/fit_guard.clj`: `budget`, `keep-mask`, `thin`; 05 §13).   **Size:** ~0.5 d. It can be built alongside Z4.
+**Written:** 2026-11-20 at `c067030` (`master`, Z0–Z3 and ZR in).   **Status:** **Done, on `master`** (`e7b93e4`..`d6fbb15`, fast-forwarded from `3229c95`). The as-built note is §6. Not checked on a real projector. Asked for by the user on 2026-11-20 ("a decimate effect that will reduce point counts by a factor to target a certain fps at a given kpps… default to 25 kpps and 30 fps… try to never mess with anchor blanking points").   **Needs:** Z3's fit guard (`animation/fit_guard.clj`: `budget`, `keep-mask`, `thin`; 05 §13).   **Size:** ~0.5 d. It can be built alongside Z4.
 
 Paths are under `src/laser_show/` unless they start with `test/` or `plans/`. **NEW** marks anything that doesn't exist yet.
 
@@ -65,7 +65,7 @@ Failing tests first in each step.
 - Telling later effects the new count: effects after Decimate in the same chain get the frame context made for the chain, so a point-index modulator after it reads the count from before. The editor's hint says to put Decimate last.
 - Replacing the fit guard: the guard stays automatic, per laser, with its floor and its record. Decimate is a tool you place.
 
-## 6. As built (2026-11-20, `e7b93e4`..`d6fbb15`, on branch `decimate`, not merged)
+## 6. As built (2026-11-20, `e7b93e4`..`d6fbb15`, on `master`)
 
 Built in worktree `wt-decimate` off `master` at `3229c95`, while Z4 was built in its own worktree. `master` hasn't moved, so the branch fast-forwards it. "For the merge" below has a trial merge with Z4's branch as it stood.
 
