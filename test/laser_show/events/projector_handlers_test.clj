@@ -159,14 +159,18 @@
       (is (identical? out (set-fit out :min-fps 30)))
       (is (identical? out (:state (projectors/handle {:event/type :projectors/set-fit :projector-id :nope
                                                       :key :min-fps :value 25 :state out})))))
-    (testing "one undo step, named, an unsaved change, and no engine restarts"
+    (testing "one undo step, named, saved as the projector's other settings are, and no engine restarts"
       (let [pipeline #(events/handle-event-pipeline (assoc %2 :state %1))
-            result (pipeline (-> state-with-projector history/mark-clean (assoc-in [:backend :streaming :running?] true))
-                             {:event/type :projectors/set-fit :projector-id test-projector-id :key :min-fps :value 25})
-            edited (:state result)]
+            start (-> state-with-projector history/mark-clean (assoc-in [:backend :streaming :running?] true))
+            result (pipeline start {:event/type :projectors/set-fit :projector-id test-projector-id :key :min-fps :value 25})
+            edited (:state result)
+            tagged (:state (pipeline start {:event/type :projectors/set-tag :projector-id test-projector-id
+                                            :tag :crowd-scanning :on? true}))]
         (is (= 25 (:min-fps (fit edited))))
         (is (= "Change Fit Guard" (history/undo-label (:history edited))))
-        (is (true? (get-in edited [:project :dirty?])))
+        (is (some? (get-in tagged [:projectors test-projector-id :tags])))
+        (is (= (boolean (get-in tagged [:project :dirty?])) (boolean (get-in edited [:project :dirty?])))
+            "the show unsaved or not as a tag edit leaves it: :fit is saved with the projector (zones ZR saves the projectors with the rig)")
         (is (nil? (:multi-engine/refresh result)) "fit is no part of an engine's fingerprint")
         (is (nil? (fit (:state (pipeline edited {:event/type :history/undo})))))))))
 

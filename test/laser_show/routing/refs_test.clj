@@ -135,4 +135,12 @@
       (is (= [{:target nil} {:target :left} {:zone-group-id :left} {:target :right}]
              (get-in (refs/replace-refs state {:balcony :left}) [:config :preview :grid-cells])))
       (is (= {:target nil} (get-in (refs/replace-refs state {:balcony nil}) [:config :preview :grid-cells 1]))
-          "cleared: the master view"))))
+          "cleared: the master view")))
+  (testing "a cell with both keys (an old :zone-group-id written into a default cell) has each re-pointed"
+    (let [state (assoc-in (show-state) [:config :preview :grid-cells] [{:target :auto/left :zone-group-id :balcony}])]
+      (is (= [{:target :auto/left :zone-group-id :left}]
+             (get-in (refs/replace-refs state {:balcony :left}) [:config :preview :grid-cells])))
+      (is (= [{:target :left :zone-group-id :left}]
+             (get-in (refs/replace-refs (assoc-in state [:config :preview :grid-cells 0 :target] :balcony) {:balcony :left})
+                     [:config :preview :grid-cells])))
+      (is (identical? state (refs/replace-refs state {:graphics :left})) "nothing it names: the same state"))))
