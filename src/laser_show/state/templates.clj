@@ -28,23 +28,16 @@
     [1 0] {:items [{:type :preset :id (random-uuid) :preset-id :square ...}]}
     ...}"
   []
-  {;; Row 0: Basic shapes - all default to "All" zone group
-   [0 0] {:items [(cue-chains/create-preset-instance :circle)]
-          :destination-zone {:zone-group-id :all}}
-   [1 0] {:items [(cue-chains/create-preset-instance :square)]
-          :destination-zone {:zone-group-id :all}}
-   [2 0] {:items [(cue-chains/create-preset-instance :triangle)]
-          :destination-zone {:zone-group-id :all}}
-   [3 0] {:items [(cue-chains/create-preset-instance :star)]
-          :destination-zone {:zone-group-id :all}}
-   [4 0] {:items [(cue-chains/create-preset-instance :spiral)]
-          :destination-zone {:zone-group-id :all}}
-   [5 0] {:items [(cue-chains/create-preset-instance :wave)]
-          :destination-zone {:zone-group-id :all}}
-   [6 0] {:items [(cue-chains/create-preset-instance :beam-fan)]
-          :destination-zone {:zone-group-id :all}}
-   [7 0] {:items [(cue-chains/create-preset-instance :horizontal-line)]
-          :destination-zone {:zone-group-id :all}}})
+  {;; Row 0: Basic shapes. No target: each follows its column, the show,
+   ;; then All (zones plan Z4)
+   [0 0] {:items [(cue-chains/create-preset-instance :circle)]}
+   [1 0] {:items [(cue-chains/create-preset-instance :square)]}
+   [2 0] {:items [(cue-chains/create-preset-instance :triangle)]}
+   [3 0] {:items [(cue-chains/create-preset-instance :star)]}
+   [4 0] {:items [(cue-chains/create-preset-instance :spiral)]}
+   [5 0] {:items [(cue-chains/create-preset-instance :wave)]}
+   [6 0] {:items [(cue-chains/create-preset-instance :beam-fan)]}
+   [7 0] {:items [(cue-chains/create-preset-instance :horizontal-line)]}})
 
 
 (defn apply-starter-cue-chains

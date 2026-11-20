@@ -248,8 +248,8 @@
     (is (= {} (:projectors loaded)) "the show's projectors are a copy: this rig's stay (none here)")
     (is (= #{:left :graphics :crowd} (set (keys (:zone-groups loaded)))) "All is built in; the empty Right and Center went")
     (is (= "Left (manual)" (get-in loaded [:zone-groups :left :name])) "the show's own hardware lists Left")
-    (is (= :auto/center (get-in loaded [:chains :cue-chains [0 0] :items 0 :zone-group-id])))
-    (is (= [nil :left :auto/right :auto/center] (mapv :zone-group-id (get-in loaded [:config :preview :grid-cells]))))
+    (is (= :auto/center (get-in loaded [:chains :cue-chains [0 0] :items 0 :target])) "then Z4's: it's a :target")
+    (is (= [nil :left :auto/right :auto/center] (mapv :target (get-in loaded [:config :preview :grid-cells]))))
     (is (false? (get-in loaded [:project :dirty?])) "converted before the baseline: not an unsaved change")
     (is (empty? (get-in loaded [:history :undo-stack])))
     (testing "saved again, it loads as it is"
@@ -456,7 +456,7 @@
     (doseq [path rig-paths]
       (is (identical? (get-in here path) (get-in loaded path)) (str path " is this machine's, as it was")))
     (is (= 128.0 (get-in loaded [:timing :bpm])) "the show is friday's")
-    (is (= :auto.laser/projector-10-0-0-57-1 (get-in loaded [:chains :cue-chains [0 0] :destination-zone :zone-group-id]))
+    (is (= :auto.laser/projector-10-0-0-57-1 (get-in loaded [:chains :cue-chains [0 0] :target]))
         "its cue pinned to Laser L follows the unit to its id here")
     (is (false? (get-in loaded [:project :dirty?])) "renamed before the baseline: not unsaved")))
 
@@ -521,8 +521,8 @@
                  (assoc-in [:projectors :projector-10-0-0-57-1 :zone-groups] [:right]))
         loaded (persistent/apply-loaded-project here (old-show [:all :left]) "old.zip")]
     (is (= "Left (manual)" (get-in loaded [:zone-groups :left :name])) "its own laser was in Left, though no laser here is")
-    (is (= :left (get-in loaded [:chains :cue-chains [0 0] :destination-zone :zone-group-id])))
+    (is (= :left (get-in loaded [:chains :cue-chains [0 0] :target])))
     (is (not (contains? (:zone-groups loaded) :right)) "nothing of its own was in Right, though a laser here is (S-ZR-7)")
-    (is (= :auto/right (get-in loaded [:chains :cue-chains [1 0] :destination-zone :zone-group-id])))
+    (is (= :auto/right (get-in loaded [:chains :cue-chains [1 0] :target])))
     (is (= [:right] (get-in loaded [:projectors :projector-10-0-0-57-1 :zone-groups])) "and the rig is left alone")))
 

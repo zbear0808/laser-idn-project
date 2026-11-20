@@ -172,7 +172,7 @@
   "A small lit circle (radius r) on target."
   [target r]
   {:id (random-uuid) :type :preset :preset-id :circle :enabled? true :effects []
-   :params {:radius r :num-points 64} :zone-group-id target})
+   :params {:radius r :num-points 64} :target target})
 
 (defn- lit-in-band
   "Lit pixels of cell i's canvas whose column is within lo-hi of its width

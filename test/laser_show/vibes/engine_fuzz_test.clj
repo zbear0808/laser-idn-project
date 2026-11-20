@@ -55,16 +55,16 @@
 ;; to :all, which the crowd-scanning projector is in), a timeline and one that
 ;; follows timecode. The starter cues send to :center.
 
-(def ^:private shape {:items [{:type :preset :preset-id :circle}] :destination-zone {:zone-group-id :center}})
+(def ^:private shape {:items [{:type :preset :preset-id :circle}] :target :center})
 
 (def ^:private extra-cues
   {[0 1] shape
    [1 1] shape
-   [2 1] (assoc shape :destination-zone {:zone-group-id :crowd})
-   [5 1] (assoc shape :destination-zone {:zone-group-id nil})
+   [2 1] (assoc shape :target :crowd)
+   [5 1] (assoc shape :target nil)
    [3 1] {:editor-type :timeline :timeline/chase :mtc :timeline/tempo-bpm 120.0
           :items [{:type :preset :preset-id :circle :timeline/start 0.0 :timeline/duration 4.0}]}
-   [4 1] {:editor-type :timeline :destination-zone {:zone-group-id :center}
+   [4 1] {:editor-type :timeline :target :center
           :items [{:type :preset :preset-id :square :timeline/start 0.0 :timeline/duration 4.0}]}})
 
 (def ^:private extra-vibes
@@ -84,7 +84,7 @@
       (templates/apply-starter-cue-chains)
       (templates/apply-starter-vibes)
       (assoc-in [:timing :bpm] 120.0)
-      (update-in [:chains :cue-chains] update-vals #(assoc % :destination-zone {:zone-group-id :center}))
+      (update-in [:chains :cue-chains] update-vals #(assoc % :target :center))
       (update-in [:chains :cue-chains] merge extra-cues)
       (assoc-in [:projectors :crowd-beam] {:name "Crowd beam" :host "10.0.0.9" :port 7255 :enabled? false
                                            :zone-groups [:all] :tags #{:crowd-scanning}})
@@ -328,7 +328,7 @@
     (boolean (and (seq (:items cue))
                   (not (playback/chases-mtc? cue))
                   (or (:allow-audience? vibe)
-                      (not (#{:crowd :all} (or (get-in cue [:destination-zone :zone-group-id]) :all))))))))
+                      (not (#{:crowd :all} (or (get-in cue [:target]) :all))))))))
 
 (defn- pool-of [state vibe role]
   (filterv #(may-play? state vibe %) (distinct (get-in vibe [role :cells]))))

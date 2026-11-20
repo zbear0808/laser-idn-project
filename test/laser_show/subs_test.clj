@@ -353,7 +353,7 @@
 (deftest vibe-pick-cell-sub-test
   (let [ctx (context (-> (vibe-state)
                          (assoc-in [:config :vibes :library :vibe-1 :bed] [5 0])
-                         (assoc-in [:chains :cue-chains [3 0] :destination-zone :zone-group-id] :crowd)
+                         (assoc-in [:chains :cue-chains [3 0] :target] :crowd)
                          (assoc-in [:chains :effect-chains [0 3]] {:items [{:effect-id :scale}] :active? false})
                          (assoc-in [:config :vibes :library :vibe-2 :fx] [[0 3]])))
         pick (fn [ctx col row] (fx/sub-ctx ctx subs/vibe-pick-cell col row))]
@@ -592,9 +592,9 @@
 
 (deftest zone-group-usage-counts-cues-test
   (let [s (-> base-state
-              (assoc-in [:chains :cue-chains [2 0]] {:destination-zone {:zone-group-id :left}
+              (assoc-in [:chains :cue-chains [2 0]] {:target :left
                                                      :items [{:type :preset :preset-id :line}]})
-              (assoc-in [:chains :cue-chains [3 1]] {:items [{:type :preset :preset-id :line :zone-group-id :left}]})
+              (assoc-in [:chains :cue-chains [3 1]] {:items [{:type :preset :preset-id :line :target :left}]})
               (assoc-in [:chains :effect-chains [5 5]] {:items [{:effect-id :zone-selector :params {:target-zone :left}}]})
               (assoc-in [:projectors :p1] {:name "P1" :zone-groups [:all :left]}))
         usage (fx/sub-ctx (context s) subs/zone-group-usage :left)]
@@ -635,7 +635,7 @@
                        subs/vibe-show-lock)))))
 
 (deftest vibe-audience-subs-test
-  (let [crowd {:items [{:type :preset :preset-id :circle}] :destination-zone {:zone-group-id :crowd}}
+  (let [crowd {:items [{:type :preset :preset-id :circle}] :target :crowd}
         s (-> (vibe-state)
               (assoc-in [:chains :cue-chains [0 1]] crowd)
               (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[0 0] [0 1]]))
@@ -768,10 +768,10 @@
   (let [s (-> base-state
               (assoc :projectors {:a {:name "A" :host "10.0.0.1"} :b {:name "B" :host "10.0.0.2"}
                                   :off {:name "Off" :host "10.0.0.3" :enabled? false :zone-groups [:graphics]}})
-              (assoc-in [:chains :cue-chains [2 0]] {:destination-zone {:zone-group-id :auto/left}
+              (assoc-in [:chains :cue-chains [2 0]] {:target :auto/left
                                                      :items [{:type :preset :preset-id :line}]})
-              (assoc-in [:chains :cue-chains [3 0]] {:destination-zone {:zone-group-id :graphics}
-                                                     :items [{:type :preset :preset-id :line :zone-group-id :auto.laser/b}]}))
+              (assoc-in [:chains :cue-chains [3 0]] {:target :graphics
+                                                     :items [{:type :preset :preset-id :line :target :auto.laser/b}]}))
         usage #(fx/sub-ctx (context s) subs/zone-group-usage %)]
     (is (= [1 1] ((juxt :cue-count :projector-count) (usage :auto/left))) "a cue names Left; Left reaches the left laser")
     (is (= 2 (:projector-count (usage :all))) "All reaches the lasers that are on")
@@ -792,9 +792,9 @@
   (let [s (-> base-state
               (templates/apply-starter-vibes)
               (assoc-in [:chains :cue-chains] {[0 0] {:items [{:type :preset :preset-id :circle}]
-                                                      :destination-zone {:zone-group-id :auto/left}}
+                                                      :target :auto/left}
                                                [1 0] {:items [{:type :preset :preset-id :square}]
-                                                      :destination-zone {:zone-group-id :auto/right}}})
+                                                      :target :auto/right}})
               (assoc :projectors {:aud {:name "Aud" :host "10.0.0.1" :zone-groups [] :tags #{:crowd-scanning}}
                                   :main {:name "Main" :host "10.0.0.2" :zone-groups []}}))
         ctx (context s)

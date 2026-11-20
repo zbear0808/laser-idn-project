@@ -4,9 +4,12 @@
    become the automatic groups, filled ones stay as \"Left (manual)\", All's
    definition goes, every projector gets a stable id, and no order is
    written. Silent, idempotent, and every projector draws what it drew
-   before, but for content aimed at an empty built-in (04 S-2)."
+   before, but for content aimed at an empty built-in (04 S-2). Then zones
+   plan Z4's rows (06 §8.3): every way a show routed becomes a :target, and
+   the Zone Selector goes."
   (:require [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]
+            [laser-show.events.handlers.grid :as grid]
             [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]
             [laser-show.state.domains :as domains]
@@ -203,3 +206,142 @@
     (testing "the one change (S-2): content aimed at the empty Left now reaches the left laser"
       (is (contains? (after-draws :projector-10-0-0-5-1) (frame-of :left)))
       (is (not (contains? (before-draws [:all :graphics]) (frame-of :left)))))))
+
+
+;; Z4's rows (06 §8.3): every way an old show routed becomes a :target
+
+(defn- zone-sel
+  ([id zone] (zone-sel id zone true))
+  ([id zone on?] {:id id :effect-id :zone-selector :enabled? on? :params (if zone {:target-zone zone} {})}))
+
+(def ^:private scale-fx {:id "fx" :effect-id :scale :enabled? true :params {:x-scale 0.5}})
+
+(deftest destination-becomes-the-cue-target-test
+  (is (= {:target :graphics :items []} (migration/cue-z4 {:destination-zone {:zone-group-id :graphics} :items []})))
+  (is (= {:items []} (migration/cue-z4 {:destination-zone {:zone-group-id :all} :items []}))
+      "All becomes none: levels 5 and 6 are empty on an old show, so it still ends at All")
+  (is (= {:items []} (migration/cue-z4 {:destination-zone {:zone-group-id nil} :items []})))
+  (is (= {:items []} (migration/cue-z4 {:destination-zone {} :items []})))
+  (is (= {:target [:graphics :auto/left] :items []}
+         (migration/cue-z4 {:destination-zone {:zone-group-id [:auto/left :graphics]} :items []}))
+      "in normal form")
+  (is (= {:target :crowd :items []} (migration/cue-z4 {:target :crowd :destination-zone {:zone-group-id :graphics} :items []}))
+      "a :target it has stays")
+  (is (nil? (migration/cue-z4 nil))))
+
+(deftest zone-groups-become-targets-test
+  (is (= {:tracks [{:id "f" :type :group :target :auto/left
+                    :items [{:id "t" :type :track :target :graphics} {:id "u" :type :track}]}]
+          :items [{:id "i" :type :preset :target :auto/right}
+                  {:id "g" :type :group :target :all
+                   :items [{:id "c" :type :preset :target :crowd} {:id "d" :type :preset}]}
+                  {:id "k" :type :group :track-id "t"
+                   :items [{:id "e" :type :preset :target [:graphics :auto/left]}]}]}
+         (migration/cue-z4
+          {:tracks [{:id "f" :type :group :zone-group-id :auto/left
+                     :items [{:id "t" :type :track :zone-group-id :graphics} {:id "u" :type :track}]}]
+           :items [{:id "i" :type :preset :zone-group-id :auto/right}
+                   {:id "g" :type :group :zone-group-id :all
+                    :items [{:id "c" :type :preset :zone-group-id :crowd} {:id "d" :type :preset}]}
+                   {:id "k" :type :group :track-id "t"
+                    :items [{:id "e" :type :preset :zone-group-id [:auto/left :graphics]}]}]}))
+      "items, groups, clips in a group clip, tracks and folders; an item's All stays All"))
+
+(def ^:private section-8-3-before
+  {:destination-zone {:zone-group-id :all}
+   :items [{:type :preset :id 1
+            :effects [{:effect-id :zone-selector :enabled? true :params {:target-zone :left}}
+                      {:effect-id :scale :enabled? true}]}
+           {:type :group :id 2 :zone-group-id :center
+            :items [{:type :preset :id 3 :zone-group-id :right
+                     :effects [{:effect-id :zone-selector :enabled? true :params {:target-zone :crowd}}]}]}
+           {:type :preset :id 4
+            :effects [{:effect-id :zone-selector :enabled? false :params {:target-zone :crowd}}]}]})
+
+(def ^:private section-8-3-after
+  {:items [{:type :preset :id 1 :target :left :effects [{:effect-id :scale :enabled? true}]}
+           {:type :group :id 2 :target :center
+            :items [{:type :preset :id 3 :target :right :effects []}]}
+           {:type :preset :id 4 :effects []}]})
+
+(deftest enabled-selector-becomes-the-target-test
+  (is (= {:items [{:id 1 :type :preset :target :auto/left :effects [scale-fx]}]}
+         (migration/cue-z4 {:items [{:id 1 :type :preset :effects [(zone-sel "z" :auto/left) scale-fx]}]}))
+      "the item's own target now, and the effect goes")
+  (is (= {:items [{:id 1 :type :group :target :graphics :items [] :effects []}]}
+         (migration/cue-z4 {:items [{:id 1 :type :group :items [] :effects [(zone-sel "z" :graphics)]}]}))
+      "a group's too")
+  (is (= {:items [{:id 1 :type :preset :target :crowd :effects []}]}
+         (migration/cue-z4 {:items [{:id 1 :type :preset :effects [{:id "z" :effect-id :zone-selector :params {:target-zone :crowd}}]}]}))
+      "one with no :enabled? is on")
+  (testing "06 §8.3's example"
+    (is (= section-8-3-after (migration/cue-z4 section-8-3-before)))))
+
+(deftest own-zone-beats-the-selector-test
+  (is (= {:items [{:id 1 :type :preset :target :auto/even :effects []}]}
+         (migration/cue-z4 {:items [{:id 1 :type :preset :zone-group-id :auto/even :effects [(zone-sel "z" :graphics)]}]})))
+  (is (= :right (get-in (migration/cue-z4 section-8-3-before) [:items 1 :items 0 :target]))
+      "as routing read it: its own zone beat its selector"))
+
+(deftest first-enabled-selector-wins-test
+  (let [target #(get-in (migration/cue-z4 {:items [{:id 1 :type :preset :effects %}]}) [:items 0 :target])]
+    (is (= :auto/center (target [(zone-sel "a" :crowd false) (zone-sel "b" :auto/center)])) "the first one on")
+    (is (= :auto/right (target [(zone-sel "a" :auto/right) (zone-sel "b" :graphics)])) "not the second")
+    (is (nil? (target [(zone-sel "a" nil) (zone-sel "b" :graphics)]))
+        "the first one on names no zone: routing read nothing, so nothing")
+    (is (nil? (target [(zone-sel "a" :crowd false)])) "one that is off never routed")))
+
+(deftest every-selector-goes-test
+  (let [cue (migration/cue-z4
+             {:tracks [{:id "t" :type :track :effects [(zone-sel "tz" :crowd) scale-fx]}]
+              :items [{:id 1 :type :preset :track-id "t"
+                       :effects [scale-fx
+                                 (zone-sel "a" :crowd false)
+                                 {:id "grp" :type :group :items [(zone-sel "b" :graphics) {:id "rot" :effect-id :rotation}]}
+                                 (assoc (zone-sel "c" :left) :keyframe-modulator {:enabled? true :keyframes []})]}]})]
+    (is (= [scale-fx {:id "grp" :type :group :items [{:id "rot" :effect-id :rotation}]}]
+           (get-in cue [:items 0 :effects]))
+        "off, inside an effect group, a second one with keyframes: all gone, the rest in order")
+    (is (= :left (get-in cue [:items 0 :target]))
+        "the first top-level one on gave its zone, its keyframes never routed; the one in the group never did either")
+    (is (= {:id "t" :type :track :effects [scale-fx]} (first (:tracks cue))) "a track's goes, and gives it no target"))
+  (let [state (migration/zones-z4 {:chains {:effect-chains {[1 2] {:active? true :items [(zone-sel "e" :crowd) scale-fx]}
+                                                            [2 2] {:items [scale-fx]}}}})]
+    (is (= [scale-fx] (get-in state [:chains :effect-chains [1 2] :items])) "an effects-grid cell's (it never routed)")
+    (is (= {:items [scale-fx]} (get-in state [:chains :effect-chains [2 2]])))))
+
+(deftest preview-cells-take-targets-test
+  (is (= [{:target nil} {:target :graphics} {:target :auto/left} {:target :auto/right}]
+         (get-in (migration/zones-z4 {:config {:preview {:grid-cells [{:zone-group-id nil} {:zone-group-id :graphics}
+                                                                      {:target :auto/left}
+                                                                      {:target :auto/right :zone-group-id :graphics}]}}})
+                 [:config :preview :grid-cells]))
+      "the same key; a cell with both shows its :target, so that's what it keeps"))
+
+(deftest z4-runs-after-z2-test
+  (let [state (migration/zones-z4 migrated)
+        cues (get-in state [:chains :cue-chains])]
+    (is (= :auto/left (get-in cues [[0 0] :items 0 :target])) "an empty built-in Left: the automatic Left")
+    (is (= :auto/center (get-in cues [[0 0] :target])) "the cue's destination, the same")
+    (is (= :right (get-in cues [[0 0] :items 1 :target])) "Right (manual) stays")
+    (is (= :auto/left (get-in cues [[1 0] :tracks 0 :target])))
+    (is (= [] (get-in cues [[2 0] :items 0 :effects])) "its Zone Selector goes, off as it was")
+    (is (= :group-balcony (get-in cues [[3 0] :target])))
+    (is (not-any? #(contains? % :destination-zone) (vals cues)))
+    (is (= [{:target nil} {:target :auto/left} {:target :right} {:target :auto/center}]
+           (get-in state [:config :preview :grid-cells])))))
+
+(deftest migration-is-idempotent-test
+  (let [once (migration/zones-z4 migrated)]
+    (is (identical? once (migration/zones-z4 once)) "twice is once")
+    (is (= section-8-3-after (migration/cue-z4 (migration/cue-z4 section-8-3-before)))))
+  (let [fresh (domains/build-initial-state)]
+    (is (identical? fresh (migration/zones-z4 fresh)) "a new show has nothing to convert"))
+  (let [cue {:target :zone/a :items [{:id 1 :type :preset :target :graphics :effects [scale-fx]}]}]
+    (is (identical? cue (migration/cue-z4 cue)))))
+
+(deftest pasted-old-cue-is-migrated-test
+  (let [state (assoc-in (domains/build-initial-state) [:ui :clipboard] {:type :cue-chain :data section-8-3-before})
+        pasted (grid/handle {:event/type :grid/paste-cell :col 3 :row 1 :state state})]
+    (is (= section-8-3-after (get-in pasted [:state :chains :cue-chains [3 1]]))
+        "a cue copied from an older build routes the same here")))

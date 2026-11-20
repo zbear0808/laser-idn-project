@@ -2,7 +2,7 @@
   "Frame service: renders cues into frames.
    
    This service:
-   - Renders a cue chain into frames per destination zone (generate-frames-by-zone)
+   - Renders a cue chain into frames by target (generate-frames-by-zone)
    - Applies effects from the effects grid and per-preset effects
    - Builds what the preview shows from a tick's rendered cues (preview-data)
    - Generates calibration frames for projector calibration mode
@@ -43,6 +43,7 @@
             [laser-show.common.util :as u]
             [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]
+            [laser-show.routing.targets :as targets]
             [laser-show.routing.zone-effects :as ze]
             [laser-show.input.store :as input-store]
             [laser-show.animation.cue-chains :as cue-chains]
@@ -200,49 +201,44 @@
   frames/concatenate-frames)
 
 (defn- render-item-tree-by-zone
-  "Recursively render a cue chain item (preset or group) partitioned by destination zone.
-   Applies effects at each level (preset effects on presets, group effects on group zone sub-frames).
+  "Render a cue chain item (preset or group) partitioned by target (zones
+   plan Z4): {target frame}, the keys targets in normal form. Applies
+   effects at each level (preset effects on presets, group effects on each
+   of a group's targets' frames).
    
    Args:
    - item: A preset or group map
-   - parent-zone-id: Inherited zone group keyword from parent container (or nil)
+   - parent: the resolution of the group it is in, as its children see it
+     (routing.targets/inherited), or nil at the top
    - timing-ctx: The cue's (or the clip's) timing context
-   - tracks: Cue chain tracks vector (optional)
-   - default-zone-id: Fallback zone group keyword
-   
-   Returns: Map of zone-group-id → LaserFrame (vector of points)"
-  [item parent-zone-id timing-ctx tracks default-zone-id]
+   - by-track: the cue's track targets (routing.targets/track-targets)
+   - fallback: the cue's fallback (routing.targets/cue-fallback)"
+  [item parent timing-ctx by-track fallback]
   (let [current-beats (window-beats timing-ctx)]
     (if-not (and (:enabled? item true)
                  (model/active-at? item current-beats))
       {}
       (cond
-        ;; Preset: render and apply preset effects, assign to resolved zone
+        ;; Preset: render and apply preset effects, under its target
         (= :preset (:type item))
-        (let [zone-id (ze/resolve-item-zone-destination
-                       item timing-ctx
-                       {:tracks tracks
-                        :default-zone-id default-zone-id
-                        :inherited-zone parent-zone-id})]
+        (let [target (:target (targets/resolve-item (:target item) (get by-track (:track-id item)) parent fallback))]
+          (ze/log-once [:resolve-item (:id item)]
+                       (format "[zone-debug] resolve-item: id=%s target=%s" (:id item) target))
           (if-let [frame (render-preset-instance item)]
             (let [frame-with-fx (apply-item-effects frame item timing-ctx)]
               (if (seq frame-with-fx)
-                {zone-id frame-with-fx}
+                {target frame-with-fx}
                 {}))
             {}))
 
-        ;; Group: resolve group's effective zone, recursively render children,
-        ;; then apply group effects to each zone partition
+        ;; Group: its resolution reaches its children, which are rendered,
+        ;; then the group's effects run on each target's frame
         (chains/group? item)
-        (let [group-zone (ze/resolve-item-zone-destination
-                          item timing-ctx
-                          {:tracks tracks
-                           :default-zone-id default-zone-id
-                           :inherited-zone parent-zone-id})
+        (let [res (targets/resolve-item (:target item) (get by-track (:track-id item)) parent fallback)
+              inherited (targets/inherited res (:id item))
               children (:items item [])
               child-zone-maps (u/keepv
-                               #(render-item-tree-by-zone
-                                 % group-zone timing-ctx tracks default-zone-id)
+                               #(render-item-tree-by-zone % inherited timing-ctx by-track fallback)
                                children)
               merged-child-frames (reduce
                                    (fn [acc child-map]
@@ -340,37 +336,41 @@
          tracks)))
 
 (defn generate-frames-by-zone
-  "Generate frames organized by destination zone group.
+  "Generate a cue's frames by target (zones plan Z4).
    
-   Recursively evaluates cue chain items and groups by resolved zone destination,
-   applies preset- and group-level effects at each level, and applies global effects
-   to each zone's frame.
+   Each item goes where it resolves to (routing.targets/resolve-item, spec 01
+   §2): its own :target, its track's (walking up its folders), its group's,
+   else the cue's fallback: the cue's :target, its grid column's default,
+   the show's, All. Preset- and group-level effects run at each level, then
+   the global effects on each frame. The keys never depend on the zone map
+   (06 §8.8 invariant 2): a map switch re-routes these same frames.
    
    Args:
-   - cue-chain: The cue chain data with :items, :destination-zone, and optional :tracks
+   - cue-chain: The cue chain data with :items, :target, and optional :tracks
    - timing-ctx: The cue's timing context (cue-timing/get-cue-timing-context),
      which every modulator, keyframe and clip window reads. Its :bpm is the
      cue's tempo.
    - render-ctx: What the tick's cues share (render-context). Without it, it
      is made from app state, the input store and the show clock as they are.
-     With :item-points? true (the show clock sets it for a cue whose editor
-     is open), the result's metadata has :item-points [[item-id {key
+     :column-target and :show-target are the cue's column's default and the
+     show's. With :item-points? true (the show clock sets it for a cue whose
+     editor is open), the result's metadata has :item-points [[item-id {key
      points}] …]: each top-level item's (or clip's) points by key, before
      track and global effects, for the cue warnings (routing.compose).
    
    Returns:
-   Map of zone-group-id → frame, where each frame is a vector of points.
-   Only zones with rendered content are included.
+   Map of target → frame, where each frame is a vector of points.
+   Only targets with rendered content are included.
    Empty map if no items render successfully."
   ([cue-chain timing-ctx]
    (generate-frames-by-zone cue-chain timing-ctx
                             (render-context (state/get-raw-state)
                                             (input-store/get-all-continuous-values)
                                             (show-time/global-clock))))
-  ([cue-chain timing-ctx {:keys [global-effects global-ctx item-points?]}]
+  ([cue-chain timing-ctx {:keys [global-effects global-ctx item-points? column-target show-target]}]
    (ze/log-once :frame-service-generate
-                (format "[zone-debug] generate-frames-by-zone: destination-zone=%s effective-beats=%.2f item-count=%d"
-                        (pr-str (:destination-zone cue-chain))
+                (format "[zone-debug] generate-frames-by-zone: target=%s effective-beats=%.2f item-count=%d"
+                        (pr-str (:target cue-chain))
                         (double (:effective-beats timing-ctx 0.0))
                         (count (:items cue-chain []))))
    (let [bpm (:bpm timing-ctx)
@@ -378,7 +378,8 @@
          muted (model/muted-track-ids tracks)
          items (cond->> (:items cue-chain [])
                  (seq muted) (filterv #(not (contains? muted (:track-id %)))))
-         destination-id (get-in cue-chain [:destination-zone :zone-group-id] :all)
+         fallback (targets/cue-fallback (:target cue-chain) column-target show-target)
+         by-track (targets/track-targets tracks)
          timing-ctx (if-let [loop-config (:loop cue-chain)]
                       (assoc timing-ctx :window-beats
                              (wrap-into-loop (:effective-beats timing-ctx 0.0) loop-config))
@@ -390,17 +391,17 @@
                             item nil
                             ;; Each clip runs on its own clock, from its start
                             (if timeline? (playback/clip-timing-ctx timing-ctx item bpm) timing-ctx)
-                            tracks destination-id))
+                            by-track fallback))
                          items)
          combined-by-zone (if (and timeline? (model/track-effects? tracks))
-                            (let [by-track (group-by :track-id (map (fn [item m] {:track-id (:track-id item) :m m})
-                                                                     items item-zone-maps))
-                                  by-track (update-vals by-track #(mapv :m %))
+                            (let [clips-by-track (update-vals (group-by :track-id (map (fn [item m] {:track-id (:track-id item) :m m})
+                                                                                         items item-zone-maps))
+                                                              #(mapv :m %))
                                   leaf-ids (model/leaf-track-ids tracks)]
                               (merge-zone-maps
-                               (into [(render-track-tree tracks by-track timing-ctx)]
+                               (into [(render-track-tree tracks clips-by-track timing-ctx)]
                                      ;; Clips without a known track: no track effects
-                                     (mapcat val (remove #(contains? leaf-ids (key %)) by-track)))))
+                                     (mapcat val (remove #(contains? leaf-ids (key %)) clips-by-track)))))
                             (merge-zone-maps item-zone-maps))
          ;; The global effects run at the cue's tempo
          global-ctx (when global-effects (assoc global-ctx :bpm bpm))]

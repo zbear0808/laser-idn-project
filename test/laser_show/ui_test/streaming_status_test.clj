@@ -191,7 +191,7 @@
   [n target]
   {:destination-zone {:zone-group-id :all}
    :items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true :effects []
-            :params {:num-points (dec n)} :zone-group-id target}]})
+            :params {:num-points (dec n)} :target target}]})
 
 (defn- play! [cue]
   (state/swap-state! assoc-in [:chains :cue-chains [7 3]] cue)
@@ -215,7 +215,7 @@
           (ui/wait-for! #(= :projectors (get-in (state/get-raw-state) [:ui :active-tab])))
           (ui/assert-text! "#projector-config-title" "CONFIGURE: Laser R"))
         (testing "both low: the lowest, and +1"
-          (state/assoc-in-state! [:chains :cue-chains [7 3] :items 0 :zone-group-id] :all)
+          (state/assoc-in-state! [:chains :cue-chains [7 3] :items 0 :target] :all)
           (ui/wait-for! #(= "LOW FPS · Laser L 14 fps +1" (ui/node-text "#low-fps-chip"))))
         (ui/click! robot "#stream-btn")))
     (testing "gone when nothing streams"

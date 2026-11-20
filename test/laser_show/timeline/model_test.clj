@@ -9,36 +9,31 @@
     (is (not (model/track-group? {:type :track})))))
 
 (deftest flatten-visible-tracks-test
-  (testing "flattens and inherits zones; collapsed folders hide their children"
+  (testing "flattens and inherits targets; collapsed folders hide their children"
     (let [tracks [{:id "t1"
                    :type :track
-                   :zone-group-id :z1}
+                   :target :zone/a}
                   {:id "g1"
                    :type :group
-                   :zone-group-id :z2
+                   :target :zone/b
                    :items [{:id "t2"
-                            :type :track} ;; Should inherit :z2
+                            :type :track} ;; Should inherit :zone/b
                            {:id "t3"
                             :type :track
-                            :zone-group-id :z3}]} ;; Should override to :z3
+                            :target :zone/c}]} ;; Should override to :zone/c
                   {:id "g2"
                    :type :group
                    :collapsed? true
-                   :zone-group-id :z4
+                   :target [:graphics :zone/d]
                    :items [{:id "t4"
-                            :type :track}]}] ;; Children hidden, but group row remains
+                            :type :track}]}
+                  {:id "t5" :type :track}] ;; Children hidden, but group row remains
           result (model/flatten-visible-tracks tracks)]
 
-      (is (= 5 (count result)) "t1, g1, t2, t3, g2")
-      (is (= "t1" (:id (nth result 0))))
-      (is (= "g1" (:id (nth result 1))))
-      (is (= :z2 (:zone-group-id (nth result 1))))
-      (is (= "t2" (:id (nth result 2))))
-      (is (= :z2 (:zone-group-id (nth result 2))))
-      (is (= "t3" (:id (nth result 3))))
-      (is (= :z3 (:zone-group-id (nth result 3))))
-      (is (= "g2" (:id (nth result 4))))
-      (is (= :z4 (:zone-group-id (nth result 4)))))))
+      (is (= 6 (count result)) "t1, g1, t2, t3, g2, t5")
+      (is (= ["t1" "g1" "t2" "t3" "g2" "t5"] (mapv :id result)))
+      (is (= [:zone/a :zone/b :zone/b :zone/c [:graphics :zone/d] nil] (mapv :target result))
+          "each row its effective target; nil at the top: the cue's"))))
 
 (deftest flatten-visible-tracks-hidden-descendants-test
   (let [tracks [{:id :f :type :group :collapsed? true
@@ -80,46 +75,50 @@
       (is (= "t1" (model/insert-track tracks "unknown")) "Unknown resolves to first leaf track"))))
 
 (deftest auto-initialize-tracks-test
-  (testing "creates zone-group folders with child tracks"
-    (let [zone-groups {:all {:name "All" :color "#FFFFFF"}
-                       :front {:name "Front" :color "#FF0000"}
-                       :back {:name "Back" :color "#00FF00"}}
-          cue-chain {:destination-zone {:zone-group-id :all}
-                     :items [{:id "item1"
-                              :effects []}
-                             {:id "item2"
-                              :effects [{:effect-id :zone-selector
-                                         :params {:target-zone :front}}]}
-                             {:id "item3"
-                              :effects [{:effect-id :zone-selector
-                                         :params {:target-zone :front}}]}]}
-          result (model/auto-initialize-tracks cue-chain zone-groups)
+  (testing "a folder per distinct item target, and Default, with none, for the rest"
+    (let [names {:auto/left {:name "Left"} :graphics {:name "Graphics"}}
+          cue-chain {:target :zone/b
+                     :items [{:id "item1" :effects []}
+                             {:id "item2" :target :auto/left :effects []}
+                             {:id "item3" :target :auto/left :effects []}
+                             {:id "item4" :target [:zone/a :graphics] :effects []}]}
+          result (model/auto-initialize-tracks cue-chain names)
           tracks (:tracks result)
           items (:items result)]
+      (is (= ["Default" "Left" "A + Graphics"] (mapv :name tracks)) "Default first, then by first use")
+      (is (= [nil :auto/left [:graphics :zone/a]] (mapv :target tracks)) "each folder its target; Default none")
+      (is (every? #(= :group (:type %)) tracks))
+      (is (every? #(= 1 (count (:items %))) tracks) "one track in each")
+      (is (not-any? #(contains? (first (:items %)) :target) tracks) "the tracks inherit their folder's")
+      (let [track-of (into {} (map (fn [f] [(:target f) (:id (first (:items f)))])) tracks)]
+        (is (= [(track-of nil) (track-of :auto/left) (track-of :auto/left) (track-of [:graphics :zone/a])]
+               (mapv :track-id items))
+            "each item on its target's track"))
+      (is (= [nil :auto/left :auto/left [:zone/a :graphics]] (mapv :target items)) "the items keep their own")
+      (is (= :zone/b (:target result)) "and the cue its own, so it still inherits it")))
+  (testing "nothing set anywhere: one Default folder"
+    (is (= ["Default"] (mapv :name (:tracks (model/auto-initialize-tracks {:items [{:id 1}]} {})))))))
 
-      ;; 1. Check folder structure
-      (is (= 2 (count tracks)) "Should create 2 folders: :all (default) and :front")
-      (let [all-folder (first (filter #(= :all (:zone-group-id %)) tracks))
-            front-folder (first (filter #(= :front (:zone-group-id %)) tracks))]
-
-        (is (= :group (:type all-folder)))
-        (is (= "All" (:name all-folder)))
-        (is (= 1 (count (:items all-folder))) "Should have one child track")
-        (is (= :track (:type (first (:items all-folder)))))
-        (is (= :all (:zone-group-id (first (:items all-folder)))))
-
-        (is (= :group (:type front-folder)))
-        (is (= 1 (count (:items front-folder))))
-        (is (= :track (:type (first (:items front-folder)))))
-        (is (= :front (:zone-group-id (first (:items front-folder))))))
-
-      ;; 2. Check item routing to the child tracks
-      (let [all-track-id (:id (first (:items (first (filter #(= :all (:zone-group-id %)) tracks)))))
-            front-track-id (:id (first (:items (first (filter #(= :front (:zone-group-id %)) tracks)))))]
-
-        (is (= all-track-id (:track-id (nth items 0))) "Item 1 goes to default zone child track")
-        (is (= front-track-id (:track-id (nth items 1))) "Item 2 goes to front zone child track")
-        (is (= front-track-id (:track-id (nth items 2))) "Item 3 goes to front zone child track")))))
+(deftest target-ops-test
+  (let [cue {:editor-type :timeline
+             :tracks [{:id :f :type :group :items [{:id :t :type :track}]}]
+             :items [{:id :c :type :preset :track-id :t :timeline/start 0.0 :timeline/duration 4.0}]}
+        track-target (model/apply-op cue {:op :set-track-target :id :f :target [:zone/b :zone/a]})
+        clip-target (model/apply-op track-target {:op :set-clip-target :id :c :target :graphics})]
+    (is (= [:zone/a :zone/b] (get-in track-target [:tracks 0 :target])) "in normal form")
+    (is (= :graphics (get-in clip-target [:items 0 :target])))
+    (is (not (contains? (get-in (model/apply-op clip-target {:op :set-clip-target :id :c :target nil}) [:items 0]) :target))
+        "nil: it inherits")
+    (is (not (contains? (get-in (model/apply-op track-target {:op :set-track-target :id :f :target []}) [:tracks 0]) :target)))
+    (is (identical? cue (model/apply-op cue {:op :set-clip-target :id :nope :target :graphics})) "an unknown id: no change")
+    (is (= ["Change Clip Target" "Change Track Target"]
+           [(model/op-label {:op :set-clip-target}) (model/op-label {:op :set-track-target})]))
+    (is (every? model/op-types [:set-clip-target :set-track-target]))
+    (is (not-any? model/op-types [:set-clip-zone :set-track-zone]) "the zone ops are gone")
+    (testing "a new track or folder takes a target"
+      (is (= :zone/c (:target (model/create-track {:target :zone/c}))))
+      (is (not (contains? (model/create-track {}) :target)))
+      (is (= "Track" (:name (model/create-track {:target :zone/c}))) "named Track, not after a zone"))))
 
 (deftest insert-track-resolves-folders-and-fallbacks-test
   (testing "resolves leaf track or falls back according to hierarchy"
@@ -258,8 +257,7 @@
       (is (seq (:tracks cue)))
       (is (not (contains? cue :loop)))))
   (testing "plain cue"
-    (let [cue (model/convert-to-timeline {:items [{:id :a :type :preset}]
-                                       :destination-zone {:zone-group-id :all}} {})
+    (let [cue (model/convert-to-timeline {:items [{:id :a :type :preset}]} {})
           item (first (:items cue))]
       (is (= [0.0 16.0] [(:timeline/start item) (:timeline/duration item)]))
       (is (contains? (model/leaf-track-ids (:tracks cue)) (:track-id item)))

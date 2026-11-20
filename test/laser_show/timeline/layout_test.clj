@@ -20,14 +20,14 @@
   (testing "f collapsed"
     (is (= [[:f :folder 0 26] [:t3 :track 27 36]]
            (shape (layout/rows (assoc-in tracks [0 :collapsed?] true) clips)))))
-  (testing "depth, clips and inherited zones"
-    (let [rows (layout/rows (assoc-in tracks [0 :zone-group-id] :front) clips)
+  (testing "depth, clips and inherited targets"
+    (let [rows (layout/rows (assoc-in tracks [0 :target] :zone/a) clips)
           by-id (into {} (map (juxt :id identity)) rows)]
       (is (= [0 1 1 0] (mapv :depth rows)))
       (is (= [:a] (mapv :id (get-in by-id [:t1 :clips]))))
-      (is (= [:front true] ((juxt :zone-id :zone-inherited?) (by-id :t1))))
-      (is (= [:front false] ((juxt :zone-id :zone-inherited?) (by-id :f))))
-      (is (nil? (:zone-id (by-id :t3))) "top level, no zone: the cue default"))))
+      (is (= [:zone/a true] ((juxt :target :target-inherited?) (by-id :t1))))
+      (is (= [:zone/a false] ((juxt :target :target-inherited?) (by-id :f))))
+      (is (= [nil true] ((juxt :target :target-inherited?) (by-id :t3))) "top level, no target: the cue's"))))
 
 (deftest collapsed-folder-summarizes-children-test
   (let [rows (layout/rows (assoc-in tracks [0 :collapsed?] true) clips)]

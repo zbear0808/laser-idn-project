@@ -9,9 +9,15 @@
    apart: show-rows (the groups) on every Open of an old show, judged by
    its own hardware, and rig-rows (the projectors) only on a show's
    hardware, before its lasers are set up or imported (zones-z2-show,
-   zones-z2-rig). Z4 adds its rows here."
-  (:require [laser-show.routing.refs :as refs]
-            [laser-show.routing.rig :as rig]))
+   zones-z2-rig).
+
+   Z4's rows (zones-z4, cue-z4; 06 §8.3) run after them, so a reference to a
+   removed built-in already names the automatic group: every way an old show
+   routed becomes a :target, and the Zone Selector goes."
+  (:require [laser-show.animation.chains :as chains]
+            [laser-show.routing.refs :as refs]
+            [laser-show.routing.rig :as rig]
+            [laser-show.routing.targets :as targets]))
 
 
 ;; Rig rows: the projectors and virtual projectors
@@ -108,3 +114,129 @@
   (if (old-hardware? hardware)
     (rig-rows hardware)
     hardware))
+
+
+;; Z4's rows: targets (06 §8.3)
+
+(defn- mapv-same
+  "mapv f over v, but v itself when f changes no element."
+  [f v]
+  (if (empty? v)
+    v
+    (let [v' (mapv f v)]
+      (if (every? true? (map identical? v v')) v v'))))
+
+(defn- update-same
+  "update m k f when m has k, keeping m when f returns the identical value."
+  [m k f]
+  (if (contains? m k)
+    (let [old (get m k)
+          new (f old)]
+      (if (identical? old new) m (assoc m k new)))
+    m))
+
+(defn- zone-selector? [fx]
+  (= :zone-selector (:effect-id fx)))
+
+(defn effects-z4
+  "effects without a Zone Selector, inside effect groups too: routing reads
+   no raw parameter (spec §2), and one left behind would do nothing. The
+   same vector when there is none."
+  [effects]
+  (if (and (vector? effects) (some #(or (zone-selector? %) (chains/group? %)) effects))
+    (let [kept (into [] (remove zone-selector?) effects)
+          kept (mapv-same #(if (chains/group? %) (update-same % :items effects-z4) %) kept)]
+      (if (and (= (count kept) (count effects)) (every? true? (map identical? kept effects)))
+        effects
+        kept))
+    effects))
+
+(defn- selector-target
+  "The zone an item's Zone Selectors routed it to: the first one on, among
+   its own effects (not inside an effect group), and its :target-zone, as
+   routing read it (zone_effects.clj); nil when it has none."
+  [effects]
+  (when-let [fx (first (filter #(and (zone-selector? %) (chains/item-enabled? %)) effects))]
+    (get-in fx [:params :target-zone])))
+
+(defn- node-z4
+  "An item, group or clip (track? false) or a track or folder (track? true)
+   in Z4's form: its :zone-group-id is its :target, else (an item only) the
+   zone its first Zone Selector on routed it to; the selectors go; its
+   children too. A :target it has stays. The same map when it has nothing
+   to convert."
+  [node track?]
+  (if-not (map? node)
+    node
+    (let [own (when (contains? node :zone-group-id) (:zone-group-id node))
+          target (when-not (contains? node :target)
+                   (targets/normalize-target
+                    (if (some? own) own (when-not track? (selector-target (:effects node))))))]
+      (cond-> node
+        (contains? node :zone-group-id) (dissoc :zone-group-id)
+        (some? target) (assoc :target target)
+        true (update-same :effects effects-z4)
+        true (update-same :items #(mapv-same (fn [child] (node-z4 child track?)) %))))))
+
+(defn items-z4
+  "Cue chain items (presets, groups, clips) in Z4's form: what a paste from
+   an older build brings in."
+  [items]
+  (mapv-same #(node-z4 % false) items))
+
+(defn cue-z4
+  "A cue in Z4's form (06 §8.3): its [:destination-zone :zone-group-id] is
+   its :target (All, or none, is no target: it inherits, down to All on an
+   old show), every :zone-group-id is a :target, an item's first Zone
+   Selector on gives it its target when it had none, and every Zone
+   Selector goes. Looks at the data, not at a flag: a cue in Z4's form comes
+   back identical?."
+  [cue]
+  (if-not (map? cue)
+    cue
+    (let [dest (targets/normalize-target (get-in cue [:destination-zone :zone-group-id]))
+          target (when-not (or (contains? cue :target) (= :all dest)) dest)]
+      (cond-> cue
+        (contains? cue :destination-zone) (dissoc :destination-zone)
+        (some? target) (assoc :target target)
+        true (update-same :items items-z4)
+        true (update-same :tracks #(mapv-same (fn [t] (node-z4 t true)) %))))))
+
+(defn- cell-z4
+  "A preview cell as {:target …}: an old {:zone-group-id x} is {:target x};
+   one with both shows its :target, so it keeps that."
+  [cell]
+  (cond
+    (not (map? cell)) cell
+    (contains? cell :target) (if (contains? cell :zone-group-id) (dissoc cell :zone-group-id) cell)
+    (contains? cell :zone-group-id) (-> cell (assoc :target (:zone-group-id cell)) (dissoc :zone-group-id))
+    :else cell))
+
+(defn- update-vals-same
+  "m with f on each value, m itself when nothing changes."
+  [m f]
+  (if (map? m)
+    (reduce-kv (fn [acc k v]
+                 (let [v' (f v)]
+                   (if (identical? v v') acc (assoc acc k v'))))
+               m m)
+    m))
+
+(defn zones-z4
+  "Z4's rows on a loaded show (06 §8.3): every cue in Z4's form (cue-z4),
+   every Zone Selector out of the effects grid (one there never routed,
+   probe v20), the preview's cells {:target …}. Run after Z2's rows, before
+   the saved baseline is taken, so a converted show isn't unsaved. state
+   comes back identical? when there is nothing to convert."
+  [state]
+  (-> state
+      (update-same :chains
+                   (fn [chains]
+                     (-> chains
+                         (update-same :cue-chains #(update-vals-same % cue-z4))
+                         (update-same :effect-chains #(update-vals-same % (fn [cell] (if (map? cell) (update-same cell :items effects-z4) cell)))))))
+      (update-same :config
+                   (fn [config]
+                     (update-same config :preview
+                                  (fn [preview]
+                                    (update-same preview :grid-cells #(if (vector? %) (mapv-same cell-z4 %) %))))))))

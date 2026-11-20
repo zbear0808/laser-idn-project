@@ -55,30 +55,29 @@
     (testing "destination :all, no item rerouted, no projector tagged"
       (is (false? (cell? (with-projector state :p3 {:zone-groups [:front] :exclude-from-all? true})))))
     (testing "destination :crowd"
-      (is (true? (cell? (assoc-in state [:chains :cue-chains [0 1] :destination-zone :zone-group-id] :crowd)))))
-    (testing "an item's zone selector names a group a crowd-scanning projector is in"
-      (let [rerouted (assoc-in state [:chains :cue-chains [0 1] :items 0 :effects]
-                               [{:effect-id :zone-selector :params {:target-zone :front}}])]
+      (is (true? (cell? (assoc-in state [:chains :cue-chains [0 1] :target] :crowd)))))
+    (testing "an item's target names a group a crowd-scanning projector is in"
+      (let [rerouted (assoc-in state [:chains :cue-chains [0 1] :items 0 :target] :front)]
         (is (true? (cell? (with-projector rerouted :p3 {:zone-groups [:front] :tags #{:crowd-scanning}
                                                         :exclude-from-all? true}))))
         (is (false? (cell? (with-projector rerouted :p3 {:zone-groups [:front] :exclude-from-all? true}))) "untagged")))
     (testing "destination :all, and the crowd-scanning projector is in :all: it does reach the crowd"
       (is (true? (cell? (with-projector state :p3 {:zone-groups [:all] :tags #{:crowd-scanning}})))))
-    (testing "a destination with no group set (the zone combo sent none) routes to :all, so it reaches it too"
-      (let [unset (assoc-in state [:chains :cue-chains [0 1] :destination-zone] {:zone-group-id nil})]
+    (testing "a cue with no target routes to :all, so it reaches it too"
+      (let [unset (assoc-in state [:chains :cue-chains [0 1] :target] nil)]
         (is (true? (cell? (with-projector unset :p3 {:zone-groups [:all] :tags #{:crowd-scanning}}))))
         (is (false? (cell? unset)) "no crowd-scanning projector")
-        (is (true? (cell? (-> (update-in state [:chains :cue-chains [0 1]] dissoc :destination-zone)
+        (is (true? (cell? (-> (update-in state [:chains :cue-chains [0 1]] dissoc :target)
                               (with-projector :p3 {:zone-groups [:all] :tags #{:crowd-scanning}}))))
-            "no destination at all")))
-    (testing "an item's or a track's own zone group, inside groups and folders"
+            "no target at all")))
+    (testing "an item's, a track's or a folder's own target, inside groups and folders"
       (is (true? (cell? (assoc-in state [:chains :cue-chains [0 1] :items]
-                                  [{:type :group :items [{:type :preset :zone-group-id :crowd}]}]))))
+                                  [{:type :group :items [{:type :preset :target :crowd}]}]))))
       (is (true? (cell? (assoc-in state [:chains :cue-chains [0 1] :tracks]
-                                  [{:type :group :items [{:type :track :id :t :zone-group-id :crowd}]}]))))
+                                  [{:type :group :items [{:type :track :id :t :target :crowd}]}]))))
       (is (true? (cell? (assoc-in state [:chains :cue-chains [0 1] :tracks]
-                                  [{:type :track :id :t
-                                    :effects [{:effect-id :zone-selector :params {:target-zone :crowd}}]}])))))
+                                  [{:type :group :id :f :target [:crowd :graphics] :items [{:type :track :id :t}]}])))
+          "a union's every ref"))
     (testing "a virtual projector tagged, or whose projector is"
       (is (true? (cell? (assoc-in state [:virtual-projectors :v1]
                                   {:parent-projector-id :p9 :zone-groups [:all] :tags #{:crowd-scanning}}))))
@@ -104,7 +103,7 @@
                   (assoc-in [:chains :cue-chains [0 1]] shape))]
     (is (= #{:crowd :auto.laser/aud} (library/audience-groups state)))
     (is (false? (library/audience-cell? state [0 1])) "a cue on All isn't an audience cue")
-    (is (true? (library/audience-cell? (assoc-in state [:chains :cue-chains [0 1] :destination-zone :zone-group-id]
+    (is (true? (library/audience-cell? (assoc-in state [:chains :cue-chains [0 1] :target]
                                                  :auto.laser/aud)
                                        [0 1]))
         "one aimed at the scanner itself is")))
@@ -122,8 +121,8 @@
 
 (deftest audience-cells-never-play-unless-allowed-test
   (let [state (-> (starter)
-                  (assoc-in [:chains :cue-chains [1 0] :destination-zone :zone-group-id] :crowd)
-                  (assoc-in [:chains :cue-chains [3 0] :destination-zone :zone-group-id] :crowd)
+                  (assoc-in [:chains :cue-chains [1 0] :target] :crowd)
+                  (assoc-in [:chains :cue-chains [3 0] :target] :crowd)
                   (assoc-in [:config :vibes :settings :hit-taps-tempo?] false))
         hits (fn [state]
                (loop [s state t 1000 acc #{}]
@@ -310,7 +309,7 @@
     (testing "warn: a HIT pool of one"
       (is (has-row? (with-vibe s0 :vibe-2 {:hit {:cells [[5 0]]}}) :warn "Lines: one cue in HIT repeats on every press")))
     (testing "warn: an audience cell in a vibe that doesn't allow them, naming the zone group and the projector"
-      (let [crowd (assoc-in s0 [:chains :cue-chains [1 0] :destination-zone :zone-group-id] :crowd)
+      (let [crowd (assoc-in s0 [:chains :cue-chains [1 0] :target] :crowd)
             text "Shapes: A2 reaches the audience through Crowd Scanning, so this vibe never plays it. Allow audience cells, or take it out"]
         (is (has-row? crowd :warn text))
         (is (not (has-row? (with-vibe crowd :vibe-1 {:allow-audience? true}) :warn text)) "unless it allows them"))
@@ -333,10 +332,10 @@
   (let [state (-> (learned-all (starter))
                   (assoc-in [:projectors :aud] {:name "Aud" :host "10.0.0.1" :zone-groups [] :tags #{:crowd-scanning}})
                   (assoc-in [:projectors :main] {:name "Main" :host "10.0.0.2" :zone-groups []})
-                  (assoc-in [:chains :cue-chains [1 0] :destination-zone :zone-group-id] :auto/left))]
+                  (assoc-in [:chains :cue-chains [1 0] :target] :auto/left))]
     (is (has-row? state :warn "Shapes: A2 reaches the audience through Left (Aud), so this vibe never plays it. Allow audience cells, or take it out")
         "Aud is the left laser, though it lists no group: the derived groups count, named as the pickers name them")
-    (is (has-row? (assoc-in state [:chains :cue-chains [1 0] :destination-zone :zone-group-id] :auto.laser/aud)
+    (is (has-row? (assoc-in state [:chains :cue-chains [1 0] :target] :auto.laser/aud)
                   :warn "Shapes: A2 reaches the audience through Aud, so this vibe never plays it. Allow audience cells, or take it out")
         "a cue aimed at the scanner's own group names it once")
     (is (not-any? #(re-find #"A2 reaches" (:text %)) (library/lint (assoc-in state [:rig :order] [:main :aud])))

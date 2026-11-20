@@ -703,7 +703,7 @@
 
 (deftest unticking-allow-audience-stops-what-plays-test
   (testing "Allow audience cells unticked: an audience cue stops at once, whichever role plays it (03 §10)"
-    (let [crowd {:items [{:type :preset :preset-id :circle}] :destination-zone {:zone-group-id :crowd}}
+    (let [crowd {:items [{:type :preset :preset-id :circle}] :target :crowd}
           s0 (-> (starter)
                  (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)
                  (assoc-in [:chains :cue-chains [0 1]] crowd)

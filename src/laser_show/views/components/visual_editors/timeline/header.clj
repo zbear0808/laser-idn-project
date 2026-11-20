@@ -14,6 +14,7 @@
   (:require [cljfx.api :as fx]
             [clj-font-awesome.core :as fa]
             [laser-show.events.core :as events]
+            [laser-show.routing.targets :as targets]
             [laser-show.timeline.layout :as layout]
             [laser-show.timeline.model :as model]
             [laser-show.views.components.drag-drop-cell :as dd]
@@ -30,30 +31,30 @@
 (defn- apply-op! [col row op]
   (events/dispatch! {:event/type :timeline/apply-op :col col :row row :op op}))
 
-(defn- zone-name [zone-groups zone-id]
-  (or (get-in zone-groups [zone-id :name])
-      (some-> zone-id name)
+(defn- zone-name [zone-groups target]
+  (or (get-in zone-groups [target :name])
+      (some->> (targets/target-refs target) seq (map #(or (get-in zone-groups [% :name]) (name %))) (clojure.string/join " + "))
       "All"))
 
 (defn- zone-menu-items
-  "Inherit + every zone group, each dispatching :set-track-zone."
+  "Inherit + every zone group, each dispatching :set-track-target."
   [{:keys [col row zone-groups destination-zone-id tracks rows-by-id]} r]
   (let [track (:track r)
         parent (model/parent-track tracks (:id r))
         default-zone (or destination-zone-id :all)
         inherited-name (if parent
                          (str "Inherit from Folder ("
-                              (zone-name zone-groups (or (:zone-id (get rows-by-id (:id parent))) default-zone)) ")")
+                              (zone-name zone-groups (or (:target (get rows-by-id (:id parent))) default-zone)) ")")
                          (str "Cue Default Zone (" (zone-name zone-groups default-zone) ")"))
-        current (:zone-group-id track)]
+        current (targets/normalize-target (:target track))]
     (into [{:fx/type :menu-item
             :text (str (if (nil? current) "✓ " "   ") inherited-name)
-            :on-action (fn [_] (apply-op! col row {:op :set-track-zone :id (:id r) :zone-group-id nil}))}
+            :on-action (fn [_] (apply-op! col row {:op :set-track-target :id (:id r) :target nil}))}
            {:fx/type :separator-menu-item}]
           (map (fn [[zid zg]]
                  {:fx/type :menu-item
                   :text (str (if (= zid current) "✓ " "   ") (:name zg (name zid)))
-                  :on-action (fn [_] (apply-op! col row {:op :set-track-zone :id (:id r) :zone-group-id zid}))}))
+                  :on-action (fn [_] (apply-op! col row {:op :set-track-target :id (:id r) :target zid}))}))
           (sort-by (comp :name val) zone-groups))))
 
 (defn- context-menu [{:keys [col row swap-state] :as props} r]
@@ -119,8 +120,8 @@
        :min-width 0})))
 
 (defn- zone-chip [{:keys [zone-groups destination-zone-id] :as props} r]
-  (let [inherited? (:zone-inherited? r)
-        zname (zone-name zone-groups (or (:zone-id r) destination-zone-id :all))]
+  (let [inherited? (:target-inherited? r)
+        zname (zone-name zone-groups (or (:target r) destination-zone-id :all))]
     {:fx/type :menu-button
      :text (if inherited? (str "(" zname ")") zname)
      :style-class (cond-> ["menu-button" "tl-zone-chip"] inherited? (conj "tl-zone-chip-inherited"))

@@ -547,7 +547,7 @@
         (is (= [1 1] (rt s :voices :bed :cell)))))
     (testing "Allow audience cells: an audience bed plays only while the vibe allows it"
       (let [crowd (-> s0
-                      (assoc-in [:chains :cue-chains [1 1] :destination-zone :zone-group-id] :crowd)
+                      (assoc-in [:chains :cue-chains [1 1] :target] :crowd)
                       (edited 2000 library/set-single :vibe-1 :bed [1 1]))
             allowed (edited crowd 3000 library/set-role-option :vibe-1 nil :allow-audience? true)]
         (is (nil? (intent crowd [0 1])))

@@ -549,7 +549,7 @@
 
 (deftest audience-badge-and-pad-mark-test
   (let [robot (ui/robot)
-        crowd {:items [{:type :preset :preset-id :circle}] :destination-zone {:zone-group-id :crowd}}]
+        crowd {:items [{:type :preset :preset-id :circle}] :target :crowd}]
     (state/swap-state! #(-> %
                             (assoc-in [:chains :cue-chains [0 1]] crowd)
                             (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[0 0] [0 1]])))

@@ -11,7 +11,6 @@
             [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]
-            [laser-show.routing.zone-effects :as ze]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.state.domains :as domains]))
@@ -72,11 +71,10 @@
    :trigger-time 0})
 
 (deftest test-generate-frames-by-zone-inherits-default
-  (testing "Item without zone effects inherits cue chain default destination"
-    (let [test-cue-chain {:destination-zone {:zone-group-id :all}
-                          :tracks [{:id #uuid "10000000-0000-0000-0000-000000000000"
+  (testing "Item without a target of its own inherits its track's"
+    (let [test-cue-chain {:tracks [{:id #uuid "10000000-0000-0000-0000-000000000000"
                                     :name "Track 1"
-                                    :zone-group-id :all}]
+                                    :target :all}]
                           :items [{:type :preset
                                    :preset-id :circle
                                    :track-id #uuid "10000000-0000-0000-0000-000000000000"
@@ -86,16 +84,16 @@
                   test-cue-chain test-timing-ctx)]
 
       (is (= 1 (count result)) "Should have exactly 1 zone")
-      (is (contains? result :all) "Item without zone effects should route to :all")
+      (is (contains? result :all) "Item without a target of its own should route to :all")
       (is (nil? (:left result)) "Should not have :left zone")
       (is (nil? (:right result)) "Should not have :right zone"))))
 
 (deftest test-generate-frames-by-zone-empty-zones-excluded
   (testing "Empty zones do not appear in result map"
-    (let [test-cue-chain {:destination-zone {:zone-group-id :left}
+    (let [test-cue-chain {:target :left
                           :tracks [{:id #uuid "10000000-0000-0000-0000-000000000000"
                                     :name "Track 1"
-                                    :zone-group-id :left}]
+                                    :target :left}]
                           :items [{:type :preset
                                    :preset-id :circle
                                    :track-id #uuid "10000000-0000-0000-0000-000000000000"
@@ -119,8 +117,8 @@
 (def ^:private track-2 #uuid "20000000-0000-0000-0000-000000000000")
 
 (defn- chain-to [zone preset-id track-id]
-  {:destination-zone {:zone-group-id zone}
-   :tracks [{:id track-id :name "Track" :zone-group-id zone}]
+  {:target zone
+   :tracks [{:id track-id :name "Track" :target zone}]
    :items [{:type :preset :preset-id preset-id :track-id track-id :enabled? true :effects []}]})
 
 (defn- rendered
@@ -192,8 +190,7 @@
 
 (defn- render-with-tracks [tracks]
   (frame-service/generate-frames-by-zone
-   {:destination-zone {:zone-group-id :all}
-    :editor-type :timeline
+   {:editor-type :timeline
     :tracks tracks
     :items [{:id :a :type :preset :preset-id :circle :track-id :t1 :enabled? true :effects []
              :timeline/start 0.0 :timeline/duration 4.0}
@@ -215,7 +212,6 @@
 
 (defn- timeline-cue [extra]
   (merge {:editor-type :timeline
-          :destination-zone {:zone-group-id :all}
           :tracks [{:id :t :type :track}]
           :items [{:id :a :type :preset :preset-id :circle :track-id :t :enabled? true :effects []
                    :timeline/start 0.0 :timeline/duration 4.0}]}
@@ -358,9 +354,8 @@
     (is (= 2 calls) "equal frames that aren't one object are two pictures: no value hashing")
     (is (not (identical? (:auto/left out) (:auto/right out))))
     (testing "through the render: two items, two pictures, each through the chain once"
-      (let [cue {:destination-zone {:zone-group-id :all}
-                 :items [{:id :a :type :preset :preset-id :circle :enabled? true :effects [] :zone-group-id :auto/left}
-                         {:id :b :type :preset :preset-id :circle :enabled? true :effects [] :zone-group-id :auto/right}]}
+      (let [cue {:items [{:id :a :type :preset :preset-id :circle :enabled? true :effects [] :target :auto/left}
+                         {:id :b :type :preset :preset-id :circle :enabled? true :effects [] :target :auto/right}]}
             [frames calls] (counting-chains #(frame-service/generate-frames-by-zone
                                               cue test-timing-ctx {:global-effects grid-scale :global-ctx grid-ctx}))]
         (is (= #{:auto/left :auto/right} (set (keys frames))))
@@ -368,8 +363,8 @@
         (is (not (identical? (:auto/left frames) (:auto/right frames))))))))
 
 (deftest frame-keys-are-normal-targets-test
-  (let [item (fn [id zone] {:id id :type :preset :preset-id :square :enabled? true :effects [] :zone-group-id zone})
-        render #(frame-service/generate-frames-by-zone {:destination-zone {:zone-group-id :all} :items %} test-timing-ctx)]
+  (let [item (fn [id zone] {:id id :type :preset :preset-id :square :enabled? true :effects [] :target zone})
+        render #(frame-service/generate-frames-by-zone {:items %} test-timing-ctx)]
     (is (= #{[:auto/left :auto/right]} (set (keys (render [(item :a [:auto/right :auto/left])]))))
         "a vector target: its refs sorted, so a key")
     (is (= #{:graphics} (set (keys (render [(item :a [:graphics :graphics])])))) "one ref left: that ref")
@@ -378,14 +373,31 @@
       (is (= [[:auto/left :auto/right]] (keys frames)) "the same refs in another order: one key")
       (is (= (frame-service/concatenate-frames [(val (first one)) (val (first one))]) (val (first frames)))
           "and their frames joined, as two items on one zone are"))
-    (is (= [:auto/left :zone/a] (ze/resolve-item-zone-destination {:zone-group-id [:zone/a :auto/left]} {} {})))
-    (is (= :all (ze/resolve-item-zone-destination {} {} {})) "a keyword, or the fallback, as before")))
+    (is (= #{[:auto/left :zone/a]} (set (keys (render [(item :a [:zone/a :auto/left])])))))
+    (is (= #{:all} (set (keys (render [(item :a nil)])))) "a keyword, or the fallback, as before")
+    (is (= #{:zone/b} (set (keys (frame-service/generate-frames-by-zone {:target [:zone/b] :items [(item :a nil)]} test-timing-ctx))))
+        "the cue's target, in normal form too")))
+
+(deftest union-target-is-one-key-test
+  (let [item (fn [id t & {:as more}] (merge {:id id :type :preset :preset-id :square :enabled? true :effects [] :target t} more))
+        render #(frame-service/generate-frames-by-zone % test-timing-ctx)
+        alone (render {:items [(item :a [:zone/b :zone/a])]})]
+    (is (= [[:zone/a :zone/b]] (keys alone)) "zones A and B: one key, the union")
+    (testing "two items on the same union share it, joined"
+      (let [frames (render {:items [(item :a [:zone/b :zone/a]) (item :b [:zone/a :zone/b])]})]
+        (is (= [[:zone/a :zone/b]] (keys frames)))
+        (is (= (frame-service/concatenate-frames [(val (first alone)) (val (first alone))]) (val (first frames))))))
+    (testing "a group's union reaches its children, and one of them can still go elsewhere"
+      (let [frames (render {:items [{:id :g :type :group :enabled? true :target [:zone/a :graphics]
+                                     :items [(item :c nil) (item :d :zone/c)]}]})]
+        (is (= #{[:graphics :zone/a] :zone/c} (set (keys frames))))))
+    (testing "the cue's union is every inheriting item's key"
+      (is (= [[:zone/a :zone/c]] (keys (render {:target [:zone/c :zone/a] :items [(item :a nil) (item :b nil)]})))))))
 
 (deftest item-points-only-when-asked-test
-  (let [cue {:destination-zone {:zone-group-id :all}
-             :items [{:id :ring :type :preset :preset-id :circle :enabled? true :effects [] :params {:num-points 99}}
-                     {:id :box :type :preset :preset-id :square :enabled? true :effects [] :zone-group-id :auto/left}
-                     {:id :grp :type :group :enabled? true :zone-group-id :auto/right
+  (let [cue {:items [{:id :ring :type :preset :preset-id :circle :enabled? true :effects [] :params {:num-points 99}}
+                     {:id :box :type :preset :preset-id :square :enabled? true :effects [] :target :auto/left}
+                     {:id :grp :type :group :enabled? true :target :auto/right
                       :items [{:id :inner :type :preset :preset-id :circle :enabled? true :effects []}]}
                      {:id :off :type :preset :preset-id :circle :enabled? false :effects []}]}
         asked (frame-service/generate-frames-by-zone cue test-timing-ctx {:item-points? true})

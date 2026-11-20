@@ -12,7 +12,8 @@
             [laser-show.animation.chains :as chains]
             [laser-show.events.handlers.list.helpers :as helpers]
             [laser-show.state.extractors :as ex]
-            [laser-show.state.clipboard :as clipboard]))
+            [laser-show.state.clipboard :as clipboard]
+            [laser-show.state.migration :as migration]))
 
 
 ;; Selection Handlers
@@ -263,7 +264,9 @@
     (if (seq clipboard-items)
       (let [items (get-in state items-path [])
             last-selected-id (get-in state [:list-ui component-id :last-selected-id])
-            items-to-paste (chains/deep-copy-items clipboard-items)
+            items-to-paste (cond-> (chains/deep-copy-items clipboard-items)
+                             ;; presets and groups from an older build route as there
+                             (= expected-type :cue-chain-items) migration/items-z4)
             new-items (if last-selected-id
                         (helpers/insert-after-id items last-selected-id items-to-paste)
                         (into (vec items) items-to-paste))

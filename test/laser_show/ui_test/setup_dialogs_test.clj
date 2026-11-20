@@ -203,13 +203,13 @@
 
 (deftest delete-group-asks-and-retargets-test
   (let [robot (ui/robot)
-        cue-zone #(get-in (app-state) [:chains :cue-chains [0 0] :items 0 :zone-group-id])]
+        cue-zone #(get-in (app-state) [:chains :cue-chains [0 0] :items 0 :target])]
     (state/swap-state! #(-> %
                             (assoc-in [:zone-groups :group-balcony] {:id :group-balcony :name "Balcony"
                                                                      :description "" :color "#FF0000"})
                             (assoc-in [:chains :cue-chains [0 0]] {:name "Intro"
                                                                    :items [{:id "p" :type :preset :preset-id :circle
-                                                                            :zone-group-id :group-balcony}]})))
+                                                                            :target :group-balcony}]})))
     (ui/click! robot "#zones-tab")
     (events/dispatch! {:event/type :zone-groups/select :group-id :group-balcony})
     (ui/wait-for! #(= "Used by 1 cue" (ui/node-text "#zone-group-cue-usage")))

@@ -23,6 +23,7 @@
             [laser-show.timeline.layout :as layout]
             [laser-show.timeline.playback :as playback]
             [laser-show.events.handlers.list.helpers :as list-helpers]
+            [laser-show.routing.rig :as rig]
             [laser-show.timeline.model :as model]))
 
 
@@ -260,28 +261,29 @@
   [{:keys [col row track-id muted? state]}]
   (op-effects state col row {:op :set-track-muted :track-id track-id :muted? muted?}))
 
-(defn- handle-set-track-zone
-  "Set or clear (nil / :inherit) the zone on a track or folder."
-  [{:keys [col row track-id zone-group-id state]}]
-  (op-effects state col row {:op :set-track-zone :id track-id :zone-group-id zone-group-id}))
+(defn- handle-set-track-target
+  "Set or clear (nil, :inherit) the target of a track or folder (zones plan
+   Z4)."
+  [{:keys [col row track-id target state]}]
+  (op-effects state col row {:op :set-track-target :id track-id :target target}))
 
-(defn- handle-set-clip-zone
-  "Set or clear (nil / :inherit) the zone override on a clip."
-  [{:keys [col row item-id zone-group-id state]}]
-  (op-effects state col row {:op :set-clip-zone :id item-id :zone-group-id zone-group-id}))
+(defn- handle-set-clip-target
+  "Set or clear (nil, :inherit) a clip's own target (zones plan Z4)."
+  [{:keys [col row item-id target state]}]
+  (op-effects state col row {:op :set-clip-target :id item-id :target target}))
 
 (defn- handle-add-track
-  "Append a track and select it. Optional :zone-group-id sets its zone;
-   without it the track inherits (its folder's zone, or the cue default)."
-  [{:keys [col row zone-group-id state]}]
+  "Append a track and select it. Optional :target sets where its clips go;
+   without it the track inherits (its folder's, or the cue's)."
+  [{:keys [col row target state]}]
   (let [track-id (random-uuid)
-        effects (op-effects state col row {:op :add-track :track-id track-id :zone-group-id zone-group-id})]
+        effects (op-effects state col row {:op :add-track :track-id track-id :target target})]
     (update effects :state select-track-in-sidebar col row track-id)))
 
 (defn- handle-add-folder
-  "Append a track folder. Optional :zone-group-id sets its zone."
-  [{:keys [col row zone-group-id state]}]
-  (op-effects state col row {:op :add-folder :zone-group-id zone-group-id}))
+  "Append a track folder. Optional :target sets where its tracks' clips go."
+  [{:keys [col row target state]}]
+  (op-effects state col row {:op :add-folder :target target}))
 
 
 ;; Add Panel (preset/effect addition from timeline)
@@ -451,7 +453,7 @@
         normalize #(model/normalize-timeline-cue % {:new-track-id new-track-id})
         final-chain (if timeline?
                       (normalize cue-chain)
-                      (model/convert-to-timeline cue-chain (get state :zone-groups {})))
+                      (model/convert-to-timeline cue-chain (into {} (map (juxt :id identity)) (rig/target-groups state))))
         changed? (not (identical? final-chain cue-chain))
         effects {:state (cond-> state
                           changed? (assoc-in chain-path final-chain)
@@ -543,8 +545,8 @@
     :timeline/set-track-muted (handle-set-track-muted event)
     :timeline/add-track (handle-add-track event)
     :timeline/add-folder (handle-add-folder event)
-    :timeline/set-track-zone (handle-set-track-zone event)
-    :timeline/set-clip-zone (handle-set-clip-zone event)
+    :timeline/set-track-target (handle-set-track-target event)
+    :timeline/set-clip-target (handle-set-clip-target event)
 
     ;; Add panel
     :timeline/toggle-add-panel (handle-toggle-add-panel event)

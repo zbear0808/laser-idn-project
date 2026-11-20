@@ -8,7 +8,7 @@
             [laser-show.animation.presets :as presets]
             [laser-show.common.util :as u]
             [laser-show.events.core :as events]
-            [laser-show.routing.zone-effects :as ze]
+            [laser-show.routing.targets :as targets]
             [laser-show.subs :as subs]
             [laser-show.timeline.model :as model]
             [laser-show.timeline.timecode :as tc])
@@ -21,8 +21,10 @@
 (defn- title [text] {:fx/type :label :id "timeline-inspector-title" :text text :style-class "tl-inspector-title"})
 (defn- field-label [text] {:fx/type :label :text text :style-class "tl-field-label"})
 
-(defn- zone-name [zone-groups zone-id]
-  (or (get-in zone-groups [zone-id :name]) (some-> zone-id name) "All"))
+(defn- zone-name [zone-groups target]
+  (or (get-in zone-groups [target :name])
+      (some->> (targets/target-refs target) seq (map #(or (get-in zone-groups [% :name]) (name %))) (clojure.string/join " + "))
+      "All"))
 
 (defn- zone-combo
   "Zone combo: an inherit option labelled inherit-label, then every zone."
@@ -88,9 +90,9 @@
     "Timeline"))
 
 (defn- clip-section
-  [{:keys [col row tracks zone-groups]} clip]
+  [{:keys [col row tracks zone-groups destination-zone-id]} clip]
   (let [track (model/find-track tracks (:track-id clip))
-        track-zone (ze/resolve-track-effective-zone tracks (:track-id clip) :all)
+        track-zone (or (:target (get (targets/track-targets tracks) (:track-id clip))) destination-zone-id :all)
         leaves (leaf-tracks tracks)]
     [(title "CLIP")
      {:fx/type :label
@@ -126,9 +128,9 @@
                             (apply-op! col row {:op :set-clip-track :clip-id (:id clip) :track-id (:id t)})))}
      (field-label "Zone")
      (zone-combo {:zone-groups zone-groups
-                  :current (:zone-group-id clip)
+                  :current (targets/normalize-target (:target clip))
                   :inherit-label (str "Inherit from Track (" (zone-name zone-groups track-zone) ")")
-                  :on-change #(apply-op! col row {:op :set-clip-zone :id (:id clip) :zone-group-id %})})]))
+                  :on-change #(apply-op! col row {:op :set-clip-target :id (:id clip) :target %})})]))
 
 (defn- clips-section [{:keys [col row]} clip-ids]
   [(title "CLIPS")
@@ -142,16 +144,16 @@
   (let [folder? (model/track-group? track)
         parent (model/parent-track tracks (:id track))
         default-zone (or destination-zone-id :all)
-        parent-zone (when parent (ze/resolve-track-effective-zone tracks (:id parent) default-zone))]
+        parent-zone (when parent (or (:target (get (targets/track-targets tracks) (:id parent))) default-zone))]
     (cond-> [(title (if folder? "FOLDER PROPERTIES" "TRACK PROPERTIES"))
              {:fx/type :label :text (:name track (if folder? "Folder" "Track")) :style-class "tl-inspector-name"}
              (field-label "Zone")
              (zone-combo {:zone-groups zone-groups
-                          :current (:zone-group-id track)
+                          :current (targets/normalize-target (:target track))
                           :inherit-label (if parent
                                            (str "Inherit from Folder (" (zone-name zone-groups parent-zone) ")")
                                            (str "Cue Default Zone (" (zone-name zone-groups default-zone) ")"))
-                          :on-change #(apply-op! col row {:op :set-track-zone :id (:id track) :zone-group-id %})})
+                          :on-change #(apply-op! col row {:op :set-track-target :id (:id track) :target %})})
              {:fx/type :check-box
               :text "Muted"
               :selected (true? (:muted? track))

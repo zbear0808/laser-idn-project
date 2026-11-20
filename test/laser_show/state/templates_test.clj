@@ -140,3 +140,14 @@
         (is (< 0.1 (max-diff plain (at :spin :slider-2 0.25))) "Spin: a quarter turn")
         (is (< 0.1 (max-diff plain (at :colour :slider-2 1.0))) "Colour: half way round")
         (is (< (max-diff plain (at :size :slider-1 1.0)) 1e-9) "fader 1 is the Master's")))))
+
+(deftest starter-cues-inherit-test
+  (testing "zones plan Z4: the starter cues set no target, so each follows its column and the show, then All"
+    (let [cues (templates/create-starter-cue-chains)]
+      (is (= 8 (count cues)))
+      (is (not-any? #(contains? % :destination-zone) (vals cues)) "no old destination")
+      (is (not-any? #(contains? % :target) (vals cues)))
+      (is (not-any? #(contains? % :target) (mapcat :items (vals cues))))
+      (is (= #{:all} (into #{} (mapcat #(keys (fs/generate-frames-by-zone % {:effective-beats 0.0 :accumulated-beats 0.0 :bpm 120.0})))
+                           (vals cues)))
+          "they all draw on All"))))

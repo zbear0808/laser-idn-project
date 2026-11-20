@@ -13,8 +13,8 @@
    Track structure:
    {:id         UUID
     :name       String   — user-visible label
-    :zone-group-id  Keyword  — zone group override (optional; inherits from
-                               the parent folder, then the chain default)
+    :target     target   — where its clips go (zones plan Z4; optional:
+                           it inherits from its folder, then the cue)
     :color      String   — hex colour (clip colour = track colour)
     :muted?     Boolean  — muted track/folder (live field, not undoable)
     :collapsed? Boolean  — folder collapsed in the editor (live field)
@@ -24,10 +24,12 @@
    Pure: used by event handlers, views, frame-service and persistence.
    Must not require views, events or state (the pure list tree helpers in
    events.handlers.list.helpers are the one exception)."
-  (:require [laser-show.animation.chains :as chains]
+  (:require [clojure.string]
+            [laser-show.animation.chains :as chains]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.common.util :as u]
-            [laser-show.events.handlers.list.helpers :as list-helpers]))
+            [laser-show.events.handlers.list.helpers :as list-helpers]
+            [laser-show.routing.targets :as targets]))
 
 ;; ============================================================
 ;; Track Creation
@@ -47,19 +49,19 @@
    
    Parameters:
    - opts map with:
-     :zone-group-id — optional keyword like :all, :front, :back. Without it
-                      the track inherits from its folder, or the chain default.
-     :name          — optional, defaults to the zone name or \"Track\"
-     :color         — optional hex color string
+     :target — optional (routing.targets): where its clips go. Without it
+               the track inherits from its folder, or the cue.
+     :name   — optional, defaults to \"Track\"
+     :color  — optional hex color string
    
    Returns: Track map with fresh UUID."
-  [{:keys [zone-group-id name color]}]
+  [{:keys [target name color]}]
   (u/assoc-some
    {:id (random-uuid)
     :type :track
-    :name (or name (some-> zone-group-id clojure.core/name) "Track")
+    :name (or name "Track")
     :collapsed? false}
-   :zone-group-id zone-group-id
+   :target (targets/normalize-target target)
    :color color))
 
 ;; ============================================================
@@ -152,26 +154,26 @@
    that should be visible on the canvas: every top-level track, plus the
    children of folders that aren't :collapsed?.
    
-   Each row carries its effective :zone-group-id (inherited from its parent
-   folder when it has none). A collapsed folder's row also has
+   Each row carries its effective :target (its folder's when it has none;
+   nil at the top: the cue's). A collapsed folder's row also has
    :hidden-descendants, the ids of every track hidden under it."
   [tracks]
-  (letfn [(flatten-level [level-tracks parent-zone-id]
+  (letfn [(flatten-level [level-tracks parent-target]
             (mapcat (fn [track]
-                      (let [effective-zone (or (:zone-group-id track) parent-zone-id)
-                            track-with-zone (assoc track :zone-group-id effective-zone)]
+                      (let [effective (or (targets/normalize-target (:target track)) parent-target)
+                            row (if (some? effective) (assoc track :target effective) (dissoc track :target))]
                         (cond
                           (not (track-group? track))
-                          [track-with-zone]
+                          [row]
 
                           (:collapsed? track false)
-                          [(assoc track-with-zone :hidden-descendants (descendant-ids track))]
+                          [(assoc row :hidden-descendants (descendant-ids track))]
 
                           :else
-                          (into [track-with-zone]
-                                (flatten-level (:items track []) effective-zone)))))
+                          (into [row]
+                                (flatten-level (:items track []) effective)))))
                     level-tracks))]
-    (vec (flatten-level tracks :all))))
+    (vec (flatten-level tracks nil))))
 
 (defn items-by-track
   "Group items into a map of {track-id -> [items]} ordered by :timeline/start.
@@ -295,74 +297,47 @@
 ;; Document: auto-initialization, normalization, conversion
 ;; ============================================================
 
+(defn- target-name
+  "A folder's name for target t: its refs' names (names {ref {:name}}, a
+   zone by its letters), zones first, joined by \" + \"."
+  [names t]
+  (->> (targets/target-refs t)
+       (sort-by (fn [r] (if-let [i (targets/zone-index r)] [0 i ""] [1 0 (str r)])))
+       (map #(or (targets/zone-letter %) (get-in names [% :name]) (clojure.core/name %)))
+       (clojure.string/join " + ")))
+
 (defn auto-initialize-tracks
-  "Generate default tracks for a CueChain that has no :tracks yet.
-   
-   Strategy:
-   1. Collect unique zone-group-ids from items' :zone-selector effects.
-   2. Fall back to the chain's :destination-zone.
-   3. For each unique zone-group-id, create a group folder.
-   4. Inside each group folder, create a single default track.
-   5. Assign each item a :track-id matching the default track for its zone.
+  "Generate default tracks for a CueChain that has no :tracks yet (zones
+   plan Z4): a \"Default\" folder, with no target, for the items with none
+   of their own, so they still follow the cue, its column and the show; then
+   a folder per distinct item :target, in the order the items first use
+   them. Each folder holds one track; each item goes on its target's track
+   and keeps its own target. Default comes first, even with no item on it.
    
    Parameters:
-   - cue-chain: The cue chain map (:items, :destination-zone)
-   - zone-groups: Map of zone-group-id -> zone config (for names/colors)
+   - cue-chain: The cue chain map (:items, :target)
+   - names: {ref {:name}} for the folders' names (Z2's target-groups by id)
    
    Returns: Updated cue-chain with structured :tracks and items having :track-id."
-  [cue-chain zone-groups]
-  (let [default-zone (get-in cue-chain [:destination-zone :zone-group-id] :all)
-        items (:items cue-chain [])
-
-        ;; Collect per-item zone destinations
-        item-zones (mapv (fn [item]
-                           (let [zone-effect (u/seek #(= :zone-selector (:effect-id %))
-                                                     (:effects item []))]
-                             (if zone-effect
-                               (get-in zone-effect [:params :target-zone] default-zone)
-                               default-zone)))
-                         items)
-
-        ;; Unique zones encountered (always include the default zone)
-        unique-zones (distinct (cons default-zone item-zones))
-
-        ;; Create the folder structure and track mapping
-        ;; Result: {zone-id {:folder-track {...} :child-track {...}}}
-        zone-structures (into {}
-                              (map (fn [zone-id]
-                                     (let [zg (get zone-groups zone-id)
-                                           name-str (or (:name zg) (clojure.core/name zone-id))
-                                           child-track (create-track {:zone-group-id zone-id
-                                                                      :name (str name-str " 1")})
-                                           folder (assoc (create-track {:zone-group-id zone-id
-                                                                        :name name-str})
-                                                         :type :group
-                                                         :collapsed? false
-                                                         :items [child-track])]
-                                       [zone-id {:folder folder :child-track child-track}])))
-                              unique-zones)
-
-        ;; Each folder's track gets the next palette colour
-        zone-structures (into {}
-                              (map-indexed (fn [i zone-id]
-                                             (let [color (palette-color i)]
-                                               [zone-id (-> (get zone-structures zone-id)
-                                                            (assoc-in [:child-track :color] color)
-                                                            (assoc-in [:folder :items 0 :color] color))])))
-                              unique-zones)
-
-        ;; The new tracks tree is just the folders
-        tracks-vec (mapv #(get-in zone-structures [% :folder]) unique-zones)
-
-        ;; Mapping from zone to the ID of the child track inside that zone's folder
-        zone->track-id (update-vals zone-structures #(-> % :child-track :id))
-
-        updated-items (mapv (fn [item zone-id]
-                              (assoc item :track-id (get zone->track-id zone-id)))
-                            items item-zones)]
+  [cue-chain names]
+  (let [items (:items cue-chain [])
+        item-targets (mapv #(targets/normalize-target (:target %)) items)
+        folder-targets (distinct (cons nil item-targets))
+        folders (into {}
+                      (map-indexed
+                       (fn [i t]
+                         (let [folder-name (if (nil? t) "Default" (target-name names t))
+                               child (assoc (create-track {:name (str folder-name " 1")}) :color (palette-color i))
+                               folder (assoc (create-track {:target t :name folder-name})
+                                             :type :group
+                                             :collapsed? false
+                                             :items [child])]
+                           [t folder])))
+                      folder-targets)]
     (assoc cue-chain
-           :tracks tracks-vec
-           :items updated-items)))
+           :tracks (mapv folders folder-targets)
+           :items (mapv (fn [item t] (assoc item :track-id (get-in folders [t :items 0 :id])))
+                        items item-targets))))
 
 (defn- mapv-identical
   "Like mapv, but returns coll itself when f returns every element unchanged."
@@ -462,12 +437,13 @@
   "Turn a plain cue chain (or nil for an empty cell) into a timeline cue
    without changing what it renders: each untimed item becomes a clip over
    [0, conversion-length), and unless the cue already has a :loop, a loop over
-   the same span is enabled. Timeline cues are returned identical."
-  [cue-chain zone-groups]
+   the same span is enabled. Timeline cues are returned identical. names
+   ({ref {:name}}) names the folders (auto-initialize-tracks)."
+  [cue-chain names]
   (if (cue-chains/timeline-cue? cue-chain)
     cue-chain
     (let [cc (or cue-chain {:items []})
-          cc (if (seq (:tracks cc)) cc (auto-initialize-tracks cc (or zone-groups {})))
+          cc (if (seq (:tracks cc)) cc (auto-initialize-tracks cc (or names {})))
           items (mapv (fn [item]
                         (cond-> item
                           (nil? (clip-start item)) (assoc :timeline/start 0.0)
@@ -590,10 +566,10 @@
           (assoc :tracks (remove-ids tracks removed))
           (update :items #(remove-ids (or % []) clip-ids))))))
 
-(defn- add-track [cue {:keys [track-id parent-id name folder? zone-group-id]}]
+(defn- add-track [cue {:keys [track-id parent-id name folder? target]}]
   (let [tracks (:tracks cue [])
         leaf-count (count (leaf-track-ids tracks))
-        base (create-track {:zone-group-id zone-group-id
+        base (create-track {:target target
                             :name (or name (if folder?
                                              (str "Folder " (inc (count tracks)))
                                              (str "Track " (inc (count tracks)))))
@@ -612,11 +588,12 @@
       (assoc cue :tracks (list-helpers/move-items tracks (set track-ids) target-id position))
       cue)))
 
-(defn- set-zone [items id zone-group-id]
-  (update-items-by-id items #{id}
-                      #(if (and zone-group-id (not= zone-group-id :inherit))
-                         (assoc % :zone-group-id zone-group-id)
-                         (dissoc % :zone-group-id))))
+(defn- set-target
+  "The item or track id (at any depth) with target, in normal form; none
+   (nil, [], :inherit) removes it, so it inherits."
+  [items id target]
+  (let [t (when-not (= :inherit target) (targets/normalize-target target))]
+    (update-items-by-id items #{id} #(if (some? t) (assoc % :target t) (dissoc % :target)))))
 
 (defn- update-effects
   "Apply f to the :effects vector of the op's target: the clip :clip-id
@@ -677,8 +654,8 @@
     :set-clip-track (if (contains? (leaf-track-ids (:tracks cue [])) (:track-id o))
                       (update cue :items update-items-by-id #{(:clip-id o)} #(assoc % :track-id (:track-id o)))
                       cue)
-    :set-clip-zone (update cue :items set-zone (:id o) (:zone-group-id o))
-    :set-track-zone (update cue :tracks set-zone (:id o) (:zone-group-id o))
+    :set-clip-target (update cue :items set-target (:id o) (:target o))
+    :set-track-target (update cue :tracks set-target (:id o) (:target o))
     :add-track (add-track cue o)
     :add-folder (add-track cue (assoc o :folder? true))
     :delete-tracks (delete-tracks cue o)
@@ -709,7 +686,7 @@
 (def op-types
   "Every op apply-op knows."
   #{:move-clips :trim-start :trim-end :delete-clips :duplicate-clips :add-clip
-    :add-effect :remove-effect :set-clip-track :set-clip-zone :set-track-zone :add-track
+    :add-effect :remove-effect :set-clip-track :set-clip-target :set-track-target :add-track
     :add-folder :delete-tracks :move-tracks :rename-track :set-track-color
     :set-track-muted :set-collapsed :set-loop :move-loop :trim-loop-start
     :trim-loop-end :set-length :set-tempo :set-tc-start :set-tc-fps
@@ -748,8 +725,8 @@
     :set-effect-enabled "Toggle Effect"
     :move-effect "Move Effect"
     :set-clip-track "Move Clip to Track"
-    :set-clip-zone "Change Clip Zone"
-    :set-track-zone "Change Track Zone"
+    :set-clip-target "Change Clip Target"
+    :set-track-target "Change Track Target"
     :add-track "Add Track"
     :add-folder "Add Folder"
     :delete-tracks (str "Delete " (n-tracks (count track-ids)))

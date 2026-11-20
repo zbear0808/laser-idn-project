@@ -9,7 +9,8 @@
    - laser-show.animation.effects.zone/evaluate-zone
    - laser-show.routing.zone-effects/resolve-item-zone-destination
    - laser-show.routing.zone-effects/group-items-by-zone
-   - laser-show.services.frame-service/generate-frames-by-zone"
+   - laser-show.services.frame-service/generate-frames-by-zone, on the cues
+     as zones plan Z4 converts them (state.migration/cue-z4)"
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
    [laser-show.animation.effects.zone :as zone]
@@ -19,6 +20,7 @@
    [laser-show.routing.zone-effects :as ze]
    [laser-show.services.frame-service :as fs]
    [laser-show.state.core :as state]
+   [laser-show.state.migration :as migration]
    [laser-show.state.domains :as domains]))
 
 ;; Test Cue Chain Fixtures
@@ -134,6 +136,14 @@
   (f))
 
 (use-fixtures :each setup-test-state)
+
+
+(defn- render
+  "What the cue renders today (zones plan Z4): converted as an old show is
+   when it opens (state.migration/cue-z4), its Zone Selectors and zones
+   become :target, and routed the same."
+  [cue-chain timing-ctx]
+  (fs/generate-frames-by-zone (migration/cue-z4 cue-chain) timing-ctx))
 
 
 ;; Helper function to create timing context
@@ -324,7 +334,7 @@
 
 (deftest zone-selector-static-frame-routing-test
   (testing "Static zone-selector routes frames to specified zone"
-    (let [frames-by-zone (fs/generate-frames-by-zone
+    (let [frames-by-zone (render
                           test-cue-chain-static-zone-selector
                           (make-timing-ctx 0.0))]
 
@@ -345,7 +355,7 @@
 
 (deftest no-zone-effect-uses-default-test
   (testing "Cue chain without zone-selector uses default destination"
-    (let [frames-by-zone (fs/generate-frames-by-zone
+    (let [frames-by-zone (render
                           test-cue-chain-no-zone-effect
                           (make-timing-ctx 0.0))]
 
@@ -363,7 +373,7 @@
 
 (deftest multiple-items-different-zones-test
   (testing "Multiple items with different zone-selectors route correctly"
-    (let [frames-by-zone (fs/generate-frames-by-zone
+    (let [frames-by-zone (render
                           test-cue-chain-multiple-items
                           (make-timing-ctx 0.0))]
 
@@ -390,7 +400,7 @@
 
 (deftest group-children-zone-override-and-inheritance-test
   (testing "Child can override zone while non-overridden child inherits group zone"
-    (let [frames-by-zone (fs/generate-frames-by-zone
+    (let [frames-by-zone (render
                           test-cue-chain-group-with-zone-selector
                           (make-timing-ctx 0.0))]
 
@@ -441,7 +451,7 @@
                                        :enabled? true
                                        :preset-id :square
                                        :params {:size 0.3 :num-points 12}}]}]}
-          frames-by-zone (fs/generate-frames-by-zone
+          frames-by-zone (render
                           cue-chain (make-timing-ctx 0.0))]
       (is (contains? frames-by-zone :left) "All children routed to :left")
       (is (> (count (:left frames-by-zone)) 24) "Combined frame has both children plus blanking")
@@ -471,7 +481,7 @@
                                        :preset-id :square
                                        :zone-group-id :right
                                        :params {:size 0.3 :num-points 4 :red 0.0 :green 1.0 :blue 0.0}}]}]}
-          frames-by-zone (fs/generate-frames-by-zone
+          frames-by-zone (render
                           cue-chain (make-timing-ctx 0.0))]
       (is (contains? frames-by-zone :left) "Child 1 routed to :left")
       (is (contains? frames-by-zone :right) "Child 2 routed to :right")
@@ -505,7 +515,7 @@
                               :track-id "track-1"
                               :preset-id :circle
                               :params {:radius 0.3 :num-points 10}}]}
-          frames-by-zone (fs/generate-frames-by-zone
+          frames-by-zone (render
                           cue-chain (make-timing-ctx 0.0))]
       (is (contains? frames-by-zone :left) "Item on track inside folder-1 inherits :left")
       (is (pos? (count (:left frames-by-zone))))
@@ -526,7 +536,7 @@
                               :zone-group-id :right
                               :preset-id :circle
                               :params {:radius 0.3 :num-points 10}}]}
-          frames-by-zone (fs/generate-frames-by-zone
+          frames-by-zone (render
                           cue-chain (make-timing-ctx 0.0))]
       (is (contains? frames-by-zone :right) "Item zone override :right beats track's :left")
       (is (nil? (:left frames-by-zone))))))
@@ -586,7 +596,7 @@
 
 (deftest projector-receives-zone-frames-test
   (testing "Projector frame extraction works with zone-based frames"
-    (let [frames-by-zone (fs/generate-frames-by-zone
+    (let [frames-by-zone (render
                           test-cue-chain-multiple-items
                           (make-timing-ctx 0.0))
           left-frame (:left frames-by-zone)
@@ -601,7 +611,7 @@
 
 (deftest projector-multi-zone-concatenation-test
   (testing "Projector in multiple zones receives concatenated frames"
-    (let [frames-by-zone (fs/generate-frames-by-zone
+    (let [frames-by-zone (render
                           test-cue-chain-multiple-items
                           (make-timing-ctx 0.0))
           left-frame (:left frames-by-zone)
@@ -644,7 +654,7 @@
                               :effects [{:effect-id :zone-selector
                                          :enabled? false  ;; DISABLED
                                          :params {:target-zone :right}}]}]}
-          frames-by-zone (fs/generate-frames-by-zone
+          frames-by-zone (render
                           cue-chain
                           (make-timing-ctx 0.0))]
 
@@ -677,7 +687,7 @@
                               :effects [{:effect-id :zone-selector
                                          :enabled? true
                                          :params {:target-zone :right}}]}]}
-          frames-by-zone (fs/generate-frames-by-zone
+          frames-by-zone (render
                           cue-chain
                           (make-timing-ctx 0.0))]
 
@@ -696,7 +706,7 @@
     (let [cue-chain {:id "empty-cue-chain"
                      :destination-zone {:zone-group-id :all}
                      :items []}
-          frames-by-zone (fs/generate-frames-by-zone
+          frames-by-zone (render
                           cue-chain
                           (make-timing-ctx 0.0))]
 

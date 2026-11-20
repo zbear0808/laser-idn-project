@@ -144,3 +144,66 @@
              (get-in (refs/replace-refs (assoc-in state [:config :preview :grid-cells 0 :target] :balcony) {:balcony :left})
                      [:config :preview :grid-cells])))
       (is (identical? state (refs/replace-refs state {:graphics :left})) "nothing it names: the same state"))))
+
+
+;; Zones plan Z4: :target everywhere, the grid's columns, the show default,
+;; and the zone maps' lanes and overrides (06 §4.4, SQ-13, spec R5)
+
+(defn- z4-state []
+  {:chains {:cue-chains {[0 0] {:target [:balcony :zone/a] :items [(preset "p")]}
+                         [1 0] {:items [(preset "p" :target :balcony)
+                                        {:id "g" :type :group :target [:balcony :graphics]
+                                         :items [(preset "q" :target :zone/b)]}]}
+                         [2 0] {:editor-type :timeline
+                                :tracks [{:id "f" :type :group :target :balcony :items [{:id "t" :type :track :target [:balcony :zone/c]}]}]
+                                :items [(preset "clip" :track-id "t" :target :balcony)]}
+                         [3 0] {:target :zone/a :items [(preset "p" :target :graphics)]}}}
+   :grid {:size [8 4] :column-targets {2 :balcony 3 [:balcony :zone/d] 4 :zone/a}}
+   :config {:default-target :balcony}
+   :zone-maps {:map/custom-1 {:name "Crowd sweep" :lanes [:auto/left :balcony :graphics] :overrides {:zone/c :balcony :zone/d :auto/center}}
+               :map/custom-2 {:name "Untouched" :lanes [:all] :overrides {}}}})
+
+(deftest z4-places-are-re-targeted-test
+  (let [before (z4-state)
+        state (refs/replace-refs before {:balcony :auto/right})
+        cues (get-in state [:chains :cue-chains])]
+    (is (not (names? state :balcony)))
+    (testing "a target, inside a union too, in normal form again"
+      (is (= [:auto/right :zone/a] (get-in cues [[0 0] :target])))
+      (is (= :auto/right (get-in cues [[1 0] :items 0 :target])))
+      (is (= [:graphics :auto/right] (get-in cues [[1 0] :items 1 :target])))
+      (is (= :auto/right (get-in cues [[2 0] :tracks 0 :target])) "a folder")
+      (is (= [:auto/right :zone/c] (get-in cues [[2 0] :tracks 0 :items 0 :target])) "a track")
+      (is (= :auto/right (get-in cues [[2 0] :items 0 :target])) "a clip"))
+    (testing "a column, the show default, a lane and an override"
+      (is (= {2 :auto/right 3 [:auto/right :zone/d] 4 :zone/a} (get-in state [:grid :column-targets])))
+      (is (= :auto/right (get-in state [:config :default-target])))
+      (is (= [:auto/left :auto/right :graphics] (get-in state [:zone-maps :map/custom-1 :lanes])))
+      (is (= {:zone/c :auto/right :zone/d :auto/center} (get-in state [:zone-maps :map/custom-1 :overrides]))))
+    (testing "what doesn't name it keeps its identity"
+      (is (identical? (get-in before [:chains :cue-chains [3 0]]) (get cues [3 0])))
+      (is (identical? (get-in before [:zone-maps :map/custom-2]) (get-in state [:zone-maps :map/custom-2])))
+      (is (identical? before (refs/replace-refs before {:nothing :left}))))
+    (testing "the cues that name it, by their own data or a union"
+      (is (= #{[0 0] [1 0] [2 0]} (refs/cues-using (get-in before [:chains :cue-chains]) :balcony)))
+      (is (= #{:balcony :zone/a} (refs/cue-refs (get-in before [:chains :cue-chains [0 0]]))))
+      (is (= #{:zone/a :graphics} (refs/cue-refs (get-in before [:chains :cue-chains [3 0]])))
+          "a cue with a target of its own names it, not All"))))
+
+(deftest nothing-empties-a-lane-and-drops-an-override-test
+  (let [state (refs/replace-refs (z4-state) {:balcony nil})
+        cues (get-in state [:chains :cue-chains])]
+    (is (not (names? state :balcony)))
+    (testing "SQ-13: the lane is left empty, so the zones after it keep their lanes"
+      (is (= [:auto/left nil :graphics] (get-in state [:zone-maps :map/custom-1 :lanes]))))
+    (testing "the override goes, so its zone wraps again"
+      (is (= {:zone/d :auto/center} (get-in state [:zone-maps :map/custom-1 :overrides]))))
+    (testing "a target loses the ref, and with none left inherits"
+      (is (= :zone/a (get-in cues [[0 0] :target])))
+      (is (not (contains? (get-in cues [[1 0] :items 0]) :target)))
+      (is (= :graphics (get-in cues [[1 0] :items 1 :target])))
+      (is (not (contains? (get-in cues [[2 0] :tracks 0]) :target)))
+      (is (= :zone/c (get-in cues [[2 0] :tracks 0 :items 0 :target]))))
+    (testing "a column default goes, and the show's is All again"
+      (is (= {3 :zone/d 4 :zone/a} (get-in state [:grid :column-targets])))
+      (is (nil? (get-in state [:config :default-target]))))))

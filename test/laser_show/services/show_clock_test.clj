@@ -520,7 +520,7 @@
   (testing "a tick reads app state and the input store once, whatever the number of
             cues, zones and global effects (04 §7, invariant 2)"
     (init! {[0 0] (cue :circle)
-            [1 0] (assoc (cue :square) :destination-zone {:zone-group-id :left})
+            [1 0] (assoc (cue :square) :target :left)
             [2 0] (cue :triangle)})
     (state/assoc-in-state! [:chains :effect-chains [0 0]]
                            {:active? true

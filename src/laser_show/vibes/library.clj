@@ -19,6 +19,7 @@
    them."
   (:require [clojure.string :as str]
             [laser-show.routing.rig :as rig]
+            [laser-show.routing.targets :as targets]
             [laser-show.state.domains :as domains]
             [laser-show.timeline.playback :as playback]
             [laser-show.vibes.reactions :as reactions]))
@@ -96,21 +97,15 @@
       (into (mapcat rig/stored-refs) (crowd-virtual-projectors state))))
 
 (defn- zone-group-ids
-  "Every zone group cue can send to, in any of the places the routing reads
-   (routing/zone_effects.clj:127-156): its destination (:all without one,
-   or with none set, as the routing falls back), and each item's, group's,
-   track's and folder's :zone-group-id and the :target-zone of its zone
-   selectors, on or off."
+  "Every ref cue can send to, in any of the places the routing reads (zones
+   plan Z4, routing.targets): its own :target (:all without one, as the
+   routing falls back), and each item's, group's, clip's, track's and
+   folder's :target, a union's every ref."
   [cue]
-  (let [nodes (concat (tree-seq #(seq (:items %)) :items cue)
+  (let [nodes (concat (tree-seq #(seq (:items %)) :items {:items (:items cue)})
                       (tree-seq #(seq (:items %)) :items {:items (:tracks cue)}))]
-    (into #{(or (get-in cue [:destination-zone :zone-group-id]) :all)}
-          (comp (mapcat (fn [node]
-                          (cons (:zone-group-id node)
-                                (keep #(when (= :zone-selector (:effect-id %))
-                                         (get-in % [:params :target-zone]))
-                                      (:effects node)))))
-                (remove nil?))
+    (into (or (not-empty (set (targets/target-refs (:target cue)))) #{:all})
+          (mapcat #(targets/target-refs (:target %)))
           nodes)))
 
 (defn audience-cue?

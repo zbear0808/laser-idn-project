@@ -332,7 +332,7 @@
       (is (= direct engine))))
   (testing "two cues on two zones"
     (state/swap-state! #(-> %
-                            (assoc-in [:chains :cue-chains [1 0]] {:destination-zone {:zone-group-id :left}
+                            (assoc-in [:chains :cue-chains [1 0]] {:target :left
                                                                     :items [(preset :square spin)]})
                             (assoc-in [:projectors :p] {:zone-groups [:left :all]})))
     (events/event-handler {:event/type :grid/trigger-cell :col 1 :row 0})
@@ -367,8 +367,8 @@
     (state/swap-state! #(-> %
                             (assoc-in [:chains :cue-chains [0 0]]
                                       {:destination-zone {:zone-group-id :all}
-                                       :items [(assoc (preset :circle) :zone-group-id :auto/left)
-                                               (assoc (preset :wave) :zone-group-id :auto/right)]})
+                                       :items [(assoc (preset :circle) :target :auto/left)
+                                               (assoc (preset :wave) :target :auto/right)]})
                             (assoc :projectors {:p {:host "10.0.0.5" :enabled? true :zone-groups []}})))
     (events/event-handler {:event/type :grid/trigger-cell :col 0 :row 0})
     (let [s (show-clock/tick! (System/nanoTime))

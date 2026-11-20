@@ -9,7 +9,7 @@
    - Preset management (add)
    - Tab switching (preset banks, effect banks)
    - Clipboard operations
-   - Destination zone routing
+   - Targets: the cue's and each item's (zones plan Z4)
    
    Effect-level operations have moved to chain.clj:
    - Effect CRUD (add, remove, set-enabled)
@@ -22,6 +22,7 @@
   (:require [clojure.tools.logging :as log]
             [laser-show.events.helpers :as h]
             [laser-show.animation.cue-chains :as cue-chains]
+            [laser-show.routing.targets :as targets]
             [laser-show.state.clipboard :as clipboard]))
 
 
@@ -174,38 +175,39 @@
   {:state (assoc-in state [:ui :dialogs :cue-chain-editor :clipboard :items] items)})
 
 
-;; Destination Zone Operations
+;; Targets (zones plan Z4): where the cue's content goes
 
 
-(defn- handle-cue-chain-set-destination-zone-group
-  "Set the destination zone group for the entire cue chain.
-   
-   Updates the cue chain at [col row] with the specified zone group ID.
-   Accepts either :group-id directly or extracts :id from the fx/event
-   (when triggered from a combo-box selection).
-   
-   This applies to all presets in the cue chain."
-  [{:keys [col row group-id fx/event state]}]
-  (let [;; Support both direct group-id and combo-box event (which passes the group map)
-        actual-group-id (or group-id (:id event))
-        dest-zone-path [:chains :cue-chains [col row] :destination-zone :zone-group-id]]
-    {:state (-> state
-                (assoc-in dest-zone-path actual-group-id))}))
+(defn- chosen-target
+  "The target an event sets: its :target, else a picker's choice (the :id
+   of its :fx/event), :inherit meaning none; in normal form."
+  [{:keys [fx/event] :as e}]
+  (let [t (if (contains? e :target) (:target e) (:id event))]
+    (when-not (= :inherit t)
+      (targets/normalize-target t))))
 
+(defn- with-target
+  "m with target t, or without :target for none (it inherits)."
+  [m t]
+  (if (some? t) (assoc m :target t) (dissoc m :target)))
 
-(defn- handle-cue-chain-set-item-zone
-  "Set or clear the first-class :zone-group-id on a preset or group in a cue chain.
-   Accepts :item-path (vector into :items) and :zone-group-id (keyword or nil).
-   Can also extract :id from fx/event when triggered from a combo-box.
-   If :zone-group-id is nil or :inherit, removes the key so the item inherits."
-  [{:keys [col row item-path zone-group-id fx/event state]}]
-  (let [selected-zone (or zone-group-id (:id event))
-        target-path (into [:chains :cue-chains [col row] :items] (vec item-path))]
-    (if (get-in state target-path)
-      (let [updated-state (if (and selected-zone (not= selected-zone :inherit))
-                            (assoc-in state (conj target-path :zone-group-id) selected-zone)
-                            (update-in state target-path dissoc :zone-group-id))]
-        {:state updated-state})
+(defn- handle-cue-chain-set-target
+  "Set the cue's own target (:target, or a picker's :fx/event), in normal
+   form; none removes it, so the cue follows its column, the show, then
+   All. A cell with no cue changes nothing."
+  [{:keys [col row state] :as event}]
+  (if-let [cue (get-in state [:chains :cue-chains [col row]])]
+    {:state (assoc-in state [:chains :cue-chains [col row]] (with-target cue (chosen-target event)))}
+    {:state state}))
+
+(defn- handle-cue-chain-set-item-target
+  "Set or clear the target of the preset or group at :item-path (a path
+   into :items), from :target or a picker's :fx/event, in normal form;
+   none (nil, [], :inherit) removes it, so the item inherits."
+  [{:keys [col row item-path state] :as event}]
+  (let [path (into [:chains :cue-chains [col row] :items] item-path)]
+    (if (and (some? col) (seq item-path) (map? (get-in state path)))
+      {:state (update-in state path with-target (chosen-target event))}
       {:state state})))
 
 
@@ -277,9 +279,9 @@
     :cue-chain/set-clipboard (handle-cue-chain-set-clipboard event)
     :cue-chain/set-item-effects-clipboard (handle-cue-chain-set-item-effects-clipboard event)
     
-    ;; Destination zone routing
-    :cue-chain/set-destination-zone-group (handle-cue-chain-set-destination-zone-group event)
-    :cue-chain/set-item-zone (handle-cue-chain-set-item-zone event)
+    ;; Targets
+    :cue-chain/set-target (handle-cue-chain-set-target event)
+    :cue-chain/set-item-target (handle-cue-chain-set-item-target event)
     
     ;; Name
     :cue-chain/set-name (handle-cue-chain-set-name event)

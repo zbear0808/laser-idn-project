@@ -379,81 +379,54 @@
       (is (history/derive-dirty (:state event) (:state result))))))
 
 
-;; Destination Zone Routing Tests
+;; Targets (zones plan Z4): one :target on the cue, its items and groups
 
 
-(deftest handle-set-item-zone-explicit
-  (testing "Setting explicit zone on a cue chain preset item"
-    (let [event {:event/type :cue-chain/set-item-zone
-                 :col 0 :row 0
-                 :item-path [0]
-                 :zone-group-id :left
-                 :state sample-state-with-item}
-          result (cue-chain/handle event)]
-      (is (= :left (get-in result [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
-      (is (history/derive-dirty (:state event) (:state result))))))
+(defn- set-item-target [state item-path target]
+  (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path item-path :target target :state state}))
 
-(deftest handle-set-item-zone-inherit
-  (testing "Setting :inherit or nil zone clears :zone-group-id so item inherits"
-    (let [state-with-zone (assoc-in sample-state-with-item
-                                    [:chains :cue-chains [0 0] :items 0 :zone-group-id]
-                                    :left)
-          event-inherit {:event/type :cue-chain/set-item-zone
-                         :col 0 :row 0
-                         :item-path [0]
-                         :zone-group-id :inherit
-                         :state state-with-zone}
-          result-inherit (cue-chain/handle event-inherit)
-          event-nil {:event/type :cue-chain/set-item-zone
-                     :col 0 :row 0
-                     :item-path [0]
-                     :zone-group-id nil
-                     :state state-with-zone}
-          result-nil (cue-chain/handle event-nil)]
-      (is (nil? (get-in result-inherit [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
-      (is (false? (contains? (get-in result-inherit [:state :chains :cue-chains [0 0] :items 0]) :zone-group-id)))
-      (is (nil? (get-in result-nil [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
-      (is (false? (contains? (get-in result-nil [:state :chains :cue-chains [0 0] :items 0]) :zone-group-id))))))
+(deftest set-item-target-test
+  (testing "an item's own target, in normal form"
+    (let [result (set-item-target sample-state-with-item [0] :zone/a)]
+      (is (= :zone/a (get-in result [:state :chains :cue-chains [0 0] :items 0 :target])))
+      (is (history/derive-dirty sample-state-with-item (:state result)) "an edit")
+      (is (= [:zone/a :zone/b] (get-in (set-item-target sample-state-with-item [0] [:zone/b :zone/a :zone/b])
+                                       [:state :chains :cue-chains [0 0] :items 0 :target])))))
+  (testing "a group and its child, each its own"
+    (let [state (assoc-in sample-state-with-item [:chains :cue-chains [0 0] :items]
+                          [{:type :group :id :g :name "Pair" :items [{:type :preset :id :c :preset-id :circle :params {}}]}])
+          group (:state (set-item-target state [0] [:zone/a :zone/b]))
+          child (:state (set-item-target group [0 :items 0] :graphics))]
+      (is (= [:zone/a :zone/b] (get-in child [:chains :cue-chains [0 0] :items 0 :target])))
+      (is (= :graphics (get-in child [:chains :cue-chains [0 0] :items 0 :items 0 :target])))))
+  (testing "from a picker's choice (:fx/event)"
+    (is (= :graphics (get-in (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path [0]
+                                                 :fx/event {:id :graphics :name "Graphics"} :state sample-state-with-item})
+                             [:state :chains :cue-chains [0 0] :items 0 :target]))))
+  (testing "an item that isn't there: nothing changes"
+    (is (= {:state sample-state-with-item} (set-item-target sample-state-with-item [5] :zone/a)))
+    (is (= {:state base-state} (cue-chain/handle {:event/type :cue-chain/set-item-target :state base-state})))))
 
-(deftest handle-set-item-zone-from-combo-box-event
-  (testing "Setting zone using fx/event map from combo-box selection"
-    (let [event {:event/type :cue-chain/set-item-zone
-                 :col 0 :row 0
-                 :item-path [0]
-                 :fx/event {:id :stage :name "Stage"}
-                 :state sample-state-with-item}
-          result (cue-chain/handle event)]
-      (is (= :stage (get-in result [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
-      (is (history/derive-dirty (:state event) (:state result))))))
+(deftest inherit-removes-the-target-test
+  (let [with-target (assoc-in sample-state-with-item [:chains :cue-chains [0 0] :items 0 :target] :zone/a)]
+    (doseq [target [nil [] :inherit]]
+      (let [item (get-in (set-item-target with-target [0] target) [:state :chains :cue-chains [0 0] :items 0])]
+        (is (not (contains? item :target)) (str (pr-str target) ": no key, it inherits"))))
+    (is (not (contains? (get-in (cue-chain/handle {:event/type :cue-chain/set-item-target :col 0 :row 0 :item-path [0]
+                                                   :fx/event {:id :inherit :name "Inherit"} :state with-target})
+                                [:state :chains :cue-chains [0 0] :items 0])
+                        :target))
+        "the picker's Inherit")))
 
-(deftest handle-set-item-zone-nested-group-and-child
-  (testing "Setting zone on a group and its nested child independently"
-    (let [group-id (java.util.UUID/randomUUID)
-          child-id (java.util.UUID/randomUUID)
-          state-with-group (assoc-in sample-state-with-item
-                                     [:chains :cue-chains [0 0] :items]
-                                     [{:type :group
-                                       :id group-id
-                                       :name "Test Group"
-                                       :items [{:type :preset
-                                                :id child-id
-                                                :preset-id :circle
-                                                :params {}}]}])
-          ;; 1. Set zone on the group itself (path [0])
-          res-group (cue-chain/handle {:event/type :cue-chain/set-item-zone
-                                       :col 0 :row 0
-                                       :item-path [0]
-                                       :zone-group-id :front
-                                       :state state-with-group})
-          ;; 2. Set zone on the nested child (path [0 :items 0])
-          res-child (cue-chain/handle {:event/type :cue-chain/set-item-zone
-                                       :col 0 :row 0
-                                       :item-path [0 :items 0]
-                                       :zone-group-id :left
-                                       :state (:state res-group)})]
-      (is (= :front (get-in res-group [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
-      (is (= :front (get-in res-child [:state :chains :cue-chains [0 0] :items 0 :zone-group-id])))
-      (is (= :left (get-in res-child [:state :chains :cue-chains [0 0] :items 0 :items 0 :zone-group-id]))))))
+(deftest set-cue-target-test
+  (let [set-target #(cue-chain/handle (merge {:event/type :cue-chain/set-target :col 0 :row 0 :state sample-state-with-item} %))]
+    (is (= :zone/b (get-in (set-target {:target :zone/b}) [:state :chains :cue-chains [0 0] :target])))
+    (is (= [:graphics :zone/a] (get-in (set-target {:target [:zone/a :graphics]}) [:state :chains :cue-chains [0 0] :target])))
+    (is (= :crowd (get-in (set-target {:fx/event {:id :crowd}}) [:state :chains :cue-chains [0 0] :target])) "from a picker")
+    (let [cleared (set-target {:target nil :state (assoc-in sample-state-with-item [:chains :cue-chains [0 0] :target] :zone/a)})]
+      (is (not (contains? (get-in cleared [:state :chains :cue-chains [0 0]]) :target)) "nil: none, it inherits"))
+    (is (= {:state sample-state-with-item} (set-target {:col 4})) "a cell with no cue: nothing")
+    (is (= {:state base-state} (cue-chain/handle {:event/type :cue-chain/set-target :state base-state})))))
 
 (deftest list-editor-component-rendering-test
   (testing "list-editor component description can be constructed with context menu"

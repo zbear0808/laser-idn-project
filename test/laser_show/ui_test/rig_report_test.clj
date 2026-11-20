@@ -197,7 +197,7 @@
     (ui/click! robot "#rig-report-pin-to-projector-10-0-0-9-1")
     (ui/click! robot "#rig-report-pin-projector-10-0-0-9-1-to-projector-10-0-0-5-1")
     (ui/wait-for! #(= [:auto.laser/projector-10-0-0-5-1 :auto.laser/projector-10-0-0-5-1]
-                      (mapv (fn [cell] (get-in (app-state) [:chains :cue-chains cell :destination-zone :zone-group-id])) [[0 0] [1 0]])))
+                      (mapv (fn [cell] (get-in (app-state) [:chains :cue-chains cell :target])) [[0 0] [1 0]])))
     (ui/wait-for! #(nil? (ui/query "#rig-report-pin-projector-10-0-0-9-1")))
     (is (true? (get-in (app-state) [:project :dirty?])) "a show edit: unsaved")
     (is (= "Re-pin Cues" (get-in (app-state) [:history :undo-stack 0 :description])))))

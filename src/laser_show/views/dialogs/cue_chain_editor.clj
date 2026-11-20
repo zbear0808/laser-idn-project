@@ -27,7 +27,7 @@
             [laser-show.views.components.effect-bank :as effect-bank]
             [laser-show.views.components.load-warning :as load-warning]
             [laser-show.views.components.zone-chips :as zone-chips]
-            [laser-show.routing.zone-effects :as zone-effects]
+            [laser-show.routing.targets :as targets]
             [laser-show.common.util :as u])
   (:import [javafx.scene.input KeyCode KeyEvent]))
 
@@ -91,24 +91,20 @@
                    :style-class "dialog-placeholder-text"}]})))
 
 
-;; Destination Zone Picker & Item Routing
+;; The cue's and each item's target (zones plan Z4)
 
 
 (defn- destination-zone-dropdown
-  "Dropdown for selecting destination zone group for the entire cue chain.
-   Renders as a horizontal row: 'Default zone:' label (the timeline
-   editor's) + dropdown, neither ever narrower than its text.
-   
-   The destination zone applies to all presets in this cue chain cell.
+  "Dropdown for the cue's own target, a group (All for none). Renders as a
+   horizontal row: 'Default zone:' label (the timeline editor's) +
+   dropdown, neither ever narrower than its text.
    
    Props:
    - :col, :row - Grid coordinates
-   - :destination-zone - Current destination-zone config at cue chain level
+   - :target - The cue's :target
    - :zone-groups - List of available zone groups"
-  [{:keys [col row destination-zone zone-groups]}]
-  (let [current-group-id (:zone-group-id destination-zone :all)
-        ;; Find the currently selected group for display
-        current-group (u/seek #(= (:id %) current-group-id) zone-groups)]
+  [{:keys [col row target zone-groups]}]
+  (let [current-group (or (u/seek #(= (:id %) (or target :all)) zone-groups) (first zone-groups))]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
@@ -128,131 +124,103 @@
                  :cell-factory {:fx/cell-type :list-cell
                                 :describe (fn [group]
                                             (zone-chips/with-lock {:text (or (:name group) "All")} group))}
-                 :on-value-changed {:event/type :cue-chain/set-destination-zone-group
+                 :on-value-changed {:event/type :cue-chain/set-target
                                     :col col
                                     :row row}}]}))
 
-(defn- resolve-item-parent-group-zone
-  "Traverse up ancestor groups of an item in items to find any inherited zone."
-  [items item-id]
-  (when-let [path (chains/find-path-by-id items item-id)]
-    (loop [curr-path (when (> (count path) 2)
-                       (subvec path 0 (- (count path) 2)))]
-      (when (seq curr-path)
-        (let [group (chains/get-item-at-path items curr-path)]
-          (or (:zone-group-id group)
-              (when (> (count curr-path) 2)
-                (recur (subvec curr-path 0 (- (count curr-path) 2))))))))))
+(defn- target-name
+  "What a target is called in the editor's labels."
+  [names t]
+  (or (targets/target-text names nil t) "All"))
+
+(defn- inherited-res
+  "What the item with item-id would inherit (explain: targets/explain-cue):
+   its group's resolution as the group's children see it, or the cue's."
+  [explain items item-id]
+  (let [path (chains/find-path-by-id items item-id)
+        parent-path (when (> (count path) 2) (subvec path 0 (- (count path) 2)))]
+    (if-let [group (when parent-path (chains/get-item-at-path items parent-path))]
+      (targets/inherited (get-in explain [:items (:id group)]) (:id group))
+      (:cue explain))))
+
+(defn- inherit-text [names res]
+  (str "Inherit (" (target-name names (:target res))
+       (when (= :group (:from res)) " (Group)")
+       ")"))
+
+(defn- routing-label
+  "base-name and where the item goes: \"Circle [Left]\", \"[Left (Group)]\"
+   when it comes from its group."
+  [names explain base-name item]
+  (let [res (get-in explain [:items (:id item)])]
+    (str base-name " [" (target-name names (:target res)) (when (= :group (:from res)) " (Group)") "]")))
 
 (defn- cue-chain-item-label
-  "Custom list-editor label renderer for cue chain preset items.
-   Displays the preset name and its effective zone destination."
-  [items zone-groups-by-id default-zone-id item]
-  (let [preset-def (presets/presets-by-id (:preset-id item))
-        base-name (or (:name preset-def) (:name item) "Unknown Preset")
-        explicit-zone (or (:zone-group-id item)
-                          (when-let [fx (first (zone-effects/extract-zone-effects (:effects item)))]
-                            (get-in fx [:params :target-zone])))
-        parent-group-zone (when-not explicit-zone
-                            (resolve-item-parent-group-zone items (:id item)))
-        effective-zone (or explicit-zone parent-group-zone default-zone-id :all)
-        zone-name (or (get-in zone-groups-by-id [effective-zone :name])
-                      (if effective-zone (name effective-zone) "All"))]
-    (cond
-      explicit-zone
-      (str base-name " [" zone-name "]")
-
-      parent-group-zone
-      (str base-name " [" zone-name " (Group)]")
-
-      :else
-      (str base-name " [" zone-name "]"))))
+  "Custom list-editor label renderer for cue chain preset items: the
+   preset's name and where it goes."
+  [names explain item]
+  (let [preset-def (presets/presets-by-id (:preset-id item))]
+    (routing-label names explain (or (:name preset-def) (:name item) "Unknown Preset") item)))
 
 (defn- cue-chain-group-label
-  "Custom list-editor label renderer for cue chain groups.
-   Displays the group name and its effective zone destination."
-  [items zone-groups-by-id default-zone-id group]
-  (let [base-name (or (:name group) "Group")
-        explicit-zone (:zone-group-id group)
-        parent-group-zone (when-not explicit-zone
-                            (resolve-item-parent-group-zone items (:id group)))
-        effective-zone (or explicit-zone parent-group-zone default-zone-id :all)
-        zone-name (or (get-in zone-groups-by-id [effective-zone :name])
-                      (if effective-zone (name effective-zone) "All"))]
-    (cond
-      explicit-zone
-      (str base-name " [" zone-name "]")
-
-      parent-group-zone
-      (str base-name " [" zone-name " (Group)]")
-
-      :else
-      (str base-name " [" zone-name "]"))))
+  "Custom list-editor label renderer for cue chain groups: the group's name
+   and where it goes."
+  [names explain group]
+  (routing-label names explain (or (:name group) "Group") group))
 
 (defn- cue-chain-context-menu
-  "Builds a context menu for a cue chain item or group with zone routing options."
-  [col row items zone-groups zone-groups-by-id default-zone-id item-or-group]
+  "Builds a context menu for a cue chain item or group with its target."
+  [col row items names explain zone-groups item-or-group]
   (let [item-id (:id item-or-group)
         item-path (chains/find-path-by-id items item-id)]
     (when item-path
-      (let [current-zone (:zone-group-id item-or-group)
-            parent-group-zone (resolve-item-parent-group-zone items item-id)
-            default-zone-name (or (get-in zone-groups-by-id [default-zone-id :name])
-                                  (if default-zone-id (name default-zone-id) "All"))
-            inherit-label (if parent-group-zone
-                            (let [pname (or (get-in zone-groups-by-id [parent-group-zone :name])
-                                            (name parent-group-zone))]
-                              (str "Inherit (Group: " pname ")"))
-                            (str "Inherit (Default: " default-zone-name ")"))
+      (let [current (targets/normalize-target (:target item-or-group))
             inherit-item [{:fx/type :check-menu-item
-                           :text (str (if (nil? current-zone) "✓ " "   ") inherit-label)
-                           :selected (nil? current-zone)
-                           :on-action {:event/type :cue-chain/set-item-zone
+                           :text (str (if (nil? current) "✓ " "   ") (inherit-text names (inherited-res explain items item-id)))
+                           :selected (nil? current)
+                           :on-action {:event/type :cue-chain/set-item-target
                                        :col col
                                        :row row
                                        :item-path item-path
-                                       :zone-group-id nil}}
+                                       :target nil}}
                           {:fx/type :separator-menu-item}]
             zone-items (mapv
                         (fn [zg]
                           (let [zid (:id zg)
-                                active? (= zid current-zone)]
+                                active? (= zid current)]
                             (zone-chips/with-lock
                              {:fx/type :check-menu-item
                               :text (str (if active? "✓ " "   ") (:name zg (name zid)))
                               :selected active?
-                              :on-action {:event/type :cue-chain/set-item-zone
+                              :on-action {:event/type :cue-chain/set-item-target
                                           :col col
                                           :row row
                                           :item-path item-path
-                                          :zone-group-id zid}}
+                                          :target zid}}
                              zg)))
-                        zone-groups)
-            all-zone-items (into inherit-item zone-items)]
+                        zone-groups)]
         {:fx/type :context-menu
          :items [{:fx/type :menu
                   :text "Assign Zone"
-                  :items all-zone-items}]}))))
+                  :items (into inherit-item zone-items)}]}))))
 
 (defn- item-zone-destination-picker
-  "Dropdown for selecting destination zone for a specific preset or group.
-   Renders as a horizontal row: 'Zone Destination:' label + dropdown.
-   
-   Supports inheriting from parent group or chain default.
+  "Dropdown for a preset's or group's own target. Renders as a horizontal
+   row: 'Zone Destination:' label + dropdown.
    
    Props:
    - :col, :row - Grid coordinates
    - :item-path - Path vector to item in cue chain
    - :item - The item or group map
-   - :inherit-label - Descriptive label for inheritance (e.g. 'Inherit (Group: Front)')
+   - :inherit-label - Descriptive label for inheriting (e.g. 'Inherit (Front)')
    - :zone-groups - List of available zone groups"
   [{:keys [col row item-path item inherit-label zone-groups]}]
-  (let [current-zone-id (:zone-group-id item)
+  (let [current (targets/normalize-target (:target item))
         inherit-option {:id :inherit
                         :name inherit-label}
         options (into [inherit-option] zone-groups)
-        current-option (if current-zone-id
-                         (or (u/seek #(= (:id %) current-zone-id) zone-groups)
+        current-option (if current
+                         (or (u/seek #(= (:id %) current) zone-groups)
                              inherit-option)
                          inherit-option)]
     {:fx/type :h-box
@@ -270,7 +238,7 @@
                  :cell-factory {:fx/cell-type :list-cell
                                 :describe (fn [opt]
                                             (zone-chips/with-lock {:text (or (:name opt) "All")} opt))}
-                 :on-value-changed {:event/type :cue-chain/set-item-zone
+                 :on-value-changed {:event/type :cue-chain/set-item-target
                                     :col col
                                     :row row
                                     :item-path item-path}}]}))
@@ -340,17 +308,10 @@
                         (chains/get-item-at-path items selected-item-path))
         is-preset? (and selected-item (= :preset (:type selected-item)))
         is-group? (and selected-item (chains/group? selected-item))
-        default-zone-id (get-in cue-chain [:destination-zone :zone-group-id] :all)
-        zone-groups-by-id (into {} (map (juxt :id identity)) zone-groups)
-        default-zone-name (or (get-in zone-groups-by-id [default-zone-id :name])
-                              (if default-zone-id (name default-zone-id) "All"))
-        parent-group-zone (when selected-item
-                            (resolve-item-parent-group-zone items (:id selected-item)))
-        inherit-label (if parent-group-zone
-                        (let [pname (or (get-in zone-groups-by-id [parent-group-zone :name])
-                                        (name parent-group-zone))]
-                          (str "Inherit (Group: " pname ")"))
-                        (str "Inherit (Default: " default-zone-name ")"))]
+        names (targets/names zone-groups {})
+        explain (targets/explain-cue cue-chain nil nil)
+        inherit-label (when selected-item
+                        (inherit-text names (inherited-res explain items (:id selected-item))))]
     {:fx/type :v-box
      :spacing 0
      :children (filterv
@@ -479,8 +440,8 @@
         ;; Where cues can go (All, the automatic groups, each laser, yours),
         ;; for the destination picker in the footer and the routing labels
         zone-groups (fx/sub-ctx context subs/target-groups)
-        zone-groups-by-id (into {} (map (juxt :id identity)) zone-groups)
-        default-zone-id (get-in cue-chain [:destination-zone :zone-group-id] :all)
+        names (targets/names zone-groups {})
+        explain (targets/explain-cue cue-chain nil nil)
 
         ;; Get chain name for header
         chain-name (:name cue-chain)
@@ -526,10 +487,10 @@
                                                      :item-id-key :preset-id
                                                      :item-registry-fn presets/presets-by-id
                                                      :fallback-label "Unknown Preset"
-                                                     :get-item-label (partial cue-chain-item-label (:items cue-chain) zone-groups-by-id default-zone-id)
-                                                     :get-group-label (partial cue-chain-group-label (:items cue-chain) zone-groups-by-id default-zone-id)
-                                                     :get-context-menu (partial cue-chain-context-menu col row (:items cue-chain) zone-groups zone-groups-by-id default-zone-id)
-                                                     :get-group-context-menu (partial cue-chain-context-menu col row (:items cue-chain) zone-groups zone-groups-by-id default-zone-id)
+                                                     :get-item-label (partial cue-chain-item-label names explain)
+                                                     :get-group-label (partial cue-chain-group-label names explain)
+                                                     :get-context-menu (partial cue-chain-context-menu col row (:items cue-chain) names explain zone-groups)
+                                                     :get-group-context-menu (partial cue-chain-context-menu col row (:items cue-chain) names explain zone-groups)
                                                      :on-change-event :chain/set-items
                                                      :on-change-params {:domain :cue-chains :entity-key [col row]}
                                                      :items-path [:chains :cue-chains [col row] :items]
@@ -624,7 +585,7 @@
                  :children [{:fx/type destination-zone-dropdown
                              :col col
                              :row row
-                             :destination-zone (:destination-zone cue-chain)
+                             :target (:target cue-chain)
                              :zone-groups zone-groups}
                             {:fx/type trigger-mode-dropdown
                              :col col

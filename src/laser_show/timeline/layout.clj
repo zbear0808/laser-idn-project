@@ -9,7 +9,8 @@
    - beats map to canvas x through the viewport:
        view = {:zoom px-per-beat :scroll-beat b :scroll-y px :width px :height px}
      where :width/:height are the lane canvas size (ruler included)."
-  (:require [laser-show.timeline.model :as model]
+  (:require [laser-show.routing.targets :as targets]
+            [laser-show.timeline.model :as model]
             [laser-show.timeline.timecode :as tc]))
 
 
@@ -50,10 +51,11 @@
 (defn rows
   "Display rows for the tracks tree, top to bottom:
    [{:id :kind (:track | :folder) :depth :y :h :track :color :muted?
-     :zone-id :zone-inherited? :clips :summary-clips}]
+     :target :target-inherited? :clips :summary-clips}]
    :clips are the clips on a track row (by start). Folder rows carry every
    descendant clip as :summary-clips; a collapsed folder hides its children.
-   :zone-id is the effective zone (nil = the cue's default zone)."
+   :target is the effective target (its own, else its folder's; nil = the
+   cue's), :target-inherited? whether it isn't the row's own (zones plan Z4)."
   ([tracks clips] (rows tracks clips metrics))
   ([tracks clips {:keys [track-h folder-h row-gap]}]
    (let [by-track (group-by :track-id clips)
@@ -66,10 +68,11 @@
      (loop [todo (map (fn [t] [t 0 nil]) tracks)
             y 0
             out []]
-       (if-let [[track depth parent-zone] (first todo)]
+       (if-let [[track depth parent-target] (first todo)]
          (let [folder? (model/track-group? track)
                h (if folder? folder-h track-h)
-               zone (or (:zone-group-id track) parent-zone)
+               own (targets/normalize-target (:target track))
+               target (or own parent-target)
                row {:id (:id track)
                     :kind (if folder? :folder :track)
                     :depth depth
@@ -78,12 +81,12 @@
                     :track track
                     :color (get colors (:id track))
                     :muted? (contains? muted (:id track))
-                    :zone-id zone
-                    :zone-inherited? (nil? (:zone-group-id track))
+                    :target target
+                    :target-inherited? (nil? own)
                     :clips (if folder? [] (sort-clips (get by-track (:id track))))
                     :summary-clips (if folder? (descendant-clips track) [])}
                children (when (and folder? (not (:collapsed? track)))
-                          (map (fn [c] [c (inc depth) zone]) (:items track [])))]
+                          (map (fn [c] [c (inc depth) target]) (:items track [])))]
            (recur (concat children (rest todo)) (+ y h row-gap) (conj out row)))
          out)))))
 

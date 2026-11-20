@@ -79,9 +79,11 @@
       (is (false? (browser-open? (open with-a-cue 0 0)))))))
 
 (deftest open-editor-converts-without-changing-output-test
-  (let [plain {:destination-zone {:zone-group-id :all}
+  (let [plain {:target :graphics
                :items [{:id (random-uuid) :type :preset :preset-id :circle :enabled? true :effects []}
-                       {:id (random-uuid) :type :preset :preset-id :square :enabled? true :effects []}]}
+                       {:id (random-uuid) :type :preset :preset-id :square :enabled? true :effects [] :target :zone/b}
+                       {:id (random-uuid) :type :group :enabled? true :target [:zone/a :auto/left]
+                        :items [{:id (random-uuid) :type :preset :preset-id :star :enabled? true :effects []}]}]}
         state (assoc-in base-state [:chains :cue-chains [0 0]] plain)
         converted (get-in (timeline/handle {:event/type :timeline-cue-editor/open
                                             :col 0 :row 0 :state state})
@@ -119,14 +121,31 @@
         (is (= #{} (get-in s3 [:ui :timeline-editor [2 1] :selection])))
         (is (= #{:x} (get-in s3 [:ui :timeline-editor [0 0] :selection])))))))
 
-(deftest add-track-does-not-stamp-zone-test
+(deftest add-track-does-not-stamp-target-test
   (let [s0 (assoc-in base-state [:chains :cue-chains [0 0]]
-                     {:destination-zone {:zone-group-id :front} :tracks [] :items []})
+                     {:target :front :tracks [] :items []})
         tracks (fn [ev] (get-in (timeline/handle (assoc ev :col 0 :row 0 :state s0))
                                 [:state :chains :cue-chains [0 0] :tracks]))]
-    (is (not (contains? (last (tracks {:event/type :timeline/add-track})) :zone-group-id)))
-    (is (not (contains? (last (tracks {:event/type :timeline/add-folder})) :zone-group-id)))
-    (is (= :back (:zone-group-id (last (tracks {:event/type :timeline/add-track :zone-group-id :back})))))))
+    (is (not (contains? (last (tracks {:event/type :timeline/add-track})) :target)) "a new track inherits")
+    (is (not (contains? (last (tracks {:event/type :timeline/add-folder})) :target)))
+    (is (= :back (:target (last (tracks {:event/type :timeline/add-track :target :back})))))
+    (is (= [:zone/a :zone/b] (:target (last (tracks {:event/type :timeline/add-folder :target [:zone/b :zone/a]})))))))
+
+(deftest set-track-and-clip-target-test
+  (let [s0 (assoc-in base-state [:chains :cue-chains [0 0]]
+                     {:editor-type :timeline
+                      :tracks [{:id :f :type :group :items [{:id :t :type :track}]}]
+                      :items [{:id :c :type :preset :preset-id :circle :track-id :t :timeline/start 0.0 :timeline/duration 4.0}]})
+        run (fn [state ev] (timeline/handle (assoc ev :col 0 :row 0 :state state)))
+        r1 (run s0 {:event/type :timeline/set-track-target :track-id :f :target :zone/c})
+        r2 (run (:state r1) {:event/type :timeline/set-clip-target :item-id :c :target [:graphics :zone/a]})
+        cue #(get-in % [:state :chains :cue-chains [0 0]])]
+    (is (= :zone/c (get-in (cue r1) [:tracks 0 :target])))
+    (is (= "Change Track Target" (:history/description r1)))
+    (is (= [:graphics :zone/a] (get-in (cue r2) [:items 0 :target])))
+    (is (= "Change Clip Target" (:history/description r2)))
+    (let [r3 (run (:state r2) {:event/type :timeline/set-clip-target :item-id :c :target nil})]
+      (is (not (contains? (get-in (cue r3) [:items 0]) :target)) "nil: it inherits again"))))
 
 (deftest handle-add-preset-to-track-test
   (testing "adds preset at cursor-beat on resolved leaf track"

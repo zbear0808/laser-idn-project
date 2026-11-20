@@ -25,9 +25,8 @@
 
 
 (defn- destination-zone-dropdown
-  [{:keys [col row destination-zone zone-groups]}]
-  (let [current-group-id (:zone-group-id destination-zone :all)
-        current-group (u/seek #(= (:id %) current-group-id) zone-groups)]
+  [{:keys [col row target zone-groups]}]
+  (let [current-group (or (u/seek #(= (:id %) (or target :all)) zone-groups) (first zone-groups))]
     {:fx/type :h-box
      :spacing 8
      :alignment :center-left
@@ -43,7 +42,7 @@
                  :cell-factory {:fx/cell-type :list-cell
                                 :describe (fn [group]
                                             (zone-chips/with-lock {:text (or (:name group) "All")} group))}
-                 :on-value-changed {:event/type :cue-chain/set-destination-zone-group
+                 :on-value-changed {:event/type :cue-chain/set-target
                                     :col col
                                     :row row}}]}))
 
@@ -97,7 +96,7 @@
 
         ;; Where cues can go: All, the automatic groups, each laser, yours
         zone-groups (fx/sub-ctx context subs/target-groups)
-        destination-zone-id (get-in cue-chain [:destination-zone :zone-group-id])
+        destination-zone-id (:target cue-chain)
 
         ;; Timeline UI state: this cue's view, plus editor-wide prefs
         timeline-ui (fx/sub-ctx context subs/timeline-ui col row)
@@ -154,7 +153,7 @@
        :children [{:fx/type destination-zone-dropdown
                    :col col
                    :row row
-                   :destination-zone (:destination-zone cue-chain)
+                   :target (:target cue-chain)
                    :zone-groups zone-groups}
                   {:fx/type trigger-mode-dropdown
                    :col col
