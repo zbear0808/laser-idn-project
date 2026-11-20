@@ -328,3 +328,13 @@
       (is (= 1 (count (get-in loaded [:config :input :trigger-map]))))
       (is (= {} (get-in loaded [:chains :effect-chains])) "its effects grid as it was: empty")
       (is (false? (get-in loaded [:project :dirty?]))))))
+
+(deftest session-reset-clears-the-vibes-tab-selection-test
+  (testing "the Vibes tab's selection names the old project's vibes: New and Open reset it with the rest of the session (03 §10)"
+    (let [busy (-> (with-starter-vibes)
+                   (assoc-in [:ui :vibes] {:selected :vibe-2 :slot :fx :wizard {:queue [:accent] :done [:hit]}}))
+          initial (get-in (domains/build-initial-state) [:ui :vibes])]
+      (is (= {:selected nil :slot :hit :wizard nil} initial))
+      (is (= initial (get-in (persistent/new-project-state busy) [:ui :vibes])) "File > New")
+      (is (= initial (get-in (persistent/apply-loaded-project busy (persistent/project-files busy) "x.zip") [:ui :vibes]))
+          "File > Open"))))

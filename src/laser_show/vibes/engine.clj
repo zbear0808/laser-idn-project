@@ -29,14 +29,20 @@
 
    With auto-advance on (laser-show.vibes.rotation), the vibe also changes
    by itself: arm and advance follow the show clock's reports, a FLASH
-   release while armed advances, and set-auto is the Perform tab's switch."
+   release while armed advances, and set-auto is the Perform tab's switch.
+
+   A key that sticks is let go of too: release with :reason :watchdog is
+   the show clock's report of a role held too long (laser-show.vibes
+   .watchdog), and release-unbound lets go of the roles a key holds when the
+   trigger map no longer binds that key to them."
   (:require [laser-show.animation.cue-timing :as cue-timing]
             [laser-show.events.handlers.grid :as grid]
             [laser-show.events.helpers :as h]
             [laser-show.state.extractors :as ex]
             [laser-show.triggers.shuffle-bag :as bag]
             [laser-show.vibes.library :as library]
-            [laser-show.vibes.rotation :as rotation])
+            [laser-show.vibes.rotation :as rotation]
+            [laser-show.vibes.watchdog :as watchdog])
   (:import [java.util UUID]))
 
 
@@ -481,28 +487,55 @@
               :vibe {:state (assoc-in state [:vibe-runtime :held :vibe] {:at t :src src})}
               {:state state}))))
 
+(defn- let-go-of-hold
+  "role's hold over without its key's release (release-all, a stuck key):
+   HIT and ACCENT stop now unless they sustain, FLASH lets go, and a held
+   VIBE neither switches nor locks: a key that stuck mustn't change the
+   look."
+  [state role t]
+  (case role
+    (:hit :accent) (release-pool state role t true)
+    :flash (release-flash state t)
+    (update-in state [:vibe-runtime :held] dissoc role)))
+
+(defn- let-go-of-stuck
+  "The show clock's :vibe/release {:reason :watchdog} (vibes.watchdog): role
+   let go of as release-all lets go, its pulse too, and :problem says the
+   key stuck, while the watchdog still finds it stuck at the event's time;
+   a report that came late, or again, changes nothing."
+  [state {:keys [role] :as event}]
+  (let [t (event-time event)]
+    (if (watchdog/stuck? state event t)
+      (-> (pulse-release state role)
+          (cond-> (get-in state [:vibe-runtime :held role]) (let-go-of-hold role t))
+          (problem {:role role :why :stuck-key}))
+      state)))
+
 (defn release
   "A role's release (:vibe/release). One that isn't held changes nothing,
    but for its pulse: a press that played nothing holds that alone. FLASH
    let go of while the rotation is armed and no other key is down goes on to
    the next vibe (:vibe/advance :flash, inline: beyond-vibe's flash mask),
    and what a solo flash stepped aside doesn't start again: it would end with
-   the look it belongs to."
-  [state {:keys [role] :as event}]
-  (let [state (pulse-release state role)]
-    (if (get-in state [:vibe-runtime :held role])
-      (let [t (event-time event)]
-        (case role
-          (:hit :accent) {:state (release-pool state role t false)}
-          :flash (let [state (let-go-of-flash-key state)]
-                   (if (rotation/may-advance? state)
-                     {:state state
-                      :dispatch {:event/type :vibe/advance :reason :flash :input-time t
-                                 :from (get-in state [:vibe-runtime :current])}}
-                     {:state (restore-ducked state t)}))
-          :vibe {:state (release-vibe state t)}
-          {:state state}))
-      {:state state})))
+   the look it belongs to. With :reason :watchdog it is a stuck key's
+   (let-go-of-stuck)."
+  [state {:keys [role reason] :as event}]
+  (if (= :watchdog reason)
+    {:state (let-go-of-stuck state event)}
+    (let [state (pulse-release state role)]
+      (if (get-in state [:vibe-runtime :held role])
+        (let [t (event-time event)]
+          (case role
+            (:hit :accent) {:state (release-pool state role t false)}
+            :flash (let [state (let-go-of-flash-key state)]
+                     (if (rotation/may-advance? state)
+                       {:state state
+                        :dispatch {:event/type :vibe/advance :reason :flash :input-time t
+                                   :from (get-in state [:vibe-runtime :current])}}
+                       {:state (restore-ducked state t)}))
+            :vibe {:state (release-vibe state t)}
+            {:state state}))
+        {:state state}))))
 
 (defn select
   "Make the vibe with id current (:vibe/select). During blackout it becomes
@@ -523,13 +556,26 @@
                        (for [[role {:keys [src]}] (get-in state [:vibe-runtime :held])
                              :when (or (nil? only) (= only src))]
                          role))]
-    {:state (reduce (fn [s role]
-                      (case role
-                        (:hit :accent) (release-pool s role t true)
-                        :flash (release-flash s t)
-                        (update-in s [:vibe-runtime :held] dissoc role)))
-                    (release-pulses state only)
-                    roles)}))
+    {:state (reduce #(let-go-of-hold %1 %2 t) (release-pulses state only) roles)}))
+
+(defn release-unbound
+  "state with each role a key holds (:src :input: the engine's hold, or the
+   pulse of a press that played nothing) let go of, as release-all lets go,
+   when the trigger map lost a binding of that role since was (the trigger
+   map before an edit): a learn moved the role to another key, or Clear took
+   it, so that key's release would reach nothing. A pad's hold stays: its
+   release still comes."
+  [state was t]
+  (let [now (get-in state [:config :input :trigger-map])
+        lost? (fn [role]
+                (some (fn [[k action]] (and (library/binds-role? action role) (not (library/binds-role? (get now k) role))))
+                      was))]
+    (reduce (fn [s role]
+              (cond-> s
+                (= :input (get-in s [:playback :pulses role :src])) (pulse-release role)
+                (= :input (get-in s [:vibe-runtime :held role :src])) (let-go-of-hold role t)))
+            state
+            (sort-by #(= :flash %) (filter lost? library/roles)))))
 
 
 ;; Auto-advance (laser-show.vibes.rotation): the show clock's reports and
@@ -604,18 +650,36 @@
         (update-in [:vibe-runtime :duck] dissoc :bed)
         (start-bed vibe t))))
 
+(defn- refresh-audience
+  "The voices whose cue vibe may no longer play now that was's audience
+   rule changed (Allow audience cells unticked, V6): HIT's and ACCENT's
+   stop, and the flash's cue stops while its effect cells stay on until
+   FLASH is let go. The bed is refresh-bed's."
+  [state was vibe]
+  (reduce (fn [s role]
+            (let [{:keys [cell] :as voice} (get-in s [:vibe-runtime :voices role])]
+              (if (and cell (playable s was cell) (not (playable s vibe cell)))
+                (let [s (stop-voice s voice)]
+                  (if (= :flash role)
+                    (update-in s [:vibe-runtime :voices :flash] dissoc :cell :run)
+                    (update-in s [:vibe-runtime :voices] dissoc role)))
+                s)))
+          state
+          [:hit :accent :flash]))
+
 (defn reconcile
   "state after an edit of the vibes ([:config :vibes] was before it), with
    the look of the vibe that plays following the edit at time t, so the
    lasers show what the editor says: an effect cell its FX set gains
    switches on and one it loses switches off (if the engine switched it
-   on), and its bed starts again when the cue it should play changed. When
-   the vibe that plays is gone (the edit removed it, or an undo did before,
-   which runs no handler), its look is left and the first of :order is
-   entered, as a press would find it (01 invariant 9). Nothing before the
-   first press or select, nor during blackout, whose end enters the look as
-   it is then. The pools, the flash and the options take effect at the next
-   press."
+   on), its bed starts again when the cue it should play changed, and a cue
+   it may no longer play (Allow audience cells unticked) stops at once,
+   whichever role plays it. When the vibe that plays is gone (the edit
+   removed it, or an undo did before, which runs no handler), its look is
+   left and the first of :order is entered, as a press would find it (01
+   invariant 9). Nothing before the first press or select, nor during
+   blackout, whose end enters the look as it is then. The pools, the flash
+   and the options take effect at the next press."
   [state was t]
   (let [{:keys [current blackout?]} (:vibe-runtime state)
         old (get-in was [:library current])
@@ -628,4 +692,5 @@
       blackout? state
       :else (-> state
                 (refresh-fx old vibe)
-                (refresh-bed old vibe t)))))
+                (refresh-bed old vibe t)
+                (refresh-audience old vibe)))))

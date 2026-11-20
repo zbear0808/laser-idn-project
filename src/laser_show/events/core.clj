@@ -60,6 +60,7 @@
             [laser-show.events.handlers :as handlers]
             [laser-show.events.handlers.history :as history-handlers]
             [laser-show.events.handlers.timeline :as timeline-handlers]
+            [laser-show.events.show-lock :as show-lock]
             [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.events.handlers.output-sync :as output-sync]
             [laser-show.common.util :as u]
@@ -462,9 +463,11 @@
             (handler event))))))
 
 (def handle-event-pipeline
-  "Event handler pipeline: timeline invariants enforced on changed cue chains
-   (innermost, so history sees normalized state), undo history for undoable
-   document edits, then the unsaved-changes flag derived for every event
+  "Event handler pipeline: the show lock (innermost: while it is on, the
+   events it refuses change [:ui] only, events/show_lock.clj), timeline
+   invariants enforced on changed cue chains (so history sees normalized
+   state), undo history for undoable document edits, then the
+   unsaved-changes flag derived for every event
    (see handlers/history.clj), then the output sync: a change to what the
    engines are built from (undo included) requests a refresh while streaming
    (handlers/output_sync.clj). Then, in dev mode only, the lost-update check
@@ -474,6 +477,7 @@
    app/create-app gives this to fx/create-app together with co-effects and
    effects, so it runs on the cljfx agent."
   (-> handlers/handle-event
+      show-lock/wrap-show-lock
       timeline-handlers/wrap-normalize-timelines
       history-handlers/wrap-history
       history-handlers/wrap-dirty

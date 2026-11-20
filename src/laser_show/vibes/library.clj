@@ -3,7 +3,7 @@
 
    {:order [vibe-id ...] :next-id n
     :library {vibe-id vibe}
-    :settings {:quick-tap-ms :lock-hold-ms :hit-taps-tempo?}}
+    :settings {:quick-tap-ms :lock-hold-ms :hit-taps-tempo? :rotation :max-hold-secs}}
 
    A vibe names cue cells per role and effect cells for its FX set:
    {:id :name :color :energy :allow-audience?

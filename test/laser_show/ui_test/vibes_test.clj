@@ -415,3 +415,17 @@
       (is (not-any? #(str/starts-with? % "vibe") (style-classes-under (first (ui/query-all "#main-layout")))))
       (is (not-any? vibe-text? (menu-texts "#effects-cell-1-0")))
       (is (not-any? vibe-text? (texts "#effects-cell-1-0 .label"))))))
+
+
+;; The lint badge (plans/2026-11-18-vibe-mode/07)
+
+(deftest vibes-tab-label-counts-lint-errors-test
+  (let [robot (ui/robot)
+        tab-text #(.getText ^Labeled (first (ui/query-all "#vibes-tab")))]
+    (ui/wait-for! #(= "Vibes" (tab-text)))
+    (state/swap-state! assoc-in [:config :vibes :library :vibe-1 :hit :cells] [])
+    (ui/wait-for! #(= "Vibes ⚠ 1" (tab-text)))
+    (open-vibes! robot)
+    (is (some #(re-find #"HIT does nothing" %) (texts ".vibe-lint-row")) "the error the badge counts")
+    (events/dispatch! {:event/type :vibe/toggle-cell :vibe :vibe-1 :slot :hit :cell [0 0]})
+    (ui/wait-for! #(= "Vibes" (tab-text)))))

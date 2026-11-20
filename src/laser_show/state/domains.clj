@@ -133,7 +133,7 @@
    :last-hit-at {:default nil
                  :doc "Event time (ms) of the last HIT press, whatever it played: the rotation's phrase gap counts from it"}
    :problem {:default nil
-             :doc "{:role :why} of the last press that had nothing to play ({:why :no-vibes} without vibes), until the next good one"}})
+             :doc "{:role :why} of the last press that had nothing to play ({:why :no-vibes} without vibes), or of a key held too long that the watchdog let go of (:why :stuck-key), until the next good one"}})
 
 (defstate grid
   "Cue grid state - the main trigger interface.
@@ -203,6 +203,10 @@
                                 :doc "Cell index whose zone selector popup is open, or nil if none"}
    :vibes {:default {:selected nil :slot :hit :wizard nil}
            :doc "the Vibes tab (views/tabs/vibes.clj): :selected, the vibe edited (nil: the first); :slot, what a click on the picker fills (vibes.library/slots); :wizard, Learn all while it runs: {:queue roles to learn, the first being learned :done learned roles :refused the role a key pressed again is already}; for the session, not saved"}
+   :show-lock? {:default false
+                :doc "the Perform tab's show lock (events/show_lock.clj): while true, the edits that would move or remove what the show is built from are refused; for the session, never saved"}
+   :show-lock-notice {:default nil
+                      :doc "the last event the show lock refused, {:text :event}, shown under the switch until it is unlocked"}
    :window {:default {:width default-window-width
                       :height default-window-height}
             :doc "window dimensions"}
@@ -274,8 +278,9 @@
                      :settings {:quick-tap-ms 150
                                 :lock-hold-ms 600
                                 :hit-taps-tempo? true
-                                :rotation {:mode :off :seconds 45 :pause-beats 2.0}}}
-           :doc "Vibe mode: cues grouped by feel (laser-show.vibes.library). :library {vibe-id vibe} in :order; new ids count from :next-id. :settings: a press shorter than :quick-tap-ms is a tap, a VIBE press of :lock-hold-ms or more locks, :hit-taps-tempo? (not while Link sync is on); :rotation, auto-advance (laser-show.vibes.rotation): :mode :auto or :off (the Perform tab's switch overrides it for the session), a vibe armed after :seconds, changing at a gap of :pause-beats. Saved, undoable content"}})
+                                :rotation {:mode :off :seconds 45 :pause-beats 2.0}
+                                :max-hold-secs 60}}
+           :doc "Vibe mode: cues grouped by feel (laser-show.vibes.library). :library {vibe-id vibe} in :order; new ids count from :next-id. :settings: a press shorter than :quick-tap-ms is a tap, a VIBE press of :lock-hold-ms or more locks, :hit-taps-tempo? (not while Link sync is on); :rotation, auto-advance (laser-show.vibes.rotation): :mode :auto or :off (the Perform tab's switch overrides it for the session), a vibe armed after :seconds, changing at a gap of :pause-beats; a role held :max-hold-secs or longer is let go of as a stuck key (laser-show.vibes.watchdog). Saved, undoable content"}})
 
 (defstate projectors
   "Projector configurations for color calibration and routing.

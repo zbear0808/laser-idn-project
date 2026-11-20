@@ -87,11 +87,13 @@
    {:id :settings :label "Settings"}])
 
 (defn tab-bar
-  "Tab bar component using shared styled-tab-bar."
+  "Tab bar component using shared styled-tab-bar. The Vibes tab's label
+   counts its lint's errors (subs/vibes-tab-label)."
   [{:keys [fx/context]}]
-  (let [active-tab (fx/sub-ctx context subs/active-tab)]
+  (let [active-tab (fx/sub-ctx context subs/active-tab)
+        vibes-label (fx/sub-ctx context subs/vibes-tab-label)]
     {:fx/type tabs/styled-tab-bar
-     :tabs main-tabs
+     :tabs (mapv #(cond-> % (= :vibes (:id %)) (assoc :label vibes-label)) main-tabs)
      :active-tab active-tab
      :on-tab-change {:event/type :ui/set-active-tab}}))
 

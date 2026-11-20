@@ -22,10 +22,11 @@
    4. sends what it learned back as events: a timeline's end and a timecode
       chase (:show-clock/cue-ended, :show-clock/chase), auto-advance's arm and
       advance (:vibe/arm, :vibe/advance: laser-show.vibes.rotation/due, on
-      the tick's read of app state), and the status views show a few times a
-      second, the beat square, the frame stats and the MTC text
-      (:show-clock/status), when app state doesn't have it yet. It writes app
-      state no other way.
+      the tick's read of app state), a key held too long (:vibe/release
+      :reason :watchdog: laser-show.vibes.watchdog/due), and the status views
+      show a few times a second, the beat square, the frame stats and the MTC
+      text (:show-clock/status), when app state doesn't have it yet. It
+      writes app state no other way.
 
    Only app requires this namespace; tests call tick! by hand."
   (:require [clojure.tools.logging :as log]
@@ -43,7 +44,8 @@
             [laser-show.state.extractors :as ex]
             [laser-show.timeline.playback :as playback]
             [laser-show.vibes.faders :as faders]
-            [laser-show.vibes.rotation :as rotation]))
+            [laser-show.vibes.rotation :as rotation]
+            [laser-show.vibes.watchdog :as watchdog]))
 
 (def ^:const TICK_HZ 60)
 
@@ -148,20 +150,24 @@
 
 ;; A tick
 
-(defn- rotation-step
-  "[runtime reports]: auto-advance's report (vibes.rotation/due, on app
-   state's time base, the wall clock), at most every report-interval-ms by
-   the runtime's :vibe-sent."
-  [runtime state now-ms]
-  (let [report (rotation/due state (System/currentTimeMillis) (double (or (ex/bpm state) 120.0)))
-        [vibe-sent reports] (show-time/due-reports (:vibe-sent runtime) (when report [report]) now-ms)]
+(defn- vibe-step
+  "[runtime reports]: vibe mode's reports, auto-advance's (vibes.rotation/due)
+   and the stuck-key guard's (vibes.watchdog/due, with the tick's presses),
+   on app state's time base, the wall clock, each at most every
+   report-interval-ms by the runtime's :vibe-sent."
+  [runtime state pulses now-ms]
+  (let [wall-ms (System/currentTimeMillis)
+        report (rotation/due state wall-ms (double (or (ex/bpm state) 120.0)))
+        stuck (watchdog/due state wall-ms pulses)
+        [vibe-sent reports] (show-time/due-reports (:vibe-sent runtime) (cond-> (or stuck []) report (conj report)) now-ms)]
     [(assoc runtime :vibe-sent vibe-sent) reports]))
 
 (defn tick!
   "One tick at now-ns (System/nanoTime): step show time, render every playing
-   cue, publish, then send the step's reports, auto-advance's and the status
-   as events (events/dispatch!). now-ms, the step's time base, is fractional
-   milliseconds since the first tick after a reset. Returns the snapshot."
+   cue, publish, then send the step's reports, vibe mode's (auto-advance and
+   stuck keys) and the status as events (events/dispatch!). now-ms, the
+   step's time base, is fractional milliseconds since the first tick after a
+   reset. Returns the snapshot."
   [now-ns]
   (let [state (state/get-raw-state)
         input-values (input-store/get-all-continuous-values)
@@ -185,7 +191,7 @@
                                             :preview (delay (frame-service/preview-data cues))))
         ;; After publish!, so the engines never wait for them
         [runtime status] (status-step runtime state mtc-pos now-ms)
-        [runtime vibe-reports] (rotation-step runtime state now-ms)]
+        [runtime vibe-reports] (vibe-step runtime state pulses now-ms)]
     (reset! show-time/!runtime runtime)
     (run! events/dispatch! (cond-> (into reports vibe-reports) status (conj status)))
     snapshot))

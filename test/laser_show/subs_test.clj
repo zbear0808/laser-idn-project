@@ -603,3 +603,60 @@
     (is (= 1 (:projector-count usage)))
     (testing "a cue with no destination counts for All"
       (is (= 2 (:cue-count (fx/sub-ctx (context base-state) subs/zone-group-usage :all)))))))
+
+
+;; Safety (plans/2026-11-18-vibe-mode/07)
+
+(deftest vibe-output-banner-sub-test
+  (let [streaming (fn [ctx running? status]
+                    (fx/swap-context ctx #(-> % (assoc-in [:backend :streaming :running?] running?)
+                                              (assoc-in [:backend :streaming :status] status))))
+        banner #(fx/sub-ctx % subs/vibe-output-banner)
+        ctx (context (vibe-state))]
+    (is (nil? (banner ctx)) "nothing played yet: the status line says it, no banner")
+    (let [played (press ctx :hit 1000)]
+      (is (= "NO OUTPUT: press Stream" (banner played)) "a press into nothing: the banner says why it shows nothing")
+      (is (some? (get-in (fx/sub-val played identity) [:playback :active-cues (in-state played :vibe-runtime :voices :hit :cell)]))
+          "invariant 6: the press still plays")
+      (is (= "NO OUTPUT: no projectors enabled" (banner (streaming played true {:engines 0 :wanted 0 :pending? false :projectors {}})))
+          "as the toolbar says (connection-status :idle)")
+      (is (nil? (banner (streaming played true nil))) "starting")
+      (is (nil? (banner (streaming played true {:engines 1 :wanted 1 :pending? false :projectors {:a {:state :streaming}}}))))
+      (testing "an effects-only press, or a vibe chosen on the strip, has played too"
+        (is (some? (banner (fx/swap-context ctx assoc-in [:playback :pulses :accent] {:id 1 :held? false}))))
+        (is (some? (banner (fx/swap-context ctx assoc-in [:vibe-runtime :current] :vibe-2))))))))
+
+(deftest vibe-show-lock-sub-test
+  (let [ctx (context (vibe-state))]
+    (is (= {:locked? false :notice nil} (fx/sub-ctx ctx subs/vibe-show-lock)))
+    (is (= {:locked? true :notice "Move Cell refused"}
+           (fx/sub-ctx (fx/swap-context ctx #(-> % (assoc-in [:ui :show-lock?] true)
+                                                 (assoc-in [:ui :show-lock-notice] {:text "Move Cell refused" :event :grid/move-cell})))
+                       subs/vibe-show-lock)))))
+
+(deftest vibe-audience-subs-test
+  (let [crowd {:items [{:type :preset :preset-id :circle}] :destination-zone {:zone-group-id :crowd}}
+        s (-> (vibe-state)
+              (assoc-in [:chains :cue-chains [0 1]] crowd)
+              (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[0 0] [0 1]]))
+        allowing (assoc-in s [:config :vibes :library :vibe-1 :allow-audience?] true)
+        marks #(into {} (for [r roles] [r (fx/sub-ctx (context %) subs/vibe-pad-audience? r)]))]
+    (is (false? (fx/sub-ctx (context s) subs/vibe-audience?)))
+    (is (= {:hit false :accent false :flash false :vibe false :blackout false} (marks s))
+        "an audience cell in a pool that never plays it marks nothing (V6)")
+    (is (true? (fx/sub-ctx (context allowing) subs/vibe-audience?)) "the header's badge")
+    (is (= {:hit true :accent false :flash false :vibe false :blackout false} (marks allowing))
+        "the pad that may start it")
+    (is (true? (:flash (marks (assoc-in allowing [:config :vibes :library :vibe-1 :flash :cue] [0 1]))))
+        "FLASH's cue")
+    (testing "the vibe that plays: another one's rule isn't this one's"
+      (is (false? (fx/sub-ctx (context (assoc-in allowing [:vibe-runtime :current] :vibe-2)) subs/vibe-audience?))))))
+
+(deftest vibes-tab-label-sub-test
+  (let [s (vibe-state)]
+    (is (= "Vibes" (fx/sub-ctx (context s) subs/vibes-tab-label)) "the starter vibes: no error, warnings and info aside")
+    (is (= "Vibes ⚠ 1" (fx/sub-ctx (context (assoc-in s [:config :vibes :library :vibe-1 :hit :cells] [])) subs/vibes-tab-label))
+        "HIT does nothing: one error")
+    (is (= "Vibes ⚠ 2" (fx/sub-ctx (context (-> s (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [])
+                                                (assoc-in [:config :vibes :library :vibe-2 :hit :cells] [])))
+                                   subs/vibes-tab-label)))))

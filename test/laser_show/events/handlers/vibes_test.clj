@@ -677,3 +677,57 @@
         (is (= 32 (count (get-in s [:chains :effect-chains]))) "the grid is full")
         (is (= master (get-in s [:chains :effect-chains [0 3]])))
         (is (= (:chains s) (:chains (run s {:event/type :vibe/add-reaction :vibe :vibe-1 :kind :flip}))) "full: nothing")))))
+
+
+;; Safety (plans/2026-11-18-vibe-mode/07)
+
+(deftest clear-control-lets-go-of-a-held-role-test
+  (testing "the key that holds HIT is cleared: its release would reach nothing, so HIT lets go now (04 §11)"
+    (let [hit {:source :midi :channel 0 :note 36}
+          accent {:source :midi :channel 0 :note 37}
+          s0 (-> (starter)
+                 (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)
+                 (assoc-in [:config :input :trigger-map] {hit {:type :vibe :role :hit} accent {:type :vibe :role :accent}}))
+          held (-> s0
+                   (run {:event/type :vibe/press :role :hit :input-time 1000})
+                   (run {:event/type :vibe/press :role :accent :input-time 1000}))
+          cell (rt held :voices :hit :cell)
+          s (run held {:event/type :vibe/clear-control :role :hit :time 1500})]
+      (is (nil? (rt s :held :hit)))
+      (is (false? (get-in s [:playback :pulses :hit :held?])) "and its pulse")
+      (is (nil? (get-in s [:playback :active-cues cell])) "cut, as release-all lets go")
+      (is (= {:at 1000 :src :input} (rt s :held :accent)) "ACCENT keeps its key and its hold")
+      (testing "a pad's hold of HIT stays: the pad's release still comes"
+        (let [pad (run s0 {:event/type :vibe/press :role :hit :src :pad :time 1000})]
+          (is (= :pad (rt (run pad {:event/type :vibe/clear-control :role :hit}) :held :hit :src))))))))
+
+(deftest unticking-allow-audience-stops-what-plays-test
+  (testing "Allow audience cells unticked: an audience cue stops at once, whichever role plays it (03 §10)"
+    (let [crowd {:items [{:type :preset :preset-id :circle}] :destination-zone {:zone-group-id :crowd}}
+          s0 (-> (starter)
+                 (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)
+                 (assoc-in [:chains :cue-chains [0 1]] crowd)
+                 (assoc-in [:chains :cue-chains [1 1]] crowd)
+                 (update-in [:config :vibes :library :vibe-1] merge
+                            {:allow-audience? true
+                             :hit {:cells [[0 1]] :select :shuffle :mode :sustain :beats 1.0}
+                             :accent {:cells [[4 0]] :select :shuffle :mode :sustain :beats 2.0}
+                             :flash {:cue [1 1] :fx [[0 3]] :solo? false}}))
+          playing (-> s0
+                      (run {:event/type :vibe/press :role :hit :input-time 1000})
+                      (run {:event/type :vibe/release :role :hit :input-time 1050})
+                      (run {:event/type :vibe/press :role :accent :input-time 1100})
+                      (run {:event/type :vibe/release :role :accent :input-time 1150})
+                      (run {:event/type :vibe/press :role :flash :input-time 1200}))
+          active #(set (keys (get-in % [:playback :active-cues])))]
+      (is (= #{[0 1] [4 0] [1 1]} (active playing)) "HIT and the FLASH cue reach the crowd, ACCENT doesn't")
+      (let [s (run playing {:event/type :vibe/set-option :vibe :vibe-1 :key :allow-audience? :value false :time 1300})]
+        (is (= #{[4 0]} (active s)) "the two audience cues stop; ACCENT plays on")
+        (is (nil? (rt s :voices :hit)))
+        (is (true? (get-in s [:chains :effect-chains [0 3] :active?])) "the flash's effect cell stays on while FLASH is held")
+        (is (= :input (rt s :held :flash :src)))
+        (let [let-go (run s {:event/type :vibe/release :role :flash :input-time 1400})]
+          (is (false? (get-in let-go [:chains :effect-chains [0 3] :active?])) "and goes off with FLASH")
+          (is (= #{[4 0]} (active let-go))))
+        (testing "ticked again: nothing starts by itself, the next press may pick them"
+          (is (= #{[4 0]} (active (run s {:event/type :vibe/set-option :vibe :vibe-1 :key :allow-audience? :value true})))))))))

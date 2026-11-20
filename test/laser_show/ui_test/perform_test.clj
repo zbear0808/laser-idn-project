@@ -1,7 +1,8 @@
 (ns laser-show.ui-test.perform-test
   "The Perform tab: five pads played by mouse, touch or a learned control,
    the vibe strip, the banner, learning a pad's control, a pointer's hold
-   ending when the window loses focus, and the faders' meters.
+   ending when the window loses focus, the faders' meters, and safety: the
+   show lock, the NO OUTPUT banner, the audience marks and a stuck pad.
    
    The headless robot marks every mouse event synthesized, as JavaFX marks
    the ones it makes from a touch, and the pads leave those out (a touch
@@ -9,6 +10,7 @@
    ui/press-node! and ui/release-node!, which fire a real mouse's events
    headless."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [laser-show.backend.output-runtime :as output-runtime]
             [laser-show.events.core :as events]
             [laser-show.events.handlers.input-mapper :as input-mapper]
             [laser-show.input.events :as input-events]
@@ -494,3 +496,96 @@
         (ui/assert-text! "#vibe-meter-slider-2-text" "Morph – · not wired"))
       (finally
         (store/clear-continuous-values!)))))
+
+
+;; Safety (plans/2026-11-18-vibe-mode/07)
+
+(deftest show-lock-switch-blocks-a-cell-move-test
+  (let [robot (ui/robot)
+        move {:event/type :grid/move-cell :from-col 0 :from-row 0 :to-col 5 :to-row 2}
+        cue-at #(get-in (app-state) [:chains :cue-chains %])]
+    ;; A busy machine can't stretch the pad's click into a hold
+    (state/swap-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
+    (open-perform! robot)
+    (is (not (ui/selected? "#vibe-show-lock")) "unlocked in a new project")
+    (ui/click! robot "#vibe-show-lock")
+    (ui/wait-for! #(true? (get-in (app-state) [:ui :show-lock?])))
+    (ui/assert-selected! "#vibe-show-lock")
+    (testing "a drag's drop on the grid is refused, and the header says so"
+      (events/dispatch! move)
+      (ui/assert-text! "#vibe-lock-notice" "Move Cell refused")
+      (is (some? (cue-at [0 0])) "the cell stays where it was")
+      (is (nil? (cue-at [5 2])))
+      (is (empty? (get-in (app-state) [:history :undo-stack])) "and no undo step"))
+    (testing "the pads still play"
+      (ui/mouse-click! robot "#vibe-pad-hit")
+      (ui/wait-for! #(some? (rt :voices :hit))))
+    (testing "unlocked: the notice goes, and the move works again"
+      (ui/click! robot "#vibe-show-lock")
+      (ui/wait-for! #(false? (get-in (app-state) [:ui :show-lock?])))
+      (ui/wait-for! #(not (ui/visible? "#vibe-lock-notice")))
+      (events/dispatch! move)
+      (ui/wait-for! #(some? (cue-at [5 2]))))))
+
+(deftest no-output-banner-test
+  (let [robot (ui/robot)]
+    (state/swap-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
+    (open-perform! robot)
+    (is (not (ui/visible? "#vibe-no-output")) "nothing played yet: the status line alone says it")
+    (ui/mouse-click! robot "#vibe-pad-hit")
+    (ui/wait-for! #(some? (rt :voices :hit)))
+    (ui/assert-text! "#vibe-no-output" "NO OUTPUT: press Stream")
+    (is (some? (intent (rt :voices :hit :cell))) "invariant 6: the press plays, into nothing")
+    (try
+      (testing "Stream with no projector enabled: the banner and the toolbar agree"
+        (ui/click! robot "#stream-btn")
+        (ui/assert-text! "#streaming-status-label" "No projectors enabled")
+        (ui/assert-text! "#vibe-no-output" "NO OUTPUT: no projectors enabled"))
+      (ui/click! robot "#stream-btn")
+      (ui/assert-text! "#streaming-status-label" "Not streaming")
+      (ui/assert-text! "#vibe-no-output" "NO OUTPUT: press Stream")
+      (finally
+        (output-runtime/drain! 2000)))))
+
+(deftest audience-badge-and-pad-mark-test
+  (let [robot (ui/robot)
+        crowd {:items [{:type :preset :preset-id :circle}] :destination-zone {:zone-group-id :crowd}}]
+    (state/swap-state! #(-> %
+                            (assoc-in [:chains :cue-chains [0 1]] crowd)
+                            (assoc-in [:config :vibes :library :vibe-1 :hit :cells] [[0 0] [0 1]])))
+    (open-perform! robot)
+    (is (not (ui/visible? "#vibe-header-audience")) "Shapes doesn't allow audience cells")
+    (is (not (ui/visible? "#vibe-pad-hit-audience")) "its HIT pool's crowd cue never plays (V6)")
+    (events/dispatch! {:event/type :vibe/set-option :vibe :vibe-1 :key :allow-audience? :value true})
+    (ui/wait-for! #(ui/visible? "#vibe-header-audience"))
+    (ui/assert-text! "#vibe-header-audience" "AUDIENCE ALLOWED")
+    (ui/wait-for! #(ui/visible? "#vibe-pad-hit-audience"))
+    (is (not (ui/visible? "#vibe-pad-accent-audience")) "ACCENT's pool reaches no crowd")
+    (testing "another vibe: its own rule"
+      (ui/click! robot "#vibe-chip-vibe-2")
+      (ui/wait-for! #(not (ui/visible? "#vibe-header-audience")))
+      (is (not (ui/visible? "#vibe-pad-hit-audience"))))))
+
+(deftest stuck-pad-shows-its-problem-test
+  (let [robot (ui/robot)]
+    ;; Half a second is a stuck key here
+    (state/swap-state! assoc-in [:config :vibes :settings :max-hold-secs] 0.5)
+    (open-perform! robot)
+    (ui/press-node! robot "#vibe-pad-hit")
+    (ui/wait-for! #(= :pad (rt :held :hit :src)))
+    (ui/wait-for! #(ui/has-style-class? "#vibe-pad-hit" "vibe-pad-held"))
+    (Thread/sleep 600)
+    (show-clock/tick! (System/nanoTime))
+    (ui/wait-for! #(= {:role :hit :why :stuck-key} (rt :problem)))
+    (is (nil? (rt :held :hit)) "the show clock's watchdog let go of it")
+    (ui/assert-text! "#vibe-pad-hit-now" "Stuck key released")
+    (ui/wait-for! #(not (ui/has-style-class? "#vibe-pad-hit" "vibe-pad-held")))
+    (testing "the mouse's late release changes nothing"
+      (ui/release-node! robot "#vibe-pad-hit")
+      (flush-event-queue!)
+      (is (= {:role :hit :why :stuck-key} (rt :problem))))
+    (testing "the next good press clears it"
+      (state/swap-state! assoc-in [:config :vibes :settings :quick-tap-ms] 2000)
+      (ui/mouse-click! robot "#vibe-pad-hit")
+      (ui/wait-for! #(nil? (rt :problem)))
+      (ui/wait-for! #(not= "Stuck key released" (ui/node-text "#vibe-pad-hit-now"))))))

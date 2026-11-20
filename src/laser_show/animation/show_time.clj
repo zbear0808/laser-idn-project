@@ -21,7 +21,8 @@
    step reads them once per tick. What the clock learns goes back to app state
    as events: a run's end (a timeline's, or a vibe cue's decay) and a timecode
    chase (:show-clock/cue-ended, :show-clock/chase), auto-advance's arm and
-   advance (laser-show.vibes.rotation, with their own memory, :vibe-sent),
+   advance and a stuck key's release (laser-show.vibes.rotation and
+   .watchdog, with their own memory, :vibe-sent),
    and what views show a few times a second, the beat square, the stats and
    the MTC text (:show-clock/status, on status-paths). Positions never reach
    app state: views that move every frame draw the newest snapshot

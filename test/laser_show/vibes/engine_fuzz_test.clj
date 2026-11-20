@@ -8,27 +8,38 @@
    the audience rule and deletes through their handlers (engine/reconcile),
    and auto-advance: AUTO switched on and off, the clock's arms and advances
    as show-clock/tick! sends them (each twice), and arms and advances that
-   come late. After every step it checks invariants 1-12
+   come late. And safety (07): the show lock on and off, undo and redo
+   through their handlers, keys that stick (a press, then the clock past the
+   hold limit, which the clock's stuck-key reports end) and stuck-key reports
+   that come late. After every step it checks invariants 1-12
    of plans/2026-11-18-vibe-mode/01-phase1-engine-core.md §7, the pulses
-   presses write for tap reactions (04 §7, check-pulses), and auto-advance's
-   invariants 1-4 (06 §7, check-auto, check-rotation); what may play
-   (invariant 1) and what may change the vibe by itself are worked out here,
-   not with laser-show.vibes.library or laser-show.vibes.rotation.
+   presses write for tap reactions (04 §7, check-pulses), auto-advance's
+   invariants 1-4 (06 §7, check-auto, check-rotation), and 07's: what the
+   lock refuses changes nothing but the notice and the rest does what it
+   would unlocked (check-lock), a stuck key is let go of once, alone, with
+   its problem (check-watchdog, check-stuck-holds), no engine cue plays
+   without its voice, none is held without its key, and no count goes
+   negative (check-always); what may play (invariant 1) and what may change
+   the vibe by itself are worked out here, not with laser-show.vibes.library
+   or laser-show.vibes.rotation.
    A failure prints the seed and the events up to the failing step, the
    shortest failing prefix. To run one seed: VIBE_FUZZ_SEED=<seed>; seeds 1
-   to n: VIBE_FUZZ_SEEDS=<n>."
+   to n: VIBE_FUZZ_SEEDS=<n>. The soak test (engine-soak-test) walks the
+   same way for longer."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [laser-show.animation.show-time :as show-time]
             [laser-show.events.core :as events]
+            [laser-show.events.show-lock :as show-lock]
             [laser-show.state.domains :as domains]
             [laser-show.state.history :as history]
             [laser-show.state.templates :as templates]
             [laser-show.timeline.playback :as playback]
             [laser-show.triggers.shuffle-bag :as bag]
             [laser-show.vibes.library :as library]
-            [laser-show.vibes.rotation :as rotation])
-  (:import [java.util SplittableRandom]))
+            [laser-show.vibes.rotation :as rotation]
+            [laser-show.vibes.watchdog :as watchdog])
+  (:import [java.util SplittableRandom UUID]))
 
 (def ^:private steps 2000)
 
@@ -95,12 +106,15 @@
       (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)
       ;; Auto-advance on, and soon: 3 s, then a gap of 2 beats
       (assoc-in [:config :vibes :settings :rotation] {:mode :auto :seconds 3 :pause-beats 2.0})
+      ;; A key held 10 s is stuck: the walk's holds reach it now and then
+      (assoc-in [:config :vibes :settings :max-hold-secs] 10)
       (history/mark-clean)))
 
 (def ^:private cue-cells (vec (sort (keys (get-in (world-state) [:chains :cue-chains])))))
 (def ^:private fx-cells [[0 3] [1 3] [2 3]])
 (def ^:private tick-ms (/ 1000.0 60))
 (def ^:private rotation-ms {:seconds 3000 :gap 1000})
+(def ^:private hold-limit-ms 10000)
 
 
 ;; Running events and the clock
@@ -122,25 +136,30 @@
   [state event t]
   (events/handle-event-pipeline (assoc event :state state :time t)))
 
-(declare bad check-auto)
+(declare bad check-auto check-watchdog)
 
 (defn- tick
-  "The world k ticks of the show clock on, its reports handled, and
-   auto-advance's as show-clock/tick! sends them (rotation/due on the tick's
-   app state, at most every 250 ms by the runtime's :vibe-sent). Each of
-   those is handled twice: the second must change nothing (06 invariant 2);
-   check-auto checks the first. Problems go in :tick-problems."
+  "The world k ticks of the show clock on, its reports handled, and vibe
+   mode's as show-clock/tick! sends them: auto-advance's (rotation/due) and
+   the stuck keys' (watchdog/due, with the tick's pulse view), on the tick's
+   app state, at most every 250 ms by the runtime's :vibe-sent. Each of
+   those is handled twice: the second must change nothing (06 invariant 2,
+   07 invariant 5); check-auto and check-watchdog check the first. Problems
+   go in :tick-problems."
   [{:keys [state rt now] :as world} k]
   (reduce (fn [{:keys [state rt now] :as w} _]
             (let [now (+ now tick-ms)
                   t (long now)
                   {:keys [runtime reports]} (show-time/step rt state nil now)
                   [vibe-sent vibe-reports] (show-time/due-reports (:vibe-sent runtime)
-                                                                  (keep identity [(rotation/due state now 120.0)])
+                                                                  (into (vec (watchdog/due state now (show-time/pulse-view runtime)))
+                                                                        (keep identity [(rotation/due state now 120.0)]))
                                                                   now)
                   [state problems] (reduce (fn [[s problems] report]
                                              (let [s' (run s report t)]
-                                               [s' (cond-> (into problems (check-auto s report s' t))
+                                               [s' (cond-> (into problems (if (= :watchdog (:reason report))
+                                                                            (check-watchdog s report s' t)
+                                                                            (check-auto s report s' t)))
                                                      (= s s')
                                                      (conj (bad "06: the clock's " (pr-str report) " changed nothing"))
                                                      (not= s' (run s' report t))
@@ -149,8 +168,10 @@
                                            vibe-reports)]
               (-> w
                   (assoc :rt (assoc runtime :vibe-sent vibe-sent) :now now :state state)
-                  (update :tick-problems into problems))))
-          (assoc world :state state :rt rt :now now)
+                  (update :tick-problems into problems)
+                  (cond-> (not= (get-in (:state w) [:vibe-runtime :current]) (get-in state [:vibe-runtime :current]))
+                    (update :tick-changes (fnil inc 0))))))
+          (assoc world :state state :rt rt :now now :tick-changes 0)
           (range k)))
 
 
@@ -181,9 +202,16 @@
             (distinct (concat (keys (get-in state [:vibe-runtime :held]))
                               (filter #(get-in state [:playback :pulses % :held?]) [:hit :accent :flash]))))))
 
+(defn- stuck
+  "A press whose release never comes (a pulled cable): role pressed from
+   src, then the clock past the hold limit, whose report lets go of it."
+  [role src]
+  {:kind :vibe :event {:event/type :vibe/press :role role :src src}
+   :next {:kind :tick :ticks (long (Math/ceil (/ (+ hold-limit-ms 500.0) tick-ms)))}})
+
 (defn- next-step
   "A random step for world: {:kind :event? :next?}, kinds :vibe, :tick, :grid,
-   :fx, :edit and :vibe-edit; a step's :next is the step after it. Blackout is pressed
+   :fx, :edit, :undo and :vibe-edit; a step's :next is the step after it. Blackout is pressed
    rarely, and more often while it is on. Half the HIT and ACCENT presses are
    taps: the release follows within 140 ms. Half the grid's clicks start a
    cell a voice plays again (its cue is someone else's now), and half of those
@@ -191,7 +219,9 @@
    voices without forgetting stale ones first. Now and then the AUTO switch,
    an arm or an advance that may be late (another vibe's) or have no reason,
    as the clock's reports could arrive, or a quiet spell: every key let go
-   of, then 2 s of the clock."
+   of, then 2 s of the clock. And now and then the show lock switched, an
+   undo or a redo, a stuck key's report that may be late (or for an earlier
+   press), or a key that sticks."
   [^SplittableRandom rng {:keys [state next]}]
   (or next
       (let [blackout? (get-in state [:vibe-runtime :blackout?])
@@ -210,6 +240,14 @@
               1 {:kind :vibe :event {:event/type :vibe/arm :from from}}
               2 {:kind :vibe :event {:event/type :vibe/advance :reason (one-of rng [:gap :gap :flash nil]) :from from}}
               (quiet state (one-of rng [nil :flash :flash-over-hit]))))
+
+          (< (.nextInt rng 100) 3)
+          (case (.nextInt rng 4)
+            0 {:kind :vibe :event {:event/type :vibe/set-show-lock :locked? (not (get-in state [:ui :show-lock?]))}}
+            1 {:kind :undo :event {:event/type (one-of rng [:edit/undo :edit/undo :edit/redo :history/undo :history/redo])}}
+            2 {:kind :vibe :event (cond-> {:event/type :vibe/release :role (role) :reason :watchdog}
+                                    (.nextBoolean rng) (assoc :pulse (inc (.nextInt rng 8))))}
+            (stuck (role) (one-of rng [:input :pad])))
 
           :else
           (let [r (.nextInt rng 100)]
@@ -305,18 +343,44 @@
   (cond-> state
     (:held? (pulse state role)) (update-in [:playback :pulses role] #(-> % (assoc :held? false) (dissoc :src)))))
 
+(defn- engine-run?
+  "Did the vibe engine start run? Its ids are (UUID. t n); a grid start's are
+   random, of variant 2 (01 §10)."
+  [run]
+  (and (instance? UUID run) (not= 2 (.variant ^UUID run))))
+
 (defn- check-always
-  "Invariants 1, 3, 4 and 6 on any state. (A voice's cell can come to follow
-   timecode or reach the crowd only by a move under a playing intent, which
-   the clock drops at its next tick: presses are checked in check-press.)"
+  "Invariants 1, 3, 4 and 6 on any state, and 07's invariant 7: no engine cue
+   plays that no voice owns (a role's old voice left playing), none is held
+   (so never decays) unless its role is, and no count is negative. (A
+   voice's cell can come to follow timecode or reach the crowd only by a
+   move under a playing intent, which the clock drops at its next tick:
+   presses are checked in check-press.)"
   [state]
-  (let [voices (filter #(live? state (val %)) (vr state :voices))]
+  (let [voices (filter #(live? state (val %)) (vr state :voices))
+        intents (get-in state [:playback :active-cues])]
     (concat
      (for [[role {:keys [cell]}] voices
            :when (empty? (get-in state [:chains :cue-chains cell :items]))]
        (bad "inv 1: the " role " voice plays " cell ", which has no content"))
      (when (not= (count voices) (count (set (map (comp :run val) voices))))
        [(bad "inv 4: two roles own one run " (pr-str voices))])
+     (for [[cell {:keys [run]}] intents
+           :when (and (engine-run? run) (not-any? #(= run (:run %)) (vals (vr state :voices))))]
+       (bad "07 inv 7: " cell " plays an engine cue that no voice owns"))
+     (for [[cell {:keys [run hold?]}] intents
+           :when hold?
+           :let [owner (some (fn [[role v]] (when (= run (:run v)) role)) (vr state :voices))]
+           :when (not (and owner (vr state :held owner)))]
+       (bad "07 inv 7: " cell " is held, so it never decays, but " (if owner (str owner " isn't") "no voice plays it")))
+     (when-not (nat-int? (vr state :started))
+       [(bad "07 inv 7: :started is " (vr state :started))])
+     (for [[source {:keys [id]}] (get-in state [:playback :pulses])
+           :when (and (some? id) (not (nat-int? id)))]
+       (bad "07 inv 7: " source "'s pulse id is " id))
+     (for [[k {:keys [n]}] (vr state :bags)
+           :when (and (some? n) (not (nat-int? n)))]
+       (bad "07 inv 7: bag " k "'s :n is " n))
      (for [[k {:keys [items remaining last]}] (vr state :bags)
            :when (or (not= (count remaining) (count (set remaining)))
                      (not-every? (set items) remaining)
@@ -426,6 +490,77 @@
 
       :else nil)))
 
+(defn- check-watchdog
+  "07 invariant 5 for a stuck key's report (:vibe/release :reason :watchdog,
+   the clock's or a late one): a hold still stuck at t, the engine's held
+   hold-limit-ms or more, or the pulse of the report's press that played
+   nothing, still held, is let go of as release-all lets go (check-release,
+   cut), once, with its problem, and the vibe, the lock and the other roles'
+   holds stay. A report that finds nothing stuck changes nothing."
+  [before {:keys [role] pulse-id :pulse} after t]
+  (let [{:keys [at] :as held} (vr before :held role)
+        stuck? (if held
+                 (>= (- t at) hold-limit-ms)
+                 (and (some? pulse-id) (= pulse-id (:id (pulse before role))) (true? (:held? (pulse before role)))))]
+    (if-not stuck?
+      (when (not= before after)
+        [(bad "07 inv 5: a stuck-key report for " role ", which isn't stuck, changed the state")])
+      (concat
+       (when (vr after :held role) [(bad "07 inv 5: " role " is still held after its stuck-key report")])
+       (when (:held? (pulse after role)) [(bad "07 inv 5: " role "'s pulse is still held after its stuck-key report")])
+       (when (not= {:role role :why :stuck-key} (vr after :problem))
+         [(bad "07 inv 5: a stuck " role " left the problem " (pr-str (vr after :problem)))])
+       (when (not= (vr before :current) (vr after :current)) [(bad "07: a stuck " role " changed the vibe")])
+       (when (not= (= :locked (vr before :rotation)) (= :locked (vr after :rotation)))
+         [(bad "07: a stuck " role " locked or unlocked the rotation")])
+       (when (not= (dissoc (vr before :held) role) (vr after :held))
+         [(bad "07 inv 5: a stuck " role " changed another role's hold")])
+       (check-release before after role t true)))))
+
+(defn- check-stuck-holds
+  "07 invariant 5 after the clock's ticks up to now (view: the last tick's
+   pulse view): nothing is held longer than the limit, the watchdog let go of
+   it."
+  [state now view]
+  (concat
+   (for [[role {:keys [at]}] (vr state :held)
+         :when (>= (- now at) hold-limit-ms)]
+     (bad "07 inv 5: " role " is held " (- now at) " ms, past the limit, after a tick"))
+   (for [r [:hit :accent :flash]
+         :let [{:keys [held? ms]} (get view r)]
+         :when (and (:held? (pulse state r)) (nil? (vr state :held r)) held? (>= ms hold-limit-ms))]
+     (bad "07 inv 5: " r "'s pulse is held " ms " ms, past the limit, after a tick"))))
+
+(defn- locked? [state] (true? (get-in state [:ui :show-lock?])))
+
+(defn- without-notices [state] (update state :ui assoc :notice nil :show-lock-notice nil))
+
+(defn- requests-without-ids
+  "state's requests without their ids (Stop's restart has a random one)."
+  [state]
+  (update-in state [:playback :requests] #(update-vals (or % {}) (fn [r] (dissoc r :id)))))
+
+(defn- check-lock
+  "07 invariants 1, 2 and 8 for a step's event while locked: one the lock
+   refuses changes nothing but the notice; unlocking changes the switch and
+   the notice only; a vibe event does what it would unlocked."
+  [before {:keys [kind event]} after t]
+  (when (and event (locked? before))
+    (let [type (:event/type event)]
+      (cond
+        (contains? show-lock/blocked-events type)
+        (when (not= (without-notices before) (without-notices after))
+          [(bad "07 inv 1: " type " changed more than the notice while locked")])
+
+        (= :vibe/set-show-lock type)
+        (when (and (not (:locked? event))
+                   (not= (update before :ui assoc :show-lock? false :show-lock-notice nil) after))
+          ["07 inv 2: unlocking changed more than the switch and the notice"])
+
+        (= :vibe kind)
+        (when (not= (requests-without-ids after)
+                    (requests-without-ids (assoc-in (run (assoc-in before [:ui :show-lock?] false) event t) [:ui :show-lock?] true)))
+          [(bad "07 inv 8: " type " " (:role event) " did otherwise while locked")])))))
 (defn- check-pulses
   "Phase 4's pulses (plans/2026-11-18-vibe-mode/04 §7): a HIT, ACCENT or
    FLASH press outside blackout pulses, held, whatever it plays; every
@@ -433,7 +568,7 @@
    BLACKOUT never pulses; :vibe pulses once per change a VIBE tap, a select
    or an auto-advance makes (06: a gap, or a FLASH release while armed),
    never during blackout, and for nothing else."
-  [before {:keys [event/type role only src]} after]
+  [before {:keys [event/type role only src reason]} after]
   (let [blackout? (vr before :blackout?)
         id (fn [s r] (:id (pulse s r) 0))
         vibe-change? (and (or (#{:vibe/select :vibe/advance} type) (and (= :vibe/release type) (#{:vibe :flash} role)))
@@ -446,7 +581,8 @@
      (when (and (= :vibe/press type) (= :blackout role)
                 (not= (map #(id before %) [:hit :accent :flash :vibe]) (map #(id after %) [:hit :accent :flash :vibe])))
        ["04 inv 9: BLACKOUT pulsed"])
-     (when (and (= :vibe/release type) (:held? (pulse after role)))
+     ;; A stuck key's report that finds nothing stuck changes nothing (check-watchdog)
+     (when (and (= :vibe/release type) (not= :watchdog reason) (:held? (pulse after role)))
        [(bad "04: " role "'s pulse is held after its release")])
      (when (= :vibe/release-all type)
        (for [r [:hit :accent :flash]
@@ -538,13 +674,15 @@
     (concat
      (case type
        (:vibe/arm :vibe/advance) (check-auto before event after t)
-       :vibe/release (if (= :flash role)
-                       (when (vr before :held :flash)
-                         (check-auto (-> before (update-in [:vibe-runtime :held] dissoc :flash) (let-go :flash))
-                                     {:event/type ::flash-release :reason :flash :from (vr before :current)}
-                                     after t))
-                       (when (and changed? (not= :vibe role))
-                         [(bad "06 inv 1: releasing " role " changed the vibe")]))
+       :vibe/release (cond
+                       ;; A stuck key's: check-watchdog
+                       (= :watchdog (:reason event)) nil
+                       (= :flash role) (when (vr before :held :flash)
+                                         (check-auto (-> before (update-in [:vibe-runtime :held] dissoc :flash) (let-go :flash))
+                                                     {:event/type ::flash-release :reason :flash :from (vr before :current)}
+                                                     after t))
+                       :else (when (and changed? (not= :vibe role))
+                               [(bad "06 inv 1: releasing " role " changed the vibe")]))
        :vibe/set-auto (concat
                        (when changed? ["06: AUTO's switch changed the vibe"])
                        (when-not (history/document-roots-identical? before after)
@@ -606,7 +744,9 @@
        ["inv 11: the same state, event and time gave another result"])
      (case type
        :vibe/press (check-press before after role t)
-       :vibe/release (check-release before after role t false)
+       :vibe/release (if (= :watchdog (:reason event))
+                       (check-watchdog before event after t)
+                       (check-release before after role t false))
        :vibe/release-all (let [roles (for [[r {:keys [src]}] (vr before :held)
                                            :when (or (nil? only) (= only src))]
                                        r)]
@@ -620,7 +760,9 @@
 (defn- check-vibe-edit
   "Phase 3's edits (engine/reconcile): they stop no cue the vibe layer
    didn't start (invariant 4) and start only what may play (1). When they
-   edit the vibe that plays, a HIT or ACCENT cue plays on, a cell its FX set
+   edit the vibe that plays, a HIT or ACCENT cue plays on unless the vibe
+   may no longer play it (07: Allow audience cells unticked stops every
+   audience cue at once, and no voice plays one after), a cell its FX set
    gains is on, one it loses that the set switched on is off (unless the
    held flash asked for it), and no other effect cell changes."
   [before after]
@@ -646,8 +788,11 @@
        (concat
         (for [role [:hit :accent]
               :let [voice (vr before :voices role)]
-              :when (and voice (live? before voice) (not (live? after voice)))]
+              :when (and voice (live? before voice) (not (live? after voice)) (may-play? after new (:cell voice)))]
           (bad "an edit of " current " stopped its " role " cue"))
+        (for [[role {:keys [cell] :as voice}] (vr after :voices)
+              :when (and (live? after voice) (may-play? before old cell) (not (may-play? after new cell)))]
+          (bad "07: an edit of " current "'s audience rule left " role " playing " cell ", which it may no longer play"))
         (for [cell (remove was now) :when (not (fx-on? after cell))]
           (bad "an edit gave " current "'s FX set " cell ", which is off"))
         (for [cell (remove now was)
@@ -702,22 +847,32 @@
 (defn- track-cycles
   "cycles {bag-key {:picked #{} :items #{} :clean? bool}} after a step: a
    pick joins its cycle (twice is a problem), a refill closes it (all items,
-   if the pool didn't change meanwhile), and a move renames what was picked."
+   if the pool didn't change meanwhile), and a move renames what was picked.
+   A pick can come in a tick too (a stuck FLASH let go of starts what it
+   kept waiting), and an undo or a redo of the document may rename cells
+   behind the bags' backs: the cycles then aren't clean."
   [cycles before after step]
   (let [{:keys [event]} step
-        cycles (if (and (= :grid (:kind step)) (= :grid/move-cell (:event/type event))
-                        (get-in before [:chains :cue-chains [(:from-col event) (:from-row event)]])
-                        (not= [(:from-col event) (:from-row event)] [(:to-col event) (:to-row event)]))
+        cycles (cond
+                 (and (= :grid (:kind step)) (= :grid/move-cell (:event/type event))
+                      (get-in before [:chains :cue-chains [(:from-col event) (:from-row event)]])
+                      (not= [(:from-col event) (:from-row event)] [(:to-col event) (:to-row event)])
+                      ;; not one the show lock refused
+                      (not= (get-in before [:chains :cue-chains]) (get-in after [:chains :cue-chains])))
                  (let [from [(:from-col event) (:from-row event)]
                        to [(:to-col event) (:to-row event)]]
                    (update-vals cycles #(update % :picked (fn [p] (set (map (rename from to) (disj p to)))))))
-                 cycles)]
+
+                 (and (= :undo (:kind step)) (not= (doc before) (doc after)))
+                 (update-vals cycles #(assoc % :clean? false))
+
+                 :else cycles)]
     (reduce-kv
      (fn [[cycles problems] k bag1]
        (let [bag0 (vr before :bags k)
              c (get cycles k)
              c (if (and c (not= (set (:items bag1)) (:items c))) (assoc c :clean? false :items (set (:items bag1))) c)]
-         (if (or (= bag0 bag1) (not= :vibe (:kind step)))
+         (if (or (= bag0 bag1) (not (#{:vibe :tick} (:kind step))))
            [(assoc cycles k c) problems]
            (let [pick (:last bag1)]
              (if (or (nil? c) (nil? bag0) (> (:n bag1 0) (:n bag0 0)))
@@ -736,14 +891,16 @@
 ;; The walk
 
 (defn- step!
-  "[world' problems] after one step."
+  "[world' problems] after one step. While the show lock is on, a direct
+   edit (one an undo would make) doesn't happen: the lock refuses undo."
   [world {:keys [kind event] :as step} dt]
   (let [before (:state world)
+        locked (locked? before)
         world (update world :now + dt)
         t (long (:now world))
         world (case kind
                 :tick (tick world (:ticks step))
-                :edit (update world :state edit (:edit step))
+                :edit (cond-> world (not locked) (update :state edit (:edit step)))
                 (assoc world :state (run before event t)))
         after (:state world)
         [cycles cycle-problems] (track-cycles (:cycles world) before after step)]
@@ -751,35 +908,56 @@
      (concat (check-always after)
              cycle-problems
              (:tick-problems world)
+             (check-lock before step after t)
              (case kind
                :vibe (concat (check-vibe-event before event after t)
                              (check-rotation before event after t))
                :tick (concat (check-clock (:rt world))
-                             (when (and (not= (vr before :current) (vr after :current)) (empty? (:tick-problems world)))
+                             (check-stuck-holds after (:now world) (show-time/pulse-view (:rt world)))
+                             ;; One :vibe pulse for each tick that changed the vibe: a long
+                             ;; tick step (a stuck key's 10 s) may change it more than once
+                             (when (and (pos? (:tick-changes world 0)) (empty? (:tick-problems world)))
                                (let [changes (- (:id (pulse after :vibe) 0) (:id (pulse before :vibe) 0))]
-                                 (when (not= 1 changes)
-                                   [(bad "06: a tick step changed the vibe with " changes " :vibe pulses")]))))
-               :vibe-edit (check-vibe-edit before after)
-               :grid (when (#{:grid/move-cell :grid/clear-cell} (:event/type event)) (check-moved before after event true))
-               :fx (check-moved before after event false)
+                                 (when (not= (:tick-changes world) changes)
+                                   [(bad "06: a tick step changed the vibe " (:tick-changes world) " times with "
+                                         changes " :vibe pulses")]))))
+               :vibe-edit (when-not locked (check-vibe-edit before after))
+               :grid (when (and (not locked) (#{:grid/move-cell :grid/clear-cell} (:event/type event)))
+                       (check-moved before after event true))
+               :fx (when-not locked (check-moved before after event false))
                nil))]))
+
+(defn new-world
+  "The walk's world before its first step (for engine-soak-test)."
+  []
+  {:state (world-state) :rt show-time/initial-runtime :now 1000.0 :cycles {}})
+
+(defn random-step
+  "[step dt]: the walk's next step and the ms before it (for engine-soak-test)."
+  [^SplittableRandom rng world]
+  (let [step (next-step rng world)]
+    [step (.nextInt rng (if (:quick? step) 140 300))]))
+
+(defn take-step
+  "[world' problems] after step, as the walk takes it (for engine-soak-test)."
+  [world step dt]
+  (try
+    (step! world step dt)
+    (catch Throwable e
+      [world [(bad "exception: " (.getMessage e))]])))
 
 (defn- walk
   "nil, or {:seed :step :problems :prefix} for the first step that breaks an
    invariant or throws."
   [seed]
   (let [rng (SplittableRandom. (long seed))]
-    (loop [world {:state (world-state) :rt show-time/initial-runtime :now 1000.0 :cycles {}}
+    (loop [world (new-world)
            i 0
            prefix []]
       (when (< i steps)
-        (let [step (next-step rng world)
-              dt (.nextInt rng (if (:quick? step) 140 300))
+        (let [[step dt] (random-step rng world)
               prefix (conj prefix (-> step (dissoc :next) (assoc :dt dt)))
-              [world' problems] (try
-                                  (step! world step dt)
-                                  (catch Throwable e
-                                    [world [(bad "exception: " (.getMessage e))]]))]
+              [world' problems] (take-step world step dt)]
           (if-let [problems (seq (remove nil? problems))]
             {:seed seed :step i :problems problems :prefix prefix}
             (recur world' (inc i) prefix)))))))

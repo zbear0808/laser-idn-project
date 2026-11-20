@@ -15,6 +15,7 @@
             [laser-show.input.router :as router]
             [laser-show.input.events :as input-events]
             [laser-show.state.core :as state]
+            [laser-show.vibes.engine :as engine]
             [laser-show.vibes.library :as library]))
 
 
@@ -67,18 +68,23 @@
     {:state (assoc-in state (midi-path) updated-midi)}))
 
 (defn- handle-midi-disconnect-device
-  "Disconnect from a MIDI device."
+  "Disconnect from a MIDI device. Its keys' releases can't come any more, so
+   every role a key holds lets go (:vibe/release-all :only :input); a pad's
+   hold stays."
   [{:keys [state device-name]}]
   (let [midi-state (get-midi-state state)
         updated-midi (midi/disconnect-device midi-state device-name)]
-    {:state (assoc-in state (midi-path) updated-midi)}))
+    {:state (assoc-in state (midi-path) updated-midi)
+     :dispatch {:event/type :vibe/release-all :only :input}}))
 
 (defn- handle-midi-disconnect-all
-  "Disconnect from all MIDI devices."
+  "Disconnect from all MIDI devices; every role a key holds lets go, as
+   for one device."
   [{:keys [state]}]
   (let [midi-state (get-midi-state state)
         updated-midi (midi/disconnect-all midi-state)]
-    {:state (assoc-in state (midi-path) updated-midi)}))
+    {:state (assoc-in state (midi-path) updated-midi)
+     :dispatch {:event/type :vibe/release-all :only :input}}))
 
 (defn- handle-midi-set-channel-filter
   "Set MIDI channel filter.
@@ -330,10 +336,12 @@
    if learn was cancelled or restarted for another target in the meantime).
    A vibe role keeps one control: its other bindings go, so learning it again
    moves it. The undo label names what the input did before, if anything.
+   A role whose key lost its binding so lets go now, if that key holds it
+   (engine/release-unbound): its release would reach nothing.
    During Learn all the next role's learn follows, and a key already learned
    for an earlier role of it is refused: the same learn starts again, and
    the wizard says whose the key is (:refused)."
-  [{:keys [state input-event target-action]}]
+  [{:keys [state input-event target-action] :as event}]
   (let [target (learn-target target-action)
         learning? (= (get-in state [:backend :input :learning-target]) target)
         lookup-key (learn-lookup-key input-event)
@@ -359,7 +367,8 @@
                             (assoc-in [:config :input :trigger-map lookup-key] target-action)
                             (update-in [:backend :input] dissoc :learning-target)
                             (cond-> wizard (assoc-in [:ui :vibes :wizard]
-                                                     (when (seq queue) {:queue queue :done (conj (vec done) role)}))))
+                                                     (when (seq queue) {:queue queue :done (conj (vec done) role)})))
+                            (engine/release-unbound (get-in state [:config :input :trigger-map]) (h/current-time-ms event)))
                  :history/description (if (and replaced (not= (learn-target replaced) target))
                                         (str "Learn Trigger (replaces " (action-name replaced) ")")
                                         "Learn Trigger")}

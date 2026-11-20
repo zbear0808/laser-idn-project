@@ -20,7 +20,11 @@
 
    Its Controls panel's faders (plans/2026-11-18-vibe-mode/05):
    :vibe/add-master and :vibe/add-morph make their effect cells
-   (vibes.faders), and :vibe/clear-control with a :slot unbinds a fader."
+   (vibes.faders), and :vibe/clear-control with a :slot unbinds a fader.
+
+   :vibe/set-show-lock is the Perform tab's show lock (events/show_lock.clj),
+   and :vibe/release with :reason :watchdog the show clock's report of a
+   stuck key (vibes.watchdog)."
   (:require [laser-show.events.helpers :as h]
             [laser-show.vibes.engine :as engine]
             [laser-show.vibes.faders :as faders]
@@ -86,14 +90,25 @@
 (defn- handle-clear-control
   "Unbind the controls of role, or the control learned for the fader slot
    (an undoable edit of the trigger map or the macro map; nothing to unbind
-   changes nothing)."
-  [{:keys [state role slot]}]
+   changes nothing). A key that holds the role lets go of it now: its
+   release would reach nothing (engine/release-unbound)."
+  [{:keys [state role slot] :as event}]
   (if slot
     (let [m (get-in state [:config :input :macro-map])
           kept (into {} (remove (fn [[_ s]] (= slot s))) m)]
       {:state (cond-> state (not= (count m) (count kept)) (assoc-in [:config :input :macro-map] kept))})
-    {:state (update-in state [:config :input :trigger-map]
-                       #(into {} (remove (fn [[_ action]] (library/binds-role? action role))) %))}))
+    (let [was (get-in state [:config :input :trigger-map])]
+      {:state (-> state
+                  (assoc-in [:config :input :trigger-map]
+                            (into {} (remove (fn [[_ action]] (library/binds-role? action role))) was))
+                  (engine/release-unbound was (h/current-time-ms event)))})))
+
+(defn- handle-set-show-lock
+  "The Perform tab's show lock switch (events/show_lock.clj), for the
+   session: unlocking also clears the notice of what it refused."
+  [{:keys [state locked?]}]
+  {:state (cond-> (assoc-in state [:ui :show-lock?] (boolean locked?))
+            (not locked?) (assoc-in [:ui :show-lock-notice] nil))})
 
 (defn- handle-add-morph
   "A Morph of kind for the vibe (vibes.faders/add-morph), switched on at once
@@ -203,6 +218,9 @@
     :vibe/arm (engine/arm state event)
     :vibe/advance (engine/advance state event)
     :vibe/set-auto (engine/set-auto state event)
+
+    ;; The show lock (events/show_lock.clj): the Perform tab's switch
+    :vibe/set-show-lock (handle-set-show-lock event)
 
     :vibe/pointer (handle-pointer event)
     :vibe/window-focus (handle-window-focus event)

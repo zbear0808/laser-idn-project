@@ -603,3 +603,35 @@
               (is (= [0.0 {:slider-1 0.0}] (tick-faders)))))))
       (finally
         (io/delete-file file true)))))
+
+
+;; The stuck-key guard (plans/2026-11-18-vibe-mode/07 §7)
+
+(deftest watchdog-event-is-sent-once-per-interval-test
+  (testing "a key held past :max-hold-secs: a tick sends its release with auto-advance's reports,
+            on their memory, at most every 250 ms"
+    (state/init-state! (-> (domains/build-initial-state)
+                           (templates/apply-starter-cue-chains)
+                           (templates/apply-starter-vibes)
+                           (assoc-in [:timing :bpm] 120.0)
+                           (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)))
+    (show-time/reset-runtime!)
+    (events/event-handler {:event/type :vibe/press :role :hit :input-time (- (System/currentTimeMillis) 61000)})
+    (let [sent (atom [])
+          release {:event/type :vibe/release :role :hit :reason :watchdog}
+          vibe-reports #(filterv (comp #{"vibe"} namespace :event/type) @sent)]
+      (with-redefs [events/dispatch! #(swap! sent conj %)]
+        (show-clock/tick! 0)
+        (show-clock/tick! 100000000)
+        (is (= [release] (vibe-reports)) "two ticks 100 ms apart: one")
+        (show-clock/tick! 300000000)
+        (is (= [release release] (vibe-reports)) "300 ms after the first: again"))
+      (testing "handled twice: let go of once, and the pad says why"
+        (run! events/event-handler (vibe-reports))
+        (is (nil? (get-in (state/get-raw-state) [:vibe-runtime :held :hit])))
+        (is (= {:role :hit :why :stuck-key} (get-in (state/get-raw-state) [:vibe-runtime :problem]))))
+      (testing "and then nothing is due"
+        (reset! sent [])
+        (with-redefs [events/dispatch! #(swap! sent conj %)]
+          (show-clock/tick! 400000000))
+        (is (empty? (vibe-reports)))))))

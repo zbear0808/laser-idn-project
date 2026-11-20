@@ -20,11 +20,13 @@ UI Events → Event Handlers (pure) → Effects → State Update → Subscriptio
 | `src/laser_show/css/` | CSS-in-Clojure via cljfx/css |
 | `src/laser_show/animation/` | Frame generation, effects, modulators |
 | `src/laser_show/backend/` | IDN streaming to laser hardware |
+| `src/laser_show/vibes/` | Vibe mode: the vibes (`library.clj`), the five keys' engine (`engine.clj`), tap reactions, faders, auto-advance (`rotation.clj`), the stuck-key watchdog. All pure |
 
 ### State Management Pattern
 - **UI reads**: Use subscriptions in `subs.clj` with `fx/sub-ctx` (memoized)
 - **Backend reads**: Use `state/get-raw-state` with extractors (thread-safe, no memoization)
 - **Writes**: Always through events → `state/reset-state!` or `state/assoc-in-state!`
+- **Vibe presses are pure events** (`:vibe/press`, `:vibe/release`, handled by `vibes/engine.clj`); **faders never go through the agent**: a CC goes to the input store, and the render derives each fader from it every tick
 
 ```clojure
 ;; UI component pattern

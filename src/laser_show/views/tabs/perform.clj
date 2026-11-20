@@ -6,10 +6,11 @@
    
    Each part subscribes to what it shows (subs.clj, Vibe mode), so a press
    re-renders its own pad, a vibe change the strip, the header and VIBE's
-   pad, and a beat the tempo only. The banner is always there, hidden while
-   it has nothing to say, so showing it never makes new nodes of the pads
-   below it: a held pad keeps getting its release. The header flashes on
-   each vibe change, from the show clock's newest tick."
+   pad, and a beat the tempo only. The banners are always there, hidden
+   while they have nothing to say, so showing one never makes new nodes of
+   the pads below it: a held pad keeps getting its release. The header
+   flashes on each vibe change, from the show clock's newest tick. The show
+   lock's switch is in the header (events/show_lock.clj)."
   (:require [cljfx.api :as fx]
             [clojure.string :as str]
             [laser-show.subs :as subs]
@@ -31,6 +32,41 @@
      :text (or banner "")
      :visible (some? banner)
      :managed (some? banner)}))
+
+(defn- output-banner
+  "NO OUTPUT, full width, once vibe mode has played and while nothing goes
+   to the lasers (the toolbar's status): why a press shows nothing."
+  [{:keys [fx/context]}]
+  (let [text (fx/sub-ctx context subs/vibe-output-banner)]
+    {:fx/type :label
+     :id "vibe-no-output"
+     :style-class "vibe-banner"
+     :max-width Double/MAX_VALUE
+     :wrap-text true
+     :text (or text "")
+     :visible (some? text)
+     :managed (some? text)}))
+
+(defn- show-lock-controls
+  "The show lock switch (:vibe/set-show-lock), and what it refused last."
+  [{:keys [fx/context]}]
+  (let [{:keys [locked? notice]} (fx/sub-ctx context subs/vibe-show-lock)]
+    {:fx/type :h-box
+     :spacing 12
+     :alignment :center-right
+     :children [{:fx/type :label
+                 :id "vibe-lock-notice"
+                 :style-class "vibe-lock-notice"
+                 :text (or notice "")
+                 :visible (some? notice)
+                 :managed (some? notice)}
+                {:fx/type :toggle-button
+                 :id "vibe-show-lock"
+                 :text "SHOW LOCK"
+                 :style-class ["toggle-button" "vibe-show-lock"]
+                 :focus-traversable false
+                 :selected locked?
+                 :on-action {:event/type :vibe/set-show-lock :locked? (not locked?)}}]}))
 
 (defn- tempo
   "The tempo and the beat in the bar (subs/beat-index changes on each beat)."
@@ -57,12 +93,14 @@
                      (range 4))}))
 
 (defn- header
-  "The current vibe in its colour, its energy, the lock, the tempo, what a
-   learn waits for, and auto-advance (its AUTO switch and countdown); a
-   flash over it on each vibe change."
+  "The current vibe in its colour, its energy, the lock, whether it may
+   reach the audience, the tempo, what a learn waits for, auto-advance (its
+   AUTO switch and countdown) and the show lock; a flash over it on each
+   vibe change."
   [{:keys [fx/context]}]
   (let [{vibe-name :name :keys [color energy rotation learning]} (fx/sub-ctx context subs/vibe-header)
-        locked? (= :locked rotation)]
+        locked? (= :locked rotation)
+        audience? (fx/sub-ctx context subs/vibe-audience?)]
     {:fx/type :stack-pane
      :children
      [{:fx/type :v-box
@@ -83,6 +121,12 @@
                                :text "LOCKED"
                                :visible locked?
                                :managed locked?}
+                              {:fx/type :label
+                               :id "vibe-header-audience"
+                               :style-class "vibe-header-audience"
+                               :text "AUDIENCE ALLOWED"
+                               :visible audience?
+                               :managed audience?}
                               {:fx/type :region
                                :h-box/hgrow :always}
                               {:fx/type tempo}]}
@@ -101,7 +145,8 @@
                                :managed (some? learning)}
                               {:fx/type :region
                                :h-box/hgrow :always}
-                              {:fx/type vibe-rotation/rotation-controls}]}]}
+                              {:fx/type vibe-rotation/rotation-controls}
+                              {:fx/type show-lock-controls}]}]}
       {:fx/type clock-view/ext-clock-redraw
        :redraw! #'vibe-pads/redraw-pulse!
        :desc {:fx/type :region
@@ -132,14 +177,15 @@
                          "MIDI: none connected")}]}))
 
 (defn perform-tab
-  "The Perform tab: banner, header, vibe strip, pads, the faders' meters and
-   status line."
+  "The Perform tab: the BLACKOUT and NO OUTPUT banners, header, vibe strip,
+   pads, the faders' meters and status line."
   [_]
   {:fx/type :v-box
    :id "perform-content"
    :spacing 14
    :padding 16
    :children [{:fx/type banner}
+              {:fx/type output-banner}
               {:fx/type header}
               {:fx/type vibe-strip/vibe-strip}
               {:fx/type vibe-pads/pad-row :v-box/vgrow :always}

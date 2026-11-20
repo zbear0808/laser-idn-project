@@ -47,6 +47,24 @@ This launches a graphical interface.
 
 The **Perform** tab has five big pads for playing vibe mode from across the room.
 
+### Vibe mode in ten minutes
+
+Vibe mode plays your cues with five keys and two faders (see [Vibe Mode](README.md#vibe-mode) in the README). A new project already has two vibes over the starter shapes, so you can try the Perform tab's pads at once. To set up your own, follow the checklist at the top of the **Vibes** tab:
+
+1. **Make cues on the Grid tab.**
+2. **Add a vibe** on the Vibes tab (**New vibe**), or click **One per grid row** for a vibe from each row of the grid that has cues. Name it after a feel, and pick its colour and energy.
+3. **Put HIT cues in every vibe:** pick a slot above the grid picker (HIT, ACCENT, FLASH cue, BED, FX set, FLASH effects) and click cells to put them in or take them out. 3–6 cues for HIT, one to three bigger ones for ACCENT.
+4. **Learn the five controls:** click **Learn all**, then press the keys for HIT, ACCENT, FLASH, VIBE and BLACKOUT on your controller, in that order. Under FADERS, click **Learn** for Intensity (and Morph) and move the fader.
+5. Optionally, add **Tap reactions** to a role (a Punch on HIT, a Swell on FLASH…), and **Add Morph to** the vibe to give fader 2 something to do in it.
+6. On the **Perform** tab, click **Stream** in the toolbar and play:
+   - **HIT** and **ACCENT**: a tap plays a cue that decays after a beat or two; hold to keep it until you let go.
+   - **FLASH**: hold for the big moment.
+   - **VIBE**: tap for the next vibe; hold 0.6 s to lock it.
+   - **BLACKOUT**: dark until you press it again.
+   - **Intensity** is the master brightness; **Morph** is whatever the vibe wires to it.
+   - Turn on **AUTO** to change vibe by itself at the next phrase gap after 45 s.
+7. Before the doors open, turn on **SHOW LOCK** in the Perform header: until you unlock it, nothing moves, clears or undoes the show by accident, and the pads, BLACKOUT, Stop and Play still work.
+
 If you use VS Code with Calva, starting a REPL should automatically launch the app and give you a REPL in the `user.clj` namespace.
 
 ## Development Workflow

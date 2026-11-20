@@ -1,6 +1,6 @@
 # Laser Show (i'm bad at naming things)
 
-A Clojure project for controlling laser shows with multiple projectors using the ILDA Digital Network protocols. Features a launchpad-style interface, multi-input support (keyboard, MIDI, OSC)
+A Clojure project for controlling laser shows with multiple projectors using the ILDA Digital Network protocols. Features a launchpad-style interface, multi-input support (keyboard, MIDI, OSC), and a vibe mode for busking with five keys and two faders
 
 
 <img width="2880" height="1800" alt="{DC4D3125-9F45-4BF8-9EB9-6AF6D73751A2}" src="https://github.com/user-attachments/assets/fe47f5a2-5038-4c44-8fd7-57c76548429f" />
@@ -11,6 +11,7 @@ A Clojure project for controlling laser shows with multiple projectors using the
 - [Animation System](#animation-system)
 - [IDN Protocol Support](#idn-protocol-support)
 - [Input System](#input-system)
+- [Vibe Mode](#vibe-mode)
 - [Testing](#testing)
 - [Current Work](#current-work)
 - [Non-Goals](#non-goals)
@@ -50,6 +51,53 @@ Frame streaming with X/Y coordinates (16-bit) and RGB color (16-bit each). See [
 All input sources produce unified events that route to handlers:
 we have keyboard, midi, and osc
 See [`src/laser_show/input/`](src/laser_show/input/) for implementation details.
+
+## Vibe Mode
+
+Busk a show with five keys and two faders. Cues are grouped into **vibes**, each a feel ("Calm", "Groove", "Peak"): a pool of cues for each key, an optional bed underneath, and an FX set of effect cells that switch on with the vibe. A key means the same in every vibe, only what is behind it changes, and a pool never plays the same cue twice in a row. Set up on the **Vibes** tab, play on the **Perform** tab (with the mouse, a touchscreen, or learned MIDI, OSC or gamepad controls). See [`src/laser_show/vibes/`](src/laser_show/vibes/).
+
+| Key | Press | Release |
+|---|---|---|
+| **HIT** | the next cue of the vibe's HIT pool; taps the tempo | a quick tap (under 150 ms) decays after the vibe's beats (1 by default); held longer, it stops |
+| **ACCENT** | the same from a second pool, layered over HIT | the same (2 beats by default) |
+| **FLASH** | the vibe's flash cue and flash effects; a solo flash steps the others aside | the look returns |
+| **VIBE** | – | a tap goes to the next vibe; a hold of 0.6 s locks the vibe |
+| **BLACKOUT** | everything dark, the other keys ignored; press again to come back | – |
+
+| Fader | |
+|---|---|
+| **1 Intensity** | master brightness (the Master effect cell a new project has); full until moved |
+| **2 Morph** | whatever the vibe wires to it (**Add Morph to** on the Vibes tab: size, spin or colour); nothing until wired |
+
+**Setup:** make cues on the Grid tab → on the Vibes tab add vibes (**New vibe**, or **One per grid row**) and click cells into each slot → **Learn all** and press your five keys in order, and **Learn** each fader and move it → play on the Perform tab. The tab's checklist says what is left, its lint what to fix (the tab's label counts the errors).
+
+**Tap reactions:** a press can also move effects. Each role's **Tap reactions** menu adds an effect cell to the vibe that follows its presses: Punch, Pump, Step colour or Step spin on HIT, Flip or Scatter on ACCENT, Swell or Strobe while FLASH is held, Fade in on a vibe change, and Energy, which grows the look as you tap faster. They are ordinary modulators you can edit.
+
+**Auto-advance:** with **AUTO** on (Perform tab, off by default), a vibe that has played 45 s changes to the next at a phrase gap (no key down, two beats without a HIT), or when FLASH is let go. A locked vibe stays.
+
+**Safety:**
+- A cue that can reach the audience (the Crowd Scanning zone group, or a projector tagged crowd-scanning) is never picked unless the vibe ticks **Allow audience cells**. Perform then says AUDIENCE ALLOWED, and AUDIENCE on each pad that may play one. Unticking it stops such a cue at once.
+- **BLACKOUT** is the one sure way to dark.
+- **SHOW LOCK** (Perform header) refuses what would change the show under you until you unlock it: moving, clearing or pasting cells, undo and redo, New, Open and Save, vibe edits, and projector and zone group changes. The pads, BLACKOUT, Stop, Play, grid clicks, the tempo, streaming and learning a key always work, and Exit still asks about unsaved changes.
+- A key held 60 s is let go of as stuck, and its pad says so. MIDI All Notes Off (CC 123), All Sound Off (CC 120) and disconnecting a MIDI device let go of every key.
+- Playing while nothing streams shows **NO OUTPUT** on Perform.
+
+### Vibe mode cheat sheet
+
+```
+HIT       tap: a cue that decays    hold: plays until you let go
+ACCENT    the same from a second pool, on top of HIT
+FLASH     hold for the big moment; let go and the look returns
+VIBE      tap: next vibe            hold 0.6 s: lock the vibe
+BLACKOUT  dark, every other key off; press again to come back
+
+Fader 1   Intensity (full until moved)
+Fader 2   Morph (what this vibe wires to it)
+
+Pads: blue = held · red = BLACKOUT on · orange border = learning ·
+dim = no vibes, or BLACKOUT · AUDIENCE = may reach the crowd ·
+the bar under a pad flashes on each press
+```
 
 ## Testing
 

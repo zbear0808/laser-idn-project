@@ -85,6 +85,43 @@
        ".toggle-button.vibe-auto:selected"
        {:-fx-background-color green}
 
+       ;; The show lock (events/show_lock.clj): on, it is red, as BLACKOUT is
+       ".toggle-button.vibe-show-lock"
+       {:-fx-background-color bg-interactive
+        :-fx-background-radius 6
+        :-fx-border-color text-primary
+        :-fx-border-radius 6
+        :-fx-border-width 2
+        :-fx-text-fill text-primary
+        :-fx-font-size 16
+        :-fx-font-weight "bold"
+        :-fx-padding "2 10"
+        :-fx-cursor "hand"}
+
+       ".toggle-button.vibe-show-lock:selected"
+       {:-fx-background-color red}
+
+       ".vibe-lock-notice"
+       {:-fx-text-fill text-primary
+        :-fx-font-size 14
+        :-fx-font-weight "bold"}
+
+       ;; The vibe that plays allows audience cells (V6): the header says so,
+       ;; and so does a pad whose press may start one
+       ".vibe-header-audience"
+       {:-fx-text-fill orange
+        :-fx-font-size 16
+        :-fx-font-weight "bold"
+        :-fx-border-color orange
+        :-fx-border-radius 6
+        :-fx-border-width 2
+        :-fx-padding "2 8"}
+
+       ".vibe-pad-audience"
+       {:-fx-text-fill orange
+        :-fx-font-size 12
+        :-fx-font-weight "bold"}
+
        ".vibe-banner"
        {:-fx-background-color red
         :-fx-background-radius 6

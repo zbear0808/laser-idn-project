@@ -2,7 +2,9 @@
   "High-performance generic input mapper.
    
    Listens to all global input events from the generic router and:
-   1. Continuous events (MIDI CC, OSC floats) -> updates fast input store (`laser-show.input.store`)
+   1. Continuous events (MIDI CC, OSC floats) -> updates fast input store (`laser-show.input.store`);
+      MIDI's All Notes Off and All Sound Off (CC 123, 120) also let go of
+      every vibe role (:vibe/release-all)
    2. Discrete events (Note ON, Key pressed) -> performs O(1) lookup in `[:config :input :trigger-map]`
       and invokes the mapped action, unless it is a press and a learn is
       waiting for one ([:backend :input :learning-target]): that one is the learn's.
@@ -63,6 +65,16 @@
   []
   (some? (get-in (state/get-raw-state) [:backend :input :learning-target])))
 
+(def ^:private all-notes-off-controls
+  "MIDI's All Sound Off (120) and All Notes Off (123): a controller's way to
+   say every key is up."
+  #{120 123})
+
+(defn- all-notes-off?
+  "Is event a MIDI control change that says every key is up?"
+  [{:keys [source control] :as event}]
+  (and (= :midi source) (contains? all-notes-off-controls control) (input-events/control-change? event)))
+
 
 ;; --- Main Event Processor ---
 
@@ -71,10 +83,13 @@
    Must be fast and non-blocking."
   [event]
   (cond
-    ;; Continuous Events
+    ;; Continuous Events. All Notes Off and All Sound Off also let go of
+    ;; every vibe role, keys and pads alike (beyond-vibe engine/mod.rs:291)
     (input-events/control-change? event)
     (let [val (double (or (:value event) 0.0))]
-      (run! #(update-input-value! % val) (store-keys event)))
+      (run! #(update-input-value! % val) (store-keys event))
+      (when-let [dispatch (and (all-notes-off? event) @*dispatch-fn)]
+        (dispatch {:event/type :vibe/release-all :input-time (:timestamp event)})))
 
     ;; Discrete triggers are resolved by the normal application event pipeline.
     (or (input-events/note-on? event)

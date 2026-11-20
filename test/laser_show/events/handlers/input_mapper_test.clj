@@ -190,3 +190,56 @@
     (is (= [] (input-mapper/store-keys (midi/midi-msg->event (fixtures/note-on 0 36 100)))) "a note writes none")
     (is (= [[:gamepad 1 :right-x]] (input-mapper/store-keys (first (gamepad/diff-controller-states {} {1 {:buttons {} :axes {:right-x 0.9}}}))))
         "a gamepad's axis")))
+
+
+;; All Notes Off and All Sound Off (plans/2026-11-18-vibe-mode/07 §7,
+;; invariant 4): a controller's way to say every key is up
+
+(defn- with-held-roles
+  "(f) with the mapper on app state where a key (note 36) holds HIT and a
+   pad holds ACCENT, every event run through the real handlers."
+  [f]
+  (state/init-state! (-> (domains/build-initial-state)
+                         (templates/apply-starter-cue-chains)
+                         (templates/apply-starter-vibes)
+                         (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)
+                         (assoc-in [:config :input :trigger-map] {{:source :midi :channel 0 :note 36} {:type :vibe :role :hit}})))
+  (store/clear-continuous-values!)
+  (input-mapper/set-dispatch-fn! events/event-handler)
+  (input-mapper/start-mapper!)
+  (try
+    (router/dispatch! (midi/midi-msg->event (fixtures/note-on 0 36 100)))
+    (events/event-handler {:event/type :vibe/press :role :accent :src :pad})
+    (f)
+    (finally
+      (input-mapper/stop-mapper!)
+      (input-mapper/set-dispatch-fn! nil)
+      (store/clear-continuous-values!))))
+
+(defn- held [] (get-in (state/get-raw-state) [:vibe-runtime :held]))
+
+(deftest all-notes-off-releases-everything-test
+  (with-held-roles
+    (fn []
+      (is (= {:hit :input :accent :pad} (update-vals (held) :src)))
+      (router/dispatch! (cc 0 123 0))
+      (is (empty? (held)) "CC 123 lets go of every role, the key's and the pad's")
+      (is (not-any? #(get-in (state/get-raw-state) [:playback :pulses % :held?]) [:hit :accent]) "and their pulses")
+      (is (empty? (get-in (state/get-raw-state) [:playback :active-cues])) "held: cut, as a long hold's release")
+      (is (= 0.0 (store/get-continuous-value [:midi 0 123])) "the store write stays"))))
+
+(deftest all-sound-off-releases-everything-test
+  (with-held-roles
+    (fn []
+      (router/dispatch! (cc 3 120 0))
+      (is (empty? (held)) "CC 120, on any channel"))))
+
+(deftest ordinary-cc-does-not-release-test
+  (with-held-roles
+    (fn []
+      (doseq [control [1 7 64 119 121 122 124 127]]
+        (router/dispatch! (cc 0 control 0)))
+      (is (= #{:hit :accent} (set (keys (held)))) "a fader or a pedal lets go of nothing")
+      (testing "nor a control 123 from another source than MIDI"
+        (router/dispatch! (input :control-change :source :osc :control 123 :value 0.0))
+        (is (= #{:hit :accent} (set (keys (held)))))))))

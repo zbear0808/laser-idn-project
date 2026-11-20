@@ -1321,3 +1321,62 @@
      :free? (some? (reactions/first-empty-effect-cell cells))
      :vibe id
      :vibe-name vibe-name}))
+
+
+;; Safety (plans/2026-11-18-vibe-mode/07): the show lock, the NO OUTPUT
+;; banner and the audience marks on the Perform tab, and the Vibes tab's
+;; lint badge
+
+(defn vibe-show-lock
+  "The Perform tab's show lock (events/show_lock.clj): {:locked? :notice
+   (what it refused last, \"Move Cell refused\"; nil)}."
+  [context]
+  {:locked? (true? (fx/sub-val context get-in [:ui :show-lock?]))
+   :notice (fx/sub-val context get-in [:ui :show-lock-notice :text])})
+
+(defn- vibe-played?
+  "Has vibe mode played in this session (it resets with the document): a
+   vibe made current, or HIT, ACCENT or FLASH pressed?"
+  [state]
+  (let [pulses (get-in state [:playback :pulses])]
+    (boolean (or (get-in state [:vibe-runtime :current])
+                 (:hit pulses) (:accent pulses) (:flash pulses)))))
+
+(defn vibe-output-banner
+  "The Perform tab's red banner, once vibe mode has played in this session
+   and while nothing goes to the lasers, as the toolbar says
+   (connection-status): \"NO OUTPUT: press Stream\" while not streaming,
+   \"NO OUTPUT: no projectors enabled\" while streaming to none; nil
+   otherwise. A press still plays, into nothing."
+  [context]
+  (when (fx/sub-val context vibe-played?)
+    (case (:state (fx/sub-ctx context connection-status))
+      (:stopped :stopping) "NO OUTPUT: press Stream"
+      :idle "NO OUTPUT: no projectors enabled"
+      nil)))
+
+(defn vibe-audience?
+  "Does the vibe that plays allow audience cells (V6: its picks may then
+   reach the crowd)?"
+  [context]
+  (boolean (:allow-audience? (get (:library (fx/sub-ctx context vibe-config)) (fx/sub-ctx context vibe-current-id)))))
+
+(defn vibe-pad-audience?
+  "Can role's press start a cue that reaches the audience: the vibe that
+   plays allows audience cells, and one its role may play is one
+   (vibes.library/audience-cell?): HIT's or ACCENT's pool, FLASH's cue."
+  [context role]
+  (boolean
+   (when (and (#{:hit :accent :flash} role) (fx/sub-ctx context vibe-audience?))
+     (let [vibe (get (:library (fx/sub-ctx context vibe-config)) (fx/sub-ctx context vibe-current-id))
+           state (fx/sub-val context reaction-inputs)
+           cells (if (= :flash role) (keep identity [(get-in vibe [:flash :cue])]) (get-in vibe [role :cells]))
+           groups (library/audience-groups state)]
+       (some #(library/audience-cell? state % groups) (library/playable-cells state vibe cells))))))
+
+(defn vibes-tab-label
+  "The Vibes tab's label: \"Vibes\", and the lint's error count while it
+   has errors (\"Vibes ⚠ 2\")."
+  [context]
+  (let [n (count (filter #(= :error (:level %)) (fx/sub-ctx context vibe-lint)))]
+    (if (pos? n) (str "Vibes ⚠ " n) "Vibes")))

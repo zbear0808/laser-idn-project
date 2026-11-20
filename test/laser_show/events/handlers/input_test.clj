@@ -8,7 +8,8 @@
             [laser-show.input.osc :as osc]
             [laser-show.input.router :as router]
             [laser-show.state.domains :as domains]
-            [laser-show.state.history :as history]))
+            [laser-show.state.history :as history]
+            [laser-show.state.templates :as templates]))
 
 (defn- initial-state []
   (domains/build-initial-state))
@@ -421,5 +422,59 @@
             (is (= (trigger-map s) (trigger-map s')))
             (is (empty? (macro-map s')))
             (is (nil? (learning-target s')))))))
+    (finally
+      (stop-learning!))))
+
+
+;; What a key holds lets go when the key can't let go itself
+;; (plans/2026-11-18-vibe-mode/07)
+
+(defn- vibe-world []
+  (-> (initial-state)
+      (templates/apply-starter-cue-chains)
+      (templates/apply-starter-vibes)
+      (assoc-in [:config :vibes :settings :hit-taps-tempo?] false)))
+
+(deftest midi-disconnect-releases-input-holds-only-test
+  (let [s0 (-> (vibe-world)
+               (assoc-in [:backend :input :midi :devices "Pad"] {})
+               (assoc-in [:backend :input :midi :connected-devices] #{"Pad"}))
+        held (-> s0
+                 (piped {:event/type :vibe/press :role :hit :input-time 1000 :time 1000})
+                 (piped {:event/type :vibe/press :role :accent :src :pad :time 1000}))]
+    (is (= {:hit :input :accent :pad} (update-vals (get-in held [:vibe-runtime :held]) :src)))
+    (doseq [event [{:event/type :input/midi-disconnect-device :device-name "Pad"}
+                   {:event/type :input/midi-disconnect-all}]]
+      (testing (str (:event/type event))
+        (let [s (piped held (assoc event :time 2000))]
+          (is (not (contains? (get-in s [:backend :input :midi :connected-devices]) "Pad")))
+          (is (nil? (get-in s [:vibe-runtime :held :hit])) "beyond-vibe disconnect_releases_held_keys: the key's hold ends")
+          (is (false? (get-in s [:playback :pulses :hit :held?])))
+          (is (= :pad (get-in s [:vibe-runtime :held :accent :src])) "a pad's hold stays: its release still comes"))))))
+
+(deftest a-key-that-loses-its-role-lets-go-test
+  (try
+    (let [hit {:type :vibe :role :hit}
+          accent {:type :vibe :role :accent}
+          s0 (assoc-in (vibe-world) [:config :input :trigger-map] {(note-key 36) hit (note-key 37) accent})
+          held (-> s0
+                   (piped {:event/type :vibe/press :role :hit :input-time 1000 :time 1000})
+                   (piped {:event/type :vibe/press :role :accent :input-time 1000 :time 1000}))
+          cell (get-in held [:vibe-runtime :voices :hit :cell])]
+      (is (some? (get-in held [:playback :active-cues cell])))
+      (testing "a learn moves HIT to another key: the key that holds it lets go now (04 §11)"
+        (let [s (press-key (learning held hit) 50)]
+          (is (= {(note-key 50) hit (note-key 37) accent} (trigger-map s)))
+          (is (nil? (get-in s [:vibe-runtime :held :hit])))
+          (is (false? (get-in s [:playback :pulses :hit :held?])) "and its pulse")
+          (is (nil? (get-in s [:playback :active-cues cell])) "cut, as release-all lets go")
+          (is (= :input (get-in s [:vibe-runtime :held :accent :src])) "ACCENT's key is still its: it holds on")))
+      (testing "a cell learned on HIT's key"
+        (is (nil? (get-in (press-key (learning held {:type :trigger-cue :target [0 1]}) 36) [:vibe-runtime :held :hit]))))
+      (testing "HIT learned again on its own key: nothing lost, it holds on"
+        (is (= :input (get-in (press-key (learning held hit) 36) [:vibe-runtime :held :hit :src]))))
+      (testing "a pad's hold stays"
+        (let [pad (piped s0 {:event/type :vibe/press :role :hit :src :pad :time 1000})]
+          (is (= :pad (get-in (press-key (learning pad hit) 50) [:vibe-runtime :held :hit :src]))))))
     (finally
       (stop-learning!))))

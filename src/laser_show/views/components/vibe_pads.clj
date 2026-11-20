@@ -39,6 +39,7 @@
   "What the pad says under its role."
   [context {:keys [role playing problem next on? effects-only?]}]
   (cond
+    (= :stuck-key problem) "Stuck key released"
     effects-only? "Effects only"
     problem "Nothing to play"
     (= :vibe role) (if next (str "→ " next) "–")
@@ -54,9 +55,12 @@
 
 (defn pad
   "One pad (props: :role). Its children are the same on every render and
-   don't take the mouse, so a press and its release reach the pad itself."
+   don't take the mouse, so a press and its release reach the pad itself.
+   It says AUDIENCE while its press may start a cue that reaches the crowd,
+   and when the watchdog let go of its stuck key."
   [{:keys [fx/context role]}]
   (let [{:keys [label bindings held? learning? dim? on? reactions] :as data} (fx/sub-ctx context subs/vibe-pad role)
+        audience? (fx/sub-ctx context subs/vibe-pad-audience? role)
         id (str "vibe-pad-" (name role))
         pointer {:event/type :vibe/pointer :role role}
         badge (badge-text data)]
@@ -107,6 +111,12 @@
                            :visible (some? badge)
                            :managed (some? badge)
                            :style-class "vibe-pad-badge"}
+                          {:fx/type :label
+                           :id (str id "-audience")
+                           :text "AUDIENCE"
+                           :visible audience?
+                           :managed audience?
+                           :style-class "vibe-pad-audience"}
                           {:fx/type :label
                            :text label
                            :style-class "vibe-pad-role"}
