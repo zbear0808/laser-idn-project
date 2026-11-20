@@ -9,6 +9,7 @@
             [clojure.test :refer [deftest is testing]]
             [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.animation.safety :as safety]
+            [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]))
 
 (defn- pid [k] (keyword (str "p" k)))
@@ -528,3 +529,64 @@
       (is (close-fits? {:L [-0.4 0.0 0.6] :R [0.4 0.0 0.6]} (get-in r [:outputs :x :regions])))
       (is (= {:index 1 :scan-rate 30000 :fit fit-guard/defaults} (dissoc (get-in r [:outputs :y]) :regions)))
       (is (close-fits? {:L [-0.2 0.0 0.3] :R [0.2 0.0 0.3]} (get-in r [:outputs :y :regions]))))))
+
+
+;; Zones plan Z4: a zone reaches the lasers of its lane in the effective map
+;; (spec 01 §4, §5)
+
+(defn- zone-routing [state map-id] (rig/routing (rig/routing-inputs state map-id)))
+
+(deftest zone-resolves-through-the-effective-map-test
+  (let [state (assoc (rig-state 4) :zone-maps {:map/custom-1 {:name "Crowd sweep" :lanes [:auto/left :graphics]
+                                                              :overrides {:zone/c :auto/center}}})
+        state (assoc-in state [:projectors :p4 :zone-groups] [:graphics])
+        lr (zone-routing state :map/left-right)]
+    (is (= {:map :map/left-right :lanes [:auto/left :auto/right] :overrides {}} (select-keys lr [:map :lanes :overrides]))
+        "the routing names the map and carries its lanes")
+    (is (= [(w 1) (w 2)] (rig/resolve-ref lr :zone/a)) "A is Left under Left / Right")
+    (is (= [(w 3) (w 4)] (rig/resolve-ref lr :zone/b)) "B is Right")
+    (let [oe (zone-routing state :map/odd-even)]
+      (is (= [(w 1) (w 3)] (rig/resolve-ref oe :zone/a)) "the same zone, another map: Odd")
+      (is (= [(w 2) (w 4)] (rig/resolve-ref oe :zone/b))))
+    (let [mine (zone-routing state :map/custom-1)]
+      (is (= [(w 4)] (rig/resolve-ref mine :zone/b)) "your map: B is Graphics")
+      (is (= [(w 2) (w 3)] (rig/resolve-ref mine :zone/c)) "and its override sends C to Center"))
+    (testing "a zone never resolves to a zone; an empty lane, or none, reaches nothing"
+      (is (= [] (rig/resolve-ref (zone-routing (assoc-in state [:zone-maps :map/custom-1 :lanes] [:zone/b nil]) :map/custom-1) :zone/a)))
+      (is (= [] (rig/resolve-ref (zone-routing (assoc-in state [:zone-maps :map/custom-1 :lanes] [:auto/left nil]) :map/custom-1) :zone/b)))
+      (is (= [] (rig/resolve-ref (zone-routing (assoc-in state [:zone-maps :map/custom-1 :lanes] []) :map/custom-1) :zone/a))))
+    (testing "an id that is no map, or none: Left / Right's lanes"
+      (is (= [(w 1) (w 2)] (rig/resolve-ref (zone-routing state :map/gone) :zone/a)))
+      (is (= [(w 1) (w 2)] (rig/resolve-ref (zone-routing state nil) :zone/a))))
+    (testing "the other refs as before"
+      (is (= [(w 1) (w 2)] (rig/resolve-ref lr :auto/left)))
+      (is (= [] (rig/resolve-ref lr :nothing))))))
+
+(deftest unison-sends-every-zone-to-all-test
+  (let [state (rig-state 3 :excluded #{3})
+        r (zone-routing state :map/unison)]
+    (doseq [zone [:zone/a :zone/b :zone/c :zone/z :zone/aa]]
+      (is (= (rig/resolve-ref r :all) (rig/resolve-ref r zone)) (name zone)))
+    (is (= [(w 1) (w 2)] (rig/resolve-ref r :zone/a)) "All: the lasers that aren't excluded")))
+
+(deftest wrapped-zones-share-a-lane-test
+  (let [r (zone-routing (rig-state 2) :map/left-right)]
+    (is (= (rig/resolve-ref r :zone/a) (rig/resolve-ref r :zone/c) (rig/resolve-ref r :zone/e) [(w 1)]) "A, C, E: Left")
+    (is (= (rig/resolve-ref r :zone/b) (rig/resolve-ref r :zone/d) [(w 2)]) "B, D: Right")
+    (testing "one laser: the zones take its halves"
+      (let [one (zone-routing (rig-state 1) :map/left-right)]
+        (is (= [[:p1 :L nil]] (rig/resolve-ref one :zone/a) (rig/resolve-ref one :zone/c)))
+        (is (= [[:p1 :R nil]] (rig/resolve-ref one :zone/b)))))))
+
+(deftest resolve-ref-callers-see-zones-test
+  (let [state (rig-state 2)
+        frame [[0.0 0.0 1.0 1.0 1.0] [0.1 0.0 1.0 1.0 1.0]]
+        cues [{:cell [0 0] :zone-frames {:zone/a frame}}]]
+    (testing "the engines' composition"
+      (is (= frame (:frame (compose/projector-frame cues (zone-routing state :map/left-right) :p1))))
+      (is (nil? (compose/projector-frame cues (zone-routing state :map/left-right) :p2)))
+      (is (= frame (:frame (compose/projector-frame cues (zone-routing state :map/unison) :p2))) "Unison: both"))
+    (testing "the cue warnings"
+      (let [heavy (vec (repeat 3000 [0.0 0.0 1.0 1.0 1.0]))
+            warned (compose/cue-warnings [{:cell [0 0] :zone-frames {:zone/b heavy}}] (zone-routing state :map/left-right))]
+        (is (= :p2 (get-in warned [[0 0] :projector])) "B is on the right laser")))))

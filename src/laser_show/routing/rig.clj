@@ -21,15 +21,17 @@
    output]. The :projectors keys stay as they are (04 S-7).
 
    The routing (05 §4, spec 01 §5): routing works out, from the rig, the
-   projectors and the groups, every ref's entries and each laser's scan
-   rate, fit settings and the boxes its halves fit into. The show clock
-   keeps it (cached-routing) and puts it in each tick's snapshot; everything
-   reads a ref through resolve-ref."
+   projectors, the groups and the effective zone map, every ref's entries,
+   the map's lanes, and each laser's scan rate, fit settings and the boxes
+   its halves fit into. The show clock keeps it (cached-routing) and puts it
+   in each tick's snapshot; everything reads a ref through resolve-ref,
+   which sends a zone through the map's lanes (zones plan Z4)."
   (:require [clojure.string :as str]
             [laser-show.animation.fit-guard :as fit-guard]
             [laser-show.animation.safety :as safety]
             [laser-show.idn.stream :as stream]
-            [laser-show.routing.targets :as targets]))
+            [laser-show.routing.targets :as targets]
+            [laser-show.routing.zone-maps :as zone-maps]))
 
 
 ;; Enabled, excluded, the stored groups
@@ -352,8 +354,9 @@
 
 (defn routing-inputs
   "What the routing is worked out from, slices of one tick's app state:
-   {:rig :projectors :zone-groups :zone-maps (nil until Z4) :map (the
-   effective map id, nil until Z4)}. Their identity is cached-routing's key."
+   {:rig :projectors :zone-groups :zone-maps (your zone maps) :map (the
+   effective map id, routing.zone-maps/effective-map-id)}. Their identity is
+   cached-routing's key."
   [state map-id]
   {:rig (:rig state)
    :projectors (:projectors state)
@@ -371,17 +374,25 @@
     (catch Exception _ nil)))
 
 (defn routing
-  "The routing (spec 01 §5): {:map map-id :refs {ref [[projector-id region
-   side] …]} :outputs {projector-id {:index :scan-rate :fit :regions}}}.
-   :refs is ref-entries: every ref the rig knows but the zones. :outputs has
-   every enabled laser, excluded ones too: :index its place in E (nil when
-   excluded from All), :scan-rate clamped as its engine clamps it, :fit its
-   fit-guard/settings, :regions the region-fits of its safety limit. Pure."
-  [{:keys [rig projectors zone-groups] map-id :map}]
+  "The routing (spec 01 §5): {:map map-id :lanes [ref …] :overrides {zone
+   ref} :refs {ref [[projector-id region side] …]} :outputs {projector-id
+   {:index :scan-rate :fit :regions}}}. :lanes and :overrides are the
+   effective map's (zones plan Z4: routing.zone-maps/map-by-id; Left /
+   Right's for an id that is no map, or none), which resolve-ref sends a
+   zone through. :refs is ref-entries: every ref the rig knows but the
+   zones. :outputs has every enabled laser, excluded ones too: :index its
+   place in E (nil when excluded from All), :scan-rate clamped as its engine
+   clamps it, :fit its fit-guard/settings, :regions the region-fits of its
+   safety limit. Pure."
+  [{:keys [rig projectors zone-groups zone-maps] map-id :map}]
   (let [inputs (rig-inputs {:rig rig :projectors projectors :zone-groups zone-groups})
         index (zipmap (e-order inputs) (range))
-        w (:split-width inputs)]
+        w (:split-width inputs)
+        zone-map (or (zone-maps/map-by-id {:zone-maps zone-maps} map-id)
+                     (zone-maps/map-by-id {} zone-maps/default-map-id))]
     {:map map-id
+     :lanes (vec (:lanes zone-map))
+     :overrides (or (:overrides zone-map) {})
      :refs (ref-entries inputs)
      :outputs (into {}
                     (keep (fn [id]
@@ -395,9 +406,15 @@
 
 (defn resolve-ref
   "ref's entries in routing, [] for a ref it doesn't know: the only way to
-   read them. Z4 resolves a zone here, through the effective map's lanes."
+   read them. A zone resolves through the effective map (zones plan Z4): its
+   lane's entries (zone-maps/zone-lane over the routing's :lanes and
+   :overrides), [] for an empty lane or none."
   [routing ref]
-  (get (:refs routing) ref []))
+  (if (targets/zone-ref? ref)
+    (if-let [lane (zone-maps/zone-lane routing ref)]
+      (get (:refs routing) lane [])
+      [])
+    (get (:refs routing) ref [])))
 
 (defn cached-routing
   "[cache routing] for inputs (routing-inputs): the cached routing while

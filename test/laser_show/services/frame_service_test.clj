@@ -445,6 +445,23 @@
         (is (= {:all (get-in cues [0 :zone-frames :all]) :left (get-in cues [1 :zone-frames :left])}
                (:ref-frames (frame-service/preview-data cues))))))))
 
+(deftest preview-zones-count-for-their-lane-test
+  (testing "zones plan Z4: a group's cell shows what its zones send it, through the map in use"
+    (let [state {:projectors {:p1 {:name "Laser A" :host "10.0.0.1" :zone-groups []}
+                              :p2 {:name "Laser B" :host "10.0.0.2" :zone-groups []}}}
+          a (square 0.0) b (square 0.4) c (square -0.4)
+          cues [{:cell [0 0] :zone-frames {:zone/a a :zone/b b :auto/left c [:zone/a :zone/c] b}}]
+          ref-frames #(:ref-frames (frame-service/preview-data cues (rig/routing (rig/routing-inputs state %))))
+          lr (ref-frames :map/left-right)]
+      (is (= (frame-service/concatenate-frames [a c b]) (:auto/left lr))
+          "Left: zone A's, its own, then the union of A and C's (once, both are Left), in key order")
+      (is (= b (:auto/right lr)) "Right: zone B's")
+      (is (= (frame-service/concatenate-frames [a b]) (:zone/a lr)) "a zone's own cell: what is drawn into it, a union naming it too")
+      (is (= (frame-service/concatenate-frames [a b b]) (:all (ref-frames :map/unison))) "Unison: every zone is All")
+      (is (= c (:auto/left (ref-frames :map/odd-even))) "Odd / Even: only Left's own key, its zones go to Odd and Even")
+      (testing "without routing, a zone counts for itself only"
+        (is (= c (:auto/left (:ref-frames (frame-service/preview-data cues)))))))))
+
 (deftest preview-projector-frames-are-what-the-engine-composes-test
   (let [state {:projectors {:p1 {:name "Laser A" :host "10.0.0.1" :zone-groups []}
                             :p2 {:name "Laser B" :host "10.0.0.2" :zone-groups [] :enabled? false}}}

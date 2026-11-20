@@ -48,8 +48,10 @@
           "of the show's groups, only the copy of the one Laser L is in"))
     (testing "the paths it holds are the ones the project's mapping marks :rig"
       (is (= (set rig-file/rig-paths) (set (persistent/owned-paths :rig))))
-      (is (= #{[:config] [:timing] [:grid] [:zone-groups] [:chains :cue-chains] [:chains :effect-chains]}
-             (set (persistent/owned-paths :show))))
+      (is (= #{[:config] [:timing] [:grid] [:zone-groups] [:chains :cue-chains] [:chains :effect-chains]
+               [:zone-map] [:zone-maps] [:zones]}
+             (set (persistent/owned-paths :show)))
+          "the zone maps, the zones' labels and the map in use are the show's (zones plan Z4)")
       (is (every? #{:show :rig} (map :owner (mapcat :paths (vals persistent/persistent-state-mapping))))
           "every saved path is the show's or the rig's"))
     (testing "a document this build can read"

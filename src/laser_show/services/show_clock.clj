@@ -5,8 +5,10 @@
    Each tick (tick!):
    1. steps show time from app state's intents and requests and the MIDI
       timecode (show-time/step);
-   2. works out the routing (routing.rig/cached-routing: which lasers each
-      group reaches, and each laser's halves, scan rate and fit settings),
+   2. works out the zone map in use at the tick's beats (a pending switch
+      once its beat is reached, routing.zone-maps/effective-map-id), then
+      the routing (routing.rig/cached-routing: which lasers each group and
+      zone reaches, and each laser's halves, scan rate and fit settings),
       from the tick's state and before the render (spec 01 §5), the cached
       one while nothing it reads changed;
    3. renders every playing cue once (frame-service/generate-frames-by-zone),
@@ -46,6 +48,7 @@
             [laser-show.profiling.jfr-profiler :as jfr]
             [laser-show.routing.compose :as compose]
             [laser-show.routing.rig :as rig]
+            [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.services.frame-service :as frame-service]
             [laser-show.state.core :as state]
             [laser-show.state.extractors :as ex]
@@ -199,13 +202,13 @@
   {:map nil :refs {} :outputs {}})
 
 (defn- routing-step
-  "[cache routing]: the tick's routing from its state (rig/cached-routing,
-   the cached one while nothing it reads changed). A resolver that throws is
-   reported under [:routing], and the tick keeps the cached routing, or none,
-   so a bad edit can't stop the clock."
-  [cache state]
+  "[cache routing]: the tick's routing from its state under zone map map-id
+   (rig/cached-routing, the cached one while nothing it reads changed). A
+   resolver that throws is reported under [:routing], and the tick keeps the
+   cached routing, or none, so a bad edit can't stop the clock."
+  [cache state map-id]
   (try
-    (let [result (rig/cached-routing cache (rig/routing-inputs state nil))]
+    (let [result (rig/cached-routing cache (rig/routing-inputs state map-id))]
       (output-errors/ok! [:routing])
       result)
     (catch Throwable e
@@ -241,7 +244,11 @@
         now-ms (/ (- (long now-ns) (long t0)) 1e6)
         {:keys [runtime reports]} (show-time/step before state mtc-pos now-ms)
         pulses (show-time/pulse-view runtime)
-        [routing-cache routing] (routing-step (:routing-cache runtime) state)
+        ;; The map in use at this tick's beats: a pending switch from the
+        ;; tick that reaches its beat (zones plan Z4, spec §4); Z5's Map
+        ;; cycle passes its pick here
+        map-id (zone-maps/effective-map-id state (show-time/global-beats runtime) nil)
+        [routing-cache routing] (routing-step (:routing-cache runtime) state map-id)
         runtime (assoc runtime :t0-ns t0 :routing-cache routing-cache)
         _ (reset! show-time/!runtime runtime)
         playing? (boolean (get-in state [:playback :playing?]))

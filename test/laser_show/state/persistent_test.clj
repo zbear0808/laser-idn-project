@@ -528,8 +528,11 @@
 
 
 (deftest zone-data-survives-save-and-load-test
-  (testing "zones plan Z4: the grid's column defaults and the show's"
-    (let [show (-> (domains/build-initial-state)
+  (testing "zones plan Z4: your maps, the zones' labels, the grid's column defaults and the show's"
+    (let [maps {:map/custom-1 {:id :map/custom-1 :name "Crowd sweep" :lanes [:auto/left :crowd] :overrides {:zone/c :auto/center}}}
+          show (-> (domains/build-initial-state)
+                   (assoc :zone-maps maps)
+                   (assoc-in [:zones :labels] {:zone/a "Beams"})
                    (assoc-in [:grid :column-targets] {0 :zone/a 2 [:zone/b :graphics]})
                    (assoc-in [:config :default-target] :zone/c))
           files (persistent/project-files show)
@@ -537,11 +540,47 @@
       (is (= {0 :zone/a 2 [:zone/b :graphics]} (get-in files ["project-metadata.edn" :grid :column-targets])))
       (is (= {0 :zone/a 2 [:zone/b :graphics]} (get-in loaded [:grid :column-targets])))
       (is (= :zone/c (get-in loaded [:config :default-target])))
+      (is (= maps (:zone-maps loaded)))
+      (is (= {:labels {:zone/a "Beams"}} (:zones loaded)))
+      (is (= maps (get-in files ["content.edn" :zone-maps])) "with the show's content")
       (is (false? (get-in loaded [:project :dirty?])))
       (testing "a file without them: none"
         (let [old (-> files
                       (update-in ["project-metadata.edn" :grid] dissoc :column-targets)
-                      (update-in ["project-metadata.edn" :config] dissoc :default-target))
+                      (update-in ["project-metadata.edn" :config] dissoc :default-target)
+                      (update "content.edn" dissoc :zone-maps :zones))
               loaded (persistent/apply-loaded-project show old "old.zip")]
           (is (= {} (get-in loaded [:grid :column-targets])))
-          (is (nil? (get-in loaded [:config :default-target]))))))))
+          (is (nil? (get-in loaded [:config :default-target])))
+          (is (= {} (:zone-maps loaded)))
+          (is (= {:labels {}} (:zones loaded))))))))
+
+(deftest show-reopens-on-its-map-test
+  (let [show (-> (domains/build-initial-state)
+                 (assoc :zone-maps {:map/custom-1 {:id :map/custom-1 :name "Mine" :lanes [:all]}})
+                 (assoc-in [:zone-map :active] :map/custom-1))
+        files (persistent/project-files show)]
+    (is (= {:active :map/custom-1} (get-in files ["project-metadata.edn" :zone-map])) "saved, the map last used (D-14)")
+    (is (= :map/custom-1 (get-in (persistent/apply-loaded-project (domains/build-initial-state) files "s.zip") [:zone-map :active])))
+    (testing "a file from before: Left / Right"
+      (is (= :map/left-right (get-in (persistent/apply-loaded-project show (update files "project-metadata.edn" dissoc :zone-map) "o.zip")
+                                     [:zone-map :active]))))
+    (testing "New Project: Left / Right"
+      (is (= :map/left-right (get-in (persistent/new-project-state show) [:zone-map :active]))))
+    (testing "loading it is no unsaved change, and no undo step"
+      (let [loaded (persistent/apply-loaded-project (domains/build-initial-state) files "s.zip")]
+        (is (false? (get-in loaded [:project :dirty?])))
+        (is (empty? (get-in loaded [:history :undo-stack])))))))
+
+(deftest pending-switch-is-not-saved-test
+  (let [show (assoc-in (domains/build-initial-state) [:zone-map :pending] {:id 1 :map :map/unison :at-beat 8.0 :bar? false})
+        files (persistent/project-files show)]
+    (is (= {:active :map/left-right} (get-in files ["project-metadata.edn" :zone-map])) "only the map in use")
+    (is (not-any? #(= :pending %) (tree-seq coll? seq files)))))
+
+(deftest session-reset-clears-the-pending-switch-test
+  (let [busy (-> (domains/build-initial-state)
+                 (assoc-in [:zone-map :pending] {:id 1 :map :map/unison :at-beat 8.0 :bar? false}))]
+    (is (nil? (get-in (persistent/apply-loaded-project busy (persistent/project-files busy) "x.zip") [:zone-map :pending]))
+        "Open: the pending beat belongs to the old show")
+    (is (nil? (get-in (persistent/new-project-state busy) [:zone-map :pending])) "New")))

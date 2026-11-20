@@ -23,6 +23,8 @@
    | prefs ([:config <prefs-config-keys>])             | no    | yes      |
    | live: [:timing :bpm], effect cell :active?,       | no    | no       |
    |   item fields in live-item-paths                  |       |          |
+   | live, own domain: [:zone-map :active] (saved by   | no    | no       |
+   |   persistent-state-mapping, zones plan Z4)        |       |          |
    Everything above is still written when the project is saved; the rig
    also has a file of its own, saved by itself (zones plan ZR, state.rig-file)."
   (:require [clojure.walk :as walk]
@@ -51,15 +53,18 @@
   [[:collapsed?] [:muted?] [:keyframe-modulator :selected-keyframe]])
 
 (def ^:private document-roots
-  "Top-level state keys that extract-document-state reads from."
-  [:config :timing :grid :projectors :virtual-projectors :zone-groups :rig :chains])
+  "Top-level state keys that extract-document-state reads from. [:zone-map]
+   isn't one: the map in use is live (zones plan Z4 §5)."
+  [:config :timing :grid :projectors :virtual-projectors :zone-groups :rig :chains :zone-maps :zones])
 
 (defn extract-document-state
   "Extract document configuration from state.
-   Only captures persistent project fields (cues, effects, projectors, zones, the rig, config, bpm, grid size and column targets).
-   Excludes all runtime data (playback, streaming engines, IDN discovery, transient UI, history)."
+   Only captures persistent project fields (cues, effects, projectors, zone groups, zone maps and
+   zones' labels, the rig, config, bpm, grid size and column targets).
+   Excludes all runtime data (playback, streaming engines, IDN discovery, transient UI, history)
+   and the live zone map in use."
   [state]
-  (let [{:keys [config timing grid projectors virtual-projectors zone-groups rig chains]} state]
+  (let [{:keys [config timing grid projectors virtual-projectors zone-groups rig chains zone-maps zones]} state]
     {:config config
      :timing {:bpm (:bpm timing)}
      :grid {:size (:size grid) :column-targets (or (:column-targets grid) {})}
@@ -67,7 +72,9 @@
      :virtual-projectors (or virtual-projectors {})
      :zone-groups (or zone-groups {})
      :rig (or rig {})
-     :chains (or chains {})}))
+     :chains (or chains {})
+     :zone-maps (or zone-maps {})
+     :zones {:labels (or (:labels zones) {})}}))
 
 (defn document-roots-identical?
   "True when no document root changed between the two states (cheap fast path)."
@@ -163,11 +170,11 @@
 
 (defn show-content-changed?
   "True when the show's undoable content differs between two documents: the
-   grid, the zone group definitions, config without prefs, the cue and
-   effect chains."
+   grid, the zone group definitions, the zone maps and the zones' labels,
+   config without prefs, the cue and effect chains."
   [old-doc new-doc]
   (boolean
-   (or (some #(differs? (get old-doc %) (get new-doc %)) [:grid :zone-groups])
+   (or (some #(differs? (get old-doc %) (get new-doc %)) [:grid :zone-groups :zone-maps :zones])
        (config-changed? (:config old-doc) (:config new-doc) (complement prefs-config-keys))
        (chains-changed? (:chains old-doc) (:chains new-doc) (complement rig-chain-domains)))))
 
@@ -285,11 +292,11 @@
 
 (defn restore-document
   "Restore the undoable content of a document snapshot into state.
-   Keeps current live state (BPM, effect cell :active?, live item fields) and
-   config prefs. Runtime systems are untouched. Does not set :dirty?; that is
+   Keeps current live state (BPM, effect cell :active?, live item fields, the
+   zone map in use) and config prefs. Runtime systems are untouched. Does not set :dirty?; that is
    derived by the event pipeline."
   [state document-state]
-  (let [{:keys [config grid projectors virtual-projectors zone-groups rig chains]} document-state
+  (let [{:keys [config grid projectors virtual-projectors zone-groups rig chains zone-maps zones]} document-state
         current-config (:config state)
         restored-config (merge (apply dissoc config prefs-config-keys)
                                (select-keys current-config prefs-config-keys))]
@@ -300,6 +307,8 @@
         (assoc :projectors (or projectors {}))
         (assoc :virtual-projectors (or virtual-projectors {}))
         (assoc :zone-groups (or zone-groups {}))
+        (assoc :zone-maps (or zone-maps {}))
+        (assoc-in [:zones :labels] (or (:labels zones) {}))
         (assoc :rig (or rig {}))
         (assoc :chains (graft-live-chains (:chains state) (or chains {}))))))
 

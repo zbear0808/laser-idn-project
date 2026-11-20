@@ -45,6 +45,7 @@
             [laser-show.routing.rig :as rig]
             [laser-show.routing.targets :as targets]
             [laser-show.routing.zone-effects :as ze]
+            [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.input.store :as input-store]
             [laser-show.animation.cue-chains :as cue-chains]
             [laser-show.timeline.model :as model]
@@ -417,16 +418,26 @@
                                                              [(:id item) (update-vals by-zone count)])))
                                                    (map vector items item-zone-maps))})))))
 
+(defn- key-reaches
+  "The refs a frame key sends to: each ref it names, and for a zone its lane
+   in routing's map too (zones plan Z4), each once."
+  [routing k]
+  (let [refs (rig/key-refs k)]
+    (if (and routing (some targets/zone-ref? refs))
+      (distinct (concat refs (keep #(zone-maps/zone-lane routing %) refs)))
+      refs)))
+
 (defn- ref-frames
-  "{ref frame} for every ref the tick's keys name: the frames of each key
-   that names it, joined in key order (routing.compose/key-order), then
-   across the cues. A key with two refs counts for each."
-  [cues]
+  "{ref frame} for every ref the tick's keys send to: the frames of each key
+   that names it, or a zone whose lane it is in routing's map, joined in key
+   order (routing.compose/key-order), then across the cues. A key with two
+   refs counts for each, a ref it reaches twice once."
+  [cues routing]
   (reduce (fn [acc {:keys [zone-frames]}]
             (let [by-ref (reduce (fn [m k]
                                    (reduce (fn [m ref] (update m ref (fnil conj []) (get zone-frames k)))
                                            m
-                                           (rig/key-refs k)))
+                                           (key-reaches routing k)))
                                  {}
                                  (sort-by compose/key-order (keys zone-frames)))]
               (reduce-kv (fn [acc ref frames]
@@ -442,8 +453,9 @@
    [{:cell :zone-frames} …] in order (show-time's snapshot :cues) and its
    routing (nil: no laser cells):
    - :points: every cue's zones joined, blanked between them (the master view);
-   - :ref-frames: {ref frame}, what is sent to each ref the tick's keys name
-     (a group cell);
+   - :ref-frames: {ref frame}, what is sent to each ref the tick's keys name,
+     a group's zones' too, through the routing's map (a group cell; a zone's
+     cell, what is drawn into it);
    - :projector-frames: {projector-id (delay {:frame :fit})}, for each laser
      of the routing, what it draws before its calibration: the composition
      and fit guard its engine runs (routing.compose, animation.fit-guard),
@@ -454,7 +466,7 @@
   ([cues routing]
    (when-let [points (concatenate-frames (u/keepv #(concatenate-frames (vec (vals (:zone-frames %)))) cues))]
      {:points points
-      :ref-frames (ref-frames cues)
+      :ref-frames (ref-frames cues routing)
       :projector-frames (into {}
                               (map (fn [[pid {:keys [scan-rate fit]}]]
                                      [pid (delay (when-let [{:keys [frame]} (compose/projector-frame cues routing pid)]

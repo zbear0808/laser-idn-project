@@ -396,6 +396,29 @@
                      :color "#E67E22"}
            :doc "Audience scanning projectors group"}})
 
+(defstate zones
+  "The show's zones (zones plan Z4, spec 01 §1): :zone/a, :zone/b … are
+   letters, each with an optional label. Show content: undoable, unsaved,
+   saved."
+  {:labels {:default {}
+            :doc "{zone \"text\"}: a zone's label, shown after its letters (\"A · Beams\")"}})
+
+(defstate zone-maps
+  "Your zone maps (zones plan Z4, routing.zone-maps): {map-id {:id :name
+   :lanes [ref …] :overrides {zone ref}}}, ids :map/custom-1 …. The built-in
+   ones (Left / Right, Odd / Even, Unison) are derived, never stored. Show
+   content: undoable, unsaved, saved."
+  {})
+
+(defstate zone-map
+  "The map in use (zones plan Z4 §5). Not a document root: a switch is live,
+   as BPM is, never an undo step and never unsaved; :active is still saved
+   with the show (persistent-state-mapping), so it reopens on it (D-14)."
+  {:active {:default :map/left-right
+            :doc "The map in use: a built-in's id or one of yours; one that is no map is Left / Right (routing.zone-maps/effective-map-id)"}
+   :pending {:default nil
+             :doc "{:id :map :at-beat :bar?}: a switch waiting for its beat (routing.zone-maps/schedule); the show clock routes by it from that beat until :show-clock/zone-map-due commits it. Never saved, cleared by Open and New"}})
+
 (defstate zone-group-ui
   "UI state for zone group selection.
    

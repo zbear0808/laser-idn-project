@@ -353,3 +353,36 @@
           (is (= {2 :zone/a} (get-in (history/restore-document clean (doc edited)) [:grid :column-targets])))
           (is (= [0 0] (get-in (history/restore-document edited (doc clean)) [:grid :selected-cell]))
               "the selection isn't the document's"))))))
+
+(deftest zone-map-active-is-live-test
+  (testing "zones plan Z4 §5: the map in use is live, as BPM is: never an undo step, never unsaved, never undone"
+    (let [clean (assoc (history/mark-clean sample-state) :zone-map {:active :map/left-right :pending nil})
+          switched (assoc-in clean [:zone-map :active] :map/odd-even)
+          pending (assoc-in clean [:zone-map :pending] {:id 1 :map :map/unison :at-beat 4.0 :bar? false})]
+      (doseq [[label edit] [["a switch" switched] ["a pending switch" pending]]]
+        (testing label
+          (is (true? (history/document-roots-identical? clean edit)) "not a document root: the fast path")
+          (is (false? (history/undoable-changed? (doc clean) (doc edit))))
+          (is (false? (history/persisted-changed? (doc clean) (doc edit))))
+          (is (false? (history/derive-dirty clean edit)))))
+      (is (not (contains? (doc switched) :zone-map)) "not in the document")
+      (is (= :map/odd-even (get-in (history/restore-document switched (doc clean)) [:zone-map :active]))
+          "an undo leaves it where it is"))))
+
+(deftest zone-maps-and-labels-are-undoable-test
+  (let [clean (history/mark-clean sample-state)
+        maps {:map/custom-1 {:id :map/custom-1 :name "Crowd sweep" :lanes [:auto/left :crowd] :overrides {}}}]
+    (doseq [[label edit] [["a map of yours" #(assoc % :zone-maps maps)]
+                          ["a lane" #(assoc-in (assoc % :zone-maps maps) [:zone-maps :map/custom-1 :lanes 1] :graphics)]
+                          ["a zone's label" #(assoc-in % [:zones :labels :zone/a] "Beams")]]]
+      (testing label
+        (is (false? (history/document-roots-identical? clean (edit clean))))
+        (is (true? (history/undoable-changed? (doc clean) (doc (edit clean)))) "undoable")
+        (is (true? (history/persisted-changed? (doc clean) (doc (edit clean)))) "unsaved")))
+    (testing "in the document, and put back by undo"
+      (let [edited (-> clean (assoc :zone-maps maps) (assoc-in [:zones :labels :zone/a] "Beams"))]
+        (is (= maps (:zone-maps (doc edited))))
+        (is (= {:labels {:zone/a "Beams"}} (:zones (doc edited))))
+        (is (= {} (:zone-maps (history/restore-document edited (doc clean)))))
+        (is (= {:labels {}} (:zones (history/restore-document edited (doc clean)))))
+        (is (= maps (:zone-maps (history/restore-document clean (doc edited)))))))))

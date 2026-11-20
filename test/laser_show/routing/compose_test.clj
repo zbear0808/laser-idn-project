@@ -54,6 +54,11 @@
 
 ;; The spec's examples (01 §6.2) in their Z3 form (05 §8)
 
+(defn- routing-on
+  "The routing of state under zone map map-id (zones plan Z4)."
+  [state map-id]
+  (rig/routing (rig/routing-inputs state map-id)))
+
 (deftest example-a-a-picture-moves-between-halves-test
   (let [r (routing (rig-state 1))]
     (is (= [(fit A L1) 1] (draws [(cue {:auto/left A})] r :p1)) "A under Left: fitted in the left half")
@@ -117,6 +122,21 @@
       (is (true? (compose/split-sides? cues r :p2)))
       (is (= [(join (fit A L) (fit B R)) 2] (draws cues r :p2)))
       (is (false? (compose/split-sides? [(first cues)] r :p2)) "one side alone doesn't"))))
+
+(deftest example-i-unison-draws-every-zone-everywhere-test
+  (testing "zones plan Z4, spec 01 §6.2 i: under Unison A and B are All, so every laser draws both, whole, as an old show on All"
+    (doseq [n [1 3]]
+      (let [r (routing-on (rig-state n) :map/unison)]
+        (doseq [k (range 1 (inc n))]
+          (is (= [(join A B) 0] (draws [(cue {:zone/a A :zone/b B})] r (pid k))) (str n " lasers, laser " k)))))))
+
+(deftest example-j-zones-wrap-over-two-lanes-test
+  (testing "zones plan Z4, spec 01 §6.2 j: two lasers, Left / Right, four zones lit"
+    (let [C (circle 12) D (circle 9)
+          r (routing-on (rig-state 2) :map/left-right)
+          zone-frames {:zone/a A :zone/b B :zone/c C :zone/d D}]
+      (is (= [(join A C) 0] (draws [(cue zone-frames)] r :p1)) "A and C on Left: overlaid, in zone order")
+      (is (= [(join B D) 0] (draws [(cue zone-frames)] r :p2)) "B and D on Right"))))
 
 (deftest same-picture-under-two-keys-is-drawn-once-test
   (let [r (routing (rig-state 1))]

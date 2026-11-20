@@ -263,14 +263,65 @@
   (two-lasers!)
   (testing "nothing playing: the routing all the same, for the preview and the engines"
     (let [s (show-clock/tick! 0)]
-      (is (= (rig/routing (rig/routing-inputs (state/get-raw-state) nil)) (:routing s)))))
+      (is (= (rig/routing (rig/routing-inputs (state/get-raw-state) :map/left-right)) (:routing s)))))
   (testing "playing"
     (trigger! 0 0)
     (let [s (show-clock/tick! 16666667)]
       (is (= [[:p1 nil nil] [:p2 nil nil]] (rig/resolve-ref (:routing s) :all)))
       (is (= [[:p1 nil nil]] (rig/resolve-ref (:routing s) :auto/left)))
       (is (= {:index 1 :scan-rate 25000} (select-keys (get-in s [:routing :outputs :p2]) [:index :scan-rate])))
-      (is (nil? (get-in s [:routing :map])) "no map until Z4"))))
+      (is (= :map/left-right (get-in s [:routing :map])) "the map in use: a new show's"))))
+
+(deftest snapshot-names-the-effective-map-test
+  (init! {[0 0] (cue :circle)})
+  (two-lasers!)
+  (trigger! 0 0)
+  (let [s (show-clock/tick! 0)]
+    (is (= {:map :map/left-right :lanes [:auto/left :auto/right] :overrides {}} (select-keys (:routing s) [:map :lanes :overrides])))
+    (is (= [[:p1 nil nil]] (rig/resolve-ref (:routing s) :zone/a)) "A is Left"))
+  (state/assoc-in-state! [:zone-map :active] :map/odd-even)
+  (let [s (show-clock/tick! 16666667)]
+    (is (= :map/odd-even (get-in s [:routing :map])) "the next tick")
+    (is (= [:auto/odd :auto/even] (get-in s [:routing :lanes]))))
+  (testing "an id that is no map: Left / Right"
+    (state/assoc-in-state! [:zone-map :active] :map/gone)
+    (is (= :map/left-right (get-in (show-clock/tick! 33333334) [:routing :map])))))
+
+(deftest pending-map-is-effective-once-due-test
+  (testing "spec §4, 06 invariant 7: from the tick whose global beats reach it, before any commit lands"
+    (init! {[0 0] (cue :circle)})
+    (two-lasers!)
+    (trigger! 0 0)
+    (state/assoc-in-state! [:zone-map :pending] {:id :p :map :map/unison :at-beat 1.0 :bar? false})
+    (with-redefs [events/dispatch! (fn [_])]
+      (let [before (show-clock/tick! 0)
+            just-before (show-clock/tick! 450000000)
+            on-the-beat (show-clock/tick! 500000000)]
+        (is (= :map/left-right (get-in before [:routing :map])))
+        (is (= :map/left-right (get-in just-before [:routing :map])) "0.9 beats: not yet")
+        (is (= :map/unison (get-in on-the-beat [:routing :map])) "beat 1: the tick that reaches it already routes by it")
+        (is (= [[:p1 nil nil] [:p2 nil nil]] (rig/resolve-ref (:routing on-the-beat) :zone/a)) "A is All under Unison")
+        (is (= :map/unison (get-in (show-clock/tick! 750000000) [:routing :map])) "and stays, until the commit")
+        (is (= :map/left-right (get-in (state/get-raw-state) [:zone-map :active])) "app state is the commit's to change")))))
+
+(deftest clock-writes-no-zone-map-test
+  (testing "06 invariant 6: the show clock never writes [:zone-map]"
+    (init! {[0 0] (cue :circle)})
+    (trigger! 0 0)
+    (state/assoc-in-state! [:zone-map :pending] {:id :p :map :map/unison :at-beat 1.0 :bar? false})
+    (let [before (:zone-map (state/get-raw-state))
+          writes (atom 0)
+          k ::zone-map]
+      (add-watch (state/get-context-atom) k
+                 (fn [_ _ old new]
+                   (when (not= (get-in old [:cljfx.context/m :zone-map]) (get-in new [:cljfx.context/m :zone-map]))
+                     (swap! writes inc))))
+      (try
+        (with-redefs [events/dispatch! (fn [_])]
+          (ticks! 60))
+        (finally (remove-watch (state/get-context-atom) k)))
+      (is (zero? @writes))
+      (is (= before (:zone-map (state/get-raw-state)))))))
 
 (deftest routing-is-made-before-the-render-test
   (testing "spec §5's order (Z5 S-3): the routing comes from the tick's state before the render, which finds it made"

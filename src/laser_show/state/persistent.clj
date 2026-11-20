@@ -69,7 +69,9 @@
   {:project-metadata
    {:paths [{:path [:config] :owner :show :merge-defaults? true}
             {:path [:timing] :owner :show :keys [:bpm]}
-            {:path [:grid] :owner :show :keys [:size :column-targets]}]}
+            {:path [:grid] :owner :show :keys [:size :column-targets]}
+            ;; The map in use: live, but the show reopens on it (zones plan Z4 §5, D-14)
+            {:path [:zone-map] :owner :show :keys [:active]}]}
    
    :hardware
    {:paths [{:path [:projectors] :owner :rig}
@@ -80,7 +82,9 @@
    :content
    {:paths [{:path [:chains :cue-chains] :owner :show}
             {:path [:chains :effect-chains] :owner :show}
-            {:path [:chains :projector-effects] :owner :rig}]}})
+            {:path [:chains :projector-effects] :owner :rig}
+            {:path [:zone-maps] :owner :show}
+            {:path [:zones] :owner :show :merge-defaults? true}]}})
 
 
 ;; Pure Document Functions
@@ -181,7 +185,8 @@
 (defn- reset-session
   "Reset state that refers to the previous document (playback, what vibe
    mode is doing, selection, list UI, dialogs, the status bar's notice, the
-   Vibes tab's selection, undo history, project metadata).
+   Vibes tab's selection, a pending zone map switch, undo history, project
+   metadata).
    Backend/runtime state (streaming, Link, MIDI/OSC, discovered devices) is kept."
   [state initial]
   (-> state
@@ -195,6 +200,8 @@
       (assoc-in [:ui :notice] (get-in initial [:ui :notice]))
       (assoc-in [:ui :vibes] (get-in initial [:ui :vibes]))
       (assoc-in [:grid :selected-cell] nil)
+      ;; A switch waiting for a beat of the show that was open
+      (assoc-in [:zone-map :pending] nil)
       ;; The test pattern and Identify belong to the show that was open
       (update :projector-ui merge (select-keys (:projector-ui initial)
                                                [:active-projector :active-virtual-projector
