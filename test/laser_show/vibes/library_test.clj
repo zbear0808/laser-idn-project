@@ -70,14 +70,22 @@
         (is (true? (cell? (-> (update-in state [:chains :cue-chains [0 1]] dissoc :target)
                               (with-projector :p3 {:zone-groups [:all] :tags #{:crowd-scanning}}))))
             "no target at all")))
-    (testing "an item's, a track's or a folder's own target, inside groups and folders"
-      (is (true? (cell? (assoc-in state [:chains :cue-chains [0 1] :items]
-                                  [{:type :group :items [{:type :preset :target :crowd}]}]))))
-      (is (true? (cell? (assoc-in state [:chains :cue-chains [0 1] :tracks]
-                                  [{:type :group :items [{:type :track :id :t :target :crowd}]}]))))
-      (is (true? (cell? (assoc-in state [:chains :cue-chains [0 1] :tracks]
-                                  [{:type :group :id :f :target [:crowd :graphics] :items [{:type :track :id :t}]}])))
-          "a union's every ref"))
+    (testing "an item's, a track's or a folder's own target, inside groups and folders: where its content goes (zones plan Z4)"
+      (let [on-track (fn [tracks] (-> state
+                                      (assoc-in [:chains :cue-chains [0 1] :tracks] tracks)
+                                      (assoc-in [:chains :cue-chains [0 1] :items 0 :track-id] :t)))]
+        (is (true? (cell? (assoc-in state [:chains :cue-chains [0 1] :items]
+                                    [{:type :group :items [{:type :preset :target :crowd}]}]))))
+        (is (true? (cell? (on-track [{:type :group :items [{:type :track :id :t :target :crowd}]}]))))
+        (is (true? (cell? (on-track [{:type :group :id :f :target [:crowd :graphics] :items [{:type :track :id :t}]}])))
+            "a union's every ref")
+        (is (false? (cell? (assoc-in state [:chains :cue-chains [0 1] :tracks]
+                                     [{:type :group :items [{:type :track :id :t :target :crowd}]}])))
+            "a track with no clip on it sends nothing there")
+        (is (false? (cell? (-> state
+                               (assoc-in [:chains :cue-chains [0 1] :target] :crowd)
+                               (assoc-in [:chains :cue-chains [0 1] :items 0 :target] :graphics))))
+            "the cue's own target, which every item overrides, sends nothing there")))
     (testing "a virtual projector tagged, or whose projector is"
       (is (true? (cell? (assoc-in state [:virtual-projectors :v1]
                                   {:parent-projector-id :p9 :zone-groups [:all] :tags #{:crowd-scanning}}))))
@@ -135,6 +143,66 @@
     (is (= #{[0 0] [2 0]} (hits state)) "81 presses never pick the two crowd cues")
     (is (= #{[0 0] [1 0] [2 0] [3 0]} (hits (assoc-in state [:config :vibes :library :vibe-1 :allow-audience?] true)))
         "unless the vibe allows them")))
+
+
+;; Zones and the audience (zones plan Z4, 06 §8.6)
+
+(defn- sweep-rig
+  "p1-p4, and p5 scanning the crowd, out of All (and so of every automatic
+   group, D-33) and alone in Crowd Scanning; the map Crowd sweep: Left and
+   Crowd, with C on Center."
+  []
+  (-> (reduce (fn [s [id n]] (with-projector s id {:host (str "10.0.0." n) :zone-groups []}))
+              (starter)
+              [[:p1 1] [:p2 2] [:p3 3] [:p4 4]])
+      (with-projector :p5 {:host "10.0.0.5" :zone-groups [:crowd] :tags #{:crowd-scanning} :exclude-from-all? true})
+      (assoc-in [:zone-maps :map/custom-1] {:name "Crowd sweep" :lanes [:auto/left :crowd] :overrides {:zone/c :auto/center}})))
+
+(defn- on
+  "state with the cue at [0 1] drawing to t, or, at cell, a cue doing so."
+  ([state t] (on state [0 1] t))
+  ([state cell t] (assoc-in state [:chains :cue-chains cell] {:items [{:type :preset :preset-id :circle :target t}]})))
+
+(deftest zone-in-any-map-reaches-the-crowd-test
+  (let [s (sweep-rig)
+        cell? #(library/audience-cell? % [0 1])]
+    (is (false? (cell? (on s :zone/a))) "A: Left, Odd, All (p5 is out of it) or Left")
+    (is (true? (cell? (on s :zone/b))) "B: Crowd sweep sends it to Crowd Scanning")
+    (is (true? (cell? (on s :auto.laser/p5))) "pinned to the scanner")
+    (is (false? (cell? (on (update s :zone-maps dissoc :map/custom-1) :zone/b))) "once Crowd sweep goes, no map sends B there")
+    (testing "every map counts, not the one in use: a switch can come while the cue plays"
+      (is (true? (cell? (assoc-in (on s :zone/b) [:zone-map :active] :map/odd-even)))))
+    (testing "its column's default and the show's count"
+      (let [inherits (assoc-in s [:chains :cue-chains [0 1]] {:items [{:type :preset :preset-id :circle}]})]
+        (is (true? (cell? (assoc-in inherits [:grid :column-targets 0] :zone/b))))
+        (is (true? (cell? (assoc-in inherits [:config :default-target] :zone/b))))
+        (is (false? (cell? (assoc-in inherits [:grid :column-targets 1] :zone/b))) "another column's doesn't")))
+    (testing "a vibe leaves it out of its pool unless it allows the audience"
+      (let [state (on s :zone/b)
+            vibe (library/vibe state :vibe-1)]
+        (is (= [] (library/playable-cells state vibe [[0 1]])))
+        (is (= [[0 1]] (library/playable-cells state (assoc vibe :allow-audience? true) [[0 1]])))))))
+
+(deftest override-counts-test
+  (let [s (sweep-rig)
+        cell? #(library/audience-cell? % [0 1])]
+    (is (false? (cell? (on s :zone/c))) "C would wrap to Crowd's lane? no: to Left; and its override sends it to Center")
+    (is (true? (cell? (on (assoc-in s [:zone-maps :map/custom-1 :overrides :zone/c] :crowd) :zone/c))) "an override to Crowd")
+    (is (true? (cell? (on (assoc-in s [:zone-maps :map/custom-1 :overrides :zone/a] :crowd) :zone/a))))))
+
+(deftest unison-counts-when-all-reaches-the-crowd-test
+  (let [s (assoc-in (sweep-rig) [:projectors :p5 :exclude-from-all?] false)
+        cell? #(library/audience-cell? % [0 1])]
+    (is (true? (cell? (on s :all))) "All reaches p5")
+    (is (true? (cell? (on s :zone/a))) "and so every zone does, through Unison")
+    (is (false? (cell? (on (sweep-rig) :zone/a))) "p5 out of All: no map sends A to it")))
+
+(deftest lint-names-the-zone-and-its-map-test
+  (let [s (on (sweep-rig) [1 0] :zone/b)
+        text "Shapes: A2 reaches the audience through Zone B (the Crowd sweep map sends it to Crowd Scanning), so this vibe never plays it. Allow audience cells, or take it out"]
+    (is (some #(= {:level :warn :vibe :vibe-1 :text text} %) (library/lint s)))
+    (is (not-any? #(= text (:text %)) (library/lint (assoc-in s [:config :vibes :library :vibe-1 :allow-audience?] true)))
+        "unless the vibe allows the audience")))
 
 
 ;; Editing the vibes (Phase 3)

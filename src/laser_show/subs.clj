@@ -1395,9 +1395,12 @@
 
 (defn- reaction-inputs
   "What the cells that react to a press depend on (vibes.reactions/reactions
-   and what may play: the audience rule reads the rig's order too)."
+   and what may play: the audience rule reads the rig's order, and since
+   zones plan Z4 the zone maps and the column and show defaults)."
   [state]
-  (select-keys state [:chains :projectors :virtual-projectors :rig]))
+  (-> (select-keys state [:chains :projectors :virtual-projectors :rig :zone-maps])
+      (assoc :grid (select-keys (:grid state) [:column-targets])
+             :config (select-keys (:config state) [:default-target]))))
 
 (defn- vibe-reactions
   "The current vibe's tap reactions by role (vibes.reactions/reactions), and
@@ -1407,7 +1410,7 @@
   [context]
   (let [id (fx/sub-ctx context vibe-current-id)
         {:keys [library]} (fx/sub-ctx context vibe-config)
-        state (assoc (fx/sub-val context reaction-inputs) :config {:vibes {:library library}})
+        state (assoc-in (fx/sub-val context reaction-inputs) [:config :vibes] {:library library})
         vibe (get library id)]
     {:by-role (if vibe (reactions/reactions state id) {})
      :quiet (set (for [role [:hit :accent :flash]
@@ -1526,13 +1529,24 @@
                                :reach (fx/sub-ctx context ref-reach)
                                :audience (fx/sub-ctx context vibe-audience-groups)})))
 
+(defn vibe-audience-routing
+  "What the audience rule reads besides a cue and the audience groups
+   (vibes.library/audience-cue?, zones plan Z4): the zone maps, the column
+   defaults and the show's; so the picker re-runs when one changes, and
+   only then."
+  [context]
+  {:zone-maps (fx/sub-val context :zone-maps)
+   :grid {:column-targets (fx/sub-val context get-in [:grid :column-targets])}
+   :config {:default-target (fx/sub-val context get-in [:config :default-target])}})
+
 (defn- edited-allows-audience? [state]
   (boolean (:allow-audience? (library/vibe state (library/edited-id state)))))
 
 (defn- cell-blocked [context col row]
   (let [groups (when-not (fx/sub-val context edited-allows-audience?)
                  (fx/sub-ctx context vibe-audience-groups))]
-    (#{:timecode :crowd} (library/unplayable (fx/sub-ctx context cue-cell-chain col row) groups))))
+    (#{:timecode :crowd} (library/unplayable (fx/sub-ctx context vibe-audience-routing) [col row]
+                                             (fx/sub-ctx context cue-cell-chain col row) groups))))
 
 (defn vibe-cell-blocked
   "Why the vibe edited never plays the cue at [col row]: :timecode (it

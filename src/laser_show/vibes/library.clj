@@ -20,6 +20,7 @@
   (:require [clojure.string :as str]
             [laser-show.routing.rig :as rig]
             [laser-show.routing.targets :as targets]
+            [laser-show.routing.zone-maps :as zone-maps]
             [laser-show.state.domains :as domains]
             [laser-show.timeline.playback :as playback]
             [laser-show.vibes.reactions :as reactions]))
@@ -96,40 +97,45 @@
       (into (rig/refs-reaching state crowd?))
       (into (mapcat rig/stored-refs) (crowd-virtual-projectors state))))
 
-(defn- zone-group-ids
-  "Every ref cue can send to, in any of the places the routing reads (zones
-   plan Z4, routing.targets): its own :target (:all without one, as the
-   routing falls back), and each item's, group's, clip's, track's and
-   folder's :target, a union's every ref."
-  [cue]
-  (let [nodes (concat (tree-seq #(seq (:items %)) :items {:items (:items cue)})
-                      (tree-seq #(seq (:items %)) :items {:items (:tracks cue)}))]
-    (into (or (not-empty (set (targets/target-refs (:target cue)))) #{:all})
-          (mapcat #(targets/target-refs (:target %)))
-          nodes)))
+(defn audience-ref?
+  "Does ref reach the audience (zones plan Z4, 06 §8.6): it is one of groups
+   (audience-groups), or it is a zone whose lane, in some map of state's
+   show (the built-ins and yours, overrides included), is one. Every map,
+   not the one in use: a vibe checks a cue once, when it picks it, and the
+   map can switch while the cue plays."
+  [state groups ref]
+  (if (targets/zone-ref? ref)
+    (boolean (some #(contains? groups (targets/zone-lane % ref)) (zone-maps/all-maps state)))
+    (contains? groups ref)))
+
+(defn- cue-refs
+  "Every ref the content of cue, at cell, draws to (routing.targets/cue-refs):
+   its column's default and the show's included."
+  [state [col] cue]
+  (targets/cue-refs cue (get-in state [:grid :column-targets col]) (get-in state [:config :default-target])))
 
 (defn audience-cue?
-  "Does cue name one of groups (audience-groups) anywhere?"
-  [cue groups]
-  (boolean (some groups (zone-group-ids cue))))
+  "Can cue, at cell, reach the audience: does a ref its content draws to
+   pass audience-ref? (groups: audience-groups)."
+  [state cell cue groups]
+  (boolean (some #(audience-ref? state groups %) (cue-refs state cell cue))))
 
 (defn audience-cell?
-  "Can the cue at cell reach the audience: does it name an audience group
-   (audience-groups) anywhere?"
+  "Can the cue at cell reach the audience (audience-cue?)?"
   ([state cell] (audience-cell? state cell (audience-groups state)))
   ([state cell groups]
-   (audience-cue? (get-in state [:chains :cue-chains cell]) groups)))
+   (audience-cue? state cell (get-in state [:chains :cue-chains cell]) groups)))
 
 (defn unplayable
-  "Why vibe mode never plays cue: :empty (no items), :timecode (it follows
-   MIDI timecode) or :crowd (it names one of groups, the audience groups of
-   a vibe that doesn't allow them; nil groups for one that does). nil when
+  "Why vibe mode never plays cue, at cell: :empty (no items), :timecode (it
+   follows MIDI timecode) or :crowd (it can reach the audience, audience-cue?,
+   in a vibe that doesn't allow it; nil groups for one that does). nil when
    it can play it."
-  [cue groups]
+  [state cell cue groups]
   (cond
     (empty? (:items cue)) :empty
     (playback/chases-mtc? cue) :timecode
-    (and groups (audience-cue? cue groups)) :crowd))
+    (and groups (audience-cue? state cell cue groups)) :crowd))
 
 (defn playable-cells
   "Those of cells (in order, each once) vibe may start: the cue has items,
@@ -140,7 +146,7 @@
         groups (when-not (:allow-audience? vibe) (audience-groups state))]
     (into []
           (comp (distinct)
-                (filter #(nil? (unplayable (get chains %) groups))))
+                (filter #(nil? (unplayable state % (get chains %) groups))))
           cells)))
 
 
@@ -422,22 +428,29 @@
   "Why vibe-name never plays the cue at cell: the audience group it reaches,
    named as the pickers name it (\"All\", \"Left\", a laser, a group), and the
    projector that scans the crowd there (not for :crowd, nor for a laser's
-   own group, which names it)."
+   own group, which names it); or the zone, and the map that sends it there
+   (zones plan Z4): \"through Zone B (the Crowd sweep map sends it to Crowd
+   Scanning)\". A group before a zone."
   [state vibe-name cell cue groups]
-  (let [ids (zone-group-ids cue)
-        group (if (contains? ids :crowd) :crowd (first (filter groups (sort ids))))
-        scanner (when-not (or (= :crowd group) (rig/laser-of group))
-                  (scanner-through state group))]
-    (str vibe-name ": " (cell-name cell) " reaches the audience through "
-         (rig/ref-name state group)
-         (when scanner (str " (" scanner ")"))
+  (let [hits (filter #(audience-ref? state groups %) (cue-refs state cell cue))
+        ref (if (some #{:crowd} hits)
+              :crowd
+              (first (sort-by (fn [r] [(boolean (targets/zone-ref? r)) (or (targets/zone-index r) 0) r]) hits)))
+        through (if (targets/zone-ref? ref)
+                  (let [m (first (filter #(contains? groups (targets/zone-lane % ref)) (zone-maps/all-maps state)))]
+                    (str "Zone " (targets/zone-letter ref) " (the " (:name m) " map sends it to "
+                         (rig/ref-name state (targets/zone-lane m ref)) ")"))
+                  (let [scanner (when-not (or (= :crowd ref) (rig/laser-of ref))
+                                  (scanner-through state ref))]
+                    (str (rig/ref-name state ref) (when scanner (str " (" scanner ")")))))]
+    (str vibe-name ": " (cell-name cell) " reaches the audience through " through
          ", so this vibe never plays it. Allow audience cells, or take it out")))
 
 (defn- cell-problems
   "Lint rows for the cell a vibe names, label saying as what (\"FLASH cue \")."
   [state vibe-name label cell groups]
   (let [cue (get-in state [:chains :cue-chains cell])]
-    (case (unplayable cue groups)
+    (case (unplayable state cell cue groups)
       :empty [{:level :error :text (str vibe-name ": " label (cell-name cell) " can't be played (empty)")}]
       :timecode [{:level :error :text (str vibe-name ": " label (cell-name cell) " can't be played (follows timecode)")}]
       :crowd [{:level :warn :text (audience-text state vibe-name cell cue groups)}]

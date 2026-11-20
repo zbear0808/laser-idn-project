@@ -975,3 +975,27 @@
                         (assoc-in [:chains :cue-chains [7 3]] {:items [{:type :preset :preset-id :circle}]})
                         (assoc-in [:grid :column-targets 7] :zone/b))
                     :auto/right))))))
+
+
+;; The Vibes tab's picker and zones (zones plan Z4, 06 §8.6)
+
+(deftest picker-blocks-a-zone-cue-that-reaches-the-crowd-test
+  (let [s (-> (domains/build-initial-state)
+              (assoc :projectors {:p1 {:name "P1" :host "10.0.0.1" :zone-groups []}
+                                  :p5 {:name "P5" :host "10.0.0.5" :zone-groups [:crowd] :tags #{:crowd-scanning}
+                                       :exclude-from-all? true}})
+              (assoc-in [:zone-groups :crowd] {:id :crowd :name "Crowd Scanning"})
+              (assoc-in [:zone-maps :map/custom-1] {:name "Crowd sweep" :lanes [:auto/left :crowd] :overrides {}})
+              (assoc-in [:chains :cue-chains [2 0]] {:items [{:type :preset :preset-id :circle :target :zone/b}]})
+              (assoc-in [:chains :cue-chains [3 0]] {:items [{:type :preset :preset-id :circle}]}))
+        ctx (context s)
+        blocked (fn [ctx col] (fx/sub-ctx ctx subs/vibe-cell-blocked col 0))]
+    (is (= :crowd (blocked ctx 2)) "Crowd sweep sends B to the scanner")
+    (is (nil? (blocked ctx 3)))
+    (testing "once the map goes, B reaches it no more"
+      (is (nil? (blocked (fx/swap-context ctx update :zone-maps dissoc :map/custom-1) 2))))
+    (testing "a column's default on B, and the show's"
+      (is (= :crowd (blocked (fx/swap-context ctx assoc-in [:grid :column-targets 3] :zone/b) 3)))
+      (is (= :crowd (blocked (fx/swap-context ctx assoc-in [:config :default-target] :zone/b) 3))))
+    (testing "a switch of the map in use changes nothing: every map counts"
+      (is (= :crowd (blocked (fx/swap-context ctx assoc-in [:zone-map :active] :map/odd-even) 2))))))
